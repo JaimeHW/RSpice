@@ -51,7 +51,11 @@ pub struct RuntimeCompileReport {
 pub struct RuntimeQualificationOptions {
     /// Transpile the canonical CFG to generated Rust and retain the source.
     pub generated_rust: bool,
-    /// Compile the native x86-64 qualification artifact when supported.
+    /// Compile the host-native qualification artifact when supported.
+    ///
+    /// The field name is retained for serialized and source compatibility with
+    /// the original x86-64-only backend. It now selects either x86-64 or
+    /// AArch64 machine code according to the host target.
     pub native_x64_jit: bool,
     /// Whether failure of a requested optimized backend may fall back to the
     /// portable bytecode interpreter.
@@ -101,6 +105,11 @@ impl RuntimeQualificationOptions {
         native_x64_jit: true,
         interpreter_fallback: InterpreterFallbackPolicy::Reject,
     };
+
+    /// Require the host-native JIT; never silently accept the interpreter.
+    ///
+    /// This architecture-neutral name is preferred for new callers.
+    pub const NATIVE_REQUIRED: Self = Self::NATIVE_X64_REQUIRED;
 
     /// Require every requested backend to qualify.
     pub const fn rejecting_interpreter_fallback(mut self) -> Self {
@@ -317,11 +326,18 @@ pub enum RuntimeTarget {
 }
 
 impl RuntimeTarget {
+    /// The JIT for the current native host architecture.
+    ///
+    /// The enum variant retains its original spelling for API and serialized
+    /// artifact compatibility. New code should use this neutral alias.
+    #[allow(non_upper_case_globals)]
+    pub const NativeJit: Self = Self::NativeX64Jit;
+
     pub const fn label(self) -> &'static str {
         match self {
             Self::SemanticIr => "semantic IR",
             Self::BytecodeVm => "bytecode VM",
-            Self::NativeX64Jit => "native x86-64 JIT",
+            Self::NativeX64Jit => "host-native JIT",
             Self::WasmInterpreter => "WebAssembly interpreter",
             Self::GeneratedRust => "generated Rust",
         }
@@ -479,7 +495,7 @@ fn qualify_runtime_targets(
             RuntimeTargetMaturity::Production,
             "compiled bytecode model available",
         ),
-        qualify_native_x64_if_requested(model, canonical_ir, options.native_x64_jit),
+        qualify_native_if_requested(model, canonical_ir, options.native_x64_jit),
         qualification(
             RuntimeTarget::WasmInterpreter,
             RuntimeTargetReadiness::Available,
@@ -492,25 +508,31 @@ fn qualify_runtime_targets(
     (RuntimeTargetQualifications::new(entries), generated_rust)
 }
 
-fn qualify_native_x64_if_requested(
+fn qualify_native_if_requested(
     model: &CompiledModel,
     canonical_ir: &CanonicalIrArtifact,
     requested: bool,
 ) -> RuntimeTargetQualification {
     if requested {
-        qualify_native_x64(model, canonical_ir)
+        qualify_native(model, canonical_ir)
     } else {
         qualification(
             RuntimeTarget::NativeX64Jit,
             RuntimeTargetReadiness::Unavailable,
             RuntimeTargetMaturity::Preview,
-            "native x64 JIT qualification was not requested",
+            "host-native JIT qualification was not requested",
         )
     }
 }
 
-#[cfg(all(feature = "native", target_arch = "x86_64"))]
-fn qualify_native_x64(
+#[cfg(all(
+    feature = "native",
+    all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        any(target_os = "macos", target_os = "linux", windows)
+    )
+))]
+fn qualify_native(
     model: &CompiledModel,
     canonical_ir: &CanonicalIrArtifact,
 ) -> RuntimeTargetQualification {
@@ -519,7 +541,12 @@ fn qualify_native_x64(
             RuntimeTarget::NativeX64Jit,
             RuntimeTargetReadiness::Available,
             RuntimeTargetMaturity::Preview,
-            "native x64 JIT compiled successfully",
+            format!(
+                "{} JIT compiled successfully",
+                crate::native::TargetSpec::host()
+                    .map(|target| target.display_name())
+                    .unwrap_or_else(|| "host-native".to_owned())
+            ),
         ),
         Err(error) => qualification(
             RuntimeTarget::NativeX64Jit,
@@ -530,8 +557,14 @@ fn qualify_native_x64(
     }
 }
 
-#[cfg(all(feature = "native", not(target_arch = "x86_64")))]
-fn qualify_native_x64(
+#[cfg(all(
+    feature = "native",
+    not(all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        any(target_os = "macos", target_os = "linux", windows)
+    ))
+))]
+fn qualify_native(
     _model: &CompiledModel,
     _canonical_ir: &CanonicalIrArtifact,
 ) -> RuntimeTargetQualification {
@@ -539,12 +572,12 @@ fn qualify_native_x64(
         RuntimeTarget::NativeX64Jit,
         RuntimeTargetReadiness::Unavailable,
         RuntimeTargetMaturity::Preview,
-        "native x64 JIT requires an x86-64 host",
+        "host architecture or operating system is not yet qualified for the native JIT",
     )
 }
 
 #[cfg(not(feature = "native"))]
-fn qualify_native_x64(
+fn qualify_native(
     _model: &CompiledModel,
     _canonical_ir: &CanonicalIrArtifact,
 ) -> RuntimeTargetQualification {

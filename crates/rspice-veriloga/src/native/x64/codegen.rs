@@ -15,7 +15,7 @@
 use super::calling_convention::HOST_ABI;
 use super::encoder::{ConditionCode, Gpr, Rel32Patch, X64Encoder, Xmm};
 use super::ir::{
-    ALLOCATABLE_XMM_REGISTERS, AllocatedInstruction, Effects as X64Effects,
+    ALLOCATABLE_VALUE_REGISTERS, AllocatedInstruction, AssignmentProgram, Effects as X64Effects,
     Program as X64SsaProgram, RegisterAllocation, ValueLocation as X64ValueLocation,
     ValueType as X64ValueType, dynamic_variable_inline_supported, plan_shared_outputs,
 };
@@ -43,6 +43,8 @@ use crate::native::abi::{
     rspice_tan, rspice_tanh, rspice_timer_state_native, rspice_transition_state_native,
     rspice_zi_step_native,
 };
+pub(crate) use crate::native::assignment::NativeAssignment;
+use crate::native::assignment::shareable_batch_ranges;
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
 use crate::native::{EvalContext, JitError, JitResult, NativeStampKernelIo};
@@ -82,18 +84,20 @@ const VECTOR_LITERAL_ALIGNMENT: usize = 16;
 const LITERAL_POOL_PADDING_BYTE: u8 = 0x90;
 const ABS_VALUE_MASK_LOW: u64 = 0x7fff_ffff_ffff_ffff;
 const ABS_VALUE_MASK_HIGH: u64 = 0;
+const NEG_VALUE_MASK_LOW: u64 = 0x8000_0000_0000_0000;
+const NEG_VALUE_MASK_HIGH: u64 = 0;
 const K_BOLTZMANN: f64 = 1.380649e-23;
 const Q_ELECTRON: f64 = 1.602176634e-19;
 const THERMAL_VOLTAGE_PER_K: f64 = K_BOLTZMANN / Q_ELECTRON;
 const F64_EXACT_INTEGER_LIMIT_ABS_BITS: u64 = 0x4330_0000_0000_0000;
 const I64_MAX_EXCLUSIVE_AS_F64: f64 = 9_223_372_036_854_775_808.0;
 const I64_MIN_AS_F64: f64 = -9_223_372_036_854_775_808.0;
-#[cfg(test)]
+#[cfg(all(test, target_arch = "x86_64"))]
 const INLINE_DYNAMIC_LOWER_ABS_LIMIT: i64 = super::ir::INLINE_DYNAMIC_LOWER_ABS_LIMIT;
 const DYNAMIC_READ_FRAME_BYTES: i32 = 16;
 const ROUND_TEMP_FRAME_BYTES: i32 = 16;
 const CALLEE_SAVED_XMM_BYTES: i32 = 16;
-#[cfg(test)]
+#[cfg(all(test, target_arch = "x86_64"))]
 const CALL_RESULT_SLOT: usize = 6;
 const CALL_SHADOW_BYTES: i32 = HOST_ABI.call_shadow_bytes;
 const LOCAL_SLOT_BYTES: i32 = 8;
@@ -393,25 +397,6 @@ fn compile_fused_kernel_artifact(
     Ok(artifact)
 }
 
-#[derive(Debug)]
-pub(crate) enum NativeAssignment {
-    Direct {
-        var_index: usize,
-        program: NativeProgram,
-    },
-    Indexed {
-        base: usize,
-        len: usize,
-        lower: i64,
-        index: NativeProgram,
-        value: NativeProgram,
-    },
-    Loop {
-        condition: NativeProgram,
-        body: Vec<NativeAssignment>,
-    },
-}
-
 #[allow(dead_code)]
 pub(crate) fn compile_assignment_pass_function(
     assignments: &[NativeAssignment],
@@ -472,9 +457,7 @@ pub(super) fn compile_assignment_pass_function_artifact(
         (expression_spill_bytes > 0).then_some(expression_spill_base_disp),
         callee_saved_xmm_count,
     )?;
-    for assignment in assignments {
-        compiler.emit_assignment_step(assignment, 0)?;
-    }
+    compiler.emit_assignment_steps(assignments, 0)?;
     let windows_unwind = compiler.windows_unwind_info();
     let body = compiler.finish_assignment_pass_function()?;
     let artifact = CompiledX64Function::new(body, windows_unwind);
@@ -795,6 +778,16 @@ impl FunctionCompiler {
         ssa: &X64SsaProgram,
         allocation: &RegisterAllocation,
     ) -> JitResult<()> {
+        self.emit_allocated_program_body(ssa, allocation, None)?;
+        self.materialize_allocated_result(allocation.result())
+    }
+
+    fn emit_allocated_program_body(
+        &mut self,
+        ssa: &X64SsaProgram,
+        allocation: &RegisterAllocation,
+        assignment: Option<&AssignmentProgram>,
+    ) -> JitResult<()> {
         if ssa.instructions().len() != allocation.instructions().len() {
             return Err(JitError::Verifier {
                 model: MODEL.into(),
@@ -805,7 +798,13 @@ impl FunctionCompiler {
         self.depth = 0;
         self.spilled_depth = 0;
         let mut context_pointer_cache = None;
-        for (instruction, allocated) in ssa.instructions().iter().zip(allocation.instructions()) {
+        let mut output_index = 0_usize;
+        for (instruction_index, (instruction, allocated)) in ssa
+            .instructions()
+            .iter()
+            .zip(allocation.instructions())
+            .enumerate()
+        {
             if instruction.value_type() != X64ValueType::F64 {
                 return Err(JitError::Verifier {
                     model: MODEL.into(),
@@ -985,9 +984,33 @@ impl FunctionCompiler {
             if instruction.effects().clobbers_context_pointer_cache() {
                 context_pointer_cache = None;
             }
+            if let Some(assignment) = assignment {
+                let instruction_end = instruction_index + 1;
+                while let Some(output) = assignment.outputs().get(output_index).copied() {
+                    if output.instruction_end() != instruction_end {
+                        break;
+                    }
+                    self.emit_assignment_location_store(
+                        allocation.location(output.value())?,
+                        output.variable_index(),
+                    )?;
+                    output_index += 1;
+                }
+            }
         }
-
-        self.materialize_allocated_result(allocation.result())
+        if let Some(assignment) = assignment
+            && output_index != assignment.outputs().len()
+        {
+            return Err(JitError::Verifier {
+                model: MODEL.into(),
+                detail: format!(
+                    "x64 emitted {output_index} of {} assignment outputs",
+                    assignment.outputs().len()
+                )
+                .into(),
+            });
+        }
+        Ok(())
     }
 
     fn prepare_allocated_instruction(
@@ -1004,6 +1027,9 @@ impl FunctionCompiler {
 
         self.reset_expression_state();
         let mut used_register_mask = allocated.live_register_mask();
+        if let X64ValueLocation::Register(register) = allocated.result() {
+            used_register_mask |= xmm_mask(allocated_xmm(register)?);
+        }
         let mut operands = Vec::with_capacity(allocated.operands().len());
         for location in allocated.operands() {
             let register = match *location {
@@ -1458,6 +1484,35 @@ impl FunctionCompiler {
         Ok(())
     }
 
+    fn emit_assignment_location_store(
+        &mut self,
+        location: X64ValueLocation,
+        var_index: usize,
+    ) -> JitResult<()> {
+        match location {
+            X64ValueLocation::Register(register) => {
+                self.encoder.movsd_m64_base_disp32_xmm(
+                    self.vars_arg_reg(),
+                    byte_disp(var_index)?,
+                    allocated_xmm(register)?,
+                );
+            }
+            X64ValueLocation::Spill(slot) => {
+                self.encoder.mov_r64_m64_base_disp32(
+                    Gpr::R10,
+                    Gpr::Rsp,
+                    self.expression_spill_disp(slot)?,
+                );
+                self.encoder.mov_m64_base_disp32_r64(
+                    self.vars_arg_reg(),
+                    byte_disp(var_index)?,
+                    Gpr::R10,
+                );
+            }
+        }
+        Ok(())
+    }
+
     fn emit_assignment_step(
         &mut self,
         assignment: &NativeAssignment,
@@ -1481,6 +1536,42 @@ impl FunctionCompiler {
         }
     }
 
+    fn emit_assignment_steps(
+        &mut self,
+        assignments: &[NativeAssignment],
+        loop_depth: i32,
+    ) -> JitResult<()> {
+        for range in shareable_batch_ranges(assignments) {
+            let batch = &assignments[range];
+            if matches!(batch.first(), Some(NativeAssignment::Direct { .. })) {
+                self.emit_direct_assignment_batch(batch)?;
+            } else {
+                debug_assert_eq!(batch.len(), 1);
+                self.emit_assignment_step(&batch[0], loop_depth)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn emit_direct_assignment_batch(&mut self, assignments: &[NativeAssignment]) -> JitResult<()> {
+        let direct = assignments
+            .iter()
+            .map(|assignment| match assignment {
+                NativeAssignment::Direct { var_index, program } => Ok((*var_index, program)),
+                NativeAssignment::Indexed { .. } | NativeAssignment::Loop { .. } => {
+                    Err(JitError::Verifier {
+                        model: MODEL.into(),
+                        detail: "x64 direct-assignment batch contains a control-flow assignment"
+                            .into(),
+                    })
+                }
+            })
+            .collect::<JitResult<Vec<_>>>()?;
+        let assignment = AssignmentProgram::lower(&direct)?;
+        let allocation = RegisterAllocation::build_for_assignments(&assignment)?;
+        self.emit_allocated_program_body(assignment.program(), &allocation, Some(&assignment))
+    }
+
     fn emit_loop_assignment(
         &mut self,
         condition: &NativeProgram,
@@ -1496,9 +1587,7 @@ impl FunctionCompiler {
         self.emit_native_program(condition)?;
         let loop_exit = self.emit_loop_exit_if_zero()?;
 
-        for assignment in body {
-            self.emit_assignment_step(assignment, loop_depth + 1)?;
-        }
+        self.emit_assignment_steps(body, loop_depth + 1)?;
 
         self.encoder
             .mov_r64_m64_base_disp32(Gpr::R10, Gpr::Rsp, counter_disp);
@@ -1770,9 +1859,11 @@ impl FunctionCompiler {
         }
 
         let target = self.register_stack[self.depth - 1];
-        self.encoder.movq_r64_xmm(Gpr::R11, target);
-        self.encoder.btc_r64_imm8(Gpr::R11, 63);
-        self.encoder.movq_xmm_r64(target, Gpr::R11);
+        let displacement_offset = self.encoder.xorpd_xmm_m128_rip_disp32(target, 0);
+        self.vector_literals.push(VectorLiteralPatch {
+            displacement_offset,
+            lanes: [NEG_VALUE_MASK_LOW, NEG_VALUE_MASK_HIGH],
+        });
         Ok(())
     }
 
@@ -3393,16 +3484,16 @@ impl FunctionCompiler {
         }
 
         let target = self.register_stack[self.depth - 1];
-        self.emit_falsy_to_gpr(target, Gpr::R10, Gpr::R11);
+        self.emit_falsy_to_gpr(target, Gpr::R10);
         self.emit_gpr_bool_result(target, Gpr::R10);
         Ok(())
     }
 
     fn emit_truthy_to_gpr(&mut self, value: Xmm, dst: Gpr) {
-        self.emit_literal_compare(value, 0.0);
+        self.encoder.movq_r64_xmm(dst, value);
+        self.encoder.btr_r64_imm8(dst, 63);
+        self.encoder.test_r64_r64(dst, dst);
         self.encoder.setcc_r8(ConditionCode::NotEqual, dst);
-        self.encoder.setcc_r8(ConditionCode::Parity, Gpr::R9);
-        self.encoder.or_r8_r8(dst, Gpr::R9);
     }
 
     fn emit_bool_result(&mut self, dst: Xmm, value: bool) {
@@ -3419,11 +3510,11 @@ impl FunctionCompiler {
         self.encoder.cvtsi2sd_xmm_r32(dst, src);
     }
 
-    fn emit_falsy_to_gpr(&mut self, value: Xmm, dst: Gpr, scratch: Gpr) {
-        self.emit_literal_compare(value, 0.0);
+    fn emit_falsy_to_gpr(&mut self, value: Xmm, dst: Gpr) {
+        self.encoder.movq_r64_xmm(dst, value);
+        self.encoder.btr_r64_imm8(dst, 63);
+        self.encoder.test_r64_r64(dst, dst);
         self.encoder.setcc_r8(ConditionCode::Equal, dst);
-        self.encoder.setcc_r8(ConditionCode::NotParity, scratch);
-        self.encoder.and_r8_r8(dst, scratch);
     }
 
     fn emit_ifelse(&mut self) -> JitResult<()> {
@@ -3437,11 +3528,13 @@ impl FunctionCompiler {
         let cond = self.register_stack[self.depth - 3];
         let then_value = self.register_stack[self.depth - 2];
         let else_value = self.register_stack[self.depth - 1];
-        self.emit_truthy_to_gpr(cond, Gpr::R10);
+        self.emit_literal_compare(cond, 0.0);
         self.encoder.movq_r64_xmm(Gpr::R8, else_value);
         self.encoder.movq_r64_xmm(Gpr::R11, then_value);
-        self.encoder.test_r8_r8(Gpr::R10, Gpr::R10);
         self.encoder.cmovne_r64_r64(Gpr::R8, Gpr::R11);
+        // UCOMISD reports unordered values with PF=1 and ZF=1. Verilog-A
+        // truthiness treats every nonzero bit pattern, including NaN, as true.
+        self.encoder.cmovp_r64_r64(Gpr::R8, Gpr::R11);
         self.encoder.movq_xmm_r64(cond, Gpr::R8);
         self.drop_stack_values(2)?;
         Ok(())
@@ -4134,23 +4227,52 @@ fn assignment_allocation_requirements(
 ) -> JitResult<(usize, usize)> {
     let mut maximum_spill_slots = 0;
     let mut maximum_required_registers = 0;
-    for assignment in assignments {
-        let programs: Vec<&NativeProgram> = match assignment {
-            NativeAssignment::Direct { program, .. } => vec![program],
-            NativeAssignment::Indexed { index, value, .. } => vec![index, value],
+    for range in shareable_batch_ranges(assignments) {
+        let batch = &assignments[range];
+        match &batch[0] {
+            NativeAssignment::Direct { .. } => {
+                let direct = batch
+                    .iter()
+                    .map(|assignment| match assignment {
+                        NativeAssignment::Direct { var_index, program } => {
+                            Ok((*var_index, program))
+                        }
+                        NativeAssignment::Indexed { .. } | NativeAssignment::Loop { .. } => {
+                            Err(JitError::Verifier {
+                                model: MODEL.into(),
+                                detail: "x64 requirement batch contains a control-flow assignment"
+                                    .into(),
+                            })
+                        }
+                    })
+                    .collect::<JitResult<Vec<_>>>()?;
+                let assignment = AssignmentProgram::lower(&direct)?;
+                let allocation = RegisterAllocation::build_for_assignments(&assignment)?;
+                maximum_spill_slots = maximum_spill_slots.max(allocation.spill_slot_count());
+                maximum_required_registers =
+                    maximum_required_registers.max(allocation.required_register_count());
+            }
+            NativeAssignment::Indexed { index, value, .. } => {
+                debug_assert_eq!(batch.len(), 1);
+                for program in [index, value] {
+                    let ssa = X64SsaProgram::lower(program)?;
+                    let allocation = RegisterAllocation::build(&ssa)?;
+                    maximum_spill_slots = maximum_spill_slots.max(allocation.spill_slot_count());
+                    maximum_required_registers =
+                        maximum_required_registers.max(allocation.required_register_count());
+                }
+            }
             NativeAssignment::Loop { condition, body } => {
+                debug_assert_eq!(batch.len(), 1);
                 let (body_spills, body_registers) = assignment_allocation_requirements(body)?;
                 maximum_spill_slots = maximum_spill_slots.max(body_spills);
                 maximum_required_registers = maximum_required_registers.max(body_registers);
-                vec![condition]
+                let ssa = X64SsaProgram::lower(condition)?;
+                let allocation = RegisterAllocation::build(&ssa)?;
+                maximum_spill_slots = maximum_spill_slots.max(allocation.spill_slot_count());
+                maximum_required_registers =
+                    maximum_required_registers.max(allocation.required_register_count());
             }
-        };
-        for program in programs {
-            let ssa = X64SsaProgram::lower(program)?;
-            let allocation = RegisterAllocation::build(&ssa)?;
-            maximum_spill_slots = maximum_spill_slots.max(allocation.spill_slot_count());
-            maximum_required_registers =
-                maximum_required_registers.max(allocation.required_register_count());
         }
     }
     Ok((maximum_spill_slots, maximum_required_registers))
@@ -4239,19 +4361,19 @@ fn callee_saved_xmm_frame_bytes(count: usize) -> i32 {
 }
 
 fn allocated_xmm(index: usize) -> JitResult<Xmm> {
-    if index >= ALLOCATABLE_XMM_REGISTERS {
+    if index >= ALLOCATABLE_VALUE_REGISTERS {
         return Err(register_allocation_error(format!(
-            "allocated XMM register {index} exceeds the {ALLOCATABLE_XMM_REGISTERS}-register value set"
+            "allocated XMM register {index} exceeds the {ALLOCATABLE_VALUE_REGISTERS}-register value set"
         )));
     }
     Ok(XMM_STACK[index])
 }
 
-fn xmm_mask(register: Xmm) -> u16 {
-    1_u16 << xmm_unwind_register(register)
+fn xmm_mask(register: Xmm) -> u32 {
+    1_u32 << xmm_unwind_register(register)
 }
 
-fn take_temporary_xmm(used_register_mask: &mut u16) -> JitResult<Xmm> {
+fn take_temporary_xmm(used_register_mask: &mut u32) -> JitResult<Xmm> {
     let register = XMM_STACK
         .into_iter()
         .find(|register| *used_register_mask & xmm_mask(*register) == 0)
@@ -4349,7 +4471,7 @@ fn call_frame_spill_slot_count(
         .unwrap_or(0)
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_arch = "x86_64"))]
 fn call_result_disp() -> i32 {
     call_spill_disp(CALL_RESULT_SLOT)
 }
@@ -4358,7 +4480,7 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
     program.ops().iter().any(native_op_uses_helper_call)
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_arch = "x86_64"))]
 fn value_program_needs_saved_entry_args(program: &NativeProgram) -> bool {
     let mut helper_seen = false;
     for op in program.ops() {
@@ -4373,7 +4495,7 @@ fn value_program_needs_saved_entry_args(program: &NativeProgram) -> bool {
     false
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_arch = "x86_64"))]
 fn native_op_needs_saved_entry_args_for_internal_helper_continuation(op: NativeOp) -> bool {
     X64Effects::for_op(op).needs_saved_entry_args_for_internal_continuation()
 }
@@ -4382,7 +4504,7 @@ fn native_op_uses_helper_call(op: &NativeOp) -> bool {
     X64Effects::for_op(*op).may_call()
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_arch = "x86_64"))]
 fn native_op_reads_entry_args(op: NativeOp) -> bool {
     X64Effects::for_op(op).reads_entry_args()
 }
@@ -4482,8 +4604,8 @@ mod tests {
         I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN,
         LITERAL_POOL_ALIGNMENT, NativeAssignment, OperandContextFilterHelper, PARAMS_OFFSET,
         Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STACK_PROBE_INTERVAL_BYTES, THERMAL_VOLTAGE_PER_K,
-        TableHelper, VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK,
-        Xmm, assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
+        TableHelper, VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, X64Encoder, XMM_STACK, Xmm,
+        assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
         compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg,
         entry_vars_arg_reg, native_op_reads_entry_args, native_op_uses_helper_call,
         program_uses_helper_calls, rspice_exp, value_program_needs_saved_entry_args,
@@ -5763,9 +5885,17 @@ mod tests {
             0,
             "helper calls should address spills directly from rsp instead of materializing a call-frame base"
         );
+        let first_call_spill = call_frame_spill_bytes(0, Xmm::Xmm0);
+        #[cfg(windows)]
         assert!(
-            !contains_bytes(&bytes, &call_frame_spill_bytes(0, Xmm::Xmm0)),
+            !contains_bytes(&bytes, &first_call_spill),
             "live-across-call values should use their reusable liveness home"
+        );
+        #[cfg(not(windows))]
+        assert_eq!(
+            count_bytes(&bytes, &first_call_spill),
+            1,
+            "System V encodes the local liveness-home store exactly like call spill slot zero; one store is the home, a second would be a duplicate call spill"
         );
         assert!(
             !contains_bytes(&bytes, &call_frame_load_bytes(Xmm::Xmm0, 0)),
@@ -8701,19 +8831,11 @@ mod tests {
         assert_eq!(program.max_stack_depth(), XMM_STACK.len());
         let bytes = compile_value_function(&program).expect("compile full-stack limit state leaf");
         assert!(
-            !contains_bytes(&bytes, &sub_rsp_bytes(WORD_BYTES as i32)),
-            "liveness allocation should provide limit-state scratch without an instruction-local frame"
-        );
-        assert!(
-            !contains_bytes(&bytes, &add_rsp_bytes(WORD_BYTES as i32)),
-            "limit-state scratch should not require an instruction-local restore"
-        );
-        assert!(
             !contains_bytes(
                 &bytes,
                 &stack_spill_store_bytes(XMM_STACK[XMM_STACK.len() - 1])
             ),
-            "the positive step should remain in its allocated register"
+            "the positive step should remain in its allocated register; stack adjustment alone is not diagnostic because System V uses an eight-byte helper-call alignment frame"
         );
         assert!(
             !contains_bytes(

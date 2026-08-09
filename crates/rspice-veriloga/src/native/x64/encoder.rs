@@ -478,6 +478,10 @@ impl X64Encoder {
         self.emit_sse_reg_rip_disp32(0x66, 0x54, dst, disp)
     }
 
+    pub(crate) fn xorpd_xmm_m128_rip_disp32(&mut self, dst: Xmm, disp: i32) -> usize {
+        self.emit_sse_reg_rip_disp32(0x66, 0x57, dst, disp)
+    }
+
     pub(crate) fn movq_r64_xmm(&mut self, dst: Gpr, src: Xmm) {
         self.emit_u8(0x66);
         self.emit_rex(true, src.code(), 0, dst.code());
@@ -555,6 +559,12 @@ impl X64Encoder {
     pub(crate) fn cmovne_r64_r64(&mut self, dst: Gpr, src: Gpr) {
         self.emit_rex(true, dst.code(), 0, src.code());
         self.emit_all(&[0x0F, 0x45]);
+        self.emit_modrm(0b11, dst.code(), src.code());
+    }
+
+    pub(crate) fn cmovp_r64_r64(&mut self, dst: Gpr, src: Gpr) {
+        self.emit_rex(true, dst.code(), 0, src.code());
+        self.emit_all(&[0x0F, 0x4A]);
         self.emit_modrm(0b11, dst.code(), src.code());
     }
 
@@ -1150,10 +1160,13 @@ mod tests {
 
         encoder.test_r8_r8(Gpr::R10, Gpr::R10);
         encoder.cmovne_r64_r64(Gpr::Rax, Gpr::R11);
+        encoder.cmovp_r64_r64(Gpr::Rax, Gpr::R11);
 
         assert_eq!(
             encoder.into_bytes(),
-            [0x45, 0x84, 0xD2, 0x49, 0x0F, 0x45, 0xC3]
+            [
+                0x45, 0x84, 0xD2, 0x49, 0x0F, 0x45, 0xC3, 0x49, 0x0F, 0x4A, 0xC3,
+            ]
         );
     }
 

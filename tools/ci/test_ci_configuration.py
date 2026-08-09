@@ -12,6 +12,31 @@ def read_text(relative_path: str) -> str:
     return (ROOT / relative_path).read_text(encoding="utf-8")
 
 
+def cargo_tree_for_target(package: str, target: str) -> str:
+    result = subprocess.run(
+        [
+            "cargo",
+            "tree",
+            "--locked",
+            "-p",
+            package,
+            "--target",
+            target,
+            "-e",
+            "features",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"cargo tree failed for {package} on {target}:\n{result.stderr}"
+        )
+    return result.stdout
+
+
 class CiConfigurationTests(unittest.TestCase):
     def test_rust_workflows_install_pinned_toolchain_without_toolchain_action(self) -> None:
         workflows = [
@@ -415,6 +440,15 @@ class CiConfigurationTests(unittest.TestCase):
         ]:
             self.assertIn(target, workflow)
         self.assertIn("veriloga-mobile:", workflow)
+        self.assertIn("Configure Android NDK C toolchain", workflow)
+        self.assertIn(
+            "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin",
+            workflow,
+        )
+        self.assertIn("aarch64-linux-android21-clang", workflow)
+        self.assertIn("CC_aarch64_linux_android", workflow)
+        self.assertIn("AR_aarch64_linux_android", workflow)
+        self.assertIn("CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER", workflow)
 
     def test_linux_ci_runs_clippy_warning_clean(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
@@ -480,26 +514,91 @@ class CiConfigurationTests(unittest.TestCase):
         )
         self.assertIn("Gate Verilog-A native JIT performance", workflow)
 
-    def test_shipping_frontends_enable_x64_jit_only_on_x86_64(self) -> None:
+    def test_aarch64_desktop_ci_executes_native_veriloga_jit(self) -> None:
+        workflow = read_text(".github/workflows/ci.yml")
+        aarch64_job = workflow.split("  test-aarch64-native:", maxsplit=1)[1].split(
+            "\n  check-macos-desktop:", maxsplit=1
+        )[0]
+
+        self.assertIn("test-aarch64-native:", workflow)
+        for runner in ["ubuntu-24.04-arm", "macos-15", "windows-11-arm"]:
+            self.assertIn(f"os: {runner}", workflow)
+        self.assertIn("Test AArch64 encoder, runtime, unwind, and model JIT", workflow)
+        self.assertIn("Test public host-native qualification report", workflow)
+        self.assertIn("Qualify full shipped device census through AArch64 JIT", workflow)
+        self.assertIn("Gate AArch64 native JIT performance", workflow)
+        self.assertIn("--test native_aarch64_shipped_models", workflow)
+        self.assertIn("--min-dense-speedup 1.50", aarch64_job)
+        self.assertIn("--min-speedup 3.00", aarch64_job)
+        self.assertIn("--min-full-stamp-speedup 2.00", aarch64_job)
+
+    def test_macos_hardened_jit_uses_only_narrow_execution_entitlements(self) -> None:
+        import plistlib
+
+        workflow = read_text(".github/workflows/ci.yml")
+        entitlement_path = ROOT / "crates/rspice-ui/macos/RSpice.entitlements"
+        with entitlement_path.open("rb") as source:
+            entitlements = plistlib.load(source)
+
+        self.assertEqual(
+            entitlements,
+            {
+                "com.apple.security.cs.allow-jit": True,
+                "com.apple.security.cs.jit-write-allowlist": True,
+            },
+        )
+        self.assertIn("Test macOS hardened-runtime JIT entitlements", workflow)
+        self.assertIn("Test Intel macOS hardened-runtime JIT entitlements", workflow)
+        self.assertIn("--options runtime", workflow)
+        self.assertIn(str(entitlement_path.relative_to(ROOT)), workflow)
+        self.assertIn("codesign --verify --strict", workflow)
+        self.assertIn(
+            "registered_dwarf_cfi_unwinds_through_generated_helper_frame",
+            workflow,
+        )
+
+    def test_shipping_frontends_enable_jit_on_qualified_desktop_architectures(self) -> None:
         cli_manifest = read_text("crates/rspice-cli/Cargo.toml")
         ui_manifest = read_text("crates/rspice-ui/Cargo.toml")
+        architecture = 'any(target_arch = "x86_64", target_arch = "aarch64")'
+        desktop_os = 'any(target_os = "macos", target_os = "linux", windows)'
+        qualified = f"all({architecture}, {desktop_os})"
+        cli_native = f"[target.'cfg({qualified})'.dependencies]"
+        cli_portable = f"[target.'cfg(not({qualified}))'.dependencies]"
+        ui_native = (
+            f"[target.'cfg(all(not(target_arch = \"wasm32\"), "
+            f"{architecture}, {desktop_os}))'.dependencies]"
+        )
+        ui_portable = (
+            f"[target.'cfg(all(not(target_arch = \"wasm32\"), not({qualified})))'.dependencies]"
+        )
 
-        self.assertRegex(
-            cli_manifest,
-            r"""\[target\.'cfg\(target_arch = "x86_64"\)'\.dependencies\][\s\S]*?rspice-core\s*=\s*\{[^}]*features\s*=\s*\["veriloga-native"\]""",
+        self.assertIn(cli_native, cli_manifest)
+        self.assertIn(cli_portable, cli_manifest)
+        self.assertIn(ui_native, ui_manifest)
+        self.assertIn(ui_portable, ui_manifest)
+
+        self.assertIn(
+            'rspice-core = { workspace = true, features = ["veriloga-native"] }',
+            cli_manifest.split(cli_native, maxsplit=1)[1].split(cli_portable, maxsplit=1)[0],
         )
-        self.assertRegex(
-            cli_manifest,
-            r"""\[target\.'cfg\(not\(target_arch = "x86_64"\)\)'\.dependencies\][\s\S]*?rspice-core\s*=\s*\{[^}]*features\s*=\s*\["veriloga"\]""",
+        self.assertIn(
+            'rspice-core = { workspace = true, features = ["veriloga"] }',
+            cli_manifest.split(cli_portable, maxsplit=1)[1],
         )
-        self.assertRegex(
-            ui_manifest,
-            r"""\[target\.'cfg\(all\(not\(target_arch = "wasm32"\), target_arch = "x86_64"\)\)'\.dependencies\][\s\S]*?rspice-core\s*=\s*\{[^}]*features\s*=\s*\["veriloga-native"\]""",
+        self.assertIn(
+            'features = ["veriloga-native"]',
+            ui_manifest.split(ui_native, maxsplit=1)[1].split(ui_portable, maxsplit=1)[0],
         )
-        self.assertRegex(
-            ui_manifest,
-            r"""\[target\.'cfg\(all\(not\(target_arch = "wasm32"\), not\(target_arch = "x86_64"\)\)\)'\.dependencies\][\s\S]*?rspice-core\s*=\s*\{[^}]*features\s*=\s*\["veriloga"\]""",
+        self.assertIn(
+            'features = ["veriloga"]',
+            ui_manifest.split(ui_portable, maxsplit=1)[1],
         )
+
+        for mobile_target in ["aarch64-linux-android", "x86_64-linux-android"]:
+            tree = cargo_tree_for_target("rspice-ui", mobile_target)
+            self.assertNotIn('rspice-veriloga feature "native"', tree)
+            self.assertIn('rspice-core feature "veriloga"', tree)
 
     def test_wasm_ci_checks_ui_and_bindings_warning_clean(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")

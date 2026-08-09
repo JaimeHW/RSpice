@@ -1,15 +1,19 @@
-//! Typed, effect-annotated SSA consumed by the x64 backend.
+//! Typed, effect-annotated SSA consumed by every native machine backend.
 //!
 //! Architecture-neutral lowering currently delivers postfix `NativeOp`s.  The
-//! x64 backend immediately lifts that stream into explicit values so machine
+//! native backends immediately lift that stream into explicit values so machine
 //! code generation never has to trust an implicit operand stack.  Expressions
 //! are single-block today; keeping the block and terminator explicit makes
 //! control-flow extension possible without changing the value model.
 
-use crate::native::expr::{NativeOp, NativeProgram, UnaryMathOp, native_op_stack_effect};
+use crate::native::expr::{
+    IntegerBinaryOp, NativeOp, NativeProgram, UnaryMathOp, native_op_stack_effect,
+};
+use crate::native::value_cache::{native_op_hash, native_ops_are_codegen_identical};
 use crate::native::{JitError, JitResult};
+use std::collections::HashMap;
 
-const MODEL: &str = "native-x64-ssa";
+const MODEL: &str = "native-ssa";
 pub(super) const INLINE_DYNAMIC_LOWER_ABS_LIMIT: i64 = 1_i64 << 51;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -23,6 +27,10 @@ impl ValueId {
                 model: MODEL.into(),
                 detail: format!("SSA value count {index} exceeds the u32 identity space").into(),
             })
+    }
+
+    pub(super) fn index(self) -> usize {
+        self.0 as usize
     }
 }
 
@@ -85,6 +93,10 @@ impl Effects {
         self.contains(Self::MAY_CALL)
     }
 
+    pub(super) fn may_fail(self) -> bool {
+        self.contains(Self::MAY_FAIL)
+    }
+
     pub(super) fn reads_entry_args(self) -> bool {
         self.contains(Self::READ_ENTRY_ARGS)
     }
@@ -129,6 +141,10 @@ pub(super) struct Instruction {
 }
 
 impl Instruction {
+    pub(super) fn result(&self) -> ValueId {
+        self.result
+    }
+
     pub(super) fn value_type(&self) -> ValueType {
         self.value_type
     }
@@ -137,7 +153,6 @@ impl Instruction {
         self.op
     }
 
-    #[cfg(test)]
     pub(super) fn operands(&self) -> &[ValueId] {
         &self.operands
     }
@@ -172,86 +187,12 @@ pub(super) struct Program {
 
 impl Program {
     pub(super) fn lower(program: &NativeProgram) -> JitResult<Self> {
-        program.validate_dependency_metadata()?;
-
-        let mut stack = Vec::with_capacity(program.max_stack_depth());
-        let mut instructions = Vec::with_capacity(program.ops().len());
-        let mut observed_maximum_depth = 0;
-        for op in program.ops().iter().copied() {
-            let (pop_count, push_count) = native_op_stack_effect(&op);
-            if push_count != 1 {
-                return Err(JitError::Verifier {
-                    model: MODEL.into(),
-                    detail: format!(
-                        "native op {op:?} declares unsupported SSA result count {push_count}"
-                    )
-                    .into(),
-                });
-            }
-            let operand_start =
-                stack
-                    .len()
-                    .checked_sub(pop_count)
-                    .ok_or_else(|| JitError::Verifier {
-                        model: MODEL.into(),
-                        detail: format!(
-                            "native op {op:?} consumes {pop_count} value(s) at SSA depth {}",
-                            stack.len()
-                        )
-                        .into(),
-                    })?;
-            let operands = stack.split_off(operand_start).into_boxed_slice();
-            let result = ValueId::new(instructions.len())?;
-            instructions.push(Instruction {
-                result,
-                value_type: ValueType::F64,
-                op,
-                operands,
-                effects: Effects::for_op(op),
-            });
-            stack.push(result);
-            observed_maximum_depth = observed_maximum_depth.max(stack.len());
-        }
-
-        let [result] = stack.as_slice() else {
-            return Err(JitError::Verifier {
-                model: MODEL.into(),
-                detail: format!(
-                    "SSA lowering ends with {} live values, expected exactly one",
-                    stack.len()
-                )
-                .into(),
-            });
-        };
-        if observed_maximum_depth != program.max_stack_depth() {
-            return Err(JitError::Verifier {
-                model: MODEL.into(),
-                detail: format!(
-                    "SSA observed stack depth {observed_maximum_depth}, native metadata records {}",
-                    program.max_stack_depth()
-                )
-                .into(),
-            });
-        }
-
-        let entry = BlockId(0);
-        let block = BasicBlock {
-            id: entry,
-            instruction_start: 0,
-            instruction_end: instructions.len(),
-            terminator: Terminator::Return(*result),
-        };
-        let lowered = Self {
-            entry,
-            block,
-            instructions,
-            maximum_stack_depth: observed_maximum_depth,
-        };
-        lowered.validate()?;
-        Ok(lowered)
+        let mut lowerer = ProgramLowerer::with_capacity(program.ops().len());
+        let (result, maximum_stack_depth) = lowerer.append(program)?;
+        eliminate_dead_instructions(lowerer.finish(result, maximum_stack_depth)?, &mut [])
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_arch = "x86_64"))]
     pub(super) fn from_ssa_for_test(
         operations: Vec<(NativeOp, Vec<usize>)>,
         result: usize,
@@ -308,6 +249,12 @@ impl Program {
         self.instructions
             .iter()
             .any(|instruction| instruction.effects.may_call())
+    }
+
+    pub(super) fn requires_call_frame(&self) -> bool {
+        self.instructions
+            .iter()
+            .any(|instruction| instruction.effects.may_call() || instruction.effects.may_fail())
     }
 
     pub(super) fn needs_saved_entry_args(&self) -> bool {
@@ -373,6 +320,399 @@ impl Program {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ExpressionId(u32);
+
+impl ExpressionId {
+    fn new(index: usize) -> JitResult<Self> {
+        u32::try_from(index)
+            .map(Self)
+            .map_err(|_| JitError::Verifier {
+                model: MODEL.into(),
+                detail: format!("SSA expression count {index} exceeds the u32 identity space")
+                    .into(),
+            })
+    }
+
+    fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+#[derive(Debug)]
+struct InternedExpression {
+    op: NativeOp,
+    operands: Box<[ExpressionId]>,
+}
+
+#[derive(Default)]
+struct ExpressionInterner {
+    expressions: Vec<InternedExpression>,
+    buckets: HashMap<u64, Vec<ExpressionId>>,
+}
+
+impl ExpressionInterner {
+    fn intern(&mut self, op: NativeOp, operands: Box<[ExpressionId]>) -> JitResult<ExpressionId> {
+        let hash = native_op_hash(op, operands.iter().map(|operand| operand.index()));
+        if let Some(existing) = self.buckets.get(&hash).and_then(|entries| {
+            entries.iter().copied().find(|candidate| {
+                let expression = &self.expressions[candidate.index()];
+                native_ops_are_codegen_identical(expression.op, op)
+                    && expression.operands.as_ref() == operands.as_ref()
+            })
+        }) {
+            return Ok(existing);
+        }
+        let expression = ExpressionId::new(self.expressions.len())?;
+        self.expressions.push(InternedExpression { op, operands });
+        self.buckets.entry(hash).or_default().push(expression);
+        Ok(expression)
+    }
+
+    fn unique(&mut self, op: NativeOp, operands: Box<[ExpressionId]>) -> JitResult<ExpressionId> {
+        let expression = ExpressionId::new(self.expressions.len())?;
+        self.expressions.push(InternedExpression { op, operands });
+        Ok(expression)
+    }
+}
+
+/// Stateful builder used for both one-result entries and source-ordered
+/// assignment batches. Structural expression identities make equivalent DAG
+/// nodes reusable even when their postfix programs are lowered separately.
+struct ProgramLowerer {
+    instructions: Vec<Instruction>,
+    value_expressions: Vec<ExpressionId>,
+    expressions: ExpressionInterner,
+    reusable_values: HashMap<ExpressionId, ValueId>,
+}
+
+impl ProgramLowerer {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            instructions: Vec::with_capacity(capacity),
+            value_expressions: Vec::with_capacity(capacity),
+            expressions: ExpressionInterner::default(),
+            reusable_values: HashMap::new(),
+        }
+    }
+
+    fn append(&mut self, program: &NativeProgram) -> JitResult<(ValueId, usize)> {
+        program.validate_dependency_metadata()?;
+
+        let mut stack: Vec<ValueId> = Vec::with_capacity(program.max_stack_depth());
+        let mut observed_maximum_depth = 0;
+        for op in program.ops().iter().copied() {
+            let (pop_count, push_count) = native_op_stack_effect(&op);
+            if push_count != 1 {
+                return Err(JitError::Verifier {
+                    model: MODEL.into(),
+                    detail: format!(
+                        "native op {op:?} declares unsupported SSA result count {push_count}"
+                    )
+                    .into(),
+                });
+            }
+            let operand_start =
+                stack
+                    .len()
+                    .checked_sub(pop_count)
+                    .ok_or_else(|| JitError::Verifier {
+                        model: MODEL.into(),
+                        detail: format!(
+                            "native op {op:?} consumes {pop_count} value(s) at SSA depth {}",
+                            stack.len()
+                        )
+                        .into(),
+                    })?;
+            let operands = stack.split_off(operand_start).into_boxed_slice();
+            let operand_expressions = operands
+                .iter()
+                .map(|operand| {
+                    self.value_expressions
+                        .get(operand.index())
+                        .copied()
+                        .ok_or_else(|| JitError::Verifier {
+                            model: MODEL.into(),
+                            detail: format!(
+                                "SSA expression identity is missing for operand {}",
+                                operand.index()
+                            )
+                            .into(),
+                        })
+                })
+                .collect::<JitResult<Vec<_>>>()?
+                .into_boxed_slice();
+            if matches!(op, NativeOp::IfElse)
+                && let [_, then_value, else_value] = operands.as_ref()
+                && then_value == else_value
+            {
+                stack.push(*then_value);
+                observed_maximum_depth = observed_maximum_depth.max(stack.len());
+                continue;
+            }
+            let effects = Effects::for_op(op);
+            let expression = if effects.permits_result_sharing() {
+                let expression = self.expressions.intern(op, operand_expressions)?;
+                if let Some(result) = self.reusable_values.get(&expression).copied() {
+                    stack.push(result);
+                    observed_maximum_depth = observed_maximum_depth.max(stack.len());
+                    continue;
+                }
+                expression
+            } else {
+                self.reusable_values.clear();
+                self.expressions.unique(op, operand_expressions)?
+            };
+            let result = ValueId::new(self.instructions.len())?;
+            self.instructions.push(Instruction {
+                result,
+                value_type: ValueType::F64,
+                op,
+                operands,
+                effects,
+            });
+            self.value_expressions.push(expression);
+            if effects.permits_result_sharing() {
+                self.reusable_values.insert(expression, result);
+            }
+            stack.push(result);
+            observed_maximum_depth = observed_maximum_depth.max(stack.len());
+        }
+
+        let [result] = stack.as_slice() else {
+            return Err(JitError::Verifier {
+                model: MODEL.into(),
+                detail: format!(
+                    "SSA lowering ends with {} live values, expected exactly one",
+                    stack.len()
+                )
+                .into(),
+            });
+        };
+        if observed_maximum_depth != program.max_stack_depth() {
+            return Err(JitError::Verifier {
+                model: MODEL.into(),
+                detail: format!(
+                    "SSA observed stack depth {observed_maximum_depth}, native metadata records {}",
+                    program.max_stack_depth()
+                )
+                .into(),
+            });
+        }
+        Ok((*result, observed_maximum_depth))
+    }
+
+    fn finish(self, result: ValueId, maximum_stack_depth: usize) -> JitResult<Program> {
+        let entry = BlockId(0);
+        let program = Program {
+            entry,
+            block: BasicBlock {
+                id: entry,
+                instruction_start: 0,
+                instruction_end: self.instructions.len(),
+                terminator: Terminator::Return(result),
+            },
+            instructions: self.instructions,
+            maximum_stack_depth,
+        };
+        program.validate()?;
+        Ok(program)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct AssignmentOutput {
+    variable_index: usize,
+    instruction_end: usize,
+    value: ValueId,
+}
+
+impl AssignmentOutput {
+    pub(super) fn variable_index(self) -> usize {
+        self.variable_index
+    }
+
+    pub(super) fn instruction_end(self) -> usize {
+        self.instruction_end
+    }
+
+    pub(super) fn value(self) -> ValueId {
+        self.value
+    }
+}
+
+/// One SSA DAG with source-order publication points for a safe batch of direct
+/// assignments. Stores are deliberately not represented as movable SSA ops:
+/// each output boundary remains observable before any later failing program.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct AssignmentProgram {
+    program: Program,
+    outputs: Box<[AssignmentOutput]>,
+}
+
+impl AssignmentProgram {
+    pub(super) fn lower(assignments: &[(usize, &NativeProgram)]) -> JitResult<Self> {
+        if assignments.is_empty() {
+            return Err(JitError::Verifier {
+                model: MODEL.into(),
+                detail: "cannot lower an empty direct-assignment batch".into(),
+            });
+        }
+        let capacity = assignments
+            .iter()
+            .map(|(_, program)| program.ops().len())
+            .fold(0_usize, usize::saturating_add);
+        let mut lowerer = ProgramLowerer::with_capacity(capacity);
+        let mut maximum_stack_depth = 0;
+        let mut outputs = Vec::with_capacity(assignments.len());
+        let mut final_result = None;
+        for (variable_index, native) in assignments.iter().copied() {
+            let (result, stack_depth) = lowerer.append(native)?;
+            maximum_stack_depth = maximum_stack_depth.max(stack_depth);
+            let instruction_end = lowerer.instructions.len();
+            if instruction_end == 0 || result.index() >= instruction_end {
+                return Err(JitError::Verifier {
+                    model: MODEL.into(),
+                    detail: "direct-assignment output is not dominated by its publication boundary"
+                        .into(),
+                });
+            }
+            outputs.push(AssignmentOutput {
+                variable_index,
+                instruction_end,
+                value: result,
+            });
+            final_result = Some(result);
+        }
+        // Outputs at the same instruction boundary have no computation,
+        // failure point, or variable read between them. Targets are distinct
+        // by the assignment batch contract, so address order is equivalent
+        // and substantially improves large-array store locality.
+        outputs.sort_by_key(|output| (output.instruction_end, output.variable_index));
+        let program = lowerer.finish(
+            final_result.expect("non-empty assignment batch has a final result"),
+            maximum_stack_depth,
+        )?;
+        let program = eliminate_dead_instructions(program, &mut outputs)?;
+        Ok(Self {
+            program,
+            outputs: outputs.into_boxed_slice(),
+        })
+    }
+
+    pub(super) fn program(&self) -> &Program {
+        &self.program
+    }
+
+    pub(super) fn outputs(&self) -> &[AssignmentOutput] {
+        &self.outputs
+    }
+}
+
+fn eliminate_dead_instructions(
+    program: Program,
+    outputs: &mut [AssignmentOutput],
+) -> JitResult<Program> {
+    let instruction_count = program.instructions.len();
+    let mut live = vec![false; instruction_count];
+    let mut work = vec![program.result()];
+    work.extend(outputs.iter().map(|output| output.value));
+    work.extend(
+        program
+            .instructions
+            .iter()
+            .filter(|instruction| !instruction.effects.permits_result_sharing())
+            .map(|instruction| instruction.result),
+    );
+    while let Some(value) = work.pop() {
+        let Some(marked) = live.get_mut(value.index()) else {
+            return Err(JitError::Verifier {
+                model: MODEL.into(),
+                detail: format!("SSA liveness references undefined value {}", value.index()).into(),
+            });
+        };
+        if *marked {
+            continue;
+        }
+        *marked = true;
+        work.extend(program.instructions[value.index()].operands.iter().copied());
+    }
+    if live.iter().all(|value| *value) {
+        return Ok(program);
+    }
+
+    let mut prefix = vec![0_usize; instruction_count + 1];
+    for (index, is_live) in live.iter().copied().enumerate() {
+        prefix[index + 1] = prefix[index] + usize::from(is_live);
+    }
+    let old_result = program.result();
+    let maximum_stack_depth = program.maximum_stack_depth;
+    let mut remap = vec![None; instruction_count];
+    let mut instructions = Vec::with_capacity(prefix[instruction_count]);
+    for (old_index, instruction) in program.instructions.into_iter().enumerate() {
+        if !live[old_index] {
+            continue;
+        }
+        let result = ValueId::new(instructions.len())?;
+        remap[old_index] = Some(result);
+        let operands = instruction
+            .operands
+            .iter()
+            .map(|operand| {
+                remap[operand.index()].ok_or_else(|| JitError::Verifier {
+                    model: MODEL.into(),
+                    detail: format!(
+                        "SSA live value {} references removed operand {}",
+                        old_index,
+                        operand.index()
+                    )
+                    .into(),
+                })
+            })
+            .collect::<JitResult<Vec<_>>>()?
+            .into_boxed_slice();
+        instructions.push(Instruction {
+            result,
+            value_type: instruction.value_type,
+            op: instruction.op,
+            operands,
+            effects: instruction.effects,
+        });
+    }
+    let remap_value = |value: ValueId| {
+        remap[value.index()].ok_or_else(|| JitError::Verifier {
+            model: MODEL.into(),
+            detail: format!("SSA required value {} was removed", value.index()).into(),
+        })
+    };
+    for output in outputs {
+        output.value = remap_value(output.value)?;
+        output.instruction_end =
+            prefix
+                .get(output.instruction_end)
+                .copied()
+                .ok_or_else(|| JitError::Verifier {
+                    model: MODEL.into(),
+                    detail: "SSA output boundary exceeds the instruction range".into(),
+                })?;
+    }
+    let result = remap_value(old_result)?;
+    let entry = BlockId(0);
+    let compact = Program {
+        entry,
+        block: BasicBlock {
+            id: entry,
+            instruction_start: 0,
+            instruction_end: instructions.len(),
+            terminator: Terminator::Return(result),
+        },
+        instructions,
+        maximum_stack_depth,
+    };
+    compact.validate()?;
+    Ok(compact)
+}
+
 /// One computation and every output slot that consumes its result.
 ///
 /// Sparse Jacobian construction already omits structurally absent axes.  This
@@ -421,10 +761,12 @@ pub(super) fn plan_shared_outputs(programs: &[Program]) -> Vec<SharedOutputGroup
     groups
 }
 
-/// XMM0-XMM9 hold allocated SSA values. Six registers remain available for
-/// materializing the widest native operation's five spilled operands plus one
-/// instruction-specific scratch value.
-pub(super) const ALLOCATABLE_XMM_REGISTERS: usize = 10;
+/// Logical registers 0-9 hold allocated SSA values. Backends map this bank to
+/// caller- or callee-saved machine registers according to their host ABI. Six
+/// logical registers remain available for materializing the widest native
+/// operation's five spilled operands plus one instruction-specific scratch.
+pub(super) const ALLOCATABLE_VALUE_REGISTERS: usize = 10;
+pub(super) const LOGICAL_VALUE_REGISTER_COUNT: usize = 21;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ValueLocation {
@@ -436,7 +778,7 @@ pub(super) enum ValueLocation {
 pub(super) struct AllocatedInstruction {
     operands: Box<[ValueLocation]>,
     result: ValueLocation,
-    live_register_mask: u16,
+    live_register_mask: u32,
 }
 
 impl AllocatedInstruction {
@@ -448,7 +790,7 @@ impl AllocatedInstruction {
         self.result
     }
 
-    pub(super) fn live_register_mask(&self) -> u16 {
+    pub(super) fn live_register_mask(&self) -> u32 {
         self.live_register_mask
     }
 }
@@ -457,6 +799,7 @@ impl AllocatedInstruction {
 pub(super) struct RegisterAllocation {
     instructions: Vec<AllocatedInstruction>,
     result: ValueLocation,
+    value_locations: Vec<ValueLocation>,
     spill_slot_count: usize,
     used_register_count: usize,
     required_register_count: usize,
@@ -464,16 +807,99 @@ pub(super) struct RegisterAllocation {
 
 impl RegisterAllocation {
     pub(super) fn build(program: &Program) -> JitResult<Self> {
+        Self::build_with_register_count_and_output_uses(program, ALLOCATABLE_VALUE_REGISTERS, &[])
+    }
+
+    #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+    pub(super) fn build_for_assignments(program: &AssignmentProgram) -> JitResult<Self> {
+        Self::build_for_assignments_with_register_count(program, ALLOCATABLE_VALUE_REGISTERS)
+    }
+
+    pub(super) fn build_for_assignments_with_register_count(
+        program: &AssignmentProgram,
+        allocatable_register_count: usize,
+    ) -> JitResult<Self> {
+        let output_uses = program
+            .outputs()
+            .iter()
+            .map(|output| (output.instruction_end(), output.value()))
+            .collect::<Vec<_>>();
+        Self::build_with_register_count_and_output_uses(
+            program.program(),
+            allocatable_register_count,
+            &output_uses,
+        )
+    }
+
+    /// Allocate SSA values from a target-selected prefix of the logical
+    /// register bank. This entry point is primarily an architecture bring-up
+    /// and qualification seam; production backends use the shared default so
+    /// allocation choices remain directly comparable across targets.
+    pub(super) fn build_with_register_count(
+        program: &Program,
+        allocatable_register_count: usize,
+    ) -> JitResult<Self> {
+        Self::build_with_register_count_and_output_uses(program, allocatable_register_count, &[])
+    }
+
+    fn build_with_register_count_and_output_uses(
+        program: &Program,
+        allocatable_register_count: usize,
+        output_uses: &[(usize, ValueId)],
+    ) -> JitResult<Self> {
         program.validate()?;
+        if !(1..=LOGICAL_VALUE_REGISTER_COUNT).contains(&allocatable_register_count) {
+            return Err(JitError::RegisterAllocation {
+                model: MODEL.into(),
+                detail: format!(
+                    "logical value-register count {allocatable_register_count} is outside 1..={LOGICAL_VALUE_REGISTER_COUNT}"
+                )
+                .into(),
+            });
+        }
         let instruction_count = program.instructions.len();
-        let mut last_use: Vec<usize> = (0..instruction_count).collect();
+        // Positions before/after one instruction are distinct. An ordinary
+        // operand use is at 2*i; a source-order assignment publication is at
+        // 2*i+1. This prevents the allocator from overwriting a value with an
+        // instruction result before that value has been stored.
+        let mut last_use_position: Vec<usize> =
+            (0..instruction_count).map(|index| index * 2).collect();
         for (instruction_index, instruction) in program.instructions.iter().enumerate() {
             for operand in instruction.operands.iter().copied() {
                 let operand_index = operand.0 as usize;
-                last_use[operand_index] = last_use[operand_index].max(instruction_index);
+                last_use_position[operand_index] =
+                    last_use_position[operand_index].max(instruction_index * 2);
             }
         }
-        last_use[program.result().0 as usize] = instruction_count;
+        for &(instruction_end, value) in output_uses {
+            if instruction_end == 0
+                || instruction_end > instruction_count
+                || value.index() >= instruction_end
+            {
+                return Err(JitError::Verifier {
+                    model: MODEL.into(),
+                    detail: format!(
+                        "SSA output value {} is invalid at instruction boundary {instruction_end}",
+                        value.index()
+                    )
+                    .into(),
+                });
+            }
+            let use_position = (instruction_end - 1)
+                .checked_mul(2)
+                .and_then(|position| position.checked_add(1))
+                .ok_or_else(|| JitError::RegisterAllocation {
+                    model: MODEL.into(),
+                    detail: "SSA assignment-output liveness position overflow".into(),
+                })?;
+            last_use_position[value.index()] = last_use_position[value.index()].max(use_position);
+        }
+        last_use_position[program.result().0 as usize] = instruction_count
+            .checked_mul(2)
+            .ok_or_else(|| JitError::RegisterAllocation {
+                model: MODEL.into(),
+                detail: "SSA return liveness position overflow".into(),
+            })?;
 
         let mut call_prefix = Vec::with_capacity(instruction_count + 1);
         call_prefix.push(0_usize);
@@ -486,22 +912,42 @@ impl RegisterAllocation {
             call_prefix.push(next);
         }
         let crosses_call = |definition: usize| {
-            let end = last_use[definition];
-            end > definition + 1 && call_prefix[end] > call_prefix[definition + 1]
+            let position = last_use_position[definition];
+            let end_instruction = (position / 2).min(instruction_count);
+            let end_exclusive = end_instruction
+                .saturating_add(usize::from(position & 1 != 0))
+                .min(instruction_count);
+            end_exclusive > definition + 1
+                && call_prefix[end_exclusive] > call_prefix[definition + 1]
         };
 
         let mut locations = vec![None; instruction_count];
-        let mut register_owners = [None; ALLOCATABLE_XMM_REGISTERS];
+        let mut register_owners = vec![None; allocatable_register_count];
         let mut spill_owners: Vec<Option<ValueId>> = Vec::new();
         let mut instructions = Vec::with_capacity(instruction_count);
         let mut used_register_count = 0;
 
         for (instruction_index, instruction) in program.instructions.iter().enumerate() {
+            let instruction_position = instruction_index * 2;
+            for owner in &mut register_owners {
+                if owner.is_some_and(|value: ValueId| {
+                    last_use_position[value.index()] < instruction_position
+                }) {
+                    *owner = None;
+                }
+            }
+            for owner in &mut spill_owners {
+                if owner.is_some_and(|value: ValueId| {
+                    last_use_position[value.index()] < instruction_position
+                }) {
+                    *owner = None;
+                }
+            }
             let live_register_mask = register_owners
                 .iter()
                 .enumerate()
-                .fold(0_u16, |mask, (register, owner)| {
-                    mask | (u16::from(owner.is_some()) << register)
+                .fold(0_u32, |mask, (register, owner)| {
+                    mask | (u32::from(owner.is_some()) << register)
                 });
             let operands: Box<[ValueLocation]> = instruction
                 .operands
@@ -522,7 +968,7 @@ impl RegisterAllocation {
                 .operands
                 .first()
                 .copied()
-                .filter(|operand| last_use[operand.0 as usize] == instruction_index)
+                .filter(|operand| last_use_position[operand.0 as usize] == instruction_position)
                 .and_then(|operand| locations[operand.0 as usize])
                 .and_then(|location| match location {
                     ValueLocation::Register(register) => Some(register),
@@ -546,7 +992,7 @@ impl RegisterAllocation {
                 .copied()
                 .zip(operands.iter().copied())
             {
-                if last_use[operand.0 as usize] != instruction_index {
+                if last_use_position[operand.0 as usize] != instruction_position {
                     continue;
                 }
                 match location {
@@ -591,6 +1037,16 @@ impl RegisterAllocation {
         Ok(Self {
             instructions,
             result,
+            value_locations: locations
+                .into_iter()
+                .enumerate()
+                .map(|(index, location)| {
+                    location.ok_or_else(|| JitError::Verifier {
+                        model: MODEL.into(),
+                        detail: format!("SSA allocator did not assign value {index}").into(),
+                    })
+                })
+                .collect::<JitResult<Vec<_>>>()?,
             spill_slot_count: spill_owners.len(),
             used_register_count,
             required_register_count,
@@ -603,6 +1059,17 @@ impl RegisterAllocation {
 
     pub(super) fn result(&self) -> ValueLocation {
         self.result
+    }
+
+    pub(super) fn location(&self, value: ValueId) -> JitResult<ValueLocation> {
+        self.value_locations
+            .get(value.index())
+            .copied()
+            .ok_or_else(|| JitError::Verifier {
+                model: MODEL.into(),
+                detail: format!("SSA allocation has no location for value {}", value.index())
+                    .into(),
+            })
     }
 
     pub(super) fn spill_slot_count(&self) -> usize {
@@ -630,11 +1097,12 @@ fn allocate_spill_slot(owners: &mut Vec<Option<ValueId>>, value: ValueId) -> usi
 }
 
 fn required_register_count(instruction: &AllocatedInstruction) -> usize {
-    const XMM_REGISTER_COUNT: usize = 16;
-
-    let mut used = [false; XMM_REGISTER_COUNT];
+    let mut used = [false; LOGICAL_VALUE_REGISTER_COUNT];
     for (register, occupied) in used.iter_mut().enumerate() {
-        *occupied = instruction.live_register_mask & (1_u16 << register) != 0;
+        *occupied = instruction.live_register_mask & (1_u32 << register) != 0;
+    }
+    if let ValueLocation::Register(register) = instruction.result {
+        used[register] = true;
     }
     for operand in &instruction.operands {
         let register = match *operand {
@@ -645,14 +1113,11 @@ fn required_register_count(instruction: &AllocatedInstruction) -> usize {
             used[register] = true;
         }
     }
-    match instruction.result {
-        ValueLocation::Register(register) => used[register] = true,
-        ValueLocation::Spill(_) => {
-            let reuses_spilled_first =
-                matches!(instruction.operands.first(), Some(ValueLocation::Spill(_)));
-            if !reuses_spilled_first && let Some(register) = take_free_register(&mut used) {
-                used[register] = true;
-            }
+    if matches!(instruction.result, ValueLocation::Spill(_)) {
+        let reuses_spilled_first =
+            matches!(instruction.operands.first(), Some(ValueLocation::Spill(_)));
+        if !reuses_spilled_first && let Some(register) = take_free_register(&mut used) {
+            used[register] = true;
         }
     }
     // Legalization can request one scratch register immediately above the
@@ -667,7 +1132,7 @@ fn required_register_count(instruction: &AllocatedInstruction) -> usize {
         .map_or(0, |last| last + 1)
 }
 
-fn take_free_register(used: &mut [bool; 16]) -> Option<usize> {
+fn take_free_register(used: &mut [bool; LOGICAL_VALUE_REGISTER_COUNT]) -> Option<usize> {
     used.iter().position(|occupied| !occupied)
 }
 
@@ -880,6 +1345,7 @@ fn op_may_fail(op: NativeOp) -> bool {
             | NativeOp::IdtState(_)
             | NativeOp::IdtJacobian
             | NativeOp::IdtModState(_)
+            | NativeOp::IntegerBinary(IntegerBinaryOp::Shl | IntegerBinaryOp::Shr)
     )
 }
 
@@ -890,8 +1356,9 @@ fn unary_math_uses_helper(op: UnaryMathOp) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        BasicBlock, BlockId, Effects, Instruction, Program, RegisterAllocation, Terminator,
-        ValueId, ValueLocation, ValueType, plan_shared_outputs,
+        AllocatedInstruction, AssignmentProgram, BasicBlock, BlockId, Effects, Instruction,
+        Program, RegisterAllocation, Terminator, ValueId, ValueLocation, ValueType,
+        plan_shared_outputs, required_register_count,
     };
     use crate::native::expr::{NativeOp, NativeProgram, native_op_stack_effect};
 
@@ -942,6 +1409,116 @@ mod tests {
         let invalid = program(vec![NativeOp::Const(1.0)], 2);
         let error = Program::lower(&invalid).expect_err("stale depth metadata must fail");
         assert!(error.to_string().contains("SSA observed stack depth 1"));
+    }
+
+    #[test]
+    fn local_cse_shares_exact_pure_subexpressions_but_stops_at_effect_barriers() {
+        let shared = Program::lower(&program(
+            vec![
+                NativeOp::LoadVariable(0),
+                NativeOp::LoadVariable(1),
+                NativeOp::Add,
+                NativeOp::LoadVariable(0),
+                NativeOp::LoadVariable(1),
+                NativeOp::Add,
+                NativeOp::Mul,
+            ],
+            3,
+        ))
+        .expect("pure CSE program");
+        assert_eq!(shared.instructions().len(), 4);
+
+        let barrier = Program::lower(&program(
+            vec![
+                NativeOp::LoadVariable(0),
+                NativeOp::Const(1.0),
+                NativeOp::LimiterStore(0),
+                NativeOp::LoadVariable(0),
+                NativeOp::Add,
+            ],
+            2,
+        ))
+        .expect("state barrier program");
+        assert_eq!(barrier.instructions().len(), 5);
+    }
+
+    #[test]
+    fn identical_if_else_arms_alias_exactly_and_dead_pure_conditions_disappear() {
+        let pure = Program::lower(&program(
+            vec![
+                NativeOp::Const(1.0),
+                NativeOp::LoadVariable(0),
+                NativeOp::LoadVariable(0),
+                NativeOp::IfElse,
+            ],
+            3,
+        ))
+        .expect("identical-arm conditional");
+        assert_eq!(pure.instructions().len(), 1);
+        assert_eq!(pure.instructions()[0].op(), NativeOp::LoadVariable(0));
+
+        let failing_condition = Program::lower(&program(
+            vec![
+                NativeOp::LoadParamGiven(0),
+                NativeOp::LoadVariable(0),
+                NativeOp::LoadVariable(0),
+                NativeOp::IfElse,
+            ],
+            3,
+        ))
+        .expect("effectful identical-arm conditional");
+        assert_eq!(failing_condition.instructions().len(), 2);
+        assert_eq!(
+            failing_condition.instructions()[0].op(),
+            NativeOp::LoadParamGiven(0)
+        );
+    }
+
+    #[test]
+    fn assignment_ssa_shares_across_outputs_and_keeps_publication_liveness() {
+        let first = program(vec![NativeOp::LoadVariable(7), NativeOp::Square], 1);
+        let second = program(
+            vec![
+                NativeOp::LoadVariable(7),
+                NativeOp::Square,
+                NativeOp::Const(1.0),
+                NativeOp::Add,
+            ],
+            2,
+        );
+        let batch =
+            AssignmentProgram::lower(&[(0, &first), (1, &second)]).expect("shared assignment SSA");
+        assert_eq!(batch.program().instructions().len(), 4);
+        assert_eq!(batch.outputs()[0].instruction_end(), 2);
+        assert_eq!(batch.outputs()[1].instruction_end(), 4);
+
+        let allocation =
+            RegisterAllocation::build_for_assignments(&batch).expect("batch allocation");
+        let first_location = allocation
+            .location(batch.outputs()[0].value())
+            .expect("first output location");
+        assert_eq!(
+            first_location,
+            allocation.instructions()[1].result(),
+            "the first output must still occupy its assigned location at publication"
+        );
+    }
+
+    #[test]
+    fn equivalent_same_boundary_outputs_are_grouped_by_target_address() {
+        let constant = program(vec![NativeOp::Const(2.0)], 1);
+        let batch =
+            AssignmentProgram::lower(&[(5000, &constant), (2, &constant), (300, &constant)])
+                .expect("constant assignment batch");
+        assert_eq!(batch.program().instructions().len(), 1);
+        assert_eq!(
+            batch
+                .outputs()
+                .iter()
+                .map(|output| output.variable_index())
+                .collect::<Vec<_>>(),
+            [2, 300, 5000]
+        );
     }
 
     #[test]
@@ -1112,5 +1689,20 @@ mod tests {
             ValueLocation::Spill(_)
         ));
         assert_eq!(allocation.spill_slot_count(), 1);
+    }
+
+    #[test]
+    fn legalization_reserves_a_register_result_before_loading_spilled_operands() {
+        let instruction = AllocatedInstruction {
+            operands: Box::new([ValueLocation::Register(0), ValueLocation::Spill(0)]),
+            result: ValueLocation::Register(1),
+            live_register_mask: 1,
+        };
+
+        assert_eq!(
+            required_register_count(&instruction),
+            4,
+            "register 1 is the future result, register 2 materializes the spill, and register 3 remains available for opcode legalization"
+        );
     }
 }

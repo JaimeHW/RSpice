@@ -44,7 +44,7 @@ runs offline, ahead of the build, and its output is compiled into
 | `vm` | Bytecode interpreter and per-instance runtime context (state for `ddt`/`idt`, transition/slew filters, delay buffers, event detectors, lookup tables) |
 | `laplace` / `zfilter` | State-space runtime for the `laplace_*` (s-domain) and `zi_*` (sampled-data) filter operators |
 | `device` | `VerilogADevice`: the per-instance object the simulator drives — see below |
-| `native/` | RSpice-owned native JIT backend (feature `native`): full native JIT or typed construction error, no bytecode fallback. x86-64 only — the AArch64 arm of the target dispatch returns `JitError::UnsupportedTarget` |
+| `native/` | RSpice-owned native JIT backend (feature `native`): full native JIT or typed construction error, no bytecode fallback. Supports x86-64 and desktop AArch64 on macOS, Linux, and Windows, with platform-native executable-memory and unwind registration |
 | `virtual_source` | Sealed, file-system-free source bundles: portable logical paths, include resolution restricted to the bundle plus the built-in headers, and BLAKE3 identities for the source, dependency closure, compiler contract, and runtime contract. The transport boundary for browser workers and retained run snapshots |
 | `runtime_report` | In-memory compilation reports: the simulator ABI a compiled artifact exposes, its user-facing diagnostics with source positions, and which runtime targets have actually qualified for it. Performs no file-system access |
 | `metrics` | Stable phase identifiers, structured timing/work-size reports, measured-result wrappers, and opt-in performance budgets shared by the compiler and offline Rust backend |
@@ -213,10 +213,17 @@ top. Its `veriloga-builtins` feature is a different path entirely: it
 selects pre-generated artifacts from `rspice-veriloga-models/models/` and does
 not link this compiler at all.
 
+Signed macOS executables that enable the hardened runtime must be signed with
+[`RSpice.entitlements`](../rspice-ui/macos/RSpice.entitlements). It grants only
+Apple's narrow `MAP_JIT` and JIT write-callback permissions; it does not disable
+executable-memory protection or library validation. CI ad-hoc signs a native
+test executable with this exact file and executes generated ARM64 code through
+the callback-only publication path.
+
 Optional backend qualification is report-only by default so the editor can
 show every target's readiness. Release tooling must use
 `RuntimeQualificationOptions::GENERATED_RUST_REQUIRED`,
-`RuntimeQualificationOptions::NATIVE_X64_REQUIRED`, or
+`RuntimeQualificationOptions::NATIVE_REQUIRED`, or
 `rejecting_interpreter_fallback()` when interpreter execution is not permitted.
 A requested backend that is unavailable or rejects the model then returns a
 typed `BackendQualification` compile error; it never silently runs bytecode.

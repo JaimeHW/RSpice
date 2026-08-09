@@ -8179,7 +8179,7 @@ fn is_static_condition_op(op: &NativeOp) -> bool {
         )
 }
 
-fn native_op_name(op: &NativeOp) -> &'static str {
+pub(super) fn native_op_name(op: &NativeOp) -> &'static str {
     match op {
         NativeOp::Const(_) => "Const",
         NativeOp::LoadParam(_) => "LoadParam",

@@ -80,4 +80,15 @@ fn main() {
         "cargo:rustc-env=RSPICE_VERILOGA_GENERATOR_SOURCE_DIGEST={}",
         hasher.finalize().to_hex()
     );
+
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    let target_family = env::var("CARGO_CFG_TARGET_FAMILY").unwrap_or_default();
+    let native_enabled = env::var_os("CARGO_FEATURE_NATIVE").is_some();
+    if native_enabled && target_arch == "aarch64" && target_family == "unix" {
+        cc::Build::new()
+            .file(root.join("src/native/aarch64_runtime.c"))
+            .warnings(true)
+            .extra_warnings(true)
+            .compile("rspice_veriloga_aarch64_runtime");
+    }
 }

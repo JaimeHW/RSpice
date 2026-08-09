@@ -30,12 +30,11 @@ mimalloc = "0.1"
 ctrlc = "3.4"
 rayon.workspace = true
 
-[target.'cfg(target_arch = "x86_64")'.dependencies]
-# The native Verilog-A backend emits x64 machine code. Enable it only where
-# that code can execute; other native architectures retain the bytecode path.
+[target.'cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dependencies]
+# The native Verilog-A backend is qualified on x64 and ARM64 desktop hosts.
 rspice-core = { workspace = true, features = ["veriloga-native"] }
 
-[target.'cfg(not(target_arch = "x86_64"))'.dependencies]
+[target.'cfg(not(all(any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows))))'.dependencies]
 rspice-core = { workspace = true, features = ["veriloga"] }
 
 [target.'cfg(windows)'.dependencies]

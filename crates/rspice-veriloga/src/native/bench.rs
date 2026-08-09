@@ -1444,10 +1444,12 @@ fn take_native_error(ctx: &mut EvalContext, phase: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        NativeBenchConfig, benchmark_failures, run_dense_entrypoint_case, run_device_evaluate_case,
-        run_device_stamp_case, timing_stats,
-    };
+    use super::{NativeBenchConfig, benchmark_failures, timing_stats};
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "aarch64", target_os = "macos")
+    ))]
+    use super::{run_dense_entrypoint_case, run_device_evaluate_case, run_device_stamp_case};
 
     fn smoke_config() -> NativeBenchConfig {
         NativeBenchConfig {
@@ -1464,6 +1466,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "aarch64", target_os = "macos")
+    ))]
     fn dense_entrypoint_benchmark_smoke_runs_native_sweep() {
         let report =
             run_dense_entrypoint_case(smoke_config()).expect("dense native benchmark case runs");
@@ -1473,6 +1479,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "aarch64", target_os = "macos")
+    ))]
     fn device_evaluate_benchmark_smoke_runs_native_sweep() {
         let report =
             run_device_evaluate_case(smoke_config()).expect("device native benchmark case runs");
@@ -1482,6 +1492,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "aarch64", target_os = "macos")
+    ))]
     fn device_stamp_benchmark_smoke_matches_matrix_and_rhs_reference() {
         let report =
             run_device_stamp_case(smoke_config()).expect("device stamp native benchmark case runs");
