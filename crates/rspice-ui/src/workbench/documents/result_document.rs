@@ -81,7 +81,8 @@ use crate::state::{AnalysisResult, SharedWaveformValues, SimulationRun, Waveform
 use crate::ui::plot::{CursorPair, DecimationCache, InteractionMode};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{chip, docbar_at_height};
+use crate::ui::icons::Icon;
+use crate::ui::widgets::{IconButton, chip, docbar_at_height};
 use crate::workbench::app_state::ActiveViewer;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::Workspace;
@@ -2260,18 +2261,30 @@ fn show_wave_instrument(ui: &mut Ui, state: &mut AppState) {
                                 state.ui.results.plot_tool = ResultPlotTool::Pan;
                             }
 
+                            // Viewport controls carry their glyphs like the
+                            // mockup: magnitude and fit are gestures, and the
+                            // lettered controls beside them are named modes.
                             instrument_separator(ui);
-                            if instrument_control(ui, "Z+", false, "Zoom active pane in 2x")
+                            if IconButton::new(Icon::ZoomIn)
+                                .side(RESULT_INSTRUMENT_CONTROL_HEIGHT)
+                                .tooltip("Zoom active pane in 2x")
+                                .show(ui)
                                 .clicked()
                             {
                                 waves::zoom_active_pane(state, &t, 0.5);
                             }
-                            if instrument_control(ui, "Z-", false, "Zoom active pane out 2x")
+                            if IconButton::new(Icon::ZoomOut)
+                                .side(RESULT_INSTRUMENT_CONTROL_HEIGHT)
+                                .tooltip("Zoom active pane out 2x")
+                                .show(ui)
                                 .clicked()
                             {
                                 waves::zoom_active_pane(state, &t, 2.0);
                             }
-                            if instrument_control(ui, "FIT", false, "Fit active waveform pane")
+                            if IconButton::new(Icon::ZoomFit)
+                                .side(RESULT_INSTRUMENT_CONTROL_HEIGHT)
+                                .tooltip("Fit active waveform pane")
+                                .show(ui)
                                 .clicked()
                             {
                                 waves::fit_active_pane(state, &t);

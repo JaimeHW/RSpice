@@ -29,6 +29,7 @@ const SIGNAL_ROW_HEIGHT: f32 = 30.0;
 // the mockup's `.result-browser-quantity` / `.result-browser-analysis-head`.
 const RESULT_QUANTITY_ROW_HEIGHT: f32 = 36.0;
 const RESULT_ANALYSIS_HEAD_HEIGHT: f32 = 31.0;
+const RESULT_MANIFEST_ROW_HEIGHT: f32 = 26.0;
 const TOUCH_TARGET_HEIGHT: f32 = 44.0;
 const PANEL_SEARCH_MARGIN_X: f32 = 8.0;
 const SCHEMATIC_NAV_ROW_HEIGHT: f32 = 24.0;
@@ -1333,18 +1334,16 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         for analysis in run.analyses {
                             let analysis_active =
                                 run_active && active_analysis == Some(analysis.analysis_index);
-                            if nav_row_indented(
+                            if result_browser_manifest_row(
                                 ui,
-                                if analysis.success {
-                                    WorkbenchIcon::Results
-                                } else {
-                                    WorkbenchIcon::Warning
-                                },
+                                analysis.short_label,
                                 &analysis.label,
+                                &analysis.domain,
                                 analysis_active,
-                                Some(analysis.short_label),
-                                1,
-                            ) {
+                                analysis.success,
+                            )
+                            .clicked()
+                            {
                                 select_result_analysis(app, run.run_index, analysis.analysis_index);
                             }
                         }
@@ -1891,6 +1890,88 @@ fn result_quantity_kind_label(name: &str, unit: &'static str) -> &'static str {
         "V^2/Hz" => "Noise PSD",
         _ => "Quantity",
     }
+}
+
+/// The mockup's `.result-browser-manifest-row`: one retained analysis of a
+/// dataset, as its kind glyph, code, and the domain it solved. It is an
+/// inventory line rather than a tree row — the dataset above it is the
+/// subject, and these state what that dataset contains.
+fn result_browser_manifest_row(
+    ui: &mut Ui,
+    glyph: &str,
+    code: &str,
+    domain: &str,
+    selected: bool,
+    ok: bool,
+) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let height = responsive_result_control_height(RESULT_MANIFEST_ROW_HEIGHT, t.metrics.ctl_h);
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), height),
+        egui::Sense::click(),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            format!("{code}, {domain}"),
+        )
+    });
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    if selected {
+        ui.painter().rect_filled(rect, 0.0, c.accent_dim);
+    } else if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, c.bg_hover);
+    }
+    let glyph_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 28.0 + 8.0, rect.center().y),
+        egui::vec2(16.0, 16.0),
+    );
+    let glyph_color = if ok { c.accent } else { c.warn };
+    ui.painter().rect_filled(glyph_rect, 3.0, c.accent_dim);
+    ui.painter().text(
+        glyph_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        glyph,
+        theme::mono(tokens::FS_MICRO, FontWeight::SemiBold),
+        glyph_color,
+    );
+    let code_end = ui
+        .painter()
+        .text(
+            egui::pos2(glyph_rect.right() + 6.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            code,
+            theme::mono(tokens::FS_0, FontWeight::Medium),
+            if selected { c.text } else { c.text_dim },
+        )
+        .right();
+    // The domain caption keeps under 42% of the row, as the mockup bounds it.
+    let domain_left = code_end + 6.0;
+    let available = (rect.right() - 8.0 - domain_left).min(rect.width() * 0.42);
+    if available > 24.0 {
+        let galley = ui.fonts_mut(|fonts| {
+            fonts.layout(
+                domain.to_owned(),
+                theme::sans(tokens::FS_MICRO, FontWeight::Medium),
+                c.text_faint,
+                available,
+            )
+        });
+        if galley.rows.len() == 1 {
+            ui.painter().galley(
+                egui::pos2(rect.right() - 8.0 - galley.size().x, rect.center().y - galley.size().y / 2.0),
+                galley,
+                c.text_faint,
+            );
+        }
+    }
+    theme::paint_focus_ring(ui, &response, rect);
+    response
 }
 
 /// The mockup's `.result-browser-omission`: an inset card that accounts for
