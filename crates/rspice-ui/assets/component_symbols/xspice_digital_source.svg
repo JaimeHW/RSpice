@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- File-driven digital source (d_source): document body with a folded
+     corner and a digital stimulus wave, vector output marked with a bus
+     slash. No input pin. Box 40x20, pin out(40,10). -->
+<svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 8,2 H 27 L 32,7 V 18 H 8 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 27,2 V 7 H 32" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 11,13.5 H 13.5 V 8 H 16.5 V 13.5 H 19.5 V 8 H 22.5 V 13.5 H 24.5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 32,10 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 34.4,12.2 L 37.6,7.8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

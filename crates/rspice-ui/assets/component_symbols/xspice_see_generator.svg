@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Single-event-effect generator (seegen / seegenerator): particle-strike
+     ray hitting a double-exponential current pulse; vector current output
+     marked with a bus slash. Box 40x40, pins ctrl(0,20) (optional),
+     out(40,20), mon(40,30) (optional monitor). -->
+<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,20 H 8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 8,8 H 32 V 32 H 8 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 11,28 H 14 L 16.2,12.5 C 18,21 23,26 29,27.6" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 10.8,8.6 L 13.4,10.6" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 15.6,12.3 L 12.5,11.4 L 13.9,9.6 Z" fill="#000000" stroke="none"/>
+  <path d="M 32,20 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 34.4,22.2 L 37.6,17.8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 32,30 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

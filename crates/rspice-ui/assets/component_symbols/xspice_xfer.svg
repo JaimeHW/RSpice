@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AC transfer-function table (xfer): gain-vs-frequency response over an
+     axis with table-point dots. Box 40x20, pins in(0,10), out(40,10). -->
+<svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 8,2 H 32 V 18 H 8 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 11,4.5 V 15.5 H 29" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 11,7 H 17 C 20.5,7 21,10.5 23,12 C 24.5,13.1 26.5,13.4 28.5,13.5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 13,7 a 1,1 0 1 0 2,0 a 1,1 0 1 0 -2,0 Z" fill="#000000" stroke="none"/>
+  <path d="M 20.1,8.9 a 1,1 0 1 0 2,0 a 1,1 0 1 0 -2,0 Z" fill="#000000" stroke="none"/>
+  <path d="M 25.2,13 a 1,1 0 1 0 2,0 a 1,1 0 1 0 -2,0 Z" fill="#000000" stroke="none"/>
+  <path d="M 32,10 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

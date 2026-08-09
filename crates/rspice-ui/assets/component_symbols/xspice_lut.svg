@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Lookup table gate (d_lut / d_genlut): truth table with a highlighted
+     entry; vector input drawn as two leads with an ellipsis, vector-capable
+     output marked with a bus slash.
+     Box 40x20, pins in[0](0,5), in[1](0,15), out(40,10). -->
+<svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,5 H 8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 0,15 H 8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 3.5,8 a 0.55,0.55 0 1 0 1.1,0 a 0.55,0.55 0 1 0 -1.1,0 Z" fill="#000000" stroke="none"/>
+  <path d="M 3.5,10 a 0.55,0.55 0 1 0 1.1,0 a 0.55,0.55 0 1 0 -1.1,0 Z" fill="#000000" stroke="none"/>
+  <path d="M 3.5,12 a 0.55,0.55 0 1 0 1.1,0 a 0.55,0.55 0 1 0 -1.1,0 Z" fill="#000000" stroke="none"/>
+  <path d="M 8,2 H 32 V 18 H 8 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 14,4 H 26 V 16 H 14 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 20,4 V 16 M 14,8 H 26 M 14,12 H 26" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 20,12 H 26 V 16 H 20 Z" fill="#000000" stroke="none"/>
+  <path d="M 32,10 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 34.4,12.2 L 37.6,7.8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

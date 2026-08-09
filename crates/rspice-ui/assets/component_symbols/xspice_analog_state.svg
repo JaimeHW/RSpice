@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Analog state return (astate): a captured point on the input waveform is
+     held and returned (dash segments show the held level).
+     Box 40x20, pins in(0,10), out(40,10). -->
+<svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 8,2 H 32 V 18 H 8 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 11,13.5 C 13.5,6 16.5,6 19,11" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 17.9,11 a 1.1,1.1 0 1 0 2.2,0 a 1.1,1.1 0 1 0 -2.2,0 Z" fill="#000000" stroke="none"/>
+  <path d="M 21,11 H 23.5 M 25.5,11 H 28" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 32,10 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>
