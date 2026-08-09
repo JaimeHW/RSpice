@@ -1372,3 +1372,41 @@ fn inline_readout_speaks_only_for_a_collapsed_strip() {
     let single = inline_cursor_readout(&mut state, &t).expect("cursor A alone still reads out");
     assert!(!single.contains('\u{0394}'), "{single}");
 }
+
+/// A legend chip may only report a value for the strip cursor A was placed
+/// on. Reporting one elsewhere would state a reading at an X that strip
+/// never sampled.
+#[test]
+fn legend_cursor_values_stay_on_the_strip_that_owns_the_cursor() {
+    let mut state = AppState::default();
+    let run = state.simulation.start_run();
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
+        ]),
+    );
+    run.add_analysis(
+        AnalysisResult::new(2, AnalysisType::Ac, "AC").with_waveforms(vec![WaveformData::new(
+            "V(in)",
+            vec![1.0, 10.0],
+            vec![1.0, 0.5],
+            "#0af",
+        )]),
+    );
+    if !state.ui.results.cursor_tool.is_armed() {
+        state.ui.results.toggle_cursor_tool();
+    }
+    state.ui.results.cursors.a = Some(0.5);
+    state.ui.results.cursor_strip = Some(0);
+
+    let owns = |analysis_index: usize, state: &AppState| {
+        state.ui.results.cursor_readout_active()
+            && state.ui.results.cursor_strip == Some(analysis_index)
+    };
+    assert!(owns(0, &state), "the placed strip reports its cursor value");
+    assert!(!owns(1, &state), "a sibling strip must not borrow cursor A");
+
+    // Disarming the tool retires every chip value at once.
+    state.ui.results.toggle_cursor_tool();
+    assert!(!owns(0, &state));
+}

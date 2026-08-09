@@ -2345,6 +2345,21 @@ fn show_unit_pane_header(
         },
     );
 
+    // Cursor A only reads out on the strip it was placed on; another strip's
+    // chips must not imply a value at an X they never sampled.
+    let cursor_a_value = (state.ui.results.cursor_readout_active()
+        && state.ui.results.cursor_strip == Some(model.analysis_index))
+    .then(|| {
+        state.ui.results.cursors.a.map(|x| {
+            (
+                x,
+                state.ui.preferences.result_presentation_policy(),
+                state.ui.preferences.quantity_presentation_policy(),
+            )
+        })
+    })
+    .flatten();
+
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(legend_rect)
@@ -2397,7 +2412,32 @@ fn show_unit_pane_header(
                                 );
                             }
                         }
-                        let label = elide(&trace.name, 20);
+                        // The instrument idiom: a trace states its own value
+                        // at cursor A right where its name is, so reading one
+                        // curve never costs a trip to the readout register.
+                        let label = match &cursor_a_value {
+                            Some((x, presentation, quantity_policy)) if trace.visible => {
+                                let value = sample_at_with(
+                                    &trace.x,
+                                    &trace.y,
+                                    *x,
+                                    cursor_interpolation(presentation.cursor_interpolation()),
+                                );
+                                format!(
+                                    "{}  {}",
+                                    elide(&trace.name, 16),
+                                    model.format_trace_value(
+                                        trace,
+                                        value,
+                                        usize::from(
+                                            presentation.displayed_significant_digits().get()
+                                        ),
+                                        *quantity_policy,
+                                    )
+                                )
+                            }
+                            _ => elide(&trace.name, 20),
+                        };
                         if ui
                             .selectable_label(selected, label)
                             .on_hover_text(&trace.name)
