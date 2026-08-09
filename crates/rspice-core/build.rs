@@ -4,6 +4,9 @@ use std::env;
 use std::fs;
 use std::path::{Component, Path};
 
+mod build_support;
+use build_support::verify_declared_generated_file;
+
 const MANIFEST_SCHEMA_VERSION: u32 = 5;
 const MANIFEST_FILE_NAME: &str = "manifest.txt";
 const REGENERATE_COMMAND: &str = "cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- regenerate-builtins";
@@ -86,28 +89,19 @@ fn verify_generated_bundle(generated_root: &Path) -> Result<(), String> {
 
         let path = generated_root.join(relative);
         println!("cargo:rerun-if-changed={}", path.display());
-        let bytes =
+        let checkout_bytes =
             fs::read(&path).map_err(|error| format!("read '{}': {error}", path.display()))?;
-        if bytes.len() as u64 != file.bytes {
-            return Err(format!(
-                "'{}' has {} bytes; manifest declares {}",
-                file.relative_path,
-                bytes.len(),
-                file.bytes
-            ));
-        }
-        let digest = blake3::hash(&bytes).to_hex().to_string();
-        if digest != file.blake3 {
-            return Err(format!(
-                "'{}' digest is {}; manifest declares {}",
-                file.relative_path, digest, file.blake3
-            ));
-        }
+        let bytes = verify_declared_generated_file(
+            &file.relative_path,
+            &checkout_bytes,
+            file.bytes,
+            &file.blake3,
+        )?;
         source_bytes = source_bytes
             .checked_add(file.bytes)
             .ok_or_else(|| "generated source byte count overflowed u64".to_string())?;
         update_digest_record(&mut bundle_hasher, file.relative_path.as_bytes());
-        update_digest_record(&mut bundle_hasher, &bytes);
+        update_digest_record(&mut bundle_hasher, bytes.as_ref());
     }
 
     if source_bytes != manifest.source_bytes {
