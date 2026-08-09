@@ -1410,3 +1410,37 @@ fn legend_cursor_values_stay_on_the_strip_that_owns_the_cursor() {
     state.ui.results.toggle_cursor_tool();
     assert!(!owns(0, &state));
 }
+
+/// The QA scenario: a four-analysis run whose noise strip is not index 0,
+/// viewed through the Noise sheet. The inline readout must find the strip its
+/// cursor was placed on through the viewer-scoped model cache.
+#[test]
+fn inline_readout_finds_a_noise_strip_behind_earlier_analyses() {
+    let t = Tokens::default();
+    let mut state = AppState::default();
+    let run = state.simulation.start_run();
+    run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(
+        vec![WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff")],
+    ));
+    run.add_analysis(AnalysisResult::new(2, AnalysisType::DcOp, "OP"));
+    run.add_analysis(AnalysisResult::new(3, AnalysisType::Ac, "AC").with_waveforms(vec![
+        WaveformData::new("V(in)", vec![1.0, 10.0], vec![1.0, 0.5], "#0af"),
+    ]));
+    run.add_analysis(
+        AnalysisResult::new(4, AnalysisType::Noise, "Noise").with_waveforms(vec![
+            WaveformData::new("onoise", vec![1.0e3, 1.0e4], vec![1.0e-18, 4.0e-18], "#f80"),
+        ]),
+    );
+    state.ui.results.viewer = super::super::ResultViewer::NoiseContrib;
+    if !state.ui.results.cursor_tool.is_armed() {
+        state.ui.results.toggle_cursor_tool();
+    }
+    state.ui.results.cursor_strip = Some(3);
+    state.ui.results.cursors.a = Some(1.0e3);
+    state.ui.results.cursors.b = Some(1.0e4);
+    state.ui.results.readout_collapsed = true;
+
+    let readout = inline_cursor_readout(&mut state, &t)
+        .expect("the noise strip at index 3 owns the cursor readout");
+    assert!(readout.contains('\u{0394}'), "{readout}");
+}
