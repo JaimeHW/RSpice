@@ -1401,6 +1401,15 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .valid_selected_trace(&app.state.simulation)
         .cloned();
 
+    // What is being read comes before where it came from: a reader adjusting
+    // a pane needs its axes and bindings first, and the dataset provenance
+    // below is unchanged by any of that.
+    active_result_pane(ui, app, selected_trace.as_ref());
+    if let Some(selected) = selected_trace.as_ref() {
+        selected_result_trace(ui, app, selected);
+    }
+    ui.add_space(8.0);
+
     let active_run_index = app.state.simulation.active_run_idx;
     if let Some(run) = active_run_index.and_then(|index| app.state.simulation.runs.get(index)) {
         let manifest =
@@ -1418,11 +1427,6 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         );
         result_qualification_gaps(ui);
     }
-
-    if let Some(selected) = selected_trace.as_ref() {
-        selected_result_trace(ui, app, selected);
-    }
-    active_result_pane(ui, app, selected_trace.as_ref());
 
     // The active viewer owns its engineering readout (measurements, margins,
     // harmonics, eye metrics, distribution statistics, and so on). It follows
