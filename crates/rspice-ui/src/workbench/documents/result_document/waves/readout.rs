@@ -299,6 +299,42 @@ fn readout_body(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
+/// The instrument bar's inline `A · B · Δ`, for the collapsed readout.
+///
+/// Collapsing the strip hides the register that owns these three numbers, so
+/// the bar states them until it is expanded again — never both at once, which
+/// is the duplication the results de-duplication pass removed.
+pub(crate) fn inline_cursor_readout(state: &mut AppState, t: &Tokens) -> Option<String> {
+    if !state.ui.results.readout_collapsed || !state.ui.results.cursor_readout_active() {
+        return None;
+    }
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let significant_digits = usize::from(presentation.displayed_significant_digits().get());
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        t,
+    );
+    let model = state
+        .ui
+        .results
+        .cursor_strip
+        .and_then(|index| models.iter().find(|model| model.analysis_index == index))?;
+    let cursors = state.ui.results.cursors;
+    let a = cursors.a?;
+    let a_text = model.format_x(a, significant_digits, quantity_policy);
+    let Some(b) = cursors.b else {
+        return Some(format!("A {a_text}"));
+    };
+    Some(format!(
+        "A {a_text} · B {} · \u{0394} {}",
+        model.format_x(b, significant_digits, quantity_policy),
+        x_separation(model, a, b, significant_digits, quantity_policy),
+    ))
+}
+
 /// The A/B table: one X row, then the value of every visible trace.
 pub(super) fn cursor_readout_section(ui: &mut Ui, state: &mut AppState) {
     let table_width = ui.available_width().max(CURSOR_TABLE_MIN_W);

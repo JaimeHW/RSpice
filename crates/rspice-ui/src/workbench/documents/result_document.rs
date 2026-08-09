@@ -2187,6 +2187,17 @@ fn show_wave_instrument(ui: &mut Ui, state: &mut AppState) {
 
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         export_menu(ui, state);
+        // The collapsed readout's numbers ride the bar's right edge, where
+        // the strip that owns them would otherwise be.
+        if let Some(readout) = waves::inline_cursor_readout(state, &t) {
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new(readout)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+            )
+            .on_hover_text("Cursor readout · expand the strip for per-trace values");
+        }
         let remaining = ui.available_size();
         ui.allocate_ui_with_layout(
             remaining,

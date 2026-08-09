@@ -1338,3 +1338,37 @@ fn recent_signals_front_insert_deduplicate_and_age_out() {
     assert_eq!(results.recent_signal_rank("V(n5)"), None);
     assert_eq!(results.recent_signal_rank("V(n0)"), None);
 }
+
+/// The inline readout exists only to cover the collapsed strip. It must stay
+/// silent whenever the strip itself is showing the same three numbers.
+#[test]
+fn inline_readout_speaks_only_for_a_collapsed_strip() {
+    let t = Tokens::default();
+    let mut state = AppState::default();
+    state.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0e-3], vec![0.0, 1.0], "#fff"),
+        ]),
+    );
+    state.ui.results.cursor_strip = Some(0);
+    if !state.ui.results.cursor_tool.is_armed() {
+        state.ui.results.toggle_cursor_tool();
+    }
+    state.ui.results.cursors.a = Some(0.0);
+    state.ui.results.cursors.b = Some(1.0e-3);
+
+    // Expanded: the strip owns the readout, so the bar says nothing.
+    state.ui.results.readout_collapsed = false;
+    assert_eq!(inline_cursor_readout(&mut state, &t), None);
+
+    state.ui.results.readout_collapsed = true;
+    let readout = inline_cursor_readout(&mut state, &t).expect("collapsed strip yields a readout");
+    assert!(readout.starts_with("A "), "{readout}");
+    assert!(readout.contains(" · B "), "{readout}");
+    assert!(readout.contains(" \u{0394} "), "{readout}");
+
+    // Cursor B unplaced: report A alone rather than an empty delta.
+    state.ui.results.cursors.b = None;
+    let single = inline_cursor_readout(&mut state, &t).expect("cursor A alone still reads out");
+    assert!(!single.contains('\u{0394}'), "{single}");
+}
