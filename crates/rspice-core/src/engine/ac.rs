@@ -13,12 +13,306 @@ use crate::device::semiconductor::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeSnapshot,
 };
 use crate::device::{MatrixStamper, NonlinearDevice};
-use crate::solver::{ComplexMatrix, StaticMatrix};
+use crate::solver::{ComplexMatrix, SolverError, StaticMatrix};
 use crate::{CircuitData, Complex64, Netlist, NodeId, Value};
+use std::collections::VecDeque;
 use std::f64::consts::PI;
 
 const BJT_DELAY_XF1_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 2;
 const BJT_DELAY_XF2_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 1;
+const AC_DIAGONAL_REGULARIZATION: Value = 1.0e-15;
+const AC_CONSTRAINT_BACKWARD_ERROR_FACTOR: Value = 64.0;
+
+#[derive(Debug, Clone, Copy)]
+struct AcVoltageConstraint {
+    node_pos: NodeId,
+    node_neg: NodeId,
+    target: Complex64,
+}
+
+#[derive(Debug)]
+struct AcVoltageConstraintComponent {
+    grounded: bool,
+    /// `(node, V(node) - V(root))` in deterministic forest traversal order.
+    nodes: Vec<(NodeId, Complex64)>,
+}
+
+/// Immutable, allocation-free-at-evaluation projection for independent AC
+/// voltage-source equations.
+///
+/// Sparse equilibration and unscaling can leave an otherwise certified MNA
+/// solution a final ULP away from `V(n+) - V(n-) = Vac`. Those equations are
+/// ideal constraints, so publish their exact affine manifold after verifying
+/// that the raw residual is only solver-sized. A whole connected component is
+/// projected together; pairwise snapping would break earlier constraints in a
+/// stack of ideal sources.
+#[derive(Debug)]
+struct AcVoltageConstraintProjection {
+    constraints: Vec<AcVoltageConstraint>,
+    components: Vec<AcVoltageConstraintComponent>,
+}
+
+impl AcVoltageConstraintProjection {
+    fn new(circuit: &CircuitData) -> Result<Self, SimulationError> {
+        let num_nodes = circuit.num_nodes();
+        let sources = &circuit.voltage_sources;
+        let mut parents = (0..=num_nodes).collect::<Vec<_>>();
+        let mut ranks = vec![0_u8; num_nodes + 1];
+        let mut constraints = Vec::with_capacity(sources.len());
+        let mut adjacency = vec![Vec::<(NodeId, Complex64)>::new(); num_nodes + 1];
+
+        fn root(parents: &mut [usize], mut node: usize) -> usize {
+            let mut representative = node;
+            while parents[representative] != representative {
+                representative = parents[representative];
+            }
+            while parents[node] != node {
+                let next = parents[node];
+                parents[node] = representative;
+                node = next;
+            }
+            representative
+        }
+
+        for index in 0..sources.len() {
+            let node_pos = sources.node_pos[index];
+            let node_neg = sources.node_neg[index];
+            if node_pos > num_nodes || node_neg > num_nodes {
+                return Err(SolverError::InvalidCircuit(format!(
+                    "AC voltage source '{}' references node outside the solved system",
+                    sources.names[index]
+                ))
+                .into());
+            }
+            let target = sources.ac_excitation(index);
+            if !complex_is_finite(target) {
+                return Err(SolverError::Overflow.into());
+            }
+
+            let root_pos = root(&mut parents, node_pos);
+            let root_neg = root(&mut parents, node_neg);
+            if root_pos == root_neg {
+                return Err(SolverError::InvalidCircuit(format!(
+                    "independent voltage source '{}' closes an ideal-source loop; its branch current is not uniquely determined",
+                    sources.names[index]
+                ))
+                .into());
+            }
+            if ranks[root_pos] < ranks[root_neg] {
+                parents[root_pos] = root_neg;
+            } else {
+                parents[root_neg] = root_pos;
+                if ranks[root_pos] == ranks[root_neg] {
+                    ranks[root_pos] = ranks[root_pos].saturating_add(1);
+                }
+            }
+
+            constraints.push(AcVoltageConstraint {
+                node_pos,
+                node_neg,
+                target,
+            });
+            // V(pos) = V(neg) + target, and conversely.
+            adjacency[node_neg].push((node_pos, target));
+            adjacency[node_pos].push((node_neg, -target));
+        }
+
+        let mut components = Vec::new();
+        let mut visited = vec![false; num_nodes + 1];
+        let mut relative = vec![Complex64::new(0.0, 0.0); num_nodes + 1];
+        for root_node in 0..=num_nodes {
+            if visited[root_node] || adjacency[root_node].is_empty() {
+                continue;
+            }
+            let grounded = root_node == 0;
+            visited[root_node] = true;
+            relative[root_node] = Complex64::new(0.0, 0.0);
+            let mut queue = VecDeque::from([root_node]);
+            let mut nodes = Vec::new();
+
+            while let Some(node) = queue.pop_front() {
+                nodes.push((node, relative[node]));
+                for &(neighbor, delta) in &adjacency[node] {
+                    if visited[neighbor] {
+                        continue;
+                    }
+                    let neighbor_relative = relative[node] + delta;
+                    if !complex_is_finite(neighbor_relative) {
+                        return Err(SolverError::Overflow.into());
+                    }
+                    visited[neighbor] = true;
+                    relative[neighbor] = neighbor_relative;
+                    queue.push_back(neighbor);
+                }
+            }
+            components.push(AcVoltageConstraintComponent { grounded, nodes });
+        }
+
+        Ok(Self {
+            constraints,
+            components,
+        })
+    }
+
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.constraints.is_empty()
+    }
+
+    fn project(&self, solution: &mut [Complex64]) -> Result<(), SimulationError> {
+        self.validate_raw_constraints(solution)?;
+
+        // Validate every prospective component before publishing any of them,
+        // so an overflow or malformed solution cannot leave a partial
+        // projection behind.
+        for component in &self.components {
+            let common_mode = if component.grounded {
+                Complex64::new(0.0, 0.0)
+            } else {
+                compensated_common_mode(solution, &component.nodes)?
+            };
+            for &(node, relative) in &component.nodes {
+                if node > 0 && !complex_is_finite(common_mode + relative) {
+                    return Err(SolverError::Overflow.into());
+                }
+            }
+        }
+        for component in &self.components {
+            let common_mode = if component.grounded {
+                Complex64::new(0.0, 0.0)
+            } else {
+                // The validation pass above established that this identical,
+                // deterministic calculation and every projected value are
+                // finite. Components are disjoint, so earlier publication
+                // cannot change a later component's mean.
+                compensated_common_mode(solution, &component.nodes)?
+            };
+            for &(node, relative) in &component.nodes {
+                if node > 0 {
+                    solution[node - 1] = common_mode + relative;
+                }
+            }
+        }
+
+        // Arithmetic along a long source stack can round while accumulating
+        // relative potentials. Recheck the published equations against the
+        // same componentwise bound rather than assuming exact subtraction is
+        // representable for every common-mode/target scale combination.
+        self.validate_raw_constraints(solution)
+    }
+
+    fn validate_raw_constraints(&self, solution: &[Complex64]) -> Result<(), SimulationError> {
+        for constraint in &self.constraints {
+            let node_voltage = |node: NodeId| {
+                if node == 0 {
+                    Some(Complex64::new(0.0, 0.0))
+                } else {
+                    solution.get(node - 1).copied()
+                }
+            };
+            let Some(node_pos) = node_voltage(constraint.node_pos) else {
+                return Err(SolverError::InvalidCircuit(
+                    "AC voltage-source projection received a truncated solution".to_string(),
+                )
+                .into());
+            };
+            let Some(node_neg) = node_voltage(constraint.node_neg) else {
+                return Err(SolverError::InvalidCircuit(
+                    "AC voltage-source projection received a truncated solution".to_string(),
+                )
+                .into());
+            };
+            if !complex_is_finite(node_pos) || !complex_is_finite(node_neg) {
+                return Err(SolverError::Overflow.into());
+            }
+
+            let residual = complex_max_norm(node_pos - node_neg - constraint.target);
+            // A homogeneous source row has a zero target and an exact zero
+            // solution, so its purely relative denominator also collapses to
+            // the unscaling residue we are trying to classify. Use a one-volt
+            // coordinate floor: the resulting bound remains only a few tens
+            // of femtovolts, far below SPICE voltage tolerances, while
+            // admitting roundoff introduced by matrix equilibration.
+            let mut scale = complex_max_norm(node_pos);
+            scale = (scale + complex_max_norm(node_neg)).min(Value::MAX);
+            scale = (scale + complex_max_norm(constraint.target)).min(Value::MAX);
+            scale = scale.max(1.0);
+            let row_terms = if constraint.node_pos == 0 || constraint.node_neg == 0 {
+                2.0
+            } else {
+                3.0
+            };
+            let tolerance =
+                AC_CONSTRAINT_BACKWARD_ERROR_FACTOR * Value::EPSILON * row_terms * scale;
+            if residual > tolerance || !residual.is_finite() {
+                let relative_error = if scale > 0.0 {
+                    residual / scale
+                } else {
+                    residual
+                };
+                return Err(SolverError::InaccurateSolution(relative_error).into());
+            }
+        }
+        Ok(())
+    }
+}
+
+#[inline]
+fn complex_is_finite(value: Complex64) -> bool {
+    value.re.is_finite() && value.im.is_finite()
+}
+
+#[inline]
+fn complex_max_norm(value: Complex64) -> Value {
+    value.re.abs().max(value.im.abs())
+}
+
+fn compensated_common_mode(
+    solution: &[Complex64],
+    nodes: &[(NodeId, Complex64)],
+) -> Result<Complex64, SimulationError> {
+    let mut scale: Value = 0.0;
+    for &(node, relative) in nodes {
+        debug_assert!(node > 0);
+        let sample = solution[node - 1] - relative;
+        if !complex_is_finite(sample) {
+            return Err(SolverError::Overflow.into());
+        }
+        scale = scale.max(complex_max_norm(sample));
+    }
+    if scale == 0.0 {
+        return Ok(Complex64::new(0.0, 0.0));
+    }
+
+    // Sum normalized samples with Kahan compensation. Scaling first prevents
+    // same-sign finite common modes from overflowing while retaining the
+    // minimum-L2 translation to substantially better than a naive mean.
+    let mut sum_re = 0.0;
+    let mut compensation_re = 0.0;
+    let mut sum_im = 0.0;
+    let mut compensation_im = 0.0;
+    for &(node, relative) in nodes {
+        debug_assert!(node > 0);
+        let raw = (solution[node - 1] - relative) / scale;
+
+        let adjusted_re = raw.re - compensation_re;
+        let next_re = sum_re + adjusted_re;
+        compensation_re = (next_re - sum_re) - adjusted_re;
+        sum_re = next_re;
+
+        let adjusted_im = raw.im - compensation_im;
+        let next_im = sum_im + adjusted_im;
+        compensation_im = (next_im - sum_im) - adjusted_im;
+        sum_im = next_im;
+    }
+    let count = nodes.len() as Value;
+    let mean = Complex64::new(sum_re / count, sum_im / count) * scale;
+    if complex_is_finite(mean) {
+        Ok(mean)
+    } else {
+        Err(SolverError::Overflow.into())
+    }
+}
 
 struct AcImagStamper<'a> {
     matrix: &'a mut ComplexMatrix,
@@ -2110,7 +2404,7 @@ impl Engine {
 
         // Add small diagonal for numerical stability
         for i in 0..size {
-            ac_matrix.add_real(i, i, 1e-15);
+            ac_matrix.add_real(i, i, AC_DIAGONAL_REGULARIZATION);
         }
         Ok(())
     }
@@ -2184,16 +2478,14 @@ impl Engine {
 
         // Independent voltage sources with AC specification.
         for i in 0..circuit.voltage_sources.len() {
-            let ac_mag = circuit.voltage_sources.ac_magnitudes[i];
-            let ac_phase = circuit.voltage_sources.ac_phases[i];
-
-            if ac_mag.abs() <= 1e-15 {
+            let excitation = circuit.voltage_sources.ac_excitation(i);
+            if excitation == Complex64::new(0.0, 0.0) {
                 continue;
             }
 
             let br_ordinal = circuit.voltage_sources.branch_indices[i];
             let br = circuit.get_branch_matrix_index(br_ordinal);
-            rhs[br - 1] = Complex64::from_polar(ac_mag, ac_phase);
+            rhs[br - 1] = excitation;
         }
 
         // Independent current sources with AC specification.
@@ -2272,6 +2564,7 @@ impl Engine {
         Self::ensure_supported_ac_dynamic_charges(&circuit)?;
         let mut matrix = engine.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
+        let ac_voltage_projection = AcVoltageConstraintProjection::new(&circuit)?;
 
         // Get DC operating point
         let has_nonlinear = circuit.has_nonlinear_devices();
@@ -2320,10 +2613,30 @@ impl Engine {
                 true,
                 true,
             )?;
+            if !ac_voltage_projection.is_empty() {
+                // The global diagonal regularizer is useful to the other
+                // small-signal entry points, including batched noise/adjoint
+                // solves. For the primary AC response, independent source
+                // branch rows must remain exact algebraic constraints: a
+                // current diagonal is a physical series resistance.
+                for &branch_ordinal in &circuit.voltage_sources.branch_indices {
+                    let branch = circuit.get_branch_matrix_index(branch_ordinal);
+                    ac_matrix.add_real(branch - 1, branch - 1, -AC_DIAGONAL_REGULARIZATION);
+                }
+            }
             let rhs = Self::build_ac_excitation_rhs(circuit);
-            let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+            let mut solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
+            }
+            if !ac_voltage_projection.is_empty() {
+                ac_voltage_projection.project(&mut solution)?;
+                ac_matrix
+                    .certify_solution(&solution, &rhs)
+                    .map_err(SimulationError::Solver)?;
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
             }
 
             let mut currents = if size > num_nodes {
@@ -2462,6 +2775,15 @@ fn validate_ac_frequencies(frequencies: &[Value]) -> Result<(), SimulationError>
 mod tests {
     use super::*;
 
+    fn voltage_at(point: &AcResult, node_name: &str) -> Complex64 {
+        let index = point
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(node_name))
+            .unwrap_or_else(|| panic!("missing node '{node_name}' in {:?}", point.node_names));
+        point.voltages[index]
+    }
+
     fn ac_deck() -> Netlist {
         Netlist::parse(
             "AC deck\n\
@@ -2495,6 +2817,227 @@ mod tests {
                 "unexpected error for freq={freq:?}: {err}"
             );
         }
+    }
+
+    #[test]
+    fn ac_preserves_exact_grounded_source_phasors_in_short_and_parallel_sweeps() {
+        let netlist = Netlist::parse(
+            "Exact AC voltage constraint\n\
+             V1 a 0 DC 0 AC 1\n\
+             C1 a b 1m\n\
+             R1 b 0 2\n\
+             .END\n",
+        )
+        .expect("deck parses");
+        let engine = Engine::default();
+        let expected = Complex64::from_polar(1.0, 0.0);
+
+        for frequencies in [
+            vec![1.0, 10.0],
+            vec![
+                1.0,
+                1.5848931924611136,
+                2.51188643150958,
+                3.9810717055349722,
+                6.309573444801933,
+                10.0,
+                15.848931924611133,
+                25.118864315095795,
+                39.810717055349734,
+                63.09573444801933,
+                100.0,
+                158.48931924611142,
+                251.18864315095797,
+                398.1071705534973,
+                630.957344480193,
+                1000.0,
+            ],
+        ] {
+            let results = engine
+                .run_ac(&netlist, &frequencies)
+                .expect("AC solve succeeds");
+            for point in &results {
+                assert_eq!(
+                    voltage_at(point, "a"),
+                    expected,
+                    "ideal source drifted at {} Hz",
+                    point.frequency
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ac_projects_source_trees_without_breaking_shared_node_constraints() {
+        let netlist = Netlist::parse(
+            "Stacked AC voltage constraints\n\
+             V1 a 0 AC 1\n\
+             V2 b a AC 2\n\
+             R1 b 0 1k\n\
+             .END\n",
+        )
+        .expect("deck parses");
+        let point = Engine::default()
+            .run_ac(&netlist, &[1.0e3])
+            .expect("AC solve succeeds")
+            .remove(0);
+
+        assert_eq!(voltage_at(&point, "a"), Complex64::new(1.0, 0.0));
+        assert_eq!(voltage_at(&point, "b"), Complex64::new(3.0, 0.0));
+    }
+
+    #[test]
+    fn ac_floating_source_projection_preserves_common_mode() {
+        let netlist = Netlist::parse(
+            "Floating AC voltage constraint\n\
+             V1 p n AC 2\n\
+             RP p 0 1k\n\
+             RN n 0 1k\n\
+             .END\n",
+        )
+        .expect("deck parses");
+        let point = Engine::default()
+            .run_ac(&netlist, &[1.0e3])
+            .expect("AC solve succeeds")
+            .remove(0);
+        let vp = voltage_at(&point, "p");
+        let vn = voltage_at(&point, "n");
+
+        assert_eq!(vp - vn, Complex64::new(2.0, 0.0));
+        assert!(
+            (vp + vn).norm() <= 16.0 * Value::EPSILON,
+            "floating common mode changed: Vp={vp}, Vn={vn}"
+        );
+    }
+
+    #[test]
+    fn ac_zero_volt_probe_remains_exact_while_carrying_current() {
+        let netlist = Netlist::parse(
+            "Loaded zero-volt AC probe\n\
+             I1 0 sense AC 1\n\
+             VPROBE sense 0 0\n\
+             .END\n",
+        )
+        .expect("deck parses");
+        let point = Engine::default()
+            .run_ac(&netlist, &[1.0e3])
+            .expect("loaded zero-volt probe solves")
+            .remove(0);
+
+        assert_eq!(voltage_at(&point, "sense"), Complex64::new(0.0, 0.0));
+        let probe_index = point
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("VPROBE"))
+            .expect("probe branch is observable");
+        assert!(
+            (point.currents[probe_index].norm() - 1.0).abs() <= 16.0 * Value::EPSILON,
+            "zero-volt probe did not carry the excitation current: {:?}",
+            point.currents[probe_index]
+        );
+    }
+
+    #[test]
+    fn ac_complex_source_stack_preserves_every_constraint() {
+        let netlist = Netlist::parse(
+            "Complex stacked AC constraints\n\
+             V1 a 0 AC 0.75 20\n\
+             V2 b a AC 1.25 -35\n\
+             R1 b 0 1k\n\
+             .END\n",
+        )
+        .expect("deck parses");
+        let point = Engine::default()
+            .run_ac(&netlist, &[1.0e3])
+            .expect("complex source stack solves")
+            .remove(0);
+        let first = Complex64::from_polar(0.75, 20.0_f64.to_radians());
+        let second = Complex64::from_polar(1.25, (-35.0_f64).to_radians());
+        let va = voltage_at(&point, "a");
+        let vb = voltage_at(&point, "b");
+
+        assert_eq!(va, first);
+        assert!(
+            (vb - va - second).norm() <= 16.0 * Value::EPSILON * second.norm().max(1.0),
+            "second stacked constraint drifted: Va={va}, Vb={vb}, target={second}"
+        );
+    }
+
+    #[test]
+    fn ac_projection_rejects_a_gross_raw_constraint_error() {
+        let projection = AcVoltageConstraintProjection {
+            constraints: vec![AcVoltageConstraint {
+                node_pos: 1,
+                node_neg: 0,
+                target: Complex64::new(1.0, 0.0),
+            }],
+            components: vec![AcVoltageConstraintComponent {
+                grounded: true,
+                nodes: vec![(0, Complex64::new(0.0, 0.0)), (1, Complex64::new(1.0, 0.0))],
+            }],
+        };
+        let mut solution = [Complex64::new(1.0 + 1.0e-8, 0.0)];
+
+        assert!(matches!(
+            projection.project(&mut solution),
+            Err(SimulationError::Solver(SolverError::InaccurateSolution(_)))
+        ));
+        assert_eq!(solution, [Complex64::new(1.0 + 1.0e-8, 0.0)]);
+    }
+
+    #[test]
+    fn floating_common_mode_mean_stays_finite_near_numeric_limits() {
+        let magnitude = Value::MAX / 4.0;
+        let solution = [
+            Complex64::new(magnitude, magnitude),
+            Complex64::new(magnitude, magnitude),
+        ];
+        let nodes = [(1, Complex64::new(0.0, 0.0)), (2, Complex64::new(0.0, 0.0))];
+
+        assert_eq!(
+            compensated_common_mode(&solution, &nodes).expect("finite mean"),
+            Complex64::new(magnitude, magnitude)
+        );
+    }
+
+    #[test]
+    fn ac_grounded_phase_source_uses_the_exact_rhs_phasor() {
+        let netlist = Netlist::parse(
+            "Phased AC voltage constraint\n\
+             V1 a 0 AC 2 30\n\
+             R1 a 0 1k\n\
+             .END\n",
+        )
+        .expect("deck parses");
+        let point = Engine::default()
+            .run_ac(&netlist, &[1.0e3])
+            .expect("AC solve succeeds")
+            .remove(0);
+
+        assert_eq!(
+            voltage_at(&point, "a"),
+            Complex64::from_polar(2.0, 30.0_f64.to_radians())
+        );
+    }
+
+    #[test]
+    fn ac_rejects_ideal_voltage_source_loops_before_projection() {
+        let netlist = Netlist::parse(
+            "Parallel ideal AC voltage sources\n\
+             V1 a 0 AC 1\n\
+             V2 a 0 AC 1\n\
+             R1 a 0 1k\n\
+             .END\n",
+        )
+        .expect("deck parses");
+        let error = Engine::default()
+            .run_ac(&netlist, &[1.0e3])
+            .expect_err("an ideal-source loop has no unique branch currents");
+
+        assert!(
+            error.to_string().contains("ideal-source loop"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

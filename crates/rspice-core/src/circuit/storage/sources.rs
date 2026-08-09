@@ -242,6 +242,21 @@ impl VoltageSources {
         self.names.is_empty()
     }
 
+    /// Return the exact complex excitation stamped into this source's AC
+    /// branch equation.
+    ///
+    /// Keep the inactive-source cutoff here so the matrix right-hand side and
+    /// the post-solve ideal-constraint projection cannot disagree at the
+    /// cutoff boundary or reconstruct a phasor with different low bits.
+    pub(crate) fn ac_excitation(&self, index: usize) -> Complex64 {
+        let magnitude = self.ac_magnitudes[index];
+        if magnitude.abs() <= 1.0e-15 {
+            Complex64::new(0.0, 0.0)
+        } else {
+            Complex64::from_polar(magnitude, self.ac_phases[index])
+        }
+    }
+
     pub(crate) fn freeze_transient_source_at_time(
         &mut self,
         name: &str,
