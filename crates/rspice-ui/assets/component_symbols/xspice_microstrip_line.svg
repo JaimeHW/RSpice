@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Microstrip line (mlin): cross-section idiom - strip conductor on a
+     substrate slab with a hatched ground plane. Signal pins connect the
+     strip, ground pins the plane; the model's sense inputs share these
+     nodes. Box 60x40, pins p1(0,10), g1(0,30), p2(60,10), g2(60,30). -->
+<svg viewBox="0 0 60 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 43,10 H 60" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 0,30 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 43,30 H 60" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 17,8 H 43 V 12 H 17 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 17,12 V 30 H 43 V 12" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 22,30 L 19,33.5 M 28,30 L 25,33.5 M 34,30 L 31,33.5 M 40,30 L 37,33.5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

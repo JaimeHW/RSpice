@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Digital pullup (d_pullup): resistive pull to the high rail; supply bar
+     on top, resistor zigzag, single output pin below.
+     Box 20x40, pin out(10,40). -->
+<svg viewBox="0 0 20 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 5,2 H 15" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 10,2 V 8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 10,8 L 6,10.3 L 14,14.9 L 6,19.5 L 14,24.1 L 6,28.7 L 10,31" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 10,31 V 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

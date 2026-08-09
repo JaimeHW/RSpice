@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 3-D lookup table (table3d): box with an isometric table slab.
+     Box 40x20, pins inx(0,5), iny(0,10), inz(0,15), out(40,10). -->
+<svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,5 H 8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 0,10 H 8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 0,15 H 8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 8,2 H 32 V 18 H 8 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 13,7 H 24 V 16 H 13 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 18.5,7 V 16 M 13,11.5 H 24" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 13,7 L 16,4 H 27 L 24,7 M 27,4 V 13 L 24,16" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 32,10 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

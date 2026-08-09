@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Open-emitter buffer (d_open_e): buffer triangle with the IEEE
+     open-output mark (diamond with a bar above - drives high, releases
+     low). Box 40x20, pins in(0,10), out(40,10). -->
+<svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 12" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 12,3 L 26,10 L 12,17 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 29,7.8 L 31.2,10 L 29,12.2 L 26.8,10 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 26.8,6.6 H 31.2" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 31.2,10 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- One-shot pulse generator (oneshot): single pulse fired off the trigger
+     edge at the clk pin (edge chevron on the left edge).
+     Box 40x40, pins clk(0,20), clear(20,0) (optional), cntl_in(20,40)
+     (optional pulse-width control), out(40,20). -->
+<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,20 H 8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 20,0 V 8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 20,40 V 32" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 8,8 H 32 V 32 H 8 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 8,17 L 11.6,20 L 8,23" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 13,26 H 16.5 V 14 H 22.5 V 26 H 29" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 32,20 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

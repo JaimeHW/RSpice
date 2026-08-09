@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- D latch (d_dlatch and Xyce D-latch variants): level-sensitive, so the
+     enable pin carries an E and no clock chevron (the chevron is reserved
+     for edge-triggered flip-flops). Box 40x40, pins data(0,10),
+     enable(0,30), q(40,10), qbar(40,30). -->
+<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 10" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 0,30 H 10" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 10,4 H 30 V 36 H 10 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 13.2,7.6 V 12.4 M 13.2,7.6 C 17.8,7.6 17.8,12.4 13.2,12.4" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 16.6,27.6 H 13.2 V 32.4 H 16.6 M 13.2,30 H 15.8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 25,7.4 A 2.4,2.4 0 0 1 25,12.2 A 2.4,2.4 0 0 1 25,7.4" fill="none" stroke="#000000" stroke-width="1"/>
+  <path d="M 25.7,11 L 27.4,12.8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 25,27.4 A 2.4,2.4 0 0 1 25,32.2 A 2.4,2.4 0 0 1 25,27.4" fill="none" stroke="#000000" stroke-width="1"/>
+  <path d="M 25.7,31 L 27.4,32.8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 22.6,25.4 H 27.4" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 30,10 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 30,30 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

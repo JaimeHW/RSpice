@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Controlled limiter (climit): saturation curve whose clamp rails are set
+     by the top and bottom control inputs (rails drawn as dash segments).
+     Box 40x40, pins in(0,20), cntl_upper(20,0), cntl_lower(20,40),
+     out(40,20). -->
+<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,20 H 8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 20,0 V 8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 20,40 V 32" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 8,8 H 32 V 32 H 8 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 11,26 H 15.5 L 24.5,14 H 29" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 11.5,14 H 14 M 16.5,14 H 19 M 21.5,14 H 23" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 17,26 H 18.5 M 21,26 H 23.5 M 26,26 H 28.5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 32,20 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

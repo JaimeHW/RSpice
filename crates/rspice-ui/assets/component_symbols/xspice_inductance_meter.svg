@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Inductance meter (lmeter): instrument circle marked with the measured
+     unit H (henrys), in the style of a voltmeter's V or ammeter's A.
+     Box 40x20, pins in(0,10), out(40,10). -->
+<svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 11.5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 11.5,10 A 8.5,8.5 0 0 1 28.5,10 A 8.5,8.5 0 0 1 11.5,10" fill="none" stroke="#000000" stroke-width="1"/>
+  <path d="M 16.8,5.5 V 14.5 M 23.2,5.5 V 14.5 M 16.8,10 H 23.2" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 28.5,10 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>
