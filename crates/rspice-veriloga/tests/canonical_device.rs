@@ -145,6 +145,34 @@ endmodule
 }
 
 #[test]
+fn shared_noise_preprocessing_is_fresh_and_call_order_independent() {
+    let source = fixtures()
+        .into_iter()
+        .find_map(|(name, source)| (name == "shared noise preprocessing").then_some(source))
+        .expect("shared-noise fixture");
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .expect("front end");
+    let device = canonical::generate_device(&artifact, &options()).expect("generation");
+    let files = device
+        .files
+        .iter()
+        .map(|file| (file.relative_path.as_str(), file.contents.as_str()))
+        .collect::<Vec<_>>();
+    let state = find(&files, "state.rs", "shared noise preprocessing");
+    let stamp = find(&files, "stamp.rs", "shared noise preprocessing");
+    let noise = find(&files, "noise.rs", "shared noise preprocessing");
+
+    assert!(stamp.contains("pub(super) fn canonical_model_preprocess"));
+    assert!(noise.contains("let mut prepared = [0.0;"));
+    assert!(noise.contains("canonical_model_preprocess("));
+    assert!(!noise.contains("vec![0.0;"));
+    if let Err(report) = run_noise_call_order("shared noise call order", state, stamp, noise) {
+        panic!("shared preprocessing changed independent noise evaluation:\n{report}");
+    }
+}
+
+#[test]
 fn repeated_static_hot_guards_are_specialized_with_a_source_size_cap() {
     let source = repeated_structure_source();
     let artifact = VerilogACompiler::default()
@@ -283,7 +311,7 @@ fn structural_specialization_rejects_source_growth_over_two_percent() {
             .lines()
             .filter(|line| {
                 let line = line.trim_start();
-                line.starts_with("if ") && line.ends_with(" != 0.0 {") && !line.contains("staged[")
+                line.starts_with("if ") && line.ends_with(" {") && !line.contains("staged[")
             })
             .count()
             >= 3,
@@ -811,6 +839,88 @@ fn run_shared_model_cache(name: &str, state: &str, stamp: &str, noise: &str) -> 
     }
 }
 
+fn run_noise_call_order(name: &str, state: &str, stamp: &str, noise: &str) -> Result<(), String> {
+    let root = scratch().join(name.replace(' ', "_"));
+    std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    let main = root.join("main.rs");
+    std::fs::write(
+        &main,
+        format!(
+            "{RUNTIME_STUB}\npub mod device {{\n\
+             pub mod state {{\n{}\n}}\n\
+             pub mod stamp {{\n{}\n}}\n\
+             pub mod noise {{\n{}\n}}\n}}\n\
+             #[derive(Default)]\n\
+             struct Capture(Vec<(usize, bool, u64, Option<u64>, Vec<u64>)>);\n\
+             impl runtime::GeneratedNoiseVisitor for Capture {{\n\
+             \x20   fn visit(&mut self, index: usize, value: runtime::GeneratedNoiseEvaluationRef<'_>) -> bool {{\n\
+             \x20       self.0.push((index, value.active, value.psd.to_bits(), value.exponent.map(f64::to_bits), value.table_operands.iter().map(|value| value.to_bits()).collect()));\n\
+             \x20       true\n\
+             \x20   }}\n\
+             }}\n\
+             fn noise(instance: &device::state::Instance, ctx: &runtime::GeneratedEvalContext<'_>) -> Vec<(usize, bool, u64, Option<u64>, Vec<u64>)> {{\n\
+             \x20   let mut capture = Capture::default();\n\
+             \x20   instance.evaluate_noise_sources(ctx, &mut capture).unwrap();\n\
+             \x20   capture.0\n\
+             }}\n\
+             fn stamp(instance: &mut device::state::Instance, ctx: &runtime::GeneratedEvalContext<'_>) {{\n\
+             \x20   let mut stamper = runtime::GeneratedStamper::default();\n\
+             \x20   instance.stamp(ctx, &mut stamper);\n\
+             }}\n\
+             fn main() {{\n\
+             \x20   let bias_a = [0.25, 0.0];\n\
+             \x20   let bias_b = [-0.4, 0.1];\n\
+             \x20   let ctx_a = runtime::GeneratedEvalContext {{ voltages: &bias_a, temperature: 300.15 }};\n\
+             \x20   let ctx_b = runtime::GeneratedEvalContext {{ voltages: &bias_b, temperature: 340.0 }};\n\
+             \x20   let mut instance = device::state::Instance::new(&[0, 1]);\n\
+             \x20   let fresh = noise(&instance, &ctx_a);\n\
+             \x20   assert_eq!(noise(&instance, &ctx_a), fresh);\n\
+             \x20   stamp(&mut instance, &ctx_a);\n\
+             \x20   assert_eq!(noise(&instance, &ctx_a), fresh);\n\
+             \x20   stamp(&mut instance, &ctx_b);\n\
+             \x20   assert_eq!(noise(&instance, &ctx_a), fresh);\n\
+             \x20   let saved = instance.capture_persistent_state();\n\
+             \x20   let mut restored = device::state::Instance::new(&[0, 1]);\n\
+             \x20   restored.restore_persistent_state(&saved).unwrap();\n\
+             \x20   assert_eq!(noise(&restored, &ctx_a), fresh);\n\
+             \x20   instance.set_parameter(\"width\", 2.0e-6).unwrap();\n\
+             \x20   let changed = noise(&instance, &ctx_a);\n\
+             \x20   let mut changed_fresh = device::state::Instance::new(&[0, 1]);\n\
+             \x20   changed_fresh.set_parameter(\"width\", 2.0e-6).unwrap();\n\
+             \x20   assert_eq!(changed, noise(&changed_fresh, &ctx_a));\n\
+             \x20   assert_eq!(noise(&instance, &ctx_b), noise(&changed_fresh, &ctx_b));\n\
+             }}\n",
+            indent(state),
+            indent(stamp),
+            indent(noise)
+        ),
+    )
+    .map_err(|error| error.to_string())?;
+
+    let binary = root.join(format!("noise_call_order{}", std::env::consts::EXE_SUFFIX));
+    let output = Command::new("rustc")
+        .arg("--edition=2024")
+        .arg("-O")
+        .arg("-A")
+        .arg("warnings")
+        .arg("-o")
+        .arg(&binary)
+        .arg(&main)
+        .output()
+        .map_err(|error| format!("could not run rustc: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    let output = Command::new(&binary)
+        .output()
+        .map_err(|error| format!("could not run generated noise probe: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).into_owned())
+    }
+}
+
 fn run_structural_variants(
     name: &str,
     state: &str,
@@ -1053,6 +1163,30 @@ endmodule
 "#,
         ),
         (
+            "shared noise preprocessing",
+            r#"
+module shared_noise_preprocessing(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real model_gain = 2.0;
+    (* type = "instance" *) parameter real width = 1.0e-6;
+    real a, b, c, d, e, geometry, thermal, current;
+    analog begin
+        a = model_gain * model_gain + 1.0;
+        b = a * a + model_gain;
+        c = sqrt(b + a);
+        d = ln(c + b);
+        e = exp(d * 0.01) + c;
+        geometry = width * width * e;
+        thermal = geometry * ($temperature + 273.15);
+        current = thermal * V(p, n);
+        I(p, n) <+ current;
+        I(p, n) <+ white_noise(abs(thermal) * (1.0 + abs(V(p, n))), "shared");
+    end
+endmodule
+"#,
+        ),
+        (
             "guarded flicker and table noise",
             r#"
 module noisy_transistor(d, g, s);
@@ -1184,6 +1318,122 @@ pub mod runtime {
         }
     }
 
+    macro_rules! define_fixed_lanes {
+        ($name:ident, $width:literal, [$($index:tt),+ $(,)?]) => {
+            #[repr(transparent)]
+            #[derive(Clone, Copy)]
+            pub struct $name(pub [f64; $width]);
+
+            impl core::ops::Add for $name {
+                type Output = Self;
+                fn add(self, rhs: Self) -> Self {
+                    Self([$((self.0[$index] + rhs.0[$index])),+])
+                }
+            }
+            impl core::ops::Sub for $name {
+                type Output = Self;
+                fn sub(self, rhs: Self) -> Self {
+                    Self([$((self.0[$index] - rhs.0[$index])),+])
+                }
+            }
+            impl core::ops::Mul<f64> for $name {
+                type Output = Self;
+                fn mul(self, rhs: f64) -> Self {
+                    Self([$((self.0[$index] * rhs)),+])
+                }
+            }
+            impl core::ops::Div<f64> for $name {
+                type Output = Self;
+                fn div(self, rhs: f64) -> Self {
+                    Self([$((self.0[$index] / rhs)),+])
+                }
+            }
+            impl core::ops::Index<usize> for $name {
+                type Output = f64;
+                fn index(&self, index: usize) -> &f64 {
+                    &self.0[index]
+                }
+            }
+        };
+    }
+
+    define_fixed_lanes!(L2, 2, [0, 1]);
+    define_fixed_lanes!(L3, 3, [0, 1, 2]);
+    define_fixed_lanes!(L4, 4, [0, 1, 2, 3]);
+    define_fixed_lanes!(L5, 5, [0, 1, 2, 3, 4]);
+    define_fixed_lanes!(L6, 6, [0, 1, 2, 3, 4, 5]);
+    define_fixed_lanes!(L7, 7, [0, 1, 2, 3, 4, 5, 6]);
+    define_fixed_lanes!(L8, 8, [0, 1, 2, 3, 4, 5, 6, 7]);
+    define_fixed_lanes!(L9, 9, [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    define_fixed_lanes!(L10, 10, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    define_fixed_lanes!(L11, 11, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    define_fixed_lanes!(L12, 12, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    define_fixed_lanes!(L13, 13, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    define_fixed_lanes!(L14, 14, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+    define_fixed_lanes!(L15, 15, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+    define_fixed_lanes!(L16, 16, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+    define_fixed_lanes!(L17, 17, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+    define_fixed_lanes!(L18, 18, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
+    define_fixed_lanes!(L19, 19, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
+    define_fixed_lanes!(L20, 20, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
+    define_fixed_lanes!(L21, 21, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+    define_fixed_lanes!(L22, 22, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
+    define_fixed_lanes!(L23, 23, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
+    define_fixed_lanes!(L24, 24, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]);
+    define_fixed_lanes!(L25, 25, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]);
+    define_fixed_lanes!(L26, 26, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    define_fixed_lanes!(L27, 27, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
+    define_fixed_lanes!(L28, 28, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]);
+    define_fixed_lanes!(L29, 29, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]);
+    define_fixed_lanes!(L30, 30, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]);
+    define_fixed_lanes!(L31, 31, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]);
+    define_fixed_lanes!(L32, 32, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]);
+
+    pub fn install_generated_stage_values(
+        destination: &mut [f64],
+        values: &[f64],
+        slots: &[u32],
+    ) {
+        assert_eq!(values.len(), slots.len());
+        for (&value, &slot) in values.iter().zip(slots) {
+            destination[slot as usize] = value;
+        }
+    }
+
+    pub fn install_generated_parameter_aliases(
+        values: &mut [f64],
+        aliases: &[(u16, u16)],
+        validate: fn(usize, f64) -> Result<(), String>,
+    ) -> Result<(), String> {
+        for &(destination, source) in aliases {
+            let value = values[usize::from(source)];
+            let destination = usize::from(destination);
+            values[destination] = value;
+            validate(destination, value)?;
+        }
+        Ok(())
+    }
+
+    pub fn find_generated_parameter_index(
+        sorted_names: &[&str],
+        parameter_indices: &[u16],
+        name: &str,
+    ) -> Option<usize> {
+        assert_eq!(sorted_names.len(), parameter_indices.len());
+        let mut left = 0usize;
+        let mut right = sorted_names.len();
+        while left < right {
+            let middle = left + (right - left) / 2;
+            if sorted_names[middle] < name {
+                left = middle + 1;
+            } else {
+                right = middle;
+            }
+        }
+        (sorted_names.get(left).copied() == Some(name))
+            .then(|| usize::from(parameter_indices[left]))
+    }
+
     pub fn rspice_limexp(x: f64) -> f64 {
         if x < 80.0 {
             x.exp()
@@ -1274,6 +1524,7 @@ pub mod runtime {
         pub label: &'static str,
     }
 
+    pub const GENERATED_PARAMETER_BOUND_NONE: u16 = 0;
     pub const GENERATED_PARAMETER_MIN_EXCLUSIVE_FLAG: u8 = 1;
     pub const GENERATED_PARAMETER_MAX_EXCLUSIVE_FLAG: u8 = 2;
 
@@ -1315,6 +1566,44 @@ pub mod runtime {
             }
         }
         for excluded in excluded {
+            if value == excluded.value {
+                return Err(format!("parameter '{}' must not equal {}, got {}", name, excluded.label, value));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn resolve_generated_parameter_bound(
+        pool: &[GeneratedParameterBound],
+        encoded: u16,
+    ) -> Option<GeneratedParameterBound> {
+        if encoded == GENERATED_PARAMETER_BOUND_NONE {
+            None
+        } else {
+            Some(*pool.get(usize::from(encoded - 1)).expect("generated parameter-bound index is outside its pool"))
+        }
+    }
+
+    pub fn validate_generated_parameter_bound_indices(
+        name: &str,
+        value: f64,
+        flags: u8,
+        pool: &[GeneratedParameterBound],
+        min: u16,
+        max: u16,
+        excluded: &[u16],
+    ) -> Result<(), String> {
+        validate_generated_parameter_bounds(
+            name,
+            value,
+            flags,
+            resolve_generated_parameter_bound(pool, min),
+            resolve_generated_parameter_bound(pool, max),
+            &[],
+        )?;
+        for &encoded in excluded {
+            let excluded = resolve_generated_parameter_bound(pool, encoded)
+                .expect("generated parameter exclusion uses the absence sentinel");
             if value == excluded.value {
                 return Err(format!("parameter '{}' must not equal {}, got {}", name, excluded.label, value));
             }

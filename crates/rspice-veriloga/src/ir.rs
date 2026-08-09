@@ -53,6 +53,8 @@ pub struct InternalNodeDef {
 #[derive(Debug, Clone)]
 pub struct ParamDef {
     pub name: SmolStr,
+    /// Exposed through the selected module's instance-facing ABI.
+    pub is_public: bool,
     /// Alternate instance-facing names (aliasparam); setting an alias
     /// writes this parameter
     pub aliases: Vec<SmolStr>,
@@ -518,6 +520,7 @@ impl DeviceIR {
 
             ir.parameters.push(ParamDef {
                 name: param.name.clone(),
+                is_public: param.is_public,
                 aliases: Vec::new(),
                 default: param.default.unwrap_or(0.0),
                 default_expr: None,

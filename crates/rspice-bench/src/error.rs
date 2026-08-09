@@ -56,6 +56,11 @@ pub enum BenchError {
         /// Actionable resource or integrity failure.
         message: String,
     },
+    /// Generated leaf-package compile-time measurement failed.
+    GeneratedCompile {
+        /// Actionable preparation, compiler, or comparison failure.
+        message: String,
+    },
     /// Generated built-in stamp-throughput measurement failed.
     #[cfg(feature = "generated-stamp-base")]
     GeneratedStamp {
@@ -101,6 +106,7 @@ impl fmt::Display for BenchError {
             Self::NativeJit { message } => write!(f, "{message}"),
             Self::Klu { message } => write!(f, "{message}"),
             Self::GeneratedRust { message } => write!(f, "{message}"),
+            Self::GeneratedCompile { message } => write!(f, "{message}"),
             #[cfg(feature = "generated-stamp-base")]
             Self::GeneratedStamp { message } => write!(f, "{message}"),
             Self::BenchmarkPolicy { message } => write!(f, "{message}"),

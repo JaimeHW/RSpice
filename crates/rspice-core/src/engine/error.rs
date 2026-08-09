@@ -123,6 +123,21 @@ pub enum SimulationError {
     Aborted,
 }
 
+/// The device layer cannot name this type, so the conversion lives here.
+///
+/// `device` is ranked below `engine`, which means the generated Verilog-A
+/// adapter returns its own [`BuiltinInstantiationError`] and the engine widens
+/// it at the boundary. Reading down is what the layer order permits; the
+/// reverse is what `tests/module_layering.rs` rejects.
+///
+/// [`BuiltinInstantiationError`]: crate::device::veriloga_builtins::BuiltinInstantiationError
+#[cfg(feature = "veriloga-builtins-base")]
+impl From<crate::device::veriloga_builtins::BuiltinInstantiationError> for SimulationError {
+    fn from(error: crate::device::veriloga_builtins::BuiltinInstantiationError) -> Self {
+        Self::Circuit(error.0)
+    }
+}
+
 impl SimulationError {
     /// Return stable metadata without requiring consumers to parse the display
     /// message or duplicate knowledge of nested error variants.

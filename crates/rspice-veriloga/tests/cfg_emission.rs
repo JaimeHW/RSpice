@@ -159,6 +159,91 @@ endmodule
     );
 }
 
+#[test]
+fn control_only_diamonds_are_not_emitted() {
+    let artifact = artifact(
+        r#"
+module dead_control(p, n);
+    inout p, n;
+    electrical p, n;
+    real unused;
+    analog begin
+        if (V(p, n) > 0.0) begin
+            if (V(p, n) > 1.0)
+                unused = exp(V(p, n));
+            else
+                unused = V(p, n) * V(p, n);
+        end else begin
+            unused = -V(p, n);
+        end
+        I(p, n) <+ V(p, n);
+    end
+endmodule
+"#,
+    );
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("lowers");
+    let (optimized, wanted) = optimize_cfg(&cfg.function, &cfg.residuals);
+    let (body, _) = emit_body(&optimized, &wanted, &EmitBindings::default()).expect("emits");
+
+    assert!(
+        !body
+            .lines()
+            .any(|line| line.trim_start().starts_with("if ")),
+        "diamonds that cannot affect an output must not survive emission:\n{body}"
+    );
+    assert!(
+        !body.contains(".exp()"),
+        "operands used only by a dead condition or arm must not be emitted:\n{body}"
+    );
+}
+
+#[test]
+fn unconditional_loop_entry_initializes_carried_values_directly() {
+    let artifact = artifact(
+        r#"
+module direct_loop_entry(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer steps = 4;
+    real total;
+    integer i;
+    analog begin
+        total = 3.0;
+        i = 1;
+        while (i < steps) begin
+            total = total + V(p, n);
+            i = i + 1;
+        end
+        I(p, n) <+ total;
+    end
+endmodule
+"#,
+    );
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("lowers");
+    let (optimized, wanted) = optimize_cfg(&cfg.function, &cfg.residuals);
+    let (body, _) = emit_body(&optimized, &wanted, &EmitBindings::default()).expect("emits");
+    let before_loop = body.split("loop {").next().expect("loop prefix");
+
+    for declaration in before_loop
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("let mut "))
+    {
+        let name = declaration
+            .strip_prefix("let mut ")
+            .and_then(|line| line.split_once(" = "))
+            .map(|(name, _)| name)
+            .expect("mutable declaration");
+        assert!(
+            !before_loop
+                .lines()
+                .map(str::trim)
+                .any(|line| line.starts_with(&format!("{name} = "))),
+            "an unconditional loop entry must initialize {name} directly:\n{body}"
+        );
+    }
+}
+
 /// The emitter and the interpreter evaluate the same operations in the same
 /// order, so anything less than bit equality is a real difference in meaning
 /// rather than a rounding artefact.

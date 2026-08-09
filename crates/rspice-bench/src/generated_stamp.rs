@@ -15,7 +15,6 @@ use rspice_conformance::suites::veriloga::reference::{
     ReferenceStampBenchConfig, run_reference_stamp_benchmark,
 };
 use serde::Serialize;
-use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -276,13 +275,7 @@ pub fn run(args: &GeneratedStampArgs) -> Result<ExitCode, BenchError> {
         failed: failed.clone(),
     };
     if let Some(path) = &args.out {
-        let json =
-            serde_json::to_string_pretty(&report).map_err(|error| BenchError::GeneratedStamp {
-                message: format!("serializing stamp report: {error}"),
-            })?;
-        fs::write(path, json).map_err(|error| BenchError::GeneratedStamp {
-            message: format!("writing {}: {error}", path.display()),
-        })?;
+        crate::report::write(path, "rspice-generated-stamp", &report, true)?;
     }
 
     for failure in &failed {

@@ -70,7 +70,7 @@ const PROBE_NODE_MAX: Value = 0.85;
 /// Branch-unknown seed magnitude, in amperes.
 const PROBE_BRANCH_CURRENT: Value = 1.0e-6;
 
-/// Scale a branch-current perturbation is measured against, in amperes.
+/// Operand scale used to choose a branch-current perturbation, in amperes.
 ///
 /// Not the seed magnitude. A branch unknown enters a node's current equation
 /// with a coefficient near one, so differencing it against a seed of 1e-6 A
@@ -78,7 +78,9 @@ const PROBE_BRANCH_CURRENT: Value = 1.0e-6;
 /// already flowing there, which is pure cancellation and reports as a wildly
 /// wrong derivative rather than as a small one. Perturbing on a milliamp scale
 /// resolves against the rest of the row.
-const PROBE_BRANCH_SCALE: Value = 1.0e-3;
+/// The coarsest relative step is 1e-3, so one ampere here produces the
+/// intended one-milliamp perturbation.
+const PROBE_BRANCH_SCALE: Value = 1.0;
 
 /// Relative steps tried, coarsest first.
 ///
@@ -1041,6 +1043,12 @@ mod tests {
         for _ in 0..8 {
             assert_eq!(next_u64(&mut first), next_u64(&mut second));
         }
+    }
+
+    #[test]
+    fn zero_branch_current_uses_a_milliamp_coarse_perturbation() {
+        let step = AUDIT_STEP_LADDER[0] * 0.0_f64.abs().max(PROBE_BRANCH_SCALE);
+        assert_eq!(step, 1.0e-3);
     }
 
     /// Build a one-entry ladder by hand: the same derivative at every step, with

@@ -110,7 +110,20 @@ impl CodeGenerator {
         module_name: Option<&str>,
         source_digest: SmolStr,
     ) -> CompileResult<CompiledModel> {
-        let module = Self::select_module(analyzed, module_name)?;
+        let selected = Self::select_module(analyzed, module_name)?;
+        let module = crate::semantic::elaborate_executable_module(analyzed, selected)?;
+        self.generate_analyzed_module_with_source_digest(&module, source_digest)
+    }
+
+    /// Lower one already-selected and already-elaborated analyzed module.
+    /// Runtime compilation uses this internal boundary so bytecode and
+    /// canonical IR consume the exact same owned hierarchy artifact.
+    pub(crate) fn generate_analyzed_module_with_source_digest(
+        &self,
+        module: &AnalyzedModule,
+        source_digest: impl Into<SmolStr>,
+    ) -> CompileResult<CompiledModel> {
+        let source_digest = source_digest.into();
         let timings = compile_timings_enabled();
 
         // Build IR
@@ -234,6 +247,7 @@ impl CodeGenerator {
                     .transpose()?;
                 Ok(CompiledParameter {
                     name: p.name.clone(),
+                    is_public: p.is_public,
                     aliases: p.aliases.clone(),
                     default: p.default,
                     default_program,

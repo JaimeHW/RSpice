@@ -78,6 +78,32 @@ pub(crate) fn optimize_with_control(
     outputs: &[ValueId],
     control: &dyn PipelineControl,
 ) -> Result<(CfgFunction, Vec<ValueId>), PipelineCancelled> {
+    let (function, outputs, _) =
+        optimize_with_control_and_tracking(function, outputs, &[], control)?;
+    Ok((function, outputs))
+}
+
+pub(crate) fn optimize_with_tracking(
+    function: &CfgFunction,
+    outputs: &[ValueId],
+    tracked: &[ValueId],
+) -> (CfgFunction, Vec<ValueId>, Vec<Option<ValueId>>) {
+    optimize_with_control_and_tracking(function, outputs, tracked, &NoPipelineControl)
+        .expect("the no-op pipeline control cannot cancel")
+}
+
+/// Simplify `function` while following values that are not liveness roots.
+///
+/// A tracked value returns `None` when optimizing `outputs` made it dead, or
+/// the surviving compacted id after folding and CSE redirected it. Tracking
+/// must not keep candidates alive: doing so would defeat the source-size
+/// optimization this analysis is intended to support.
+pub(crate) fn optimize_with_control_and_tracking(
+    function: &CfgFunction,
+    outputs: &[ValueId],
+    tracked: &[ValueId],
+    control: &dyn PipelineControl,
+) -> Result<(CfgFunction, Vec<ValueId>, Vec<Option<ValueId>>), PipelineCancelled> {
     check_cancelled(control)?;
     let mut optimizer = Optimizer {
         entry: function.entry,
@@ -85,6 +111,7 @@ pub(crate) fn optimize_with_control(
         blocks: function.blocks.clone(),
         shapes: function.shapes.clone(),
         outputs: outputs.to_vec(),
+        tracked: tracked.iter().copied().map(Some).collect(),
         replacement: vec![None; function.values.len()],
     };
 
@@ -111,6 +138,7 @@ pub(crate) fn optimize_with_control(
             shapes: optimizer.shapes,
         },
         optimizer.outputs,
+        optimizer.tracked,
     ))
 }
 
@@ -132,6 +160,7 @@ struct Optimizer {
     /// renumbering values does not renumber shapes.
     shapes: Vec<Vec<u32>>,
     outputs: Vec<ValueId>,
+    tracked: Vec<Option<ValueId>>,
     /// Where each value has been redirected, as a union-find parent list.
     replacement: Vec<Option<ValueId>>,
 }
@@ -508,6 +537,9 @@ impl Optimizer {
         for output in &mut self.outputs {
             *output = translate(*output);
         }
+        for tracked in self.tracked.iter_mut().flatten() {
+            *tracked = translate(*tracked);
+        }
         // Instructions whose result was redirected no longer define anything.
         for block in &mut self.blocks {
             block.instructions.retain(|instruction| {
@@ -664,6 +696,9 @@ impl Optimizer {
         }
         for output in &mut self.outputs {
             *output = translate(*output);
+        }
+        for tracked in &mut self.tracked {
+            *tracked = tracked.and_then(|value| remap[usize::from(value)]);
         }
         for block in &mut self.blocks {
             for param in &mut block.params {

@@ -65,9 +65,10 @@
 //! ## Dependency direction
 //!
 //! Nothing a user installs may depend on this crate. `rspice-bench` does,
-//! deliberately: it is a benchmark rig rather than a product, and the
-//! Verilog-A stamp bench and golden-fingerprint capture belong with the suite
-//! rather than inside the library they measure.
+//! deliberately: it is a benchmark rig rather than a product, and its
+//! generated-stamp timing harness consumes the hand-written Verilog-A suite.
+//! Golden capture, replay, and derivative audit are exposed by the
+//! `rspice-veriloga-golden` conformance binary and remain wholly owned here.
 //!
 //! ## Feature forwarding
 //!

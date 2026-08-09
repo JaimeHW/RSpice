@@ -5,9 +5,9 @@
 //! tree is generator-owned output that is rewritten wholesale by
 //! `rspice-veriloga-gen`, and hand-written code sitting inside it cannot be
 //! told apart from emitted code by a reader, a reviewer, or a regeneration
-//! diff. The only hand-written file that belongs under `veriloga_builtins/` is
-//! its `mod.rs`, because that is the module root the generated folders attach
-//! to.
+//! diff. That tree is `rspice-veriloga-models` now, and
+//! `device/veriloga_builtins.rs` is the hand-written adapter that drives it —
+//! the separation is a crate boundary rather than a convention.
 //!
 //! - [`bench`] — stamp throughput, the runtime gate.
 //! - [`reference`] — the same measurement on a hand-written model, which is

@@ -31,6 +31,9 @@ pub struct RuntimeCompileReport {
     pub targets: RuntimeTargetQualifications,
     /// Generated Rust source, present only when in-memory transpilation passed.
     pub generated_rust: Option<GeneratedRustDevice>,
+    /// Source-authentic specialist review retained with this exact artifact.
+    #[serde(default)]
+    pub specialist: crate::specialist::SpecialistReport,
     /// Operational timings and work-size counters. These are not artifact
     /// identity and are excluded from runtime-contract digests.
     #[serde(default)]
@@ -121,6 +124,7 @@ impl RuntimeCompileReport {
             abi,
             targets,
             generated_rust,
+            specialist: crate::specialist::SpecialistReport::default(),
             metrics: PipelineMetrics::default(),
         }
     }
@@ -187,6 +191,10 @@ impl RuntimeCompileReport {
             validate_generated_rust(generated, canonical_module, canonical_digest)?;
         }
 
+        self.specialist
+            .validate(canonical_module)
+            .map_err(RuntimeArtifactIntegrityError::InvalidSpecialistReport)?;
+
         Ok(())
     }
 
@@ -252,6 +260,7 @@ impl RuntimeAbiSummary {
                 .hir
                 .parameters
                 .iter()
+                .filter(|parameter| parameter.is_public)
                 .map(|parameter| RuntimeAbiParameter {
                     name: parameter.name.clone(),
                     scope: parameter.scope,
@@ -308,7 +317,7 @@ pub enum RuntimeTarget {
 }
 
 impl RuntimeTarget {
-    const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::SemanticIr => "semantic IR",
             Self::BytecodeVm => "bytecode VM",
@@ -648,6 +657,8 @@ pub enum RuntimeArtifactIntegrityError {
     DuplicateGeneratedRustPath(String),
     #[error("generated Rust file is empty: '{0}'")]
     EmptyGeneratedRustFile(String),
+    #[error("invalid Verilog-A specialist report: {0}")]
+    InvalidSpecialistReport(String),
 }
 
 /// Compiler phase associated with a typed source diagnostic.

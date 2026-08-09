@@ -42,6 +42,7 @@ impl VirtualSourceFile {
 pub struct VirtualSourceBundle {
     root_path: String,
     files: Vec<VirtualSourceFile>,
+    include_paths: Vec<String>,
     case_folded_index: BTreeMap<String, usize>,
 }
 
@@ -50,6 +51,17 @@ impl VirtualSourceBundle {
     pub fn new(
         root_path: impl Into<String>,
         files: impl IntoIterator<Item = VirtualSourceFile>,
+    ) -> Result<Self, VirtualSourceError> {
+        Self::new_with_include_paths(root_path, files, std::iter::empty::<String>())
+    }
+
+    /// Validate a bundle with an ordered set of project-relative include
+    /// directories. These paths are searched only inside the sealed bundle;
+    /// they never grant access to an ambient host file system.
+    pub fn new_with_include_paths(
+        root_path: impl Into<String>,
+        files: impl IntoIterator<Item = VirtualSourceFile>,
+        include_paths: impl IntoIterator<Item = impl Into<String>>,
     ) -> Result<Self, VirtualSourceError> {
         let root_path = normalize_logical_path(&root_path.into())?;
         let mut normalized_files: Vec<VirtualSourceFile> = Vec::new();
@@ -74,9 +86,19 @@ impl VirtualSourceBundle {
             return Err(VirtualSourceError::RootNotFound(root_path));
         }
 
+        let mut normalized_include_paths = Vec::new();
+        let mut include_path_keys = std::collections::BTreeSet::new();
+        for path in include_paths {
+            let path = normalize_logical_path(&path.into())?;
+            if include_path_keys.insert(case_fold_path(&path)) {
+                normalized_include_paths.push(path);
+            }
+        }
+
         Ok(Self {
             root_path,
             files: normalized_files,
+            include_paths: normalized_include_paths,
             case_folded_index,
         })
     }
@@ -104,6 +126,10 @@ impl VirtualSourceBundle {
 
     pub fn files(&self) -> &[VirtualSourceFile] {
         &self.files
+    }
+
+    pub fn include_paths(&self) -> &[String] {
+        &self.include_paths
     }
 
     fn find(&self, path: &str) -> Option<&VirtualSourceFile> {
@@ -598,6 +624,25 @@ impl SourceProvider for VirtualBundleProvider<'_> {
                 ));
             }
             if let Some(document) = self.document(&relative) {
+                return Ok(Some(document));
+            }
+        }
+
+        for include_path in &self.bundle.include_paths {
+            let candidate = format!("{include_path}/{requested}");
+            if candidate.len() > self.limits.max_path_bytes {
+                return Err(crate::PreprocessorError::new(
+                    VirtualSourceError::PathTooLong {
+                        path: candidate,
+                        actual: include_path.len() + 1 + requested.len(),
+                        limit: self.limits.max_path_bytes,
+                    }
+                    .to_string(),
+                    including_file.map(Path::to_path_buf),
+                    0,
+                ));
+            }
+            if let Some(document) = self.document(&candidate) {
                 return Ok(Some(document));
             }
         }

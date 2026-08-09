@@ -15,29 +15,33 @@
 //!   decks can be reproduced exactly.
 //! * `generated-rust` — authenticate and gate generated Verilog-A Rust
 //!   source resources.
+//! * `generated-compile` — measure generated-catalog Rust compile time with
+//!   reproducible provenance and package-only rebuild auditing.
 //! * `klu` — time the KLU solver kernels (analyze/factor/refactor/solve) in
 //!   isolation on circuit-shaped matrices, with optional per-nonzero budgets.
 //! * `native-jit` — in-process Verilog-A native JIT gate.
 //! * `run` — execute the benchmark suite and write the JSON scoreboard.
 //!
-//! Two further subcommands, `generated-stamp` and `veriloga-golden`, are
-//! behind `generated-stamp-base`, the gate that `generated-stamp` and
-//! `generated-stamp-subset` build on to select a corpus.
+//! The `generated-stamp` subcommand is behind `generated-stamp-base`, the gate
+//! that `generated-stamp` and `generated-stamp-subset` build on to select a
+//! corpus. Verilog-A golden-oracle ownership lives in `rspice-conformance`.
 //!
 //! See `benchmarks/README.md` for methodology and operating conventions.
 
 mod error;
 mod generate;
+mod generated_compile;
 mod generated_rust;
 #[cfg(feature = "generated-stamp-base")]
 mod generated_stamp;
 mod klu;
 mod native_jit;
+mod provenance;
+mod report;
 mod runner;
-#[cfg(feature = "generated-stamp-base")]
-mod veriloga_golden;
 
 use clap::{Parser, Subcommand};
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 /// Command-line interface of the benchmark rig.
@@ -56,6 +60,8 @@ enum BenchCommand {
     Gen(generate::GenArgs),
     /// Authenticate and gate generated Verilog-A Rust source resources.
     GeneratedRust(generated_rust::GeneratedRustArgs),
+    /// Measure generated Verilog-A leaf-package release compile time.
+    GeneratedCompile(generated_compile::GeneratedCompileArgs),
     /// Measure and gate generated Verilog-A built-in stamp throughput.
     #[cfg(feature = "generated-stamp-base")]
     GeneratedStamp(generated_stamp::GeneratedStampArgs),
@@ -65,9 +71,14 @@ enum BenchCommand {
     NativeJit(native_jit::NativeJitArgs),
     /// Run the benchmark suite and emit a JSON scoreboard.
     Run(runner::RunArgs),
-    /// Capture, verify, and independently audit generated Verilog-A numerics.
-    #[cfg(feature = "generated-stamp-base")]
-    VerilogAGolden(veriloga_golden::VerilogAGoldenArgs),
+}
+
+pub(crate) fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("rspice-bench is a workspace crate under crates/")
+        .to_path_buf()
 }
 
 fn main() -> ExitCode {
@@ -75,13 +86,12 @@ fn main() -> ExitCode {
     let outcome = match cli.command {
         BenchCommand::Gen(args) => generate::generate(&args).map(|()| ExitCode::SUCCESS),
         BenchCommand::GeneratedRust(args) => generated_rust::run(&args),
+        BenchCommand::GeneratedCompile(args) => generated_compile::run(&args),
         #[cfg(feature = "generated-stamp-base")]
         BenchCommand::GeneratedStamp(args) => generated_stamp::run(&args),
         BenchCommand::Klu(args) => klu::run(&args),
         BenchCommand::NativeJit(args) => native_jit::run(&args),
         BenchCommand::Run(args) => runner::run(&args),
-        #[cfg(feature = "generated-stamp-base")]
-        BenchCommand::VerilogAGolden(args) => veriloga_golden::run(&args),
     };
     match outcome {
         Ok(code) => code,

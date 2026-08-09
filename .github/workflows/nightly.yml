@@ -154,6 +154,16 @@ jobs:
         run: >-
           cargo test --locked --release -p rspice-conformance --features veriloga-builtins
           --test veriloga_golden -- --test-threads=1
+      - name: Replay captured Verilog-A fingerprints (42 models)
+        # Snapshot replay is deliberately separate from the independent
+        # derivative gates above: replay detects behavioral drift, while the
+        # oracle determines whether the captured derivative is mathematically
+        # defensible. Both must pass.
+        env:
+          RUST_MIN_STACK: "67108864"
+        run: >-
+          cargo run --locked --release -p rspice-conformance
+          --features veriloga-builtins --bin rspice-veriloga-golden -- verify
       - name: Gate 42-model stamp performance against hand-written reference
         # These are no-regression ratchets around the 2026-07-28 canonical
         # backend baseline. Tighten them toward the release target (1.00x

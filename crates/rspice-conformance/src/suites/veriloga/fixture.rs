@@ -85,7 +85,7 @@ impl GoldenFixture {
         let mut out = String::new();
         out.push_str(
             "# RSpice Verilog-A golden fingerprint.\n\
-             # Written by `rspice-bench veriloga-golden capture`. Do not edit by hand.\n",
+             # Written by `rspice-veriloga-golden capture`. Do not edit by hand.\n",
         );
         let _ = writeln!(out, "format {GOLDEN_FORMAT_VERSION}");
         let _ = writeln!(out, "model {}", self.model_name);
@@ -96,17 +96,17 @@ impl GoldenFixture {
             let _ = writeln!(out, "case {}", case.label());
             for (index, point) in case.points.iter().enumerate() {
                 let _ = writeln!(out, "point {index}");
-                let _ = writeln!(out, "unknowns {}", render_vector(&point.unknowns));
-                let _ = writeln!(out, "rhs {}", render_indexed(&point.record.rhs));
-                let _ = writeln!(
-                    out,
-                    "jac {}",
-                    render_matrix(&point.record.jacobian, self.size())
+                push_field(&mut out, "unknowns", render_vector(&point.unknowns));
+                push_field(&mut out, "rhs", render_indexed(&point.record.rhs));
+                push_field(
+                    &mut out,
+                    "jac",
+                    render_matrix(&point.record.jacobian, self.size()),
                 );
-                let _ = writeln!(
-                    out,
-                    "cap {}",
-                    render_matrix(&point.record.capacitance, self.size())
+                push_field(
+                    &mut out,
+                    "cap",
+                    render_matrix(&point.record.capacitance, self.size()),
                 );
                 for (source, sample) in point.record.noise.iter().enumerate() {
                     let _ = writeln!(
@@ -225,6 +225,15 @@ impl GoldenFixture {
         }
         Ok(fixture)
     }
+}
+
+fn push_field(out: &mut String, keyword: &str, values: String) {
+    out.push_str(keyword);
+    if !values.is_empty() {
+        out.push(' ');
+        out.push_str(&values);
+    }
+    out.push('\n');
 }
 
 fn flush_point(fixture: &mut GoldenFixture, pending: &mut Option<GoldenPoint>) {
@@ -429,6 +438,12 @@ mod tests {
     fn rendering_is_stable() {
         let fixture = sample_fixture();
         assert_eq!(fixture.render(), fixture.render());
+    }
+
+    #[test]
+    fn rendering_never_emits_trailing_whitespace() {
+        let rendered = sample_fixture().render();
+        assert!(rendered.lines().all(|line| line.trim_end() == line));
     }
 
     #[test]

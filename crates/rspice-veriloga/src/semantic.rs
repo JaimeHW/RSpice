@@ -18,9 +18,11 @@ use std::collections::HashMap;
 const RSPICE_LIMITED_EXP_INTRINSIC: &str = "__rspice_limited_exp";
 
 mod analyzed;
+mod elaboration;
 mod symbols;
 
 pub use analyzed::*;
+pub(crate) use elaboration::elaborate_executable_module;
 pub use symbols::*;
 
 // ============================================================================
@@ -110,6 +112,7 @@ impl SemanticAnalyzer {
 
     pub fn analyze(&mut self, source: &SourceFile) -> CompileResult<AnalyzedFile> {
         let mut modules = HashMap::new();
+        let mut module_spans = HashMap::new();
 
         // First pass: register user-defined natures, then disciplines that
         // reference them. Access compatibility validation relies on this DB.
@@ -127,6 +130,15 @@ impl SemanticAnalyzer {
         // Second pass: analyze modules
         for item in &source.items {
             if let Item::Module(module) = item {
+                if let Some(first_defined) = module_spans.insert(module.name.clone(), module.span) {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::DuplicateSymbol {
+                            name: module.name.clone(),
+                            first_defined,
+                        },
+                        module.span,
+                    )));
+                }
                 self.symbols = SymbolTable::new();
                 self.errors.clear();
                 self.user_functions.clear();
@@ -582,6 +594,7 @@ impl SemanticAnalyzer {
 
             analyzed.parameters.push(AnalyzedParameter {
                 name: param.name.clone(),
+                is_public: true,
                 scope,
                 param_type: param.param_type,
                 value_type,

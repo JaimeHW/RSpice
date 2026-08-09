@@ -1,6 +1,8 @@
 mod support;
 
-use rspice_veriloga::{CompilerOptions, VerilogACompiler};
+use rspice_veriloga::{
+    CodeGenerator, CompilerOptions, Lexer, Parser, SemanticAnalyzer, SourceMap, VerilogACompiler,
+};
 use support::DeviceFixture;
 
 fn assert_unsupported(source: &str, expected_context: &str) {
@@ -26,8 +28,57 @@ module unsupported_instance(p, n);
     analog I(p, n) <+ V(p, n);
 endmodule
 "#,
-        "Unsupported module item: child",
+        "Undefined module: 'child'",
     );
+}
+
+#[test]
+fn declared_module_hierarchy_executes_child_behavior() {
+    let source = r#"
+`include "disciplines.vams"
+module child(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ 2.0 * V(p, n);
+endmodule
+module parent(p, n);
+    inout p, n;
+    electrical p, n;
+    child u1(p, n);
+endmodule
+"#;
+    let model = VerilogACompiler::new(CompilerOptions::default())
+        .compile_module(source, Some("parent"))
+        .expect("declared child hierarchy must elaborate");
+    assert_eq!(model.stamp_programs.len(), 1);
+    assert_eq!(model.stamp_programs[0].value_program.instructions.len(), 3);
+}
+
+#[test]
+fn direct_bytecode_generation_uses_the_same_hierarchy_elaborator() {
+    let source = r#"
+module child(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ V(p, n);
+endmodule
+module parent(p, n);
+    inout p, n;
+    electrical p, n;
+    child u1(p, n);
+endmodule
+"#;
+    let source_map = SourceMap::new();
+    let source_id = source_map.add_source("<direct-codegen>", source);
+    let tokens = Lexer::new(source, source_id).collect_tokens().unwrap();
+    let parsed = Parser::new(&tokens).parse().unwrap();
+    let analyzed = SemanticAnalyzer::new().analyze(&parsed).unwrap();
+
+    let model = CodeGenerator::new()
+        .generate_module(&analyzed, Some("parent"))
+        .expect("public bytecode generation must elaborate hierarchy");
+    assert_eq!(model.stamp_programs.len(), 1);
+    assert_eq!(model.num_terminals, 2);
 }
 
 #[test]

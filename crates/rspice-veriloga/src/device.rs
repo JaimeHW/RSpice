@@ -746,21 +746,39 @@ impl VerilogADevice {
         let params = &self.model.parameters;
         let index = params
             .iter()
-            .position(|p| p.name == name)
+            .enumerate()
+            .filter(|(_, p)| p.is_public)
+            .find_map(|(index, p)| (p.name == name).then_some(index))
             .or_else(|| {
                 params
                     .iter()
-                    .position(|p| p.aliases.iter().any(|a| a.as_str() == name))
+                    .enumerate()
+                    .filter(|(_, p)| p.is_public)
+                    .find_map(|(index, p)| {
+                        p.aliases
+                            .iter()
+                            .any(|a| a.as_str() == name)
+                            .then_some(index)
+                    })
             })
             .or_else(|| {
                 params
                     .iter()
-                    .position(|p| p.name.eq_ignore_ascii_case(name))
+                    .enumerate()
+                    .filter(|(_, p)| p.is_public)
+                    .find_map(|(index, p)| p.name.eq_ignore_ascii_case(name).then_some(index))
             })
             .or_else(|| {
                 params
                     .iter()
-                    .position(|p| p.aliases.iter().any(|a| a.eq_ignore_ascii_case(name)))
+                    .enumerate()
+                    .filter(|(_, p)| p.is_public)
+                    .find_map(|(index, p)| {
+                        p.aliases
+                            .iter()
+                            .any(|a| a.eq_ignore_ascii_case(name))
+                            .then_some(index)
+                    })
             });
         let Some(i) = index else { return Ok(false) };
         // Cross-parameter constraints are checked after all instance

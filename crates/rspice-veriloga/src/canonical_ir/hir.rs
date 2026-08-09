@@ -320,6 +320,8 @@ pub struct HirPort {
 pub struct HirParameter {
     pub id: ParamId,
     pub name: SmolStr,
+    #[serde(default = "default_true")]
+    pub is_public: bool,
     pub scope: ParameterScope,
     pub value_type: CanonicalValueType,
     pub default: Option<f64>,
@@ -470,6 +472,7 @@ impl HirModel {
             .map(|(index, parameter)| HirParameter {
                 id: ParamId::from(index),
                 name: parameter.name.clone(),
+                is_public: parameter.is_public,
                 scope: parameter.scope,
                 value_type: CanonicalValueType::from(parameter.value_type),
                 default: parameter.default,
@@ -1561,6 +1564,10 @@ impl HirModel {
             .map(|branch| branch.name.clone())
             .collect()
     }
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 fn validate_dense_port_ids(diagnostics: &mut Vec<IrDiagnostic>, ports: &[HirPort]) {

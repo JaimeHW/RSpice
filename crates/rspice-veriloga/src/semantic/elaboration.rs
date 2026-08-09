@@ -1,0 +1,1200 @@
+//! Executable elaboration of structural Verilog-A module instances.
+//!
+//! Semantic analysis deliberately keeps every module independent.  This pass
+//! selects a top module and flattens its instance tree into one analyzed model
+//! before either executable backend sees it.  Keeping the pass here gives the
+//! bytecode and canonical-IR paths exactly the same ports, parameters, state,
+//! nodes, and equations.
+
+use super::{
+    AnalyzedArray, AnalyzedAssignment, AnalyzedBranch, AnalyzedContribution, AnalyzedFile,
+    AnalyzedInternalNode, AnalyzedLoop, AnalyzedModule, AnalyzedRegion, AnalyzedStatement,
+};
+use crate::ast::{
+    AnalogOperator, ArrayAccessExpr, ArrayLiteralExpr, BinaryExpr, BranchAccess, CallExpr,
+    ConditionalExpr, Connection, Expression, Identifier, Item, LaplaceKind, Module, ModuleInstance,
+    NoiseSource, NumberLit, SystemFunction, UnaryExpr, ZiKind,
+};
+use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind};
+use crate::source::Span;
+use smol_str::SmolStr;
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
+
+/// Return the selected module itself when it is structural-leaf, otherwise a
+/// faithfully flattened owned module.  Unsupported or ambiguous structure is
+/// rejected before code generation; it is never omitted.
+pub(crate) fn elaborate_executable_module<'a>(
+    analyzed: &'a AnalyzedFile,
+    selected: &'a AnalyzedModule,
+) -> CompileResult<Cow<'a, AnalyzedModule>> {
+    let source_modules = source_modules(analyzed)?;
+    let root = source_modules.get(&selected.name).copied().ok_or_else(|| {
+        internal_error(format!(
+            "selected module '{}' has no retained source module",
+            selected.name
+        ))
+    })?;
+    if root.instances.is_empty() {
+        return Ok(Cow::Borrowed(selected));
+    }
+
+    let mut elaborator = HierarchyElaborator::new(analyzed, source_modules, selected.clone());
+    let root_scope = ScopeMap::for_root(selected);
+    let mut module_stack = vec![selected.name.clone()];
+    elaborator.append_instances(root, &root_scope, &mut module_stack, selected.name.as_str())?;
+    Ok(Cow::Owned(elaborator.finish()))
+}
+
+fn source_modules<'a>(analyzed: &'a AnalyzedFile) -> CompileResult<HashMap<SmolStr, &'a Module>> {
+    let mut modules = HashMap::new();
+    for item in &analyzed.source.items {
+        let Item::Module(module) = item else { continue };
+        if let Some(previous) = modules.insert(module.name.clone(), module) {
+            return Err(semantic_error(
+                SemanticErrorKind::DuplicateSymbol {
+                    name: module.name.clone(),
+                    first_defined: previous.span,
+                },
+                module.span,
+            ));
+        }
+    }
+    Ok(modules)
+}
+
+#[derive(Clone)]
+struct NodeBinding {
+    name: SmolStr,
+    discipline: Option<SmolStr>,
+}
+
+#[derive(Default)]
+struct ScopeMap {
+    nodes: HashMap<SmolStr, NodeBinding>,
+    parameters: HashMap<SmolStr, SmolStr>,
+    parameter_given: HashMap<SmolStr, bool>,
+    variables: HashMap<SmolStr, SmolStr>,
+    arrays: HashMap<SmolStr, SmolStr>,
+    branches: HashMap<SmolStr, SmolStr>,
+    port_connected: HashMap<SmolStr, bool>,
+    instance_path: Option<SmolStr>,
+}
+
+impl ScopeMap {
+    fn for_root(module: &AnalyzedModule) -> Self {
+        let mut scope = Self::default();
+        for port in &module.ports {
+            scope.nodes.insert(
+                port.name.clone(),
+                NodeBinding {
+                    name: port.name.clone(),
+                    discipline: Some(port.discipline.clone()),
+                },
+            );
+        }
+        for node in &module.internal_nodes {
+            scope.nodes.insert(
+                node.name.clone(),
+                NodeBinding {
+                    name: node.name.clone(),
+                    discipline: Some(node.discipline.clone()),
+                },
+            );
+        }
+        for ground in &module.ground_nodes {
+            scope.nodes.insert(
+                ground.clone(),
+                NodeBinding {
+                    name: ground.clone(),
+                    discipline: None,
+                },
+            );
+        }
+        scope.nodes.insert(
+            "0".into(),
+            NodeBinding {
+                name: "0".into(),
+                discipline: None,
+            },
+        );
+        for parameter in &module.parameters {
+            scope
+                .parameters
+                .insert(parameter.name.clone(), parameter.name.clone());
+        }
+        for variable in &module.variables {
+            scope
+                .variables
+                .insert(variable.name.clone(), variable.name.clone());
+        }
+        for array in module.arrays.keys() {
+            scope.arrays.insert(array.clone(), array.clone());
+        }
+        for branch in &module.branches {
+            scope
+                .branches
+                .insert(branch.name.clone(), branch.name.clone());
+        }
+        scope
+    }
+}
+
+struct HierarchyElaborator<'a> {
+    analyzed: &'a AnalyzedFile,
+    source_modules: HashMap<SmolStr, &'a Module>,
+    flattened: AnalyzedModule,
+    used_names: HashSet<SmolStr>,
+    next_name: usize,
+}
+
+impl<'a> HierarchyElaborator<'a> {
+    fn new(
+        analyzed: &'a AnalyzedFile,
+        source_modules: HashMap<SmolStr, &'a Module>,
+        flattened: AnalyzedModule,
+    ) -> Self {
+        let mut used_names = HashSet::new();
+        used_names.extend(flattened.ports.iter().map(|item| item.name.clone()));
+        used_names.extend(flattened.parameters.iter().map(|item| item.name.clone()));
+        used_names.extend(flattened.variables.iter().map(|item| item.name.clone()));
+        used_names.extend(
+            flattened
+                .internal_nodes
+                .iter()
+                .map(|item| item.name.clone()),
+        );
+        used_names.extend(flattened.ground_nodes.iter().cloned());
+        used_names.extend(flattened.branches.iter().map(|item| item.name.clone()));
+        used_names.extend(flattened.arrays.keys().cloned());
+        Self {
+            analyzed,
+            source_modules,
+            flattened,
+            used_names,
+            next_name: 0,
+        }
+    }
+
+    fn finish(self) -> AnalyzedModule {
+        self.flattened
+    }
+
+    fn append_instances(
+        &mut self,
+        source_module: &Module,
+        parent_scope: &ScopeMap,
+        module_stack: &mut Vec<SmolStr>,
+        parent_path: &str,
+    ) -> CompileResult<()> {
+        let mut instance_names = HashSet::new();
+        for instance in &source_module.instances {
+            if !instance_names.insert(instance.name.clone()) {
+                return Err(semantic_error(
+                    SemanticErrorKind::DuplicateSymbol {
+                        name: instance.name.clone(),
+                        first_defined: instance.span,
+                    },
+                    instance.span,
+                ));
+            }
+            let path = format!("{parent_path}.{}", instance.name);
+            self.append_instance(instance, parent_scope, module_stack, &path)?;
+        }
+        Ok(())
+    }
+
+    fn append_instance(
+        &mut self,
+        instance: &ModuleInstance,
+        parent_scope: &ScopeMap,
+        module_stack: &mut Vec<SmolStr>,
+        path: &str,
+    ) -> CompileResult<()> {
+        let child_source = self
+            .source_modules
+            .get(&instance.module)
+            .copied()
+            .ok_or_else(|| {
+                semantic_error(
+                    SemanticErrorKind::UndefinedModule(instance.module.to_string()),
+                    instance.span,
+                )
+            })?;
+        let child = self.analyzed.modules.get(&instance.module).ok_or_else(|| {
+            internal_error(format!(
+                "module '{}' was retained but not semantically analyzed",
+                instance.module
+            ))
+        })?;
+        if module_stack.contains(&instance.module) {
+            let mut cycle = module_stack.iter().map(SmolStr::as_str).collect::<Vec<_>>();
+            cycle.push(instance.module.as_str());
+            return Err(semantic_error(
+                SemanticErrorKind::CircularDependency(format!(
+                    "module hierarchy {} at instance '{path}'",
+                    cycle.join(" -> ")
+                )),
+                instance.span,
+            ));
+        }
+
+        let connections = self.bind_connections(instance, child, parent_scope, path)?;
+        let overrides = bind_parameter_overrides(instance, child, path)?;
+        let mut scope = ScopeMap {
+            instance_path: Some(path.into()),
+            ..ScopeMap::default()
+        };
+        scope.nodes.insert(
+            "0".into(),
+            NodeBinding {
+                name: "0".into(),
+                discipline: None,
+            },
+        );
+        for (port, connection) in child.ports.iter().zip(connections) {
+            let (binding, connected) = match connection {
+                Some(binding) => (binding, true),
+                None => {
+                    let name = self.fresh_name(&port.name);
+                    let index = self.flattened.internal_nodes.len();
+                    self.flattened.internal_nodes.push(AnalyzedInternalNode {
+                        name: name.clone(),
+                        discipline: port.discipline.clone(),
+                        index,
+                    });
+                    (
+                        NodeBinding {
+                            name,
+                            discipline: Some(port.discipline.clone()),
+                        },
+                        false,
+                    )
+                }
+            };
+            scope.nodes.insert(port.name.clone(), binding);
+            scope.port_connected.insert(port.name.clone(), connected);
+        }
+        for ground in &child.ground_nodes {
+            scope.nodes.insert(
+                ground.clone(),
+                NodeBinding {
+                    name: "0".into(),
+                    discipline: None,
+                },
+            );
+        }
+        for node in &child.internal_nodes {
+            let name = self.fresh_name(&node.name);
+            let index = self.flattened.internal_nodes.len();
+            self.flattened.internal_nodes.push(AnalyzedInternalNode {
+                name: name.clone(),
+                discipline: node.discipline.clone(),
+                index,
+            });
+            scope.nodes.insert(
+                node.name.clone(),
+                NodeBinding {
+                    name,
+                    discipline: Some(node.discipline.clone()),
+                },
+            );
+        }
+
+        // Allocate all parameter names before rewriting defaults and ranges;
+        // this makes forward references diagnostic-preserving instead of
+        // accidentally binding to a similarly named parent parameter.
+        let parameter_base = self.flattened.parameters.len();
+        for (index, parameter) in child.parameters.iter().enumerate() {
+            let name = self.fresh_name(&parameter.name);
+            scope.parameters.insert(parameter.name.clone(), name);
+            scope
+                .parameter_given
+                .insert(parameter.name.clone(), overrides.contains_key(&index));
+        }
+        for (index, parameter) in child.parameters.iter().enumerate() {
+            let mut parameter = parameter.clone();
+            parameter.name = scope.parameters[&parameter.name].clone();
+            parameter.is_public = false;
+            parameter.default_expr = if let Some(override_expr) = overrides.get(&index) {
+                parameter.default = None;
+                Some(rewrite_expression(override_expr, parent_scope)?)
+            } else {
+                parameter
+                    .default_expr
+                    .as_ref()
+                    .map(|expr| rewrite_expression(expr, &scope))
+                    .transpose()?
+            };
+            if let Some(range) = &mut parameter.range {
+                range.min_parameter =
+                    mapped_optional_parameter(range.min_parameter.as_ref(), &scope, instance.span)?;
+                range.max_parameter =
+                    mapped_optional_parameter(range.max_parameter.as_ref(), &scope, instance.span)?;
+                range.exclude_parameters = range
+                    .exclude_parameters
+                    .iter()
+                    .map(|name| {
+                        scope.parameters.get(name).cloned().ok_or_else(|| {
+                            semantic_error(
+                                SemanticErrorKind::UndeclaredSymbol { name: name.clone() },
+                                instance.span,
+                            )
+                        })
+                    })
+                    .collect::<CompileResult<Vec<_>>>()?;
+                range.min_expression = range
+                    .min_expression
+                    .as_ref()
+                    .map(|expr| rewrite_expression(expr, &scope))
+                    .transpose()?;
+                range.max_expression = range
+                    .max_expression
+                    .as_ref()
+                    .map(|expr| rewrite_expression(expr, &scope))
+                    .transpose()?;
+                range.exclude_expressions = range
+                    .exclude_expressions
+                    .iter()
+                    .map(|expr| rewrite_expression(expr, &scope))
+                    .collect::<CompileResult<Vec<_>>>()?;
+            }
+            self.flattened.parameters.push(parameter);
+        }
+        debug_assert_eq!(
+            self.flattened.parameters.len(),
+            parameter_base + child.parameters.len()
+        );
+
+        let variable_base = self.flattened.variables.len();
+        for variable in &child.variables {
+            let mut variable = variable.clone();
+            let original = variable.name.clone();
+            variable.name = self.fresh_name(&original);
+            scope.variables.insert(original, variable.name.clone());
+            self.flattened.variables.push(variable);
+        }
+        for (name, array) in &child.arrays {
+            let mapped_name = self.fresh_name(name);
+            scope.arrays.insert(name.clone(), mapped_name.clone());
+            self.flattened.arrays.insert(
+                mapped_name,
+                AnalyzedArray {
+                    base: variable_base + array.base,
+                    lower: array.lower,
+                    len: array.len,
+                },
+            );
+        }
+        for branch in &child.branches {
+            let mapped_name = self.fresh_name(&branch.name);
+            scope
+                .branches
+                .insert(branch.name.clone(), mapped_name.clone());
+            self.flattened.branches.push(AnalyzedBranch {
+                name: mapped_name,
+                pos_node: mapped_node_name(&scope, &branch.pos_node, instance.span)?,
+                neg_node: if branch.neg_node.is_empty() {
+                    SmolStr::default()
+                } else {
+                    mapped_node_name(&scope, &branch.neg_node, instance.span)?
+                },
+                discipline: branch.discipline.clone(),
+            });
+        }
+
+        self.flattened.statements.extend(
+            child
+                .statements
+                .iter()
+                .map(|statement| rewrite_statement(statement, &scope, variable_base))
+                .collect::<CompileResult<Vec<_>>>()?,
+        );
+        self.flattened.body.extend(
+            child
+                .body
+                .iter()
+                .map(|region| rewrite_region(region, &scope, variable_base))
+                .collect::<CompileResult<Vec<_>>>()?,
+        );
+        self.flattened.contributions.extend(
+            child
+                .contributions
+                .iter()
+                .map(|contribution| rewrite_contribution(contribution, &scope))
+                .collect::<CompileResult<Vec<_>>>()?,
+        );
+
+        module_stack.push(instance.module.clone());
+        let nested = self.append_instances(child_source, &scope, module_stack, path);
+        module_stack.pop();
+        nested
+    }
+
+    fn bind_connections(
+        &mut self,
+        instance: &ModuleInstance,
+        child: &AnalyzedModule,
+        parent_scope: &ScopeMap,
+        path: &str,
+    ) -> CompileResult<Vec<Option<NodeBinding>>> {
+        let has_named = instance
+            .connections
+            .iter()
+            .any(|connection| matches!(connection, Connection::Named { .. }));
+        let has_ordered = instance
+            .connections
+            .iter()
+            .any(|connection| matches!(connection, Connection::Ordered { .. }));
+        if has_named && has_ordered {
+            return Err(semantic_error(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "instance '{path}' mixes named and ordered port connections"
+                )),
+                instance.span,
+            ));
+        }
+        let mut bound = vec![None; child.ports.len()];
+        let mut seen = vec![false; child.ports.len()];
+        if has_named {
+            for connection in &instance.connections {
+                let Connection::Named { port, signal, span } = connection else {
+                    unreachable!()
+                };
+                let Some(index) = child
+                    .ports
+                    .iter()
+                    .position(|candidate| candidate.name == *port)
+                else {
+                    return Err(semantic_error(
+                        SemanticErrorKind::UndeclaredSymbol { name: port.clone() },
+                        *span,
+                    ));
+                };
+                if seen[index] {
+                    return Err(semantic_error(
+                        SemanticErrorKind::DuplicateSymbol {
+                            name: port.clone(),
+                            first_defined: *span,
+                        },
+                        *span,
+                    ));
+                }
+                seen[index] = true;
+                bound[index] = signal
+                    .as_ref()
+                    .map(|signal| {
+                        resolve_connection(signal, parent_scope, path, &child.ports[index])
+                    })
+                    .transpose()?;
+            }
+        } else {
+            if instance.connections.len() > child.ports.len() {
+                return Err(semantic_error(
+                    SemanticErrorKind::ArgumentCountMismatch {
+                        name: path.to_string(),
+                        expected: format!("at most {} port connections", child.ports.len()),
+                        got: instance.connections.len(),
+                    },
+                    instance.span,
+                ));
+            }
+            for (index, connection) in instance.connections.iter().enumerate() {
+                let Connection::Ordered { signal, .. } = connection else {
+                    unreachable!()
+                };
+                bound[index] = signal
+                    .as_ref()
+                    .map(|signal| {
+                        resolve_connection(signal, parent_scope, path, &child.ports[index])
+                    })
+                    .transpose()?;
+            }
+        }
+        Ok(bound)
+    }
+
+    fn fresh_name(&mut self, leaf: &str) -> SmolStr {
+        loop {
+            let name = SmolStr::from(format!("__rspice_h{}_{}", self.next_name, leaf));
+            self.next_name += 1;
+            if self.used_names.insert(name.clone()) {
+                return name;
+            }
+        }
+    }
+}
+
+fn bind_parameter_overrides(
+    instance: &ModuleInstance,
+    child: &AnalyzedModule,
+    path: &str,
+) -> CompileResult<HashMap<usize, Expression>> {
+    let has_named = instance
+        .parameters
+        .iter()
+        .any(|parameter| parameter.name.is_some());
+    let has_ordered = instance
+        .parameters
+        .iter()
+        .any(|parameter| parameter.name.is_none());
+    if has_named && has_ordered {
+        return Err(semantic_error(
+            SemanticErrorKind::UnsupportedFeature(format!(
+                "instance '{path}' mixes named and ordered parameter overrides"
+            )),
+            instance.span,
+        ));
+    }
+    if has_ordered && instance.parameters.len() > child.parameters.len() {
+        return Err(semantic_error(
+            SemanticErrorKind::ArgumentCountMismatch {
+                name: path.to_string(),
+                expected: format!("at most {} parameter overrides", child.parameters.len()),
+                got: instance.parameters.len(),
+            },
+            instance.span,
+        ));
+    }
+    let aliases: HashMap<&str, usize> = child
+        .param_aliases
+        .iter()
+        .map(|alias| (alias.alias.as_str(), alias.target))
+        .collect();
+    let mut overrides = HashMap::new();
+    for (ordered_index, parameter) in instance.parameters.iter().enumerate() {
+        let index = match &parameter.name {
+            Some(name) => child
+                .parameters
+                .iter()
+                .position(|candidate| candidate.name == *name)
+                .or_else(|| aliases.get(name.as_str()).copied())
+                .ok_or_else(|| {
+                    semantic_error(
+                        SemanticErrorKind::UndeclaredSymbol { name: name.clone() },
+                        parameter.span,
+                    )
+                })?,
+            None => ordered_index,
+        };
+        if overrides.insert(index, parameter.value.clone()).is_some() {
+            let name = child.parameters[index].name.clone();
+            return Err(semantic_error(
+                SemanticErrorKind::DuplicateSymbol {
+                    name,
+                    first_defined: parameter.span,
+                },
+                parameter.span,
+            ));
+        }
+    }
+    Ok(overrides)
+}
+
+fn resolve_connection(
+    expression: &Expression,
+    parent_scope: &ScopeMap,
+    path: &str,
+    child_port: &super::AnalyzedPort,
+) -> CompileResult<NodeBinding> {
+    let source_name = match expression {
+        Expression::Identifier(identifier) => identifier.name.as_str(),
+        Expression::Number(number) if number.value == 0.0 => "0",
+        _ => {
+            return Err(semantic_error(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "analog port '{}' of instance '{path}' must connect to a net identifier or ground",
+                    child_port.name
+                )),
+                expression.span(),
+            ));
+        }
+    };
+    let binding = parent_scope
+        .nodes
+        .get(source_name)
+        .cloned()
+        .ok_or_else(|| {
+            semantic_error(
+                SemanticErrorKind::UndeclaredSymbol {
+                    name: source_name.into(),
+                },
+                expression.span(),
+            )
+        })?;
+    if let Some(parent_discipline) = &binding.discipline
+        && parent_discipline != &child_port.discipline
+    {
+        return Err(semantic_error(
+            SemanticErrorKind::UnsupportedFeature(format!(
+                "discipline mismatch on instance '{path}' port '{}': expected '{}', connected net uses '{}'",
+                child_port.name, child_port.discipline, parent_discipline
+            )),
+            expression.span(),
+        ));
+    }
+    Ok(binding)
+}
+
+fn rewrite_statement(
+    statement: &AnalyzedStatement,
+    scope: &ScopeMap,
+    variable_base: usize,
+) -> CompileResult<AnalyzedStatement> {
+    Ok(match statement {
+        AnalyzedStatement::Assignment(assignment) => {
+            AnalyzedStatement::Assignment(rewrite_assignment(assignment, scope, variable_base)?)
+        }
+        AnalyzedStatement::Loop(loop_) => AnalyzedStatement::Loop(AnalyzedLoop {
+            condition: rewrite_expression(&loop_.condition, scope)?,
+            body: loop_
+                .body
+                .iter()
+                .map(|statement| rewrite_statement(statement, scope, variable_base))
+                .collect::<CompileResult<Vec<_>>>()?,
+            span: loop_.span,
+        }),
+    })
+}
+
+fn rewrite_region(
+    region: &AnalyzedRegion,
+    scope: &ScopeMap,
+    variable_base: usize,
+) -> CompileResult<AnalyzedRegion> {
+    Ok(match region {
+        AnalyzedRegion::Assignment(assignment) => {
+            AnalyzedRegion::Assignment(rewrite_assignment(assignment, scope, variable_base)?)
+        }
+        AnalyzedRegion::Contribution(contribution) => {
+            AnalyzedRegion::Contribution(rewrite_contribution(contribution, scope)?)
+        }
+        AnalyzedRegion::Conditional {
+            condition,
+            then_body,
+            else_body,
+            span,
+        } => AnalyzedRegion::Conditional {
+            condition: rewrite_expression(condition, scope)?,
+            then_body: then_body
+                .iter()
+                .map(|region| rewrite_region(region, scope, variable_base))
+                .collect::<CompileResult<Vec<_>>>()?,
+            else_body: else_body
+                .iter()
+                .map(|region| rewrite_region(region, scope, variable_base))
+                .collect::<CompileResult<Vec<_>>>()?,
+            span: *span,
+        },
+        AnalyzedRegion::Loop {
+            condition,
+            body,
+            span,
+        } => AnalyzedRegion::Loop {
+            condition: rewrite_expression(condition, scope)?,
+            body: body
+                .iter()
+                .map(|region| rewrite_region(region, scope, variable_base))
+                .collect::<CompileResult<Vec<_>>>()?,
+            span: *span,
+        },
+    })
+}
+
+fn rewrite_assignment(
+    assignment: &AnalyzedAssignment,
+    scope: &ScopeMap,
+    variable_base: usize,
+) -> CompileResult<AnalyzedAssignment> {
+    let target = scope
+        .variables
+        .get(&assignment.target)
+        .or_else(|| scope.arrays.get(&assignment.target))
+        .cloned()
+        .unwrap_or_else(|| assignment.target.clone());
+    Ok(AnalyzedAssignment {
+        target,
+        var_index: variable_base
+            .checked_add(assignment.var_index)
+            .ok_or_else(|| internal_error("hierarchy variable index overflow".to_string()))?,
+        index: assignment
+            .index
+            .as_ref()
+            .map(|expression| rewrite_expression(expression, scope))
+            .transpose()?,
+        expression: rewrite_expression(&assignment.expression, scope)?,
+        expr_type: assignment.expr_type,
+        span: assignment.span,
+        unfiltered_initial_step_guard: assignment.unfiltered_initial_step_guard.as_ref().map(
+            |name| {
+                scope
+                    .variables
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| name.clone())
+            },
+        ),
+    })
+}
+
+fn rewrite_contribution(
+    contribution: &AnalyzedContribution,
+    scope: &ScopeMap,
+) -> CompileResult<AnalyzedContribution> {
+    let mut endpoints = contribution.branch.split(',');
+    let pos = endpoints.next().unwrap_or_default();
+    let neg = endpoints.next();
+    if endpoints.next().is_some() || pos.is_empty() {
+        return Err(internal_error(format!(
+            "invalid analyzed contribution branch '{}'",
+            contribution.branch
+        )));
+    }
+    let pos = mapped_node_name(scope, pos, contribution.span)?;
+    let branch = if let Some(neg) = neg {
+        let neg = mapped_node_name(scope, neg, contribution.span)?;
+        SmolStr::from(format!("{pos},{neg}"))
+    } else {
+        pos
+    };
+    Ok(AnalyzedContribution {
+        branch,
+        declared_branch: contribution
+            .declared_branch
+            .as_ref()
+            .map(|name| {
+                scope.branches.get(name).cloned().ok_or_else(|| {
+                    semantic_error(
+                        SemanticErrorKind::UndeclaredSymbol { name: name.clone() },
+                        contribution.span,
+                    )
+                })
+            })
+            .transpose()?,
+        is_current: contribution.is_current,
+        indirect: contribution.indirect,
+        expression: rewrite_expression(&contribution.expression, scope)?,
+        expr_type: contribution.expr_type,
+        span: contribution.span,
+    })
+}
+
+fn mapped_node_name(scope: &ScopeMap, name: &str, span: Span) -> CompileResult<SmolStr> {
+    scope
+        .nodes
+        .get(name)
+        .map(|binding| binding.name.clone())
+        .ok_or_else(|| {
+            semantic_error(
+                SemanticErrorKind::UndeclaredSymbol { name: name.into() },
+                span,
+            )
+        })
+}
+
+fn mapped_optional_parameter(
+    parameter: Option<&SmolStr>,
+    scope: &ScopeMap,
+    span: Span,
+) -> CompileResult<Option<SmolStr>> {
+    parameter
+        .map(|name| {
+            scope.parameters.get(name).cloned().ok_or_else(|| {
+                semantic_error(
+                    SemanticErrorKind::UndeclaredSymbol { name: name.clone() },
+                    span,
+                )
+            })
+        })
+        .transpose()
+}
+
+fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResult<Expression> {
+    Ok(match expression {
+        Expression::Number(_) | Expression::StringLit(_) => expression.clone(),
+        Expression::Identifier(identifier) => Expression::Identifier(Identifier {
+            name: scope
+                .parameters
+                .get(&identifier.name)
+                .or_else(|| scope.variables.get(&identifier.name))
+                .cloned()
+                .unwrap_or_else(|| identifier.name.clone()),
+            span: identifier.span,
+        }),
+        Expression::SystemFunction(function) => {
+            if let Some(value) = rewritten_connectivity_predicate(
+                &function.name,
+                &function.args,
+                function.span,
+                scope,
+            ) {
+                value
+            } else {
+                Expression::SystemFunction(SystemFunction {
+                    name: function.name.clone(),
+                    args: rewrite_expressions(&function.args, scope)?,
+                    span: function.span,
+                })
+            }
+        }
+        Expression::Binary(binary) => Expression::Binary(BinaryExpr {
+            op: binary.op,
+            left: Box::new(rewrite_expression(&binary.left, scope)?),
+            right: Box::new(rewrite_expression(&binary.right, scope)?),
+            span: binary.span,
+        }),
+        Expression::Unary(unary) => Expression::Unary(UnaryExpr {
+            op: unary.op,
+            operand: Box::new(rewrite_expression(&unary.operand, scope)?),
+            span: unary.span,
+        }),
+        Expression::Conditional(conditional) => Expression::Conditional(ConditionalExpr {
+            condition: Box::new(rewrite_expression(&conditional.condition, scope)?),
+            then_expr: Box::new(rewrite_expression(&conditional.then_expr, scope)?),
+            else_expr: Box::new(rewrite_expression(&conditional.else_expr, scope)?),
+            span: conditional.span,
+        }),
+        Expression::Call(call) => {
+            if let Some(value) =
+                rewritten_connectivity_predicate(&call.name, &call.args, call.span, scope)
+            {
+                value
+            } else {
+                let mut args = rewrite_expressions(&call.args, scope)?;
+                qualify_noise_call_name(&call.name, &mut args, scope);
+                Expression::Call(CallExpr {
+                    name: call.name.clone(),
+                    args,
+                    span: call.span,
+                })
+            }
+        }
+        Expression::BranchAccess(access) => {
+            Expression::BranchAccess(rewrite_branch_access(access, scope)?)
+        }
+        Expression::ArrayAccess(access) => Expression::ArrayAccess(ArrayAccessExpr {
+            array: scope
+                .arrays
+                .get(&access.array)
+                .cloned()
+                .unwrap_or_else(|| access.array.clone()),
+            index: Box::new(rewrite_expression(&access.index, scope)?),
+            span: access.span,
+        }),
+        Expression::ArrayLiteral(array) => Expression::ArrayLiteral(ArrayLiteralExpr {
+            elements: rewrite_expressions(&array.elements, scope)?,
+            span: array.span,
+        }),
+        Expression::AnalogOperator(operator) => {
+            Expression::AnalogOperator(rewrite_analog_operator(operator, scope)?)
+        }
+        Expression::NoiseSource(noise) => {
+            Expression::NoiseSource(rewrite_noise_source(noise, scope)?)
+        }
+    })
+}
+
+fn qualify_noise_call_name(name: &str, arguments: &mut [Expression], scope: &ScopeMap) {
+    let Some(path) = &scope.instance_path else {
+        return;
+    };
+    let name_index = match name {
+        "white_noise" => Some(1),
+        "flicker_noise" => Some(2),
+        "noise_table" | "noise_table_log" => Some(1),
+        _ => None,
+    };
+    let Some(Expression::StringLit(label)) = name_index.and_then(|index| arguments.get_mut(index))
+    else {
+        return;
+    };
+    label.value = SmolStr::from(format!("{path}:{}", label.value));
+}
+
+fn rewritten_connectivity_predicate(
+    name: &str,
+    arguments: &[Expression],
+    span: Span,
+    scope: &ScopeMap,
+) -> Option<Expression> {
+    let Expression::Identifier(identifier) = arguments.first()? else {
+        return None;
+    };
+    if arguments.len() != 1 {
+        return None;
+    }
+    let value = if name.eq_ignore_ascii_case("$param_given") {
+        scope.parameter_given.get(&identifier.name).copied()
+    } else if name.eq_ignore_ascii_case("$port_connected") {
+        scope.port_connected.get(&identifier.name).copied()
+    } else {
+        None
+    }?;
+    Some(number_expression(if value { 1.0 } else { 0.0 }, span))
+}
+
+fn rewrite_expressions(
+    expressions: &[Expression],
+    scope: &ScopeMap,
+) -> CompileResult<Vec<Expression>> {
+    expressions
+        .iter()
+        .map(|expression| rewrite_expression(expression, scope))
+        .collect()
+}
+
+fn rewrite_branch_access(access: &BranchAccess, scope: &ScopeMap) -> CompileResult<BranchAccess> {
+    Ok(match access {
+        BranchAccess::Nodes {
+            access,
+            pos,
+            neg,
+            span,
+        } => BranchAccess::Nodes {
+            access: access.clone(),
+            pos: if neg.is_none() {
+                scope
+                    .branches
+                    .get(pos)
+                    .cloned()
+                    .map(Ok)
+                    .unwrap_or_else(|| mapped_node_name(scope, pos, *span))?
+            } else {
+                mapped_node_name(scope, pos, *span)?
+            },
+            neg: neg
+                .as_ref()
+                .map(|name| mapped_node_name(scope, name, *span))
+                .transpose()?,
+            span: *span,
+        },
+        BranchAccess::Branch { access, name, span } => BranchAccess::Branch {
+            access: access.clone(),
+            name: scope.branches.get(name).cloned().ok_or_else(|| {
+                semantic_error(
+                    SemanticErrorKind::UndeclaredSymbol { name: name.clone() },
+                    *span,
+                )
+            })?,
+            span: *span,
+        },
+    })
+}
+
+fn rewrite_analog_operator(
+    operator: &AnalogOperator,
+    scope: &ScopeMap,
+) -> CompileResult<AnalogOperator> {
+    let optional = |expression: &Option<Box<Expression>>| {
+        expression
+            .as_ref()
+            .map(|expression| rewrite_expression(expression, scope).map(Box::new))
+            .transpose()
+    };
+    Ok(match operator {
+        AnalogOperator::Limit {
+            proposed,
+            candidate,
+            type_metadata,
+            selector,
+            span,
+        } => AnalogOperator::Limit {
+            proposed: Box::new(rewrite_expression(proposed, scope)?),
+            candidate: Box::new(rewrite_expression(candidate, scope)?),
+            type_metadata: optional(type_metadata)?,
+            selector: selector.clone(),
+            span: *span,
+        },
+        AnalogOperator::LimiterArgument { .. } => operator.clone(),
+        AnalogOperator::Ddt { expr, abstol, span } => AnalogOperator::Ddt {
+            expr: Box::new(rewrite_expression(expr, scope)?),
+            abstol: optional(abstol)?,
+            span: *span,
+        },
+        AnalogOperator::Idt {
+            expr,
+            ic,
+            assert_val,
+            abstol,
+            span,
+        } => AnalogOperator::Idt {
+            expr: Box::new(rewrite_expression(expr, scope)?),
+            ic: optional(ic)?,
+            assert_val: optional(assert_val)?,
+            abstol: optional(abstol)?,
+            span: *span,
+        },
+        AnalogOperator::IdtMod {
+            expr,
+            ic,
+            modulus,
+            offset,
+            abstol,
+            span,
+        } => AnalogOperator::IdtMod {
+            expr: Box::new(rewrite_expression(expr, scope)?),
+            ic: optional(ic)?,
+            modulus: optional(modulus)?,
+            offset: optional(offset)?,
+            abstol: optional(abstol)?,
+            span: *span,
+        },
+        AnalogOperator::Ddx { expr, probe, span } => AnalogOperator::Ddx {
+            expr: Box::new(rewrite_expression(expr, scope)?),
+            probe: rewrite_branch_access(probe, scope)?,
+            span: *span,
+        },
+        AnalogOperator::Limexp { expr, span } => AnalogOperator::Limexp {
+            expr: Box::new(rewrite_expression(expr, scope)?),
+            span: *span,
+        },
+        AnalogOperator::Absdelay {
+            expr,
+            delay,
+            max_delay,
+            span,
+        } => AnalogOperator::Absdelay {
+            expr: Box::new(rewrite_expression(expr, scope)?),
+            delay: Box::new(rewrite_expression(delay, scope)?),
+            max_delay: optional(max_delay)?,
+            span: *span,
+        },
+        AnalogOperator::Transition {
+            expr,
+            delay,
+            rise,
+            fall,
+            tolerance,
+            span,
+        } => AnalogOperator::Transition {
+            expr: Box::new(rewrite_expression(expr, scope)?),
+            delay: optional(delay)?,
+            rise: optional(rise)?,
+            fall: optional(fall)?,
+            tolerance: optional(tolerance)?,
+            span: *span,
+        },
+        AnalogOperator::Slew {
+            expr,
+            max_rise,
+            max_fall,
+            span,
+        } => AnalogOperator::Slew {
+            expr: Box::new(rewrite_expression(expr, scope)?),
+            max_rise: optional(max_rise)?,
+            max_fall: optional(max_fall)?,
+            span: *span,
+        },
+        AnalogOperator::LastCrossing { expr, edge, span } => AnalogOperator::LastCrossing {
+            expr: Box::new(rewrite_expression(expr, scope)?),
+            edge: *edge,
+            span: *span,
+        },
+        AnalogOperator::Laplace { kind, expr, span } => AnalogOperator::Laplace {
+            kind: rewrite_laplace_kind(kind, scope)?,
+            expr: Box::new(rewrite_expression(expr, scope)?),
+            span: *span,
+        },
+        AnalogOperator::Zi { kind, expr, span } => AnalogOperator::Zi {
+            kind: rewrite_zi_kind(kind, scope)?,
+            expr: Box::new(rewrite_expression(expr, scope)?),
+            span: *span,
+        },
+    })
+}
+
+fn rewrite_laplace_kind(kind: &LaplaceKind, scope: &ScopeMap) -> CompileResult<LaplaceKind> {
+    Ok(match kind {
+        LaplaceKind::ZeroPole { zeros, poles } => LaplaceKind::ZeroPole {
+            zeros: rewrite_expressions(zeros, scope)?,
+            poles: rewrite_expressions(poles, scope)?,
+        },
+        LaplaceKind::ZeroDenominator { zeros, denominator } => LaplaceKind::ZeroDenominator {
+            zeros: rewrite_expressions(zeros, scope)?,
+            denominator: rewrite_expressions(denominator, scope)?,
+        },
+        LaplaceKind::NumeratorPole { numerator, poles } => LaplaceKind::NumeratorPole {
+            numerator: rewrite_expressions(numerator, scope)?,
+            poles: rewrite_expressions(poles, scope)?,
+        },
+        LaplaceKind::NumeratorDenominator {
+            numerator,
+            denominator,
+        } => LaplaceKind::NumeratorDenominator {
+            numerator: rewrite_expressions(numerator, scope)?,
+            denominator: rewrite_expressions(denominator, scope)?,
+        },
+    })
+}
+
+fn rewrite_zi_kind(kind: &ZiKind, scope: &ScopeMap) -> CompileResult<ZiKind> {
+    Ok(match kind {
+        ZiKind::ZeroPole { zeros, poles } => ZiKind::ZeroPole {
+            zeros: rewrite_expressions(zeros, scope)?,
+            poles: rewrite_expressions(poles, scope)?,
+        },
+        ZiKind::ZeroDenominator { zeros, denominator } => ZiKind::ZeroDenominator {
+            zeros: rewrite_expressions(zeros, scope)?,
+            denominator: rewrite_expressions(denominator, scope)?,
+        },
+        ZiKind::NumeratorPole { numerator, poles } => ZiKind::NumeratorPole {
+            numerator: rewrite_expressions(numerator, scope)?,
+            poles: rewrite_expressions(poles, scope)?,
+        },
+        ZiKind::NumeratorDenominator {
+            numerator,
+            denominator,
+        } => ZiKind::NumeratorDenominator {
+            numerator: rewrite_expressions(numerator, scope)?,
+            denominator: rewrite_expressions(denominator, scope)?,
+        },
+    })
+}
+
+fn rewrite_noise_source(noise: &NoiseSource, scope: &ScopeMap) -> CompileResult<NoiseSource> {
+    let qualified_name = |name: &Option<SmolStr>| {
+        name.as_ref().map(|name| match &scope.instance_path {
+            Some(path) => SmolStr::from(format!("{path}:{name}")),
+            None => name.clone(),
+        })
+    };
+    Ok(match noise {
+        NoiseSource::White { power, name, span } => NoiseSource::White {
+            power: Box::new(rewrite_expression(power, scope)?),
+            name: qualified_name(name),
+            span: *span,
+        },
+        NoiseSource::Flicker {
+            power,
+            exponent,
+            name,
+            span,
+        } => NoiseSource::Flicker {
+            power: Box::new(rewrite_expression(power, scope)?),
+            exponent: Box::new(rewrite_expression(exponent, scope)?),
+            name: qualified_name(name),
+            span: *span,
+        },
+        NoiseSource::Table { data, name, span } => NoiseSource::Table {
+            data: rewrite_expressions(data, scope)?,
+            name: qualified_name(name),
+            span: *span,
+        },
+    })
+}
+
+fn number_expression(value: f64, span: Span) -> Expression {
+    Expression::Number(NumberLit {
+        value,
+        raw: if value == 0.0 { "0.0" } else { "1.0" }.into(),
+        span,
+    })
+}
+
+fn semantic_error(kind: SemanticErrorKind, span: Span) -> CompileError {
+    SemanticError::new(kind, span).into()
+}
+
+fn internal_error(message: String) -> CompileError {
+    crate::error::CodeGenError::new(crate::error::CodeGenErrorKind::Internal(message)).into()
+}

@@ -5046,6 +5046,7 @@ dependencies = [
  "rspice-veriloga",
  "serde",
  "serde_json",
+ "tempfile",
  "wait-timeout",
 ]
 
@@ -5127,9 +5128,13 @@ name = "rspice-conformance"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "clap",
  "log",
  "num-complex",
  "rspice-core",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

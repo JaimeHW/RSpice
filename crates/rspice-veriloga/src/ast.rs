@@ -994,19 +994,33 @@ pub struct ModuleInstance {
     pub module: SmolStr,
     pub name: SmolStr,
     pub connections: Vec<Connection>,
-    pub parameters: Vec<(SmolStr, Expression)>,
+    pub parameters: Vec<ParameterOverride>,
+    pub span: Span,
+}
+
+/// Parameter override on a module instance. `name == None` is an ordered
+/// override; named and ordered overrides are retained distinctly so later
+/// elaboration never has to reconstruct source intent from a synthetic name.
+#[derive(Debug, Clone)]
+pub struct ParameterOverride {
+    pub name: Option<SmolStr>,
+    pub value: Expression,
     pub span: Span,
 }
 
 /// Port connection
 #[derive(Debug, Clone)]
 pub enum Connection {
-    /// Ordered connection
-    Ordered(Expression),
+    /// Ordered connection. `None` retains an explicitly unconnected port.
+    Ordered {
+        signal: Option<Expression>,
+        span: Span,
+    },
     /// Named connection: .port(signal)
     Named {
         port: SmolStr,
-        signal: Expression,
+        /// `None` retains `.port()` rather than inventing a signal.
+        signal: Option<Expression>,
         span: Span,
     },
 }

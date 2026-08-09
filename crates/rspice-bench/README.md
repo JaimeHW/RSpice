@@ -21,10 +21,13 @@ attributable to a phase rather than diluted across a whole process.
 
 | File | Contents |
 | :--- | :--- |
-| `src/main.rs` | CLI entry point: `gen`, `generated-rust`, `generated-stamp`, `klu`, `native-jit`, and `run` subcommands |
+| `src/main.rs` | CLI entry point: `gen`, `generated-rust`, `generated-compile`, `generated-stamp`, `klu`, `native-jit`, and `run` subcommands |
 | `src/runner.rs` | The `run` subcommand: locates executables, runs warmup + timed repeats per deck/simulator, computes min/median/mean and the median speedup, writes the scoreboard, prints the table |
 | `src/generate.rs` | The `gen` subcommand: deterministically regenerates the generated decks (RC ladders, MOS array) with byte-stable output — fixed formatting, no timestamps |
 | `src/generated_rust.rs` | Authenticated source-resource report and budget gate for checked-in Verilog-A Rust kernels |
+| `src/generated_compile.rs` | Reproducible generated-catalog compile-time measurement with package-only rebuild auditing |
+| `src/provenance.rs` | Shared source, toolchain, target, host, and repository provenance capture |
+| `src/report.rs` | Deterministic JSON report serialization and fail-closed verdict helpers |
 | `src/klu.rs` | The `klu` subcommand: in-process KLU kernel benchmark — analyze/factor/refactor/solve medians and fill per circuit-shaped pattern, with optional per-nonzero budgets |
 | `src/native_jit.rs` | The `native-jit` subcommand: in-process Verilog-A native JIT benchmark gate with median speedup and optional p95 budgets |
 | `src/error.rs` | `BenchError` with full context on every failure path |
@@ -60,6 +63,10 @@ target/release/rspice-bench klu --out benchmarks/scoreboards/klu.json
 target/release/rspice-bench generated-rust \
   --out benchmarks/scoreboards/generated-rust.json
 
+# Measure an isolated release check of the generated catalog
+target/release/rspice-bench generated-compile \
+  --out benchmarks/scoreboards/generated-compile.json
+
 # Measure five representative generated models against hand-written BSIM4
 cargo run -p rspice-bench --release --features generated-stamp-subset -- \
   generated-stamp --max-corpus-median-reference-ratio 1.25
@@ -86,6 +93,14 @@ metric into a non-zero-exit release budget.
 | `--max-stamp-state-payload-bytes <N>` | unset | Maximum persistent DDT/IDT stamp-state payload for any model instance |
 | `--top <N>` | 20 | Largest files and models retained in output |
 | `--out <PATH>` | unset | Optional deterministic JSON report |
+
+### `rspice-bench generated-compile`
+
+This gate prepares dependencies in an isolated target directory, then forces
+and times repeat release checks of representative generated leaf packages.
+Cargo JSON messages are audited so dependency rebuilds cannot silently pollute
+the samples. The JSON report authenticates the source bundle and captures the
+Rust toolchain, target, host, and Git provenance.
 
 ### `rspice-bench generated-stamp`
 

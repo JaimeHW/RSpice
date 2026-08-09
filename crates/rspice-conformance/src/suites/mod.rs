@@ -33,9 +33,13 @@
 //! [`execution`] as another [`ExecutionCorpus`](execution::ExecutionCorpus)
 //! and needs only a corpus directory and a manifest.
 
+#[cfg(feature = "circuit-suites")]
 pub mod execution;
+#[cfg(feature = "circuit-suites")]
 pub mod gf180mcu;
+#[cfg(feature = "circuit-suites")]
 pub mod ngspice;
+#[cfg(feature = "circuit-suites")]
 pub mod xyce;
 
 /// The generated Verilog-A built-ins, checked against captured fingerprints

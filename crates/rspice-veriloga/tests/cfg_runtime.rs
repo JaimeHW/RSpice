@@ -333,7 +333,7 @@ fn program(body: &str, names: &[String], bias: &Bias, staged: &[f64]) -> String 
         r#"#![allow(unused_variables, unused_parens, unused_mut, dead_code, clippy::all)]
 {RUNTIME_PRELUDE}
 
-fn analysis(_name: &str) -> f64 {{ 0.0 }}
+fn analysis(_name: &str) -> bool {{ false }}
 fn simparam(_name: &str, fallback: f64) -> f64 {{ fallback }}
 fn ddt(_operator: usize, _input: f64) -> f64 {{ 0.0 }}
 fn ddt_scale() -> f64 {{ 0.0 }}

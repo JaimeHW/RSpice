@@ -42,17 +42,14 @@
 //! dependency, so they are excluded. `use`, type positions, and paths all
 //! count equally: the metric tracks coupling, not import style.
 //!
-//! `device/veriloga_builtins/` is excluded, and no longer for the reason it was
-//! written. It held the generated corpus — 172 files, 49 MB — and generated code
-//! is the generator's business, not this ratchet's. The shard moved every one of
-//! those files into `rspice-veriloga-models`, leaving one hand-written file.
-//!
-//! It stays excluded because it would fail: the adapter names
-//! `crate::engine::SimulationError`, and `device` is rank 8 against `engine` at
-//! rank 12. That is a real upward edge, not an exemption this test has earned.
-//! Closing it means giving `instantiate_builtin` a device-level error and
-//! mapping it at the two `engine/builder` call sites; until then the exclusion
-//! is tracked debt, and should be deleted the moment that lands.
+//! Nothing under `src/` is excluded. `device/veriloga_builtins/` used to be,
+//! first because it held the generated corpus — 172 files, 49 MB, and generated
+//! code is the generator's business rather than this ratchet's — and then,
+//! after the shard moved those files into `rspice-veriloga-models`, because the
+//! one hand-written file left behind named `crate::engine::SimulationError`
+//! from rank 8. That was a real upward edge wearing an exemption's clothes.
+//! `instantiate_builtin` returns a device-level error now and `engine` converts,
+//! so the directory is measured like every other.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -213,7 +210,7 @@ fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
 }
 
-/// Every `.rs` file under `src/`, excluding generated Verilog-A.
+/// Every `.rs` file under `src/`.
 fn rust_sources(root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut pending = vec![root.to_path_buf()];
@@ -223,12 +220,6 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
         for entry in entries {
             let path = entry.expect("directory entry").path();
             if path.is_dir() {
-                if path
-                    .file_name()
-                    .is_some_and(|name| name == "veriloga_builtins")
-                {
-                    continue;
-                }
                 pending.push(path);
             } else if path.extension().is_some_and(|ext| ext == "rs") {
                 found.push(path);

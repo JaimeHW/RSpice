@@ -23,9 +23,11 @@ pub type Value = f64;
 /// Packed partial derivatives used by precompiled Verilog-A model bodies.
 ///
 /// This lives in the shared leaf dependency so every generated device does not
-/// have to parse its own copy. The fixed-size array and forced-inline operators
-/// preserve the same scalarized machine code at each generated call site.
+/// have to parse its own copy. Widths emitted by the shipped catalog use the
+/// loop-free fixed types below. This const-generic form is retained only as a
+/// correctness fallback for future widths above the fixed ceiling.
 #[doc(hidden)]
+#[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct Lanes<const N: usize>(pub [f64; N]);
 
@@ -96,6 +98,271 @@ impl<const N: usize> core::ops::Index<usize> for Lanes<N> {
     fn index(&self, index: usize) -> &f64 {
         &self.0[index]
     }
+}
+
+/// Defines one fixed-width derivative value with no source or IR loop in its
+/// arithmetic implementations. LLVM can inline these scalar expressions
+/// directly without rediscovering and rotating thousands of tiny loops in a
+/// wide generated stamp.
+macro_rules! define_fixed_lanes {
+    ($name:ident, $width:literal, [$($index:tt),+ $(,)?]) => {
+        #[doc(hidden)]
+        #[repr(transparent)]
+        #[derive(Clone, Copy)]
+        pub struct $name(pub [f64; $width]);
+
+        impl core::ops::Add for $name {
+            type Output = Self;
+
+            #[inline(always)]
+            fn add(self, rhs: Self) -> Self {
+                Self([$((self.0[$index] + rhs.0[$index])),+])
+            }
+        }
+
+        impl core::ops::Sub for $name {
+            type Output = Self;
+
+            #[inline(always)]
+            fn sub(self, rhs: Self) -> Self {
+                Self([$((self.0[$index] - rhs.0[$index])),+])
+            }
+        }
+
+        impl core::ops::Mul<f64> for $name {
+            type Output = Self;
+
+            #[inline(always)]
+            fn mul(self, rhs: f64) -> Self {
+                Self([$((self.0[$index] * rhs)),+])
+            }
+        }
+
+        impl core::ops::Div<f64> for $name {
+            type Output = Self;
+
+            #[inline(always)]
+            fn div(self, rhs: f64) -> Self {
+                Self([$((self.0[$index] / rhs)),+])
+            }
+        }
+
+        impl core::ops::Index<usize> for $name {
+            type Output = f64;
+
+            #[inline(always)]
+            fn index(&self, index: usize) -> &f64 {
+                &self.0[index]
+            }
+        }
+    };
+}
+
+define_fixed_lanes!(L2, 2, [0, 1]);
+define_fixed_lanes!(L3, 3, [0, 1, 2]);
+define_fixed_lanes!(L4, 4, [0, 1, 2, 3]);
+define_fixed_lanes!(L5, 5, [0, 1, 2, 3, 4]);
+define_fixed_lanes!(L6, 6, [0, 1, 2, 3, 4, 5]);
+define_fixed_lanes!(L7, 7, [0, 1, 2, 3, 4, 5, 6]);
+define_fixed_lanes!(L8, 8, [0, 1, 2, 3, 4, 5, 6, 7]);
+define_fixed_lanes!(L9, 9, [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+define_fixed_lanes!(L10, 10, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+define_fixed_lanes!(L11, 11, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+define_fixed_lanes!(L12, 12, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+define_fixed_lanes!(L13, 13, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+define_fixed_lanes!(L14, 14, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+define_fixed_lanes!(L15, 15, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+define_fixed_lanes!(
+    L16,
+    16,
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+);
+define_fixed_lanes!(
+    L17,
+    17,
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+);
+define_fixed_lanes!(
+    L18,
+    18,
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+);
+define_fixed_lanes!(
+    L19,
+    19,
+    [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18
+    ]
+);
+define_fixed_lanes!(
+    L20,
+    20,
+    [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
+    ]
+);
+define_fixed_lanes!(
+    L21,
+    21,
+    [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20
+    ]
+);
+define_fixed_lanes!(
+    L22,
+    22,
+    [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21
+    ]
+);
+define_fixed_lanes!(
+    L23,
+    23,
+    [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22
+    ]
+);
+define_fixed_lanes!(
+    L24,
+    24,
+    [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23
+    ]
+);
+define_fixed_lanes!(
+    L25,
+    25,
+    [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24
+    ]
+);
+define_fixed_lanes!(
+    L26,
+    26,
+    [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+        25
+    ]
+);
+define_fixed_lanes!(
+    L27,
+    27,
+    [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+        25, 26
+    ]
+);
+define_fixed_lanes!(
+    L28,
+    28,
+    [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+        25, 26, 27
+    ]
+);
+define_fixed_lanes!(
+    L29,
+    29,
+    [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+        25, 26, 27, 28
+    ]
+);
+define_fixed_lanes!(
+    L30,
+    30,
+    [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+        25, 26, 27, 28, 29
+    ]
+);
+define_fixed_lanes!(
+    L31,
+    31,
+    [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+        25, 26, 27, 28, 29, 30
+    ]
+);
+define_fixed_lanes!(
+    L32,
+    32,
+    [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+        25, 26, 27, 28, 29, 30, 31
+    ]
+);
+
+/// Installs one generated invalidation stage into its canonical destination
+/// slots. The generator proves the mapping shape, while these checks keep a
+/// stale or corrupt generated table from becoming unchecked memory access.
+///
+/// Kept out of line because installation is cold-path work and duplicating the
+/// loop into every model would recreate the compile-time cost this table form
+/// removes.
+#[doc(hidden)]
+#[inline(never)]
+pub fn install_generated_stage_values(destination: &mut [f64], values: &[f64], slots: &[u32]) {
+    assert_eq!(
+        values.len(),
+        slots.len(),
+        "generated stage value/slot count mismatch"
+    );
+    for (&value, &slot) in values.iter().zip(slots) {
+        let slot = usize::try_from(slot).expect("generated stage slot does not fit usize");
+        let destination = destination
+            .get_mut(slot)
+            .expect("generated stage slot is outside canonical storage");
+        *destination = value;
+    }
+}
+
+/// Apply dependency-ordered generated parameter-default aliases.
+///
+/// Validation runs immediately after every copy, before a later alias may read
+/// the destination, preserving Verilog-A declaration-order semantics.
+#[doc(hidden)]
+pub fn install_generated_parameter_aliases(
+    values: &mut [f64],
+    aliases: &[(u16, u16)],
+    validate: fn(usize, f64) -> Result<(), String>,
+) -> Result<(), String> {
+    for &(destination, source) in aliases {
+        let source = *values
+            .get(usize::from(source))
+            .expect("generated parameter-alias source is outside parameter storage");
+        let destination = usize::from(destination);
+        *values
+            .get_mut(destination)
+            .expect("generated parameter-alias destination is outside parameter storage") = source;
+        validate(destination, source)?;
+    }
+    Ok(())
+}
+
+/// Look up a lower-case generated parameter name in parallel sorted tables.
+#[doc(hidden)]
+pub fn find_generated_parameter_index(
+    sorted_names: &[&str],
+    parameter_indices: &[u16],
+    name: &str,
+) -> Option<usize> {
+    assert_eq!(
+        sorted_names.len(),
+        parameter_indices.len(),
+        "generated parameter lookup table length mismatch"
+    );
+    let mut left = 0usize;
+    let mut right = sorted_names.len();
+    while left < right {
+        let middle = left + (right - left) / 2;
+        if sorted_names[middle] < name {
+            left = middle + 1;
+        } else {
+            right = middle;
+        }
+    }
+    (sorted_names.get(left).copied() == Some(name)).then(|| usize::from(parameter_indices[left]))
 }
 
 #[doc(hidden)]
@@ -224,6 +491,13 @@ pub struct GeneratedParameterBound {
     pub label: &'static str,
 }
 
+/// Encoded generated parameter-bound index used for the absence sentinel.
+///
+/// Positive values are one-based indices into a generated bound pool. Keeping
+/// the sentinel explicit avoids relying on an enum's undocumented layout.
+#[doc(hidden)]
+pub const GENERATED_PARAMETER_BOUND_NONE: u16 = 0;
+
 #[doc(hidden)]
 pub const GENERATED_PARAMETER_MIN_EXCLUSIVE_FLAG: u8 = 1;
 #[doc(hidden)]
@@ -280,6 +554,56 @@ pub fn validate_generated_parameter_bounds(
         }
     }
     for excluded in excluded {
+        if value == excluded.value {
+            return Err(format!(
+                "parameter '{}' must not equal {}, got {}",
+                name, excluded.label, value
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Resolve a compact, one-based generated parameter-bound index.
+#[doc(hidden)]
+#[inline]
+pub fn resolve_generated_parameter_bound(
+    pool: &[GeneratedParameterBound],
+    encoded: u16,
+) -> Option<GeneratedParameterBound> {
+    if encoded == GENERATED_PARAMETER_BOUND_NONE {
+        return None;
+    }
+    let index = usize::from(encoded - 1);
+    Some(
+        *pool
+            .get(index)
+            .expect("generated parameter-bound index is outside its pool"),
+    )
+}
+
+/// Validate bounds stored as compact indices into a generated per-device pool.
+#[doc(hidden)]
+pub fn validate_generated_parameter_bound_indices(
+    name: &str,
+    value: f64,
+    flags: u8,
+    pool: &[GeneratedParameterBound],
+    min: u16,
+    max: u16,
+    excluded: &[u16],
+) -> Result<(), String> {
+    validate_generated_parameter_bounds(
+        name,
+        value,
+        flags,
+        resolve_generated_parameter_bound(pool, min),
+        resolve_generated_parameter_bound(pool, max),
+        &[],
+    )?;
+    for &encoded in excluded {
+        let excluded = resolve_generated_parameter_bound(pool, encoded)
+            .expect("generated parameter exclusion uses the absence sentinel");
         if value == excluded.value {
             return Err(format!(
                 "parameter '{}' must not equal {}, got {}",
@@ -5747,5 +6071,241 @@ impl<'a> GeneratedReactiveStamper<'a> {
             GeneratedDerivativeAxis::Node(node) => cache.node_axis(node),
             GeneratedDerivativeAxis::Branch(branch) => cache.branch_axis(branch),
         }
+    }
+}
+
+#[cfg(test)]
+mod fixed_lane_tests {
+    use super::*;
+
+    fn left<const N: usize>() -> [f64; N] {
+        let values = [
+            0.0,
+            -0.0,
+            f64::MIN_POSITIVE,
+            f64::from_bits(1),
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::from_bits(0x7ff8_0000_0000_0042),
+            -3.5,
+        ];
+        core::array::from_fn(|index| values[index % values.len()])
+    }
+
+    fn right<const N: usize>() -> [f64; N] {
+        let values = [
+            -0.0,
+            0.0,
+            -f64::MIN_POSITIVE,
+            f64::from_bits(2),
+            2.0,
+            -7.25,
+            f64::from_bits(0x7ff8_0000_0000_00a5),
+            f64::INFINITY,
+        ];
+        core::array::from_fn(|index| values[(index + 3) % values.len()])
+    }
+
+    fn assert_same_bits<const N: usize>(actual: [f64; N], expected: [f64; N]) {
+        for index in 0..N {
+            assert_eq!(
+                actual[index].to_bits(),
+                expected[index].to_bits(),
+                "lane {index} differs: actual={:?}, expected={:?}",
+                actual[index],
+                expected[index]
+            );
+        }
+    }
+
+    macro_rules! assert_fixed_width {
+        ($name:ident, $width:literal) => {{
+            let lhs = left::<$width>();
+            let rhs = right::<$width>();
+            assert_same_bits(($name(lhs) + $name(rhs)).0, (Lanes(lhs) + Lanes(rhs)).0);
+            assert_same_bits(($name(lhs) - $name(rhs)).0, (Lanes(lhs) - Lanes(rhs)).0);
+            assert_same_bits(($name(lhs) * -3.25).0, (Lanes(lhs) * -3.25).0);
+            assert_same_bits(($name(lhs) / -3.25).0, (Lanes(lhs) / -3.25).0);
+            for index in 0..$width {
+                assert_eq!($name(lhs)[index].to_bits(), lhs[index].to_bits());
+            }
+            assert_eq!(
+                core::mem::size_of::<$name>(),
+                core::mem::size_of::<[f64; $width]>()
+            );
+            assert_eq!(
+                core::mem::align_of::<$name>(),
+                core::mem::align_of::<[f64; $width]>()
+            );
+        }};
+    }
+
+    #[test]
+    fn every_fixed_lane_width_matches_the_generic_fallback_bit_for_bit() {
+        assert_fixed_width!(L2, 2);
+        assert_fixed_width!(L3, 3);
+        assert_fixed_width!(L4, 4);
+        assert_fixed_width!(L5, 5);
+        assert_fixed_width!(L6, 6);
+        assert_fixed_width!(L7, 7);
+        assert_fixed_width!(L8, 8);
+        assert_fixed_width!(L9, 9);
+        assert_fixed_width!(L10, 10);
+        assert_fixed_width!(L11, 11);
+        assert_fixed_width!(L12, 12);
+        assert_fixed_width!(L13, 13);
+        assert_fixed_width!(L14, 14);
+        assert_fixed_width!(L15, 15);
+        assert_fixed_width!(L16, 16);
+        assert_fixed_width!(L17, 17);
+        assert_fixed_width!(L18, 18);
+        assert_fixed_width!(L19, 19);
+        assert_fixed_width!(L20, 20);
+        assert_fixed_width!(L21, 21);
+        assert_fixed_width!(L22, 22);
+        assert_fixed_width!(L23, 23);
+        assert_fixed_width!(L24, 24);
+        assert_fixed_width!(L25, 25);
+        assert_fixed_width!(L26, 26);
+        assert_fixed_width!(L27, 27);
+        assert_fixed_width!(L28, 28);
+        assert_fixed_width!(L29, 29);
+        assert_fixed_width!(L30, 30);
+        assert_fixed_width!(L31, 31);
+        assert_fixed_width!(L32, 32);
+    }
+
+    #[test]
+    fn generated_stage_installation_handles_empty_contiguous_and_sparse_maps() {
+        let mut destination = [10.0, 11.0, 12.0, 13.0, 14.0];
+        install_generated_stage_values(&mut destination, &[], &[]);
+        assert_eq!(destination, [10.0, 11.0, 12.0, 13.0, 14.0]);
+
+        install_generated_stage_values(&mut destination, &[1.0, 2.0], &[1, 2]);
+        assert_eq!(destination, [10.0, 1.0, 2.0, 13.0, 14.0]);
+
+        install_generated_stage_values(&mut destination, &[7.0, 8.0], &[4, 0]);
+        assert_eq!(destination, [8.0, 1.0, 2.0, 13.0, 7.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "generated stage value/slot count mismatch")]
+    fn generated_stage_installation_rejects_length_mismatch() {
+        install_generated_stage_values(&mut [0.0; 2], &[1.0], &[]);
+    }
+
+    #[test]
+    #[should_panic(expected = "generated stage slot is outside canonical storage")]
+    fn generated_stage_installation_rejects_out_of_range_slots() {
+        install_generated_stage_values(&mut [0.0; 2], &[1.0], &[2]);
+    }
+
+    #[test]
+    fn generated_parameter_aliases_are_ordered_and_validated_after_each_copy() {
+        fn validate(index: usize, value: f64) -> Result<(), String> {
+            if matches!(index, 2 | 3) && value == 3.5 {
+                Ok(())
+            } else {
+                Err(format!("unexpected alias {index}={value}"))
+            }
+        }
+
+        let mut values = [3.5, 0.0, 0.0, 0.0];
+        install_generated_parameter_aliases(&mut values, &[(2, 0), (3, 2)], validate)
+            .expect("alias chain");
+        assert_eq!(values, [3.5, 0.0, 3.5, 3.5]);
+    }
+
+    #[test]
+    fn generated_parameter_aliases_stop_before_later_operations_on_validation_error() {
+        fn reject_first(_: usize, _: f64) -> Result<(), String> {
+            Err("invalid default".to_string())
+        }
+
+        let mut values = [2.0, 0.0, 0.0];
+        assert_eq!(
+            install_generated_parameter_aliases(&mut values, &[(1, 0), (2, 1)], reject_first),
+            Err("invalid default".to_string())
+        );
+        assert_eq!(values, [2.0, 2.0, 0.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "generated parameter-alias source is outside parameter storage")]
+    fn generated_parameter_aliases_reject_out_of_range_sources() {
+        install_generated_parameter_aliases(&mut [0.0; 1], &[(0, 1)], |_, _| Ok(()))
+            .expect("validation does not fail");
+    }
+
+    #[test]
+    fn generated_parameter_lookup_is_sorted_deterministic_and_compact() {
+        let names = ["alpha", "alpha", "beta", "zeta"];
+        let indices = [7, 9, 2, 4];
+        assert_eq!(
+            find_generated_parameter_index(&names, &indices, "alpha"),
+            Some(7)
+        );
+        assert_eq!(
+            find_generated_parameter_index(&names, &indices, "beta"),
+            Some(2)
+        );
+        assert_eq!(
+            find_generated_parameter_index(&names, &indices, "gamma"),
+            None
+        );
+        assert_eq!(
+            find_generated_parameter_index(&names, &indices, "Alpha"),
+            None
+        );
+        assert_eq!(core::mem::size_of_val(&indices[0]), 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "generated parameter lookup table length mismatch")]
+    fn generated_parameter_lookup_rejects_mismatched_tables() {
+        find_generated_parameter_index(&["alpha"], &[], "alpha");
+    }
+
+    #[test]
+    fn generated_parameter_bound_indices_preserve_sentinel_values_and_diagnostics() {
+        const POOL: [GeneratedParameterBound; 2] = [
+            GeneratedParameterBound {
+                value: -1.0,
+                label: "-1.0",
+            },
+            GeneratedParameterBound {
+                value: 2.0,
+                label: "2.0",
+            },
+        ];
+
+        assert_eq!(GENERATED_PARAMETER_BOUND_NONE, 0);
+        assert!(resolve_generated_parameter_bound(&POOL, 0).is_none());
+        let resolved = resolve_generated_parameter_bound(&POOL, 2).expect("bound exists");
+        assert_eq!(resolved.value.to_bits(), 2.0f64.to_bits());
+        assert_eq!(resolved.label, "2.0");
+        assert_eq!(core::mem::size_of_val(&2u16), core::mem::size_of::<u16>());
+
+        assert_eq!(
+            validate_generated_parameter_bound_indices("gain", -2.0, 0, &POOL, 1, 0, &[]),
+            Err("parameter 'gain' must be >= -1.0, got -2".to_string())
+        );
+        assert_eq!(
+            validate_generated_parameter_bound_indices("gain", 2.0, 0, &POOL, 0, 0, &[2]),
+            Err("parameter 'gain' must not equal 2.0, got 2".to_string())
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "generated parameter-bound index is outside its pool")]
+    fn generated_parameter_bound_indices_reject_out_of_range_values() {
+        resolve_generated_parameter_bound(&[], 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "generated parameter exclusion uses the absence sentinel")]
+    fn generated_parameter_bound_indices_reject_none_as_an_exclusion() {
+        validate_generated_parameter_bound_indices("gain", 0.0, 0, &[], 0, 0, &[0])
+            .expect("validation should panic before returning");
     }
 }

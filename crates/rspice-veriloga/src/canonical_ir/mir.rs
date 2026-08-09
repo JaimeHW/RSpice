@@ -50,6 +50,8 @@ pub struct MirNode {
 pub struct MirParameterSlot {
     pub id: ParamId,
     pub name: SmolStr,
+    #[serde(default = "default_true")]
+    pub is_public: bool,
     pub scope: ParameterScope,
     pub value_type: CanonicalValueType,
     pub default: Option<f64>,
@@ -149,6 +151,7 @@ impl MirModel {
             .map(|parameter| MirParameterSlot {
                 id: parameter.id,
                 name: parameter.name.clone(),
+                is_public: parameter.is_public,
                 scope: parameter.scope,
                 value_type: parameter.value_type,
                 default: parameter.default,
@@ -273,6 +276,10 @@ impl MirModel {
             Err(diagnostics)
         }
     }
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 impl From<HirContributionKind> for MirEquationKind {

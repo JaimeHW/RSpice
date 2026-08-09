@@ -90,6 +90,14 @@ pub struct CfgStructureMetrics {
     pub lane_widen_count: u64,
 }
 
+/// One normalized canonical CFG region used to assess family-kernel sharing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelRegionMetric {
+    pub fingerprint: String,
+    pub instruction_count: u64,
+    pub newton_instruction_count: u64,
+}
+
 /// Cooperative control surface for long-running compiler pipelines.
 ///
 /// Implementations must make [`Self::is_cancelled`] cheap and thread-safe.
@@ -144,6 +152,21 @@ pub struct PipelineMetrics {
     /// Final stamp CFG after the ordinary algebraic optimizer.
     #[serde(default)]
     pub optimized_cfg: CfgStructureMetrics,
+    /// Optimized primal CFG used by the independent noise evaluator.
+    #[serde(default)]
+    pub noise_cfg: CfgStructureMetrics,
+    /// Noise values by invalidation class: model, instance, temperature,
+    /// timestep, and Newton.
+    #[serde(default)]
+    pub noise_invalidation_value_count: [u64; 5],
+    /// Noise preprocessing instructions whose original value is already live
+    /// in an accepted stamp preprocessing stage. This is the exact structural
+    /// upper bound for sharing without adding arithmetic to stamp.
+    #[serde(default)]
+    pub noise_shared_preprocess_value_count: u64,
+    /// Normalized final-CFG block fingerprints for family-sharing discovery.
+    #[serde(default)]
+    pub kernel_regions: Vec<KernelRegionMetric>,
     /// Model-card-controlled branches that shape Newton-stage work.
     #[serde(default)]
     pub model_structural_guard_count: u64,

@@ -123,6 +123,10 @@ pub struct LookupTable {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompiledParameter {
     pub name: SmolStr,
+    /// Exposed through the selected module's instance-facing ABI. Hidden
+    /// hierarchy slots still participate in default and range evaluation.
+    #[serde(default = "default_true")]
+    pub is_public: bool,
     /// Alternate instance-facing names (aliasparam); setting an alias
     /// writes this parameter
     pub aliases: Vec<SmolStr>,
@@ -162,6 +166,10 @@ pub struct CompiledParameter {
     /// Programs computing parameter-dependent excluded values.
     #[serde(default)]
     pub exclude_programs: Vec<BytecodeProgram>,
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 /// Stamp program for a contribution

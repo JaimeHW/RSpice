@@ -234,8 +234,7 @@ fn generated_stamper_uses_linked_static_stamp_slots() {
 #[test]
 fn generated_runtime_snapshots_only_mutable_evaluation_state() {
     let manifest_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let generated_root = manifest_root.join("src/device/veriloga_builtins");
-    let runtime_path = generated_root.join("mod.rs");
+    let runtime_path = manifest_root.join("src/device/veriloga_builtins.rs");
     let registry_path = manifest_root.join("../rspice-veriloga-models/src/registry.rs");
     let nonlinear_path = manifest_root.join("src/circuit/nonlinear.rs");
 

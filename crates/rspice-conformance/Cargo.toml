@@ -18,6 +18,13 @@ rust-version.workspace = true
 # `tools/ci/test_ci_configuration.py` asserts no shipping crate depends on this.
 
 [features]
+# The deck-driven simulator suites remain the normal/default conformance
+# surface. Verilog-A tooling depends on this crate with `default-features =
+# false` so it can reuse only the generated-model oracle and benchmark harness
+# without compiling unrelated ngspice/Xyce runners or their corpora.
+default = ["circuit-suites"]
+circuit-suites = []
+
 # Forwarded, not local. The ngspice suite marks decks that instantiate a
 # generated Verilog-A built-in as unsupported when those models are not
 # compiled in, and expects them to run when they are. That decision has to
@@ -26,13 +33,17 @@ rust-version.workspace = true
 # false here and the suite would skip decks it should be running. A
 # conformance suite that quietly skips cases is worse than one that fails.
 veriloga-builtins-base = ["rspice-core/veriloga-builtins-base"]
+veriloga-builtins-models = [
+    "veriloga-builtins-base",
+    "rspice-core/veriloga-builtins-models",
+]
 # Same reasoning, one level up. The Xyce VANOISE decks assert the *opposite*
 # outcome depending on this feature: with the generated VBIC noise mechanisms
 # compiled in the deck must pass, without them it must fail closed as
 # `expected_unsupported`. An unforwarded feature reads false here, so the
 # suite would take the "unsupported" branch and pass vacuously even when the
 # models were built.
-veriloga-builtins = ["rspice-core/veriloga-builtins", "veriloga-builtins-base"]
+veriloga-builtins = ["rspice-core/veriloga-builtins", "veriloga-builtins-models"]
 
 [lib]
 doctest = false
@@ -40,23 +51,35 @@ doctest = false
 [dependencies]
 rspice-core = { path = "../rspice-core", version = "0.1.0" }
 blake3 = "1.5"
+clap.workspace = true
 log.workspace = true
 num-complex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile = "3.20"
 
 [[bin]]
 name = "rspice-ngspice-case-runner"
 path = "src/bin/ngspice_case_runner.rs"
 test = false
+required-features = ["circuit-suites"]
 
 [[bin]]
 name = "rspice-xyce-case-runner"
 path = "src/bin/xyce_case_runner.rs"
 test = false
+required-features = ["circuit-suites"]
 
 [[bin]]
 name = "rspice-xspice-ifspec-audit"
 path = "src/bin/xspice_ifspec_audit.rs"
 test = false
+required-features = ["circuit-suites"]
+
+[[bin]]
+name = "rspice-veriloga-golden"
+path = "src/bin/rspice_veriloga_golden.rs"
+required-features = ["veriloga-builtins-models"]
 
 [lints]
 workspace = true

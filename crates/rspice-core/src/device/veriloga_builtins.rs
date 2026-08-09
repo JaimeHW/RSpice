@@ -8,13 +8,14 @@
 //! result into the solver's matrices.
 //!
 //! That direction is the reason the adapter lives here and not in a Verilog-A
-//! crate: it speaks `crate::netlist`, `crate::solver`, `crate::CircuitData` and
-//! `crate::engine::SimulationError`. Moving it across would make a generated
-//! crate depend on `rspice-core`, closing the cycle
-//! `rspice-core -> rspice-veriloga-models -> rspice-core`.
+//! crate: it speaks `crate::netlist`, `crate::solver` and `crate::CircuitData`.
+//! Moving it across would make a generated crate depend on `rspice-core`,
+//! closing the cycle `rspice-core -> rspice-veriloga-models -> rspice-core`.
 //!
-//! The directory was called `veriloga_generated` while it actually held the
-//! generated tree.
+//! What it must *not* name is `crate::engine`. `device` is ranked below it, so
+//! instantiation failures leave here as `BuiltinInstantiationError` and the
+//! engine converts at the boundary. (Not an intra-doc link: the type is gated
+//! behind `veriloga-builtins-base` and this module doc is not.)
 
 #[cfg(feature = "veriloga-builtins-base")]
 use crate::solver::{ComplexMatrix, StaticMatrix};
@@ -209,6 +210,19 @@ impl BuiltinVerilogADevices {
                 .map(|device| device.kind.capture_rollback_state())
                 .collect(),
         }
+    }
+
+    #[inline]
+    pub(crate) fn capture_rollback_state_into(
+        &self,
+        rollback: &mut BuiltinVerilogADevicesRollback,
+    ) {
+        rollback.states.clear();
+        rollback.states.extend(
+            self.devices
+                .iter()
+                .map(|device| device.kind.capture_rollback_state()),
+        );
     }
 
     #[inline]
@@ -778,6 +792,32 @@ impl BuiltinVerilogAInstance {
     }
 }
 
+/// Why a netlist card could not be turned into a generated Verilog-A instance.
+///
+/// This exists so the adapter does not have to name `engine::SimulationError`.
+/// `device` sits at rank 8 in the crate's layer order and `engine` at rank 12,
+/// so returning the engine's error type here would be an upward edge — the
+/// exact inversion `tests/module_layering.rs` exists to forbid. The engine
+/// converts on the way out, which is the direction the ranking allows, and both
+/// call sites keep the `?` they already had.
+///
+/// Every case is a malformed or unresolvable instantiation, so one message
+/// carries it; a runtime evaluation failure is [`GeneratedEvaluationError`] and
+/// a different thing entirely.
+#[cfg(feature = "veriloga-builtins-base")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuiltinInstantiationError(pub String);
+
+#[cfg(feature = "veriloga-builtins-base")]
+impl std::fmt::Display for BuiltinInstantiationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+#[cfg(feature = "veriloga-builtins-base")]
+impl std::error::Error for BuiltinInstantiationError {}
+
 #[cfg(feature = "veriloga-builtins-base")]
 pub fn instantiate_builtin(
     model_name: &str,
@@ -786,7 +826,7 @@ pub fn instantiate_builtin(
     params: &[(String, crate::netlist::ParametricValue)],
     param_ctx: &crate::netlist::ParamContext,
     circuit: &mut crate::CircuitData,
-) -> Result<Option<BuiltinVerilogAInstance>, crate::engine::SimulationError> {
+) -> Result<Option<BuiltinVerilogAInstance>, BuiltinInstantiationError> {
     let Some(descriptor_name) = builtins::builtin_names()
         .iter()
         .find(|name| name.eq_ignore_ascii_case(model_name))
@@ -797,7 +837,7 @@ pub fn instantiate_builtin(
 
     let expected_nodes = builtins::node_count(descriptor_name).unwrap_or(0);
     if node_names.len() != expected_nodes {
-        return Err(crate::engine::SimulationError::Circuit(format!(
+        return Err(BuiltinInstantiationError(format!(
             "Generated Verilog-A instance '{}' expects {} terminals for model '{}', found {}",
             instance_name,
             expected_nodes,
@@ -834,7 +874,7 @@ pub fn instantiate_builtin(
             crate::netlist::ParametricValue::Resolved(value) => *value,
             crate::netlist::ParametricValue::Expression(expr) => {
                 crate::netlist::expr::eval_expression(expr, param_ctx).map_err(|error| {
-                    crate::engine::SimulationError::Circuit(format!(
+                    BuiltinInstantiationError(format!(
                         "Failed to resolve generated Verilog-A parameter '{}': {}",
                         name, error
                     ))
@@ -842,7 +882,7 @@ pub fn instantiate_builtin(
             }
             crate::netlist::ParametricValue::String(_)
             | crate::netlist::ParametricValue::StringExpression(_) => {
-                return Err(crate::engine::SimulationError::Circuit(format!(
+                return Err(BuiltinInstantiationError(format!(
                     "Generated Verilog-A parameter '{name}' requires a numeric value"
                 )));
             }
@@ -858,7 +898,7 @@ pub fn instantiate_builtin(
 
     let Some(kind) =
         builtins::instantiate(descriptor_name, &nodes, &branches, &resolved).map_err(|error| {
-            crate::engine::SimulationError::Circuit(format!(
+            BuiltinInstantiationError(format!(
                 "Failed to instantiate generated Verilog-A instance '{}': {}",
                 instance_name, error
             ))

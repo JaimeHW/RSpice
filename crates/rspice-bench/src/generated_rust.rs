@@ -77,12 +77,41 @@ struct GeneratedRustReport {
     max_stamp_state_payload_bytes_per_instance: u64,
     max_stamp_state_heap_allocations_per_instance: u64,
     max_legacy_stamp_state_heap_allocations_per_instance: u64,
+    structure: GeneratedStructure,
     categories: BTreeMap<String, SourceCategory>,
     largest_models: Vec<ModelSize>,
     largest_files: Vec<FileSize>,
     budgets: ResourceBudgets,
     passed: bool,
     failures: Vec<String>,
+}
+
+/// Stable syntactic counters for compile-cost shapes emitted by the backend.
+///
+/// These deliberately count exact generated spellings rather than trying to
+/// infer optimized LLVM IR. They are regression indicators; LLVM time traces
+/// remain the authority for optimizer cost.
+#[derive(Debug, Default, Serialize)]
+struct GeneratedStructure {
+    packed_lane_constructions: u64,
+    fixed_width_lane_constructions: u64,
+    fixed_lane_width_histogram: BTreeMap<usize, u64>,
+    generic_lane_fallback_constructions: u64,
+    emitted_source_loops: u64,
+    cache_scatter_assignments: u64,
+    cache_scatter_table_slots: u64,
+    capture_declarations: u64,
+    capture_assignments: u64,
+    bare_local_declarations: u64,
+    local_edge_assignments: u64,
+}
+
+#[derive(Debug)]
+pub(crate) struct AuthenticatedGeneratedBundle {
+    pub(crate) digest: String,
+    pub(crate) source_bytes: u64,
+    pub(crate) device_count: usize,
+    pub(crate) file_count: usize,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -162,9 +191,11 @@ fn build_report(
     let mut measured_bytes = 0u64;
     let mut source_lines = 0u64;
     let mut bundle_hasher = blake3::Hasher::new();
+    let mut structure = GeneratedStructure::default();
 
     for file in &manifest.files {
         let bytes = read_and_authenticate(&args.generated_root, file)?;
+        measure_structure(&bytes, &mut structure, &file.relative_path)?;
         let lines = count_lines(&bytes);
         let category = source_category(&file.relative_path);
         let summary = categories.entry(category.clone()).or_default();
@@ -298,6 +329,7 @@ fn build_report(
         max_stamp_state_payload_bytes_per_instance,
         max_stamp_state_heap_allocations_per_instance,
         max_legacy_stamp_state_heap_allocations_per_instance,
+        structure,
         categories,
         largest_models,
         largest_files,
@@ -339,6 +371,136 @@ fn read_and_authenticate(
         });
     }
     Ok(bytes)
+}
+
+/// Authenticates the complete generated bundle and returns the identity needed
+/// to make compile-time reports comparable with source-resource reports.
+pub(crate) fn authenticate_generated_bundle(
+    generated_root: &Path,
+) -> Result<AuthenticatedGeneratedBundle, BenchError> {
+    let manifest_path = generated_root.join(MANIFEST_FILE_NAME);
+    let manifest_text = fs::read_to_string(&manifest_path).map_err(|source| {
+        BenchError::io(
+            format!("read generated Rust manifest `{}`", manifest_path.display()),
+            source,
+        )
+    })?;
+    let manifest = parse_generated_builtin_manifest(&manifest_text).ok_or_else(|| {
+        BenchError::GeneratedRust {
+            message: format!(
+                "`{}` is not a supported generated Rust manifest",
+                manifest_path.display()
+            ),
+        }
+    })?;
+
+    let mut measured_bytes = 0u64;
+    let mut bundle_hasher = blake3::Hasher::new();
+    for file in &manifest.files {
+        let bytes = read_and_authenticate(generated_root, file)?;
+        measured_bytes = measured_bytes.saturating_add(file.bytes);
+        update_digest_record(&mut bundle_hasher, file.relative_path.as_bytes());
+        update_digest_record(&mut bundle_hasher, &bytes);
+    }
+    let digest = bundle_hasher.finalize().to_hex().to_string();
+    if measured_bytes != manifest.source_bytes || digest != manifest.bundle_digest {
+        return Err(BenchError::GeneratedRust {
+            message: format!(
+                "generated Rust bundle does not match its manifest: measured bytes={measured_bytes}, declared bytes={}, measured digest={digest}, declared digest={}",
+                manifest.source_bytes, manifest.bundle_digest
+            ),
+        });
+    }
+
+    Ok(AuthenticatedGeneratedBundle {
+        digest,
+        source_bytes: measured_bytes,
+        device_count: manifest.device_count,
+        file_count: manifest.file_count,
+    })
+}
+
+fn measure_structure(
+    bytes: &[u8],
+    structure: &mut GeneratedStructure,
+    relative_path: &str,
+) -> Result<(), BenchError> {
+    let source = std::str::from_utf8(bytes).map_err(|error| BenchError::GeneratedRust {
+        message: format!("generated Rust source `{relative_path}` is not UTF-8: {error}"),
+    })?;
+
+    let generic = source.matches("Lanes([").count() as u64;
+    let mut fixed = 0u64;
+    for width in 2..=32 {
+        let count = source.matches(&format!("L{width}([")).count() as u64;
+        fixed = fixed.saturating_add(count);
+        if count > 0 {
+            let total = structure
+                .fixed_lane_width_histogram
+                .entry(width)
+                .or_default();
+            *total = total.saturating_add(count);
+        }
+    }
+    structure.generic_lane_fallback_constructions = structure
+        .generic_lane_fallback_constructions
+        .saturating_add(generic);
+    structure.fixed_width_lane_constructions = structure
+        .fixed_width_lane_constructions
+        .saturating_add(fixed);
+    structure.packed_lane_constructions = structure
+        .packed_lane_constructions
+        .saturating_add(generic.saturating_add(fixed));
+
+    for line in source.lines() {
+        let line = line.trim_start();
+        if line.starts_with("for ") || line.starts_with("while ") || line.starts_with("loop {") {
+            structure.emitted_source_loops = structure.emitted_source_loops.saturating_add(1);
+        }
+        if line.starts_with("self.canonical_staged[") && line.contains("] = ") {
+            structure.cache_scatter_assignments =
+                structure.cache_scatter_assignments.saturating_add(1);
+        }
+        if line.starts_with("const CANONICAL_")
+            && line.contains("_STAGE_SLOTS: [u32;")
+            && let Some((_, values)) = line.split_once("= [")
+            && let Some(values) = values.strip_suffix("];")
+        {
+            let slots = if values.trim().is_empty() {
+                0
+            } else {
+                values.split(',').count() as u64
+            };
+            structure.cache_scatter_table_slots =
+                structure.cache_scatter_table_slots.saturating_add(slots);
+        }
+        if line.starts_with("let mut o") {
+            structure.capture_declarations = structure.capture_declarations.saturating_add(1);
+        }
+        if let Some((target, _)) = line.split_once(" = ") {
+            if target
+                .strip_prefix('o')
+                .is_some_and(is_compact_generated_local)
+            {
+                structure.capture_assignments = structure.capture_assignments.saturating_add(1);
+            } else if is_compact_generated_local(target) {
+                structure.local_edge_assignments =
+                    structure.local_edge_assignments.saturating_add(1);
+            }
+        }
+        if line
+            .strip_prefix("let ")
+            .and_then(|declaration| declaration.strip_suffix(';'))
+            .is_some_and(is_compact_generated_local)
+        {
+            structure.bare_local_declarations = structure.bare_local_declarations.saturating_add(1);
+        }
+    }
+    Ok(())
+}
+
+fn is_compact_generated_local(name: &str) -> bool {
+    !name.is_empty() && name.bytes().all(|byte| byte.is_ascii_uppercase())
 }
 
 fn apply_budgets(args: &GeneratedRustArgs, report: &mut GeneratedRustReport) {
@@ -428,6 +590,31 @@ fn print_report(report: &GeneratedRustReport) {
             category.files, category.bytes, category.lines
         );
     }
+    println!(
+        "  structure lanes={} fixed={} generic-fallback={} loops={} cache-scatter={} cache-table-slots={} captures={}/{} bare-locals={} edge-assignments={}",
+        report.structure.packed_lane_constructions,
+        report.structure.fixed_width_lane_constructions,
+        report.structure.generic_lane_fallback_constructions,
+        report.structure.emitted_source_loops,
+        report.structure.cache_scatter_assignments,
+        report.structure.cache_scatter_table_slots,
+        report.structure.capture_declarations,
+        report.structure.capture_assignments,
+        report.structure.bare_local_declarations,
+        report.structure.local_edge_assignments,
+    );
+    if !report.structure.fixed_lane_width_histogram.is_empty() {
+        println!(
+            "  fixed lane widths: {}",
+            report
+                .structure
+                .fixed_lane_width_histogram
+                .iter()
+                .map(|(width, count)| format!("L{width}={count}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+    }
     if !report.largest_models.is_empty() {
         println!("  largest models:");
         for model in &report.largest_models {
@@ -450,26 +637,7 @@ fn print_report(report: &GeneratedRustReport) {
 }
 
 fn write_report(path: &Path, report: &GeneratedRustReport) -> Result<(), BenchError> {
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        fs::create_dir_all(parent).map_err(|source| {
-            BenchError::io(
-                format!("create generated Rust report dir `{}`", parent.display()),
-                source,
-            )
-        })?;
-    }
-    let json = serde_json::to_string_pretty(report).map_err(|source| BenchError::Json {
-        context: "serialize generated Rust resource report".into(),
-        source,
-    })?;
-    fs::write(path, format!("{json}\n")).map_err(|source| {
-        BenchError::io(
-            format!("write generated Rust report `{}`", path.display()),
-            source,
-        )
-    })
+    crate::report::write(path, "rspice-generated-rust", report, false)
 }
 
 fn source_category(relative_path: &str) -> String {
@@ -521,5 +689,39 @@ mod tests {
         assert_eq!(count_lines(b"a"), 1);
         assert_eq!(count_lines(b"a\n"), 1);
         assert_eq!(count_lines(b"a\nb"), 2);
+    }
+
+    #[test]
+    fn structural_counters_match_generated_spellings() {
+        let source = br#"
+let a = Lanes([0f64; 4]);
+let b = L3([1f64, 2f64, 3f64]);
+const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 3] = [7, 11, 13];
+let F;
+C = D;
+for index in 0..4 {
+    self.canonical_staged[7] = values[index];
+}
+let mut oA = 0f64;
+oA = F;
+while condition {
+}
+loop {
+}
+"#;
+        let mut structure = GeneratedStructure::default();
+        measure_structure(source, &mut structure, "fixture.rs")
+            .expect("fixture is valid Rust text");
+        assert_eq!(structure.packed_lane_constructions, 2);
+        assert_eq!(structure.fixed_width_lane_constructions, 1);
+        assert_eq!(structure.fixed_lane_width_histogram.get(&3), Some(&1));
+        assert_eq!(structure.generic_lane_fallback_constructions, 1);
+        assert_eq!(structure.emitted_source_loops, 3);
+        assert_eq!(structure.cache_scatter_assignments, 1);
+        assert_eq!(structure.cache_scatter_table_slots, 3);
+        assert_eq!(structure.capture_declarations, 1);
+        assert_eq!(structure.capture_assignments, 1);
+        assert_eq!(structure.bare_local_declarations, 1);
+        assert_eq!(structure.local_edge_assignments, 1);
     }
 }

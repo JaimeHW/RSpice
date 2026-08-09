@@ -10,7 +10,7 @@
 //! This pass says which is which, and the emitter turns that into separate
 //! functions with separate caches. That is the *only* reason to split a body —
 //! never because it got large. Splitting for compile time was measured and
-//! costs 52% runtime (`benchmarks/reference/split-probe`).
+//! costs 52% runtime (`tools/perf-probes/archive/split`).
 //!
 //! ## Control dependence, not just data
 //!
@@ -727,6 +727,10 @@ pub struct Stage {
     /// Values this stage computes that a later one reads, as
     /// `(slot, value in this stage)`. The caller writes each to its slot.
     pub exports: Vec<(u32, ValueId)>,
+    /// Source-function value for each entry in `exports`. Keeping the origin
+    /// explicit lets independent slices prove that they are exporting the same
+    /// computation without depending on stage-local value numbering.
+    pub export_origins: Vec<ValueId>,
     /// Where each requested output landed, `None` if another stage computes it.
     pub outputs: Vec<Option<ValueId>>,
 }
@@ -1268,6 +1272,7 @@ fn build_stage(
     // such a value would have been "defined" in a block that no longer runs,
     // which is equally wrong and merely quieter.
     let mut exports = Vec::new();
+    let mut export_origins = Vec::new();
     for (index, slot) in slots.iter().enumerate() {
         let Some(slot) = *slot else { continue };
         let value = ValueId::from(index);
@@ -1275,7 +1280,10 @@ fn build_stage(
             continue;
         }
         match mapped[index] {
-            Some(mapped) => exports.push((slot, mapped)),
+            Some(mapped) => {
+                exports.push((slot, mapped));
+                export_origins.push(value);
+            }
             None => {
                 let home = block_of[index];
                 // How it is reached matters, because "kept but unreachable" and
@@ -1344,6 +1352,7 @@ fn build_stage(
         class,
         function: stage,
         exports,
+        export_origins,
         outputs,
     })
 }

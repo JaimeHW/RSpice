@@ -73,6 +73,7 @@ rspice-matrix.workspace = true
 rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0", features = ["native"] }
 serde.workspace = true
 serde_json.workspace = true
+tempfile = "3.20"
 wait-timeout = "0.2.1"
 
 [lints]

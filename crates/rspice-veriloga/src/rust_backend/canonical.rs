@@ -63,7 +63,9 @@ use crate::canonical_ir::cfg::{
     CfgValueType,
 };
 use crate::canonical_ir::cfg_lower::CfgModel;
-use crate::canonical_ir::cfg_opt::optimize_with_control;
+use crate::canonical_ir::cfg_opt::{
+    optimize_with_control, optimize_with_control_and_tracking, optimize_with_tracking,
+};
 use crate::canonical_ir::schedule::{
     InvalidationClass, Stage, schedule_with_parameter_scopes, split, structural_guards,
     worth_splitting,
@@ -72,10 +74,11 @@ use crate::canonical_ir::{
     AdSeed, BlockId, CanonicalIrArtifact, ExprId, MirEquationKind, ValueId, optimize_cfg,
 };
 use crate::metrics::{
-    CfgStructureMetrics, MetricsRecorder, PipelineCancelled, PipelineControl, PipelinePhase,
+    CfgStructureMetrics, KernelRegionMetric, MetricsRecorder, PipelineCancelled, PipelineControl,
+    PipelinePhase,
 };
 
-use super::emit::{EmitBindings, emit_body};
+use super::emit::{EmitBindings, emit_body, lane_runtime_types};
 use super::expr::parameter_field_names;
 use super::stamp_plan::{StampPlan, StampRow, split_row};
 use super::{GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames};
@@ -224,6 +227,293 @@ fn cfg_structure_metrics(function: &CfgFunction) -> CfgStructureMetrics {
     }
 }
 
+fn kernel_region_metrics(
+    artifact: &CanonicalIrArtifact,
+    function: &CfgFunction,
+    schedule: &crate::canonical_ir::schedule::Schedule,
+) -> Vec<KernelRegionMetric> {
+    fn visit(
+        function: &CfgFunction,
+        block: BlockId,
+        visited: &mut HashSet<BlockId>,
+        postorder: &mut Vec<BlockId>,
+    ) {
+        if !visited.insert(block) {
+            return;
+        }
+        for successor in function.block(block).successors() {
+            visit(function, successor, visited, postorder);
+        }
+        postorder.push(block);
+    }
+
+    let mut postorder = Vec::new();
+    visit(
+        function,
+        function.entry,
+        &mut HashSet::new(),
+        &mut postorder,
+    );
+    postorder.reverse();
+    let mut definitions = vec![None; function.values.len()];
+    for (block_index, block_id) in postorder.iter().enumerate() {
+        let block = function.block(*block_id);
+        for (local_index, value) in block
+            .params
+            .iter()
+            .copied()
+            .chain(
+                block
+                    .instructions
+                    .iter()
+                    .map(|instruction| instruction.result),
+            )
+            .enumerate()
+        {
+            definitions[usize::from(value)] = Some((block_index, local_index));
+        }
+    }
+
+    let mut node_indices = HashMap::new();
+    let mut branch_indices = HashMap::new();
+    let mut unknown_indices = HashMap::new();
+    let mut operator_indices = HashMap::new();
+    let mut staged_indices = HashMap::new();
+    for block_id in &postorder {
+        let block = function.block(*block_id);
+        for value_id in block.params.iter().copied().chain(
+            block
+                .instructions
+                .iter()
+                .map(|instruction| instruction.result),
+        ) {
+            match &function.value(value_id).kind {
+                CfgValueKind::NodePotential(node) => {
+                    let next = node_indices.len();
+                    node_indices.entry(*node).or_insert(next);
+                }
+                CfgValueKind::BranchFlow(branch) => {
+                    let next = branch_indices.len();
+                    branch_indices.entry(*branch).or_insert(next);
+                }
+                CfgValueKind::BranchUnknownFlow(branch) => {
+                    let next = unknown_indices.len();
+                    unknown_indices.entry(*branch).or_insert(next);
+                }
+                CfgValueKind::Ddt { operator, .. }
+                | CfgValueKind::Idt { operator, .. }
+                | CfgValueKind::Limit { operator, .. }
+                | CfgValueKind::LimitPrevious { operator, .. } => {
+                    let next = operator_indices.len();
+                    operator_indices.entry(*operator).or_insert(next);
+                }
+                CfgValueKind::Staged { slot } => {
+                    let next = staged_indices.len();
+                    staged_indices.entry(*slot).or_insert(next);
+                }
+                _ => {}
+            }
+        }
+    }
+    for index in 0..artifact.mir.nodes.len() {
+        let node = index.into();
+        let next = node_indices.len();
+        node_indices.entry(node).or_insert(next);
+    }
+    for index in 0..artifact.mir.branch_unknowns.len() {
+        let branch = index.into();
+        let next = unknown_indices.len();
+        unknown_indices.entry(branch).or_insert(next);
+    }
+
+    let lane_signature = |lane: u32| {
+        let lane = lane as usize;
+        if lane < artifact.mir.nodes.len() {
+            format!("n{}", node_indices[&lane.into()])
+        } else if lane < artifact.mir.nodes.len() + artifact.mir.branch_unknowns.len() {
+            let raw = lane - artifact.mir.nodes.len();
+            format!("b{}", unknown_indices[&raw.into()])
+        } else {
+            format!(
+                "c{}",
+                lane - artifact.mir.nodes.len() - artifact.mir.branch_unknowns.len()
+            )
+        }
+    };
+    let shape_signature = |value: ValueId| {
+        let Some(lanes) = function.lanes_of(value) else {
+            return String::new();
+        };
+        let mut out = String::from("[");
+        for (index, lane) in lanes.iter().copied().enumerate() {
+            if index != 0 {
+                out.push(',');
+            }
+            out.push_str(&lane_signature(lane));
+        }
+        out.push(']');
+        out
+    };
+
+    let base_signature = |value_id: ValueId| {
+        let value = function.value(value_id);
+        let mut out = format!(
+            "{:?}{}:",
+            schedule.class(value_id),
+            shape_signature(value_id)
+        );
+        match &value.kind {
+            CfgValueKind::RealConstant(value) => write!(out, "real:{:016x}", value.to_bits()),
+            CfgValueKind::BooleanConstant(value) => write!(out, "bool:{value}"),
+            CfgValueKind::BlockParameter => write!(out, "block-param"),
+            CfgValueKind::Parameter(parameter) => write!(
+                out,
+                "parameter:{}",
+                artifact.mir.parameters[usize::from(*parameter)].name
+            ),
+            CfgValueKind::ParameterGiven(parameter) => write!(
+                out,
+                "parameter-given:{}",
+                artifact.mir.parameters[usize::from(*parameter)].name
+            ),
+            CfgValueKind::Temperature => write!(out, "temperature"),
+            CfgValueKind::ThermalVoltage => write!(out, "thermal-voltage"),
+            CfgValueKind::Multiplicity => write!(out, "multiplicity"),
+            CfgValueKind::Time => write!(out, "time"),
+            CfgValueKind::Analysis(name) => write!(out, "analysis:{name}"),
+            CfgValueKind::SimParam { name, .. } => write!(out, "simparam:{name}"),
+            CfgValueKind::NodePotential(node) => write!(out, "node:{}", node_indices[node]),
+            CfgValueKind::BranchFlow(branch) => {
+                write!(out, "branch:{}", branch_indices[branch])
+            }
+            CfgValueKind::BranchUnknownFlow(branch) => {
+                write!(out, "unknown:{}", unknown_indices[branch])
+            }
+            CfgValueKind::Ddt { operator, .. } => {
+                write!(out, "ddt:{}", operator_indices[operator])
+            }
+            CfgValueKind::DdtScale => write!(out, "ddt-scale"),
+            CfgValueKind::Idt { operator, .. } => {
+                write!(out, "idt:{}", operator_indices[operator])
+            }
+            CfgValueKind::IdtScale => write!(out, "idt-scale"),
+            CfgValueKind::Limit {
+                operator, selector, ..
+            } => write!(out, "limit:{}:{selector}", operator_indices[operator]),
+            CfgValueKind::Ddx {
+                pos_node, neg_node, ..
+            } => write!(
+                out,
+                "ddx:{:?}:{:?}",
+                pos_node.map(|node| node_indices[&node]),
+                neg_node.map(|node| node_indices[&node])
+            ),
+            CfgValueKind::LimitPrevious { operator, .. } => {
+                write!(out, "limit-previous:{}", operator_indices[operator])
+            }
+            CfgValueKind::Unary { op, .. } => write!(out, "unary:{op:?}"),
+            CfgValueKind::Binary { op, .. } => write!(out, "binary:{op:?}"),
+            CfgValueKind::LaneSplat(value) => {
+                write!(out, "lane-splat:{:016x}", value.to_bits())
+            }
+            CfgValueKind::LaneWiden { .. } => write!(out, "lane-widen"),
+            CfgValueKind::LaneBinary { op, .. } => write!(out, "lane-binary:{op:?}"),
+            CfgValueKind::LaneScalar { op, .. } => write!(out, "lane-scalar:{op:?}"),
+            CfgValueKind::LaneExtract { lane, .. } => {
+                write!(out, "lane-extract:{}", lane_signature(*lane))
+            }
+            CfgValueKind::Staged { slot } => write!(out, "staged:{}", staged_indices[slot]),
+        }
+        .expect("write value signature");
+        out
+    };
+
+    let operand_signature =
+        |block_index: usize, value: ValueId| match definitions[usize::from(value)] {
+            Some((owner, local)) if owner == block_index => format!("local:{local}"),
+            _ => format!("external:{}", base_signature(value)),
+        };
+
+    let mut regions = Vec::new();
+    for (block_index, block_id) in postorder.iter().copied().enumerate() {
+        let block = function.block(block_id);
+        let mut signature = format!("block:{:?}|", schedule.blocks[usize::from(block_id)]);
+        for parameter in &block.params {
+            write!(signature, "param:{};", base_signature(*parameter))
+                .expect("write block parameter signature");
+        }
+        let mut newton_instructions = 0usize;
+        for instruction in &block.instructions {
+            let value = function.value(instruction.result);
+            if schedule.class(instruction.result) == InvalidationClass::Newton {
+                newton_instructions += 1;
+            }
+            write!(signature, "value:{}(", base_signature(instruction.result))
+                .expect("write block value signature");
+            for operand in value.kind.operands() {
+                write!(signature, "{},", operand_signature(block_index, operand))
+                    .expect("write block operand signature");
+            }
+            signature.push_str(");");
+        }
+        let target_signature = |target: BlockId| {
+            let target = function.block(target);
+            let terminator = match target.terminator {
+                CfgTerminator::Jump { .. } => "jump",
+                CfgTerminator::Branch { .. } => "branch",
+                CfgTerminator::Return => "return",
+                CfgTerminator::Unset => "unset",
+            };
+            format!(
+                "{:?}:{}:{}:{terminator}",
+                schedule.blocks[usize::from(target.id)],
+                target.params.len(),
+                target.instructions.len()
+            )
+        };
+        match &block.terminator {
+            CfgTerminator::Jump { target, args } => {
+                write!(signature, "jump:{}(", target_signature(*target))
+                    .expect("write jump signature");
+                for argument in args {
+                    write!(signature, "{},", operand_signature(block_index, *argument))
+                        .expect("write jump argument signature");
+                }
+                signature.push(')');
+            }
+            CfgTerminator::Branch {
+                condition,
+                then_target,
+                then_args,
+                else_target,
+                else_args,
+            } => {
+                write!(
+                    signature,
+                    "branch:{}:{}:{}(",
+                    operand_signature(block_index, *condition),
+                    target_signature(*then_target),
+                    target_signature(*else_target)
+                )
+                .expect("write branch signature");
+                for argument in then_args.iter().chain(else_args) {
+                    write!(signature, "{},", operand_signature(block_index, *argument))
+                        .expect("write branch argument signature");
+                }
+                signature.push(')');
+            }
+            CfgTerminator::Return => signature.push_str("return"),
+            CfgTerminator::Unset => signature.push_str("unset"),
+        }
+        regions.push(KernelRegionMetric {
+            fingerprint: blake3::hash(signature.as_bytes()).to_hex().to_string(),
+            instruction_count: crate::metrics::usize_to_u64(block.instructions.len()),
+            newton_instruction_count: crate::metrics::usize_to_u64(newton_instructions),
+        });
+    }
+    regions
+}
+
 /// Every noise magnitude the model declares, as one body.
 ///
 /// Emitted from the *primal* CFG rather than the differentiated one: a noise
@@ -242,6 +532,16 @@ struct NoisePlan {
     function: CfgFunction,
     outputs: Vec<ValueId>,
     sources: Vec<NoiseSourceValues>,
+    /// An original pre-optimization value represented by each compacted value.
+    /// Used only to prove that a noise preprocessing result is already live in
+    /// the stamp slice; absence means sharing is not legal, never that a value
+    /// should be kept alive for it.
+    origins: Vec<Option<ValueId>>,
+    /// Stamp-stage slot buffer prepared locally by the noise evaluator.
+    prepared_slots: usize,
+    /// Deepest shared stamp preprocessing helper the independent noise path
+    /// must run. `None` keeps the original self-contained body.
+    shared_through: Option<InvalidationClass>,
 }
 
 /// Where one source's magnitudes sit in [`NoisePlan::outputs`].
@@ -473,8 +773,20 @@ impl ModelPlan {
         // the corpus: always-primal costs those six 5.4 MB of fallback, and
         // always-differentiated costs the other 35 more than it saves the six,
         // because the AD pass leaves bookkeeping the magnitudes can reach.
-        let noise = plan_noise(artifact, &cfg, &cfg.function)
+        let mut noise = plan_noise(artifact, &cfg, &cfg.function)
             .or_else(|| plan_noise(artifact, &cfg, &differentiated.function));
+        if let Some(noise) = &noise {
+            let parameter_scopes = artifact
+                .mir
+                .parameters
+                .iter()
+                .map(|parameter| parameter.scope)
+                .collect::<Vec<_>>();
+            let noise_schedule = schedule_with_parameter_scopes(&noise.function, &parameter_scopes);
+            measurements.metrics_mut().noise_cfg = cfg_structure_metrics(&noise.function);
+            measurements.metrics_mut().noise_invalidation_value_count =
+                noise_schedule.census().map(crate::metrics::usize_to_u64);
+        }
         record_phase(
             artifact,
             measurements,
@@ -524,15 +836,22 @@ impl ModelPlan {
         let mut wanted = conduction.wanted();
         let reactive_wanted = reactive.wanted();
         wanted.extend_from_slice(&reactive_wanted);
-        let (function, mapped) =
-            optimize_with_control(&differentiated.function, &wanted, measurements.control())
-                .map_err(|error| {
-                    RustBackendError::cancelled(
-                        artifact.metadata.source_package.as_str(),
-                        artifact.mir.module_name.as_str(),
-                        error,
-                    )
-                })?;
+        let tracked_primal = (0..cfg.function.values.len())
+            .map(ValueId::from)
+            .collect::<Vec<_>>();
+        let (function, mapped, stamp_primal_values) = optimize_with_control_and_tracking(
+            &differentiated.function,
+            &wanted,
+            &tracked_primal,
+            measurements.control(),
+        )
+        .map_err(|error| {
+            RustBackendError::cancelled(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                error,
+            )
+        })?;
         conduction.remap(&mapped[..wanted.len() - reactive_wanted.len()]);
         reactive.remap(&mapped[wanted.len() - reactive_wanted.len()..]);
         conduction.drop_zeros(&function);
@@ -581,6 +900,8 @@ impl ModelPlan {
             .map(|parameter| parameter.scope)
             .collect();
         let schedule = schedule_with_parameter_scopes(&function, &parameter_scopes);
+        measurements.metrics_mut().kernel_regions =
+            kernel_region_metrics(artifact, &function, &schedule);
         let structural_guards = structural_guards(&function, &schedule, &parameter_scopes);
         measurements.metrics_mut().model_structural_guard_count = crate::metrics::usize_to_u64(
             structural_guards
@@ -620,6 +941,18 @@ impl ModelPlan {
         } else {
             (Vec::new(), 0)
         };
+        if let Some(noise) = &mut noise {
+            measurements
+                .metrics_mut()
+                .noise_shared_preprocess_value_count = share_noise_preprocessing(
+                noise,
+                &parameter_scopes,
+                &schedule,
+                &stages,
+                &stamp_primal_values,
+                slots,
+            );
+        }
 
         let branch_of_equation = artifact
             .mir
@@ -656,6 +989,144 @@ impl ModelPlan {
             limit_slots,
         })
     }
+}
+
+fn share_noise_preprocessing(
+    noise: &mut NoisePlan,
+    parameter_scopes: &[crate::semantic::ParameterScope],
+    stamp_schedule: &crate::canonical_ir::schedule::Schedule,
+    stamp_stages: &[Stage],
+    stamp_primal_values: &[Option<ValueId>],
+    stamp_slots: usize,
+) -> u64 {
+    if stamp_stages.is_empty() {
+        return 0;
+    }
+    let noise_schedule = schedule_with_parameter_scopes(&noise.function, parameter_scopes);
+    let Ok(noise_stages) = split(&noise.function, &noise_schedule, &noise.outputs) else {
+        return 0;
+    };
+    let before = noise
+        .function
+        .blocks
+        .iter()
+        .map(|block| block.instructions.len())
+        .sum::<usize>();
+    let mut replacements = HashMap::<ValueId, (u32, InvalidationClass)>::new();
+    for stage in noise_stages {
+        if stage.class > InvalidationClass::Temperature
+            || !stamp_stages
+                .iter()
+                .any(|candidate| candidate.class == stage.class)
+        {
+            continue;
+        }
+        for ((_, _), noise_origin) in stage.exports.iter().zip(&stage.export_origins) {
+            let Some(original) = noise
+                .origins
+                .get(usize::from(*noise_origin))
+                .copied()
+                .flatten()
+            else {
+                continue;
+            };
+            let Some(stamp_value) = stamp_primal_values
+                .get(usize::from(original))
+                .copied()
+                .flatten()
+            else {
+                continue;
+            };
+            if stamp_schedule.class(stamp_value) != stage.class {
+                continue;
+            }
+            let Some(stamp_stage) = stamp_stages
+                .iter()
+                .find(|candidate| candidate.class == stage.class)
+            else {
+                continue;
+            };
+            let Some((slot, _)) = stamp_stage
+                .exports
+                .iter()
+                .zip(&stamp_stage.export_origins)
+                .find_map(|(export, origin)| (*origin == stamp_value).then_some(export))
+            else {
+                continue;
+            };
+            replacements.insert(*noise_origin, (*slot, stage.class));
+        }
+    }
+    if replacements.is_empty() {
+        return 0;
+    }
+    let mut function = noise.function.clone();
+    let removed_parameters = function
+        .blocks
+        .iter()
+        .map(|block| {
+            block
+                .params
+                .iter()
+                .map(|parameter| replacements.contains_key(parameter))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    for block in &mut function.blocks {
+        block
+            .params
+            .retain(|parameter| !replacements.contains_key(parameter));
+        let retain_arguments = |target: crate::canonical_ir::BlockId, args: &mut Vec<ValueId>| {
+            let removed = &removed_parameters[usize::from(target)];
+            let mut position = 0usize;
+            args.retain(|_| {
+                let keep = !removed.get(position).copied().unwrap_or(false);
+                position += 1;
+                keep
+            });
+        };
+        match &mut block.terminator {
+            CfgTerminator::Jump { target, args } => retain_arguments(*target, args),
+            CfgTerminator::Branch {
+                then_target,
+                then_args,
+                else_target,
+                else_args,
+                ..
+            } => {
+                retain_arguments(*then_target, then_args);
+                retain_arguments(*else_target, else_args);
+            }
+            CfgTerminator::Return | CfgTerminator::Unset => {}
+        }
+    }
+    for value in &mut function.values {
+        let Some((slot, _)) = replacements.get(&value.id) else {
+            continue;
+        };
+        value.kind = CfgValueKind::Staged { slot: *slot };
+    }
+    for block in &mut function.blocks {
+        block
+            .instructions
+            .retain(|instruction| !replacements.contains_key(&instruction.result));
+    }
+    if function.validate().is_err() {
+        return 0;
+    }
+    let (function, outputs) = optimize_cfg(&function, &noise.outputs);
+    noise.function = function;
+    noise.outputs = outputs;
+    noise.origins = vec![None; noise.function.values.len()];
+    noise.prepared_slots = stamp_slots;
+    noise.shared_through = replacements.values().map(|(_, class)| *class).max();
+    let after = noise
+        .function
+        .blocks
+        .iter()
+        .map(|block| block.instructions.len())
+        .sum::<usize>();
+    crate::metrics::usize_to_u64(before.saturating_sub(after))
 }
 
 /// Match the lowered noise sources to the plan the descriptors come from, and
@@ -722,7 +1193,16 @@ fn plan_noise(
         });
     }
 
-    let (mut function, outputs) = optimize_cfg(function, &wanted);
+    let tracked = (0..function.values.len())
+        .map(ValueId::from)
+        .collect::<Vec<_>>();
+    let (mut function, outputs, mapped) = optimize_with_tracking(function, &wanted, &tracked);
+    let mut origins = vec![None; function.values.len()];
+    for (original, mapped) in tracked.into_iter().zip(mapped) {
+        if let Some(mapped) = mapped {
+            origins[usize::from(mapped)].get_or_insert(original);
+        }
+    }
 
     // One kind cannot appear in this body. `ddt` reads and writes per-instance
     // history and `evaluate_noise_sources` takes `&self`, so a magnitude that
@@ -758,6 +1238,9 @@ fn plan_noise(
         function,
         outputs,
         sources,
+        origins,
+        prepared_slots: 0,
+        shared_through: None,
     })
 }
 
@@ -883,6 +1366,15 @@ impl Stamps {
 }
 
 impl ModelPlan {
+    fn emit_bindings(&self) -> EmitBindings {
+        EmitBindings {
+            ddt_slots: self.ddt_slots.clone(),
+            idt_slots: self.idt_slots.clone(),
+            limit_slots: self.limit_slots.clone(),
+            ..bindings()
+        }
+    }
+
     fn stamp_file(
         &self,
         artifact: &CanonicalIrArtifact,
@@ -891,7 +1383,7 @@ impl ModelPlan {
     ) -> Result<String, RustBackendError> {
         let mut out = String::new();
         out.push_str(
-            "#![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]\n\n",
+            "// @generated by rspice-veriloga; do not edit.\n#![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]\n\n",
         );
         if self.model_stage().is_some() {
             out.push_str(
@@ -900,16 +1392,59 @@ impl ModelPlan {
         } else {
             out.push_str("use super::state::Instance;\n");
         }
+        let mut runtime_support = vec![
+            "GeneratedEvalContext".to_string(),
+            "GeneratedReactiveStamper".to_string(),
+            "GeneratedStamper".to_string(),
+        ];
+        if self
+            .stages
+            .iter()
+            .any(|stage| stage.class != InvalidationClass::Newton && !stage.exports.is_empty())
+        {
+            runtime_support.push("install_generated_stage_values".to_string());
+        }
+        let mut lane_types = lane_runtime_types(&self.function);
+        lane_types.extend(
+            self.stages
+                .iter()
+                .flat_map(|stage| lane_runtime_types(&stage.function)),
+        );
+        runtime_support.extend(lane_types);
+        runtime_support.extend([
+            "rspice_eval_ddt".to_string(),
+            "rspice_eval_idt".to_string(),
+            "rspice_limexp".to_string(),
+            "rspice_limited_exp".to_string(),
+            "rspice_limited_exp_derivative".to_string(),
+        ]);
         let _ = writeln!(
             out,
-            "use {}::{{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, Lanes, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative}};",
-            options.runtime_path
+            "use {}::{{{}}};",
+            options.runtime_path,
+            runtime_support.join(", ")
         );
         if self.model_stage().is_some() {
             out.push_str(
                 "use std::collections::HashMap;\n\
                  use std::sync::{Arc, Mutex, OnceLock, Weak};\n",
             );
+        }
+        let mut emitted_slot_table = false;
+        for stage in &self.stages {
+            if stage.class == InvalidationClass::Newton || stage.exports.is_empty() {
+                continue;
+            }
+            self.emit_stage_slot_table(artifact, stage, &mut out)?;
+            emitted_slot_table = true;
+        }
+        if emitted_slot_table {
+            out.push('\n');
+        }
+        for stage in &self.stages {
+            if stage.class <= InvalidationClass::Temperature && !stage.exports.is_empty() {
+                self.emit_preprocess_helper(artifact, stage, &mut out)?;
+            }
         }
         if self.model_stage().is_some() {
             self.emit_model_cache_support(&mut out);
@@ -931,6 +1466,70 @@ impl ModelPlan {
         Ok(out)
     }
 
+    fn emit_stage_slot_table(
+        &self,
+        _artifact: &CanonicalIrArtifact,
+        stage: &Stage,
+        out: &mut String,
+    ) -> Result<(), RustBackendError> {
+        let slots = stage
+            .exports
+            .iter()
+            .map(|(slot, _)| *slot)
+            .collect::<Vec<_>>();
+        let visibility = if stage.class <= InvalidationClass::Temperature {
+            "pub(super) "
+        } else {
+            ""
+        };
+        let _ = writeln!(
+            out,
+            "{visibility}const {}: [u32; {}] = [{}];",
+            stage_slot_table_name(stage.class),
+            slots.len(),
+            slots
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        Ok(())
+    }
+
+    /// Pure, explicitly-bound preprocessing shared by cached stamping and an
+    /// independent fresh noise evaluation.
+    fn emit_preprocess_helper(
+        &self,
+        artifact: &CanonicalIrArtifact,
+        stage: &Stage,
+        out: &mut String,
+    ) -> Result<(), RustBackendError> {
+        let name = preprocess_fn_name(stage.class);
+        let produced = stage
+            .exports
+            .iter()
+            .map(|(_, value)| *value)
+            .collect::<Vec<_>>();
+        let (body, names) = emit_body(&stage.function, &produced, &self.emit_bindings())
+            .map_err(|error| unsupported(artifact, format!("{name}: {error}")))?;
+        let _ = writeln!(
+            out,
+            "pub(super) fn {name}(\n\
+             \x20   parameters: &[f64],\n\
+             \x20   parameter_given: &[bool],\n\
+             \x20   multiplicity: f64,\n\
+             \x20   staged: &[f64],\n\
+             \x20   temperature: f64,\n\
+             \x20   thermal_voltage: f64,\n\
+             ) -> [f64; {}] {{",
+            produced.len()
+        );
+        out.push_str(&indent(&body, 1));
+        let names = numeric_output_names(&stage.function, &produced, &names);
+        let _ = writeln!(out, "    [{}]\n}}\n", names.join(", "));
+        Ok(())
+    }
+
     /// A stage coarser than Newton: run it once and cache what later readers
     /// take from it.
     fn emit_cached_stage(
@@ -945,7 +1544,10 @@ impl ModelPlan {
         }
         let name = stage_fn_name(stage.class);
         let produced: Vec<ValueId> = stage.exports.iter().map(|(_, value)| *value).collect();
-        let (body, names) = emit_body(&stage.function, &produced, &bindings())
+        let direct = stage.class > InvalidationClass::Temperature || produced.is_empty();
+        let emitted = direct
+            .then(|| emit_body(&stage.function, &produced, &self.emit_bindings()))
+            .transpose()
             .map_err(|error| unsupported(artifact, format!("{name}: {error}")))?;
 
         let _ = writeln!(
@@ -969,25 +1571,42 @@ impl ModelPlan {
             _ => {}
         }
 
-        // Captured through a block so the immutable borrow of the slot array
-        // ends before the writes into it begin.
-        let _ = writeln!(
-            out,
-            "        let produced: [f64; {}] = {{",
-            produced.len().max(1)
-        );
-        self.emit_prologue(artifact, &stage.function, 3, out)?;
-        out.push_str(&indent(&body, 3));
-        if produced.is_empty() {
-            out.push_str("            [0.0]\n");
-        } else {
-            let _ = writeln!(out, "            [{}]", names.join(", "));
-        }
-        out.push_str("        };\n");
-        for (index, (slot, _)) in stage.exports.iter().enumerate() {
+        if let Some((body, names)) = emitted {
+            // Captured through a block so the immutable borrow of the slot
+            // array ends before the writes into it begin.
             let _ = writeln!(
                 out,
-                "        self.canonical_staged[{slot}] = produced[{index}];"
+                "        let produced: [f64; {}] = {{",
+                produced.len().max(1)
+            );
+            self.emit_prologue(artifact, &stage.function, 3, out)?;
+            out.push_str(&indent(&body, 3));
+            if produced.is_empty() {
+                out.push_str("            [0.0]\n");
+            } else {
+                let names = numeric_output_names(&stage.function, &produced, &names);
+                let _ = writeln!(out, "            [{}]", names.join(", "));
+            }
+            out.push_str("        };\n");
+        } else {
+            let _ = writeln!(
+                out,
+                "        let produced = {}(\n\
+                 \x20           &self.params.values,\n\
+                 \x20           &self.param_given[..],\n\
+                 \x20           self.multiplicity,\n\
+                 \x20           &self.canonical_staged[..],\n\
+                 \x20           ctx.temperature(),\n\
+                 \x20           ctx.thermal_voltage(),\n\
+                 \x20       );",
+                preprocess_fn_name(stage.class)
+            );
+        }
+        if !produced.is_empty() {
+            let _ = writeln!(
+                out,
+                "        install_generated_stage_values(&mut self.canonical_staged[..], &produced, &{});",
+                stage_slot_table_name(stage.class)
             );
         }
         match stage.class {
@@ -1052,10 +1671,6 @@ impl ModelPlan {
         stage: &Stage,
         out: &mut String,
     ) -> Result<(), RustBackendError> {
-        let produced: Vec<ValueId> = stage.exports.iter().map(|(_, value)| *value).collect();
-        let (body, names) = emit_body(&stage.function, &produced, &bindings())
-            .map_err(|error| unsupported(artifact, format!("canonical_model_stage: {error}")))?;
-
         let model_key_words = artifact
             .mir
             .parameters
@@ -1080,12 +1695,11 @@ impl ModelPlan {
              \x20   fn canonical_install_model_values(&mut self, values: \
              Arc<CanonicalModelValues>) {\n",
         );
-        for (index, (slot, _)) in stage.exports.iter().enumerate() {
-            let _ = writeln!(
-                out,
-                "        self.canonical_staged[{slot}] = values[{index}];"
-            );
-        }
+        let _ = writeln!(
+            out,
+            "        install_generated_stage_values(&mut self.canonical_staged[..], values.as_ref(), &{});",
+            stage_slot_table_name(stage.class)
+        );
         out.push_str(
             "        self.canonical_model_values = Some(values);\n\
              \x20   }\n\n\
@@ -1098,18 +1712,17 @@ impl ModelPlan {
              \x20           self.canonical_install_model_values(values);\n\
              \x20           return;\n\
              \x20       }\n\
-             \x20       let produced: CanonicalModelValues = {\n",
+             \x20       let produced: CanonicalModelValues = canonical_model_preprocess(\n\
+             \x20           &self.params.values,\n\
+             \x20           &self.param_given[..],\n\
+             \x20           self.multiplicity,\n\
+             \x20           &self.canonical_staged[..],\n\
+             \x20           ctx.temperature(),\n\
+             \x20           ctx.thermal_voltage(),\n\
+             \x20       );\n",
         );
-        self.emit_prologue(artifact, &stage.function, 3, out)?;
-        out.push_str(&indent(&body, 3));
-        if produced.is_empty() {
-            out.push_str("            [0.0]\n");
-        } else {
-            let _ = writeln!(out, "            [{}]", names.join(", "));
-        }
         out.push_str(
-            "        };\n\
-             \x20       let values = canonical_model_cache_intern(key, Arc::new(produced));\n\
+            "        let values = canonical_model_cache_intern(key, Arc::new(produced));\n\
              \x20       self.canonical_install_model_values(values);\n\
              \x20   }\n\n",
         );
@@ -1248,7 +1861,7 @@ impl ModelPlan {
         let function = &noise.function;
         let mut out = String::new();
         out.push_str(
-            "#![allow(dead_code, non_snake_case, unused_parens, unused_variables)]\n\n\
+            "// @generated by rspice-veriloga; do not edit.\n#![allow(dead_code, non_snake_case, unused_parens, unused_variables)]\n\n\
              use super::state::Instance;\n",
         );
         let _ = writeln!(
@@ -1256,6 +1869,25 @@ impl ModelPlan {
             "use {}::GeneratedEvalContext;\npub use {}::{{GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseKind, GeneratedNoiseVisitor}};\n",
             options.runtime_path, options.runtime_path
         );
+        let shared_stages = noise
+            .shared_through
+            .into_iter()
+            .flat_map(|through| {
+                self.stages.iter().filter(move |stage| {
+                    stage.class <= through
+                        && stage.class <= InvalidationClass::Temperature
+                        && !stage.exports.is_empty()
+                })
+            })
+            .collect::<Vec<_>>();
+        if !shared_stages.is_empty() {
+            let mut imports = Vec::with_capacity(shared_stages.len() * 2);
+            for stage in &shared_stages {
+                imports.push(preprocess_fn_name(stage.class));
+                imports.push(stage_slot_table_name(stage.class));
+            }
+            let _ = writeln!(out, "use super::stamp::{{{}}};", imports.join(", "));
+        }
         // Emitted only where the body reaches something in it: on a model whose
         // magnitudes are plain arithmetic it would be an unused import. Two
         // things reach it, and the second is what the corpus
@@ -1264,10 +1896,6 @@ impl ModelPlan {
         // exponentials are functions in here rather than method calls, so a
         // magnitude with a diode in it needs the helpers with no packed value
         // anywhere. Twenty of the corpus models are the second case.
-        let uses_lanes = function
-            .values
-            .iter()
-            .any(|value| value.value_type.shape().is_some());
         let uses_unary = |target| {
             function
                 .values
@@ -1275,17 +1903,18 @@ impl ModelPlan {
                 .any(|value| matches!(value.kind, CfgValueKind::Unary { op, .. } if op == target))
         };
         let mut math_support = Vec::new();
-        if uses_lanes {
-            math_support.push("Lanes");
+        if !shared_stages.is_empty() {
+            math_support.push("install_generated_stage_values".to_string());
         }
+        math_support.extend(lane_runtime_types(function));
         if uses_unary(CfgUnaryOp::LimExp) {
-            math_support.push("rspice_limexp");
+            math_support.push("rspice_limexp".to_string());
         }
         if uses_unary(CfgUnaryOp::LimitedExp) {
-            math_support.push("rspice_limited_exp");
+            math_support.push("rspice_limited_exp".to_string());
         }
         if uses_unary(CfgUnaryOp::LimitedExpDerivative) {
-            math_support.push("rspice_limited_exp_derivative");
+            math_support.push("rspice_limited_exp_derivative".to_string());
         }
         if !math_support.is_empty() {
             if math_support.len() == 1 {
@@ -1307,7 +1936,30 @@ impl ModelPlan {
              \x20           return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });\n\
              \x20       }\n",
         );
-        let (body, values) = emit_body(function, &noise.outputs, &bindings())
+        if !shared_stages.is_empty() {
+            let _ = writeln!(
+                out,
+                "        let mut prepared = [0.0; {}];",
+                noise.prepared_slots
+            );
+            for stage in &shared_stages {
+                let _ = writeln!(
+                    out,
+                    "        let produced = {}(\n\
+                     \x20           &self.params.values,\n\
+                     \x20           &self.param_given[..],\n\
+                     \x20           self.multiplicity,\n\
+                     \x20           &prepared[..],\n\
+                     \x20           ctx.temperature(),\n\
+                     \x20           ctx.thermal_voltage(),\n\
+                     \x20       );\n\
+                     \x20       install_generated_stage_values(&mut prepared[..], &produced, &{});",
+                    preprocess_fn_name(stage.class),
+                    stage_slot_table_name(stage.class),
+                );
+            }
+        }
+        let (body, values) = emit_body(function, &noise.outputs, &self.emit_bindings())
             .map_err(|error| unsupported(artifact, format!("noise body: {error}")))?;
         self.emit_noise_prologue(artifact, function, &mut out);
         out.push_str(&indent(&body, 2));
@@ -1323,6 +1975,7 @@ impl ModelPlan {
             // run into every device that declares noise at all.
             let always = match function.value(noise.outputs[source.active]).kind {
                 CfgValueKind::RealConstant(active) => Some(active != 0.0),
+                CfgValueKind::BooleanConstant(active) => Some(active),
                 _ => None,
             };
             if always == Some(false) {
@@ -1333,12 +1986,16 @@ impl ModelPlan {
                 continue;
             }
             if always.is_none() {
+                let active = truth_output(
+                    function,
+                    noise.outputs[source.active],
+                    &values[source.active],
+                );
                 let _ = writeln!(
                     out,
-                    "        if {} == 0.0 {{\n\
+                    "        if !({active}) {{\n\
                      \x20           if !visitor.visit({index}, GeneratedNoiseEvaluationRef {{ active: false, psd: 0.0, exponent: None, table_operands: &[] }}) {{ return Ok(()); }}\n\
-                     \x20       }} else {{",
-                    values[source.active]
+                     \x20       }} else {{"
                 );
             } else {
                 out.push_str("        {\n");
@@ -1456,6 +2113,9 @@ impl ModelPlan {
         if wants.thermal_voltage {
             out.push_str("        let thermal_voltage = ctx.thermal_voltage();\n");
         }
+        if wants.staged {
+            out.push_str("        let staged = &prepared[..];\n");
+        }
         if wants.node_potentials {
             let _ = writeln!(
                 out,
@@ -1519,7 +2179,7 @@ impl ModelPlan {
         control: &dyn PipelineControl,
     ) -> Result<(String, Vec<String>), RustBackendError> {
         let Some(newton) = newton else {
-            let (body, names) = emit_body(&self.function, &self.outputs, &bindings())
+            let (body, names) = emit_body(&self.function, &self.outputs, &self.emit_bindings())
                 .map_err(|error| unsupported(artifact, format!("body: {error}")))?;
             return Ok((body, names));
         };
@@ -1531,13 +2191,15 @@ impl ModelPlan {
             .filter_map(|(index, value)| value.map(|value| (index, value)))
             .collect();
         let owned_values: Vec<ValueId> = owned.iter().map(|(_, value)| *value).collect();
-        let (body, names) = emit_body(&newton.function, &owned_values, &bindings())
+        let emit_bindings = self.emit_bindings();
+        let (body, names) = emit_body(&newton.function, &owned_values, &emit_bindings)
             .map_err(|error| unsupported(artifact, format!("newton stage: {error}")))?;
         let (body, names) = specialize_repeated_static_guards(
             &newton.function,
             &owned_values,
             body,
             names,
+            &emit_bindings,
             control,
         )
         .map_err(|error| match error {
@@ -1798,38 +2460,21 @@ impl ModelPlan {
             let _ = writeln!(out, "{pad}let ddt_state = self.stamp_state.as_mut();");
         }
         if wants.idt {
-            let mut arms: Vec<String> = Vec::new();
             for value in &function.values {
                 if let CfgValueKind::Idt { operator, .. } = &value.kind {
-                    let slot = self.idt_slots.get(operator).copied().ok_or_else(|| {
+                    self.idt_slots.get(operator).copied().ok_or_else(|| {
                         unsupported(
                             artifact,
                             format!("an idt at {operator} with no generated state slot"),
                         )
                     })?;
-                    let arm = format!("{} => {slot}usize, ", usize::from(*operator));
-                    if !arms.contains(&arm) {
-                        arms.push(arm);
-                    }
                 }
             }
-            // The same out-of-range fallback `ddt` uses, and for the same
-            // reason: integrating into the wrong history looks like a converged
-            // answer.
-            let resolve = match arms.len() {
-                1 => arms[0]
-                    .split_once("=> ")
-                    .map(|(_, slot)| slot.trim_end_matches(", ").to_string())
-                    .unwrap_or_else(|| "usize::MAX".to_string()),
-                _ => format!("match operator {{ {}_ => usize::MAX }}", arms.concat()),
-            };
             let _ = writeln!(
                 out,
                 "{pad}let idt_active = self.ddt_coefficients.active;\n\
                  {pad}let idt_step = self.timestep;\n\
-                 {pad}let mut idt = |operator: usize, value: f64, ic: f64| -> f64 {{\n\
-                 {pad}    let _ = operator;\n\
-                 {pad}    let slot = {resolve};\n\
+                 {pad}let mut idt = |slot: usize, value: f64, ic: f64| -> f64 {{\n\
                  {pad}    rspice_eval_idt(\n\
                  {pad}        &mut ddt_state.idt_current,\n\
                  {pad}        &mut ddt_state.idt_previous,\n\
@@ -1845,43 +2490,23 @@ impl ModelPlan {
         }
         if wants.ddt {
             // `ddt` is the one binding that is a call rather than an expression,
-            // because it reads and writes per-instance history. The operator id
-            // the CFG carries is a source expression, so the slot it was
-            // assigned is resolved here rather than looked up at run time.
-            let mut arms: Vec<String> = Vec::new();
+            // because it reads and writes per-instance history. Call sites pass
+            // the dense slot the backend resolved from the source operator id.
             for value in &function.values {
                 if let CfgValueKind::Ddt { operator, .. } = &value.kind {
-                    let slot = self.ddt_slots.get(operator).copied().ok_or_else(|| {
+                    self.ddt_slots.get(operator).copied().ok_or_else(|| {
                         unsupported(
                             artifact,
                             format!("a ddt at {operator} with no generated state slot"),
                         )
                     })?;
-                    let arm = format!("{} => {slot}usize, ", usize::from(*operator));
-                    if !arms.contains(&arm) {
-                        arms.push(arm);
-                    }
                 }
             }
-            // The arms cover every `ddt` the body holds, so the fallback is
-            // unreachable — and it resolves to an out-of-range slot rather than
-            // to slot zero, because if the invariant ever breaks, integrating a
-            // charge into the wrong history is the one failure that would look
-            // like a converged answer.
-            let resolve = match arms.len() {
-                1 => arms[0]
-                    .split_once("=> ")
-                    .map(|(_, slot)| slot.trim_end_matches(", ").to_string())
-                    .unwrap_or_else(|| "usize::MAX".to_string()),
-                _ => format!("match operator {{ {}_ => usize::MAX }}", arms.concat()),
-            };
             let _ = writeln!(
                 out,
                 "{pad}let ddt_active = self.ddt_coefficients.active;\n\
                  {pad}let ddt_coefficients = self.ddt_coefficients;\n\
-                 {pad}let mut ddt = |operator: usize, value: f64| -> f64 {{\n\
-                 {pad}    let _ = operator;\n\
-                 {pad}    let slot = {resolve};\n\
+                 {pad}let mut ddt = |slot: usize, value: f64| -> f64 {{\n\
                  {pad}    rspice_eval_ddt(\n\
                  {pad}        &mut ddt_state.ddt_current,\n\
                  {pad}        &mut ddt_state.ddt_previous,\n\
@@ -1901,7 +2526,19 @@ impl ModelPlan {
             );
         }
         if wants.limit || wants.limit_previous {
-            let resolve = self.limit_slot_resolver(artifact, function)?;
+            for value in &function.values {
+                let (CfgValueKind::Limit { operator, .. }
+                | CfgValueKind::LimitPrevious { operator, .. }) = &value.kind
+                else {
+                    continue;
+                };
+                self.limit_slots.get(operator).copied().ok_or_else(|| {
+                    unsupported(
+                        artifact,
+                        format!("a $limit at {operator} with no generated state slot"),
+                    )
+                })?;
+            }
             // The anchors are *copied* out before any write, which is what makes
             // "the value this `$limit` returned on the previous iteration" mean
             // that regardless of emission order. Reading the live array instead
@@ -1921,9 +2558,7 @@ impl ModelPlan {
             if wants.limit_previous {
                 let _ = writeln!(
                     out,
-                    "{pad}let limit_previous = move |operator: usize, proposed: f64| -> f64 {{\n\
-                     {pad}    let _ = operator;\n\
-                     {pad}    let slot = {resolve};\n\
+                    "{pad}let limit_previous = move |slot: usize, proposed: f64| -> f64 {{\n\
                      {pad}    if limiting_enabled && limit_initialized[slot] {{\n\
                      {pad}        limit_anchor[slot]\n\
                      {pad}    }} else {{\n\
@@ -1935,12 +2570,10 @@ impl ModelPlan {
             if wants.limit {
                 let _ = writeln!(
                     out,
-                    "{pad}let mut limit = |operator: usize, proposed: f64, candidate: f64| -> f64 {{\n\
-                     {pad}    let _ = operator;\n\
+                    "{pad}let mut limit = |slot: usize, proposed: f64, candidate: f64| -> f64 {{\n\
                      {pad}    if !limiting_enabled {{\n\
                      {pad}        return proposed;\n\
                      {pad}    }}\n\
-                     {pad}    let slot = {resolve};\n\
                      {pad}    limit_state.active |= candidate != proposed;\n\
                      {pad}    limit_state.previous[slot] = candidate;\n\
                      {pad}    limit_state.initialized[slot] = true;\n\
@@ -1950,45 +2583,6 @@ impl ModelPlan {
             }
         }
         Ok(())
-    }
-
-    /// A `match` from an operator id to the state slot it was assigned, or the
-    /// bare slot when there is only one.
-    ///
-    /// The fallback resolves to an out-of-range slot rather than to zero, for
-    /// the reason `ddt` gives: reading or writing the wrong history is the one
-    /// failure that looks like a converged answer.
-    fn limit_slot_resolver(
-        &self,
-        artifact: &CanonicalIrArtifact,
-        function: &CfgFunction,
-    ) -> Result<String, RustBackendError> {
-        let mut arms: Vec<String> = Vec::new();
-        for value in &function.values {
-            let (CfgValueKind::Limit { operator, .. }
-            | CfgValueKind::LimitPrevious { operator, .. }) = &value.kind
-            else {
-                continue;
-            };
-            let operator = *operator;
-            let slot = self.limit_slots.get(&operator).copied().ok_or_else(|| {
-                unsupported(
-                    artifact,
-                    format!("a $limit at {operator} with no generated state slot"),
-                )
-            })?;
-            let arm = format!("{} => {slot}usize, ", usize::from(operator));
-            if !arms.contains(&arm) {
-                arms.push(arm);
-            }
-        }
-        Ok(match arms.len() {
-            1 => arms[0]
-                .split_once("=> ")
-                .map(|(_, slot)| slot.trim_end_matches(", ").to_string())
-                .unwrap_or_else(|| "usize::MAX".to_string()),
-            _ => format!("match operator {{ {}_ => usize::MAX }}", arms.concat()),
-        })
     }
 
     fn state_extensions(&self, artifact: &CanonicalIrArtifact) -> state_file::StateFileExtensions {
@@ -2174,6 +2768,7 @@ fn specialize_repeated_static_guards(
     outputs: &[ValueId],
     baseline_body: String,
     baseline_names: Vec<String>,
+    bindings: &EmitBindings,
     control: &dyn PipelineControl,
 ) -> Result<(String, Vec<String>), StructuralSpecializationError> {
     const MIN_REPEATED_BRANCHES: usize = 3;
@@ -2230,9 +2825,9 @@ fn specialize_repeated_static_guards(
     );
     for (slot, branches) in candidates.into_iter().take(MAX_CANDIDATES) {
         let (true_body, true_names) =
-            emit_static_guard_variant(function, outputs, slot, true, control)?;
+            emit_static_guard_variant(function, outputs, slot, true, bindings, control)?;
         let (false_body, false_names) =
-            emit_static_guard_variant(function, outputs, slot, false, control)?;
+            emit_static_guard_variant(function, outputs, slot, false, bindings, control)?;
         let specialized = render_static_guard_variants(
             slot,
             branches,
@@ -2257,6 +2852,7 @@ fn emit_static_guard_variant(
     outputs: &[ValueId],
     slot: u32,
     outcome: bool,
+    bindings: &EmitBindings,
     control: &dyn PipelineControl,
 ) -> Result<(String, Vec<String>), StructuralSpecializationError> {
     let mut specialized = function.clone();
@@ -2299,7 +2895,7 @@ fn emit_static_guard_variant(
     collapse_single_predecessor_parameters(&mut specialized, &mut outputs);
     let (specialized, outputs) = optimize_with_control(&specialized, &outputs, control)
         .map_err(StructuralSpecializationError::Cancelled)?;
-    emit_body(&specialized, &outputs, &bindings()).map_err(StructuralSpecializationError::Emit)
+    emit_body(&specialized, &outputs, bindings).map_err(StructuralSpecializationError::Emit)
 }
 
 fn render_static_guard_variants(
@@ -3046,6 +3642,26 @@ fn stage_fn_name(class: InvalidationClass) -> &'static str {
     }
 }
 
+fn preprocess_fn_name(class: InvalidationClass) -> &'static str {
+    match class {
+        InvalidationClass::Model => "canonical_model_preprocess",
+        InvalidationClass::Instance => "canonical_instance_preprocess",
+        InvalidationClass::Temperature => "canonical_temperature_preprocess",
+        InvalidationClass::Timestep => "canonical_timestep_preprocess",
+        InvalidationClass::Newton => "canonical_newton_preprocess",
+    }
+}
+
+fn stage_slot_table_name(class: InvalidationClass) -> &'static str {
+    match class {
+        InvalidationClass::Model => "CANONICAL_MODEL_STAGE_SLOTS",
+        InvalidationClass::Instance => "CANONICAL_INSTANCE_STAGE_SLOTS",
+        InvalidationClass::Temperature => "CANONICAL_TEMPERATURE_STAGE_SLOTS",
+        InvalidationClass::Timestep => "CANONICAL_TIMESTEP_STAGE_SLOTS",
+        InvalidationClass::Newton => "CANONICAL_NEWTON_STAGE_SLOTS",
+    }
+}
+
 /// A branch endpoint, as the stamper wants it.
 ///
 /// The *local* ordinal, not `self.nodes[..]`. The stamper resolves a node to a
@@ -3066,6 +3682,35 @@ fn emit_noise_check(out: &mut String, index: usize, quantity: &str, value: &str)
     );
 }
 
+/// Stage caches have an `f64` ABI even when the CFG value they carry is a
+/// predicate. Keep Boolean values native inside the generated body and perform
+/// the exact Verilog-A numeric conversion only as they cross that ABI boundary.
+fn numeric_output_names(
+    function: &CfgFunction,
+    outputs: &[ValueId],
+    names: &[String],
+) -> Vec<String> {
+    outputs
+        .iter()
+        .zip(names)
+        .map(|(value, name)| {
+            if function.value(*value).value_type == CfgValueType::Boolean {
+                format!("{name} as u8 as f64")
+            } else {
+                name.clone()
+            }
+        })
+        .collect()
+}
+
+fn truth_output(function: &CfgFunction, value: ValueId, name: &str) -> String {
+    if function.value(value).value_type == CfgValueType::Boolean {
+        name.to_string()
+    } else {
+        format!("{name} != 0.0")
+    }
+}
+
 fn bindings() -> EmitBindings {
     EmitBindings {
         analysis: "ctx.analysis".into(),
@@ -3075,7 +3720,7 @@ fn bindings() -> EmitBindings {
 }
 
 fn indent(body: &str, levels: usize) -> String {
-    let pad = "    ".repeat(levels);
+    let pad = "\t".repeat(levels);
     let mut out = String::with_capacity(body.len() + body.len() / 8);
     for line in body.lines() {
         if !line.is_empty() {

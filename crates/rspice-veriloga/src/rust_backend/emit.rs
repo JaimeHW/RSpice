@@ -24,19 +24,20 @@
 //! analyses therefore continue to check the properties SSA maintained by
 //! construction without making the common one-value merge three statements.
 //!
-//! ## Everything is `f64`
+//! ## Predicates stay predicates
 //!
-//! Including predicates, as `0.0` and `1.0`. The alternative — `bool` for
-//! comparisons — needs a conversion wherever a derivative multiplies by one,
-//! which is every `min` and every `max`. Uniform typing keeps the emitted
-//! arithmetic identical to what [`super::super::canonical_ir::cfg_eval`]
-//! computes, which is what makes the interpreter a usable oracle for this
-//! output.
+//! Boolean CFG values emit as Rust `bool`. Numeric `0.0`/`1.0` conversions are
+//! written only where a predicate enters arithmetic or a scalar cache; real
+//! values entering control flow are tested against zero. Keeping that boundary
+//! explicit preserves the semantics used by
+//! [`super::super::canonical_ir::cfg_eval`] without making every comparison an
+//! `if` expression that Rust immediately has to turn back into a predicate.
 //!
 //! ## Derivatives are scalar-or-packed, and that is where the size went
 //!
-//! A one-lane derivative emits as plain `f64`; wider derivatives use the
-//! shared runtime's `Lanes<N>` newtype over the lanes their shape names.
+//! A one-lane derivative emits as plain `f64`; widths two through thirty-two
+//! use fixed loop-free runtime newtypes (`L2` through `L32`). Larger future
+//! shapes retain the shared runtime's const-generic `Lanes<N>` fallback.
 //! The elementwise rules emit as `a + b` and `a * s` — one line each, whatever
 //! `N` is. That is the whole reason the IR packs: fully scalarised derivatives
 //! cost a line per lane, and the wide MOSFETs carry a hundred thousand of them.
@@ -46,10 +47,12 @@
 //! promotes the small fixed array inside it to registers, so none of this is a
 //! loop at run time.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write;
 
-use crate::canonical_ir::cfg::{CfgBinaryOp, CfgFunction, CfgTerminator, CfgUnaryOp, CfgValueKind};
+use crate::canonical_ir::cfg::{
+    CfgBinaryOp, CfgFunction, CfgTerminator, CfgUnaryOp, CfgValueKind, CfgValueType,
+};
 use crate::canonical_ir::{BlockId, ValueId};
 
 /// What the emitted body expects to find in scope.
@@ -69,8 +72,11 @@ pub struct EmitBindings {
     pub multiplicity: String,
     pub time: String,
     pub ddt: String,
+    /// Dense generated state slots keyed by source operator id.
+    pub ddt_slots: HashMap<crate::canonical_ir::ExprId, usize>,
     pub ddt_scale: String,
     pub idt: String,
+    pub idt_slots: HashMap<crate::canonical_ir::ExprId, usize>,
     pub idt_scale: String,
     /// Called as `analysis("dc")`.
     pub analysis: String,
@@ -78,6 +84,7 @@ pub struct EmitBindings {
     pub simparam: String,
     /// Called as `limit(operator, proposed, candidate)`.
     pub limit: String,
+    pub limit_slots: HashMap<crate::canonical_ir::ExprId, usize>,
     /// Called as `limit_previous(operator, proposed)`.
     pub limit_previous: String,
     /// Indexed as `staged[slot]` — what coarser invalidation stages cached.
@@ -97,12 +104,15 @@ impl Default for EmitBindings {
             multiplicity: "multiplicity".into(),
             time: "time".into(),
             ddt: "ddt".into(),
+            ddt_slots: HashMap::new(),
             ddt_scale: "ddt_scale".into(),
             idt: "idt".into(),
+            idt_slots: HashMap::new(),
             idt_scale: "idt_scale".into(),
             analysis: "analysis".into(),
             simparam: "simparam".into(),
             limit: "limit".into(),
+            limit_slots: HashMap::new(),
             limit_previous: "limit_previous".into(),
             staged: "staged".into(),
         }
@@ -154,11 +164,14 @@ pub fn emit_body(
         loop_headers: back_edge_targets(function),
         post_dominators: immediate_post_dominators(function),
         predecessor_counts: predecessor_counts(function),
+        emitted: vec![false; function.values.len()],
+        effectful_branches: HashSet::new(),
         inlined: HashMap::new(),
         names: Vec::new(),
         wanted: outputs.iter().copied().collect(),
         captured: BTreeMap::new(),
     };
+    emitter.plan_emission_liveness(outputs);
     emitter.plan_inlining(outputs);
     emitter.plan_names();
     emitter.leaves()?;
@@ -174,6 +187,29 @@ pub fn emit_body(
         .map(|value| emitter.output_name(*value))
         .collect();
     Ok((emitter.source, names))
+}
+
+pub const MAX_FIXED_LANE_WIDTH: usize = 32;
+
+/// Runtime constructor/type name for a packed derivative width.
+pub(super) fn lane_type_name(width: usize) -> String {
+    if (2..=MAX_FIXED_LANE_WIDTH).contains(&width) {
+        format!("L{width}")
+    } else {
+        "Lanes".to_string()
+    }
+}
+
+/// Exact packed-lane runtime imports needed by one emitted CFG function.
+pub(super) fn lane_runtime_types(function: &CfgFunction) -> BTreeSet<String> {
+    function
+        .values
+        .iter()
+        .filter_map(|value| function.lanes_of(value.id))
+        .map(<[u32]>::len)
+        .filter(|width| *width > 1)
+        .map(lane_type_name)
+        .collect()
 }
 
 /// Standalone copy of the helpers emitted arithmetic calls.
@@ -215,36 +251,29 @@ fn rspice_limited_exp_derivative(x: f64) -> f64 {
 /// `a + b` and `a * s` instead of named calls. That is not cosmetic — these
 /// operations are most of a large model's generated source, and an operator is
 /// a dozen characters shorter than a call at every one of them.
+#[repr(transparent)]
 #[derive(Clone, Copy)]
 struct Lanes<const N: usize>([f64; N]);
 
-impl<const N: usize> core::ops::Add for Lanes<N> {
-    type Output = Self;
-    #[inline(always)]
-    fn add(self, rhs: Self) -> Self {
-        let mut out = self.0;
-        let mut i = 0;
-        while i < N {
-            out[i] = self.0[i] + rhs.0[i];
-            i += 1;
+macro_rules! generic_lane_operator {
+    ($trait:ident, $method:ident, $operator:tt) => {
+        impl<const N: usize> core::ops::$trait for Lanes<N> {
+            type Output = Self;
+            #[inline(always)]
+            fn $method(self, rhs: Self) -> Self {
+                let mut out = self.0;
+                let mut i = 0;
+                while i < N {
+                    out[i] = self.0[i] $operator rhs.0[i];
+                    i += 1;
+                }
+                Self(out)
+            }
         }
-        Self(out)
-    }
+    };
 }
-
-impl<const N: usize> core::ops::Sub for Lanes<N> {
-    type Output = Self;
-    #[inline(always)]
-    fn sub(self, rhs: Self) -> Self {
-        let mut out = self.0;
-        let mut i = 0;
-        while i < N {
-            out[i] = self.0[i] - rhs.0[i];
-            i += 1;
-        }
-        Self(out)
-    }
-}
+generic_lane_operator!(Add, add, +);
+generic_lane_operator!(Sub, sub, -);
 
 impl<const N: usize> core::ops::Mul<f64> for Lanes<N> {
     type Output = Self;
@@ -277,10 +306,82 @@ impl<const N: usize> core::ops::Div<f64> for Lanes<N> {
 impl<const N: usize> core::ops::Index<usize> for Lanes<N> {
     type Output = f64;
     #[inline(always)]
-    fn index(&self, index: usize) -> &f64 {
-        &self.0[index]
-    }
+    fn index(&self, index: usize) -> &f64 { &self.0[index] }
 }
+
+macro_rules! define_fixed_lanes {
+    ($name:ident, $width:literal, [$($index:tt),+ $(,)?]) => {
+        #[repr(transparent)]
+        #[derive(Clone, Copy)]
+        struct $name([f64; $width]);
+
+        impl core::ops::Add for $name {
+            type Output = Self;
+            #[inline(always)]
+            fn add(self, rhs: Self) -> Self {
+                Self([$((self.0[$index] + rhs.0[$index])),+])
+            }
+        }
+        impl core::ops::Sub for $name {
+            type Output = Self;
+            #[inline(always)]
+            fn sub(self, rhs: Self) -> Self {
+                Self([$((self.0[$index] - rhs.0[$index])),+])
+            }
+        }
+        impl core::ops::Mul<f64> for $name {
+            type Output = Self;
+            #[inline(always)]
+            fn mul(self, rhs: f64) -> Self {
+                Self([$((self.0[$index] * rhs)),+])
+            }
+        }
+        impl core::ops::Div<f64> for $name {
+            type Output = Self;
+            #[inline(always)]
+            fn div(self, rhs: f64) -> Self {
+                Self([$((self.0[$index] / rhs)),+])
+            }
+        }
+        impl core::ops::Index<usize> for $name {
+            type Output = f64;
+            #[inline(always)]
+            fn index(&self, index: usize) -> &f64 { &self.0[index] }
+        }
+    };
+}
+
+define_fixed_lanes!(L2, 2, [0, 1]);
+define_fixed_lanes!(L3, 3, [0, 1, 2]);
+define_fixed_lanes!(L4, 4, [0, 1, 2, 3]);
+define_fixed_lanes!(L5, 5, [0, 1, 2, 3, 4]);
+define_fixed_lanes!(L6, 6, [0, 1, 2, 3, 4, 5]);
+define_fixed_lanes!(L7, 7, [0, 1, 2, 3, 4, 5, 6]);
+define_fixed_lanes!(L8, 8, [0, 1, 2, 3, 4, 5, 6, 7]);
+define_fixed_lanes!(L9, 9, [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+define_fixed_lanes!(L10, 10, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+define_fixed_lanes!(L11, 11, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+define_fixed_lanes!(L12, 12, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+define_fixed_lanes!(L13, 13, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+define_fixed_lanes!(L14, 14, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+define_fixed_lanes!(L15, 15, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+define_fixed_lanes!(L16, 16, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+define_fixed_lanes!(L17, 17, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+define_fixed_lanes!(L18, 18, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
+define_fixed_lanes!(L19, 19, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
+define_fixed_lanes!(L20, 20, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
+define_fixed_lanes!(L21, 21, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+define_fixed_lanes!(L22, 22, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
+define_fixed_lanes!(L23, 23, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
+define_fixed_lanes!(L24, 24, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]);
+define_fixed_lanes!(L25, 25, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]);
+define_fixed_lanes!(L26, 26, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+define_fixed_lanes!(L27, 27, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
+define_fixed_lanes!(L28, 28, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]);
+define_fixed_lanes!(L29, 29, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]);
+define_fixed_lanes!(L30, 30, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]);
+define_fixed_lanes!(L31, 31, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]);
+define_fixed_lanes!(L32, 32, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]);
 "#;
 
 struct Emitter<'a> {
@@ -294,6 +395,17 @@ struct Emitter<'a> {
     /// Incoming edge count for each block. Expression-form arms must be owned
     /// by exactly one branch so emitting them lexically cannot duplicate work.
     predecessor_counts: Vec<usize>,
+    /// Values that can affect a requested output or necessary control flow.
+    ///
+    /// Ordinary CFG DCE keeps every branch condition because the CFG still
+    /// names it. Slicing a model (especially stamp preprocessing shared with
+    /// noise) can leave whole nested diamonds that compute no requested value.
+    /// Keeping a second, emission-specific liveness set lets the Rust backend
+    /// omit those pure conditions and their operands without mutating the
+    /// validated canonical CFG.
+    emitted: Vec<bool>,
+    /// Branches whose choice can affect an emitted value, plus loop control.
+    effectful_branches: HashSet<BlockId>,
     /// Values emitted at their use rather than bound to a name.
     ///
     /// A compact model is mostly values read exactly once, and binding each of
@@ -331,7 +443,127 @@ struct Emitter<'a> {
     captured: BTreeMap<ValueId, String>,
 }
 
+/// Keep emitted expressions shallow enough for rustc's parser, type checker,
+/// and MIR builder. A temporary is SSA, so stopping here changes source shape
+/// rather than generated runtime storage.
+const MAX_INLINED_EXPRESSION_NODES: usize = 32;
+
 impl Emitter<'_> {
+    /// Find values and control decisions that can affect `outputs`.
+    ///
+    /// This deliberately starts without branch conditions. A branch becomes
+    /// live only when one of its arms carries or computes an already-live
+    /// value before the join. Newly-live conditions can themselves flow
+    /// through outer diamonds, so the scan iterates to a fixed point. Loops
+    /// stay conservative: even an output-free loop controls termination.
+    fn plan_emission_liveness(&mut self, outputs: &[ValueId]) {
+        let incoming = incoming_block_arguments(self.function);
+        let mut worklist = Vec::new();
+        for output in outputs {
+            mark_live(*output, &mut self.emitted, &mut worklist);
+        }
+        propagate_value_liveness(self.function, &incoming, &mut self.emitted, &mut worklist);
+
+        loop {
+            let mut changed = false;
+            for block in &self.function.blocks {
+                let CfgTerminator::Branch {
+                    condition,
+                    then_target,
+                    then_args,
+                    else_target,
+                    else_args,
+                } = &block.terminator
+                else {
+                    continue;
+                };
+                if self.effectful_branches.contains(&block.id) {
+                    continue;
+                }
+                let effectful = if self.loop_headers.contains(&block.id) {
+                    true
+                } else if let Some(join) = self.join_of(block.id) {
+                    self.region_has_live_effect(*then_target, then_args, join)
+                        || self.region_has_live_effect(*else_target, else_args, join)
+                } else {
+                    // A branch without a post-dominating join may return or
+                    // loop on only one path. Preserve that control behavior.
+                    true
+                };
+                if effectful {
+                    self.effectful_branches.insert(block.id);
+                    mark_live(*condition, &mut self.emitted, &mut worklist);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+            propagate_value_liveness(self.function, &incoming, &mut self.emitted, &mut worklist);
+        }
+    }
+
+    /// Whether `start..join` carries or computes an emitted value.
+    fn region_has_live_effect(&self, start: BlockId, edge_args: &[ValueId], join: BlockId) -> bool {
+        if self.edge_carries_live_value(start, edge_args) {
+            return true;
+        }
+        let mut seen = HashSet::new();
+        let mut stack = vec![start];
+        while let Some(current) = stack.pop() {
+            if current == join || !seen.insert(current) {
+                continue;
+            }
+            if self.loop_headers.contains(&current) {
+                return true;
+            }
+            let block = self.function.block(current);
+            if block
+                .instructions
+                .iter()
+                .any(|instruction| self.emitted[usize::from(instruction.result)])
+            {
+                return true;
+            }
+            match &block.terminator {
+                CfgTerminator::Jump { target, args } => {
+                    if self.edge_carries_live_value(*target, args) {
+                        return true;
+                    }
+                    stack.push(*target);
+                }
+                CfgTerminator::Branch {
+                    then_target,
+                    then_args,
+                    else_target,
+                    else_args,
+                    ..
+                } => {
+                    if self.edge_carries_live_value(*then_target, then_args)
+                        || self.edge_carries_live_value(*else_target, else_args)
+                    {
+                        return true;
+                    }
+                    stack.push(*then_target);
+                    stack.push(*else_target);
+                }
+                // Reaching a function exit before the proposed join changes
+                // control behavior and is never an empty region.
+                CfgTerminator::Return | CfgTerminator::Unset => return true,
+            }
+        }
+        false
+    }
+
+    fn edge_carries_live_value(&self, target: BlockId, args: &[ValueId]) -> bool {
+        self.function
+            .block(target)
+            .params
+            .iter()
+            .zip(args)
+            .any(|(parameter, _)| self.emitted[usize::from(*parameter)])
+    }
+
     /// Decide which values are substituted into their consumer.
     ///
     /// Read exactly once, defined by an instruction in the same block as that
@@ -343,11 +575,21 @@ impl Emitter<'_> {
     fn plan_inlining(&mut self, outputs: &[ValueId]) {
         let mut uses = vec![0usize; self.function.values.len()];
         let mut block_of: Vec<Option<BlockId>> = vec![None; self.function.values.len()];
+        // Terminators and the caller name their operands directly rather than
+        // through `operand`, so those values must retain bindings.
+        let mut must_bind = vec![false; self.function.values.len()];
+        // A widen can spell one input once per held lane. Its deliberately
+        // coarse use count below is enough to prevent one-use inlining, but not
+        // exact enough for the source-cost calculation used for constants.
+        let mut expanded_use = vec![false; self.function.values.len()];
         // The one reader, recorded as it is counted: searching for it per
         // candidate would be quadratic, and these graphs run to hundreds of
         // thousands of values.
         let mut reader_of: Vec<Option<ValueId>> = vec![None; self.function.values.len()];
         for value in &self.function.values {
+            if !self.emitted[usize::from(value.id)] {
+                continue;
+            }
             // A widen names each held source lane once. Substituting a
             // multi-lane expression into it would therefore emit that
             // expression repeatedly; a scalar source still appears only once
@@ -359,6 +601,11 @@ impl Emitter<'_> {
                     .is_some_and(|lanes| lanes.len() > 1),
                 _ => false,
             };
+            if repeated_widen {
+                if let CfgValueKind::LaneWiden { input } = value.kind {
+                    expanded_use[usize::from(input)] = true;
+                }
+            }
             let weight = usize::from(repeated_widen) + 1;
             for operand in value.kind.operands() {
                 uses[usize::from(operand)] += weight;
@@ -367,12 +614,19 @@ impl Emitter<'_> {
         }
         for block in &self.function.blocks {
             for instruction in &block.instructions {
+                if !self.emitted[usize::from(instruction.result)] {
+                    continue;
+                }
                 block_of[usize::from(instruction.result)] = Some(block.id);
             }
             match &block.terminator {
                 CfgTerminator::Jump { args, .. } => {
                     for arg in args {
+                        if !self.emitted[usize::from(*arg)] {
+                            continue;
+                        }
                         uses[usize::from(*arg)] += 1;
+                        must_bind[usize::from(*arg)] = true;
                     }
                 }
                 CfgTerminator::Branch {
@@ -381,9 +635,16 @@ impl Emitter<'_> {
                     else_args,
                     ..
                 } => {
-                    uses[usize::from(*condition)] += 1;
+                    if self.effectful_branches.contains(&block.id) {
+                        uses[usize::from(*condition)] += 1;
+                        must_bind[usize::from(*condition)] = true;
+                    }
                     for arg in then_args.iter().chain(else_args) {
+                        if !self.emitted[usize::from(*arg)] {
+                            continue;
+                        }
                         uses[usize::from(*arg)] += 1;
+                        must_bind[usize::from(*arg)] = true;
                     }
                 }
                 CfgTerminator::Return | CfgTerminator::Unset => {}
@@ -392,6 +653,7 @@ impl Emitter<'_> {
         // An output is read by the caller, which no operand list records.
         for output in outputs {
             uses[usize::from(*output)] += 2;
+            must_bind[usize::from(*output)] = true;
         }
 
         // Pure leaves can be substituted when their sole reader is an ordinary
@@ -400,11 +662,18 @@ impl Emitter<'_> {
         // bindings because caller-provided implementations need not be pure.
         for value in &self.function.values {
             let index = usize::from(value.id);
-            if uses[index] == 1
+            if !self.emitted[index] {
+                continue;
+            }
+            let single_use_leaf = uses[index] == 1
                 && reader_of[index].is_some()
-                && block_of[index].is_none()
-                && Self::is_inlineable_leaf(&value.kind)
-            {
+                && Self::is_inlineable_leaf(&value.kind);
+            let cheaper_constant = !must_bind[index]
+                && !expanded_use[index]
+                && self
+                    .constant_leaf_expression_len(value.id)
+                    .is_some_and(|length| constant_inlining_saves_source(length, uses[index]));
+            if block_of[index].is_none() && (single_use_leaf || cheaper_constant) {
                 // Marked now, filled in by `leaves` in value-id order.
                 self.inlined.insert(value.id, String::new());
             }
@@ -413,6 +682,9 @@ impl Emitter<'_> {
         for block in &self.function.blocks {
             for instruction in &block.instructions {
                 let result = instruction.result;
+                if !self.emitted[usize::from(result)] {
+                    continue;
+                }
                 if uses[usize::from(result)] != 1 {
                     continue;
                 }
@@ -425,13 +697,46 @@ impl Emitter<'_> {
                 }
             }
         }
+
+        // One-use substitution is source-efficient, but left unbounded it can
+        // turn a long arithmetic chain into a single 16-kilobyte Rust
+        // expression. Keep the expansion under a fixed node budget and let an
+        // ordinary SSA binding cut the tree when it would cross that boundary.
+        // CFG values are created after their operands; a forward reference is
+        // treated conservatively as over budget if a future transformation ever
+        // changes that invariant.
+        let mut expanded_nodes = vec![1usize; self.function.values.len()];
+        for value in &self.function.values {
+            if !self.inlined.contains_key(&value.id) {
+                continue;
+            }
+            let index = usize::from(value.id);
+            let mut nodes = 1usize;
+            for operand in value.kind.operands() {
+                let operand_index = usize::from(operand);
+                if operand_index >= index {
+                    nodes = MAX_INLINED_EXPRESSION_NODES + 1;
+                    break;
+                }
+                nodes = nodes.saturating_add(if self.inlined.contains_key(&operand) {
+                    expanded_nodes[operand_index]
+                } else {
+                    1
+                });
+            }
+            if nodes > MAX_INLINED_EXPRESSION_NODES {
+                self.inlined.remove(&value.id);
+            } else {
+                expanded_nodes[index] = nodes;
+            }
+        }
     }
 
     fn plan_names(&mut self) {
         self.names = vec![String::new(); self.function.values.len()];
         let mut ordinal = 0usize;
         for value in &self.function.values {
-            if self.inlined.contains_key(&value.id) {
+            if !self.emitted[usize::from(value.id)] || self.inlined.contains_key(&value.id) {
                 continue;
             }
             self.names[usize::from(value.id)] = compact_local_name(ordinal);
@@ -462,6 +767,9 @@ impl Emitter<'_> {
             defined.extend(block.instructions.iter().map(|entry| entry.result));
         }
         for value in &self.function.values {
+            if !self.emitted[usize::from(value.id)] {
+                continue;
+            }
             if defined.contains(&value.id) {
                 continue;
             }
@@ -507,19 +815,23 @@ impl Emitter<'_> {
             }
 
             self.instructions(current, depth)?;
-            // A loop header's carried variables are assigned by the edge into
-            // the loop, which is emitted here — before `emit_loop` gets a
-            // chance to declare them, and outside any arm that would scope them
-            // away.
-            self.declare_loop_targets(current, depth);
             match &self.function.block(current).terminator {
                 CfgTerminator::Return | CfgTerminator::Unset => return Ok(()),
                 CfgTerminator::Jump { target, args } => {
                     let (target, args) = (*target, args.clone());
-                    self.pass_arguments(target, &args, depth);
+                    if self.loop_headers.contains(&target) {
+                        self.initialize_or_pass_loop_arguments(target, &args, depth);
+                    } else {
+                        self.pass_arguments(target, &args, depth);
+                    }
                     current = target;
                 }
                 CfgTerminator::Branch { .. } => {
+                    // A conditional edge cannot initialize a carried value in
+                    // both arms with one Rust declaration. Keep those loop
+                    // targets declared outside the arms; each selected edge
+                    // assigns them through the ordinary parallel-copy path.
+                    self.declare_loop_targets(current, depth);
                     let join = self.emit_diamond(current, depth)?;
                     match join {
                         Some(join) => current = join,
@@ -563,10 +875,32 @@ impl Emitter<'_> {
             self.declare_all(&self.function.block(join).params.clone(), depth);
         }
 
-        self.line(
-            depth,
-            &format!("if {} != 0.0 {{", self.value_name(condition)),
-        );
+        if let Some(join) = join {
+            let then_empty = self.empty_diamond_arm(then_target, &then_args, join);
+            let else_empty = self.empty_diamond_arm(else_target, &else_args, join);
+            if then_empty && else_empty {
+                return Ok(Some(join));
+            }
+            if else_empty {
+                let condition = self.truth_operand(condition);
+                self.line(depth, &format!("if {condition} {{"));
+                self.pass_arguments(then_target, &then_args, depth + 1);
+                self.block(then_target, Some(join), depth + 1)?;
+                self.line(depth, "}");
+                return Ok(Some(join));
+            }
+            if then_empty {
+                let condition = self.false_operand(condition);
+                self.line(depth, &format!("if {condition} {{"));
+                self.pass_arguments(else_target, &else_args, depth + 1);
+                self.block(else_target, Some(join), depth + 1)?;
+                self.line(depth, "}");
+                return Ok(Some(join));
+            }
+        }
+
+        let condition = self.truth_operand(condition);
+        self.line(depth, &format!("if {condition} {{"));
         self.pass_arguments(then_target, &then_args, depth + 1);
         self.block(then_target, join, depth + 1)?;
         self.line(depth, "} else {");
@@ -576,13 +910,24 @@ impl Emitter<'_> {
         Ok(join)
     }
 
+    /// Whether emitting one arm would produce no live statements or edge writes.
+    ///
+    /// Shared preprocessing can remove every data value from a deeply nested
+    /// region while canonical CFG DCE conservatively retains its conditions.
+    /// Walk the whole arm so a chain of routing blocks and no-op diamonds is as
+    /// empty as a direct edge to the join.
+    fn empty_diamond_arm(&self, target: BlockId, edge_args: &[ValueId], join: BlockId) -> bool {
+        !self.region_has_live_effect(target, edge_args, join)
+    }
+
     /// Emit a one-value, straight-line diamond as one typed `if` expression.
     ///
     /// Multi-value joins deliberately retain ordinary edge assignments. Tuple
-    /// expressions saved more source but did not improve the complete HiSIM-HV
-    /// leaf compile. Each non-empty arm must be a unique-predecessor block that
-    /// jumps directly to the join, so this preserves instruction order and
-    /// never moves work across a condition or loop boundary.
+    /// expressions save source, but paired seven-sample BSIM-BULK measurements
+    /// showed a repeatable 0.78% leaf-compile regression. Each non-empty arm
+    /// must be a unique-predecessor block that jumps directly to the join, so
+    /// this preserves instruction order and never moves work across a condition
+    /// or loop boundary.
     #[allow(clippy::too_many_arguments)]
     fn emit_single_value_diamond(
         &mut self,
@@ -595,7 +940,10 @@ impl Emitter<'_> {
         depth: usize,
     ) -> Result<bool, EmitError> {
         let params = self.function.block(join).params.clone();
-        if params.len() != 1 || self.declared.contains(&params[0]) {
+        if params.len() != 1
+            || !self.emitted[usize::from(params[0])]
+            || self.declared.contains(&params[0])
+        {
             return Ok(false);
         }
         let Some((then_block, then_result)) = self.single_value_arm(then_target, then_args, join)
@@ -609,17 +957,14 @@ impl Emitter<'_> {
 
         let param = params[0];
         self.declared.insert(param);
+        let condition = self.truth_operand(condition);
         self.line(
             depth,
-            &format!(
-                "let {} = if {} != 0.0 {{",
-                self.value_name(param),
-                self.value_name(condition)
-            ),
+            &format!("let {} = if {condition} {{", self.value_name(param)),
         );
-        self.emit_single_value_arm(then_block, then_result, depth + 1)?;
+        self.emit_single_value_arm(then_block, then_result, param, depth + 1)?;
         self.line(depth, "} else {");
-        self.emit_single_value_arm(else_block, else_result, depth + 1)?;
+        self.emit_single_value_arm(else_block, else_result, param, depth + 1)?;
         self.line(depth, "};");
         Ok(true)
     }
@@ -652,12 +997,13 @@ impl Emitter<'_> {
         &mut self,
         block: Option<BlockId>,
         result: ValueId,
+        target: ValueId,
         depth: usize,
     ) -> Result<(), EmitError> {
         if let Some(block) = block {
             self.instructions(block, depth)?;
         }
-        let result = self.value_name(result).to_owned();
+        let result = self.coerce_operand(result, self.function.value(target).value_type);
         self.line(depth, &result);
         Ok(())
     }
@@ -690,10 +1036,8 @@ impl Emitter<'_> {
                 (else_target, else_args, then_target, then_args)
             };
 
-        self.line(
-            depth + 1,
-            &format!("if {} == 0.0 {{", self.value_name(condition)),
-        );
+        let condition = self.false_operand(condition);
+        self.line(depth + 1, &format!("if {condition} {{"));
         self.pass_arguments(exit, &exit_args, depth + 2);
         self.line(depth + 2, "break;");
         self.line(depth + 1, "}");
@@ -756,9 +1100,15 @@ impl Emitter<'_> {
         // A parameter is assigned by the edge that arrived here, so its value is
         // already the one this block sees.
         for param in &self.function.block(block).params.clone() {
+            if !self.emitted[usize::from(*param)] {
+                continue;
+            }
             self.capture(*param, depth);
         }
         for instruction in &self.function.block(block).instructions.clone() {
+            if !self.emitted[usize::from(instruction.result)] {
+                continue;
+            }
             let expression = self.expression(instruction.result)?;
             // Composite expressions are parenthesised because they are about to
             // be dropped into the middle of another expression. Constructor,
@@ -827,34 +1177,82 @@ impl Emitter<'_> {
     /// thousand blocks the temporaries are otherwise two emitted lines per
     /// parameter per edge for nothing.
     fn pass_arguments(&mut self, target: BlockId, args: &[ValueId], depth: usize) {
-        let params = self.function.block(target).params.clone();
-        if params.is_empty() {
+        let pairs = self
+            .function
+            .block(target)
+            .params
+            .iter()
+            .copied()
+            .zip(args.iter().copied())
+            .filter(|(parameter, _)| self.emitted[usize::from(*parameter)])
+            .collect::<Vec<_>>();
+        if pairs.is_empty() {
             return;
         }
-        let clobbers = args.iter().any(|argument| params.contains(argument));
+        let clobbers = pairs
+            .iter()
+            .any(|(_, argument)| pairs.iter().any(|(parameter, _)| parameter == argument));
         if !clobbers {
-            for (param, argument) in params.iter().zip(args) {
-                self.line(
-                    depth,
-                    &format!(
-                        "{} = {};",
-                        self.value_name(*param),
-                        self.value_name(*argument)
-                    ),
-                );
+            for (param, argument) in pairs {
+                let argument = self.coerce_operand(argument, self.function.value(param).value_type);
+                self.line(depth, &format!("{} = {argument};", self.value_name(param)));
             }
             return;
         }
-        for (index, argument) in args.iter().enumerate() {
-            self.line(
-                depth,
-                &format!("let edge{index} = {};", self.value_name(*argument)),
-            );
+        for (index, (param, argument)) in pairs.iter().copied().enumerate() {
+            let argument = self.coerce_operand(argument, self.function.value(param).value_type);
+            self.line(depth, &format!("let edge{index} = {argument};"));
         }
-        for (index, param) in params.iter().enumerate() {
+        for (index, (param, _)) in pairs.into_iter().enumerate() {
+            self.line(depth, &format!("{} = edge{index};", self.value_name(param)));
+        }
+    }
+
+    /// Initialize loop-carried values directly on their first unconditional
+    /// edge, then use ordinary parallel assignments on every later edge.
+    ///
+    /// The old path emitted `let mut value = 0.0; value = argument;` for every
+    /// loop parameter even when a unique preheader supplied its real initial
+    /// value immediately. Direct initialization is valid only when every live
+    /// parameter is new and no argument refers to a parameter being declared.
+    /// Conditional entries, back edges, and swaps retain `pass_arguments`.
+    fn initialize_or_pass_loop_arguments(
+        &mut self,
+        target: BlockId,
+        args: &[ValueId],
+        depth: usize,
+    ) {
+        let pairs = self
+            .function
+            .block(target)
+            .params
+            .iter()
+            .copied()
+            .zip(args.iter().copied())
+            .filter(|(parameter, _)| self.emitted[usize::from(*parameter)])
+            .collect::<Vec<_>>();
+        if pairs.is_empty() {
+            return;
+        }
+        let can_initialize = pairs
+            .iter()
+            .all(|(parameter, _)| !self.declared.contains(parameter))
+            && !pairs
+                .iter()
+                .any(|(_, argument)| pairs.iter().any(|(parameter, _)| parameter == argument));
+        if !can_initialize {
+            for (parameter, _) in &pairs {
+                self.declare_mutable(*parameter, depth);
+            }
+            self.pass_arguments(target, args, depth);
+            return;
+        }
+        for (parameter, argument) in pairs {
+            self.declared.insert(parameter);
+            let argument = self.coerce_operand(argument, self.function.value(parameter).value_type);
             self.line(
                 depth,
-                &format!("{} = edge{index};", self.value_name(*param)),
+                &format!("let mut {} = {argument};", self.value_name(parameter)),
             );
         }
     }
@@ -872,6 +1270,9 @@ impl Emitter<'_> {
 
     fn declare_all(&mut self, values: &[ValueId], depth: usize) {
         for value in values {
+            if !self.emitted[usize::from(*value)] {
+                continue;
+            }
             if self.declared.insert(*value) {
                 self.line(depth, &format!("let {};", self.value_name(*value)));
             }
@@ -879,6 +1280,9 @@ impl Emitter<'_> {
     }
 
     fn declare_mutable(&mut self, value: ValueId, depth: usize) {
+        if !self.emitted[usize::from(value)] {
+            return;
+        }
         if self.declared.insert(value) {
             let initial = self.zero(value);
             self.line(
@@ -889,15 +1293,20 @@ impl Emitter<'_> {
     }
 
     fn zero(&self, value: ValueId) -> String {
+        if self.function.value(value).value_type == CfgValueType::Boolean {
+            return "false".to_string();
+        }
         match self.function.lanes_of(value) {
-            Some(lanes) if lanes.len() > 1 => format!("Lanes([0.0; {}])", lanes.len()),
+            Some(lanes) if lanes.len() > 1 => {
+                format!("{}([0.0; {}])", lane_type_name(lanes.len()), lanes.len())
+            }
             Some(_) | None => "0.0".to_string(),
         }
     }
 
     fn line(&mut self, depth: usize, text: &str) {
         for _ in 0..depth {
-            self.source.push_str("    ");
+            self.source.push('\t');
         }
         self.source.push_str(text);
         self.source.push('\n');
@@ -912,12 +1321,83 @@ impl Emitter<'_> {
         }
     }
 
+    /// A value in numeric context, preserving Verilog-A's `0.0`/`1.0`
+    /// representation only at the boundary where arithmetic requires it.
+    fn numeric_operand(&self, value: ValueId) -> String {
+        let operand = self.operand(value);
+        if self.function.value(value).value_type == CfgValueType::Boolean {
+            format!("({operand} as u8 as f64)")
+        } else {
+            operand
+        }
+    }
+
+    /// A value in control-flow context. IEEE NaN remains true because the
+    /// numeric rule is exactly `value != 0.0`, matching the evaluator.
+    fn truth_operand(&self, value: ValueId) -> String {
+        if let CfgValueKind::ParameterGiven(parameter) = self.function.value(value).kind {
+            return format!(
+                "{}[{}]",
+                self.bindings.parameter_given,
+                usize::from(parameter)
+            );
+        }
+        let operand = self.operand(value);
+        if self.function.value(value).value_type == CfgValueType::Boolean {
+            operand
+        } else {
+            format!("{operand} != 0.0")
+        }
+    }
+
+    fn false_operand(&self, value: ValueId) -> String {
+        if let CfgValueKind::ParameterGiven(parameter) = self.function.value(value).kind {
+            return format!(
+                "!{}[{}]",
+                self.bindings.parameter_given,
+                usize::from(parameter)
+            );
+        }
+        let operand = self.operand(value);
+        if self.function.value(value).value_type == CfgValueType::Boolean {
+            format!("!{operand}")
+        } else {
+            format!("{operand} == 0.0")
+        }
+    }
+
+    /// Coerce an edge or output to the representation its destination expects.
+    fn coerce_operand(&self, value: ValueId, target: CfgValueType) -> String {
+        match target {
+            CfgValueType::Boolean => self.truth_operand(value),
+            CfgValueType::Real
+                if self.function.value(value).value_type == CfgValueType::Boolean =>
+            {
+                self.numeric_operand(value)
+            }
+            CfgValueType::Real | CfgValueType::Lanes(_) => self.operand(value),
+        }
+    }
+
     fn inlined_expression_is_atomic(&self, value: ValueId) -> bool {
+        if matches!(
+            self.function.value(value).kind,
+            CfgValueKind::ParameterGiven(_)
+        ) && self.function.value(value).value_type != CfgValueType::Boolean
+        {
+            return false;
+        }
+        if matches!(self.function.value(value).kind, CfgValueKind::Staged { .. })
+            && self.function.value(value).value_type == CfgValueType::Boolean
+        {
+            return false;
+        }
         matches!(
             self.function.value(value).kind,
             CfgValueKind::RealConstant(_)
                 | CfgValueKind::BooleanConstant(_)
                 | CfgValueKind::Parameter(_)
+                | CfgValueKind::ParameterGiven(_)
                 | CfgValueKind::Temperature
                 | CfgValueKind::ThermalVoltage
                 | CfgValueKind::Multiplicity
@@ -956,26 +1436,71 @@ impl Emitter<'_> {
         )
     }
 
+    /// Exact emitted length of an immutable constant leaf, when it has one.
+    fn constant_leaf_expression_len(&self, value: ValueId) -> Option<usize> {
+        match self.function.value(value).kind {
+            CfgValueKind::RealConstant(constant) => Some(real_literal(constant).len()),
+            CfgValueKind::BooleanConstant(constant) => Some(if constant {
+                "true".len()
+            } else {
+                "false".len()
+            }),
+            CfgValueKind::LaneSplat(constant) => {
+                let width = self.function.lanes_of(value).map_or(0, <[u32]>::len);
+                let literal = real_literal(constant);
+                Some(if width == 1 {
+                    literal.len()
+                } else {
+                    format!("{}([{literal}; {width}])", lane_type_name(width)).len()
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn unary_expression(&self, op: CfgUnaryOp, input: ValueId) -> String {
+        if op == CfgUnaryOp::Not {
+            unary(op, &self.truth_operand(input))
+        } else {
+            unary(op, &self.numeric_operand(input))
+        }
+    }
+
+    fn binary_expression(&self, op: CfgBinaryOp, left: ValueId, right: ValueId) -> String {
+        if matches!(op, CfgBinaryOp::And | CfgBinaryOp::Or) {
+            binary(op, &self.truth_operand(left), &self.truth_operand(right))
+        } else {
+            binary(
+                op,
+                &self.numeric_operand(left),
+                &self.numeric_operand(right),
+            )
+        }
+    }
+
     fn expression(&self, value: ValueId) -> Result<String, EmitError> {
         let bindings = self.bindings;
         Ok(match &self.function.value(value).kind {
             CfgValueKind::RealConstant(constant) => real_literal(*constant),
             CfgValueKind::BooleanConstant(constant) => {
                 if *constant {
-                    "1.0f64".into()
+                    "true".into()
                 } else {
-                    "0.0f64".into()
+                    "false".into()
                 }
             }
             CfgValueKind::BlockParameter => self.value_name(value).to_owned(),
             CfgValueKind::Parameter(parameter) => {
                 format!("{}[{}]", bindings.parameters, usize::from(*parameter))
             }
-            CfgValueKind::ParameterGiven(parameter) => format!(
-                "if {}[{}] {{ 1.0 }} else {{ 0.0 }}",
-                bindings.parameter_given,
-                usize::from(*parameter)
-            ),
+            CfgValueKind::ParameterGiven(parameter) => {
+                let given = format!("{}[{}]", bindings.parameter_given, usize::from(*parameter));
+                if self.function.value(value).value_type == CfgValueType::Boolean {
+                    given
+                } else {
+                    format!("{given} as u8 as f64")
+                }
+            }
             CfgValueKind::Temperature => bindings.temperature.clone(),
             CfgValueKind::ThermalVoltage => bindings.thermal_voltage.clone(),
             CfgValueKind::Multiplicity => bindings.multiplicity.clone(),
@@ -984,7 +1509,7 @@ impl Emitter<'_> {
             CfgValueKind::SimParam { name, fallback } => format!(
                 "{}(\"{name}\", {})",
                 bindings.simparam,
-                self.operand(*fallback)
+                self.numeric_operand(*fallback)
             ),
             CfgValueKind::NodePotential(node) => {
                 format!("{}[{}]", bindings.node_potentials, usize::from(*node))
@@ -1000,8 +1525,12 @@ impl Emitter<'_> {
             CfgValueKind::Ddt { operator, input } => format!(
                 "{}({}, {})",
                 bindings.ddt,
-                usize::from(*operator),
-                self.operand(*input)
+                bindings
+                    .ddt_slots
+                    .get(operator)
+                    .copied()
+                    .unwrap_or_else(|| usize::from(*operator)),
+                self.numeric_operand(*input)
             ),
             CfgValueKind::DdtScale => format!("{}()", bindings.ddt_scale),
             CfgValueKind::Idt {
@@ -1011,9 +1540,13 @@ impl Emitter<'_> {
             } => format!(
                 "{}({}, {}, {})",
                 bindings.idt,
-                usize::from(*operator),
-                self.operand(*input),
-                self.operand(*ic)
+                bindings
+                    .idt_slots
+                    .get(operator)
+                    .copied()
+                    .unwrap_or_else(|| usize::from(*operator)),
+                self.numeric_operand(*input),
+                self.numeric_operand(*ic)
             ),
             CfgValueKind::IdtScale => format!("{}()", bindings.idt_scale),
             CfgValueKind::Limit {
@@ -1024,27 +1557,37 @@ impl Emitter<'_> {
             } => format!(
                 "{}({}, {}, {})",
                 bindings.limit,
-                usize::from(*operator),
-                self.operand(*proposed),
-                self.operand(*candidate)
+                bindings
+                    .limit_slots
+                    .get(operator)
+                    .copied()
+                    .unwrap_or_else(|| usize::from(*operator)),
+                self.numeric_operand(*proposed),
+                self.numeric_operand(*candidate)
             ),
             CfgValueKind::LimitPrevious { operator, proposed } => format!(
                 "{}({}, {})",
                 bindings.limit_previous,
-                usize::from(*operator),
-                self.operand(*proposed)
+                bindings
+                    .limit_slots
+                    .get(operator)
+                    .copied()
+                    .unwrap_or_else(|| usize::from(*operator)),
+                self.numeric_operand(*proposed)
             ),
             CfgValueKind::Ddx { .. } => return Err(EmitError::UnresolvedDdx(value)),
-            CfgValueKind::Unary { op, input } => unary(*op, &self.operand(*input)),
-            CfgValueKind::Binary { op, left, right } => {
-                binary(*op, &self.operand(*left), &self.operand(*right))
-            }
+            CfgValueKind::Unary { op, input } => self.unary_expression(*op, *input),
+            CfgValueKind::Binary { op, left, right } => self.binary_expression(*op, *left, *right),
             CfgValueKind::LaneSplat(constant) => {
                 let width = self.function.lanes_of(value).map_or(0, <[u32]>::len);
                 if width == 1 {
                     real_literal(*constant)
                 } else {
-                    format!("Lanes([{}; {width}])", real_literal(*constant))
+                    format!(
+                        "{}([{}; {width}])",
+                        lane_type_name(width),
+                        real_literal(*constant)
+                    )
                 }
             }
             // The one packed form that is written out rather than called: which
@@ -1067,7 +1610,11 @@ impl Emitter<'_> {
                         .next()
                         .unwrap_or_else(|| "0.0".to_string())
                 } else {
-                    format!("Lanes([{}])", elements.join(", "))
+                    format!(
+                        "{}([{}])",
+                        lane_type_name(elements.len()),
+                        elements.join(", ")
+                    )
                 }
             }
             CfgValueKind::LaneBinary { op, left, right } => {
@@ -1087,14 +1634,21 @@ impl Emitter<'_> {
                 format!(
                     "{} {symbol} {}",
                     self.operand(*input),
-                    self.operand(*scalar)
+                    self.numeric_operand(*scalar)
                 )
             }
             CfgValueKind::LaneExtract { input, lane } => {
                 let position = self.function.lane_position(*input, *lane).unwrap_or(0);
                 self.lane_element(*input, position)
             }
-            CfgValueKind::Staged { slot } => format!("{}[{slot}]", bindings.staged),
+            CfgValueKind::Staged { slot } => {
+                let staged = format!("{}[{slot}]", bindings.staged);
+                if self.function.value(value).value_type == CfgValueType::Boolean {
+                    format!("{staged} != 0.0")
+                } else {
+                    staged
+                }
+            }
         })
     }
 
@@ -1264,6 +1818,60 @@ fn back_edge_targets(function: &CfgFunction) -> HashSet<BlockId> {
     headers
 }
 
+/// Arguments reaching each block parameter, indexed by value id.
+fn incoming_block_arguments(function: &CfgFunction) -> Vec<Vec<ValueId>> {
+    let mut incoming = vec![Vec::new(); function.values.len()];
+    let mut record = |target: BlockId, args: &[ValueId]| {
+        for (parameter, argument) in function.block(target).params.iter().zip(args) {
+            incoming[usize::from(*parameter)].push(*argument);
+        }
+    };
+    for block in &function.blocks {
+        match &block.terminator {
+            CfgTerminator::Jump { target, args } => record(*target, args),
+            CfgTerminator::Branch {
+                then_target,
+                then_args,
+                else_target,
+                else_args,
+                ..
+            } => {
+                record(*then_target, then_args);
+                record(*else_target, else_args);
+            }
+            CfgTerminator::Return | CfgTerminator::Unset => {}
+        }
+    }
+    incoming
+}
+
+fn mark_live(value: ValueId, live: &mut [bool], worklist: &mut Vec<ValueId>) {
+    let slot = &mut live[usize::from(value)];
+    if !*slot {
+        *slot = true;
+        worklist.push(value);
+    }
+}
+
+/// Close liveness over ordinary operands and SSA merge inputs.
+fn propagate_value_liveness(
+    function: &CfgFunction,
+    incoming: &[Vec<ValueId>],
+    live: &mut [bool],
+    worklist: &mut Vec<ValueId>,
+) {
+    while let Some(value) = worklist.pop() {
+        for operand in function.value(value).kind.operands() {
+            mark_live(operand, live, worklist);
+        }
+        if matches!(function.value(value).kind, CfgValueKind::BlockParameter) {
+            for argument in &incoming[usize::from(value)] {
+                mark_live(*argument, live, worklist);
+            }
+        }
+    }
+}
+
 /// A literal that reads back as exactly this value.
 fn real_literal(value: f64) -> String {
     if value.is_nan() {
@@ -1276,13 +1884,19 @@ fn real_literal(value: f64) -> String {
             "f64::INFINITY".into()
         };
     }
-    let mut text = String::new();
-    // `{:e}` is the shortest form that round-trips, which matters: a truncated
-    // constant is a wrong model, not a smaller one. The explicit type is also
-    // required when a generated binding is only used as a float-method receiver;
-    // Rust otherwise leaves that binding ambiguous between f32 and f64.
-    let _ = write!(text, "{value:e}f64");
-    text
+    // Both `Display` forms use Rust's shortest round-tripping conversion. Plain
+    // decimal wins for small integers and ordinary fractions, while scientific
+    // notation wins for large magnitudes. The explicit type is required when a
+    // generated binding is only used as a float-method receiver; Rust otherwise
+    // leaves that binding ambiguous between f32 and f64.
+    let decimal = value.to_string();
+    let scientific = format!("{value:e}");
+    let shortest = if decimal.len() <= scientific.len() {
+        decimal
+    } else {
+        scientific
+    };
+    format!("{shortest}f64")
 }
 
 /// A short, deterministic Rust identifier for an otherwise meaningless local.
@@ -1316,7 +1930,7 @@ fn compact_local_name(mut ordinal: usize) -> String {
 fn unary(op: CfgUnaryOp, input: &str) -> String {
     match op {
         CfgUnaryOp::Neg => format!("-{input}"),
-        CfgUnaryOp::Not => format!("if {input} == 0.0 {{ 1.0 }} else {{ 0.0 }}"),
+        CfgUnaryOp::Not => format!("!({input})"),
         CfgUnaryOp::Exp => format!("{input}.exp()"),
         CfgUnaryOp::LimExp => format!("rspice_limexp({input})"),
         CfgUnaryOp::LimitedExp => format!("rspice_limited_exp({input})"),
@@ -1352,24 +1966,39 @@ fn binary(op: CfgBinaryOp, left: &str, right: &str) -> String {
         // difference is hardest to trace.
         CfgBinaryOp::Min => format!("if {left} <= {right} {{ {left} }} else {{ {right} }}"),
         CfgBinaryOp::Max => format!("if {left} >= {right} {{ {left} }} else {{ {right} }}"),
-        CfgBinaryOp::Eq => predicate(&format!("{left} == {right}")),
-        CfgBinaryOp::Ne => predicate(&format!("{left} != {right}")),
-        CfgBinaryOp::Lt => predicate(&format!("{left} < {right}")),
-        CfgBinaryOp::Le => predicate(&format!("{left} <= {right}")),
-        CfgBinaryOp::Gt => predicate(&format!("{left} > {right}")),
-        CfgBinaryOp::Ge => predicate(&format!("{left} >= {right}")),
-        CfgBinaryOp::And => predicate(&format!("{left} != 0.0 && {right} != 0.0")),
-        CfgBinaryOp::Or => predicate(&format!("{left} != 0.0 || {right} != 0.0")),
+        CfgBinaryOp::Eq => format!("{left} == {right}"),
+        CfgBinaryOp::Ne => format!("{left} != {right}"),
+        CfgBinaryOp::Lt => format!("{left} < {right}"),
+        CfgBinaryOp::Le => format!("{left} <= {right}"),
+        CfgBinaryOp::Gt => format!("{left} > {right}"),
+        CfgBinaryOp::Ge => format!("{left} >= {right}"),
+        CfgBinaryOp::And => format!("{left} && {right}"),
+        CfgBinaryOp::Or => format!("{left} || {right}"),
     }
 }
 
-fn predicate(test: &str) -> String {
-    format!("if {test} {{ 1.0 }} else {{ 0.0 }}")
+/// Whether substituting a constant is no larger than binding it once.
+///
+/// A depth-one binding costs one indentation tab, `let `, ` = `, `;\n`,
+/// the expression, and its name. Every use also costs the name. Assuming the
+/// shortest possible one-byte name makes this conservative: when it returns
+/// true, substitution cannot increase generated source after dense naming.
+fn constant_inlining_saves_source(expression_len: usize, uses: usize) -> bool {
+    if uses == 0 {
+        return false;
+    }
+    uses.saturating_mul(expression_len)
+        <= 10usize
+            .saturating_add(expression_len)
+            .saturating_add(uses.saturating_add(1))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::compact_local_name;
+    use super::{
+        MAX_FIXED_LANE_WIDTH, RUNTIME_PRELUDE, compact_local_name, constant_inlining_saves_source,
+        lane_type_name, real_literal,
+    };
 
     #[test]
     fn compact_local_names_are_stable_across_base_26_boundaries() {
@@ -1380,5 +2009,62 @@ mod tests {
         assert_eq!(compact_local_name(52), "BA");
         assert_eq!(compact_local_name(701), "ZZ");
         assert_eq!(compact_local_name(702), "AAA");
+    }
+
+    #[test]
+    fn constant_inlining_uses_a_conservative_source_cost() {
+        // A six-byte `0.0f64` is smaller through four uses, even if the binding
+        // would have had the shortest possible local name.
+        assert!(constant_inlining_saves_source(6, 1));
+        assert!(constant_inlining_saves_source(6, 3));
+        assert!(!constant_inlining_saves_source(6, 4));
+
+        // A longer literal only wins through two uses.
+        assert!(constant_inlining_saves_source(10, 2));
+        assert!(!constant_inlining_saves_source(10, 3));
+        assert!(!constant_inlining_saves_source(6, 0));
+    }
+
+    #[test]
+    fn real_literals_choose_the_shortest_exact_spelling() {
+        assert_eq!(real_literal(0.0), "0f64");
+        assert_eq!(real_literal(1.0), "1f64");
+        assert_eq!(real_literal(1e20), "1e20f64");
+
+        for value in [
+            -0.0,
+            0.1,
+            -1.234_567_890_123_456_7,
+            f64::MIN_POSITIVE,
+            f64::MAX,
+        ] {
+            let literal = real_literal(value);
+            let parsed: f64 = literal
+                .strip_suffix("f64")
+                .expect("generated literal carries its type")
+                .parse()
+                .expect("generated literal parses as f64");
+            assert_eq!(parsed.to_bits(), value.to_bits(), "{literal}");
+        }
+    }
+
+    #[test]
+    fn packed_lane_widths_select_fixed_types_and_retain_a_bounded_fallback() {
+        assert_eq!(lane_type_name(2), "L2");
+        assert_eq!(lane_type_name(3), "L3");
+        assert_eq!(lane_type_name(MAX_FIXED_LANE_WIDTH), "L32");
+        assert_eq!(lane_type_name(MAX_FIXED_LANE_WIDTH + 1), "Lanes");
+
+        let fixed = RUNTIME_PRELUDE
+            .split("macro_rules! define_fixed_lanes")
+            .nth(1)
+            .and_then(|source| source.split("define_fixed_lanes!(L2").next())
+            .expect("standalone prelude contains fixed lane definitions");
+        assert!(!fixed.contains("while "));
+        assert!(
+            !fixed
+                .lines()
+                .any(|line| line.trim_start().starts_with("for "))
+        );
     }
 }

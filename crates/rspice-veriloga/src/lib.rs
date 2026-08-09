@@ -93,6 +93,7 @@ pub mod runtime_report;
 pub mod rust_backend;
 pub mod semantic;
 pub mod source;
+pub mod specialist;
 pub mod stdlib;
 pub mod types;
 pub mod virtual_source;
@@ -137,6 +138,11 @@ pub use runtime_report::{
 };
 pub use semantic::{ParameterScope, SemanticAnalyzer};
 pub use source::{SourceId, SourceMap, Span};
+pub use specialist::{
+    SpecialistCheckDisposition, SpecialistCheckKind, SpecialistCheckSummary, SpecialistCodeAction,
+    SpecialistEvidence, SpecialistFinding, SpecialistFindingSeverity, SpecialistModuleInstance,
+    SpecialistReport, SpecialistSpan,
+};
 pub use types::{FunctionRegistry, ParameterRange, ValueType};
 pub use virtual_source::{
     VirtualCompileLimits, VirtualRuntimeCompilation, VirtualRuntimeCompileFailure,
@@ -624,25 +630,29 @@ impl VerilogACompiler {
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<RuntimeCompileReport> {
         let analyzed = self.analyze_preprocessed(source_package, preprocessed, measurements)?;
+        let executable = self.select_executable_module(&analyzed, module_name)?;
         let source_digest = canonical_ir::StableDigest::from_text(&preprocessed).as_hex();
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
         let phase_started = web_time::Instant::now();
-        let model = CodeGenerator::new().generate_module_with_source_digest(
-            &analyzed,
-            module_name,
-            source_digest,
-        )?;
+        let model = CodeGenerator::new()
+            .generate_analyzed_module_with_source_digest(&executable, source_digest)?;
         measurements.record(PipelinePhase::BytecodeGeneration, phase_started.elapsed())?;
-        let canonical_ir = self.build_canonical_ir_artifact(
+        let canonical_ir = self.build_canonical_ir_artifact_from_module(
             source_package,
             preprocessed,
-            &analyzed,
-            module_name,
+            &executable,
             measurements,
         )?;
         measurements.checkpoint(PipelinePhase::RuntimeQualification)?;
         let phase_started = web_time::Instant::now();
         let mut report = RuntimeCompileReport::from_artifacts(model, canonical_ir, qualifications);
+        report.specialist = specialist::analyze(
+            &analyzed,
+            report.abi.module_name.as_str(),
+            preprocessed,
+            &report.targets,
+            qualifications,
+        );
         measurements.record(PipelinePhase::RuntimeQualification, phase_started.elapsed())?;
         report.enforce_fallback_policy(qualifications)?;
         measurements.checkpoint(PipelinePhase::IntegrityValidation)?;
@@ -742,16 +752,14 @@ impl VerilogACompiler {
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<CompiledModel> {
         let analyzed = self.analyze_preprocessed("<input>", source, measurements)?;
+        let executable = self.select_executable_module(&analyzed, module_name)?;
 
         // Phase 4 & 5: IR generation and code generation
         let source_digest = canonical_ir::StableDigest::from_text(source).as_hex();
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
         let phase_started = web_time::Instant::now();
-        let model = CodeGenerator::new().generate_module_with_source_digest(
-            &analyzed,
-            module_name,
-            source_digest,
-        )?;
+        let model = CodeGenerator::new()
+            .generate_analyzed_module_with_source_digest(&executable, source_digest)?;
         measurements.record(PipelinePhase::BytecodeGeneration, phase_started.elapsed())?;
 
         Ok(model)
@@ -849,7 +857,17 @@ impl VerilogACompiler {
         module_name: Option<&str>,
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<canonical_ir::CanonicalIrArtifact> {
-        let module = self.select_analyzed_module(analyzed, module_name)?;
+        let module = self.select_executable_module(analyzed, module_name)?;
+        self.build_canonical_ir_artifact_from_module(source_package, source, &module, measurements)
+    }
+
+    fn build_canonical_ir_artifact_from_module(
+        &self,
+        source_package: &str,
+        source: &str,
+        module: &semantic::AnalyzedModule,
+        measurements: &mut metrics::MetricsRecorder,
+    ) -> CompileResult<canonical_ir::CanonicalIrArtifact> {
         let trace = compiler_phase_trace_enabled();
         let metadata = canonical_ir::CanonicalMetadata::for_source(source_package, source);
         measurements.checkpoint(PipelinePhase::HirLowering)?;
@@ -933,6 +951,18 @@ impl VerilogACompiler {
                 ))),
             },
         }
+    }
+
+    /// Select and faithfully elaborate one executable module. Leaf modules are
+    /// borrowed; structural hierarchy returns an owned flattened model shared
+    /// by downstream lowering.
+    fn select_executable_module<'a>(
+        &self,
+        analyzed: &'a semantic::AnalyzedFile,
+        module_name: Option<&str>,
+    ) -> CompileResult<std::borrow::Cow<'a, semantic::AnalyzedModule>> {
+        let selected = self.select_analyzed_module(analyzed, module_name)?;
+        semantic::elaborate_executable_module(analyzed, selected)
     }
 
     fn canonical_ir_error(diagnostics: Vec<canonical_ir::IrDiagnostic>) -> CompileError {
@@ -1158,20 +1188,17 @@ impl VerilogACompiler {
         let source_package = source_package_path.display().to_string();
         let analyzed =
             self.analyze_preprocessed(&source_package, &preprocessed, &mut measurements)?;
+        let executable = self.select_executable_module(&analyzed, module_name)?;
         let source_digest = canonical_ir::StableDigest::from_text(&preprocessed).as_hex();
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
         let phase_started = web_time::Instant::now();
-        let model = CodeGenerator::new().generate_module_with_source_digest(
-            &analyzed,
-            module_name,
-            source_digest,
-        )?;
+        let model = CodeGenerator::new()
+            .generate_analyzed_module_with_source_digest(&executable, source_digest)?;
         measurements.record(PipelinePhase::BytecodeGeneration, phase_started.elapsed())?;
-        let canonical_ir = self.build_canonical_ir_artifact(
+        let canonical_ir = self.build_canonical_ir_artifact_from_module(
             &source_package,
             &preprocessed,
-            &analyzed,
-            module_name,
+            &executable,
             &mut measurements,
         )?;
 

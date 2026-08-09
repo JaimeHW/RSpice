@@ -4,7 +4,7 @@
 //! unchanged corpus leaves mtimes alone and does not trigger a rebuild.
 //! [`cleanup_stale_generated_device_folders`] removes devices that are no
 //! longer generated — without it a renamed or dropped model would linger in
-//! `veriloga_builtins/` and keep compiling.
+//! the generated catalog and keep compiling.
 //!
 //! Paths are validated before anything is removed: generated folder names must
 //! be single, normal components, so a malformed name cannot direct a delete

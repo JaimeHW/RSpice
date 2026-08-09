@@ -374,7 +374,132 @@ impl<'a> Parser<'a> {
             }
         }
 
+        // Module instance declaration:
+        // `model [#(...)] instance (...)[, instance (...)];`
+        // The parameter override belongs to every instance in the declaration.
+        if self.peek_is(TokenKind::Identifier) || self.peek_is(TokenKind::Hash) {
+            let instances = self.parse_module_instances()?;
+            module.instances.extend(instances);
+            return Ok(());
+        }
+
         Err(self.unsupported_current("module item"))
+    }
+
+    fn parse_module_instances(&mut self) -> Result<Vec<ModuleInstance>, ParseError> {
+        let declaration_start = self.current_span();
+        let module: SmolStr = self.expect_identifier("instantiated module name")?.into();
+        let parameters = if self.match_token(TokenKind::Hash) {
+            self.parse_instance_parameter_overrides()?
+        } else {
+            Vec::new()
+        };
+        let mut instances = Vec::new();
+        loop {
+            let instance_start = self.current_span();
+            let name: SmolStr = self.expect_identifier("module instance name")?.into();
+            let connections = self.parse_instance_connections()?;
+            instances.push(ModuleInstance {
+                module: module.clone(),
+                name,
+                connections,
+                parameters: parameters.clone(),
+                span: instance_start.extend(self.previous_span()),
+            });
+            if !self.match_token(TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(TokenKind::Semicolon)?;
+        let declaration_end = self.previous_span();
+        for instance in &mut instances {
+            instance.span = declaration_start.extend(declaration_end);
+        }
+        Ok(instances)
+    }
+
+    fn parse_instance_parameter_overrides(&mut self) -> Result<Vec<ParameterOverride>, ParseError> {
+        self.expect(TokenKind::LParen)?;
+        let mut parameters = Vec::new();
+        if !self.check(TokenKind::RParen) {
+            let named = self.check(TokenKind::Dot);
+            loop {
+                let start = self.current_span();
+                let (name, value) = if named {
+                    self.expect(TokenKind::Dot)?;
+                    let name: SmolStr = self.expect_identifier("parameter override name")?.into();
+                    self.expect(TokenKind::LParen)?;
+                    let value = self.parse_expression()?;
+                    self.expect(TokenKind::RParen)?;
+                    (Some(name), value)
+                } else {
+                    (None, self.parse_expression()?)
+                };
+                parameters.push(ParameterOverride {
+                    name,
+                    value,
+                    span: start.extend(self.previous_span()),
+                });
+                if !self.match_token(TokenKind::Comma) {
+                    break;
+                }
+                if self.check(TokenKind::Dot) != named {
+                    return Err(self.unsupported_current(
+                        "mixed named and ordered module parameter overrides",
+                    ));
+                }
+            }
+        }
+        self.expect(TokenKind::RParen)?;
+        Ok(parameters)
+    }
+
+    fn parse_instance_connections(&mut self) -> Result<Vec<Connection>, ParseError> {
+        self.expect(TokenKind::LParen)?;
+        let mut connections = Vec::new();
+        if !self.check(TokenKind::RParen) {
+            let named = self.check(TokenKind::Dot);
+            loop {
+                let start = self.current_span();
+                let connection = if named {
+                    self.expect(TokenKind::Dot)?;
+                    let port: SmolStr = self.expect_identifier("module port name")?.into();
+                    self.expect(TokenKind::LParen)?;
+                    let signal = if self.check(TokenKind::RParen) {
+                        None
+                    } else {
+                        Some(self.parse_expression()?)
+                    };
+                    self.expect(TokenKind::RParen)?;
+                    Connection::Named {
+                        port,
+                        signal,
+                        span: start.extend(self.previous_span()),
+                    }
+                } else {
+                    let signal = if self.check(TokenKind::Comma) || self.check(TokenKind::RParen) {
+                        None
+                    } else {
+                        Some(self.parse_expression()?)
+                    };
+                    Connection::Ordered {
+                        signal,
+                        span: start.extend(self.previous_span()),
+                    }
+                };
+                connections.push(connection);
+                if !self.match_token(TokenKind::Comma) {
+                    break;
+                }
+                if self.check(TokenKind::Dot) != named {
+                    return Err(
+                        self.unsupported_current("mixed named and ordered module port connections")
+                    );
+                }
+            }
+        }
+        self.expect(TokenKind::RParen)?;
+        Ok(connections)
     }
 
     /// Parse a named branch declaration: branch (a [, b]) name1 [, name2] ;
@@ -2431,6 +2556,55 @@ mod tests {
             endmodule"#,
         );
         assert_eq!(m.analog_block.as_ref().unwrap().statements.len(), 2);
+    }
+
+    #[test]
+    fn module_instances_retain_named_bindings_and_unconnected_ports() {
+        let m = parse_module(
+            r#"module parent(p, n);
+                inout p, n;
+                electrical p, n;
+                child #(.gain(2.0)) first (.p(p), .n(n)), second (.p(p), .n());
+            endmodule"#,
+        );
+
+        assert_eq!(m.instances.len(), 2);
+        assert_eq!(m.instances[0].module.as_str(), "child");
+        assert_eq!(m.instances[0].name.as_str(), "first");
+        assert_eq!(m.instances[0].parameters.len(), 1);
+        assert_eq!(m.instances[0].parameters[0].name.as_deref(), Some("gain"));
+        assert!(matches!(
+            m.instances[1].connections[1],
+            Connection::Named {
+                ref port,
+                signal: None,
+                ..
+            } if port.as_str() == "n"
+        ));
+    }
+
+    #[test]
+    fn module_instances_retain_ordered_parameters_connections_and_holes() {
+        let m = parse_module(
+            r#"module parent(p, n);
+                inout p, n;
+                electrical p, n;
+                child #(2.0, 3.0) device (p, , n);
+            endmodule"#,
+        );
+
+        let instance = &m.instances[0];
+        assert!(
+            instance
+                .parameters
+                .iter()
+                .all(|parameter| parameter.name.is_none())
+        );
+        assert_eq!(instance.connections.len(), 3);
+        assert!(matches!(
+            instance.connections[1],
+            Connection::Ordered { signal: None, .. }
+        ));
     }
 
     #[test]

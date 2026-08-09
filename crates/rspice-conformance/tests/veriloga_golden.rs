@@ -99,14 +99,6 @@ const KNOWN_DEVIATIONS: &[KnownDeviation] = &[
         why: "same zero-bias kink, with the stamped entry exactly zero",
     },
     KnownDeviation {
-        model: "l_utsoi__485e0ac9",
-        relative_error: 2.0e-3,
-        unverified_significant: 4,
-        why: "was 9e-2 on the old backend, described there as a branch incidence \
-              stamping -1 against a difference reading -0.914; the canonical \
-              backend brings it to 1.6e-3, so whatever that was, it was the model",
-    },
-    KnownDeviation {
         model: "EPFL_HEMT_10a",
         relative_error: 1.0e-5,
         unverified_significant: 10,
@@ -416,18 +408,21 @@ fn stamped_jacobians_match_a_numerical_derivative_of_the_stamped_currents() {
         // entries the difference resolved tightly, so an entry that missed
         // convergence by a hair can fail the gate while leaving `worst` clean,
         // and a model can then be dropped from the list and immediately fail.
-        if allowance.is_some() && gaps == 0 && strict == 0 {
-            clean.push(*model_name);
+        if let Some(allowance) = allowance
+            && gaps == 0
+            && strict == 0
+        {
+            clean.push((*model_name, allowance.why));
         }
     }
 
     // Reported together rather than as two asserts, so one run says everything
     // it found instead of only whichever tripped first. These runs are not
     // cheap.
-    for model_name in &clean {
+    for (model_name, why) in &clean {
         failures.push(format!(
             "{model_name}: listed in KNOWN_DEVIATIONS but now meets the gate; \
-             remove the entry so the list keeps describing something"
+             remove the entry so the list keeps describing something ({why})"
         ));
     }
     assert!(
@@ -530,16 +525,19 @@ fn stamped_reactive_blocks_match_a_numerical_derivative_of_the_stored_charge() {
                 "{model_name}: {gaps} significant reactive entries unverifiable, allowance is {allowed_gaps}"
             ));
         }
-        if allowance.is_some() && gaps == 0 && strict == 0 {
-            clean.push(*model_name);
+        if let Some(allowance) = allowance
+            && gaps == 0
+            && strict == 0
+        {
+            clean.push((*model_name, allowance.why));
         }
     }
 
     eprintln!("{reactive_models} built-ins stamp a reactive block");
-    for model_name in &clean {
+    for (model_name, why) in &clean {
         failures.push(format!(
             "{model_name}: listed in KNOWN_CAPACITANCE_DEVIATIONS but now meets the \
-             gate; remove the entry so the list keeps describing something"
+             gate; remove the entry so the list keeps describing something ({why})"
         ));
     }
     assert!(

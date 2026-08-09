@@ -11,20 +11,36 @@
 //! derivative of the current, which is the property the goldens themselves were
 //! never able to establish.
 
-use std::fs;
+use std::collections::BTreeSet;
+use std::fs::{self, File};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::Args;
+use clap::{Args, Parser};
 use rspice_conformance::suites::veriloga::fixture::{GoldenCase, GoldenFixture, GoldenPoint};
 use rspice_conformance::suites::veriloga::golden::GoldenHarness;
 use rspice_core::device::veriloga_builtins::builtins;
 use serde::Serialize;
 
-use crate::error::BenchError;
+use tempfile::{Builder as TempBuilder, NamedTempFile};
+
+#[derive(Debug)]
+struct GoldenError {
+    message: String,
+}
+
+impl std::fmt::Display for GoldenError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for GoldenError {}
 
 /// Bias points captured per model per case.
 const DEFAULT_PROBE_POINTS: usize = 6;
+const MAX_FIXTURE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Tolerances a replay must meet, matching the backend-rewrite gates.
 const PRIMAL_TOLERANCE: f64 = 1.0e-12;
@@ -58,19 +74,7 @@ struct FixtureDeviation {
     why: &'static str,
 }
 
-const FIXTURE_DEVIATIONS: &[FixtureDeviation] = &[FixtureDeviation {
-    model: "DIODE_CMC",
-    jacobian: 5.0e-3,
-    capacitance: JACOBIAN_TOLERANCE,
-    why: "the model writes `I(a, aik) <+ $simparam(\"gmin\", 0.0) * V(a, aik)`, and the backend \
-          that captured this fixture folded that call to its literal fallback at generation time \
-          — its generated source contains no `simparam` and no `gmin` anywhere, so the term was \
-          dropped. The canonical backend emits `ctx.simparam_or(\"gmin\", ..)` and reads the \
-          simulator's value, which is `constants::GMIN` = 1e-12; four entries of the (a, aik) \
-          block therefore differ by exactly 1e-12, with the signs of a parallel conductance. The \
-          independent derivative oracle confirms the canonical Jacobian against the model's own \
-          currents at 8.5e-7, so the replay is the correct side",
-}];
+const FIXTURE_DEVIATIONS: &[FixtureDeviation] = &[];
 
 fn fixture_deviation(model: &str) -> Option<&'static FixtureDeviation> {
     FIXTURE_DEVIATIONS
@@ -78,8 +82,46 @@ fn fixture_deviation(model: &str) -> Option<&'static FixtureDeviation> {
         .find(|deviation| deviation.model == model)
 }
 
-#[derive(Args, Debug)]
-pub struct VerilogAGoldenArgs {
+/// Models whose default card is known to produce non-finite values at exact
+/// equilibrium.
+///
+/// A matching `NaN` is not ordinary numerical agreement and is never accepted
+/// by [`relative`]. These entries make the exception explicit and fail closed:
+/// finite/non-finite changes still fail, and an entry whose fixture no longer
+/// contains a matching non-finite value must be removed.
+struct NonFiniteFixtureDeviation {
+    model: &'static str,
+    why: &'static str,
+}
+
+const NON_FINITE_FIXTURE_DEVIATIONS: &[NonFiniteFixtureDeviation] = &[
+    NonFiniteFixtureDeviation {
+        model: "asmesd",
+        why: "the independently checked default-card equilibrium stamp is non-finite",
+    },
+    NonFiniteFixtureDeviation {
+        model: "asmesd_dio",
+        why: "the independently checked default-card equilibrium stamp is non-finite",
+    },
+    NonFiniteFixtureDeviation {
+        model: "bsimimg",
+        why: "the independently checked default-card equilibrium stamp is non-finite",
+    },
+];
+
+fn non_finite_fixture_deviation(model: &str) -> Option<&'static NonFiniteFixtureDeviation> {
+    NON_FINITE_FIXTURE_DEVIATIONS
+        .iter()
+        .find(|deviation| deviation.model == model)
+}
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "rspice-veriloga-golden",
+    version,
+    about = "Capture, verify, and independently audit generated Verilog-A numerics"
+)]
+struct Cli {
     #[command(subcommand)]
     command: GoldenCommand,
 }
@@ -96,23 +138,23 @@ enum GoldenCommand {
 
 #[derive(Args, Debug)]
 struct CaptureArgs {
-    /// Directory to write fixtures into.
-    #[arg(long, default_value = "benchmarks/reference/veriloga-golden")]
+    /// New directory to publish transactionally. It must not already exist.
+    #[arg(long)]
     out: PathBuf,
     /// Restrict to these models; empty means every compiled-in built-in.
     #[arg(long, value_delimiter = ',')]
     models: Vec<String>,
     /// Bias points per case.
-    #[arg(long, default_value_t = DEFAULT_PROBE_POINTS)]
+    #[arg(long, default_value_t = DEFAULT_PROBE_POINTS, value_parser = parse_positive_usize)]
     points: usize,
 }
 
 #[derive(Args, Debug)]
 struct VerifyArgs {
     /// Directory holding the fixtures.
-    #[arg(long, default_value = "benchmarks/reference/veriloga-golden")]
-    fixtures: PathBuf,
-    /// Restrict to these models; empty means every fixture present.
+    #[arg(long)]
+    fixtures: Option<PathBuf>,
+    /// Restrict to these models; empty means every compiled-in model.
     #[arg(long, value_delimiter = ',')]
     models: Vec<String>,
     /// Require bit-identical replay instead of the gate tolerances.
@@ -126,14 +168,34 @@ struct AuditArgs {
     #[arg(long, value_delimiter = ',')]
     models: Vec<String>,
     /// Bias points per model.
-    #[arg(long, default_value_t = DEFAULT_PROBE_POINTS)]
+    #[arg(long, default_value_t = DEFAULT_PROBE_POINTS, value_parser = parse_positive_usize)]
     points: usize,
     /// Write a JSON report here.
     #[arg(long)]
     out: Option<PathBuf>,
 }
 
-pub fn run(args: &VerilogAGoldenArgs) -> Result<ExitCode, BenchError> {
+fn main() -> ExitCode {
+    match run(&Cli::parse()) {
+        Ok(code) => code,
+        Err(error) => {
+            eprintln!("rspice-veriloga-golden: error: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn parse_positive_usize(value: &str) -> Result<usize, String> {
+    let parsed = value
+        .parse::<usize>()
+        .map_err(|error| format!("'{value}' is not a positive integer: {error}"))?;
+    if parsed == 0 {
+        return Err("value must be at least 1".to_string());
+    }
+    Ok(parsed)
+}
+
+fn run(args: &Cli) -> Result<ExitCode, GoldenError> {
     match &args.command {
         GoldenCommand::Capture(capture) => run_capture(capture),
         GoldenCommand::Verify(verify) => run_verify(verify),
@@ -141,20 +203,31 @@ pub fn run(args: &VerilogAGoldenArgs) -> Result<ExitCode, BenchError> {
     }
 }
 
-fn selected_models(requested: &[String]) -> Result<Vec<&'static str>, BenchError> {
+fn selected_models(requested: &[String]) -> Result<Vec<&'static str>, GoldenError> {
     let available = builtins::builtin_names();
     if requested.is_empty() {
+        if available.is_empty() {
+            return Err(GoldenError {
+                message: "no generated models are compiled in; build with the conformance crate's `veriloga-builtins-models` feature".to_string(),
+            });
+        }
         return Ok(available.to_vec());
     }
     let mut selected = Vec::with_capacity(requested.len());
+    let mut unique = BTreeSet::new();
     for name in requested {
         let found = available
             .iter()
             .find(|candidate| candidate.eq_ignore_ascii_case(name))
             .copied()
-            .ok_or_else(|| BenchError::GeneratedStamp {
+            .ok_or_else(|| GoldenError {
                 message: format!("'{name}' is not a compiled-in generated built-in"),
             })?;
+        if !unique.insert(found.to_ascii_lowercase()) {
+            return Err(GoldenError {
+                message: format!("model '{name}' was selected more than once"),
+            });
+        }
         selected.push(found);
     }
     Ok(selected)
@@ -169,19 +242,16 @@ fn fixture_path(root: &Path, model_name: &str) -> PathBuf {
     root.join(format!("{}.txt", model_name.to_ascii_lowercase()))
 }
 
-fn build_fixture(model_name: &'static str, points: usize) -> Result<GoldenFixture, BenchError> {
-    let mut harness =
-        GoldenHarness::new(model_name, &[]).map_err(|error| BenchError::GeneratedStamp {
-            message: error.to_string(),
-        })?;
+fn build_fixture(model_name: &'static str, points: usize) -> Result<GoldenFixture, GoldenError> {
+    let mut harness = GoldenHarness::new(model_name, &[]).map_err(|error| GoldenError {
+        message: error.to_string(),
+    })?;
 
     let mut captured = Vec::new();
     for point in harness.probe_points(points) {
-        let record = harness
-            .evaluate(&point)
-            .map_err(|error| BenchError::GeneratedStamp {
-                message: error.to_string(),
-            })?;
+        let record = harness.evaluate(&point).map_err(|error| GoldenError {
+            message: error.to_string(),
+        })?;
         captured.push(GoldenPoint {
             unknowns: point,
             record,
@@ -199,38 +269,82 @@ fn build_fixture(model_name: &'static str, points: usize) -> Result<GoldenFixtur
     })
 }
 
-fn run_capture(args: &CaptureArgs) -> Result<ExitCode, BenchError> {
-    let models = selected_models(&args.models)?;
-    fs::create_dir_all(&args.out).map_err(|error| BenchError::GeneratedStamp {
-        message: format!("creating {}: {error}", args.out.display()),
-    })?;
+fn fixture_root(requested: Option<&Path>) -> PathBuf {
+    requested.map_or_else(
+        || Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/veriloga-golden"),
+        Path::to_path_buf,
+    )
+}
 
-    let mut written = 0usize;
+fn run_capture(args: &CaptureArgs) -> Result<ExitCode, GoldenError> {
+    let models = selected_models(&args.models)?;
+    let out = &args.out;
+    if out.exists() {
+        return Err(GoldenError {
+            message: format!(
+                "{} already exists; capture requires a new directory so fixture updates can be reviewed as a complete set",
+                out.display()
+            ),
+        });
+    }
+
+    let mut captured = Vec::with_capacity(models.len());
     let mut failed = Vec::new();
     for model_name in models {
         match build_fixture(model_name, args.points) {
-            Ok(fixture) => {
-                let path = fixture_path(&args.out, model_name);
-                fs::write(&path, fixture.render()).map_err(|error| BenchError::GeneratedStamp {
-                    message: format!("writing {}: {error}", path.display()),
-                })?;
-                written += 1;
-            }
+            Ok(fixture) => captured.push((model_name, fixture.render())),
             Err(error) => failed.push(format!("{model_name}: {error}")),
         }
     }
-
-    println!("captured {written} fixtures into {}", args.out.display());
     for failure in &failed {
-        eprintln!("skipped: {failure}");
+        eprintln!("FAIL {failure}");
     }
-    // A model that cannot be captured has no baseline, which is exactly the
-    // situation the rewrite must not start from.
-    Ok(if failed.is_empty() {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::FAILURE
-    })
+    if !failed.is_empty() {
+        return Ok(ExitCode::FAILURE);
+    }
+
+    let parent = out
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).map_err(|error| GoldenError {
+        message: format!("creating {}: {error}", parent.display()),
+    })?;
+    let staging = TempBuilder::new()
+        .prefix("rspice-veriloga-golden-")
+        .tempdir_in(parent)
+        .map_err(|error| GoldenError {
+            message: format!(
+                "creating capture staging directory in {}: {error}",
+                parent.display()
+            ),
+        })?;
+    for (model_name, rendered) in &captured {
+        let path = fixture_path(staging.path(), model_name);
+        let mut file = File::create(&path).map_err(|error| GoldenError {
+            message: format!("creating staged fixture {}: {error}", path.display()),
+        })?;
+        file.write_all(rendered.as_bytes())
+            .and_then(|()| file.flush())
+            .and_then(|()| file.sync_all())
+            .map_err(|error| GoldenError {
+                message: format!("flushing staged fixture {}: {error}", path.display()),
+            })?;
+    }
+    let staging_path = staging.keep();
+    fs::rename(&staging_path, out).map_err(|error| GoldenError {
+        message: format!(
+            "publishing complete fixture set {} -> {}: {error}; staged files remain for recovery",
+            staging_path.display(),
+            out.display()
+        ),
+    })?;
+    println!(
+        "captured {} fixtures into {}",
+        captured.len(),
+        out.display()
+    );
+    Ok(ExitCode::SUCCESS)
 }
 
 /// The worst disagreement seen in one array, and which entry it was.
@@ -272,11 +386,15 @@ struct Deviation {
     capacitance: Worst,
     noise: Worst,
     structural: Vec<String>,
+    matching_known_non_finite: usize,
 }
 
 fn relative(left: f64, right: f64) -> f64 {
     if left == right {
         return 0.0;
+    }
+    if !left.is_finite() || !right.is_finite() {
+        return f64::INFINITY;
     }
     let scale = left.abs().max(right.abs());
     if scale == 0.0 {
@@ -284,6 +402,11 @@ fn relative(left: f64, right: f64) -> f64 {
     } else {
         (left - right).abs() / scale
     }
+}
+
+fn matching_non_finite(left: f64, right: f64) -> bool {
+    (left.is_nan() && right.is_nan())
+        || (left.is_infinite() && right.is_infinite() && left == right)
 }
 
 /// Below this, an entry carries no information and comparing it measures
@@ -375,8 +498,47 @@ fn compare_point(
     label: &str,
     expected: &GoldenPoint,
     actual: &GoldenPoint,
+    allow_matching_non_finite: bool,
     deviation: &mut Deviation,
 ) {
+    if expected.unknowns.len() != actual.unknowns.len() {
+        deviation.structural.push(format!(
+            "{label}: probe width {} -> {}",
+            expected.unknowns.len(),
+            actual.unknowns.len()
+        ));
+    }
+    for (index, (want, got)) in expected
+        .unknowns
+        .iter()
+        .zip(actual.unknowns.iter())
+        .enumerate()
+    {
+        if want.to_bits() != got.to_bits() {
+            deviation.structural.push(format!(
+                "{label}: probe[{index}] changed from {want:e} to {got:e}"
+            ));
+        }
+    }
+    for (array, expected_len, actual_len) in [
+        ("rhs", expected.record.rhs.len(), actual.record.rhs.len()),
+        (
+            "jacobian",
+            expected.record.jacobian.len(),
+            actual.record.jacobian.len(),
+        ),
+        (
+            "capacitance",
+            expected.record.capacitance.len(),
+            actual.record.capacitance.len(),
+        ),
+    ] {
+        if expected_len != actual_len {
+            deviation.structural.push(format!(
+                "{label}: {array} length {expected_len} -> {actual_len}"
+            ));
+        }
+    }
     let rhs_scale = record_scale(&expected.record.rhs, &actual.record.rhs);
     for (index, (want, got)) in expected
         .record
@@ -385,6 +547,10 @@ fn compare_point(
         .zip(actual.record.rhs.iter())
         .enumerate()
     {
+        if allow_matching_non_finite && matching_non_finite(*want, *got) {
+            deviation.matching_known_non_finite += 1;
+            continue;
+        }
         // A value that used to be finite and now is not never shows up as a
         // large relative error, so it is checked separately rather than being
         // folded into the maximum.
@@ -407,6 +573,10 @@ fn compare_point(
         .zip(actual.record.jacobian.iter())
         .enumerate()
     {
+        if allow_matching_non_finite && matching_non_finite(*want, *got) {
+            deviation.matching_known_non_finite += 1;
+            continue;
+        }
         if negligible(*want, *got, jacobian_scale, CONDUCTANCE_FLOOR) {
             continue;
         }
@@ -428,6 +598,10 @@ fn compare_point(
         .zip(actual.record.capacitance.iter())
         .enumerate()
     {
+        if allow_matching_non_finite && matching_non_finite(*want, *got) {
+            deviation.matching_known_non_finite += 1;
+            continue;
+        }
         if negligible(*want, *got, capacitance_scale, CHARGE_FLOOR) {
             continue;
         }
@@ -473,17 +647,22 @@ fn compare_point(
     }
 }
 
-fn run_verify(args: &VerifyArgs) -> Result<ExitCode, BenchError> {
+fn run_verify(args: &VerifyArgs) -> Result<ExitCode, GoldenError> {
     let models = selected_models(&args.models)?;
-    let mut failures = Vec::new();
+    let fixtures = fixture_root(args.fixtures.as_deref());
+    let mut failures = if args.models.is_empty() {
+        fixture_inventory_failures(&fixtures, &models)?
+    } else {
+        Vec::new()
+    };
     let mut verified = 0usize;
 
     for model_name in models {
-        let path = fixture_path(&args.fixtures, model_name);
-        let text = match fs::read_to_string(&path) {
+        let path = fixture_path(&fixtures, model_name);
+        let text = match read_fixture(&path) {
             Ok(text) => text,
             Err(error) => {
-                failures.push(format!("{model_name}: reading {}: {error}", path.display()));
+                failures.push(format!("{model_name}: {error}"));
                 continue;
             }
         };
@@ -503,6 +682,14 @@ fn run_verify(args: &VerifyArgs) -> Result<ExitCode, BenchError> {
             }
         };
 
+        if !expected.model_name.eq_ignore_ascii_case(model_name) {
+            failures.push(format!(
+                "{model_name}: fixture declares model '{}'",
+                expected.model_name
+            ));
+            continue;
+        }
+
         if expected.node_count != actual.node_count || expected.branch_count != actual.branch_count
         {
             failures.push(format!(
@@ -513,9 +700,30 @@ fn run_verify(args: &VerifyArgs) -> Result<ExitCode, BenchError> {
         }
 
         let mut deviation = Deviation::default();
+        let known_non_finite = non_finite_fixture_deviation(model_name);
+        if expected.cases.len() != actual.cases.len() {
+            deviation.structural.push(format!(
+                "case count {} -> {}",
+                expected.cases.len(),
+                actual.cases.len()
+            ));
+        }
         for (case_index, (want_case, got_case)) in
             expected.cases.iter().zip(actual.cases.iter()).enumerate()
         {
+            if want_case.options != got_case.options {
+                deviation.structural.push(format!(
+                    "case {case_index}: options changed from {:?} to {:?}",
+                    want_case.options, got_case.options
+                ));
+            }
+            if want_case.points.len() != got_case.points.len() {
+                deviation.structural.push(format!(
+                    "case {case_index}: point count {} -> {}",
+                    want_case.points.len(),
+                    got_case.points.len()
+                ));
+            }
             for (point_index, (want, got)) in want_case
                 .points
                 .iter()
@@ -526,6 +734,7 @@ fn run_verify(args: &VerifyArgs) -> Result<ExitCode, BenchError> {
                     &format!("case {case_index} point {point_index}"),
                     want,
                     got,
+                    known_non_finite.is_some(),
                     &mut deviation,
                 );
             }
@@ -544,6 +753,14 @@ fn run_verify(args: &VerifyArgs) -> Result<ExitCode, BenchError> {
         };
 
         let mut model_failures = deviation.structural.clone();
+        if let Some(known) = known_non_finite
+            && deviation.matching_known_non_finite == 0
+        {
+            model_failures.push(format!(
+                "listed as a non-finite fixture deviation but no matching non-finite value remains; drop the entry ({})",
+                known.why
+            ));
+        }
         // The other direction: a fixture that stops recording its defect means
         // it has been re-captured, or the backend has changed under it, and
         // either way the entry is now describing nothing.
@@ -580,10 +797,7 @@ fn run_verify(args: &VerifyArgs) -> Result<ExitCode, BenchError> {
         }
     }
 
-    println!(
-        "verified {verified} models against {}",
-        args.fixtures.display()
-    );
+    println!("verified {verified} models against {}", fixtures.display());
     for failure in &failures {
         eprintln!("FAIL {failure}");
     }
@@ -592,6 +806,67 @@ fn run_verify(args: &VerifyArgs) -> Result<ExitCode, BenchError> {
     } else {
         ExitCode::FAILURE
     })
+}
+
+fn read_fixture(path: &Path) -> Result<String, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("inspecting {}: {error}", path.display()))?;
+    if !metadata.file_type().is_file() {
+        return Err(format!(
+            "{} must be a regular, non-symlink fixture file",
+            path.display()
+        ));
+    }
+    if metadata.len() == 0 || metadata.len() > MAX_FIXTURE_BYTES {
+        return Err(format!(
+            "{} must contain 1..={} bytes",
+            path.display(),
+            MAX_FIXTURE_BYTES
+        ));
+    }
+    let bytes = fs::read(path).map_err(|error| format!("reading {}: {error}", path.display()))?;
+    String::from_utf8(bytes).map_err(|error| format!("{} is not UTF-8: {error}", path.display()))
+}
+
+fn fixture_inventory_failures(
+    fixtures: &Path,
+    models: &[&'static str],
+) -> Result<Vec<String>, GoldenError> {
+    let expected = models
+        .iter()
+        .map(|model| format!("{}.txt", model.to_ascii_lowercase()))
+        .collect::<BTreeSet<_>>();
+    let entries = fs::read_dir(fixtures).map_err(|error| GoldenError {
+        message: format!("reading fixture directory {}: {error}", fixtures.display()),
+    })?;
+    let mut actual = BTreeSet::new();
+    let mut failures = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| GoldenError {
+            message: format!("reading fixture directory {}: {error}", fixtures.display()),
+        })?;
+        let file_type = entry.file_type().map_err(|error| GoldenError {
+            message: format!("inspecting fixture {}: {error}", entry.path().display()),
+        })?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !file_type.is_file() || !name.to_ascii_lowercase().ends_with(".txt") {
+            failures.push(format!(
+                "unexpected non-fixture entry in {}: {name}",
+                fixtures.display()
+            ));
+            continue;
+        }
+        if !actual.insert(name.to_ascii_lowercase()) {
+            failures.push(format!("duplicate case-insensitive fixture name: {name}"));
+        }
+    }
+    for missing in expected.difference(&actual) {
+        failures.push(format!("missing fixture: {missing}"));
+    }
+    for extra in actual.difference(&expected) {
+        failures.push(format!("fixture has no compiled-in model: {extra}"));
+    }
+    Ok(failures)
 }
 
 fn expected_point_count(fixture: &GoldenFixture) -> usize {
@@ -615,7 +890,7 @@ struct AuditModelReport {
     worst_relative_error: f64,
 }
 
-fn run_audit(args: &AuditArgs) -> Result<ExitCode, BenchError> {
+fn run_audit(args: &AuditArgs) -> Result<ExitCode, GoldenError> {
     let models = selected_models(&args.models)?;
     let mut reports = Vec::new();
     let mut failures = Vec::new();
@@ -626,10 +901,9 @@ fn run_audit(args: &AuditArgs) -> Result<ExitCode, BenchError> {
     );
 
     for model_name in models {
-        let mut harness =
-            GoldenHarness::new(model_name, &[]).map_err(|error| BenchError::GeneratedStamp {
-                message: error.to_string(),
-            })?;
+        let mut harness = GoldenHarness::new(model_name, &[]).map_err(|error| GoldenError {
+            message: error.to_string(),
+        })?;
 
         let mut entries = 0usize;
         let mut tight = 0usize;
@@ -678,13 +952,11 @@ fn run_audit(args: &AuditArgs) -> Result<ExitCode, BenchError> {
     if let Some(path) = &args.out {
         let json =
             serde_json::to_string_pretty(&AuditReport { models: reports }).map_err(|error| {
-                BenchError::GeneratedStamp {
+                GoldenError {
                     message: format!("serializing audit report: {error}"),
                 }
             })?;
-        fs::write(path, json).map_err(|error| BenchError::GeneratedStamp {
-            message: format!("writing {}: {error}", path.display()),
-        })?;
+        write_atomic(path, format!("{json}\n").as_bytes())?;
     }
 
     for failure in &failures {
@@ -695,6 +967,37 @@ fn run_audit(args: &AuditArgs) -> Result<ExitCode, BenchError> {
     } else {
         ExitCode::FAILURE
     })
+}
+
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), GoldenError> {
+    if path.exists() {
+        return Err(GoldenError {
+            message: format!(
+                "{} already exists; audit artifacts are immutable",
+                path.display()
+            ),
+        });
+    }
+    let directory = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(directory).map_err(|error| GoldenError {
+        message: format!("creating {}: {error}", directory.display()),
+    })?;
+    let mut temp = NamedTempFile::new_in(directory).map_err(|error| GoldenError {
+        message: format!(
+            "creating temporary output in {}: {error}",
+            directory.display()
+        ),
+    })?;
+    temp.write_all(bytes)
+        .and_then(|()| temp.flush())
+        .and_then(|()| temp.as_file().sync_all())
+        .map_err(|error| GoldenError {
+            message: format!("flushing {}: {error}", path.display()),
+        })?;
+    temp.persist_noclobber(path).map_err(|error| GoldenError {
+        message: format!("publishing {}: {}", path.display(), error.error),
+    })?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -717,11 +1020,51 @@ mod tests {
     }
 
     #[test]
+    fn unequal_non_finite_values_are_never_silently_accepted() {
+        assert_eq!(relative(f64::NAN, f64::NAN), f64::INFINITY);
+        assert_eq!(relative(f64::INFINITY, f64::NEG_INFINITY), f64::INFINITY);
+        assert_eq!(relative(1.0, f64::NAN), f64::INFINITY);
+    }
+
+    #[test]
+    fn known_non_finite_replay_requires_the_same_non_finite_class() {
+        assert!(matching_non_finite(f64::NAN, f64::NAN));
+        assert!(matching_non_finite(f64::INFINITY, f64::INFINITY));
+        assert!(matching_non_finite(f64::NEG_INFINITY, f64::NEG_INFINITY));
+        assert!(!matching_non_finite(f64::INFINITY, f64::NEG_INFINITY));
+        assert!(!matching_non_finite(f64::NAN, 0.0));
+        assert!(!matching_non_finite(0.0, 0.0));
+    }
+
+    #[test]
     fn fixture_paths_are_case_folded() {
         let root = Path::new("fixtures");
         assert_eq!(
             fixture_path(root, "PSP104VA"),
             fixture_path(root, "psp104va")
         );
+    }
+
+    #[test]
+    fn cli_rejects_zero_probe_points_for_capture_and_audit() {
+        for command in ["capture", "audit"] {
+            let mut arguments = vec!["rspice-veriloga-golden", command];
+            if command == "capture" {
+                arguments.extend(["--out", "unused"]);
+            }
+            arguments.extend(["--points", "0"]);
+            let error = Cli::try_parse_from(arguments).expect_err("zero points must fail");
+            assert!(error.to_string().contains("value must be at least 1"));
+        }
+    }
+
+    #[test]
+    fn cli_accepts_one_probe_point() {
+        let parsed = Cli::try_parse_from(["rspice-veriloga-golden", "audit", "--points", "1"])
+            .expect("one point is valid");
+        let GoldenCommand::Audit(arguments) = parsed.command else {
+            panic!("audit command expected");
+        };
+        assert_eq!(arguments.points, 1);
     }
 }

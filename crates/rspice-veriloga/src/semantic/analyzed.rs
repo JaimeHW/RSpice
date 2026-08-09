@@ -127,6 +127,11 @@ pub struct AnalyzedPort {
 #[derive(Debug, Clone)]
 pub struct AnalyzedParameter {
     pub name: SmolStr,
+    /// Whether this parameter belongs to the selected module's public ABI.
+    /// Parameters of flattened child instances remain runtime slots so their
+    /// defaults and ranges retain exact semantics, but are not externally
+    /// settable or reported as top-level model parameters.
+    pub is_public: bool,
     /// Whether the source declares shared model-card or per-device storage.
     pub scope: ParameterScope,
     pub param_type: ParamType,

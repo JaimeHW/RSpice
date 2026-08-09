@@ -22,7 +22,7 @@ use std::env;
 use std::path::PathBuf;
 
 use rspice_veriloga::rust_backend::{
-    generate_generated_builtin_subset_with_progress_and_jobs,
+    common_kernel_coverage, generate_generated_builtin_subset_with_progress_and_jobs,
     regenerate_generated_builtins_with_progress_and_jobs, validate_generated_builtins,
 };
 
@@ -98,6 +98,43 @@ fn run() -> CommandResult<()> {
                 report.device_count,
                 options.generated_root.display()
             );
+            let coverage = common_kernel_coverage(&report.kernel_structures);
+            println!(
+                "kernel-structure common-newton-instructions={}",
+                coverage.common_newton_instruction_count
+            );
+            for (model, instructions, percent) in coverage.models {
+                println!(
+                    "kernel-structure model={model} newton-instructions={instructions} common-coverage={percent:.2}%"
+                );
+            }
+            let noise_census =
+                report
+                    .kernel_structures
+                    .iter()
+                    .fold([0u64; 5], |mut total, report| {
+                        for (total, count) in
+                            total.iter_mut().zip(report.noise_invalidation_value_count)
+                        {
+                            *total = total.saturating_add(count);
+                        }
+                        total
+                    });
+            println!(
+                "noise-structure values={} model={} instance={} temperature={} timestep={} newton={}",
+                noise_census.iter().sum::<u64>(),
+                noise_census[0],
+                noise_census[1],
+                noise_census[2],
+                noise_census[3],
+                noise_census[4],
+            );
+            let shared_preprocess = report
+                .kernel_structures
+                .iter()
+                .map(|report| report.noise_shared_preprocess_value_count)
+                .sum::<u64>();
+            println!("noise-structure exact-shared-preprocess-values={shared_preprocess}");
             println!("[partial output: registry.rs and manifest.txt were not rewritten]");
         }
         Command::CheckBuiltins => {
