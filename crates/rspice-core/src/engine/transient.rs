@@ -14,7 +14,10 @@ use crate::device::semiconductor::{
     BjtChargeSnapshot,
 };
 use crate::engine::waveform::{CompressionConfig, TransientResultCompressed};
-use crate::netlist::{AnalysisCommand, OutputAnalysisKind, OutputSymbolKind, SaveSignal};
+use crate::netlist::{
+    AnalysisCommand, OutputAnalysisKind, OutputSymbolKind, SaveSignal,
+    is_device_lead_current_accessor,
+};
 use crate::numerics::integration::{
     BreakpointManager, BreakpointStepPolicy, LteEstimator, TimestepController, TrapGearController,
 };
@@ -1685,6 +1688,14 @@ impl Engine {
             .signals
             .iter()
             .any(|signal| matches!(signal, SaveSignal::DeviceParam { .. }))
+            || netlist.output_requests.iter().any(|request| {
+                request.dependencies.iter().any(|dependency| {
+                    dependency.kind == OutputSymbolKind::Device
+                        && is_device_lead_current_accessor(
+                            &dependency.operator.to_ascii_uppercase(),
+                        )
+                })
+            })
             || netlist.elements.iter().any(|element| {
                 matches!(
                     &element.kind,

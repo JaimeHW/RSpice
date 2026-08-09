@@ -10,19 +10,23 @@
 //! `TIME` (the swept value plays that role for DC sweeps, so
 //! `FIND TIME WHEN V(out)=...` addresses the sweep variable).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::measure::{
-    ContinuousMeasureResult, MeasureEngine, MeasureOperand, MeasureResult, MeasureStatement,
-    MeasureType, TriggerEvent, canonical_measure_signal_name,
+    AcceptedRowAtMatch, ContinuousMeasureResult, DelayConditionTracker, EdgeType,
+    ErrorFunctionNorm, ExtremaOutput, LegacyFracDelayTracker, MeasureConditionDirection,
+    MeasureEngine, MeasureOperand, MeasureResult, MeasureStatement, MeasureType, TrigSpec,
+    TriggerEvent, WhenCondition, accepted_row_at_match, accepted_row_secant_slope,
+    canonical_measure_signal_name,
 };
 use crate::Value;
 use crate::analysis::{AcResult, NoiseContributionKind, NoiseContributionProbe};
 use crate::engine::TransientResult;
-use crate::netlist::expr::Expr as NetExpr;
+use crate::netlist::expr::{ComplexValue, Expr as NetExpr, PreparedExpression};
 use crate::netlist::{
     InterfaceNodeAliases, Netlist, OutputAnalysisKind, canonical_symbol,
-    collect_requested_interface_node_aliases,
+    collect_requested_interface_node_aliases, is_current_output_accessor,
+    is_device_lead_current_accessor,
 };
 use crate::solver::SimulationResult;
 
@@ -284,7 +288,7 @@ impl<'a> CanonicalMeasureSignalIndex<'a> {
                     }
                 })
                 .or_insert_with(|| IndexedMeasureSignal {
-                    waveform: *waveform,
+                    waveform,
                     first_name: name.to_string(),
                     conflicting_name: None,
                 });
@@ -294,7 +298,15 @@ impl<'a> CanonicalMeasureSignalIndex<'a> {
 
     fn get(&self, requested: &str) -> Result<Option<&'a [Value]>, String> {
         let canonical = canonical_measure_signal_name(requested);
-        let Some(indexed) = self.signals.get(&canonical) else {
+        self.get_canonical(requested, &canonical)
+    }
+
+    fn get_canonical(
+        &self,
+        requested: &str,
+        canonical: &str,
+    ) -> Result<Option<&'a [Value]>, String> {
+        let Some(indexed) = self.signals.get(canonical) else {
             return Ok(None);
         };
         if let Some(conflicting_name) = &indexed.conflicting_name {
@@ -363,6 +375,21 @@ pub fn transient_signal_map(result: &TransientResult) -> HashMap<String, &[Value
         }
     }
 
+    // Xyce's exactly two-character I* operators include device-lead currents
+    // (ID/IG/IS/IB, IC/IB/IE, and hierarchical variants). RSpice
+    // records those canonical device outputs in the typed operating-point
+    // trace namespace rather than pretending that every lead is an MNA branch.
+    for trace in &result.device_op_traces {
+        let operator = trace.parameter.to_ascii_uppercase();
+        if is_device_lead_current_accessor(&operator) {
+            insert_case_variants(
+                &mut signals,
+                &format!("{operator}({})", trace.device_name),
+                trace.values.as_slice(),
+            );
+        }
+    }
+
     signals
 }
 
@@ -372,19 +399,609 @@ pub fn transient_signal_map(result: &TransientResult) -> HashMap<String, &[Value
 pub struct EquationMeasureTrace {
     pub name: String,
     pub values: Vec<Value>,
+    /// Per-row IEEE numeric validity, always aligned one-to-one with `values`.
+    /// Xyce exposes an undefined live measure as a raw NaN and can overwrite
+    /// it at a later accepted point; retaining that value and an explicit
+    /// validity bit preserves both behaviors.
+    pub valid: Vec<bool>,
     /// Whether at least one point landed inside the measure's time window.
     pub initialized: bool,
 }
 
-struct EquationProgram<'a> {
+struct LiveMeasureProgram<'a> {
     statement: &'a MeasureStatement,
-    expression: NetExpr,
-    from: Option<Value>,
-    to: Option<Value>,
-    td: Option<Value>,
+    canonical_name: String,
+    state: Option<LiveMeasureState>,
     current: Value,
     initialized: bool,
     values: Vec<Value>,
+    valid: Vec<bool>,
+    store_trace: bool,
+    has_file_error_dependency: bool,
+    failure: Option<String>,
+}
+
+/// Mutable view of live scalar results at one accepted analysis point.
+/// Reading a FileError result is observable in Xyce: the first actual getter
+/// read freezes its prefix aggregate. Keeping that operation here lets lazy
+/// expression evaluation trigger it at the selected branch, rather than from
+/// a conservative dependency pre-pass.
+struct LiveMeasureReadContext<'program, 'netlist> {
+    programs: &'program mut [LiveMeasureProgram<'netlist>],
+    current_values: &'program mut HashMap<String, Value>,
+    program_indices: &'program HashMap<String, usize>,
+    row: usize,
+    axis: &'program [Value],
+}
+
+impl LiveMeasureReadContext<'_, '_> {
+    fn read_measure(&mut self, canonical_name: &str) -> Option<Value> {
+        if let Some(&program_index) = self.program_indices.get(canonical_name)
+            && freeze_live_file_error(&mut self.programs[program_index], self.row, self.axis)
+        {
+            let program = &self.programs[program_index];
+            *self
+                .current_values
+                .get_mut(&program.canonical_name)
+                .expect("compiled measure value slot") = program.current;
+        }
+        self.current_values.get(canonical_name).copied()
+    }
+}
+
+#[derive(Debug)]
+struct LiveMeasureOperand {
+    authored: String,
+    canonical_authored: String,
+    canonical_signal: String,
+    is_axis_symbol: bool,
+    expression: Option<Box<LivePreparedExpression>>,
+    dependencies: Vec<String>,
+}
+
+#[derive(Debug)]
+struct LivePreparedExpression {
+    evaluator: PreparedExpression,
+    probes: HashMap<String, LiveRawOutputOperator>,
+    parameters: HashMap<String, LiveExpressionParameter>,
+}
+
+#[derive(Debug)]
+struct LiveExpressionParameter {
+    canonical_measure: String,
+    canonical_signal: String,
+    is_axis_symbol: bool,
+    context_value: Option<ComplexValue>,
+}
+
+impl LivePreparedExpression {
+    fn compile(
+        expression: &NetExpr,
+        params: &crate::netlist::ParamContext,
+    ) -> Result<Self, String> {
+        fn rewrite_probes(
+            expression: &NetExpr,
+            probes: &mut HashMap<String, LiveRawOutputOperator>,
+        ) -> Result<NetExpr, String> {
+            Ok(match expression {
+                NetExpr::UnaryOp { op, operand } => NetExpr::UnaryOp {
+                    op: *op,
+                    operand: Box::new(rewrite_probes(operand, probes)?),
+                },
+                NetExpr::BinOp { op, left, right } => NetExpr::BinOp {
+                    op: *op,
+                    left: Box::new(rewrite_probes(left, probes)?),
+                    right: Box::new(rewrite_probes(right, probes)?),
+                },
+                NetExpr::FnCall { name, args }
+                    if is_equation_probe_accessor(name)
+                        || is_equation_noise_accessor(name)
+                        || is_equation_generic_output_accessor(name) =>
+                {
+                    let prefix = name.to_ascii_uppercase();
+                    let arguments = args
+                        .iter()
+                        .map(|argument| {
+                            equation_probe_argument(Some(argument)).ok_or_else(|| {
+                                format!("{prefix}() in continuous measure has an invalid argument")
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let authored = format!("{prefix}({})", arguments.join(","));
+                    // NUL cannot occur in a parsed identifier. The prepared
+                    // compiler also promotes these keys to typed External
+                    // nodes, keeping the internal probe namespace disjoint
+                    // from every authored parameter name.
+                    let key = format!("\0RSPICE_LIVE_PROBE_{}", probes.len());
+                    probes.insert(key.clone(), LiveRawOutputOperator::compile(&authored)?);
+                    NetExpr::Param(key)
+                }
+                NetExpr::FnCall { name, args } => NetExpr::FnCall {
+                    name: name.clone(),
+                    args: args
+                        .iter()
+                        .map(|argument| rewrite_probes(argument, probes))
+                        .collect::<Result<Vec<_>, _>>()?,
+                },
+                NetExpr::Number(_)
+                | NetExpr::ComplexNumber(_)
+                | NetExpr::StringLiteral(_)
+                | NetExpr::Param(_) => expression.clone(),
+            })
+        }
+
+        let mut probes = HashMap::new();
+        let rewritten = rewrite_probes(expression, &mut probes)?;
+        let external_parameters = probes.keys().cloned().collect::<HashSet<_>>();
+        let evaluator = if external_parameters.is_empty() {
+            PreparedExpression::compile(&rewritten, params)
+        } else {
+            PreparedExpression::compile_with_external_parameters(
+                &rewritten,
+                params,
+                &external_parameters,
+            )
+        }
+        .map_err(|error| format!("failed to prepare live expression: {error}"))?;
+        let mut parameters = HashMap::new();
+        evaluator.visit_runtime_parameters(|name| {
+            if !probes.contains_key(name) {
+                let canonical_measure = name.to_ascii_uppercase();
+                parameters
+                    .entry(name.to_string())
+                    .or_insert_with(|| LiveExpressionParameter {
+                        context_value: params.get_complex(name),
+                        is_axis_symbol: matches!(
+                            canonical_measure.as_str(),
+                            "TIME" | "FREQ" | "FREQUENCY" | "HERTZ"
+                        ),
+                        canonical_signal: canonical_measure_signal_name(name),
+                        canonical_measure,
+                    });
+            }
+        });
+        Ok(Self {
+            evaluator,
+            probes,
+            parameters,
+        })
+    }
+
+    fn value(
+        &mut self,
+        row: usize,
+        signals: &CanonicalMeasureSignalIndex<'_>,
+        reads: &mut LiveMeasureReadContext<'_, '_>,
+        params: &crate::netlist::ParamContext,
+    ) -> Result<ComplexValue, String> {
+        let probes = &self.probes;
+        let parameters = &self.parameters;
+        self.evaluator
+            .evaluate_with(params, &mut |name| {
+                if let Some(probe) = probes.get(name) {
+                    return probe
+                        .value(row, signals)
+                        .map(|value| Some(ComplexValue::real(value)))
+                        .map_err(crate::netlist::expr::ExprError::InvalidArgument);
+                }
+                let Some(parameter) = parameters.get(name) else {
+                    return Ok(None);
+                };
+                if !parameter.is_axis_symbol
+                    && let Some(value) = reads.read_measure(&parameter.canonical_measure)
+                {
+                    return Ok(Some(ComplexValue::real(value)));
+                }
+                if let Some(value) = lookup_equation_signal_canonical_optional(
+                    signals,
+                    name,
+                    &parameter.canonical_signal,
+                    row,
+                )
+                .map_err(crate::netlist::expr::ExprError::InvalidArgument)?
+                {
+                    return Ok(Some(ComplexValue::real(value)));
+                }
+                if parameter.is_axis_symbol
+                    && let Some(value) = reads.read_measure(&parameter.canonical_measure)
+                {
+                    return Ok(Some(ComplexValue::real(value)));
+                }
+                Ok(parameter.context_value)
+            })
+            .map_err(|error| error.to_string())
+    }
+}
+
+impl LiveMeasureOperand {
+    fn compile(authored: &str, params: &crate::netlist::ParamContext) -> Result<Self, String> {
+        let parsed_expression = authored
+            .strip_prefix('{')
+            .and_then(|value| value.strip_suffix('}'))
+            .map(crate::netlist::expr::parse_expression)
+            .transpose()
+            .map_err(|error| format!("invalid measurement expression '{authored}': {error}"))?;
+        let canonical_authored = authored.to_ascii_uppercase();
+        let canonical_signal = canonical_measure_signal_name(authored);
+        let is_axis_symbol = matches!(
+            canonical_authored.as_str(),
+            "TIME" | "FREQ" | "FREQUENCY" | "HERTZ"
+        );
+        let mut dependencies = vec![canonical_authored.clone()];
+        let expression = if let Some(expression) = parsed_expression {
+            let prepared = LivePreparedExpression::compile(&expression, params)?;
+            dependencies.extend(
+                prepared
+                    .parameters
+                    .values()
+                    .map(|parameter| parameter.canonical_measure.clone()),
+            );
+            Some(Box::new(prepared))
+        } else {
+            None
+        };
+        if expression.is_some() {
+            dependencies.retain(|name| name != &canonical_authored);
+        }
+        dependencies.sort();
+        dependencies.dedup();
+        Ok(Self {
+            authored: authored.to_string(),
+            canonical_authored,
+            canonical_signal,
+            is_axis_symbol,
+            expression,
+            dependencies,
+        })
+    }
+
+    fn value(
+        &mut self,
+        row: usize,
+        signals: &CanonicalMeasureSignalIndex<'_>,
+        reads: &mut LiveMeasureReadContext<'_, '_>,
+        params: &crate::netlist::ParamContext,
+    ) -> Result<Value, String> {
+        if !self.is_axis_symbol
+            && let Some(value) = reads.read_measure(&self.canonical_authored)
+        {
+            return Ok(value);
+        }
+        if let Some(value) = lookup_equation_signal_canonical_optional(
+            signals,
+            &self.authored,
+            &self.canonical_signal,
+            row,
+        )? {
+            return Ok(value);
+        }
+        if self.is_axis_symbol
+            && let Some(value) = reads.read_measure(&self.canonical_authored)
+        {
+            return Ok(value);
+        }
+        let Some(expression) = &mut self.expression else {
+            return Err(format!("Signal '{}' not found", self.authored));
+        };
+        let value = expression.value(row, signals, reads, params)?;
+        Ok(crate::netlist::expr::normalize_xyce_expression_component(
+            value.re,
+        ))
+    }
+}
+
+enum LiveMeasureState {
+    Equation {
+        source: LiveEquationSource,
+        dependencies: Vec<String>,
+        from: Option<Value>,
+        to: Option<Value>,
+        td: Option<Value>,
+    },
+    Extremum {
+        signal: LiveMeasureOperand,
+        lower: Value,
+        upper: Value,
+        output: ExtremaOutput,
+        is_max: bool,
+        selected: Option<(Value, Value)>,
+    },
+    PeakToPeak {
+        signal: LiveMeasureOperand,
+        lower: Value,
+        upper: Value,
+        minimum: Value,
+        maximum: Value,
+        initialized: bool,
+    },
+    IntegralStatistic {
+        signal: LiveMeasureOperand,
+        lower: Value,
+        upper: Value,
+        mode: LiveIntegralMode,
+        integral: Value,
+        width: Value,
+        previous: Option<(Value, Value)>,
+    },
+    ErrorFunction {
+        measured: LiveMeasureOperand,
+        comparison: LiveMeasureOperand,
+        norm: ErrorFunctionNorm,
+        lower: Value,
+        upper: Value,
+        minval: Value,
+        ymin: Value,
+        ymax: Value,
+        sum: Value,
+        count: usize,
+    },
+    Point {
+        signal: Option<LiveMeasureOperand>,
+        at: Option<Value>,
+        condition: Option<LiveCondition>,
+        lower: Value,
+        upper: Value,
+        minval: Value,
+        kind: LivePointKind,
+        previous_signal: Option<(Value, Value)>,
+        negative_results: VecDeque<LivePointCandidate>,
+        complete: bool,
+    },
+    Delay {
+        trigger: LiveDelayClause,
+        target: LiveDelayClause,
+        frac_tracker: Option<LegacyFracDelayTracker>,
+        axis_ascending: bool,
+        axis_minimum: Value,
+        axis_maximum: Value,
+    },
+    RiseFall {
+        signal: LiveMeasureOperand,
+        samples: Vec<Value>,
+        from_pct: Value,
+        to_pct: Value,
+        number: usize,
+        is_rise: bool,
+    },
+    FileError {
+        signal: LiveMeasureOperand,
+        samples: Vec<Value>,
+        frozen: bool,
+    },
+    Param {
+        source: LiveEquationSource,
+        dependencies: Vec<String>,
+    },
+}
+
+enum LiveEquationSource {
+    Expression(LivePreparedExpression),
+    RawReference {
+        authored: String,
+        canonical_measure: String,
+        canonical_signal: String,
+    },
+    RawOutputOperator(LiveRawOutputOperator),
+}
+
+#[derive(Debug)]
+struct LiveRawOutputOperator {
+    authored: String,
+    canonical_signal: String,
+    voltage: Option<LiveVoltageOutputOperator>,
+}
+
+#[derive(Debug)]
+struct LiveVoltageOutputOperator {
+    prefix: String,
+    arguments: Vec<LiveVoltageNode>,
+}
+
+#[derive(Debug)]
+struct LiveVoltageNode {
+    authored: String,
+    voltage: String,
+    real: String,
+    imaginary: String,
+}
+
+impl LiveRawOutputOperator {
+    fn compile(authored: &str) -> Result<Self, String> {
+        let (name, arguments) = split_equation_output_operator(authored)
+            .ok_or_else(|| format!("invalid raw equation output operator '{authored}'"))?;
+        let prefix = name.to_ascii_uppercase();
+        let valid = matches!(prefix.as_str(), "N" | "P" | "W" | "DNO" | "DNI")
+            || is_current_output_accessor(&prefix)
+            || is_equation_voltage_accessor(&prefix)
+            || is_equation_rf_accessor(&prefix);
+        if !valid {
+            return Err(format!(
+                "unsupported raw equation output operator '{authored}'"
+            ));
+        }
+        let voltage = if is_equation_voltage_accessor(&prefix) {
+            if !(1..=2).contains(&arguments.len()) {
+                return Err(format!(
+                    "{prefix}() in continuous measure requires one or two arguments"
+                ));
+            }
+            Some(LiveVoltageOutputOperator {
+                prefix,
+                arguments: arguments
+                    .into_iter()
+                    .map(|authored| LiveVoltageNode {
+                        voltage: canonical_measure_signal_name(&format!("V({authored})")),
+                        real: canonical_measure_signal_name(&format!("VR({authored})")),
+                        imaginary: canonical_measure_signal_name(&format!("VI({authored})")),
+                        authored,
+                    })
+                    .collect(),
+            })
+        } else {
+            None
+        };
+        Ok(Self {
+            authored: authored.to_string(),
+            canonical_signal: canonical_measure_signal_name(authored),
+            voltage,
+        })
+    }
+
+    fn value(
+        &self,
+        row: usize,
+        signals: &CanonicalMeasureSignalIndex<'_>,
+    ) -> Result<Value, String> {
+        if let Some(value) = lookup_equation_signal_canonical_optional(
+            signals,
+            &self.authored,
+            &self.canonical_signal,
+            row,
+        )? {
+            return Ok(value);
+        }
+        let Some(voltage) = &self.voltage else {
+            return Err(format!(
+                "continuous measure signal '{}' is unavailable at row {row}",
+                self.authored
+            ));
+        };
+        let node_component = |component: &str, node: &LiveVoltageNode| -> Result<Value, String> {
+            if node.authored == "0" {
+                return Ok(0.0);
+            }
+            let canonical = match component {
+                "V" => &node.voltage,
+                "VR" => &node.real,
+                "VI" => &node.imaginary,
+                _ => unreachable!(),
+            };
+            if let Some(value) =
+                lookup_equation_signal_canonical_optional(signals, &node.authored, canonical, row)?
+            {
+                return Ok(value);
+            }
+            if component == "VR"
+                && let Some(value) = lookup_equation_signal_canonical_optional(
+                    signals,
+                    &node.authored,
+                    &node.voltage,
+                    row,
+                )?
+            {
+                return Ok(value);
+            }
+            Err(format!(
+                "continuous measure signal '{component}({})' is unavailable at row {row}",
+                node.authored
+            ))
+        };
+        if voltage.arguments.len() == 1 {
+            return if voltage.prefix == "V" {
+                node_component("V", &voltage.arguments[0])
+            } else {
+                Err(format!(
+                    "continuous measure signal '{}' is unavailable at row {row}",
+                    self.authored
+                ))
+            };
+        }
+        let positive = &voltage.arguments[0];
+        let negative = &voltage.arguments[1];
+        match voltage.prefix.as_str() {
+            "V" | "VR" => Ok(node_component("VR", positive)? - node_component("VR", negative)?),
+            "VI" => Ok(node_component("VI", positive)? - node_component("VI", negative)?),
+            "VM" | "VP" | "VDB" => {
+                let real = node_component("VR", positive)? - node_component("VR", negative)?;
+                let imaginary = node_component("VI", positive)? - node_component("VI", negative)?;
+                let magnitude = real.hypot(imaginary);
+                Ok(match voltage.prefix.as_str() {
+                    "VM" => magnitude,
+                    "VP" => imaginary.atan2(real).to_degrees(),
+                    "VDB" => 20.0 * magnitude.log10(),
+                    _ => unreachable!(),
+                })
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum LiveIntegralMode {
+    Average,
+    Rms,
+    Integral { direction: Value },
+}
+
+#[derive(Debug, Clone, Copy)]
+enum LivePointKind {
+    When,
+    Find,
+    Derivative,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum LivePointCandidate {
+    Defined(Value),
+    Undefined,
+}
+
+impl LivePointCandidate {
+    fn numeric_value(&self) -> Value {
+        match self {
+            Self::Defined(value) => *value,
+            Self::Undefined => Value::NAN,
+        }
+    }
+}
+
+struct LiveCondition {
+    left: LiveMeasureOperand,
+    right: LiveConditionOperand,
+    edge: EdgeType,
+    number: isize,
+    minval: Value,
+    match_count: usize,
+    negative_events: VecDeque<LiveConditionEvent>,
+    previous: Option<(Value, Value, Value)>,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct LiveConditionUpdate {
+    current: Option<LiveConditionEvent>,
+    selected: Option<LiveConditionEvent>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LiveConditionEvent {
+    fraction: Value,
+    axis: Value,
+    current_within_minval: bool,
+}
+
+enum LiveConditionOperand {
+    Constant(Value),
+    Waveform(LiveMeasureOperand),
+}
+
+struct LiveDelayClause {
+    at: Option<Value>,
+    condition: Option<LiveDelayCondition>,
+    td: Option<Value>,
+    from: Option<Value>,
+    to: Option<Value>,
+    selected: Option<Value>,
+    negative_events: VecDeque<Value>,
+    minval: Value,
+    legacy: bool,
+}
+
+struct LiveDelayCondition {
+    left: LiveMeasureOperand,
+    right: LiveConditionOperand,
+    tracker: DelayConditionTracker,
+    number: isize,
 }
 
 /// Evaluate Xyce continuous equation measurements over a transient result.
@@ -401,6 +1018,7 @@ pub fn evaluate_tran_equation_measurements(
     let mut signals = transient_signal_map(result);
     alias_projection.augment(&mut signals)?;
     evaluate_equation_measurements(netlist, "TRAN", &result.time, &signals, -1.0, None)
+        .map(|traces| retain_equation_traces(netlist, "TRAN", traces))
 }
 
 /// Evaluate Xyce continuous equation measurements over a DC sweep.
@@ -428,6 +1046,7 @@ pub fn evaluate_dc_equation_measurements(
         0.0,
         Some(dc_primary_sweep_is_ascending(netlist, series.axis())),
     )
+    .map(|traces| retain_equation_traces(netlist, "DC", traces))
 }
 
 /// Evaluate Xyce continuous equation measurements over an AC sweep.
@@ -449,6 +1068,7 @@ pub fn evaluate_ac_equation_measurements(
     let mut signals = series.equation_signal_map();
     alias_projection.augment(&mut signals)?;
     evaluate_equation_measurements(netlist, "AC", series.axis(), &signals, -1.0, None)
+        .map(|traces| retain_equation_traces(netlist, "AC", traces))
 }
 
 /// Evaluate Xyce continuous equation measurements over a NOISE sweep.
@@ -470,6 +1090,24 @@ pub fn evaluate_noise_equation_measurements(
     let mut signals = series.equation_signal_map();
     alias_projection.augment(&mut signals)?;
     evaluate_equation_measurements(netlist, "NOISE", series.axis(), &signals, -1.0, None)
+        .map(|traces| retain_equation_traces(netlist, "NOISE", traces))
+}
+
+fn retain_equation_traces(
+    netlist: &Netlist,
+    analysis: &str,
+    traces: Vec<EquationMeasureTrace>,
+) -> Vec<EquationMeasureTrace> {
+    traces
+        .into_iter()
+        .filter(|trace| {
+            netlist.measurements.iter().any(|statement| {
+                statement.analysis.eq_ignore_ascii_case(analysis)
+                    && statement.name.eq_ignore_ascii_case(&trace.name)
+                    && matches!(statement.measure_type, MeasureType::Equation { .. })
+            })
+        })
+        .collect()
 }
 
 fn dc_primary_sweep_is_ascending(netlist: &Netlist, axis: &[Value]) -> bool {
@@ -519,46 +1157,30 @@ fn evaluate_equation_measurements(
         .measurements
         .iter()
         .filter(|statement| statement.analysis.eq_ignore_ascii_case(analysis))
-        .filter_map(|statement| {
-            let MeasureType::Equation {
-                expression,
-                from,
-                to,
-                td,
-            } = &statement.measure_type
-            else {
-                return None;
-            };
-            Some((statement, expression, *from, *to, *td))
-        })
-        .map(|(statement, expression, from, to, td)| {
-            let expression = crate::netlist::expr::parse_expression(expression).map_err(|err| {
-                format!(
-                    "failed to parse continuous measure '{}': {err}",
-                    statement.name
-                )
-            })?;
-            let (from, to) = if dc_sweep_ascending.is_some() {
-                match (from, to) {
-                    (Some(from), Some(to)) if from > to => (Some(to), Some(from)),
-                    bounds => bounds,
-                }
-            } else {
-                (from, to)
-            };
-            Ok(EquationProgram {
+        .map(|statement| {
+            let equation = matches!(statement.measure_type, MeasureType::Equation { .. });
+            Ok(LiveMeasureProgram {
                 statement,
-                expression,
-                from,
-                to,
-                td,
+                canonical_name: statement.name.to_ascii_uppercase(),
+                state: Some(compile_live_measure_state(
+                    statement,
+                    analysis,
+                    axis,
+                    dc_sweep_ascending,
+                    netlist.options.measure_use_lttm(),
+                    &netlist.params,
+                )?),
                 current: netlist
                     .options
                     .measure_default_value
                     .or(statement.default_value)
-                    .unwrap_or(implicit_default),
+                    .unwrap_or(if equation { implicit_default } else { 0.0 }),
                 initialized: false,
-                values: Vec::with_capacity(axis.len()),
+                values: Vec::new(),
+                valid: Vec::new(),
+                store_trace: false,
+                has_file_error_dependency: false,
+                failure: None,
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
@@ -566,56 +1188,1420 @@ fn evaluate_equation_measurements(
     if programs.is_empty() {
         return Ok(Vec::new());
     }
+    let all_dependencies = programs
+        .iter()
+        .map(|program| {
+            program
+                .state
+                .as_ref()
+                .expect("compiled live measure state")
+                .all_dependencies()
+        })
+        .collect::<Vec<_>>();
+    let referenced_measure_names = all_dependencies
+        .iter()
+        .flatten()
+        .cloned()
+        .collect::<HashSet<_>>();
+    for program in &mut programs {
+        program.store_trace =
+            matches!(program.statement.measure_type, MeasureType::Equation { .. })
+                || referenced_measure_names.contains(&program.canonical_name);
+        if program.store_trace {
+            program.values.reserve(axis.len());
+            program.valid.reserve(axis.len());
+        }
+    }
     let mut current_values = programs
         .iter()
-        .map(|program| (program.statement.name.to_ascii_uppercase(), program.current))
+        .map(|program| (program.canonical_name.clone(), program.current))
         .collect::<HashMap<_, _>>();
+    let program_indices = programs
+        .iter()
+        .enumerate()
+        .map(|(index, program)| (program.canonical_name.clone(), index))
+        .collect::<HashMap<_, _>>();
+    let file_error_programs = programs
+        .iter()
+        .map(|program| matches!(program.state, Some(LiveMeasureState::FileError { .. })))
+        .collect::<Vec<_>>();
+    for (program, dependencies) in programs.iter_mut().zip(&all_dependencies) {
+        program.has_file_error_dependency = dependencies.iter().any(|dependency| {
+            program_indices
+                .get(dependency)
+                .is_some_and(|&dependency_index| file_error_programs[dependency_index])
+        });
+    }
     let signal_index = CanonicalMeasureSignalIndex::new(signals);
 
+    let segment_starts = if analysis.eq_ignore_ascii_case("DC") {
+        dc_primary_segment_starts(netlist, axis.len())
+    } else {
+        Vec::new()
+    };
     for (row, &axis_value) in axis.iter().enumerate() {
-        for program in &mut programs {
-            if equation_axis_is_in_window(
-                axis_value,
-                program.from,
-                program.to,
-                program.td,
-                dc_sweep_ascending,
-            ) {
-                let bound = bind_equation_expression(
-                    &program.expression,
+        let starts_segment = segment_starts.binary_search(&row).is_ok();
+        for program_index in 0..programs.len() {
+            if !programs[program_index].store_trace
+                && !programs[program_index].has_file_error_dependency
+            {
+                continue;
+            }
+            let has_failed = programs[program_index].failure.is_some();
+            let is_equation = matches!(
+                programs[program_index].statement.measure_type,
+                MeasureType::Equation { .. }
+            );
+            let mut state = programs[program_index]
+                .state
+                .take()
+                .expect("live measure state is present outside evaluation");
+            let update = if has_failed {
+                Ok(None)
+            } else {
+                let mut reads = LiveMeasureReadContext {
+                    programs: &mut programs,
+                    current_values: &mut current_values,
+                    program_indices: &program_indices,
                     row,
+                    axis,
+                };
+                state.update(
+                    row,
+                    axis_value,
+                    axis,
+                    starts_segment,
                     &signal_index,
-                    &current_values,
-                )?;
-                let value = crate::netlist::expr::evaluate_complex(&bound, &netlist.params)
-                    .map_err(|err| {
-                        format!(
-                            "continuous measure '{}' evaluation failed at row {row}: {err}",
-                            program.statement.name
-                        )
-                    })?;
-                if !value.is_real() || value.re.is_nan() {
+                    &mut reads,
+                    &netlist.params,
+                    dc_sweep_ascending,
+                )
+            };
+            programs[program_index].state = Some(state);
+            let program = &mut programs[program_index];
+            match update {
+                Ok(Some(value)) => {
+                    program.current = value;
+                    program.initialized = true;
+                }
+                Ok(None) => {}
+                Err(error) if is_equation => {
                     return Err(format!(
-                        "continuous measure '{}' produced a non-real or NaN value at row {row}",
+                        "continuous measure '{}' evaluation failed at row {row}: {error}",
                         program.statement.name
                     ));
                 }
-                program.current = value.re;
-                program.initialized = true;
-                current_values.insert(program.statement.name.to_ascii_uppercase(), program.current);
+                Err(error) => program.failure = Some(error),
             }
-            program.values.push(program.current);
+            *current_values
+                .get_mut(&program.canonical_name)
+                .expect("compiled measure value slot") = program.current;
+            if program.store_trace {
+                program.values.push(program.current);
+                program.valid.push(!program.current.is_nan());
+            }
         }
     }
 
     Ok(programs
         .into_iter()
+        .filter(|program| program.store_trace)
         .map(|program| EquationMeasureTrace {
             name: program.statement.name.clone(),
             values: program.values,
+            valid: program.valid,
             initialized: program.initialized,
         })
         .collect())
+}
+
+fn compile_live_equation_source(
+    expression: &crate::netlist::measure::MeasureExpression,
+    statement_name: &str,
+    params: &crate::netlist::ParamContext,
+) -> Result<(LiveEquationSource, Vec<String>), String> {
+    let mut dependencies = Vec::new();
+    let source = match expression.kind {
+        crate::netlist::measure::MeasureExpressionKind::Expression => {
+            let parsed =
+                crate::netlist::expr::parse_expression(&expression.text).map_err(|error| {
+                    format!("failed to parse continuous measure '{statement_name}': {error}")
+                })?;
+            let prepared = LivePreparedExpression::compile(&parsed, params)?;
+            dependencies.extend(
+                prepared
+                    .parameters
+                    .values()
+                    .map(|parameter| parameter.canonical_measure.clone()),
+            );
+            LiveEquationSource::Expression(prepared)
+        }
+        crate::netlist::measure::MeasureExpressionKind::RawReference => {
+            let canonical_measure = expression.text.to_ascii_uppercase();
+            dependencies.push(canonical_measure.clone());
+            LiveEquationSource::RawReference {
+                authored: expression.text.clone(),
+                canonical_measure,
+                canonical_signal: canonical_measure_signal_name(&expression.text),
+            }
+        }
+        crate::netlist::measure::MeasureExpressionKind::RawOutputOperator => {
+            LiveEquationSource::RawOutputOperator(LiveRawOutputOperator::compile(&expression.text)?)
+        }
+    };
+    dependencies.sort();
+    dependencies.dedup();
+    Ok((source, dependencies))
+}
+
+fn compile_live_measure_state(
+    statement: &MeasureStatement,
+    analysis: &str,
+    axis: &[Value],
+    dc_sweep_ascending: Option<bool>,
+    use_legacy_tran_trig_targ: bool,
+    params: &crate::netlist::ParamContext,
+) -> Result<LiveMeasureState, String> {
+    let bounds = |from: Option<Value>, to: Option<Value>| {
+        if analysis.eq_ignore_ascii_case("DC")
+            && let (Some(from), Some(to)) = (from, to)
+        {
+            (from.min(to), from.max(to))
+        } else {
+            live_measurement_window_bounds(axis, from, to)
+        }
+    };
+    let point_bounds = |from, to, td| {
+        let (mut lower, upper) = bounds(from, to);
+        if analysis.eq_ignore_ascii_case("TRAN")
+            && let Some(td) = td
+        {
+            lower = lower.max(td);
+        }
+        (lower, upper)
+    };
+    Ok(match &statement.measure_type {
+        MeasureType::Equation {
+            expression,
+            from,
+            to,
+            td,
+        } => {
+            let (source, dependencies) =
+                compile_live_equation_source(expression, &statement.name, params)?;
+            let (from, to) = if dc_sweep_ascending.is_some() {
+                match (*from, *to) {
+                    (Some(from), Some(to)) if from > to => (Some(to), Some(from)),
+                    bounds => bounds,
+                }
+            } else {
+                (*from, *to)
+            };
+            LiveMeasureState::Equation {
+                source,
+                dependencies,
+                from,
+                to,
+                td: *td,
+            }
+        }
+        MeasureType::Min {
+            signal,
+            from,
+            to,
+            output,
+        }
+        | MeasureType::Max {
+            signal,
+            from,
+            to,
+            output,
+        } => {
+            let (lower, upper) = bounds(*from, *to);
+            LiveMeasureState::Extremum {
+                signal: LiveMeasureOperand::compile(signal, params)?,
+                lower,
+                upper,
+                output: *output,
+                is_max: matches!(statement.measure_type, MeasureType::Max { .. }),
+                selected: None,
+            }
+        }
+        MeasureType::PeakToPeak { signal, from, to } => {
+            let (lower, upper) = bounds(*from, *to);
+            LiveMeasureState::PeakToPeak {
+                signal: LiveMeasureOperand::compile(signal, params)?,
+                lower,
+                upper,
+                minimum: Value::INFINITY,
+                maximum: Value::NEG_INFINITY,
+                initialized: false,
+            }
+        }
+        MeasureType::Avg { signal, from, to } | MeasureType::Rms { signal, from, to } => {
+            let (lower, upper) = bounds(*from, *to);
+            LiveMeasureState::IntegralStatistic {
+                signal: LiveMeasureOperand::compile(signal, params)?,
+                lower,
+                upper,
+                mode: if matches!(statement.measure_type, MeasureType::Avg { .. }) {
+                    LiveIntegralMode::Average
+                } else {
+                    LiveIntegralMode::Rms
+                },
+                integral: 0.0,
+                width: 0.0,
+                previous: None,
+            }
+        }
+        MeasureType::Integ { signal, from, to } => {
+            let sweep_direction = axis
+                .first()
+                .zip(axis.last())
+                .map_or(1.0, |(first, last)| Value::signum(last - first));
+            let (lower, upper, direction) = match (*from, *to) {
+                (Some(from), Some(to)) => (from.min(to), from.max(to), Value::signum(to - from)),
+                (Some(from), None) if sweep_direction >= 0.0 => {
+                    (from, Value::INFINITY, sweep_direction)
+                }
+                (Some(from), None) => (Value::NEG_INFINITY, from, sweep_direction),
+                (None, Some(to)) if sweep_direction >= 0.0 => {
+                    (Value::NEG_INFINITY, to, sweep_direction)
+                }
+                (None, Some(to)) => (to, Value::INFINITY, sweep_direction),
+                (None, None) => (Value::NEG_INFINITY, Value::INFINITY, sweep_direction),
+            };
+            LiveMeasureState::IntegralStatistic {
+                signal: LiveMeasureOperand::compile(signal, params)?,
+                lower,
+                upper,
+                mode: LiveIntegralMode::Integral { direction },
+                integral: 0.0,
+                width: 0.0,
+                previous: None,
+            }
+        }
+        MeasureType::ErrorFunction {
+            measured,
+            comparison,
+            norm,
+            from,
+            to,
+            minval,
+            ymin,
+            ymax,
+            ..
+        } => {
+            let (lower, upper) = if analysis.eq_ignore_ascii_case("DC") {
+                match (*from, *to) {
+                    (Some(from), Some(to)) => (from.min(to), from.max(to)),
+                    _ => bounds(*from, *to),
+                }
+            } else {
+                bounds(*from, *to)
+            };
+            LiveMeasureState::ErrorFunction {
+                measured: LiveMeasureOperand::compile(measured, params)?,
+                comparison: LiveMeasureOperand::compile(comparison, params)?,
+                norm: *norm,
+                lower,
+                upper,
+                minval: *minval,
+                ymin: *ymin,
+                ymax: *ymax,
+                sum: 0.0,
+                count: 0,
+            }
+        }
+        MeasureType::Find {
+            signal,
+            at,
+            when,
+            from,
+            to,
+            td,
+            minval,
+        }
+        | MeasureType::Derivative {
+            signal,
+            at,
+            when,
+            from,
+            to,
+            td,
+            minval,
+        } => {
+            let (lower, upper) = point_bounds(*from, *to, *td);
+            LiveMeasureState::Point {
+                signal: Some(LiveMeasureOperand::compile(signal, params)?),
+                at: *at,
+                condition: when
+                    .as_ref()
+                    .map(|condition| LiveCondition::compile(condition, *minval, params))
+                    .transpose()?,
+                lower,
+                upper,
+                minval: *minval,
+                kind: if matches!(statement.measure_type, MeasureType::Find { .. }) {
+                    LivePointKind::Find
+                } else {
+                    LivePointKind::Derivative
+                },
+                previous_signal: None,
+                negative_results: VecDeque::new(),
+                complete: false,
+            }
+        }
+        MeasureType::When {
+            condition,
+            from,
+            to,
+            td,
+            minval,
+        } => {
+            let (lower, upper) = point_bounds(*from, *to, *td);
+            LiveMeasureState::Point {
+                signal: None,
+                at: None,
+                condition: Some(LiveCondition::compile(condition, *minval, params)?),
+                lower,
+                upper,
+                minval: *minval,
+                kind: LivePointKind::When,
+                previous_signal: None,
+                negative_results: VecDeque::new(),
+                complete: false,
+            }
+        }
+        MeasureType::Delay {
+            trig,
+            targ,
+            from,
+            to,
+            minval,
+        } => {
+            let legacy = analysis.eq_ignore_ascii_case("TRAN")
+                && (use_legacy_tran_trig_targ
+                    || trig.frac_max.is_some()
+                    || targ.frac_max.is_some());
+            if !legacy && (trig.frac_max.is_some() || targ.frac_max.is_some()) {
+                return Err(format!(
+                    "FRAC_MAX is supported only by scalar TRAN TRIG/TARG for measure {}",
+                    statement.name
+                ));
+            }
+            let axis_ascending = axis
+                .windows(2)
+                .find_map(|pair| (pair[0] != pair[1]).then_some(pair[1] > pair[0]))
+                .unwrap_or(true);
+            let axis_minimum = axis.iter().copied().fold(Value::INFINITY, Value::min);
+            let axis_maximum = axis.iter().copied().fold(Value::NEG_INFINITY, Value::max);
+            if legacy && matches!(&targ.event, TriggerEvent::At(_)) {
+                return Err(format!(
+                    "AT keyword not allowed in legacy TARG block for measure {}",
+                    statement.name
+                ));
+            }
+            let legacy_td = targ.td.or(trig.td);
+            let trigger_td = if legacy { legacy_td } else { trig.td };
+            let target_td = if legacy {
+                legacy_td
+            } else {
+                targ.td.or(trig.td)
+            };
+            LiveMeasureState::Delay {
+                frac_tracker: (legacy && (trig.frac_max.is_some() || targ.frac_max.is_some()))
+                    .then(|| LegacyFracDelayTracker::new(trig, targ, *minval)),
+                trigger: LiveDelayClause::compile(
+                    trig, trigger_td, *from, *to, *minval, legacy, params,
+                )?,
+                target: LiveDelayClause::compile(
+                    targ, target_td, *from, *to, *minval, legacy, params,
+                )?,
+                axis_ascending,
+                axis_minimum,
+                axis_maximum,
+            }
+        }
+        MeasureType::RiseTime {
+            signal,
+            from_pct,
+            to_pct,
+            number,
+        }
+        | MeasureType::FallTime {
+            signal,
+            from_pct,
+            to_pct,
+            number,
+        } => LiveMeasureState::RiseFall {
+            signal: LiveMeasureOperand::compile(signal, params)?,
+            samples: Vec::new(),
+            from_pct: *from_pct,
+            to_pct: *to_pct,
+            number: *number,
+            is_rise: matches!(statement.measure_type, MeasureType::RiseTime { .. }),
+        },
+        MeasureType::FileError { signal, .. } => LiveMeasureState::FileError {
+            signal: LiveMeasureOperand::compile(signal, params)?,
+            samples: Vec::new(),
+            frozen: false,
+        },
+        MeasureType::Param { expression } => {
+            let (source, dependencies) =
+                compile_live_equation_source(expression, &statement.name, params)?;
+            LiveMeasureState::Param {
+                source,
+                dependencies,
+            }
+        }
+    })
+}
+
+fn live_measurement_window_bounds(
+    axis: &[Value],
+    from: Option<Value>,
+    to: Option<Value>,
+) -> (Value, Value) {
+    let ascending = axis
+        .windows(2)
+        .find_map(|pair| (pair[0] != pair[1]).then_some(pair[1] > pair[0]))
+        .unwrap_or(true);
+    match (from, to) {
+        (Some(from), Some(to)) => (from, to),
+        (Some(from), None) if ascending => (from, Value::INFINITY),
+        (Some(from), None) => (Value::NEG_INFINITY, from),
+        (None, Some(to)) if ascending => (Value::NEG_INFINITY, to),
+        (None, Some(to)) => (to, Value::INFINITY),
+        (None, None) => (Value::NEG_INFINITY, Value::INFINITY),
+    }
+}
+
+fn freeze_live_file_error(
+    program: &mut LiveMeasureProgram<'_>,
+    read_row: usize,
+    axis: &[Value],
+) -> bool {
+    let (signal_name, sample_count) = match program.state.as_mut() {
+        Some(LiveMeasureState::FileError {
+            signal,
+            samples,
+            frozen,
+            ..
+        }) if !*frozen => {
+            *frozen = true;
+            (signal.authored.clone(), samples.len())
+        }
+        _ => return false,
+    };
+    if sample_count == 0 {
+        // Xyce's ERROR getter caches the authored/default result even when a
+        // forward reference reads it before the statement has accepted its
+        // first point. Later updates do not change that cached scalar.
+        program.initialized = true;
+        return true;
+    }
+    let Some(LiveMeasureState::FileError { samples, .. }) = &program.state else {
+        unreachable!("file ERROR state changed while freezing")
+    };
+    let mut signals = HashMap::new();
+    signals.insert(signal_name, samples.as_slice());
+    match MeasureEngine::evaluate_file_error_prefix_raw(
+        program.statement,
+        &axis[..sample_count],
+        &signals,
+    ) {
+        Ok(value) => {
+            program.current = value;
+            program.initialized = true;
+            if program.store_trace && program.values.len() == read_row + 1 {
+                program.values[read_row] = value;
+                program.valid[read_row] = !value.is_nan();
+            }
+        }
+        Err(error) => program.failure = Some(error),
+    }
+    true
+}
+
+impl LiveCondition {
+    fn compile(
+        condition: &WhenCondition,
+        minval: Value,
+        params: &crate::netlist::ParamContext,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            left: LiveMeasureOperand::compile(&condition.left, params)?,
+            right: match &condition.right {
+                MeasureOperand::Constant(value) => LiveConditionOperand::Constant(*value),
+                MeasureOperand::Waveform(name) => {
+                    LiveConditionOperand::Waveform(LiveMeasureOperand::compile(name, params)?)
+                }
+            },
+            edge: condition.occurrence.edge,
+            number: condition.occurrence.number,
+            minval,
+            match_count: 0,
+            negative_events: VecDeque::new(),
+            previous: None,
+        })
+    }
+
+    fn update(
+        &mut self,
+        row: usize,
+        axis_value: Value,
+        starts_segment: bool,
+        signals: &CanonicalMeasureSignalIndex<'_>,
+        reads: &mut LiveMeasureReadContext<'_, '_>,
+        params: &crate::netlist::ParamContext,
+        lower: Value,
+        upper: Value,
+        exclusive_lower: Option<Value>,
+    ) -> Result<LiveConditionUpdate, String> {
+        if starts_segment {
+            self.previous = None;
+        }
+        let left = self.left.value(row, signals, reads, params)?;
+        let right = match &mut self.right {
+            LiveConditionOperand::Constant(value) => *value,
+            LiveConditionOperand::Waveform(operand) => {
+                operand.value(row, signals, reads, params)?
+            }
+        };
+        let previous = self.previous.replace((axis_value, left, right));
+        let Some((previous_axis, previous_left, previous_right)) = previous else {
+            return Ok(LiveConditionUpdate::default());
+        };
+        let Some(crossing) = super::measure::measure_condition_crossing(
+            previous_left,
+            left,
+            previous_right,
+            right,
+            self.minval,
+        ) else {
+            return Ok(LiveConditionUpdate::default());
+        };
+        let event_axis = previous_axis + crossing.fraction * (axis_value - previous_axis);
+        if !super::measure::point_event_axis_in_window(event_axis, lower, upper, self.minval)
+            || exclusive_lower.is_some_and(|lower| event_axis <= lower)
+        {
+            return Ok(LiveConditionUpdate::default());
+        }
+        self.match_count += match self.edge {
+            EdgeType::Cross => 1,
+            EdgeType::Rise => usize::from(crossing.direction == MeasureConditionDirection::Rise),
+            EdgeType::Fall => usize::from(crossing.direction != MeasureConditionDirection::Rise),
+        };
+        let edge_matches = match self.edge {
+            EdgeType::Rise => crossing.direction == MeasureConditionDirection::Rise,
+            EdgeType::Fall => crossing.direction == MeasureConditionDirection::Fall,
+            EdgeType::Cross => true,
+        };
+        if !edge_matches {
+            return Ok(LiveConditionUpdate::default());
+        }
+        let current = LiveConditionEvent {
+            fraction: crossing.fraction,
+            axis: event_axis,
+            current_within_minval: crossing.current_within_minval,
+        };
+        let selected = if self.number >= 0 {
+            (self.match_count >= self.number as usize).then_some(current)
+        } else if self.number < 0 {
+            let Some(distance) = self.number.checked_abs().map(|distance| distance as usize) else {
+                return Ok(LiveConditionUpdate {
+                    current: Some(current),
+                    selected: None,
+                });
+            };
+            self.negative_events.push_back(current);
+            if self.negative_events.len() > distance {
+                self.negative_events.pop_front();
+            }
+            (self.negative_events.len() == distance)
+                .then(|| self.negative_events.front().copied())
+                .flatten()
+        } else {
+            None
+        };
+        Ok(LiveConditionUpdate {
+            current: Some(current),
+            selected,
+        })
+    }
+
+    fn reset_segment(&mut self) {
+        self.previous = None;
+    }
+
+    fn dependencies(&self, names: &mut Vec<String>) {
+        names.extend(self.left.dependencies.iter().cloned());
+        if let LiveConditionOperand::Waveform(right) = &self.right {
+            names.extend(right.dependencies.iter().cloned());
+        }
+    }
+}
+
+impl LiveDelayClause {
+    fn compile(
+        clause: &TrigSpec,
+        effective_td: Option<Value>,
+        from: Option<Value>,
+        to: Option<Value>,
+        minval: Value,
+        legacy: bool,
+        params: &crate::netlist::ParamContext,
+    ) -> Result<Self, String> {
+        Ok(match &clause.event {
+            TriggerEvent::At(at) => Self {
+                at: Some(*at),
+                condition: None,
+                td: effective_td,
+                from,
+                to,
+                selected: None,
+                negative_events: VecDeque::new(),
+                minval,
+                legacy,
+            },
+            TriggerEvent::When(condition) => Self {
+                at: None,
+                condition: Some(LiveDelayCondition {
+                    left: LiveMeasureOperand::compile(&condition.left, params)?,
+                    right: match &condition.right {
+                        MeasureOperand::Constant(value) => LiveConditionOperand::Constant(*value),
+                        MeasureOperand::Waveform(name) => LiveConditionOperand::Waveform(
+                            LiveMeasureOperand::compile(name, params)?,
+                        ),
+                    },
+                    tracker: if legacy {
+                        DelayConditionTracker::new_legacy(
+                            condition.occurrence.edge,
+                            condition.occurrence.number,
+                            clause.occurrence_explicit,
+                            minval,
+                        )
+                    } else {
+                        DelayConditionTracker::new(
+                            condition.occurrence.edge,
+                            condition.occurrence.number,
+                            clause.occurrence_explicit,
+                            minval,
+                        )
+                    },
+                    number: condition.occurrence.number,
+                }),
+                td: effective_td,
+                from,
+                to,
+                selected: None,
+                negative_events: VecDeque::new(),
+                minval,
+                legacy,
+            },
+        })
+    }
+
+    fn update(
+        &mut self,
+        row: usize,
+        axis_value: Value,
+        ascending: bool,
+        axis_minimum: Value,
+        axis_maximum: Value,
+        starts_segment: bool,
+        signals: &CanonicalMeasureSignalIndex<'_>,
+        reads: &mut LiveMeasureReadContext<'_, '_>,
+        params: &crate::netlist::ParamContext,
+        after: Option<Value>,
+        allow_selection: bool,
+    ) -> Result<(), String> {
+        if self.selected.is_some()
+            && (self.at.is_some()
+                || self
+                    .condition
+                    .as_ref()
+                    .is_some_and(|condition| condition.number >= 0))
+        {
+            return Ok(());
+        }
+        if let Some(target) = self.at {
+            if self.selected.is_none()
+                && target.is_finite()
+                && if self.legacy {
+                    super::measure::legacy_delay_accepts_sample(
+                        axis_value,
+                        self.td,
+                        self.from,
+                        self.to,
+                        self.minval,
+                    ) && axis_value >= target
+                } else {
+                    live_delay_at_is_reached(
+                        axis_value,
+                        target,
+                        ascending,
+                        axis_minimum,
+                        axis_maximum,
+                        self.minval,
+                    )
+                }
+            {
+                self.selected = Some(if self.legacy { axis_value } else { target });
+            }
+            return Ok(());
+        }
+        let Some(condition) = &mut self.condition else {
+            return Ok(());
+        };
+        if self.legacy
+            && !super::measure::legacy_delay_accepts_sample(
+                axis_value,
+                self.td,
+                self.from,
+                self.to,
+                condition.tracker.minval(),
+            )
+        {
+            return Ok(());
+        }
+        if starts_segment {
+            condition.tracker.reset_segment();
+        }
+        let left = condition.left.value(row, signals, reads, params)?;
+        let right = match &mut condition.right {
+            LiveConditionOperand::Constant(value) => *value,
+            LiveConditionOperand::Waveform(operand) => {
+                operand.value(row, signals, reads, params)?
+            }
+        };
+        if let Some(event_axis) = condition.tracker.update_with_td(
+            axis_value,
+            left,
+            right,
+            (!self.legacy).then_some(self.td).flatten(),
+        ) && allow_selection
+            && after.is_none_or(|trigger| axis_value > trigger)
+        {
+            if condition.number < 0 && !self.legacy {
+                let distance = condition.number.unsigned_abs();
+                self.negative_events.push_back(event_axis);
+                if self.negative_events.len() > distance {
+                    self.negative_events.pop_front();
+                }
+                self.selected = (self.negative_events.len() == distance)
+                    .then(|| self.negative_events.front().copied())
+                    .flatten();
+            } else {
+                // RiseFallDelay treats every negative count as LAST and
+                // overwrites the selected result on each matching window.
+                self.selected = Some(event_axis);
+            }
+        }
+        Ok(())
+    }
+
+    fn sample(
+        &mut self,
+        row: usize,
+        signals: &CanonicalMeasureSignalIndex<'_>,
+        reads: &mut LiveMeasureReadContext<'_, '_>,
+        params: &crate::netlist::ParamContext,
+    ) -> Result<(Value, Value), String> {
+        let Some(condition) = &mut self.condition else {
+            return Ok((0.0, 0.0));
+        };
+        let value = condition.left.value(row, signals, reads, params)?;
+        let target = match &mut condition.right {
+            LiveConditionOperand::Constant(value) => *value,
+            LiveConditionOperand::Waveform(operand) => {
+                operand.value(row, signals, reads, params)?
+            }
+        };
+        Ok((value, target))
+    }
+
+    fn dependencies(&self, names: &mut Vec<String>) {
+        if self.selected.is_some()
+            && self
+                .condition
+                .as_ref()
+                .is_some_and(|condition| condition.number >= 0)
+        {
+            return;
+        }
+        if let Some(condition) = &self.condition {
+            names.extend(condition.left.dependencies.iter().cloned());
+            if let LiveConditionOperand::Waveform(right) = &condition.right {
+                names.extend(right.dependencies.iter().cloned());
+            }
+        }
+    }
+}
+
+impl LiveMeasureState {
+    fn all_dependencies(&self) -> Vec<String> {
+        let mut names = Vec::new();
+        match self {
+            Self::Equation { dependencies, .. } | Self::Param { dependencies, .. } => {
+                names.extend(dependencies.iter().cloned());
+            }
+            Self::Extremum { signal, .. }
+            | Self::PeakToPeak { signal, .. }
+            | Self::IntegralStatistic { signal, .. }
+            | Self::RiseFall { signal, .. }
+            | Self::FileError { signal, .. } => {
+                names.extend(signal.dependencies.iter().cloned());
+            }
+            Self::ErrorFunction {
+                measured,
+                comparison,
+                ..
+            } => {
+                names.extend(measured.dependencies.iter().cloned());
+                names.extend(comparison.dependencies.iter().cloned());
+            }
+            Self::Point {
+                signal, condition, ..
+            } => {
+                if let Some(signal) = signal {
+                    names.extend(signal.dependencies.iter().cloned());
+                }
+                if let Some(condition) = condition {
+                    condition.dependencies(&mut names);
+                }
+            }
+            Self::Delay {
+                trigger, target, ..
+            } => {
+                trigger.dependencies(&mut names);
+                target.dependencies(&mut names);
+            }
+        }
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn update(
+        &mut self,
+        row: usize,
+        axis_value: Value,
+        axis: &[Value],
+        starts_segment: bool,
+        signals: &CanonicalMeasureSignalIndex<'_>,
+        reads: &mut LiveMeasureReadContext<'_, '_>,
+        params: &crate::netlist::ParamContext,
+        dc_sweep_ascending: Option<bool>,
+    ) -> Result<Option<Value>, String> {
+        match self {
+            Self::Equation {
+                source,
+                from,
+                to,
+                td,
+                ..
+            } => {
+                if !equation_axis_is_in_window(axis_value, *from, *to, *td, dc_sweep_ascending) {
+                    return Ok(None);
+                }
+                // Raw references and raw circuit operators are deliberately
+                // not reparsed as expressions. Besides preserving IEEE values,
+                // this supports Xyce's legacy `I(YDEVICE BRANCH)` spelling.
+                let value = match source {
+                    LiveEquationSource::Expression(expression) => {
+                        let value = expression.value(row, signals, reads, params)?;
+                        crate::netlist::expr::normalize_xyce_expression_component(value.re)
+                    }
+                    LiveEquationSource::RawReference {
+                        authored,
+                        canonical_measure,
+                        canonical_signal,
+                    } => lookup_compiled_raw_equation_reference(
+                        authored,
+                        canonical_measure,
+                        canonical_signal,
+                        row,
+                        signals,
+                        reads,
+                    )?,
+                    LiveEquationSource::RawOutputOperator(operator) => {
+                        operator.value(row, signals)?
+                    }
+                };
+                Ok(Some(value))
+            }
+            Self::Extremum {
+                signal,
+                lower,
+                upper,
+                output,
+                is_max,
+                selected,
+            } => {
+                if !live_axis_in_window(axis_value, *lower, *upper, 1.0e-12) {
+                    return Ok(None);
+                }
+                let value = signal.value(row, signals, reads, params)?;
+                let replaces = selected.is_none_or(|(_, selected_value)| {
+                    if *is_max {
+                        value > selected_value
+                    } else {
+                        value < selected_value
+                    }
+                });
+                if replaces {
+                    *selected = Some((axis_value, value));
+                }
+                // Xyce's live getMeasureResult() for MIN/MAX always returns
+                // the dependent extrema value. OUTPUT=SV/FREQ/TIME affects
+                // terminal printing only.
+                let _ = output;
+                Ok(selected.map(|(_, value)| value))
+            }
+            Self::PeakToPeak {
+                signal,
+                lower,
+                upper,
+                minimum,
+                maximum,
+                initialized,
+            } => {
+                if !live_axis_in_window(axis_value, *lower, *upper, 1.0e-12) {
+                    return Ok(None);
+                }
+                let value = signal.value(row, signals, reads, params)?;
+                if !*initialized {
+                    *minimum = value;
+                    *maximum = value;
+                    *initialized = true;
+                } else {
+                    if value < *minimum {
+                        *minimum = value;
+                    }
+                    if value > *maximum {
+                        *maximum = value;
+                    }
+                }
+                Ok(Some(*maximum - *minimum))
+            }
+            Self::IntegralStatistic {
+                signal,
+                lower,
+                upper,
+                mode,
+                integral,
+                width,
+                previous,
+            } => {
+                if !live_axis_in_window(axis_value, *lower, *upper, 1.0e-12) {
+                    *previous = None;
+                    return Ok(None);
+                }
+                let value = signal.value(row, signals, reads, params)?;
+                if let Some((previous_axis, previous_value)) = *previous {
+                    let dx = (axis_value - previous_axis).abs();
+                    *width += dx;
+                    *integral += match mode {
+                        LiveIntegralMode::Average => 0.5 * (value + previous_value) * dx,
+                        LiveIntegralMode::Rms => {
+                            0.5 * (value * value + previous_value * previous_value) * dx
+                        }
+                        LiveIntegralMode::Integral { .. } => 0.5 * (value + previous_value) * dx,
+                    };
+                }
+                *previous = Some((axis_value, value));
+                Ok(match mode {
+                    LiveIntegralMode::Average if *width > 0.0 => Some(*integral / *width),
+                    LiveIntegralMode::Rms if *width > 0.0 => Some((*integral / *width).sqrt()),
+                    LiveIntegralMode::Integral { direction } => Some(*integral * *direction),
+                    LiveIntegralMode::Average | LiveIntegralMode::Rms => None,
+                })
+            }
+            Self::ErrorFunction {
+                measured,
+                comparison,
+                norm,
+                lower,
+                upper,
+                minval,
+                ymin,
+                ymax,
+                sum,
+                count,
+            } => {
+                if !minval.is_finite() || !ymin.is_finite() || !ymax.is_finite() {
+                    return Err("ERR limits must be finite".to_string());
+                }
+                if !live_axis_in_window(axis_value, *lower, *upper, *minval) {
+                    return Ok(None);
+                }
+                let measured_value = measured.value(row, signals, reads, params)?;
+                let comparison_value = comparison.value(row, signals, reads, params)?;
+                let magnitude = measured_value.abs();
+                if !(magnitude >= *ymin - ymin.abs() * 1.0e-12
+                    && magnitude <= *ymax + ymax.abs() * 1.0e-12)
+                {
+                    // Xyce marks ERR initialized before applying YMIN/YMAX.
+                    // With no qualifying rows its raw getter is 0/0 (NaN);
+                    // once an aggregate exists, a skipped row retains it.
+                    return Ok((*count == 0).then_some(Value::NAN));
+                }
+                let denominator = magnitude.max(*minval);
+                let relative_error = (measured_value - comparison_value) / denominator;
+                *sum += match norm {
+                    ErrorFunctionNorm::RootMeanSquare => relative_error * relative_error,
+                    ErrorFunctionNorm::MeanAbsolute => relative_error.abs(),
+                };
+                *count += 1;
+                let mean = *sum / *count as Value;
+                Ok(Some(match norm {
+                    ErrorFunctionNorm::RootMeanSquare => mean.sqrt(),
+                    ErrorFunctionNorm::MeanAbsolute => mean,
+                }))
+            }
+            Self::Point {
+                signal,
+                at,
+                condition,
+                lower,
+                upper,
+                minval,
+                kind,
+                previous_signal,
+                negative_results,
+                complete,
+            } => {
+                if *complete {
+                    return Ok(None);
+                }
+                if starts_segment {
+                    if let Some(condition) = condition {
+                        condition.reset_segment();
+                    }
+                    *previous_signal = None;
+                }
+                let current_signal = signal
+                    .as_mut()
+                    .map(|signal| signal.value(row, signals, reads, params))
+                    .transpose()?;
+                let prior_signal = *previous_signal;
+                *previous_signal = current_signal.map(|value| (axis_value, value));
+                if let Some(target) = at {
+                    if !live_axis_in_window(*target, *lower, *upper, *minval) {
+                        return Ok(None);
+                    }
+                    if matches!(kind, LivePointKind::Derivative) && row == 0 {
+                        return Ok(None);
+                    }
+                    let Some(current_signal) = current_signal else {
+                        return Ok(None);
+                    };
+                    let Some(relation) = accepted_row_at_match(
+                        prior_signal.map(|(axis, _)| axis),
+                        axis_value,
+                        *target,
+                        *minval,
+                    ) else {
+                        return Ok(None);
+                    };
+                    let candidate = match (*kind, relation) {
+                        (LivePointKind::Find, AcceptedRowAtMatch::Current) => {
+                            LivePointCandidate::Defined(current_signal)
+                        }
+                        (LivePointKind::Find, AcceptedRowAtMatch::PreviousSegment { fraction }) => {
+                            let Some((_, previous_signal)) = prior_signal else {
+                                return Ok(None);
+                            };
+                            let value = super::measure::interpolate_extended_real(
+                                previous_signal,
+                                current_signal,
+                                fraction,
+                            );
+                            if value.is_nan() {
+                                LivePointCandidate::Undefined
+                            } else {
+                                LivePointCandidate::Defined(value)
+                            }
+                        }
+                        (LivePointKind::Derivative, _) => {
+                            let (previous_axis, previous_signal) =
+                                prior_signal.unwrap_or((axis_value, current_signal));
+                            LivePointCandidate::Defined(accepted_row_secant_slope(
+                                previous_axis,
+                                previous_signal,
+                                axis_value,
+                                current_signal,
+                            ))
+                        }
+                        (LivePointKind::When, _) => {
+                            unreachable!("WHEN point state cannot carry AT")
+                        }
+                    };
+                    *complete = true;
+                    return Ok(Some(candidate.numeric_value()));
+                }
+                let Some(condition) = condition else {
+                    return Ok(None);
+                };
+                let update = condition.update(
+                    row,
+                    axis_value,
+                    starts_segment,
+                    signals,
+                    reads,
+                    params,
+                    *lower,
+                    *upper,
+                    None,
+                )?;
+                if matches!(kind, LivePointKind::When) {
+                    let Some(event) = update.selected else {
+                        return Ok(None);
+                    };
+                    if condition.number >= 0 {
+                        *complete = true;
+                    }
+                    return Ok(Some(event.axis));
+                }
+
+                let resolve = |event: LiveConditionEvent| {
+                    let Some((previous_axis, previous_value)) = prior_signal else {
+                        return Err("Point event has no prior source sample".to_string());
+                    };
+                    let Some(current_value) = current_signal else {
+                        return Err("Point event has no current source sample".to_string());
+                    };
+                    match kind {
+                        LivePointKind::Find => {
+                            let value = if event.current_within_minval {
+                                current_value
+                            } else {
+                                super::measure::interpolate_extended_real(
+                                    previous_value,
+                                    current_value,
+                                    event.fraction,
+                                )
+                            };
+                            if value.is_nan() {
+                                Ok(LivePointCandidate::Undefined)
+                            } else {
+                                Ok(LivePointCandidate::Defined(value))
+                            }
+                        }
+                        LivePointKind::Derivative => {
+                            Ok(LivePointCandidate::Defined(accepted_row_secant_slope(
+                                previous_axis,
+                                previous_value,
+                                axis_value,
+                                current_value,
+                            )))
+                        }
+                        LivePointKind::When => unreachable!("WHEN was handled above"),
+                    }
+                };
+
+                if condition.number >= 0 {
+                    let Some(event) = update.selected else {
+                        return Ok(None);
+                    };
+                    let candidate = resolve(event)?;
+                    *complete = true;
+                    return Ok(Some(candidate.numeric_value()));
+                }
+                if condition.number < 0 {
+                    let Some(distance) = condition
+                        .number
+                        .checked_abs()
+                        .map(|distance| distance as usize)
+                    else {
+                        return Ok(None);
+                    };
+                    if let Some(event) = update.current {
+                        negative_results.push_back(resolve(event)?);
+                        if negative_results.len() > distance {
+                            negative_results.pop_front();
+                        }
+                    }
+                    if update.selected.is_some() {
+                        // Xyce's negative-RFC FIFO stores the raw candidate,
+                        // including NaN, and remains active. Undefined is a
+                        // recoverable numeric state, not a structural failure:
+                        // later events can age it out of this bounded queue.
+                        return Ok(negative_results
+                            .front()
+                            .map(LivePointCandidate::numeric_value));
+                    }
+                }
+                Ok(None)
+            }
+            Self::Delay {
+                trigger,
+                target,
+                frac_tracker,
+                axis_ascending,
+                axis_minimum,
+                axis_maximum,
+            } => {
+                if let Some(frac_tracker) = frac_tracker {
+                    if !super::measure::legacy_delay_accepts_sample(
+                        axis_value,
+                        trigger.td,
+                        trigger.from,
+                        trigger.to,
+                        trigger.minval,
+                    ) {
+                        return Ok(None);
+                    }
+                    let (trigger_value, trigger_target) =
+                        trigger.sample(row, signals, reads, params)?;
+                    let (target_value, target_target) =
+                        target.sample(row, signals, reads, params)?;
+                    let pair = frac_tracker.update(
+                        axis_value,
+                        trigger_value,
+                        trigger_target,
+                        target_value,
+                        target_target,
+                    );
+                    trigger.selected = pair.map(|(trigger, _)| trigger);
+                    target.selected = pair.map(|(_, target)| target);
+                    return Ok(pair.map(|(trigger, target)| target - trigger));
+                }
+                trigger.update(
+                    row,
+                    axis_value,
+                    *axis_ascending,
+                    *axis_minimum,
+                    *axis_maximum,
+                    starts_segment,
+                    signals,
+                    reads,
+                    params,
+                    None,
+                    true,
+                )?;
+                let trigger_axis = trigger.selected;
+                let target_after = target.legacy.then_some(trigger_axis).flatten();
+                target.update(
+                    row,
+                    axis_value,
+                    *axis_ascending,
+                    *axis_minimum,
+                    *axis_maximum,
+                    starts_segment,
+                    signals,
+                    reads,
+                    params,
+                    target_after,
+                    !target.legacy || trigger_axis.is_some(),
+                )?;
+                Ok(trigger
+                    .selected
+                    .zip(target.selected)
+                    .map(|(trigger, target)| target - trigger))
+            }
+            Self::RiseFall {
+                signal,
+                samples,
+                from_pct,
+                to_pct,
+                number,
+                is_rise,
+            } => {
+                samples.push(signal.value(row, signals, reads, params)?);
+                if row + 1 != axis.len() {
+                    return Ok(None);
+                }
+                Ok(super::measure::rise_fall_duration(
+                    axis, samples, *from_pct, *to_pct, *number, *is_rise,
+                ))
+            }
+            Self::FileError {
+                signal,
+                samples,
+                frozen,
+                ..
+            } => {
+                if !*frozen {
+                    samples.push(signal.value(row, signals, reads, params)?);
+                }
+                Ok(None)
+            }
+            Self::Param { source, .. } => {
+                if row + 1 != axis.len() {
+                    return Ok(None);
+                }
+                let value = match source {
+                    LiveEquationSource::Expression(expression) => {
+                        let value = expression.value(row, signals, reads, params)?;
+                        if params.expression_dialect() != crate::config::ExpressionDialect::Xyce
+                            && (!value.is_real() || value.re.is_nan())
+                        {
+                            return Err(
+                                "PARAM expression produced a non-real or NaN value".to_string()
+                            );
+                        }
+                        if params.expression_dialect() == crate::config::ExpressionDialect::Xyce {
+                            crate::netlist::expr::normalize_xyce_expression_component(value.re)
+                        } else {
+                            value.re
+                        }
+                    }
+                    LiveEquationSource::RawReference {
+                        authored,
+                        canonical_measure,
+                        canonical_signal,
+                    } => lookup_compiled_raw_equation_reference(
+                        authored,
+                        canonical_measure,
+                        canonical_signal,
+                        row,
+                        signals,
+                        reads,
+                    )?,
+                    LiveEquationSource::RawOutputOperator(operator) => {
+                        operator.value(row, signals)?
+                    }
+                };
+                Ok(Some(value))
+            }
+        }
+    }
+}
+
+fn live_axis_in_window(axis: Value, lower: Value, upper: Value, tolerance: Value) -> bool {
+    let lower_tolerance = if lower.is_finite() {
+        (lower * tolerance).abs()
+    } else {
+        0.0
+    };
+    let upper_tolerance = if upper.is_finite() {
+        (upper * tolerance).abs()
+    } else {
+        0.0
+    };
+    axis >= lower - lower_tolerance && axis <= upper + upper_tolerance
+}
+
+fn live_delay_at_is_reached(
+    current_axis: Value,
+    target: Value,
+    ascending: bool,
+    axis_minimum: Value,
+    axis_maximum: Value,
+    minval: Value,
+) -> bool {
+    if target < axis_minimum || target > axis_maximum {
+        return false;
+    }
+    if ascending {
+        current_axis - minval >= target
+    } else {
+        current_axis - minval <= target
+    }
 }
 
 fn equation_axis_is_in_window(
@@ -643,6 +2629,127 @@ fn equation_axis_is_in_window(
     }
 
     td.is_none_or(at_or_above) && from.is_none_or(at_or_above) && to.is_none_or(at_or_below)
+}
+
+fn evaluate_measure_expression(
+    expression: &NetExpr,
+    row: usize,
+    signals: &CanonicalMeasureSignalIndex<'_>,
+    measures: &HashMap<String, Value>,
+    params: &crate::netlist::ParamContext,
+    normalize_nonfinite: bool,
+    description: &str,
+) -> Result<Value, String> {
+    let bound = bind_equation_expression(expression, row, signals, measures)?;
+    let value = crate::netlist::expr::evaluate_complex_raw(&bound, params)
+        .map_err(|error| format!("{description} failed: {error}"))?;
+    // Xyce evaluates measurement expressions as complex values, applies
+    // fixNan/fixInf independently to both root components, then projects the
+    // real component in MeasureBase::getOutputValue. Preserve that boundary:
+    // bare measure getters remain raw, but every authored expression root is
+    // finite before MAX/ERR/FIND/EQN/PARAM consumes it.
+    if normalize_nonfinite {
+        let real = crate::netlist::expr::normalize_xyce_expression_component(value.re);
+        let _imaginary = crate::netlist::expr::normalize_xyce_expression_component(value.im);
+        Ok(real)
+    } else {
+        Ok(value.re)
+    }
+}
+
+fn lookup_compiled_raw_equation_reference(
+    authored: &str,
+    canonical_measure: &str,
+    canonical_signal: &str,
+    row: usize,
+    signals: &CanonicalMeasureSignalIndex<'_>,
+    reads: &mut LiveMeasureReadContext<'_, '_>,
+) -> Result<Value, String> {
+    if let Some(value) = reads.read_measure(canonical_measure) {
+        return Ok(value);
+    }
+    lookup_equation_signal_canonical_optional(signals, authored, canonical_signal, row)?
+        .ok_or_else(|| format!("raw equation reference '{authored}' is unavailable at row {row}"))
+}
+
+fn split_equation_output_operator(operator: &str) -> Option<(&str, Vec<String>)> {
+    let (name, arguments) = operator.split_once('(')?;
+    let arguments = arguments.strip_suffix(')')?;
+    if name.is_empty() || arguments.is_empty() {
+        return None;
+    }
+    let arguments = arguments
+        .split(',')
+        .map(str::trim)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    arguments
+        .iter()
+        .all(|argument| !argument.is_empty())
+        .then_some((name, arguments))
+}
+
+fn is_equation_voltage_accessor(name: &str) -> bool {
+    matches!(name, "V" | "VR" | "VI" | "VM" | "VP" | "VDB")
+}
+
+fn lookup_equation_voltage_operator(
+    signals: &CanonicalMeasureSignalIndex<'_>,
+    prefix: &str,
+    arguments: &[String],
+    row: usize,
+) -> Result<Value, String> {
+    if !(1..=2).contains(&arguments.len()) {
+        return Err(format!(
+            "{prefix}() in continuous measure requires one or two arguments"
+        ));
+    }
+    let authored = format!("{prefix}({})", arguments.join(","));
+    if let Some(value) = lookup_equation_signal_optional(signals, &authored, row)? {
+        return Ok(value);
+    }
+    let node_component = |component: &str, node: &str| -> Result<Value, String> {
+        if node == "0" {
+            return Ok(0.0);
+        }
+        if let Some(value) =
+            lookup_equation_signal_optional(signals, &format!("{component}({node})"), row)?
+        {
+            return Ok(value);
+        }
+        if component == "VR" {
+            return lookup_equation_signal(signals, &format!("V({node})"), row);
+        }
+        Err(format!(
+            "continuous measure signal '{component}({node})' is unavailable at row {row}"
+        ))
+    };
+    if arguments.len() == 1 {
+        return if prefix == "V" {
+            lookup_equation_signal(signals, &format!("V({})", arguments[0]), row)
+        } else {
+            lookup_equation_signal(signals, &authored, row)
+        };
+    }
+
+    let positive = &arguments[0];
+    let negative = &arguments[1];
+    match prefix {
+        "V" | "VR" => Ok(node_component("VR", positive)? - node_component("VR", negative)?),
+        "VI" => Ok(node_component("VI", positive)? - node_component("VI", negative)?),
+        "VM" | "VP" | "VDB" => {
+            let real = node_component("VR", positive)? - node_component("VR", negative)?;
+            let imaginary = node_component("VI", positive)? - node_component("VI", negative)?;
+            let magnitude = real.hypot(imaginary);
+            Ok(match prefix {
+                "VM" => magnitude,
+                "VP" => imaginary.atan2(real).to_degrees(),
+                "VDB" => 20.0 * magnitude.log10(),
+                _ => unreachable!(),
+            })
+        }
+        _ => unreachable!(),
+    }
 }
 
 fn bind_equation_expression(
@@ -684,18 +2791,27 @@ fn bind_equation_expression(
         },
         NetExpr::FnCall { name, args } if is_equation_probe_accessor(name) => {
             let prefix = name.to_ascii_uppercase();
-            let first = equation_probe_argument(args.first()).ok_or_else(|| {
-                format!("{prefix}() in continuous measure has an invalid first argument")
-            })?;
-            let first_value = lookup_equation_signal(signals, &format!("{prefix}({first})"), row)?;
-            if prefix == "V" && args.len() == 2 {
-                let second = equation_probe_argument(args.get(1)).ok_or_else(|| {
-                    "V() in continuous measure has an invalid second argument".to_string()
-                })?;
-                let second_value = lookup_equation_signal(signals, &format!("V({second})"), row)?;
-                NetExpr::Number(first_value - second_value)
+            if is_equation_voltage_accessor(&prefix) {
+                let arguments = args
+                    .iter()
+                    .map(|argument| {
+                        equation_probe_argument(Some(argument)).ok_or_else(|| {
+                            format!("{prefix}() in continuous measure has an invalid argument")
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                NetExpr::Number(lookup_equation_voltage_operator(
+                    signals, &prefix, &arguments, row,
+                )?)
             } else if args.len() == 1 {
-                NetExpr::Number(first_value)
+                let first = equation_probe_argument(args.first()).ok_or_else(|| {
+                    format!("{prefix}() in continuous measure has an invalid argument")
+                })?;
+                NetExpr::Number(lookup_equation_signal(
+                    signals,
+                    &format!("{prefix}({first})"),
+                    row,
+                )?)
             } else {
                 return Err(format!(
                     "{prefix}() in continuous measure has invalid arity"
@@ -709,6 +2825,19 @@ fn bind_equation_expression(
                     "{prefix}() in continuous measure requires one or two arguments"
                 ));
             }
+            let arguments = args
+                .iter()
+                .map(|argument| {
+                    equation_probe_argument(Some(argument)).ok_or_else(|| {
+                        format!("{prefix}() in continuous measure has an invalid argument")
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let probe = format!("{prefix}({})", arguments.join(","));
+            NetExpr::Number(lookup_equation_signal(signals, &probe, row)?)
+        }
+        NetExpr::FnCall { name, args } if is_equation_generic_output_accessor(name) => {
+            let prefix = name.to_ascii_uppercase();
             let arguments = args
                 .iter()
                 .map(|argument| {
@@ -744,6 +2873,23 @@ fn is_equation_noise_accessor(name: &str) -> bool {
     matches!(name.to_ascii_uppercase().as_str(), "DNO" | "DNI")
 }
 
+fn is_equation_generic_output_accessor(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    !is_equation_probe_accessor(&upper)
+        && !is_equation_noise_accessor(&upper)
+        && upper != "IF"
+        && (matches!(upper.as_str(), "N" | "P" | "W")
+            || is_current_output_accessor(&upper)
+            || is_equation_rf_accessor(&upper))
+}
+
+fn is_equation_rf_accessor(name: &str) -> bool {
+    let Some((family, suffix)) = name.split_at_checked(1) else {
+        return false;
+    };
+    matches!(family, "S" | "Y" | "Z") && matches!(suffix, "" | "R" | "I" | "M" | "P" | "DB")
+}
+
 fn equation_probe_argument(argument: Option<&NetExpr>) -> Option<String> {
     match argument? {
         NetExpr::Param(name) => Some(name.clone()),
@@ -770,6 +2916,17 @@ fn lookup_equation_signal_optional(
 ) -> Result<Option<Value>, String> {
     Ok(signals
         .get(name)?
+        .and_then(|values| values.get(row).copied()))
+}
+
+fn lookup_equation_signal_canonical_optional(
+    signals: &CanonicalMeasureSignalIndex<'_>,
+    authored_name: &str,
+    canonical_name: &str,
+    row: usize,
+) -> Result<Option<Value>, String> {
+    Ok(signals
+        .get_canonical(authored_name, canonical_name)?
         .and_then(|values| values.get(row).copied()))
 }
 
@@ -1244,8 +3401,9 @@ pub fn evaluate_noise_measurements(
             traces,
             netlist.options.measure_default_value,
             -1.0,
+            false,
         ),
-        Err(_) => evaluate_statements(&statements, series.axis(), &signals, &netlist.params),
+        Err(_) => evaluate_statements(&statements, series.axis(), &signals, &netlist.params, false),
     };
     overlay_continuous_equation_results(&statements, &mut results, equation_traces, "NOISE");
     results
@@ -1362,8 +3520,16 @@ fn evaluate_statements(
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
     params: &crate::netlist::ParamContext,
+    use_legacy_tran_trig_targ: bool,
 ) -> Vec<MeasureResult> {
-    evaluate_statements_with_segment_starts(statements, axis, signals, params, &[])
+    evaluate_statements_with_segment_starts(
+        statements,
+        axis,
+        signals,
+        params,
+        &[],
+        use_legacy_tran_trig_targ,
+    )
 }
 
 fn evaluate_statements_with_segment_starts(
@@ -1372,6 +3538,7 @@ fn evaluate_statements_with_segment_starts(
     signals: &HashMap<String, &[Value]>,
     params: &crate::netlist::ParamContext,
     segment_starts: &[usize],
+    use_legacy_tran_trig_targ: bool,
 ) -> Vec<MeasureResult> {
     let derived = materialize_measure_expression_signals(statements, axis, signals, params);
     let mut augmented_signals = signals.clone();
@@ -1379,6 +3546,7 @@ fn evaluate_statements_with_segment_starts(
         augmented_signals.insert(name.clone(), waveform.as_slice());
     }
     let mut engine = MeasureEngine::new();
+    engine.set_use_legacy_tran_trig_targ(use_legacy_tran_trig_targ);
     for statement in statements {
         engine.add((*statement).clone());
     }
@@ -1399,22 +3567,34 @@ fn evaluate_statements_with_equation_traces(
     traces: &[EquationMeasureTrace],
     global_default: Option<Value>,
     equation_default: Value,
+    use_legacy_tran_trig_targ: bool,
 ) -> Vec<MeasureResult> {
+    let statement_dependencies = statements
+        .iter()
+        .map(|statement| statement_live_dependencies(statement, params))
+        .collect::<Vec<_>>();
     let equation_positions = traces
         .iter()
         .map(|trace| {
-            statements.iter().position(|statement| {
-                matches!(statement.measure_type, MeasureType::Equation { .. })
-                    && statement.name.eq_ignore_ascii_case(&trace.name)
-            })
+            statements
+                .iter()
+                .position(|statement| statement.name.eq_ignore_ascii_case(&trace.name))
         })
         .collect::<Vec<_>>();
     let previous_values = traces
         .iter()
         .zip(&equation_positions)
         .map(|(trace, position)| {
-            let local_default = position.and_then(|position| statements[position].default_value);
-            let default = global_default.or(local_default).unwrap_or(equation_default);
+            let statement = position.map(|position| statements[position]);
+            let local_default = statement.and_then(|statement| statement.default_value);
+            let implicit_default = statement.map_or(equation_default, |statement| {
+                if matches!(statement.measure_type, MeasureType::Equation { .. }) {
+                    equation_default
+                } else {
+                    0.0
+                }
+            });
+            let default = global_default.or(local_default).unwrap_or(implicit_default);
             std::iter::once(default)
                 .chain(
                     trace
@@ -1427,15 +3607,20 @@ fn evaluate_statements_with_equation_traces(
         })
         .collect::<Vec<_>>();
 
-    // Xyce updates measurements sequentially at every accepted point. A
-    // consumer after an equation sees its current-point value; a forward
-    // consumer sees the previous-point value (or DEFAULT_VAL at row zero).
+    // Xyce updates every measurement sequentially at each accepted point. A
+    // later consumer sees the producer's current-point value; a forward
+    // consumer sees its previous-point value (or DEFAULT_VAL at row zero).
     let mut signal_maps = statements
         .iter()
         .enumerate()
         .map(|(statement_index, _)| {
             let mut map = signals.clone();
             for (trace_index, trace) in traces.iter().enumerate() {
+                if !statement_dependencies[statement_index]
+                    .contains(&trace.name.to_ascii_uppercase())
+                {
+                    continue;
+                }
                 let values = if equation_positions[trace_index]
                     .is_some_and(|equation_index| statement_index > equation_index)
                 {
@@ -1463,6 +3648,7 @@ fn evaluate_statements_with_equation_traces(
     }
 
     let mut engine = MeasureEngine::new();
+    engine.set_use_legacy_tran_trig_targ(use_legacy_tran_trig_targ);
     for statement in statements {
         engine.add((*statement).clone());
     }
@@ -1474,6 +3660,81 @@ fn evaluate_statements_with_equation_traces(
     )
 }
 
+fn statement_live_dependencies(
+    statement: &MeasureStatement,
+    params: &crate::netlist::ParamContext,
+) -> HashSet<String> {
+    let mut names = Vec::new();
+    match &statement.measure_type {
+        MeasureType::Delay { trig, targ, .. } => {
+            for clause in [trig, targ] {
+                if let TriggerEvent::When(when) = &clause.event {
+                    add_live_condition_dependencies(when, &mut names, params);
+                }
+            }
+        }
+        MeasureType::Find { signal, when, .. } | MeasureType::Derivative { signal, when, .. } => {
+            add_live_operand_dependencies(signal, &mut names, params);
+            if let Some(when) = when {
+                add_live_condition_dependencies(when, &mut names, params);
+            }
+        }
+        MeasureType::When {
+            condition: when, ..
+        } => add_live_condition_dependencies(when, &mut names, params),
+        MeasureType::Param { expression } | MeasureType::Equation { expression, .. } => {
+            if let Ok((_, dependencies)) =
+                compile_live_equation_source(expression, &statement.name, params)
+            {
+                names.extend(dependencies);
+            }
+        }
+        MeasureType::ErrorFunction {
+            measured,
+            comparison,
+            ..
+        } => {
+            add_live_operand_dependencies(measured, &mut names, params);
+            add_live_operand_dependencies(comparison, &mut names, params);
+        }
+        MeasureType::FileError { signal, .. }
+        | MeasureType::Min { signal, .. }
+        | MeasureType::Max { signal, .. }
+        | MeasureType::PeakToPeak { signal, .. }
+        | MeasureType::Avg { signal, .. }
+        | MeasureType::Rms { signal, .. }
+        | MeasureType::RiseTime { signal, .. }
+        | MeasureType::FallTime { signal, .. }
+        | MeasureType::Integ { signal, .. } => {
+            add_live_operand_dependencies(signal, &mut names, params)
+        }
+    }
+    names.into_iter().collect()
+}
+
+fn add_live_operand_dependencies(
+    authored: &str,
+    names: &mut Vec<String>,
+    params: &crate::netlist::ParamContext,
+) {
+    if let Ok(operand) = LiveMeasureOperand::compile(authored, params) {
+        names.extend(operand.dependencies);
+    } else {
+        names.push(authored.to_ascii_uppercase());
+    }
+}
+
+fn add_live_condition_dependencies(
+    condition: &WhenCondition,
+    names: &mut Vec<String>,
+    params: &crate::netlist::ParamContext,
+) {
+    add_live_operand_dependencies(&condition.left, names, params);
+    if let MeasureOperand::Waveform(right) = &condition.right {
+        add_live_operand_dependencies(right, names, params);
+    }
+}
+
 fn overlay_continuous_equation_results(
     statements: &[&MeasureStatement],
     results: &mut [MeasureResult],
@@ -1483,7 +3744,13 @@ fn overlay_continuous_equation_results(
     match traces {
         Ok(traces) => {
             for (statement, result) in statements.iter().zip(results) {
-                if !matches!(statement.measure_type, MeasureType::Equation { .. }) {
+                let equation = matches!(statement.measure_type, MeasureType::Equation { .. });
+                let cached_file_error =
+                    matches!(statement.measure_type, MeasureType::FileError { .. })
+                        && traces.iter().any(|trace| {
+                            trace.name.eq_ignore_ascii_case(&statement.name) && trace.initialized
+                        });
+                if !equation && !cached_file_error {
                     continue;
                 }
                 let Some(trace) = traces
@@ -1508,11 +3775,13 @@ fn overlay_continuous_equation_results(
                                 &format!("continuous {analysis} equation trace is empty"),
                             )
                         })
-                } else {
+                } else if equation {
                     MeasureResult::failed(
                         &statement.name,
                         &format!("continuous {analysis} equation window was never active"),
                     )
+                } else {
+                    continue;
                 }
                 .check_goal(statement);
             }
@@ -1603,13 +3872,18 @@ fn materialize_measure_expression_signals(
             let mut waveform = Vec::with_capacity(axis.len());
             let measures = HashMap::new();
             for row in 0..axis.len() {
-                let bound =
-                    bind_equation_expression(&expression, row, &signal_index, &measures).ok()?;
-                let value = crate::netlist::expr::evaluate_complex(&bound, params).ok()?;
-                if !value.is_real() || value.re.is_nan() {
-                    return None;
-                }
-                waveform.push(value.re);
+                waveform.push(
+                    evaluate_measure_expression(
+                        &expression,
+                        row,
+                        &signal_index,
+                        &measures,
+                        params,
+                        true,
+                        &format!("expression '{name}'"),
+                    )
+                    .ok()?,
+                );
             }
             Some((name, waveform))
         })
@@ -1854,13 +4128,28 @@ fn evaluate_tran_measurements_with_signals(
     for (name, waveform) in &differential_signals {
         insert_case_variants(&mut signals, name, waveform);
     }
-    let mut results = evaluate_statements(&statements, time, &signals, &netlist.params);
-    overlay_continuous_equation_results(
-        &statements,
-        &mut results,
-        evaluate_equation_measurements(netlist, "TRAN", time, &signals, -1.0, None),
-        "TRAN",
-    );
+    let live_traces = evaluate_equation_measurements(netlist, "TRAN", time, &signals, -1.0, None);
+    let mut results = match &live_traces {
+        Ok(traces) => evaluate_statements_with_equation_traces(
+            &statements,
+            time,
+            &signals,
+            &netlist.params,
+            &[],
+            traces,
+            netlist.options.measure_default_value,
+            -1.0,
+            netlist.options.measure_use_lttm(),
+        ),
+        Err(_) => evaluate_statements(
+            &statements,
+            time,
+            &signals,
+            &netlist.params,
+            netlist.options.measure_use_lttm(),
+        ),
+    };
+    overlay_continuous_equation_results(&statements, &mut results, live_traces, "TRAN");
     results
 }
 
@@ -2104,6 +4393,7 @@ pub fn evaluate_dc_measurements_with_parameter_contexts(
             traces,
             netlist.options.measure_default_value,
             0.0,
+            false,
         ),
         Err(_) => evaluate_statements_with_segment_starts(
             &statements,
@@ -2111,6 +4401,7 @@ pub fn evaluate_dc_measurements_with_parameter_contexts(
             &signals,
             &netlist.params,
             &segment_starts,
+            false,
         ),
     };
     overlay_continuous_equation_results(&statements, &mut results, equation_traces, "DC");
@@ -2292,8 +4583,9 @@ pub fn evaluate_ac_measurements(netlist: &Netlist, sweep: &[AcResult]) -> Vec<Me
             traces,
             netlist.options.measure_default_value,
             -1.0,
+            false,
         ),
-        Err(_) => evaluate_statements(&statements, series.axis(), &signals, &netlist.params),
+        Err(_) => evaluate_statements(&statements, series.axis(), &signals, &netlist.params, false),
     };
     overlay_continuous_equation_results(&statements, &mut results, equation_traces, "AC");
     results
@@ -2326,6 +4618,23 @@ mod tests {
             num_nodes: 1,
             node_names: vec!["out".to_string()],
             branch_names: vec!["v1".to_string()],
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        }
+    }
+
+    fn tran_waveform(time: Vec<Value>, voltage: Vec<Value>) -> TransientResult {
+        assert_eq!(time.len(), voltage.len());
+        TransientResult {
+            step_sizes: vec![0.0; time.len()],
+            time,
+            voltages: vec![voltage],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["out".to_string()],
+            branch_names: Vec::new(),
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
@@ -2549,6 +4858,138 @@ mod tests {
         assert_eq!(continuous.len(), 1);
         assert_eq!(continuous[0].failure, None);
         assert_eq!(continuous[0].records[0].event_axis, Some(0.5));
+    }
+
+    #[test]
+    fn live_legacy_frac_max_revises_results_and_global_window_gates_histories() {
+        let frac_netlist = Netlist::parse(
+            "live frac max\n\
+             V1 1 0 0\n\
+             .tran 1 4\n\
+             .measure tran dynamic TRIG V(1) FRAC_MAX=0.5 TARG V(1) FRAC_MAX=0.75\n\
+             .measure tran echoed EQN {dynamic}\n\
+             .end\n",
+        )
+        .expect("FRAC_MAX deck parses");
+        let frac_result = TransientResult {
+            time: vec![0.0, 1.0, 2.0, 3.0, 4.0],
+            step_sizes: vec![0.0; 5],
+            voltages: vec![vec![0.0, 1.0, 2.0, 1.0, 0.0]],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["1".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+        let results = evaluate_tran_measurements(&frac_netlist, &frac_result);
+        assert_eq!(results[0].value, Some(0.5));
+        assert_eq!(results[1].value, Some(0.5));
+
+        let window_netlist = Netlist::parse(
+            "legacy global delay window\n\
+             V1 1 0 0\n\
+             V2 2 0 0\n\
+             .options measure use_lttm=1\n\
+             .tran 1 5\n\
+             .measure tran windowed TRIG V(1)=0 RISE=1 FROM=2 TARG V(2)=0 RISE=1 TO=5\n\
+             .measure tran echoed EQN {windowed}\n\
+             .end\n",
+        )
+        .expect("legacy global window deck parses");
+        let window_result = TransientResult {
+            time: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+            step_sizes: vec![0.0; 6],
+            voltages: vec![
+                vec![-1.0, 1.0, 1.0, -1.0, 1.0, 1.0],
+                vec![-1.0, -1.0, -1.0, 1.0, -1.0, 1.0],
+            ],
+            branch_currents: Vec::new(),
+            num_nodes: 2,
+            node_names: vec!["1".to_string(), "2".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+        let results = evaluate_tran_measurements(&window_netlist, &window_result);
+        assert_eq!(results[0].value, Some(0.0));
+        assert_eq!(results[1].value, Some(0.0));
+    }
+
+    #[test]
+    fn live_err_distinguishes_inactive_windows_from_ieee_aggregates() {
+        let netlist = Netlist::parse(
+            "live ERR IEEE results\n\
+             V1 measured 0 0\n\
+             V2 zero 0 0\n\
+             V3 one 0 0\n\
+             .tran 1 1\n\
+             .measure tran filtered ERR V(measured) V(zero) MINVAL=0 YMIN=1 YMAX=2\n\
+             .measure tran filtered_live EQN filtered\n\
+             .measure tran inactive ERR V(measured) V(zero) FROM=3 TO=4 MINVAL=0 YMIN=0 YMAX=1\n\
+             .measure tran inactive_live EQN inactive\n\
+             .measure tran zero_zero ERR V(measured) V(zero) MINVAL=0 YMIN=0 YMAX=1\n\
+             .measure tran zero_zero_live EQN zero_zero\n\
+             .measure tran nonzero_zero ERR V(measured) V(one) MINVAL=0 YMIN=0 YMAX=1\n\
+             .measure tran nonzero_zero_live EQN nonzero_zero\n\
+             .end\n",
+        )
+        .expect("live ERR IEEE deck parses");
+        let result = TransientResult {
+            time: vec![0.0, 1.0],
+            step_sizes: vec![0.0; 2],
+            voltages: vec![vec![0.0; 2], vec![0.0; 2], vec![1.0; 2]],
+            branch_currents: Vec::new(),
+            num_nodes: 3,
+            node_names: vec![
+                "measured".to_string(),
+                "zero".to_string(),
+                "one".to_string(),
+            ],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+        let traces = evaluate_equation_measurements(
+            &netlist,
+            "TRAN",
+            &result.time,
+            &transient_signal_map(&result),
+            -1.0,
+            None,
+        )
+        .expect("live ERR IEEE traces evaluate");
+        let trace = |name: &str| {
+            traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named live ERR trace")
+        };
+        assert!(trace("filtered").initialized);
+        assert!(trace("filtered").values.iter().all(|value| value.is_nan()));
+        assert!(!trace("inactive").initialized);
+        assert!(trace("zero_zero").initialized);
+        assert!(trace("zero_zero").values.iter().all(|value| value.is_nan()));
+        assert!(trace("nonzero_zero").initialized);
+        assert_eq!(trace("nonzero_zero").values, vec![Value::INFINITY; 2]);
+
+        let terminal = evaluate_tran_measurements(&netlist, &result);
+        let terminal = |name: &str| {
+            terminal
+                .iter()
+                .find(|result| result.name.eq_ignore_ascii_case(name))
+                .expect("named terminal ERR result")
+        };
+        assert!(terminal("filtered").value.is_some_and(Value::is_nan));
+        assert!(!terminal("inactive").passed && terminal("inactive").value.is_none());
+        assert!(terminal("zero_zero").value.is_some_and(Value::is_nan));
+        assert_eq!(terminal("nonzero_zero").value, Some(Value::INFINITY));
     }
 
     #[test]
@@ -2781,6 +5222,1357 @@ mod tests {
     }
 
     #[test]
+    fn transient_equations_observe_live_scalar_measures_in_declaration_order() {
+        let netlist = Netlist::parse(
+            "* declaration-ordered live scalar visibility\n\
+             V1 out 0 0\n\
+             .tran 0.5 1\n\
+             .measure tran before EQN peak\n\
+             .measure tran peak MAX V(out) DEFAULT_VAL=-7\n\
+             .measure tran after EQN peak\n\
+             .end\n",
+        )
+        .expect("ordered live-measure deck parses");
+        let result = TransientResult {
+            time: vec![0.0, 0.5, 1.0],
+            step_sizes: vec![0.0; 3],
+            voltages: vec![vec![0.0, 2.0, 1.0]],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["out".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+
+        let traces = evaluate_tran_equation_measurements(&netlist, &result)
+            .expect("equation traces evaluate");
+        assert_eq!(traces.len(), 2, "public API returns equation traces only");
+        assert_eq!(traces[0].name, "BEFORE");
+        assert_eq!(traces[0].values, vec![-7.0, 0.0, 2.0]);
+        assert_eq!(traces[1].name, "AFTER");
+        assert_eq!(traces[1].values, vec![0.0, 2.0, 2.0]);
+
+        let results = evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(
+            results
+                .iter()
+                .map(|result| result.value)
+                .collect::<Vec<_>>(),
+            vec![Some(2.0), Some(2.0), Some(2.0)]
+        );
+        assert!(results.iter().all(|result| result.passed), "{results:?}");
+    }
+
+    #[test]
+    fn transient_point_measures_consume_prior_equation_traces() {
+        let netlist = Netlist::parse(
+            "* transient equation consumers\n\
+             V1 out 0 0\n\
+             .tran 1 3\n\
+             .measure tran before_crossing WHEN shifted=1.5\n\
+             .measure tran before_sample FIND V(out) WHEN shifted=1.5\n\
+             .measure tran shifted EQN V(out)\n\
+             .measure tran after_crossing WHEN shifted=1.5\n\
+             .measure tran after_sample FIND V(out) WHEN shifted=1.5\n\
+             .end\n",
+        )
+        .expect("transient equation-consumer deck parses");
+
+        let results = evaluate_tran_measurements(&netlist, &tran_result());
+        assert_eq!(
+            results
+                .iter()
+                .map(|result| result.value)
+                .collect::<Vec<_>>(),
+            vec![Some(2.5), Some(2.5), Some(3.0), Some(1.5), Some(1.5)]
+        );
+        assert!(results.iter().all(|result| result.passed), "{results:?}");
+    }
+
+    #[test]
+    fn delay_occurrences_are_counted_after_effective_td() {
+        let netlist = Netlist::parse(
+            "* delay TD occurrence ordering\n\
+             V1 out 0 0\n\
+             .tran 1 5\n\
+             .measure tran trig_delay TRIG V(out)=0.5 TD=1.5 RISE=1 TARG AT=4\n\
+             .measure tran targ_delay TRIG AT=0 TARG V(out)=0.5 TD=1.5 RISE=1\n\
+             .end\n",
+        )
+        .expect("delay TD deck parses");
+        let result = tran_waveform(
+            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+            vec![0.0, 1.0, 0.0, 1.0, 0.0, 0.0],
+        );
+
+        let results = evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(results[0].value, Some(1.5));
+        assert_eq!(results[1].value, Some(2.5));
+        assert!(results.iter().all(|result| result.passed), "{results:?}");
+    }
+
+    #[test]
+    fn delay_at_live_reach_matches_directional_minval_contract() {
+        let netlist = Netlist::parse(
+            "* delay AT accepted-point reach\n\
+             V1 out 0 0\n\
+             .tran 1 1\n\
+             .measure tran endpoint TRIG AT=0 TARG AT=1 DEFAULT_VAL=-7\n\
+             .measure tran endpoint_live EQN endpoint\n\
+             .measure tran interior TRIG AT=0 TARG AT=0.5 DEFAULT_VAL=-7\n\
+             .measure tran interior_live EQN interior\n\
+             .end\n",
+        )
+        .expect("delay AT reach deck parses");
+        let result = tran_waveform(vec![0.0, 1.0], vec![0.0, 0.0]);
+
+        let traces = evaluate_tran_equation_measurements(&netlist, &result)
+            .expect("delay AT live traces evaluate");
+        assert_eq!(traces[0].values, vec![-7.0, -7.0]);
+        assert_eq!(traces[1].values, vec![-7.0, 0.5]);
+        let results = evaluate_tran_measurements(&netlist, &result);
+        assert!(!results[0].passed, "exact final endpoint is not overshot");
+        assert_eq!(results[2].value, Some(0.5));
+    }
+
+    #[test]
+    fn find_at_first_sample_publishes_before_derivative() {
+        let netlist = Netlist::parse(
+            "* first-sample point publication\n\
+             V1 out 0 0\n\
+             .tran 1 1\n\
+             .measure tran found FIND V(out) AT=0 DEFAULT_VAL=-7\n\
+             .measure tran found_live EQN found\n\
+             .measure tran slope DERIV V(out) AT=0 DEFAULT_VAL=-9\n\
+             .measure tran slope_live EQN slope\n\
+             .end\n",
+        )
+        .expect("first-sample point deck parses");
+        let result = tran_waveform(vec![0.0, 1.0], vec![2.0, 5.0]);
+
+        let traces = evaluate_tran_equation_measurements(&netlist, &result)
+            .expect("first-sample equation traces evaluate");
+        let trace = |name: &str| {
+            &traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named trace")
+                .values
+        };
+        assert_eq!(trace("found_live"), &vec![2.0, 2.0]);
+        assert_eq!(trace("slope_live"), &vec![-9.0, 3.0]);
+
+        let results = evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(results[0].value, Some(2.0));
+        assert_eq!(results[2].value, Some(3.0));
+    }
+
+    #[test]
+    fn find_at_uses_authored_minval_in_scalar_continuous_and_live_paths() {
+        let netlist = Netlist::parse(
+            "* FIND AT accepted-row MINVAL parity\n\
+             V1 out 0 0\n\
+             .tran 1 1\n\
+             .measure tran default_near FIND V(out) AT=5e-13 DEFAULT_VAL=-7\n\
+             .measure tran default_live EQN default_near\n\
+             .measure tran small FIND V(out) AT=5e-13 MINVAL=1e-14 DEFAULT_VAL=-7\n\
+             .measure tran small_live EQN small\n\
+             .measure tran_cont small_cont FIND V(out) AT=5e-13 MINVAL=1e-14\n\
+             .end\n",
+        )
+        .expect("FIND AT MINVAL parity deck parses");
+        let result = tran_waveform(vec![0.0, 1.0], vec![0.0, 1.0e12]);
+
+        let traces = evaluate_tran_equation_measurements(&netlist, &result)
+            .expect("FIND AT MINVAL live traces evaluate");
+        let trace = |name: &str| {
+            &traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named trace")
+                .values
+        };
+        assert_eq!(trace("default_live"), &vec![0.0, 0.0]);
+        assert_eq!(trace("small_live"), &vec![-7.0, 0.5]);
+
+        let scalar = evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(scalar[0].value, Some(0.0));
+        assert_eq!(scalar[1].value, Some(0.0));
+        assert_eq!(scalar[2].value, Some(0.5));
+        assert_eq!(scalar[3].value, Some(0.5));
+
+        let continuous = evaluate_tran_continuous_measurements(&netlist, &result);
+        assert_eq!(continuous.len(), 1);
+        assert_eq!(continuous[0].records[0].value, 0.5);
+        assert_eq!(continuous[0].records[0].event_axis, Some(5.0e-13));
+    }
+
+    #[test]
+    fn find_and_derivative_at_share_accepted_rows_across_all_tran_adapters() {
+        let netlist = Netlist::parse(
+            "* FIND and DERIV accepted-row parity\n\
+             V1 out 0 0\n\
+             .tran 1 2\n\
+             .measure tran found FIND V(out) AT=1.05 MINVAL=0.1 DEFAULT_VAL=-7\n\
+             .measure tran found_live EQN found\n\
+             .measure tran slope DERIV V(out) AT=1.05 MINVAL=0.1 DEFAULT_VAL=-7\n\
+             .measure tran slope_live EQN slope\n\
+             .measure tran_cont found_cont FIND V(out) AT=1.05 MINVAL=0.1\n\
+             .measure tran_cont slope_cont DERIV V(out) AT=1.05 MINVAL=0.1\n\
+             .end\n",
+        )
+        .expect("FIND and DERIV accepted-row parity deck parses");
+        let result = tran_waveform(vec![0.0, 1.0, 2.0], vec![0.0, 10.0, 40.0]);
+
+        let traces = evaluate_tran_equation_measurements(&netlist, &result)
+            .expect("FIND and DERIV accepted-row live traces evaluate");
+        let trace = |name: &str| {
+            &traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named trace")
+                .values
+        };
+        assert_eq!(trace("found_live"), &vec![-7.0, 10.0, 10.0]);
+        assert_eq!(trace("slope_live"), &vec![-7.0, 10.0, 10.0]);
+
+        let scalar = evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(scalar[0].value, Some(10.0));
+        assert_eq!(scalar[1].value, Some(10.0));
+        assert_eq!(scalar[2].value, Some(10.0));
+        assert_eq!(scalar[3].value, Some(10.0));
+
+        let continuous = evaluate_tran_continuous_measurements(&netlist, &result);
+        assert_eq!(continuous.len(), 2);
+        assert_eq!(continuous[0].records[0].value, 10.0);
+        assert_eq!(continuous[1].records[0].value, 10.0);
+    }
+
+    #[test]
+    fn live_getters_preserve_extrema_and_first_statistic_semantics() {
+        let netlist = Netlist::parse(
+            "* live getter details\n\
+             V1 out 0 0\n\
+             .options measure default_val=-11\n\
+             .tran 1 2\n\
+             .measure tran maximum MAX V(out) OUTPUT=TIME DEFAULT_VAL=-7\n\
+             .measure tran maximum_live EQN maximum\n\
+             .measure tran average AVG V(out) DEFAULT_VAL=-7\n\
+             .measure tran average_live EQN average\n\
+             .measure tran rms_value RMS V(out) DEFAULT_VAL=-7\n\
+             .measure tran rms_live EQN rms_value\n\
+             .measure tran integral_value INTEG V(out) DEFAULT_VAL=-7\n\
+             .measure tran integral_live EQN integral_value\n\
+             .end\n",
+        )
+        .expect("live getter detail deck parses");
+        let result = tran_waveform(vec![0.0, 1.0, 2.0], vec![2.0, 4.0, 3.0]);
+
+        let traces = evaluate_tran_equation_measurements(&netlist, &result)
+            .expect("live getter traces evaluate");
+        let trace = |name: &str| {
+            &traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named trace")
+                .values
+        };
+        assert_eq!(trace("maximum_live"), &vec![2.0, 4.0, 4.0]);
+        assert_eq!(trace("average_live"), &vec![-11.0, 3.0, 3.25]);
+        assert_eq!(trace("rms_live")[0], -11.0);
+        assert!((trace("rms_live")[1] - 10.0_f64.sqrt()).abs() < 1.0e-12);
+        assert!((trace("rms_live")[2] - 11.25_f64.sqrt()).abs() < 1.0e-12);
+        assert_eq!(trace("integral_live"), &vec![0.0, 3.0, 6.5]);
+
+        let results = evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(results[0].value, Some(1.0), "terminal OUTPUT=TIME");
+        assert_eq!(results[1].value, Some(4.0), "live MAX getter is VALUE");
+    }
+
+    #[test]
+    fn last_event_updates_live_value_with_bounded_history() {
+        let netlist = Netlist::parse(
+            "* LAST event live state\n\
+             V1 out 0 0\n\
+             .tran 1 4\n\
+             .measure tran latest WHEN V(out)=0.5 RISE=LAST DEFAULT_VAL=-7\n\
+             .measure tran latest_live EQN latest\n\
+             .end\n",
+        )
+        .expect("LAST event deck parses");
+        let result = tran_waveform(vec![0.0, 1.0, 2.0, 3.0, 4.0], vec![0.0, 1.0, 0.0, 1.0, 0.0]);
+
+        let traces = evaluate_tran_equation_measurements(&netlist, &result)
+            .expect("LAST event traces evaluate");
+        assert_eq!(traces[0].values, vec![-7.0, 0.5, 0.5, 2.5, 2.5]);
+        let results = evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(results[0].value, Some(2.5));
+        assert_eq!(results[1].value, Some(2.5));
+
+        let axis = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
+        let waveform = [0.0, 1.0, 0.0, 1.0, 0.0, 1.0];
+        let signals = HashMap::from([("V(out)".to_string(), waveform.as_slice())]);
+        let signal_index = CanonicalMeasureSignalIndex::new(&signals);
+        let params = crate::netlist::ParamContext::new();
+        let mut selector = LiveCondition::compile(
+            &WhenCondition {
+                left: "V(out)".to_string(),
+                right: MeasureOperand::Constant(0.5),
+                occurrence: crate::netlist::measure::EventOccurrence {
+                    edge: EdgeType::Rise,
+                    number: -2,
+                },
+            },
+            1.0e-12,
+            &params,
+        )
+        .expect("bounded selector compiles");
+        let mut programs = Vec::<LiveMeasureProgram<'_>>::new();
+        let mut current_values = HashMap::new();
+        let program_indices = HashMap::new();
+        let mut selected = None;
+        for (row, axis_value) in axis.iter().copied().enumerate() {
+            let mut reads = LiveMeasureReadContext {
+                programs: &mut programs,
+                current_values: &mut current_values,
+                program_indices: &program_indices,
+                row,
+                axis: &axis,
+            };
+            if let Some(event) = selector
+                .update(
+                    row,
+                    axis_value,
+                    false,
+                    &signal_index,
+                    &mut reads,
+                    &params,
+                    Value::NEG_INFINITY,
+                    Value::INFINITY,
+                    None,
+                )
+                .expect("bounded selector updates")
+                .selected
+            {
+                selected = Some(event);
+            }
+            assert!(selector.negative_events.len() <= 2);
+        }
+        assert_eq!(selected.map(|event| event.axis), Some(2.5));
+    }
+
+    #[test]
+    fn find_last_recovers_after_an_undefined_candidate_and_preserves_raw_nan() {
+        let netlist = Netlist::parse(
+            "* FIND LAST recoverable undefined candidate\n\
+             V1 out 0 0\n\
+             V2 cond 0 0\n\
+             .tran 1 3\n\
+             .measure tran latest FIND V(out) WHEN V(cond)=0 CROSS=LAST DEFAULT_VAL=-7\n\
+             .measure tran observer EQN latest DEFAULT_VAL=-8\n\
+             .measure tran latest_live EQN latest FROM=3 DEFAULT_VAL=-9\n\
+             .measure tran param_value PARAM='latest'\n\
+             .measure tran param_live EQN param_value FROM=3 DEFAULT_VAL=-10\n\
+             .measure tran independent EQN 42\n\
+             .end\n",
+        )
+        .expect("FIND LAST recovery deck parses");
+        let result = TransientResult {
+            time: vec![0.0, 1.0, 2.0, 3.0],
+            step_sizes: vec![0.0; 4],
+            voltages: vec![
+                vec![Value::INFINITY, Value::NEG_INFINITY, 0.0, 2.0],
+                vec![-1.0, 1.0, -1.0, 1.0],
+            ],
+            branch_currents: Vec::new(),
+            num_nodes: 2,
+            node_names: vec!["out".to_string(), "cond".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+
+        let traces = evaluate_equation_measurements(
+            &netlist,
+            "TRAN",
+            &result.time,
+            &transient_signal_map(&result),
+            -1.0,
+            None,
+        )
+        .expect("FIND LAST live traces recover");
+        let trace = |name: &str| {
+            traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named live trace")
+        };
+        let latest = trace("latest");
+        assert_eq!(latest.values[0], -7.0);
+        assert!(latest.values[1].is_nan());
+        assert_eq!(latest.values[2], Value::NEG_INFINITY);
+        assert_eq!(latest.values[3], 1.0);
+        assert_eq!(latest.valid, vec![true, false, true, true]);
+        let observer = trace("observer");
+        assert_eq!(observer.values[0], -7.0);
+        assert!(observer.values[1].is_nan());
+        assert_eq!(observer.values[2], Value::NEG_INFINITY);
+        assert_eq!(observer.values[3], 1.0);
+        assert_eq!(observer.valid, vec![true, false, true, true]);
+        assert_eq!(trace("latest_live").values, vec![-9.0, -9.0, -9.0, 1.0]);
+        let param = trace("param_value");
+        assert_eq!(param.values[0..3], [0.0, 0.0, 0.0]);
+        assert_eq!(param.values[3], 1.0);
+        assert_eq!(param.valid, vec![true; 4]);
+        assert_eq!(trace("param_live").values, vec![-10.0, -10.0, -10.0, 1.0]);
+        assert_eq!(trace("independent").values, vec![42.0; 4]);
+
+        let terminal = evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(terminal[0].value, Some(1.0));
+        assert_eq!(terminal[1].value, Some(1.0));
+        assert_eq!(terminal[2].value, Some(1.0));
+        assert_eq!(terminal[3].value, Some(1.0));
+        assert_eq!(terminal[4].value, Some(1.0));
+        assert_eq!(terminal[5].value, Some(42.0));
+        assert!(terminal.iter().all(|result| result.passed));
+    }
+
+    #[test]
+    fn braced_measure_operands_normalize_raw_nonfinite_getters_before_consumption() {
+        let netlist = Netlist::parse(
+            "* Xyce ExpressionOp root normalization\n\
+             V1 out 0 0\n\
+             V2 cond 0 0\n\
+             V3 ref 0 0\n\
+             .tran 1 3\n\
+             .measure tran latest FIND V(out) WHEN V(cond)=0 CROSS=LAST DEFAULT_VAL=-7\n\
+             .measure tran raw_eq EQN latest\n\
+             .measure tran braced_eq EQN {latest}\n\
+             .measure tran physical_expr EQN {V(out)}\n\
+             .measure tran raw_max MAX latest FROM=1\n\
+             .measure tran raw_max_live EQN raw_max\n\
+             .measure tran braced_max MAX {latest} FROM=1\n\
+             .measure tran braced_max_live EQN braced_max\n\
+             .measure tran raw_pp PP latest FROM=1\n\
+             .measure tran raw_pp_live EQN raw_pp\n\
+             .measure tran braced_pp PP {latest} FROM=1\n\
+             .measure tran braced_pp_live EQN braced_pp\n\
+             .measure tran raw_measured ERR latest V(ref) FROM=1 YMIN=0 YMAX=1e100\n\
+             .measure tran raw_measured_live EQN raw_measured\n\
+             .measure tran braced_measured ERR {latest} V(ref) FROM=1 YMIN=0 YMAX=1e100\n\
+             .measure tran braced_measured_live EQN braced_measured\n\
+             .measure tran raw_comparison ERR V(ref) latest FROM=1 YMIN=0 YMAX=1e100\n\
+             .measure tran raw_comparison_live EQN raw_comparison\n\
+             .measure tran braced_comparison ERR V(ref) {latest} FROM=1 YMIN=0 YMAX=1e100\n\
+             .measure tran braced_comparison_live EQN braced_comparison\n\
+             .measure tran independent EQN 42\n\
+             .end\n",
+        )
+        .expect("raw-vs-braced consumer deck parses");
+        let result = TransientResult {
+            time: vec![0.0, 1.0, 2.0, 3.0],
+            step_sizes: vec![0.0; 4],
+            voltages: vec![
+                vec![Value::INFINITY, Value::NEG_INFINITY, 0.0, 2.0],
+                vec![-1.0, 1.0, -1.0, 1.0],
+                vec![1.0; 4],
+            ],
+            branch_currents: Vec::new(),
+            num_nodes: 3,
+            node_names: vec!["out".to_string(), "cond".to_string(), "ref".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+
+        let traces = evaluate_equation_measurements(
+            &netlist,
+            "TRAN",
+            &result.time,
+            &transient_signal_map(&result),
+            -1.0,
+            None,
+        )
+        .expect("raw-vs-braced consumers evaluate");
+        let trace = |name: &str| {
+            &traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named raw-vs-braced trace")
+                .values
+        };
+        assert!(trace("raw_eq")[1].is_nan());
+        assert_eq!(trace("raw_eq")[2], Value::NEG_INFINITY);
+        assert_eq!(trace("braced_eq"), &vec![-7.0, 1.0e50, -1.0e50, 1.0]);
+        assert_eq!(trace("physical_expr"), &vec![1.0e50, -1.0e50, 0.0, 2.0]);
+
+        assert!(
+            trace("raw_max_live")[1..]
+                .iter()
+                .all(|value| value.is_nan())
+        );
+        assert_eq!(trace("braced_max_live"), &vec![0.0, 1.0e50, 1.0e50, 1.0e50]);
+        assert!(trace("raw_pp_live")[1..].iter().all(|value| value.is_nan()));
+        assert_eq!(trace("braced_pp_live"), &vec![0.0, 0.0, 2.0e50, 2.0e50]);
+
+        assert!(trace("raw_measured_live")[1].is_nan());
+        assert!(trace("raw_measured_live")[2].is_nan());
+        assert_eq!(trace("raw_measured_live")[3], 0.0);
+        let expected_braced_error = (2.0_f64 / 3.0).sqrt();
+        assert_eq!(trace("braced_measured_live")[1], 1.0);
+        assert_eq!(trace("braced_measured_live")[2], 1.0);
+        assert!((trace("braced_measured_live")[3] - expected_braced_error).abs() < 1.0e-12);
+        assert!(
+            trace("raw_comparison_live")[1..]
+                .iter()
+                .all(|value| value.is_nan())
+        );
+        assert!(
+            (trace("braced_comparison_live")[3] / 1.0e50 - expected_braced_error).abs() < 1.0e-12
+        );
+        assert_eq!(trace("independent"), &vec![42.0; 4]);
+
+        let terminal = evaluate_tran_measurements(&netlist, &result);
+        let terminal = |name: &str| {
+            terminal
+                .iter()
+                .find(|result| result.name.eq_ignore_ascii_case(name))
+                .expect("named raw-vs-braced terminal result")
+        };
+        assert!(terminal("raw_max").value.is_some_and(Value::is_nan));
+        assert!(terminal("raw_pp").value.is_some_and(Value::is_nan));
+        assert!(terminal("raw_comparison").value.is_some_and(Value::is_nan));
+        assert_eq!(terminal("braced_max").value, Some(1.0e50));
+        assert_eq!(terminal("braced_pp").value, Some(2.0e50));
+        assert_eq!(terminal("independent").value, Some(42.0));
+    }
+
+    #[test]
+    fn raw_nan_when_events_count_snap_find_and_preserve_terminal_invariants() {
+        let netlist = Netlist::parse(
+            "* raw NaN WHEN event provenance\n\
+             V1 source 0 0\n\
+             V2 producer_cond 0 0\n\
+             V3 sample 0 0\n\
+             .tran 1 5\n\
+             .measure tran latest FIND V(source) WHEN V(producer_cond)=0 CROSS=LAST DEFAULT_VAL=-7\n\
+             .measure tran raw_when WHEN latest=0 CROSS=1\n\
+             .measure tran raw_when_live EQN raw_when\n\
+             .measure tran braced_when WHEN {latest}=0 CROSS=1\n\
+             .measure tran braced_when_live EQN braced_when\n\
+             .measure tran snapped FIND V(sample) WHEN latest=0 CROSS=1\n\
+             .measure tran snapped_live EQN snapped\n\
+             .measure tran raw_derivative DERIV V(sample) WHEN latest=0 CROSS=1\n\
+             .measure tran raw_derivative_live EQN raw_derivative\n\
+             .measure tran second_cross WHEN latest=0 CROSS=2\n\
+             .measure tran second_cross_live EQN second_cross\n\
+             .measure tran first_fall WHEN latest=0 FALL=1\n\
+             .measure tran first_fall_live EQN first_fall\n\
+             .end\n",
+        )
+        .expect("raw NaN WHEN deck parses");
+        let result = TransientResult {
+            time: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+            step_sizes: vec![0.0; 6],
+            voltages: vec![
+                vec![Value::INFINITY, Value::NEG_INFINITY, 0.0, 2.0, 0.0, -2.0],
+                vec![-1.0, 1.0, 0.0, 1.0, -1.0, 1.0],
+                vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
+            ],
+            branch_currents: Vec::new(),
+            num_nodes: 3,
+            node_names: vec![
+                "source".to_string(),
+                "producer_cond".to_string(),
+                "sample".to_string(),
+            ],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+
+        let traces = evaluate_equation_measurements(
+            &netlist,
+            "TRAN",
+            &result.time,
+            &transient_signal_map(&result),
+            -1.0,
+            None,
+        )
+        .expect("raw NaN WHEN traces evaluate");
+        let trace = |name: &str| {
+            &traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named raw NaN WHEN trace")
+                .values
+        };
+        assert!(
+            trace("raw_when_live")[2..]
+                .iter()
+                .all(|value| value.is_nan())
+        );
+        assert!(
+            trace("braced_when_live")[1..]
+                .iter()
+                .all(|value| (*value - 7.0e-50).abs() < 1.0e-62)
+        );
+        assert_eq!(trace("snapped_live")[2..], [30.0; 4]);
+        assert_eq!(trace("raw_derivative_live")[2..], [10.0; 4]);
+        assert_eq!(trace("second_cross_live")[5], 4.5);
+        assert_eq!(trace("first_fall_live")[5], 4.5);
+
+        let terminal = evaluate_tran_measurements(&netlist, &result);
+        let terminal = |name: &str| {
+            terminal
+                .iter()
+                .find(|result| result.name.eq_ignore_ascii_case(name))
+                .expect("named raw NaN WHEN result")
+        };
+        assert!(terminal("raw_when").value.is_some_and(Value::is_nan));
+        assert_eq!(terminal("raw_derivative").value, Some(10.0));
+        assert!(
+            terminal("raw_derivative")
+                .event_axis
+                .is_some_and(Value::is_nan)
+        );
+        assert!(
+            (terminal("braced_when").value.expect("braced WHEN value") - 7.0e-50).abs() < 1.0e-62
+        );
+        assert_eq!(terminal("snapped").value, Some(30.0));
+        assert_eq!(terminal("second_cross").value, Some(4.5));
+        assert_eq!(terminal("first_fall").value, Some(4.5));
+    }
+
+    #[test]
+    fn modern_trig_targ_delay_retains_raw_nan_history_in_explicit_rfc_window() {
+        let netlist = Netlist::parse(
+            "* Xyce TrigTarg raw NaN history\n\
+             V1 source 0 0\n\
+             V2 producer_cond 0 0\n\
+             .tran 1 5\n\
+             .measure tran latest FIND V(source) WHEN V(producer_cond)=0 CROSS=LAST DEFAULT_VAL=-7\n\
+             .measure tran raw_delay TRIG latest=0 TARG AT=4.5\n\
+             .measure tran raw_delay_live EQN raw_delay\n\
+             .measure tran explicit_delay TRIG latest=0 CROSS=1 TARG AT=4.5\n\
+             .measure tran explicit_delay_live EQN explicit_delay\n\
+             .measure tran braced_delay TRIG {latest}=0 TARG AT=4.5\n\
+             .measure tran braced_delay_live EQN braced_delay\n\
+             .end\n",
+        )
+        .expect("raw delay history deck parses");
+        let result = TransientResult {
+            time: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+            step_sizes: vec![0.0; 6],
+            voltages: vec![
+                vec![Value::INFINITY, Value::NEG_INFINITY, 0.0, 2.0, 0.0, -2.0],
+                vec![-1.0, 1.0, 0.0, 1.0, -1.0, 1.0],
+            ],
+            branch_currents: Vec::new(),
+            num_nodes: 2,
+            node_names: vec!["source".to_string(), "producer_cond".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+
+        let traces = evaluate_equation_measurements(
+            &netlist,
+            "TRAN",
+            &result.time,
+            &transient_signal_map(&result),
+            -1.0,
+            None,
+        )
+        .expect("raw delay history traces evaluate");
+        let trace = |name: &str| {
+            &traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named raw delay trace")
+                .values
+        };
+        assert!(trace("raw_delay_live")[5].is_nan());
+        assert!(trace("explicit_delay_live")[5].is_nan());
+        let expected_braced = 4.5 - 7.0e-50;
+        assert_eq!(trace("braced_delay_live")[5], expected_braced);
+
+        let terminal = evaluate_tran_measurements(&netlist, &result);
+        let terminal = |name: &str| {
+            terminal
+                .iter()
+                .find(|result| result.name.eq_ignore_ascii_case(name))
+                .expect("named raw delay result")
+        };
+        assert!(terminal("raw_delay").value.is_some_and(Value::is_nan));
+        assert!(terminal("explicit_delay").value.is_some_and(Value::is_nan));
+        assert_eq!(terminal("braced_delay").value, Some(expected_braced));
+    }
+
+    #[test]
+    fn final_undefined_last_candidate_retains_nan_and_isolates_independent_results() {
+        let netlist = Netlist::parse(
+            "* terminal undefined LAST candidate isolation\n\
+             V1 out 0 0\n\
+             V2 cond 0 0\n\
+             .tran 1 3\n\
+             .measure tran latest FIND V(out) WHEN V(cond)=0 CROSS=LAST DEFAULT_VAL=-7\n\
+             .measure tran observer EQN latest\n\
+             .measure tran independent EQN 42\n\
+             .end\n",
+        )
+        .expect("terminal undefined LAST deck parses");
+        let result = TransientResult {
+            time: vec![0.0, 1.0, 2.0, 3.0],
+            step_sizes: vec![0.0; 4],
+            voltages: vec![
+                vec![0.0, 2.0, Value::INFINITY, Value::NEG_INFINITY],
+                vec![-1.0, 1.0, -1.0, 1.0],
+            ],
+            branch_currents: Vec::new(),
+            num_nodes: 2,
+            node_names: vec!["out".to_string(), "cond".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+
+        let traces = evaluate_equation_measurements(
+            &netlist,
+            "TRAN",
+            &result.time,
+            &transient_signal_map(&result),
+            -1.0,
+            None,
+        )
+        .expect("terminal undefined LAST traces evaluate");
+        let trace = |name: &str| {
+            traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named live trace")
+        };
+        assert!(trace("latest").values[3].is_nan());
+        assert!(trace("observer").values[3].is_nan());
+        assert!(!trace("latest").valid[3]);
+        assert!(!trace("observer").valid[3]);
+        assert_eq!(trace("independent").values, vec![42.0; 4]);
+        assert_eq!(trace("independent").valid, vec![true; 4]);
+
+        let terminal = evaluate_tran_measurements(&netlist, &result);
+        assert!(terminal[0].value.is_some_and(Value::is_nan));
+        assert_eq!(terminal[0].event_axis, Some(2.5));
+        assert!(terminal[0].error.is_none());
+        assert!(terminal[0].passed);
+        assert!(terminal[1].value.is_some_and(Value::is_nan));
+        assert!(terminal[1].error.is_none());
+        assert!(terminal[1].passed);
+        assert_eq!(terminal[2].value, Some(42.0));
+        assert!(terminal[2].error.is_none());
+        assert!(terminal[2].passed);
+    }
+
+    #[test]
+    fn derivative_negative_two_ages_out_undefined_candidate_and_recovers() {
+        let netlist = Netlist::parse(
+            "* DERIV -2 recoverable undefined candidate\n\
+             V1 out 0 0\n\
+             V2 cond 0 0\n\
+             .tran 1 5\n\
+             .measure tran previous_slope DERIV V(out) WHEN V(cond)=0 CROSS=-2 DEFAULT_VAL=-7\n\
+             .measure tran slope_live EQN previous_slope FROM=4 DEFAULT_VAL=-9\n\
+             .end\n",
+        )
+        .expect("DERIV -2 recovery deck parses");
+        let result = TransientResult {
+            time: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+            step_sizes: vec![0.0; 6],
+            voltages: vec![
+                vec![Value::INFINITY, Value::INFINITY, 0.0, 1.0, 3.0, 6.0],
+                vec![-1.0, 1.0, -1.0, 1.0, -1.0, 1.0],
+            ],
+            branch_currents: Vec::new(),
+            num_nodes: 2,
+            node_names: vec!["out".to_string(), "cond".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+
+        let traces = evaluate_equation_measurements(
+            &netlist,
+            "TRAN",
+            &result.time,
+            &transient_signal_map(&result),
+            -1.0,
+            None,
+        )
+        .expect("DERIV -2 live traces recover");
+        let trace = |name: &str| {
+            traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named live trace")
+        };
+        let slope = trace("previous_slope");
+        assert_eq!(slope.values[0..2], [-7.0, -7.0]);
+        assert!(slope.values[2].is_nan());
+        assert_eq!(slope.values[3], Value::NEG_INFINITY);
+        assert_eq!(slope.values[4..], [1.0, 2.0]);
+        assert_eq!(slope.valid, vec![true, true, false, true, true, true]);
+        assert_eq!(
+            trace("slope_live").values,
+            vec![-9.0, -9.0, -9.0, -9.0, 1.0, 2.0]
+        );
+
+        let terminal = evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(terminal[0].value, Some(2.0));
+        assert_eq!(terminal[1].value, Some(2.0));
+        assert!(terminal.iter().all(|result| result.passed));
+    }
+
+    #[test]
+    fn point_state_remains_bounded_over_a_large_accepted_point_stream() {
+        let point_count = 10_001;
+        let axis = (0..point_count).map(|row| row as Value).collect::<Vec<_>>();
+        let waveform = (0..point_count)
+            .map(|row| if row % 2 == 0 { 0.0 } else { 1.0 })
+            .collect::<Vec<_>>();
+        let condition = |number| WhenCondition {
+            left: "V(out)".to_string(),
+            right: MeasureOperand::Constant(0.5),
+            occurrence: crate::netlist::measure::EventOccurrence {
+                edge: EdgeType::Cross,
+                number,
+            },
+        };
+        let statement = |name: &str, measure_type| MeasureStatement {
+            default_value: Some(-7.0),
+            print_policy: crate::netlist::measure::MeasurePrintPolicy::All,
+            name: name.to_string(),
+            measure_type,
+            analysis: "TRAN".to_string(),
+            goal: None,
+            tolerance: None,
+        };
+        let find = statement(
+            "latest",
+            MeasureType::Find {
+                signal: "V(out)".to_string(),
+                at: None,
+                when: Some(condition(-1)),
+                from: None,
+                to: None,
+                td: None,
+                minval: 1.0e-12,
+            },
+        );
+        let derivative = statement(
+            "previous_slope",
+            MeasureType::Derivative {
+                signal: "V(out)".to_string(),
+                at: None,
+                when: Some(condition(-2)),
+                from: None,
+                to: None,
+                td: None,
+                minval: 1.0e-12,
+            },
+        );
+        let params = crate::netlist::ParamContext::new();
+        let mut find_state = compile_live_measure_state(&find, "TRAN", &axis, None, false, &params)
+            .expect("large FIND state compiles");
+        let mut derivative_state =
+            compile_live_measure_state(&derivative, "TRAN", &axis, None, false, &params)
+                .expect("large DERIV state compiles");
+        let signals = HashMap::from([("V(out)".to_string(), waveform.as_slice())]);
+        let signal_index = CanonicalMeasureSignalIndex::new(&signals);
+        let mut programs = Vec::<LiveMeasureProgram<'_>>::new();
+        let mut current_values = HashMap::new();
+        let program_indices = HashMap::new();
+        let mut latest_find = None;
+        let mut latest_derivative = None;
+        for (row, axis_value) in axis.iter().copied().enumerate() {
+            let mut reads = LiveMeasureReadContext {
+                programs: &mut programs,
+                current_values: &mut current_values,
+                program_indices: &program_indices,
+                row,
+                axis: &axis,
+            };
+            if let Some(value) = find_state
+                .update(
+                    row,
+                    axis_value,
+                    &axis,
+                    false,
+                    &signal_index,
+                    &mut reads,
+                    &params,
+                    None,
+                )
+                .expect("large FIND state updates")
+            {
+                latest_find = Some(value);
+            }
+            let mut reads = LiveMeasureReadContext {
+                programs: &mut programs,
+                current_values: &mut current_values,
+                program_indices: &program_indices,
+                row,
+                axis: &axis,
+            };
+            if let Some(value) = derivative_state
+                .update(
+                    row,
+                    axis_value,
+                    &axis,
+                    false,
+                    &signal_index,
+                    &mut reads,
+                    &params,
+                    None,
+                )
+                .expect("large DERIV state updates")
+            {
+                latest_derivative = Some(value);
+            }
+        }
+        assert_eq!(latest_find, Some(0.5));
+        assert_eq!(latest_derivative, Some(1.0));
+
+        let assert_point_bound = |state: &LiveMeasureState, distance: usize| match state {
+            LiveMeasureState::Point {
+                previous_signal,
+                negative_results,
+                condition: Some(condition),
+                ..
+            } => {
+                assert!(previous_signal.is_some());
+                assert!(negative_results.len() <= distance);
+                assert!(condition.negative_events.len() <= distance);
+            }
+            _ => panic!("expected conditional Point state"),
+        };
+        assert_point_bound(&find_state, 1);
+        assert_point_bound(&derivative_state, 2);
+
+        let rise = statement(
+            "unused_rise",
+            MeasureType::RiseTime {
+                signal: "V(out)".to_string(),
+                from_pct: 0.1,
+                to_pct: 0.9,
+                number: 1,
+            },
+        );
+        let file_error = statement(
+            "unused_file_error",
+            MeasureType::FileError {
+                signal: "V(out)".to_string(),
+                file: "virtual://measure/not-read.prn".to_string(),
+                norm: crate::netlist::measure::FileErrorNorm::L2,
+                independent_column: Some(1),
+                dependent_column: 2,
+            },
+        );
+        match compile_live_measure_state(&rise, "TRAN", &axis, None, false, &params)
+            .expect("unreferenced RiseFall state compiles")
+        {
+            LiveMeasureState::RiseFall { samples, .. } => {
+                assert!(samples.is_empty());
+                assert_eq!(samples.capacity(), 0);
+            }
+            _ => panic!("expected RiseFall state"),
+        }
+        match compile_live_measure_state(&file_error, "TRAN", &axis, None, false, &params)
+            .expect("unreferenced FileError state compiles")
+        {
+            LiveMeasureState::FileError { samples, .. } => {
+                assert!(samples.is_empty());
+                assert_eq!(samples.capacity(), 0);
+            }
+            _ => panic!("expected FileError state"),
+        }
+
+        let mut netlist = Netlist::parse(
+            "large selective live state\n\
+             V1 out 0 0\n\
+             .tran 1 10000\n\
+             .measure tran equation EQN V(out)\n\
+             .end\n",
+        )
+        .expect("large selective-state deck parses");
+        netlist
+            .measurements
+            .splice(0..0, [find.clone(), rise.clone(), file_error.clone()]);
+        let internal =
+            evaluate_equation_measurements(&netlist, "TRAN", &axis, &signals, -1.0, None)
+                .expect("large selective live state evaluates");
+        assert_eq!(internal.len(), 1);
+        assert_eq!(internal[0].name, "EQUATION");
+        assert_eq!(internal[0].values.len(), point_count);
+    }
+
+    #[test]
+    fn file_error_freezes_only_on_a_real_measure_dependency_read() {
+        let file = "virtual://measure/live-file-error.prn";
+        let _ = crate::xspice::unregister_data_file(file);
+        crate::xspice::register_data_file(
+            file,
+            "Index TIME REF\n0 0 0\n1 1 0\n2 2 0\nEnd of Xyce(TM) Simulation\n",
+        )
+        .expect("register live ERROR comparison table");
+        let netlist = Netlist::parse(&format!(
+            "live ERROR dependency reads\n\
+             V1 out 0 0\n\
+             .tran 1 2\n\
+             .measure tran OUT ERROR V(out) FILE=\"{file}\" COMP_FUNCTION=L2NORM INDEPVARCOL=1 DEPVARCOL=2\n\
+             .measure tran voltage EQN V(out)\n\
+             .measure tran backward EQN OUT FROM=2 TO=2\n\
+             .measure tran forward EQN LATER FROM=2 TO=2\n\
+             .measure tran LATER ERROR V(out) FILE=\"{file}\" COMP_FUNCTION=L2NORM INDEPVARCOL=1 DEPVARCOL=2\n\
+             .measure tran gated ERR OUT V(out) FROM=2 TO=2 MINVAL=1e-12\n\
+             .measure tran gated_live EQN gated FROM=2 TO=2\n\
+             .end\n"
+        ))
+        .expect("live ERROR dependency deck parses");
+        let result = tran_waveform(vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 4.0]);
+
+        let traces = evaluate_tran_equation_measurements(&netlist, &result)
+            .expect("live ERROR traces evaluate");
+        let trace = |name: &str| {
+            &traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named trace")
+                .values
+        };
+        assert_eq!(trace("voltage"), &vec![0.0, 1.0, 4.0]);
+        assert!((trace("backward")[2] - 17.0_f64.sqrt()).abs() < 1.0e-12);
+        assert!(
+            (trace("forward")[2] - 2.0_f64.sqrt()).abs() < 1.0e-12,
+            "{traces:?}"
+        );
+        let expected_error = (17.0_f64.sqrt() - 4.0).abs() / 17.0_f64.sqrt();
+        assert!((trace("gated_live")[2] - expected_error).abs() < 1.0e-12);
+
+        let results = evaluate_tran_measurements(&netlist, &result);
+        let result = |name: &str| {
+            results
+                .iter()
+                .find(|result| result.name.eq_ignore_ascii_case(name))
+                .expect("named result")
+        };
+        assert!(
+            (result("OUT").value.unwrap() - 17.0_f64.sqrt()).abs() < 1.0e-12,
+            "{results:?}"
+        );
+        assert!((result("LATER").value.unwrap() - 2.0_f64.sqrt()).abs() < 1.0e-12);
+        crate::xspice::unregister_data_file(file).expect("unregister live ERROR table");
+    }
+
+    #[test]
+    fn untraced_consumers_still_freeze_file_error_on_first_active_read() {
+        let file = "virtual://measure/untraced-live-file-error.prn";
+        let _ = crate::xspice::unregister_data_file(file);
+        crate::xspice::register_data_file(
+            file,
+            "Index TIME REF\n0 0 0\n1 1 0\n2 2 0\nEnd of Xyce(TM) Simulation\n",
+        )
+        .expect("register untraced-consumer ERROR table");
+        let netlist = Netlist::parse(&format!(
+            "untraced ERROR dependency reads\n\
+             V1 out 0 0\n\
+             .tran 1 2\n\
+             .measure tran EARLY ERROR V(out) FILE=\"{file}\" COMP_FUNCTION=L2NORM INDEPVARCOL=1 DEPVARCOL=2\n\
+             .measure tran early_reader ERR EARLY V(out) FROM=0 TO=0 MINVAL=1e-12\n\
+             .measure tran forward_reader ERR LATER V(out) FROM=0 TO=0 MINVAL=1e-12\n\
+             .measure tran LATER ERROR V(out) FILE=\"{file}\" COMP_FUNCTION=L2NORM INDEPVARCOL=1 DEPVARCOL=2\n\
+             .end\n"
+        ))
+        .expect("untraced-consumer ERROR deck parses");
+        let result = tran_waveform(vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 4.0]);
+
+        let signals = transient_signal_map(&result);
+        let internal =
+            evaluate_equation_measurements(&netlist, "TRAN", &result.time, &signals, -1.0, None)
+                .expect("untraced consumers preserve ERROR side effects");
+        assert_eq!(
+            internal
+                .iter()
+                .map(|trace| trace.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["EARLY", "LATER"]
+        );
+        let early_cached = 3.0_f64.sqrt();
+        assert!(
+            internal[0]
+                .values
+                .iter()
+                .all(|value| (value - early_cached).abs() < 1.0e-12)
+        );
+        assert_eq!(internal[1].values, vec![0.0, 0.0, 0.0]);
+
+        let results = evaluate_tran_measurements(&netlist, &result);
+        let result = |name: &str| {
+            results
+                .iter()
+                .find(|result| result.name.eq_ignore_ascii_case(name))
+                .expect("named untraced-consumer result")
+        };
+        assert!(
+            (result("EARLY").value.expect("EARLY cached value") - early_cached).abs() < 1.0e-12
+        );
+        assert_eq!(result("LATER").value, Some(0.0));
+        crate::xspice::unregister_data_file(file)
+            .expect("unregister untraced-consumer ERROR table");
+    }
+
+    #[test]
+    fn lazy_expression_reads_freeze_only_the_condition_and_selected_arm() {
+        let file = "virtual://measure/lazy-live-file-error.prn";
+        let _ = crate::xspice::unregister_data_file(file);
+        crate::xspice::register_data_file(
+            file,
+            "Index TIME REF\n0 0 0\n1 1 0\n2 2 0\nEnd of Xyce(TM) Simulation\n",
+        )
+        .expect("register lazy ERROR comparison table");
+        let netlist = Netlist::parse(&format!(
+            "lazy ERROR dependency reads\n\
+             V1 out 0 0\n\
+             .tran 1 2\n\
+             .measure tran NEVER ERROR V(out) FILE=\"{file}\" COMP_FUNCTION=L2NORM INDEPVARCOL=1 DEPVARCOL=2\n\
+             .measure tran never_reader EQN {{IF(TIME<0,NEVER,0)}}\n\
+             .measure tran ARM ERROR V(out) FILE=\"{file}\" COMP_FUNCTION=L2NORM INDEPVARCOL=1 DEPVARCOL=2\n\
+             .measure tran arm_reader EQN {{TIME>=1 ? ARM : 0}}\n\
+             .measure tran CONDITION ERROR V(out) FILE=\"{file}\" COMP_FUNCTION=L2NORM INDEPVARCOL=1 DEPVARCOL=2\n\
+             .measure tran condition_reader EQN {{IF(CONDITION>=0,1,0)}} FROM=1\n\
+             .end\n"
+        ))
+        .expect("lazy ERROR dependency deck parses");
+        let result = tran_waveform(vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 4.0]);
+        let signals = transient_signal_map(&result);
+        let traces =
+            evaluate_equation_measurements(&netlist, "TRAN", &result.time, &signals, -1.0, None)
+                .expect("lazy ERROR dependencies evaluate");
+        let trace = |name: &str| {
+            &traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named lazy ERROR trace")
+                .values
+        };
+
+        assert_eq!(trace("NEVER"), &[0.0, 0.0, 0.0]);
+        assert_eq!(trace("never_reader"), &[0.0, 0.0, 0.0]);
+        for producer in ["ARM", "CONDITION"] {
+            let values = trace(producer);
+            assert_eq!(values[0], 0.0, "{producer} froze before its first read");
+            assert!(values[1].is_finite() && values[1] > 0.0, "{values:?}");
+            assert_eq!(values[2], values[1], "{producer} did not remain frozen");
+        }
+        assert_eq!(trace("arm_reader")[0], 0.0);
+        assert_eq!(trace("arm_reader")[1], trace("ARM")[1]);
+        assert_eq!(trace("condition_reader"), &[-1.0, 1.0, 1.0]);
+        crate::xspice::unregister_data_file(file).expect("unregister lazy ERROR table");
+    }
+
+    #[test]
+    fn file_error_forward_and_backward_getters_cache_raw_nan() {
+        let file = "virtual://measure/raw-nan-live-file-error.prn";
+        let _ = crate::xspice::unregister_data_file(file);
+        crate::xspice::register_data_file(
+            file,
+            "Index TIME REF\n0 0 0\n1 1 0\nEnd of Xyce(TM) Simulation\n",
+        )
+        .expect("register raw-NaN ERROR table");
+        let netlist = Netlist::parse(&format!(
+            "raw NaN ERROR dependency reads\n\
+             V1 source 0 0\n\
+             V2 cond 0 0\n\
+             .tran 1 2\n\
+             .measure tran latest FIND V(source) WHEN V(cond)=0 CROSS=LAST DEFAULT_VAL=-7\n\
+             .measure tran BACK ERROR latest FILE=\"{file}\" COMP_FUNCTION=L2NORM INDEPVARCOL=1 DEPVARCOL=2\n\
+             .measure tran back_reader EQN BACK FROM=1\n\
+             .measure tran braced_back EQN {{BACK}} FROM=1\n\
+             .measure tran forward_reader EQN LATER FROM=2\n\
+             .measure tran LATER ERROR latest FILE=\"{file}\" COMP_FUNCTION=L2NORM INDEPVARCOL=1 DEPVARCOL=2\n\
+             .measure tran braced_later EQN {{LATER}} FROM=2\n\
+             .measure tran independent EQN 42\n\
+             .end\n"
+        ))
+        .expect("raw-NaN ERROR dependency deck parses");
+        let result = TransientResult {
+            time: vec![0.0, 1.0, 2.0],
+            step_sizes: vec![0.0; 3],
+            voltages: vec![
+                vec![Value::INFINITY, Value::NEG_INFINITY, 0.0],
+                vec![-1.0, 1.0, 0.0],
+            ],
+            branch_currents: Vec::new(),
+            num_nodes: 2,
+            node_names: vec!["source".to_string(), "cond".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+
+        let traces = evaluate_equation_measurements(
+            &netlist,
+            "TRAN",
+            &result.time,
+            &transient_signal_map(&result),
+            -1.0,
+            None,
+        )
+        .expect("raw-NaN ERROR getters evaluate");
+        let trace = |name: &str| {
+            &traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named raw-NaN ERROR trace")
+                .values
+        };
+        assert!(trace("BACK")[1..].iter().all(|value| value.is_nan()));
+        assert!(trace("back_reader")[1..].iter().all(|value| value.is_nan()));
+        assert_eq!(trace("braced_back")[1..], [1.0e50; 2]);
+        assert!(trace("LATER")[2].is_nan());
+        assert!(trace("forward_reader")[2].is_nan());
+        assert_eq!(trace("braced_later")[2], 1.0e50);
+        assert_eq!(trace("independent"), &vec![42.0; 3]);
+
+        let terminal = evaluate_tran_measurements(&netlist, &result);
+        let terminal = |name: &str| {
+            terminal
+                .iter()
+                .find(|result| result.name.eq_ignore_ascii_case(name))
+                .expect("named raw-NaN ERROR result")
+        };
+        assert!(terminal("BACK").value.is_some_and(Value::is_nan));
+        assert!(terminal("back_reader").value.is_some_and(Value::is_nan));
+        assert!(terminal("LATER").value.is_some_and(Value::is_nan));
+        assert!(terminal("forward_reader").value.is_some_and(Value::is_nan));
+        assert_eq!(terminal("braced_back").value, Some(1.0e50));
+        assert_eq!(terminal("braced_later").value, Some(1.0e50));
+        assert_eq!(terminal("independent").value, Some(42.0));
+        crate::xspice::unregister_data_file(file).expect("unregister raw-NaN ERROR table");
+    }
+
+    #[test]
+    fn issue_277_operator_letter_measure_names_feed_equations() {
+        let netlist = Netlist::parse(
+            "* Xyce issue 277\n\
+             V1 1 0 0\n\
+             .tran 0.5 1\n\
+             .measure tran DMAX MAX V(1)\n\
+             .measure tran IMAX MAX V(1)\n\
+             .measure tran NMAX MAX V(1)\n\
+             .measure tran PMAX MAX V(1)\n\
+             .measure tran SMAX MAX V(1)\n\
+             .measure tran VMAX MAX V(1)\n\
+             .measure tran WMAX MAX V(1)\n\
+             .measure tran YMAX1 MAX V(1)\n\
+             .measure tran ZMAX MAX V(1)\n\
+             .measure tran EQN1 EQN DMAX\n\
+             .measure tran EQN2 EQN IMAX\n\
+             .measure tran EQN3 EQN NMAX\n\
+             .measure tran EQN4 EQN PMAX\n\
+             .measure tran EQN5 EQN SMAX\n\
+             .measure tran EQN6 EQN VMAX\n\
+             .measure tran EQN7 EQN WMAX\n\
+             .measure tran EQN8 EQN YMAX1\n\
+             .measure tran EQN9 EQN ZMAX\n\
+             .end\n",
+        )
+        .expect("issue 277 deck parses");
+        let result = TransientResult {
+            time: vec![0.0, 0.5, 1.0],
+            step_sizes: vec![0.0; 3],
+            voltages: vec![vec![0.0, 1.0, 0.0]],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["1".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+
+        let results = evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(results.len(), 18);
+        assert!(results.iter().all(|result| result.passed), "{results:?}");
+        assert!(
+            results.iter().all(|result| result.value == Some(1.0)),
+            "{results:?}"
+        );
+    }
+
+    #[test]
+    fn live_trace_storage_is_limited_to_equations_and_referenced_producers() {
+        let netlist = Netlist::parse(
+            "selective live traces\n\
+             V1 out 0 0\n\
+             .tran 1 1\n\
+             .measure tran unused MAX V(out)\n\
+             .measure tran used MAX V(out)\n\
+             .measure tran consumer EQN used\n\
+             .end\n",
+        )
+        .expect("selective trace deck parses");
+        let result = tran_waveform(vec![0.0, 1.0], vec![1.0, 2.0]);
+        let signals = transient_signal_map(&result);
+        let internal =
+            evaluate_equation_measurements(&netlist, "TRAN", &result.time, &signals, -1.0, None)
+                .expect("internal live traces evaluate");
+        assert_eq!(
+            internal
+                .iter()
+                .map(|trace| trace.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["USED", "CONSUMER"]
+        );
+        let public = evaluate_tran_equation_measurements(&netlist, &result)
+            .expect("public equation traces evaluate");
+        assert_eq!(public.len(), 1);
+        assert_eq!(public[0].name, "CONSUMER");
+
+        let expression = crate::netlist::expr::parse_expression(
+            "V(out)+VM(out)+I(V1)+DNO(M1,thermal)+DNI(M1)+gain",
+        )
+        .expect("probe dependency expression parses");
+        let prepared =
+            LivePreparedExpression::compile(&expression, &crate::netlist::ParamContext::new())
+                .expect("probe dependency expression prepares");
+        let mut dependencies = prepared
+            .parameters
+            .values()
+            .map(|parameter| parameter.canonical_measure.clone())
+            .collect::<Vec<_>>();
+        dependencies.sort();
+        dependencies.dedup();
+        assert_eq!(dependencies, vec!["GAIN"]);
+    }
+
+    #[test]
     fn transient_continuous_adapter_retains_interpolated_events() {
         let netlist = Netlist::parse(
             "* continuous transient events\n\
@@ -2927,6 +6719,47 @@ mod tests {
     }
 
     #[test]
+    fn ac_find_and_derivative_at_use_authored_minval_across_adapters() {
+        let netlist = Netlist::parse(
+            "AC accepted-row MINVAL parity\n\
+             V1 out 0 AC 1\n\
+             .ac lin 3 1 3\n\
+             .measure ac found FIND VR(out) AT=2.05 MINVAL=0.1 DEFAULT_VAL=-7\n\
+             .measure ac found_live EQN found\n\
+             .measure ac slope DERIV VR(out) AT=2.05 MINVAL=0.1 DEFAULT_VAL=-7\n\
+             .measure ac slope_live EQN slope\n\
+             .measure ac_cont found_cont FIND VR(out) AT=2.05 MINVAL=0.1\n\
+             .measure ac_cont slope_cont DERIV VR(out) AT=2.05 MINVAL=0.1\n\
+             .end\n",
+        )
+        .expect("AC accepted-row MINVAL deck parses");
+        let point = |frequency, real| AcResult {
+            frequency,
+            node_names: vec!["out".to_string()],
+            branch_names: Vec::new(),
+            voltages: vec![crate::Complex64::new(real, 0.0)],
+            currents: Vec::new(),
+        };
+        let sweep = vec![point(1.0, 0.0), point(2.0, 10.0), point(3.0, 40.0)];
+
+        let traces = evaluate_ac_equation_measurements(&netlist, &sweep)
+            .expect("AC accepted-row live traces evaluate");
+        assert_eq!(traces[0].values, vec![-7.0, 10.0, 10.0]);
+        assert_eq!(traces[1].values, vec![-7.0, 10.0, 10.0]);
+
+        let scalar = evaluate_ac_measurements(&netlist, &sweep);
+        assert_eq!(scalar[0].value, Some(10.0));
+        assert_eq!(scalar[1].value, Some(10.0));
+        assert_eq!(scalar[2].value, Some(10.0));
+        assert_eq!(scalar[3].value, Some(10.0));
+
+        let continuous = evaluate_ac_continuous_measurements(&netlist, &sweep);
+        assert_eq!(continuous.len(), 2);
+        assert_eq!(continuous[0].records[0].value, 10.0);
+        assert_eq!(continuous[1].records[0].value, 10.0);
+    }
+
+    #[test]
     fn ac_interface_aliases_cover_complex_equation_and_continuous_projections() {
         let netlist = Netlist::parse(
             "AC interface measurement paths\n\
@@ -2963,10 +6796,7 @@ mod tests {
             .expect("AC interface equation evaluates");
         assert_eq!(traces[0].values, vec![2.0, 8.0]);
         assert_eq!(traces[1].values, vec![1.0, 5.0]);
-        assert_eq!(
-            traces[2].values,
-            vec![Value::NEG_INFINITY, Value::NEG_INFINITY]
-        );
+        assert_eq!(traces[2].values, vec![-1.0e50, -1.0e50]);
 
         let scalar = evaluate_ac_measurements(&netlist, &sweep);
         let result = |name: &str| {
@@ -2985,7 +6815,7 @@ mod tests {
         assert!(result("groundDecibels").passed);
         assert_eq!(result("equation").value, Some(8.0));
         assert_eq!(result("spacedEquation").value, Some(5.0));
-        assert_eq!(result("groundDbEquation").value, Some(Value::NEG_INFINITY));
+        assert_eq!(result("groundDbEquation").value, Some(-1.0e50));
         assert!(scalar.iter().all(|result| result.passed), "{scalar:?}");
 
         let continuous = evaluate_ac_continuous_measurements(&netlist, &sweep);
@@ -3005,8 +6835,10 @@ mod tests {
              .ENDS\n\
              .AC LIN 2 1 2\n\
              .MEASURE AC raw MAX VDB(0)\n\
-             .MEASURE AC equation EQN {VDB(0)}\n\
-             .MEASURE AC param PARAM='VDB(0)'\n\
+             .MEASURE AC bare_equation EQN VDB(0)\n\
+             .MEASURE AC braced_equation EQN {VDB(0)}\n\
+             .MEASURE AC bare_param PARAM VDB(0)\n\
+             .MEASURE AC quoted_param PARAM='VDB(0)'\n\
              .END\n",
             crate::netlist::NetlistParseOptions {
                 expression_dialect: crate::config::ExpressionDialect::Xyce,
@@ -3030,9 +6862,227 @@ mod tests {
         };
 
         assert_eq!(result("raw").value, Some(Value::NEG_INFINITY));
-        assert_eq!(result("equation").value, Some(-1.0e50), "{results:?}");
-        assert_eq!(result("param").value, Some(-1.0e50), "{results:?}");
+        assert_eq!(
+            result("bare_equation").value,
+            Some(Value::NEG_INFINITY),
+            "{results:?}"
+        );
+        assert_eq!(
+            result("braced_equation").value,
+            Some(-1.0e50),
+            "{results:?}"
+        );
+        assert_eq!(
+            result("bare_param").value,
+            Some(Value::NEG_INFINITY),
+            "{results:?}"
+        );
+        assert_eq!(result("quoted_param").value, Some(-1.0e50), "{results:?}");
         assert!(results.iter().all(|result| result.passed), "{results:?}");
+    }
+
+    #[test]
+    fn xyce_unbraced_equations_bind_raw_output_operator_families() {
+        let netlist = Netlist::parse_with_options(
+            "Xyce raw equation output operators\n\
+             V1 1 0 AC 1\n\
+             .AC LIN 2 1 2\n\
+             .MEASURE AC raw_voltage EQN VDB(0) FROM=1 TO=2\n\
+             .MEASURE AC raw_current EQN IDB(V1)\n\
+             .MEASURE AC raw_dno EQN DNO(M1,thermal)\n\
+             .MEASURE AC raw_dni EQN DNI(M1)\n\
+             .MEASURE AC raw_device EQN N(X1:M1:id)\n\
+             .MEASURE AC raw_power EQN P(R1)\n\
+             .MEASURE AC raw_watt EQN W(R1)\n\
+             .MEASURE AC raw_network EQN SDB(1,2)\n\
+             .MEASURE AC braced_voltage EQN {VDB(0)}\n\
+             .MEASURE AC quoted_voltage PARAM='VDB(0)'\n\
+             .END\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("Xyce raw equation operator deck parses");
+        let axis = [1.0, 2.0];
+        let negative_infinity = [Value::NEG_INFINITY; 2];
+        let positive_infinity = [Value::INFINITY; 2];
+        let device = [3.0, 4.0];
+        let power = [5.0, 6.0];
+        let watt = [7.0, 8.0];
+        let network = [Value::INFINITY; 2];
+        let signals = HashMap::from([
+            ("VDB(0)".to_string(), negative_infinity.as_slice()),
+            ("IDB(V1)".to_string(), positive_infinity.as_slice()),
+            ("DNO(M1,thermal)".to_string(), positive_infinity.as_slice()),
+            ("DNI(M1)".to_string(), negative_infinity.as_slice()),
+            ("N(X1:M1:id)".to_string(), device.as_slice()),
+            ("P(R1)".to_string(), power.as_slice()),
+            ("W(R1)".to_string(), watt.as_slice()),
+            ("SDB(1,2)".to_string(), network.as_slice()),
+        ]);
+
+        let traces = evaluate_equation_measurements(&netlist, "AC", &axis, &signals, -1.0, None)
+            .expect("raw output-operator equations evaluate");
+        let trace = |name: &str| {
+            &traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named raw output-operator trace")
+                .values
+        };
+        assert_eq!(trace("raw_voltage"), &vec![Value::NEG_INFINITY; 2]);
+        assert_eq!(trace("raw_current"), &vec![Value::INFINITY; 2]);
+        assert_eq!(trace("raw_dno"), &vec![Value::INFINITY; 2]);
+        assert_eq!(trace("raw_dni"), &vec![Value::NEG_INFINITY; 2]);
+        assert_eq!(trace("raw_device"), &device);
+        assert_eq!(trace("raw_power"), &power);
+        assert_eq!(trace("raw_watt"), &watt);
+        assert_eq!(trace("raw_network"), &vec![1.0e50; 2]);
+        assert_eq!(trace("braced_voltage"), &vec![-1.0e50; 2]);
+        assert_eq!(trace("quoted_voltage"), &vec![-1.0e50; 2]);
+    }
+
+    #[test]
+    fn i_prefix_expression_builtins_bind_as_functions_not_current_accessors() {
+        let netlist = Netlist::parse_with_options(
+            "I-prefix builtins remain expression functions\n\
+             V1 out 0 0\n\
+             .TRAN 1 1\n\
+             .MEASURE TRAN collision EQN {IF(V(out)>0,INT(V(out)),IMG(V(out)))}\n\
+             .END\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("I-prefix builtin equation parses");
+        let axis = [0.0, 1.0];
+        let waveform = [1.75, -2.25];
+        let signals = HashMap::from([("V(out)".to_string(), waveform.as_slice())]);
+
+        let traces = evaluate_equation_measurements(&netlist, "TRAN", &axis, &signals, -1.0, None)
+            .expect("IF, INT, and IMG bind and evaluate as expression builtins");
+        assert_eq!(traces.len(), 1);
+        assert_eq!(traces[0].values, [1.0, 0.0]);
+    }
+
+    #[test]
+    fn xyce_raw_current_spellings_use_direct_live_and_terminal_lookups() {
+        let netlist = Netlist::parse_with_options(
+            "typed raw current lookup\n\
+             .tran 1 2\n\
+             .measure tran legacy EQN I(YPDE BRANCH)\n\
+             .measure tran collector EQN IC(Q1)\n\
+             .measure tran hierarchical EQN IC(X1:Q1)\n\
+             .end\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("typed raw-current deck parses");
+        let result = TransientResult {
+            time: vec![0.0, 1.0, 2.0],
+            step_sizes: vec![0.0; 3],
+            voltages: Vec::new(),
+            branch_currents: vec![vec![1.0, 2.0, 3.0]],
+            num_nodes: 0,
+            node_names: Vec::new(),
+            branch_names: vec!["YPDE BRANCH".to_string()],
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: vec![
+                crate::engine::TransientDeviceOpTrace {
+                    device_name: "Q1".to_string(),
+                    parameter: "ic".to_string(),
+                    values: vec![4.0, 5.0, 6.0],
+                },
+                crate::engine::TransientDeviceOpTrace {
+                    device_name: "X1:Q1".to_string(),
+                    parameter: "IC".to_string(),
+                    values: vec![7.0, 8.0, 9.0],
+                },
+            ],
+            store_traces: Vec::new(),
+        };
+
+        let traces = evaluate_tran_equation_measurements(&netlist, &result)
+            .expect("typed raw currents evaluate live");
+        assert_eq!(traces[0].values, [1.0, 2.0, 3.0]);
+        assert_eq!(traces[1].values, [4.0, 5.0, 6.0]);
+        assert_eq!(traces[2].values, [7.0, 8.0, 9.0]);
+        let terminal = evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(terminal[0].value, Some(3.0));
+        assert_eq!(terminal[1].value, Some(6.0));
+        assert_eq!(terminal[2].value, Some(9.0));
+        assert!(
+            netlist
+                .output_requests
+                .iter()
+                .any(|request| { request.selects_transient_device_current("X1:Q1") })
+        );
+    }
+
+    #[test]
+    fn xyce_differential_voltage_families_work_live_and_terminal() {
+        let netlist = Netlist::parse_with_options(
+            "differential voltage operators\n\
+             .ac lin 2 1 2\n\
+             .measure ac raw_vm EQN VM(a,b)\n\
+             .measure ac raw_vdb EQN VDB(a,b)\n\
+             .measure ac expression_vdb EQN {VDB(a,b)}\n\
+             .end\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("differential voltage equation deck parses");
+        let point = |frequency, a: crate::Complex64, b: crate::Complex64| AcResult {
+            frequency,
+            node_names: vec!["a".to_string(), "b".to_string()],
+            branch_names: Vec::new(),
+            voltages: vec![a, b],
+            currents: Vec::new(),
+        };
+        let sweep = [
+            point(
+                1.0,
+                crate::Complex64::new(3.0, 4.0),
+                crate::Complex64::new(1.0, 1.0),
+            ),
+            point(
+                2.0,
+                crate::Complex64::new(1.0, 1.0),
+                crate::Complex64::new(1.0, 1.0),
+            ),
+        ];
+        let traces = evaluate_ac_equation_measurements(&netlist, &sweep)
+            .expect("differential voltage equations evaluate live");
+        let trace = |name: &str| {
+            &traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named differential trace")
+                .values
+        };
+        assert!((trace("raw_vm")[0] - 13.0_f64.sqrt()).abs() < 1.0e-12);
+        assert_eq!(trace("raw_vm")[1], 0.0);
+        assert!(trace("raw_vdb")[1].is_infinite() && trace("raw_vdb")[1].is_sign_negative());
+        assert_eq!(trace("expression_vdb")[1], -1.0e50);
+
+        let terminal = evaluate_ac_measurements(&netlist, &sweep);
+        let value = |name: &str| {
+            terminal
+                .iter()
+                .find(|result| result.name.eq_ignore_ascii_case(name))
+                .expect("named differential terminal result")
+                .value
+        };
+        assert_eq!(value("raw_vm"), Some(0.0));
+        assert_eq!(value("raw_vdb"), Some(Value::NEG_INFINITY));
+        assert_eq!(value("expression_vdb"), Some(-1.0e50));
     }
 
     #[test]
@@ -3822,6 +7872,129 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].value, Some(58.0 / 6.0));
         assert!(results[0].passed);
+    }
+
+    #[test]
+    fn nested_dc_live_aggregates_continue_but_events_respect_segment_barriers() {
+        let netlist = Netlist::parse(
+            "nested DC live state\n\
+             V1 out 0 0\n\
+             V2 bias 0 0\n\
+             .dc V1 3 1 -1 V2 0 1 1\n\
+             .measure dc combined AVG V(out)\n\
+             .measure dc combined_live EQN combined\n\
+             .measure dc barrier WHEN V(out)=10 DEFAULT_VAL=-7\n\
+             .measure dc barrier_live EQN barrier\n\
+             .end\n",
+        )
+        .expect("nested DC live-state deck parses");
+        let sweep = [
+            (3.0, 9.0),
+            (2.0, 4.0),
+            (1.0, 1.0),
+            (3.0, 19.0),
+            (2.0, 14.0),
+            (1.0, 11.0),
+        ]
+        .into_iter()
+        .map(|(axis, voltage)| {
+            let mut point = SimulationResult::new(1, 0);
+            point.node_voltages = vec![0.0, voltage];
+            point.node_names = vec!["0".to_string(), "out".to_string()];
+            (axis, point)
+        })
+        .collect::<Vec<_>>();
+
+        let traces = evaluate_dc_equation_measurements(&netlist, &sweep)
+            .expect("nested DC equation traces evaluate");
+        let trace = |name: &str| {
+            &traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named trace")
+                .values
+        };
+        let expected_average = [0.0, 6.5, 4.5, 7.25, 9.1, 58.0 / 6.0];
+        for (actual, expected) in trace("combined_live").iter().zip(expected_average) {
+            assert!((actual - expected).abs() < 1.0e-12);
+        }
+        assert_eq!(trace("barrier_live"), &vec![-7.0; 6]);
+
+        let results = evaluate_dc_measurements(&netlist, &sweep);
+        assert_eq!(results[0].value, Some(58.0 / 6.0));
+        assert_eq!(results[1].value, Some(58.0 / 6.0));
+        assert!(!results[2].passed, "barrier event must not bridge segments");
+        assert_eq!(results[3].value, Some(-7.0));
+    }
+
+    #[test]
+    fn dc_find_at_exact_later_segment_start_publishes_current_sample() {
+        let netlist = Netlist::parse(
+            "nested DC segment-start FIND\n\
+             V1 out 0 0\n\
+             V2 bias 0 0\n\
+             .dc V1 0 1 1 V2 0 1 1\n\
+             .measure dc sample FIND V(out) AT=2 DEFAULT_VAL=-7\n\
+             .measure dc sample_live EQN sample\n\
+             .measure dc near FIND V(out) AT=2.0000000000005 DEFAULT_VAL=-7\n\
+             .measure dc near_live EQN near\n\
+             .end\n",
+        )
+        .expect("nested DC segment-start FIND deck parses");
+        let sweep = [(0.0, 10.0), (1.0, 11.0), (2.0, 20.0), (3.0, 21.0)]
+            .into_iter()
+            .map(|(axis, voltage)| {
+                let mut point = SimulationResult::new(1, 0);
+                point.node_voltages = vec![0.0, voltage];
+                point.node_names = vec!["0".to_string(), "out".to_string()];
+                (axis, point)
+            })
+            .collect::<Vec<_>>();
+
+        let traces = evaluate_dc_equation_measurements(&netlist, &sweep)
+            .expect("nested DC segment-start FIND traces evaluate");
+        assert_eq!(traces.len(), 2);
+        assert_eq!(traces[0].values, vec![-7.0, -7.0, 20.0, 20.0]);
+        assert_eq!(traces[1].values, vec![-7.0, -7.0, 20.0, 20.0]);
+
+        let results = evaluate_dc_measurements(&netlist, &sweep);
+        assert_eq!(results[0].value, Some(20.0));
+        assert_eq!(results[1].value, Some(20.0));
+        assert_eq!(results[2].value, Some(20.0));
+        assert_eq!(results[3].value, Some(20.0));
+        assert!(results.iter().all(|result| result.passed));
+    }
+
+    #[test]
+    fn reversed_dc_windows_apply_to_live_extrema_and_statistics() {
+        let netlist = Netlist::parse(
+            "reversed DC live windows\n\
+             V1 out 0 0\n\
+             .dc V1 3 1 -1\n\
+             .measure dc maximum MAX V(out) FROM=3 TO=2\n\
+             .measure dc maximum_live EQN maximum\n\
+             .measure dc average AVG V(out) FROM=3 TO=2\n\
+             .measure dc average_live EQN average\n\
+             .end\n",
+        )
+        .expect("reversed DC live-window deck parses");
+        let sweep = [(3.0, 9.0), (2.0, 4.0), (1.0, 1.0)]
+            .into_iter()
+            .map(|(axis, voltage)| {
+                let mut point = SimulationResult::new(1, 0);
+                point.node_voltages = vec![0.0, voltage];
+                point.node_names = vec!["0".to_string(), "out".to_string()];
+                (axis, point)
+            })
+            .collect::<Vec<_>>();
+
+        let traces = evaluate_dc_equation_measurements(&netlist, &sweep)
+            .expect("reversed DC live traces evaluate");
+        assert_eq!(traces[0].values, vec![9.0, 9.0, 9.0]);
+        assert_eq!(traces[1].values, vec![0.0, 6.5, 6.5]);
+        let results = evaluate_dc_measurements(&netlist, &sweep);
+        assert_eq!(results[0].value, Some(9.0));
+        assert_eq!(results[2].value, Some(6.5));
     }
 
     #[test]

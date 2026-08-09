@@ -26,9 +26,9 @@ use std::collections::HashMap;
 // because this is where callers expect to find them, and because the engine
 // below is the only thing that gives them meaning.
 pub use crate::netlist::measure::{
-    EdgeType, ErrorFunctionNorm, EventOccurrence, ExtremaOutput, FileErrorNorm, MeasureOperand,
-    MeasurePrintPolicy, MeasureStatement, MeasureType, TrigSpec, TriggerEvent, WhenCondition,
-    XYCE_DEFAULT_MEASURE_MINVAL,
+    EdgeType, ErrorFunctionNorm, EventOccurrence, ExtremaOutput, FileErrorNorm, MeasureExpression,
+    MeasureExpressionKind, MeasureOperand, MeasurePrintPolicy, MeasureStatement, MeasureType,
+    TrigSpec, TriggerEvent, WhenCondition, XYCE_DEFAULT_MEASURE_MINVAL,
 };
 
 //=============================================================================
@@ -40,7 +40,9 @@ pub use crate::netlist::measure::{
 pub struct MeasureResult {
     /// Measurement name
     pub name: String,
-    /// Computed value (None if measurement failed)
+    /// Numeric payload, when the measurement produced one. A failed GOAL/TOL
+    /// check can retain its raw payload; inspect [`Self::passed`] and
+    /// [`Self::error`] for the measurement outcome.
     pub value: Option<Value>,
     /// Error message if failed
     pub error: Option<String>,
@@ -61,9 +63,6 @@ pub struct MeasureResult {
 
 impl MeasureResult {
     pub fn success(name: &str, value: Value) -> Self {
-        if value.is_nan() {
-            return Self::failed(name, "measurement value is NaN");
-        }
         Self {
             name: name.to_string(),
             value: Some(value),
@@ -88,12 +87,6 @@ impl MeasureResult {
     }
 
     fn with_event_axis(mut self, event_axis: Value) -> Self {
-        if !event_axis.is_finite() {
-            return Self::failed(
-                &self.name,
-                &format!("measurement event axis is non-finite ({event_axis})"),
-            );
-        }
         self.event_axis = Some(event_axis);
         self
     }
@@ -231,9 +224,9 @@ impl ContinuousMeasureResult {
     }
 
     /// Validate the mutually exclusive success/failure representation and
-    /// the validity of all published numeric metadata. Infinite result values
-    /// are legitimate extended-real SPICE results (for example `VDB(0)`), but
-    /// event-axis metadata must remain finite and values must never be NaN.
+    /// the structural validity of published records. Numeric fields retain
+    /// IEEE extended-real values, including NaN, to distinguish a computed
+    /// undefined result from an event that was never found.
     pub fn validate_invariants(&self) -> Result<(), &'static str> {
         if self.name.trim().is_empty() {
             return Err("continuous measurement name is empty");
@@ -255,22 +248,6 @@ impl ContinuousMeasureResult {
                     return Err("successful continuous measurement contains failure metadata");
                 }
             }
-        }
-        if self.records.iter().any(|record| {
-            record.value.is_nan()
-                || record.event_axis.is_some_and(|value| !value.is_finite())
-                || record.trigger_axis.is_some_and(|value| !value.is_finite())
-                || record.target_axis.is_some_and(|value| !value.is_finite())
-        }) {
-            return Err("continuous measurement record contains NaN or a non-finite event axis");
-        }
-        if self.failure_metadata.is_some_and(|metadata| {
-            metadata
-                .trigger_axis
-                .is_some_and(|value| !value.is_finite())
-                || metadata.target_axis.is_some_and(|value| !value.is_finite())
-        }) {
-            return Err("continuous measurement failure metadata contains a non-finite value");
         }
         Ok(())
     }
@@ -455,13 +432,22 @@ impl AkimaInterpolator {
 pub struct MeasureEngine {
     /// Registered measurements
     measurements: Vec<MeasureStatement>,
+    /// Xyce compatibility switch for the legacy non-continuous TRAN
+    /// RiseFallDelay implementation. Modern TrigTarg remains mandatory for
+    /// every other analysis and for all continuous measurement modes.
+    use_legacy_tran_trig_targ: bool,
 }
 
 impl MeasureEngine {
     pub fn new() -> Self {
         Self {
             measurements: Vec::new(),
+            use_legacy_tran_trig_targ: false,
         }
+    }
+
+    pub(crate) fn set_use_legacy_tran_trig_targ(&mut self, enabled: bool) {
+        self.use_legacy_tran_trig_targ = enabled;
     }
 
     /// Add a measurement to be evaluated
@@ -483,6 +469,44 @@ impl MeasureEngine {
         signals: &HashMap<String, &[Value]>,
     ) -> Vec<MeasureResult> {
         self.evaluate_with_segment_starts(time, signals, &[])
+    }
+
+    /// Evaluate the raw scalar cached by a file-backed ERROR getter.
+    ///
+    /// Xyce freezes that getter on its first read, including an IEEE NaN
+    /// produced by the norm. Keep the raw scalar inside the declaration-
+    /// ordered runtime so dependent measures and the terminal result retain
+    /// the same computed numeric payload.
+    pub(crate) fn evaluate_file_error_prefix_raw(
+        statement: &MeasureStatement,
+        axis: &[Value],
+        signals: &HashMap<String, &[Value]>,
+    ) -> Result<Value, String> {
+        let MeasureType::FileError {
+            signal,
+            file,
+            norm,
+            independent_column,
+            dependent_column,
+        } = &statement.measure_type
+        else {
+            return Err("raw file ERROR evaluation requires a FileError statement".to_string());
+        };
+        let engine = Self {
+            measurements: Vec::new(),
+            use_legacy_tran_trig_targ: false,
+        };
+        let signals = index_measure_signals(signals);
+        engine.file_error_value(
+            &statement.analysis,
+            signal,
+            file,
+            *norm,
+            *independent_column,
+            *dependent_column,
+            axis,
+            &signals,
+        )
     }
 
     /// Evaluate measurements while treating selected sample indices as the
@@ -562,24 +586,6 @@ impl MeasureEngine {
                             signal.len(),
                             axis.len()
                         ),
-                    )
-                })
-                .collect();
-        }
-        if let Some((name, index)) = signals.iter().find_map(|(name, signal)| {
-            signal
-                .iter()
-                .enumerate()
-                .find(|(_, value)| value.is_nan())
-                .map(|(index, _)| (name, index))
-        }) {
-            return self
-                .measurements
-                .iter()
-                .map(|statement| {
-                    ContinuousMeasureResult::failed(
-                        &statement.name,
-                        format!("signal '{name}' contains NaN at index {index}"),
                     )
                 })
                 .collect();
@@ -690,15 +696,26 @@ impl MeasureEngine {
                 signals,
                 segment_starts,
             ),
-            MeasureType::Delay { trig, targ, minval } => continuous_delay(
-                &statement.name,
-                trig,
-                targ,
-                *minval,
-                axis,
-                signals,
-                segment_starts,
-            ),
+            MeasureType::Delay {
+                trig, targ, minval, ..
+            } => {
+                if trig.frac_max.is_some() || targ.frac_max.is_some() {
+                    ContinuousMeasureResult::failed(
+                        &statement.name,
+                        "FRAC_MAX is supported only by scalar TRAN TRIG/TARG",
+                    )
+                } else {
+                    continuous_delay(
+                        &statement.name,
+                        trig,
+                        targ,
+                        *minval,
+                        axis,
+                        signals,
+                        segment_starts,
+                    )
+                }
+            }
             _ => ContinuousMeasureResult::failed(
                 &statement.name,
                 "continuous measures support only WHEN, FIND, DERIV, and TRIG/TARG",
@@ -752,19 +769,6 @@ impl MeasureEngine {
                 signal.len(),
                 time.len()
             ));
-        }
-        if let Some((name, index)) = signal_maps
-            .iter()
-            .flat_map(|signals| signals.iter())
-            .find_map(|(name, signal)| {
-                signal
-                    .iter()
-                    .enumerate()
-                    .find(|(_, value)| value.is_nan())
-                    .map(|(index, _)| (name, index))
-            })
-        {
-            return self.fail_all(&format!("signal '{name}' contains NaN at index {index}"));
         }
         if segment_starts.iter().enumerate().any(|(index, start)| {
             *start == 0 || *start >= time.len() || index > 0 && *start <= segment_starts[index - 1]
@@ -834,10 +838,19 @@ impl MeasureEngine {
         segment_starts: &[usize],
     ) -> MeasureResult {
         match &measurement.measure_type {
-            MeasureType::Delay { trig, targ, minval } => self.eval_delay(
-                &measurement.name,
+            MeasureType::Delay {
                 trig,
                 targ,
+                from,
+                to,
+                minval,
+            } => self.eval_delay(
+                &measurement.name,
+                &measurement.analysis,
+                trig,
+                targ,
+                *from,
+                *to,
                 *minval,
                 time,
                 signals,
@@ -1047,57 +1060,72 @@ impl MeasureEngine {
         axis: &[Value],
         signals: &HashMap<String, &[Value]>,
     ) -> MeasureResult {
+        match self.file_error_value(
+            analysis,
+            signal_name,
+            file,
+            norm,
+            independent_column,
+            dependent_column,
+            axis,
+            signals,
+        ) {
+            Ok(value) => MeasureResult::success(name, value),
+            Err(error) => MeasureResult::failed(name, &error),
+        }
+    }
+
+    fn file_error_value(
+        &self,
+        analysis: &str,
+        signal_name: &str,
+        file: &str,
+        norm: FileErrorNorm,
+        independent_column: Option<isize>,
+        dependent_column: usize,
+        axis: &[Value],
+        signals: &HashMap<String, &[Value]>,
+    ) -> Result<Value, String> {
         if !matches!(
             analysis.to_ascii_uppercase().as_str(),
             "DC" | "TRAN" | "AC" | "NOISE"
         ) {
-            return MeasureResult::failed(
-                name,
-                "file-backed ERROR is supported only for DC, TRAN, AC, and NOISE analyses",
+            return Err(
+                "file-backed ERROR is supported only for DC, TRAN, AC, and NOISE analyses"
+                    .to_string(),
             );
         }
         let Some(signal) = lookup_signal(signals, signal_name) else {
-            return MeasureResult::failed(name, &format!("Signal '{signal_name}' not found"));
+            return Err(format!("Signal '{signal_name}' not found"));
         };
         let pairs = if analysis.eq_ignore_ascii_case("DC") {
             let comparison =
                 match super::measure_file::read_error_comparison_column(file, dependent_column) {
                     Ok(values) => values,
                     Err(error) => {
-                        return MeasureResult::failed(
-                            name,
-                            &format!("could not load ERROR comparison file '{file}': {error}"),
-                        );
+                        return Err(format!(
+                            "could not load ERROR comparison file '{file}': {error}"
+                        ));
                     }
                 };
             if signal.len() < comparison.len() {
-                return MeasureResult::failed(
-                    name,
-                    &format!(
-                        "ERROR comparison has {} rows but the simulation produced only {} accepted points",
-                        comparison.len(),
-                        signal.len()
-                    ),
-                );
+                return Err(format!(
+                    "ERROR comparison has {} rows but the simulation produced only {} accepted points",
+                    comparison.len(),
+                    signal.len()
+                ));
             }
             signal.iter().copied().zip(comparison).collect::<Vec<_>>()
         } else {
             let Some(independent_column) = independent_column else {
-                return MeasureResult::failed(
-                    name,
-                    "non-DC ERROR requires a non-negative INDEPVARCOL",
-                );
+                return Err("non-DC ERROR requires a non-negative INDEPVARCOL".to_string());
             };
             let Ok(independent_column) = usize::try_from(independent_column) else {
-                return MeasureResult::failed(
-                    name,
-                    "non-DC ERROR requires a non-negative INDEPVARCOL",
-                );
+                return Err("non-DC ERROR requires a non-negative INDEPVARCOL".to_string());
             };
             if independent_column == dependent_column {
-                return MeasureResult::failed(
-                    name,
-                    "non-DC ERROR requires different INDEPVARCOL and DEPVARCOL values",
+                return Err(
+                    "non-DC ERROR requires different INDEPVARCOL and DEPVARCOL values".to_string(),
                 );
             }
             let comparison = match super::measure_file::read_error_comparison_columns(
@@ -1107,10 +1135,9 @@ impl MeasureEngine {
             ) {
                 Ok(columns) => columns,
                 Err(error) => {
-                    return MeasureResult::failed(
-                        name,
-                        &format!("could not load ERROR comparison file '{file}': {error}"),
-                    );
+                    return Err(format!(
+                        "could not load ERROR comparison file '{file}': {error}"
+                    ));
                 }
             };
             let reference_axis = comparison
@@ -1121,14 +1148,14 @@ impl MeasureEngine {
                     .windows(2)
                     .any(|window| window[1] < window[0])
             {
-                return MeasureResult::failed(
-                    name,
-                    "non-DC ERROR comparison axis must be monotonically increasing and non-negative",
+                return Err(
+                    "non-DC ERROR comparison axis must be monotonically increasing and non-negative"
+                        .to_string(),
                 );
             }
             let interpolator = match AkimaInterpolator::new(axis, signal) {
                 Ok(interpolator) => interpolator,
-                Err(error) => return MeasureResult::failed(name, &error),
+                Err(error) => return Err(error),
             };
             reference_axis
                 .into_iter()
@@ -1145,9 +1172,6 @@ impl MeasureEngine {
         let mut infinity: Value = 0.0;
         for (simulated, reference) in pairs {
             let difference = simulated - reference;
-            if !difference.is_finite() {
-                return MeasureResult::failed(name, "ERROR difference vector is non-finite");
-            }
             let magnitude = difference.abs();
             infinity = infinity.max(magnitude);
             // Neumaier-compensated L1 and hypot-folded L2 preserve useful
@@ -1161,88 +1185,91 @@ impl MeasureEngine {
             l1 = next_l1;
             l2 = l2.hypot(difference);
         }
-        let value = match norm {
+        Ok(match norm {
             FileErrorNorm::Infinity => infinity,
             FileErrorNorm::L1 => l1 + l1_compensation,
             FileErrorNorm::L2 => l2,
-        };
-        MeasureResult::success(name, value)
-    }
-
-    /// Find time when signal crosses threshold
-    fn find_crossing(
-        &self,
-        time: &[Value],
-        signal: &[Value],
-        threshold: Value,
-        edge: EdgeType,
-        occurrence: usize,
-        start_at: Option<Value>,
-    ) -> Option<Value> {
-        let mut count = 0;
-
-        for i in 1..signal.len() {
-            if let Some(start_time) = start_at
-                && time[i] < start_time
-            {
-                continue;
-            }
-
-            let prev = signal[i - 1];
-            let curr = signal[i];
-            let crossed = match edge {
-                EdgeType::Rise => prev < threshold && curr >= threshold,
-                EdgeType::Fall => prev > threshold && curr <= threshold,
-                EdgeType::Cross => {
-                    (prev < threshold && curr >= threshold)
-                        || (prev > threshold && curr <= threshold)
-                }
-            };
-
-            if crossed {
-                // Linear interpolation for exact crossing time.
-                let frac = (threshold - prev) / (curr - prev);
-                let crossing_time = time[i - 1] + frac * (time[i] - time[i - 1]);
-
-                if let Some(start_time) = start_at
-                    && crossing_time < start_time
-                {
-                    continue;
-                }
-
-                count += 1;
-                if count == occurrence {
-                    return Some(crossing_time);
-                }
-            }
-        }
-
-        None
+        })
     }
 
     fn eval_delay(
         &self,
         name: &str,
+        analysis: &str,
         trig: &TrigSpec,
         targ: &TrigSpec,
+        from: Option<Value>,
+        to: Option<Value>,
         minval: Value,
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
         segment_starts: &[usize],
     ) -> MeasureResult {
-        let target_td = targ.td.or(trig.td);
-        let t_trig = match delay_clause_event(trig, trig.td, minval, time, signals, segment_starts)
-        {
+        let legacy = analysis.eq_ignore_ascii_case("TRAN")
+            && (self.use_legacy_tran_trig_targ
+                || trig.frac_max.is_some()
+                || targ.frac_max.is_some());
+        if !legacy && (trig.frac_max.is_some() || targ.frac_max.is_some()) {
+            return MeasureResult::failed(
+                name,
+                "FRAC_MAX is supported only by scalar TRAN TRIG/TARG",
+            );
+        }
+        if legacy && matches!(&targ.event, TriggerEvent::At(_)) {
+            return MeasureResult::failed(name, "AT keyword not allowed in legacy TARG block");
+        }
+        // RiseFallDelay has one Base::td_ measurement window. Since the TARG
+        // block is parsed last, its TD wins when present and the resulting
+        // window gates both clause histories. TrigTarg retains separate TRIG
+        // and inherited TARG windows.
+        let legacy_td = targ.td.or(trig.td);
+        let trigger_td = if legacy { legacy_td } else { trig.td };
+        let target_td = if legacy {
+            legacy_td
+        } else {
+            targ.td.or(trig.td)
+        };
+        if legacy && (trig.frac_max.is_some() || targ.frac_max.is_some()) {
+            return match eval_legacy_frac_delay(
+                trig, targ, legacy_td, from, to, minval, time, signals,
+            ) {
+                Ok(Some((trigger, target))) => MeasureResult::success(name, target - trigger),
+                Ok(None) => MeasureResult::failed(name, "Trigger or target condition not found"),
+                Err(error) => MeasureResult::failed(name, &error),
+            };
+        }
+        let t_trig = match delay_clause_event(
+            trig,
+            trigger_td,
+            from,
+            to,
+            minval,
+            time,
+            signals,
+            segment_starts,
+            legacy,
+            None,
+        ) {
             Ok(Some(value)) => value,
             Ok(None) => return MeasureResult::failed(name, "Trigger condition not found"),
             Err(error) => return MeasureResult::failed(name, &error),
         };
-        let t_targ =
-            match delay_clause_event(targ, target_td, minval, time, signals, segment_starts) {
-                Ok(Some(value)) => value,
-                Ok(None) => return MeasureResult::failed(name, "Target condition not found"),
-                Err(error) => return MeasureResult::failed(name, &error),
-            };
+        let t_targ = match delay_clause_event(
+            targ,
+            target_td,
+            from,
+            to,
+            minval,
+            time,
+            signals,
+            segment_starts,
+            legacy,
+            legacy.then_some(t_trig),
+        ) {
+            Ok(Some(value)) => value,
+            Ok(None) => return MeasureResult::failed(name, "Target condition not found"),
+            Err(error) => return MeasureResult::failed(name, &error),
+        };
 
         MeasureResult::success(name, t_targ - t_trig)
     }
@@ -1373,19 +1400,25 @@ impl MeasureEngine {
         };
 
         let (lower, upper) = Self::measurement_window_bounds(time, from, to);
-        let mut min_val = Value::INFINITY;
-        let mut max_val = Value::NEG_INFINITY;
-        let mut selected = false;
+        let mut selected: Option<(Value, Value)> = None;
         for (&axis, &value) in time.iter().zip(signal) {
             if Self::axis_in_measurement_window(axis, lower, upper) {
-                min_val = min_val.min(value);
-                max_val = max_val.max(value);
-                selected = true;
+                match &mut selected {
+                    None => selected = Some((value, value)),
+                    Some((minimum, maximum)) => {
+                        if value < *minimum {
+                            *minimum = value;
+                        }
+                        if value > *maximum {
+                            *maximum = value;
+                        }
+                    }
+                }
             }
         }
-        if !selected {
+        let Some((min_val, max_val)) = selected else {
             return MeasureResult::failed(name, "Empty range");
-        }
+        };
 
         MeasureResult::success(name, max_val - min_val)
     }
@@ -1425,22 +1458,21 @@ impl MeasureEngine {
         };
         let mut sum = 0.0;
         let mut count = 0usize;
+        let mut window_active = false;
         for ((&axis_value, &measured_value), &comparison_value) in
             axis.iter().zip(measured).zip(comparison)
         {
+            if !axis_in_error_window(axis_value, lower, upper, minval) {
+                continue;
+            }
+            window_active = true;
             let magnitude = measured_value.abs();
             let ymin_tolerance = ymin.abs() * 1.0e-12;
             let ymax_tolerance = ymax.abs() * 1.0e-12;
-            if !axis_in_error_window(axis_value, lower, upper, minval)
-                || magnitude < ymin - ymin_tolerance
-                || magnitude > ymax + ymax_tolerance
-            {
+            if !(magnitude >= ymin - ymin_tolerance && magnitude <= ymax + ymax_tolerance) {
                 continue;
             }
             let denominator = magnitude.max(minval);
-            if denominator <= 0.0 {
-                return MeasureResult::failed(name, "ERR relative-error denominator is zero");
-            }
             let relative_error = (measured_value - comparison_value) / denominator;
             sum += match norm {
                 ErrorFunctionNorm::RootMeanSquare => relative_error * relative_error,
@@ -1449,18 +1481,21 @@ impl MeasureEngine {
             count += 1;
         }
         if count == 0 {
-            return MeasureResult::failed(name, "ERR window contains no qualifying points");
+            return if window_active {
+                // Xyce initializes ERR on entry to the axis window, then its
+                // zero-sample getter computes 0/0. Preserve that computed NaN
+                // distinctly from a window that was never entered.
+                MeasureResult::success(name, Value::NAN)
+            } else {
+                MeasureResult::failed(name, "ERR window contains no points")
+            };
         }
         let mean = sum / count as Value;
         let result = match norm {
             ErrorFunctionNorm::RootMeanSquare => mean.sqrt(),
             ErrorFunctionNorm::MeanAbsolute => mean,
         };
-        if result.is_finite() {
-            MeasureResult::success(name, result)
-        } else {
-            MeasureResult::failed(name, "ERR result is non-finite")
-        }
+        MeasureResult::success(name, result)
     }
 
     fn eval_avg(
@@ -1607,28 +1642,8 @@ impl MeasureEngine {
             }
         };
 
-        // Find min and max to compute thresholds
-        let min_val = signal.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max_val = signal.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        let range = max_val - min_val;
-
-        let (th_low, th_high) = if is_rise {
-            (min_val + from_pct * range, min_val + to_pct * range)
-        } else {
-            (min_val + to_pct * range, min_val + from_pct * range)
-        };
-
-        let edge = if is_rise {
-            EdgeType::Rise
-        } else {
-            EdgeType::Fall
-        };
-
-        let t1 = self.find_crossing(time, signal, th_low, edge, number, None);
-        let t2 = self.find_crossing(time, signal, th_high, edge, number, None);
-
-        match (t1, t2) {
-            (Some(t1), Some(t2)) => MeasureResult::success(name, (t2 - t1).abs()),
+        match rise_fall_duration(time, signal, from_pct, to_pct, number, is_rise) {
+            Some(duration) => MeasureResult::success(name, duration),
             _ => MeasureResult::failed(name, "Rise/fall transition not found"),
         }
     }
@@ -1667,11 +1682,13 @@ impl MeasureEngine {
                 return MeasureResult::failed(name, "AT point is outside the measurement window")
                     .with_event_axis(target);
             }
-            let Some(segment) = measurement_segment_containing(time, target, segment_starts) else {
-                return MeasureResult::failed(name, "Time point not in simulation range")
-                    .with_event_axis(target);
+            return match derivative_at_accepted_points(time, signal, target, minval, segment_starts)
+            {
+                Ok(Some(slope)) => MeasureResult::success(name, slope).with_event_axis(target),
+                Ok(None) => MeasureResult::failed(name, "Time point not in simulation range")
+                    .with_event_axis(target),
+                Err(error) => MeasureResult::failed(name, error).with_event_axis(target),
             };
-            return measurement_segment_slope(name, time, signal, segment).with_event_axis(target);
         }
 
         let Some(condition) = when else {
@@ -1686,7 +1703,7 @@ impl MeasureEngine {
             upper,
             segment_starts,
         ) {
-            Ok(Some((segment, _, event_axis))) => {
+            Ok(Some((segment, _, event_axis, _))) => {
                 return measurement_segment_slope(name, time, signal, segment)
                     .with_event_axis(event_axis);
             }
@@ -1700,7 +1717,7 @@ impl MeasureEngine {
     fn eval_param(
         &self,
         name: &str,
-        expression: &str,
+        expression: &MeasureExpression,
         prior: &[MeasureResult],
         params: &crate::netlist::ParamContext,
     ) -> MeasureResult {
@@ -1710,31 +1727,49 @@ impl MeasureEngine {
                 ctx.set(&result.name, value);
             }
         }
-        match crate::netlist::expr::eval_expression_complex(expression, &ctx) {
+        let parsed = match crate::netlist::expr::parse_expression(&expression.text) {
+            Ok(parsed) => parsed,
+            Err(err) => {
+                return MeasureResult::failed(name, &format!("PARAM expression failed: {err}"));
+            }
+        };
+        match crate::netlist::expr::evaluate_complex_raw(&parsed, &ctx) {
             Ok(value) => {
-                if value.re.is_nan() || value.im.is_nan() {
-                    return MeasureResult::failed(
-                        name,
-                        &format!(
-                            "PARAM expression produced NaN ({} {:+}j)",
-                            value.re, value.im
-                        ),
-                    );
-                }
-                let imag_tolerance = if value.re.is_finite() {
-                    1.0e-15 * value.re.abs().max(1.0)
+                let xyce = params.expression_dialect() == crate::config::ExpressionDialect::Xyce;
+                let value = if xyce && expression.is_expression() {
+                    crate::netlist::expr::normalize_xyce_expression_result(value)
                 } else {
-                    0.0
+                    value
                 };
-                if value.im.abs() > imag_tolerance {
-                    return MeasureResult::failed(
-                        name,
-                        &format!(
-                            "PARAM expression produced complex value ({} {:+}j); scalar measurement results must be real",
-                            value.re, value.im
-                        ),
-                    );
+                if !xyce {
+                    if value.re.is_nan() || value.im.is_nan() {
+                        return MeasureResult::failed(
+                            name,
+                            &format!(
+                                "PARAM expression produced NaN ({} {:+}j)",
+                                value.re, value.im
+                            ),
+                        );
+                    }
+                    let imag_tolerance = if value.re.is_finite() {
+                        1.0e-15 * value.re.abs().max(1.0)
+                    } else {
+                        0.0
+                    };
+                    if value.im.abs() > imag_tolerance {
+                        return MeasureResult::failed(
+                            name,
+                            &format!(
+                                "PARAM expression produced complex value ({} {:+}j); scalar measurement results must be real",
+                                value.re, value.im
+                            ),
+                        );
+                    }
                 }
+                // MeasureBase applies fixNan/fixInf to both components at an
+                // authored ExpressionOp root, then exposes the real output.
+                // Typed raw MeasureOp references deliberately bypass that
+                // normalization and retain their IEEE real projection.
                 MeasureResult::success(name, value.re)
             }
             Err(err) => MeasureResult::failed(name, &format!("PARAM expression failed: {err}")),
@@ -1767,14 +1802,18 @@ impl MeasureEngine {
         if let Some(t_at) = at {
             // FIND ... AT=time
             if !Self::axis_in_measurement_window_with_minval(t_at, lower, upper, minval) {
-                return MeasureResult::failed(name, "AT point is outside the measurement window");
+                return MeasureResult::failed(name, "AT point is outside the measurement window")
+                    .with_event_axis(t_at);
             }
-            if let Some(value) =
-                interpolate_measure_signal_segmented(time, signal, t_at, segment_starts)
-            {
-                return MeasureResult::success(name, value);
+            match find_at_accepted_points(time, signal, t_at, minval, segment_starts) {
+                Ok(Some(value)) => {
+                    return MeasureResult::success(name, value).with_event_axis(t_at);
+                }
+                Err(error) => return MeasureResult::failed(name, error).with_event_axis(t_at),
+                Ok(None) => {}
             }
-            return MeasureResult::failed(name, "Time point not in simulation range");
+            return MeasureResult::failed(name, "Time point not in simulation range")
+                .with_event_axis(t_at);
         }
 
         if let Some(condition) = when {
@@ -1787,10 +1826,16 @@ impl MeasureEngine {
                 upper,
                 segment_starts,
             ) {
-                Ok(Some((segment, fraction, _))) => {
-                    let value =
-                        interpolate_extended_real(signal[segment], signal[segment + 1], fraction);
-                    return MeasureResult::success(name, value);
+                Ok(Some((segment, fraction, event_axis, current_within_minval))) => {
+                    // Xyce's FIND-WHEN uses the current accepted-row value
+                    // when that row is already inside the MINVAL equality
+                    // band. Only a strict interval crossing interpolates.
+                    let value = if current_within_minval {
+                        signal[segment + 1]
+                    } else {
+                        interpolate_extended_real(signal[segment], signal[segment + 1], fraction)
+                    };
+                    return MeasureResult::success(name, value).with_event_axis(event_axis);
                 }
                 Err(error) => return MeasureResult::failed(name, &error),
                 Ok(None) => {}
@@ -1827,7 +1872,7 @@ impl MeasureEngine {
             upper,
             segment_starts,
         ) {
-            Ok(Some((_, _, axis))) => MeasureResult::success(name, axis),
+            Ok(Some((_, _, axis, _))) => MeasureResult::success(name, axis).with_event_axis(axis),
             Ok(None) => {
                 MeasureResult::failed(name, "WHEN condition not found in the measurement window")
             }
@@ -1936,50 +1981,697 @@ fn resolve_measure_operand<'a>(
 fn delay_clause_event(
     clause: &TrigSpec,
     effective_td: Option<Value>,
+    from: Option<Value>,
+    to: Option<Value>,
     minval: Value,
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
     segment_starts: &[usize],
+    legacy: bool,
+    after: Option<Value>,
 ) -> Result<Option<Value>, String> {
     match &clause.event {
         TriggerEvent::At(target) => {
             if !target.is_finite() {
                 return Ok(None);
             }
-            Ok(delay_at_is_reached(axis, *target, segment_starts).then_some(*target))
+            if legacy {
+                Ok(axis.iter().copied().find(|sample| {
+                    legacy_delay_accepts_sample(*sample, effective_td, from, to, minval)
+                        && *sample >= *target
+                }))
+            } else {
+                Ok(delay_at_is_reached(axis, *target, segment_starts, minval).then_some(*target))
+            }
         }
         TriggerEvent::When(condition) => {
-            // Xyce's TRIG/TARG contract recognizes only -1/LAST as a
-            // negative occurrence. Other negative values parse as a failed
-            // measure so the remaining measurements in the deck still run.
-            if condition.occurrence.number < -1 {
-                return Ok(None);
-            }
             let left = lookup_signal(signals, &condition.left)
                 .ok_or_else(|| format!("When signal '{}' not found", condition.left))?;
             let right = resolve_measure_operand(&condition.right, signals)?;
-            let events = measurement_condition_crossings(
-                left,
-                right,
-                axis.len(),
-                segment_starts,
-                condition.occurrence.edge,
-                minval,
-            )
-            .into_iter()
-            .filter_map(|(segment, fraction)| {
-                let event_axis = axis[segment] + fraction * (axis[segment + 1] - axis[segment]);
-                delay_td_accepts_event(event_axis, effective_td).then_some(event_axis)
-            });
-            Ok(select_measure_occurrence(
-                events,
-                condition.occurrence.number,
+            let mut tracker = if legacy {
+                DelayConditionTracker::new_legacy(
+                    condition.occurrence.edge,
+                    condition.occurrence.number,
+                    clause.occurrence_explicit,
+                    minval,
+                )
+            } else {
+                DelayConditionTracker::new(
+                    condition.occurrence.edge,
+                    condition.occurrence.number,
+                    clause.occurrence_explicit,
+                    minval,
+                )
+            };
+            let mut events = Vec::new();
+            for row in 0..axis.len() {
+                if legacy && !legacy_delay_accepts_sample(axis[row], effective_td, from, to, minval)
+                {
+                    continue;
+                }
+                if segment_starts.binary_search(&row).is_ok() {
+                    tracker.reset_segment();
+                }
+                let Some(right_value) = right.value_at(row) else {
+                    return Ok(None);
+                };
+                if let Some(event_axis) = tracker.update_with_td(
+                    axis[row],
+                    left[row],
+                    right_value,
+                    (!legacy).then_some(effective_td).flatten(),
+                ) && after.is_none_or(|trigger| axis[row] > trigger)
+                {
+                    events.push(event_axis);
+                }
+            }
+            Ok(if condition.occurrence.number < 0 && !legacy {
+                let distance = condition.occurrence.number.unsigned_abs();
+                events.iter().rev().nth(distance - 1).copied()
+            } else if condition.occurrence.number < 0 {
+                // RiseFallDelay interprets every negative RFC value as LAST.
+                events.last().copied()
+            } else {
+                events.first().copied()
+            })
+        }
+    }
+}
+
+fn resolve_legacy_frac_clause<'a>(
+    clause: &TrigSpec,
+    signals: &HashMap<String, &'a [Value]>,
+) -> Result<(Option<&'a [Value]>, ResolvedMeasureOperand<'a>), String> {
+    match &clause.event {
+        TriggerEvent::At(_) => Ok((None, ResolvedMeasureOperand::Constant(0.0))),
+        TriggerEvent::When(condition) => {
+            let left = lookup_signal(signals, &condition.left)
+                .ok_or_else(|| format!("When signal '{}' not found", condition.left))?;
+            Ok((
+                Some(left),
+                resolve_measure_operand(&condition.right, signals)?,
             ))
         }
     }
 }
 
-fn delay_at_is_reached(axis: &[Value], target: Value, segment_starts: &[usize]) -> bool {
+#[allow(clippy::too_many_arguments)]
+fn eval_legacy_frac_delay(
+    trig: &TrigSpec,
+    targ: &TrigSpec,
+    td: Option<Value>,
+    from: Option<Value>,
+    to: Option<Value>,
+    minval: Value,
+    axis: &[Value],
+    signals: &HashMap<String, &[Value]>,
+) -> Result<Option<(Value, Value)>, String> {
+    let (trigger_signal, trigger_target) = resolve_legacy_frac_clause(trig, signals)?;
+    let (Some(target_signal), target_target) = resolve_legacy_frac_clause(targ, signals)? else {
+        return Ok(None);
+    };
+    let mut tracker = LegacyFracDelayTracker::new(trig, targ, minval);
+    let mut result = None;
+    for row in 0..axis.len() {
+        if !legacy_delay_accepts_sample(axis[row], td, from, to, minval) {
+            continue;
+        }
+        let trigger_value = trigger_signal.map_or(0.0, |signal| signal[row]);
+        let Some(trigger_target) = trigger_target.value_at(row) else {
+            return Ok(None);
+        };
+        let Some(target_target) = target_target.value_at(row) else {
+            return Ok(None);
+        };
+        result = tracker.update(
+            axis[row],
+            trigger_value,
+            trigger_target,
+            target_signal[row],
+            target_target,
+        );
+    }
+    Ok(result)
+}
+
+/// Stateful detector for Xyce TRIG/TARG delay clauses.
+///
+/// Xyce 7.10 has two deliberately different implementations. Modern
+/// `TrigTarg` is the default and uses moving-target interpolation. Legacy
+/// `RiseFallDelay` is selected only for non-continuous TRAN by USE_LTTM (or
+/// FRAC_MAX) and retains the older sign-history/equality-on-departure rules.
+#[derive(Debug, Clone)]
+pub(crate) struct DelayConditionTracker {
+    mode: DelayTrackerMode,
+    edge: EdgeType,
+    number: isize,
+    occurrence_explicit: bool,
+    minval: Value,
+    actual_count: usize,
+    previous: Option<(Value, Value, Value)>,
+    continuous: bool,
+    legacy_negative_search_open: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DelayTrackerMode {
+    Modern,
+    Legacy,
+}
+
+/// Streaming state for Xyce's legacy `RiseFallDelay` FRAC_MAX path.
+///
+/// Unlike an ordinary WHEN target, FRAC_MAX is revised whenever a larger
+/// in-window maximum is observed.  Xyce consequently retains the accepted
+/// waveform history and replays it from the last useful bracket.  Keeping the
+/// same state machine here makes batch and live measurement consumers share
+/// one implementation and avoids an end-of-run approximation.
+#[derive(Debug, Clone)]
+pub(crate) struct LegacyFracDelayTracker {
+    trigger: LegacyFracClauseTracker,
+    target: LegacyFracClauseTracker,
+    minval: Value,
+    initialized: bool,
+    previous_trigger: Value,
+    previous_target: Value,
+}
+
+#[derive(Debug, Clone)]
+struct LegacyFracClauseTracker {
+    at: Option<Value>,
+    edge: EdgeType,
+    number: isize,
+    occurrence_explicit: bool,
+    frac_max: Option<Value>,
+    history: Vec<(Value, Value)>,
+    maximum: Value,
+    result_index: usize,
+    found: Option<Value>,
+    output_target: Value,
+    target_changed: bool,
+    actual_rise: usize,
+    actual_fall: usize,
+    actual_cross: usize,
+    is_rising: bool,
+    is_falling: bool,
+    last_output: Value,
+}
+
+impl LegacyFracClauseTracker {
+    fn new(clause: &TrigSpec) -> Self {
+        let (at, edge, number) = match &clause.event {
+            TriggerEvent::At(at) => (Some(*at), EdgeType::Cross, 1),
+            TriggerEvent::When(condition) => {
+                (None, condition.occurrence.edge, condition.occurrence.number)
+            }
+        };
+        Self {
+            at,
+            edge,
+            number,
+            occurrence_explicit: clause.occurrence_explicit,
+            frac_max: clause.frac_max,
+            history: Vec::new(),
+            maximum: 0.0,
+            result_index: 0,
+            found: None,
+            output_target: 0.0,
+            target_changed: false,
+            actual_rise: 0,
+            actual_fall: 0,
+            actual_cross: 0,
+            is_rising: false,
+            is_falling: false,
+            last_output: 0.0,
+        }
+    }
+
+    fn variable_history(&self) -> bool {
+        self.frac_max.is_some() && self.at.is_none()
+    }
+
+    fn within_rfc_window(&self) -> bool {
+        if !self.occurrence_explicit {
+            return true;
+        }
+        let actual = match self.edge {
+            EdgeType::Rise => self.actual_rise,
+            EdgeType::Fall => self.actual_fall,
+            EdgeType::Cross => self.actual_cross,
+        };
+        self.number < 0 || actual == self.number as usize
+    }
+
+    fn variable_history_changed(&self, value: Value, minval: Value) -> bool {
+        self.variable_history()
+            && self
+                .history
+                .last()
+                .is_none_or(|(_, previous)| (previous - value).abs() > minval)
+    }
+
+    fn record_before_count(
+        &mut self,
+        axis: Value,
+        value: Value,
+        previous_value: Value,
+        record_data: bool,
+    ) {
+        if self.variable_history() {
+            if record_data && self.within_rfc_window() {
+                self.history.push((axis, value));
+                if value > self.maximum || previous_value > self.maximum {
+                    // Preserve C++ comparison/selection behavior exactly:
+                    // unlike f64::max, a NaN previous sample is selected when
+                    // the current sample alone makes the outer condition true.
+                    self.maximum = if value >= previous_value {
+                        value
+                    } else {
+                        previous_value
+                    };
+                    self.target_changed = true;
+                }
+            }
+        } else if self.at.is_none() {
+            self.history.push((axis, value));
+            if self.history.len() > 2 {
+                self.history.remove(0);
+            }
+            self.result_index = 0;
+        }
+    }
+
+    /// Update legacy RFC counters and report a newly entered requested window
+    /// for the non-FRAC LAST reopen/close rule.
+    fn update_rfc_counts(&mut self, value: Value, target: Value) -> bool {
+        if !self.occurrence_explicit {
+            return false;
+        }
+        let mut new_rise = false;
+        let mut new_fall = false;
+        if self.frac_max.is_some() {
+            if value > self.last_output && !self.is_rising {
+                self.is_rising = true;
+                self.is_falling = false;
+                self.actual_rise += 1;
+            }
+            if value < self.last_output && !self.is_falling {
+                self.is_rising = false;
+                self.is_falling = true;
+                self.actual_fall += 1;
+            }
+        } else {
+            if value - target >= 0.0 && self.last_output - target < 0.0 {
+                self.actual_rise += 1;
+                new_rise = true;
+            } else if value - target <= 0.0 && self.last_output - target > 0.0 {
+                self.actual_fall += 1;
+                new_fall = true;
+            }
+        }
+        let cross_target = if self.frac_max.is_some() { 0.0 } else { target };
+        let current = value - cross_target;
+        let previous = self.last_output - cross_target;
+        let crossed = current <= 0.0 && previous > 0.0 || current >= 0.0 && previous < 0.0;
+        if crossed {
+            self.actual_cross += 1;
+        }
+        self.last_output = value;
+        self.number < 0
+            && self.frac_max.is_none()
+            && match self.edge {
+                EdgeType::Rise => new_rise,
+                EdgeType::Fall => new_fall,
+                EdgeType::Cross => crossed,
+            }
+    }
+
+    fn refresh_target(&mut self, authored_target: Value) {
+        if let Some(frac_max) = self.frac_max {
+            if self.target_changed {
+                self.output_target = frac_max * self.maximum;
+            }
+        } else {
+            // Legacy moving-RHS syntax uses the current RHS as a fixed level
+            // while searching the retained dependent-variable bracket.
+            self.output_target = authored_target;
+        }
+    }
+
+    fn search_history(&mut self, minval: Value, after: Option<Value>) -> Option<Value> {
+        if self.history.len() < 2 {
+            return self.found;
+        }
+        for index in self.result_index..self.history.len() - 1 {
+            let (axis, value) = self.history[index];
+            let (next_axis, next_value) = self.history[index + 1];
+            if after.is_some_and(|trigger| next_axis <= trigger) {
+                continue;
+            }
+            let difference = value - self.output_target;
+            let next_difference = next_value - self.output_target;
+            if (difference < 0.0) != (next_difference < 0.0) {
+                if (next_value - value).abs() < minval {
+                    // RiseFallDelay updates an already-found dynamic result to
+                    // the left bracket, but deliberately does not turn this
+                    // near-flat first crossing into a found result.
+                    if self.found.is_some() {
+                        self.found = Some(axis);
+                    }
+                } else {
+                    self.found = Some(
+                        (next_axis - axis) * ((self.output_target - value) / (next_value - value))
+                            + axis,
+                    );
+                }
+                self.target_changed = false;
+                self.result_index = index;
+                break;
+            }
+            if difference.abs() < minval && next_difference.abs() >= minval {
+                self.found = Some(axis);
+            }
+        }
+        self.found
+    }
+
+    fn prune_consumed_history(&mut self) {
+        // Match Xyce's bounded-history maintenance. Retain the bracket at the
+        // consumed index so a revised FRAC_MAX target can resume from it.
+        const PRUNING_THRESHOLD: usize = 1000;
+        if self.variable_history() && self.result_index > PRUNING_THRESHOLD {
+            self.history.drain(..self.result_index);
+            self.result_index = 0;
+        }
+    }
+}
+
+impl LegacyFracDelayTracker {
+    pub(crate) fn new(trigger: &TrigSpec, target: &TrigSpec, minval: Value) -> Self {
+        Self {
+            trigger: LegacyFracClauseTracker::new(trigger),
+            target: LegacyFracClauseTracker::new(target),
+            minval,
+            initialized: false,
+            previous_trigger: 0.0,
+            previous_target: 0.0,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn update(
+        &mut self,
+        axis: Value,
+        trigger_value: Value,
+        trigger_target: Value,
+        target_value: Value,
+        target_target: Value,
+    ) -> Option<(Value, Value)> {
+        if !self.initialized {
+            self.trigger.last_output = trigger_value;
+            self.target.last_output = target_value;
+            self.initialized = true;
+        }
+
+        let record_data = self
+            .trigger
+            .variable_history_changed(trigger_value, self.minval)
+            || self
+                .target
+                .variable_history_changed(target_value, self.minval);
+        self.trigger
+            .record_before_count(axis, trigger_value, self.previous_trigger, record_data);
+        self.target
+            .record_before_count(axis, target_value, self.previous_target, record_data);
+
+        self.trigger.refresh_target(trigger_target);
+        let new_trigger_window = self
+            .trigger
+            .update_rfc_counts(trigger_value, self.trigger.output_target);
+        if new_trigger_window {
+            self.trigger.found = None;
+            self.target.found = None;
+        }
+        let new_target_window = self
+            .target
+            .update_rfc_counts(target_value, self.target.output_target);
+        if new_target_window {
+            self.target.found = None;
+        }
+
+        if let Some(at) = self.trigger.at {
+            if self.trigger.found.is_none() && axis >= at {
+                self.trigger.found = Some(axis);
+            }
+        } else if (self.trigger.found.is_none() || self.trigger.target_changed)
+            && self.trigger.within_rfc_window()
+        {
+            let old_trigger = self.trigger.found;
+            self.trigger.search_history(self.minval, None);
+            if self.trigger.found != old_trigger
+                && self
+                    .trigger
+                    .found
+                    .zip(self.target.found)
+                    .is_some_and(|(trigger, target)| target < trigger)
+            {
+                self.target.found = None;
+            }
+        }
+
+        self.target.refresh_target(target_target);
+        if let Some(trigger) = self.trigger.found
+            && (self.target.found.is_none()
+                || self.target.target_changed
+                || self.target.found.is_some_and(|target| target < trigger))
+            && self.target.within_rfc_window()
+        {
+            self.target.search_history(self.minval, Some(trigger));
+        }
+
+        self.trigger.prune_consumed_history();
+        self.target.prune_consumed_history();
+
+        self.previous_trigger = trigger_value;
+        self.previous_target = target_value;
+        self.trigger.found.zip(self.target.found)
+    }
+}
+
+impl DelayConditionTracker {
+    pub(crate) fn new(
+        edge: EdgeType,
+        number: isize,
+        occurrence_explicit: bool,
+        minval: Value,
+    ) -> Self {
+        Self {
+            mode: DelayTrackerMode::Modern,
+            edge,
+            number,
+            occurrence_explicit,
+            minval,
+            actual_count: 0,
+            previous: None,
+            continuous: false,
+            legacy_negative_search_open: true,
+        }
+    }
+
+    pub(crate) fn new_legacy(
+        edge: EdgeType,
+        number: isize,
+        occurrence_explicit: bool,
+        minval: Value,
+    ) -> Self {
+        let mut tracker = Self::new(edge, number, occurrence_explicit, minval);
+        tracker.mode = DelayTrackerMode::Legacy;
+        tracker
+    }
+
+    pub(crate) fn new_continuous(
+        edge: EdgeType,
+        number: isize,
+        occurrence_explicit: bool,
+        minval: Value,
+    ) -> Self {
+        let mut tracker = Self::new(edge, number, occurrence_explicit, minval);
+        tracker.continuous = true;
+        tracker
+    }
+
+    pub(crate) fn reset_segment(&mut self) {
+        self.previous = None;
+    }
+
+    pub(crate) fn minval(&self) -> Value {
+        self.minval
+    }
+
+    pub(crate) fn update_with_td(
+        &mut self,
+        axis: Value,
+        value: Value,
+        target: Value,
+        td: Option<Value>,
+    ) -> Option<Value> {
+        let previous = self.previous.replace((axis, value, target));
+        let Some((previous_axis, previous_value, previous_target)) = previous else {
+            return None;
+        };
+        match self.mode {
+            DelayTrackerMode::Modern => self.update_modern(
+                previous_axis,
+                previous_value,
+                previous_target,
+                axis,
+                value,
+                target,
+                td,
+            ),
+            DelayTrackerMode::Legacy => {
+                self.update_legacy(previous_axis, previous_value, axis, value, target)
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn update_modern(
+        &mut self,
+        previous_axis: Value,
+        previous_value: Value,
+        previous_target: Value,
+        axis: Value,
+        value: Value,
+        target: Value,
+        td: Option<Value>,
+    ) -> Option<Value> {
+        // TrigTarg::isWHENcondition rejects a constant dependent signal even
+        // when a moving RHS passes through it.
+        if value == previous_value {
+            return None;
+        }
+        let previous_difference = previous_value - previous_target;
+        let current_difference = value - target;
+        let found = current_difference.abs() < self.minval
+            || previous_difference < 0.0 && current_difference > 0.0
+            || previous_difference > 0.0 && current_difference < 0.0;
+        if !found {
+            return None;
+        }
+
+        let delta_axis = axis - previous_axis;
+        let dependent_slope = (value - previous_value) / delta_axis;
+        let target_slope = (target - previous_target) / delta_axis;
+        let dependent_intercept = value - dependent_slope * axis;
+        let target_intercept = target - target_slope * axis;
+        let event_axis =
+            if dependent_slope == target_slope && target_intercept == dependent_intercept {
+                axis
+            } else {
+                (target_intercept - dependent_intercept) / (dependent_slope - target_slope)
+            };
+        if !delay_td_accepts_modern_event(event_axis, td, self.minval) {
+            return None;
+        }
+
+        let rise = value > previous_value;
+        let fall = value < previous_value;
+        let requested = !self.occurrence_explicit
+            || match self.edge {
+                EdgeType::Rise => rise,
+                EdgeType::Fall => fall,
+                EdgeType::Cross => true,
+            };
+        if !requested {
+            return None;
+        }
+        self.actual_count += 1;
+        if self.number > 0
+            && if self.continuous {
+                self.actual_count < self.number as usize
+            } else {
+                self.actual_count != self.number as usize
+            }
+        {
+            return None;
+        }
+        Some(event_axis)
+    }
+
+    fn update_legacy(
+        &mut self,
+        previous_axis: Value,
+        previous_value: Value,
+        axis: Value,
+        value: Value,
+        target: Value,
+    ) -> Option<Value> {
+        let previous_difference = previous_value - target;
+        let current_difference = value - target;
+
+        if self.occurrence_explicit {
+            let rise = current_difference >= 0.0 && previous_difference < 0.0;
+            let fall = current_difference <= 0.0 && previous_difference > 0.0;
+            let crossed = rise || fall;
+            let requested_window = match self.edge {
+                EdgeType::Rise => rise,
+                EdgeType::Fall => fall,
+                EdgeType::Cross => crossed,
+            };
+            self.actual_count += usize::from(requested_window);
+            if self.number < 0 {
+                if requested_window {
+                    self.legacy_negative_search_open = true;
+                }
+                if !self.legacy_negative_search_open {
+                    return None;
+                }
+            }
+            if self.number >= 0
+                && if self.continuous {
+                    self.actual_count < self.number as usize
+                } else {
+                    self.actual_count != self.number as usize
+                }
+            {
+                return None;
+            }
+        }
+
+        let previous_negative = previous_difference < 0.0;
+        let current_negative = current_difference < 0.0;
+        if previous_negative != current_negative {
+            if (value - previous_value).abs() < self.minval {
+                // Xyce avoids dividing here but does not mark the clause as
+                // found in this branch.
+                return None;
+            }
+            let event = Some(
+                (axis - previous_axis) * ((target - previous_value) / (value - previous_value))
+                    + previous_axis,
+            );
+            if self.occurrence_explicit && self.number < 0 {
+                self.legacy_negative_search_open = false;
+            }
+            return event;
+        }
+        if previous_difference.abs() < self.minval && current_difference.abs() >= self.minval {
+            if self.occurrence_explicit && self.number < 0 {
+                self.legacy_negative_search_open = false;
+            }
+            return Some(previous_axis);
+        }
+        None
+    }
+}
+
+fn delay_at_is_reached(
+    axis: &[Value],
+    target: Value,
+    segment_starts: &[usize],
+    minval: Value,
+) -> bool {
     let Some((&minimum, &maximum)) = axis
         .iter()
         .min_by(|left, right| left.total_cmp(right))
@@ -1987,9 +2679,7 @@ fn delay_at_is_reached(axis: &[Value], target: Value, segment_starts: &[usize]) 
     else {
         return false;
     };
-    if target < minimum - XYCE_DEFAULT_MEASURE_MINVAL
-        || target > maximum + XYCE_DEFAULT_MEASURE_MINVAL
-    {
+    if target < minimum || target > maximum {
         return false;
     }
     let ascending = axis
@@ -2002,16 +2692,31 @@ fn delay_at_is_reached(axis: &[Value], target: Value, segment_starts: &[usize]) 
         .unwrap_or(true);
     axis.iter().any(|sample| {
         if ascending {
-            sample - XYCE_DEFAULT_MEASURE_MINVAL >= target
+            sample - minval >= target
         } else {
-            sample - XYCE_DEFAULT_MEASURE_MINVAL <= target
+            sample - minval <= target
         }
     })
 }
 
-fn delay_td_accepts_event(event_axis: Value, td: Option<Value>) -> bool {
-    const XYCE_TD_TOLERANCE: Value = 1.0e-12;
-    td.is_none_or(|td| event_axis > td * (1.0 - XYCE_TD_TOLERANCE))
+pub(crate) fn delay_td_accepts_sample(axis: Value, td: Option<Value>, minval: Value) -> bool {
+    td.is_none_or(|td| !(axis < td * (1.0 - minval)))
+}
+
+pub(crate) fn legacy_delay_accepts_sample(
+    axis: Value,
+    td: Option<Value>,
+    from: Option<Value>,
+    to: Option<Value>,
+    minval: Value,
+) -> bool {
+    delay_td_accepts_sample(axis, td, minval)
+        && from.is_none_or(|from| !(axis < from * (1.0 - minval)))
+        && to.is_none_or(|to| !(axis > to * (1.0 + minval)))
+}
+
+fn delay_td_accepts_modern_event(axis: Value, td: Option<Value>, minval: Value) -> bool {
+    td.is_none_or(|td| axis > td * (1.0 - minval))
 }
 
 fn axis_in_error_window(axis: Value, lower: Value, upper: Value, minval: Value) -> bool {
@@ -2036,31 +2741,30 @@ fn first_measure_condition_event(
     lower: Value,
     upper: Value,
     segment_starts: &[usize],
-) -> Result<Option<(usize, Value, Value)>, String> {
+) -> Result<Option<MeasureEvent>, String> {
     let left = lookup_signal(signals, &condition.left)
         .ok_or_else(|| format!("When signal '{}' not found", condition.left))?;
     let right = resolve_measure_operand(&condition.right, signals)?;
-    let events = measurement_condition_crossings(
-        left,
-        right,
-        axis.len(),
-        segment_starts,
+    let candidates =
+        measurement_condition_candidates(left, right, axis.len(), segment_starts, minval);
+    Ok(select_measure_condition_occurrence(
+        candidates.into_iter().filter_map(|(segment, crossing)| {
+            let event_axis =
+                axis[segment] + crossing.fraction * (axis[segment + 1] - axis[segment]);
+            point_event_axis_in_window(event_axis, lower, upper, minval).then_some((
+                segment,
+                crossing.fraction,
+                event_axis,
+                crossing.current_within_minval,
+                crossing.direction,
+            ))
+        }),
         condition.occurrence.edge,
-        minval,
-    )
-    .into_iter()
-    .filter_map(|(segment, fraction)| {
-        let event_axis = axis[segment] + fraction * (axis[segment + 1] - axis[segment]);
-        MeasureEngine::axis_in_measurement_window_with_minval(event_axis, lower, upper, minval)
-            .then_some((segment, fraction, event_axis))
-    });
-    Ok(select_measure_occurrence(
-        events,
         condition.occurrence.number,
     ))
 }
 
-type MeasureEvent = (usize, Value, Value);
+type MeasureEvent = (usize, Value, Value, bool);
 
 fn continuous_condition_events(
     condition: &WhenCondition,
@@ -2074,48 +2778,45 @@ fn continuous_condition_events(
     let left = lookup_signal(signals, &condition.left)
         .ok_or_else(|| format!("When signal '{}' not found", condition.left))?;
     let right = resolve_measure_operand(&condition.right, signals)?;
-    let events = measurement_condition_crossings(
-        left,
-        right,
-        axis.len(),
-        segment_starts,
+    let candidates =
+        measurement_condition_candidates(left, right, axis.len(), segment_starts, minval);
+    Ok(select_continuous_measure_condition_occurrences(
+        candidates.into_iter().filter_map(|(segment, crossing)| {
+            let event_axis =
+                axis[segment] + crossing.fraction * (axis[segment + 1] - axis[segment]);
+            point_event_axis_in_window(event_axis, lower, upper, minval).then_some((
+                segment,
+                crossing.fraction,
+                event_axis,
+                crossing.current_within_minval,
+                crossing.direction,
+            ))
+        }),
         condition.occurrence.edge,
-        minval,
-    )
-    .into_iter()
-    .filter_map(|(segment, fraction)| {
-        let event_axis = axis[segment] + fraction * (axis[segment + 1] - axis[segment]);
-        MeasureEngine::axis_in_measurement_window_with_minval(event_axis, lower, upper, minval)
-            .then_some((segment, fraction, event_axis))
-    })
-    .collect::<Vec<_>>();
-    Ok(select_continuous_occurrences(
-        events,
         condition.occurrence.number,
     ))
 }
 
-fn select_continuous_occurrences<T>(mut events: Vec<T>, number: isize) -> Vec<T> {
-    if number >= 0 {
-        // Xyce stores the qualifier as zero when it is omitted.  Our parsed
-        // representation uses one for both the omitted and explicit first
-        // occurrence; both begin emitting at the first qualifying event.
-        let skip = number.saturating_sub(1) as usize;
-        if skip >= events.len() {
-            Vec::new()
-        } else {
-            events.drain(skip..).collect()
-        }
+pub(crate) fn point_event_axis_in_window(
+    axis: Value,
+    lower: Value,
+    upper: Value,
+    minval: Value,
+) -> bool {
+    let lower_tolerance = if lower.is_finite() {
+        (lower * minval).abs()
     } else {
-        let Some(distance) = number.checked_abs().map(|value| value as usize) else {
-            return Vec::new();
-        };
-        if distance > events.len() {
-            Vec::new()
-        } else {
-            vec![events.swap_remove(events.len() - distance)]
-        }
-    }
+        0.0
+    };
+    let upper_tolerance = if upper.is_finite() {
+        (upper * minval).abs()
+    } else {
+        0.0
+    };
+    // Xyce's window routines reject only an affirmative out-of-window
+    // comparison. IEEE NaN therefore remains in-window and is retained as a
+    // computed event location by both raw getters and terminal results.
+    !(axis < lower - lower_tolerance || axis > upper + upper_tolerance)
 }
 
 fn continuous_when(
@@ -2145,7 +2846,7 @@ fn continuous_when(
             name,
             events
                 .into_iter()
-                .map(|(_, _, event_axis)| ContinuousMeasureRecord::point(event_axis, event_axis))
+                .map(|(_, _, event_axis, _)| ContinuousMeasureRecord::point(event_axis, event_axis))
                 .collect(),
         ),
         Ok(_) => ContinuousMeasureResult::failed(
@@ -2182,16 +2883,14 @@ fn continuous_find(
                 "AT point is outside the measurement window",
             );
         }
-        return interpolate_measure_signal_segmented(axis, signal, target, segment_starts)
-            .map(|value| {
-                ContinuousMeasureResult::success(
-                    name,
-                    vec![ContinuousMeasureRecord::point(value, target)],
-                )
-            })
-            .unwrap_or_else(|| {
-                ContinuousMeasureResult::failed(name, "Time point not in simulation range")
-            });
+        return match find_at_accepted_points(axis, signal, target, minval, segment_starts) {
+            Ok(Some(value)) => ContinuousMeasureResult::success(
+                name,
+                vec![ContinuousMeasureRecord::point(value, target)],
+            ),
+            Ok(None) => ContinuousMeasureResult::failed(name, "Time point not in simulation range"),
+            Err(error) => ContinuousMeasureResult::failed(name, error),
+        };
     }
     let Some(condition) = when else {
         return ContinuousMeasureResult::failed(name, "FIND requires AT= or WHEN condition");
@@ -2209,9 +2908,12 @@ fn continuous_find(
             name,
             events
                 .into_iter()
-                .map(|(segment, fraction, event_axis)| {
-                    let value =
-                        interpolate_extended_real(signal[segment], signal[segment + 1], fraction);
+                .map(|(segment, fraction, event_axis, current_within_minval)| {
+                    let value = if current_within_minval {
+                        signal[segment + 1]
+                    } else {
+                        interpolate_extended_real(signal[segment], signal[segment + 1], fraction)
+                    };
                     ContinuousMeasureRecord::point(value, event_axis)
                 })
                 .collect(),
@@ -2244,15 +2946,13 @@ fn continuous_derivative(
     let (lower, upper) =
         MeasureEngine::point_measurement_window_bounds(axis, analysis, from, to, td);
     let make_record = |segment: usize, event_axis: Value| {
-        let width = axis[segment + 1] - axis[segment];
-        if width == 0.0 || !width.is_finite() {
-            return Err("Derivative interval has zero or non-finite width");
-        }
-        let value = (signal[segment + 1] - signal[segment]) / width;
-        if value.is_nan() {
-            return Err("Derivative slope is undefined");
-        }
-        Ok(ContinuousMeasureRecord::point(value, event_axis))
+        let value = accepted_row_secant_slope(
+            axis[segment],
+            signal[segment],
+            axis[segment + 1],
+            signal[segment + 1],
+        );
+        ContinuousMeasureRecord::point(value, event_axis)
     };
     if let Some(target) = at {
         if !MeasureEngine::axis_in_measurement_window_with_minval(target, lower, upper, minval) {
@@ -2261,11 +2961,12 @@ fn continuous_derivative(
                 "AT point is outside the measurement window",
             );
         }
-        let Some(segment) = measurement_segment_containing(axis, target, segment_starts) else {
-            return ContinuousMeasureResult::failed(name, "Time point not in simulation range");
-        };
-        return match make_record(segment, target) {
-            Ok(record) => ContinuousMeasureResult::success(name, vec![record]),
+        return match derivative_at_accepted_points(axis, signal, target, minval, segment_starts) {
+            Ok(Some(slope)) => ContinuousMeasureResult::success(
+                name,
+                vec![ContinuousMeasureRecord::point(slope, target)],
+            ),
+            Ok(None) => ContinuousMeasureResult::failed(name, "Time point not in simulation range"),
             Err(error) => ContinuousMeasureResult::failed(name, error),
         };
     }
@@ -2287,12 +2988,9 @@ fn continuous_derivative(
         Ok(events) if !events.is_empty() => {
             let records = events
                 .into_iter()
-                .map(|(segment, _, event_axis)| make_record(segment, event_axis))
-                .collect::<Result<Vec<_>, _>>();
-            match records {
-                Ok(records) => ContinuousMeasureResult::success(name, records),
-                Err(error) => ContinuousMeasureResult::failed(name, error),
-            }
+                .map(|(segment, _, event_axis, _)| make_record(segment, event_axis))
+                .collect::<Vec<_>>();
+            ContinuousMeasureResult::success(name, records)
         }
         Ok(_) => ContinuousMeasureResult::failed(
             name,
@@ -2314,7 +3012,7 @@ fn continuous_delay_clause_events(
         // Xyce treats AT as an exact clause result. TD gates conditional
         // events but does not override a valid explicit AT location.
         TriggerEvent::At(target) => Ok((target.is_finite()
-            && delay_at_is_reached(axis, *target, segment_starts))
+            && delay_at_is_reached(axis, *target, segment_starts, minval))
         .then_some(*target)
         .into_iter()
         .collect()),
@@ -2328,24 +3026,27 @@ fn continuous_delay_clause_events(
             let left = lookup_signal(signals, &condition.left)
                 .ok_or_else(|| format!("When signal '{}' not found", condition.left))?;
             let right = resolve_measure_operand(&condition.right, signals)?;
-            let events = measurement_condition_crossings(
-                left,
-                right,
-                axis.len(),
-                segment_starts,
+            let mut tracker = DelayConditionTracker::new_continuous(
                 condition.occurrence.edge,
-                minval,
-            )
-            .into_iter()
-            .filter_map(|(segment, fraction)| {
-                let event_axis = axis[segment] + fraction * (axis[segment + 1] - axis[segment]);
-                delay_td_accepts_event(event_axis, effective_td).then_some(event_axis)
-            })
-            .collect::<Vec<_>>();
-            Ok(select_continuous_occurrences(
-                events,
                 condition.occurrence.number,
-            ))
+                clause.occurrence_explicit,
+                minval,
+            );
+            let mut events = Vec::new();
+            for row in 0..axis.len() {
+                if segment_starts.binary_search(&row).is_ok() {
+                    tracker.reset_segment();
+                }
+                let Some(right_value) = right.value_at(row) else {
+                    return Ok(Vec::new());
+                };
+                if let Some(event_axis) =
+                    tracker.update_with_td(axis[row], left[row], right_value, effective_td)
+                {
+                    events.push(event_axis);
+                }
+            }
+            Ok(events)
         }
     }
 }
@@ -2415,17 +3116,90 @@ fn select_measure_occurrence<T>(events: impl Iterator<Item = T>, number: isize) 
     }
 }
 
+type MeasureConditionCandidate = (usize, Value, Value, bool, MeasureConditionDirection);
+
+fn select_measure_condition_occurrence(
+    events: impl Iterator<Item = MeasureConditionCandidate>,
+    edge: EdgeType,
+    number: isize,
+) -> Option<MeasureEvent> {
+    if number < 0 {
+        return select_measure_occurrence(
+            events
+                .filter(|event| edge_matches_measure_condition(edge, event.4))
+                .map(|event| (event.0, event.1, event.2, event.3)),
+            number,
+        );
+    }
+    let requested = number.max(1) as usize;
+    let mut count = 0usize;
+    for event in events {
+        count += match edge {
+            EdgeType::Cross => 1,
+            EdgeType::Rise => usize::from(event.4 == MeasureConditionDirection::Rise),
+            // updateRFCcountForWhen increments FALL through an `else` when
+            // the current sample is not greater than the prior sample. This
+            // includes an indeterminate NaN comparison, even though the same
+            // candidate cannot satisfy withinRFCWindowForWhen's strict `<`.
+            EdgeType::Fall => usize::from(event.4 != MeasureConditionDirection::Rise),
+        };
+        if count >= requested && edge_matches_measure_condition(edge, event.4) {
+            return Some((event.0, event.1, event.2, event.3));
+        }
+    }
+    None
+}
+
+fn select_continuous_measure_condition_occurrences(
+    events: impl Iterator<Item = MeasureConditionCandidate>,
+    edge: EdgeType,
+    number: isize,
+) -> Vec<MeasureEvent> {
+    if number < 0 {
+        return select_measure_condition_occurrence(events, edge, number)
+            .into_iter()
+            .collect();
+    }
+    let requested = number.max(1) as usize;
+    let mut count = 0usize;
+    let mut selected = Vec::new();
+    for event in events {
+        count += match edge {
+            EdgeType::Cross => 1,
+            EdgeType::Rise => usize::from(event.4 == MeasureConditionDirection::Rise),
+            EdgeType::Fall => usize::from(event.4 != MeasureConditionDirection::Rise),
+        };
+        if count >= requested && edge_matches_measure_condition(edge, event.4) {
+            selected.push((event.0, event.1, event.2, event.3));
+        }
+    }
+    selected
+}
+
 /// Return every qualifying `WHEN left=right` crossing interval in traversal
 /// order. Xyce requires the left operand itself to change over the interval;
 /// a moving right operand cannot trigger against a constant left operand.
-fn measurement_condition_crossings(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MeasureConditionDirection {
+    Rise,
+    Fall,
+    Indeterminate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MeasureConditionCrossing {
+    pub(crate) fraction: Value,
+    pub(crate) current_within_minval: bool,
+    pub(crate) direction: MeasureConditionDirection,
+}
+
+fn measurement_condition_candidates(
     left: &[Value],
     right: ResolvedMeasureOperand<'_>,
     point_count: usize,
     segment_starts: &[usize],
-    edge: EdgeType,
     minval: Value,
-) -> Vec<(usize, Value)> {
+) -> Vec<(usize, MeasureConditionCrossing)> {
     if left.len() != point_count || point_count < 2 || !minval.is_finite() || minval < 0.0 {
         return Vec::new();
     }
@@ -2437,85 +3211,156 @@ fn measurement_condition_crossings(
         }
         let left_previous = left[segment];
         let left_current = left[segment + 1];
-        // Xyce rejects an interval when the dependent-variable motion is
-        // smaller than this measurement's MINVAL. NOISE decks can lower
-        // MINVAL explicitly, so physically meaningful sub-picounit spectral
-        // motion remains eligible without allowing numerical jitter on an
-        // otherwise constant waveform to fabricate events.
-        if (left_current - left_previous).abs() < minval {
-            continue;
-        }
         let Some(right_previous) = right.value_at(segment) else {
             return Vec::new();
         };
         let Some(right_current) = right.value_at(segment + 1) else {
             return Vec::new();
         };
-        let previous_difference = left_previous - right_previous;
-        let current_difference = left_current - right_current;
-        let previous_equal = previous_difference.abs() < minval;
-        let current_equal = current_difference.abs() < minval;
-        // Entering Xyce's MINVAL equality band is the crossing.  Normalize
-        // that state before the next strict-sign test so leaving the band
-        // cannot emit the same physical root a second time.
-        let strict_crossing = !previous_equal
-            && ((previous_difference < 0.0 && current_difference > 0.0)
-                || (previous_difference > 0.0 && current_difference < 0.0));
-        if !current_equal && !strict_crossing {
-            continue;
-        }
-        let edge_matches = match edge {
-            EdgeType::Rise => left_current > left_previous,
-            EdgeType::Fall => left_current < left_previous,
-            EdgeType::Cross => true,
-        };
-        if !edge_matches {
-            continue;
-        }
-
-        let denominator = current_difference - previous_difference;
-        let fraction = if denominator == 0.0 {
-            if previous_difference == 0.0 && current_difference == 0.0 {
-                // Parallel, identical moving operands are considered equal at
-                // the current accepted point by Xyce.
-                1.0
-            } else {
-                continue;
-            }
-        } else {
-            -previous_difference / denominator
-        };
-        // Xyce always performs its linear intersection calculation when the
-        // accepted endpoint is inside MINVAL. The resulting instant may lie
-        // just outside this segment when both samples are on the same side of
-        // the target, while a strict sign crossing remains bracketed.
-        if fraction.is_finite() && (current_equal || (0.0..=1.0).contains(&fraction)) {
-            crossings.push((segment, fraction));
+        if let Some(crossing) = measure_condition_crossing(
+            left_previous,
+            left_current,
+            right_previous,
+            right_current,
+            minval,
+        ) {
+            crossings.push((segment, crossing));
         }
     }
     crossings
 }
 
-fn measurement_segment_containing(
-    axis: &[Value],
-    target: Value,
+#[cfg(test)]
+fn measurement_condition_crossings(
+    left: &[Value],
+    right: ResolvedMeasureOperand<'_>,
+    point_count: usize,
     segment_starts: &[usize],
-) -> Option<usize> {
-    const XYCE_AT_ABSOLUTE_TOLERANCE: Value = 1.0e-12;
-    axis.windows(2).enumerate().find_map(|(segment, pair)| {
-        if segment_starts.binary_search(&(segment + 1)).is_ok() {
-            return None;
+    edge: EdgeType,
+    minval: Value,
+) -> Vec<(usize, Value)> {
+    measurement_condition_candidates(left, right, point_count, segment_starts, minval)
+        .into_iter()
+        .filter(|(_, crossing)| edge_matches_measure_condition(edge, crossing.direction))
+        .map(|(segment, crossing)| (segment, crossing.fraction))
+        .collect()
+}
+
+/// Compute the legacy percentage-threshold rise/fall duration over a complete
+/// accepted-point waveform. The live runtime deliberately calls this only at
+/// the final point because both thresholds depend on the waveform's global
+/// extrema.
+pub(crate) fn rise_fall_duration(
+    axis: &[Value],
+    signal: &[Value],
+    from_pct: Value,
+    to_pct: Value,
+    number: usize,
+    is_rise: bool,
+) -> Option<Value> {
+    let minimum = signal.iter().copied().fold(Value::INFINITY, Value::min);
+    let maximum = signal.iter().copied().fold(Value::NEG_INFINITY, Value::max);
+    let range = maximum - minimum;
+    let (lower_threshold, upper_threshold) = if is_rise {
+        (minimum + from_pct * range, minimum + to_pct * range)
+    } else {
+        (minimum + to_pct * range, minimum + from_pct * range)
+    };
+    let edge = if is_rise {
+        EdgeType::Rise
+    } else {
+        EdgeType::Fall
+    };
+    let crossing = |threshold: Value| {
+        let mut count = 0usize;
+        for (segment, samples) in signal.windows(2).enumerate() {
+            let previous = samples[0];
+            let current = samples[1];
+            let crossed = match edge {
+                EdgeType::Rise => previous < threshold && current >= threshold,
+                EdgeType::Fall => previous > threshold && current <= threshold,
+                EdgeType::Cross => unreachable!("rise/fall duration selects a directional edge"),
+            };
+            if !crossed {
+                continue;
+            }
+            count += 1;
+            if count == number {
+                let fraction = (threshold - previous) / (current - previous);
+                return Some(axis[segment] + fraction * (axis[segment + 1] - axis[segment]));
+            }
         }
-        let previous = pair[0];
-        let current = pair[1];
-        if previous == current {
-            return None;
+        None
+    };
+    crossing(lower_threshold)
+        .zip(crossing(upper_threshold))
+        .map(|(lower, upper)| (upper - lower).abs())
+}
+
+pub(crate) fn measure_condition_crossing(
+    left_previous: Value,
+    left_current: Value,
+    right_previous: Value,
+    right_current: Value,
+    minval: Value,
+) -> Option<MeasureConditionCrossing> {
+    if !minval.is_finite() || minval < 0.0 || left_current == left_previous {
+        return None;
+    }
+    let previous_difference = left_previous - right_previous;
+    let current_difference = left_current - right_current;
+    let previous_equal = previous_difference.abs() < minval;
+    let current_equal = current_difference.abs() < minval;
+    // Entering Xyce's MINVAL equality band is the crossing. Normalize that
+    // state before the next strict-sign test so leaving the band cannot emit
+    // the same physical root a second time.
+    let strict_crossing = !previous_equal
+        && ((previous_difference < 0.0 && current_difference > 0.0)
+            || (previous_difference > 0.0 && current_difference < 0.0));
+    if !current_equal && !strict_crossing {
+        return None;
+    }
+    let direction = if left_current > left_previous {
+        MeasureConditionDirection::Rise
+    } else if left_current < left_previous {
+        MeasureConditionDirection::Fall
+    } else {
+        // IEEE comparisons with a NaN endpoint are both false. Xyce still
+        // accepts current-point MINVAL equality for default CROSS, increments
+        // its fall counter through the updateRFC `else`, but does not select
+        // the event for an authored RISE or FALL qualifier.
+        MeasureConditionDirection::Indeterminate
+    };
+
+    let denominator = current_difference - previous_difference;
+    let fraction = if denominator == 0.0 {
+        if previous_difference == 0.0 && current_difference == 0.0 {
+            // Parallel, identical moving operands are equal at the current
+            // accepted point in Xyce.
+            1.0
+        } else {
+            -previous_difference / denominator
         }
-        let strictly_between = target > previous.min(current) && target < previous.max(current);
-        let matches_endpoint = (target - previous).abs() < XYCE_AT_ABSOLUTE_TOLERANCE
-            || (target - current).abs() < XYCE_AT_ABSOLUTE_TOLERANCE;
-        (strictly_between || matches_endpoint).then_some(segment)
+    } else {
+        -previous_difference / denominator
+    };
+    // Xyce preserves the raw interpolated instant. In particular, a prior
+    // NaN followed by current-point MINVAL equality produces a NaN instant
+    // that passes its negative-form window checks and participates in RFC
+    // occurrence counting.
+    Some(MeasureConditionCrossing {
+        fraction,
+        current_within_minval: current_equal,
+        direction,
     })
+}
+
+fn edge_matches_measure_condition(edge: EdgeType, direction: MeasureConditionDirection) -> bool {
+    match edge {
+        EdgeType::Rise => direction == MeasureConditionDirection::Rise,
+        EdgeType::Fall => direction == MeasureConditionDirection::Fall,
+        EdgeType::Cross => true,
+    }
 }
 
 fn measurement_segment_slope(
@@ -2524,55 +3369,160 @@ fn measurement_segment_slope(
     signal: &[Value],
     segment: usize,
 ) -> MeasureResult {
-    let delta_axis = axis[segment + 1] - axis[segment];
-    if delta_axis == 0.0 || !delta_axis.is_finite() {
-        return MeasureResult::failed(name, "Derivative interval has zero or non-finite width");
+    MeasureResult::success(
+        name,
+        accepted_row_secant_slope(
+            axis[segment],
+            signal[segment],
+            axis[segment + 1],
+            signal[segment + 1],
+        ),
+    )
+}
+
+pub(crate) fn accepted_row_secant_slope(
+    previous_axis: Value,
+    previous_signal: Value,
+    current_axis: Value,
+    current_signal: Value,
+) -> Value {
+    (current_signal - previous_signal) / (current_axis - previous_axis)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum AcceptedRowAtMatch {
+    Current,
+    PreviousSegment { fraction: Value },
+}
+
+/// Classify one accepted row using Xyce's shared `AT=` rule.
+///
+/// The current endpoint has priority because FIND snaps to its exact dependent
+/// value while DERIV uses the accepted row's backward secant. Otherwise, a
+/// strict bracket or a previous endpoint inside the authored `MINVAL` band
+/// qualifies the row. Passing `None` at a DC rollover prevents a cross-segment
+/// bracket while still permitting a current-endpoint match.
+pub(crate) fn accepted_row_at_match(
+    previous_axis: Option<Value>,
+    current_axis: Value,
+    target: Value,
+    minval: Value,
+) -> Option<AcceptedRowAtMatch> {
+    if !target.is_finite() || !minval.is_finite() || minval < 0.0 {
+        return None;
     }
-    let slope = (signal[segment + 1] - signal[segment]) / delta_axis;
-    MeasureResult::success(name, slope)
+    if !current_axis.is_finite() {
+        return None;
+    }
+    let current_difference = current_axis - target;
+    if current_difference.abs() < minval {
+        return Some(AcceptedRowAtMatch::Current);
+    }
+
+    let previous_axis = previous_axis?;
+    if !previous_axis.is_finite() {
+        return None;
+    }
+    let previous_difference = previous_axis - target;
+    let strictly_bracketed = (previous_difference < 0.0 && current_difference > 0.0)
+        || (previous_difference > 0.0 && current_difference < 0.0);
+    if !strictly_bracketed && previous_difference.abs() >= minval {
+        return None;
+    }
+
+    let width = current_axis - previous_axis;
+    if width == 0.0 || !width.is_finite() {
+        return None;
+    }
+    let fraction = (target - previous_axis) / width;
+    if !fraction.is_finite() {
+        return None;
+    }
+    Some(AcceptedRowAtMatch::PreviousSegment { fraction })
 }
 
-#[cfg(test)]
-fn interpolate_measure_signal(axis: &[Value], signal: &[Value], target: Value) -> Option<Value> {
-    interpolate_measure_signal_segmented(axis, signal, target, &[])
+fn find_at_accepted_row(
+    previous: Option<(Value, Value)>,
+    current: (Value, Value),
+    target: Value,
+    minval: Value,
+) -> Result<Option<Value>, &'static str> {
+    let Some(relation) =
+        accepted_row_at_match(previous.map(|(axis, _)| axis), current.0, target, minval)
+    else {
+        return Ok(None);
+    };
+    let value = match relation {
+        AcceptedRowAtMatch::Current => current.1,
+        AcceptedRowAtMatch::PreviousSegment { fraction } => {
+            let Some((_, previous_signal)) = previous else {
+                return Ok(None);
+            };
+            interpolate_extended_real(previous_signal, current.1, fraction)
+        }
+    };
+    Ok(Some(value))
 }
 
-fn interpolate_measure_signal_segmented(
+fn find_at_accepted_points(
     axis: &[Value],
     signal: &[Value],
     target: Value,
+    minval: Value,
     segment_starts: &[usize],
-) -> Option<Value> {
-    if axis.len() != signal.len() || axis.is_empty() || !target.is_finite() {
-        return None;
+) -> Result<Option<Value>, &'static str> {
+    if axis.len() != signal.len() || axis.is_empty() {
+        return Ok(None);
     }
-    if let Some(index) = axis.iter().position(|value| *value == target) {
-        return signal.get(index).copied();
+    for row in 0..axis.len() {
+        let starts_segment = row == 0 || segment_starts.binary_search(&row).is_ok();
+        let previous = (!starts_segment).then(|| (axis[row - 1], signal[row - 1]));
+        if let Some(value) =
+            find_at_accepted_row(previous, (axis[row], signal[row]), target, minval)?
+        {
+            return Ok(Some(value));
+        }
     }
-    axis.windows(2).enumerate().find_map(|(index, segment)| {
-        if segment_starts.binary_search(&(index + 1)).is_ok() {
-            return None;
+    Ok(None)
+}
+
+fn derivative_at_accepted_points(
+    axis: &[Value],
+    signal: &[Value],
+    target: Value,
+    minval: Value,
+    segment_starts: &[usize],
+) -> Result<Option<Value>, &'static str> {
+    if axis.len() != signal.len() || axis.len() < 2 {
+        return Ok(None);
+    }
+    // Xyce initializes state at the first global row but does not evaluate a
+    // DERIV AT there. Later DC rollovers remain eligible after resetting the
+    // previous state to the current accepted row, which correctly classifies
+    // their self-secants as undefined.
+    for row in 1..axis.len() {
+        let starts_segment = segment_starts.binary_search(&row).is_ok();
+        let previous_axis = (!starts_segment).then_some(axis[row - 1]);
+        if accepted_row_at_match(previous_axis, axis[row], target, minval).is_none() {
+            continue;
         }
-        let left = segment[0];
-        let right = segment[1];
-        if left == right || target < left.min(right) || target > left.max(right) {
-            return None;
-        }
-        let fraction = (target - left) / (right - left);
-        Some(interpolate_extended_real(
-            signal[index],
-            signal[index + 1],
-            fraction,
-        ))
-    })
+        let previous_row = if starts_segment { row } else { row - 1 };
+        return Ok(Some(accepted_row_secant_slope(
+            axis[previous_row],
+            signal[previous_row],
+            axis[row],
+            signal[row],
+        )));
+    }
+    Ok(None)
 }
 
 /// Interpolate values in the extended-real domain used by direct measurement
 /// operands. Finite endpoints retain the conventional linear formula. At an
 /// interior point, a single infinite endpoint dominates and equal signed
 /// infinities remain constant; opposite infinities are undefined and yield
-/// NaN, which the measurement result invariant rejects.
-fn interpolate_extended_real(left: Value, right: Value, fraction: Value) -> Value {
+/// NaN, which is retained as a computed undefined numeric result.
+pub(crate) fn interpolate_extended_real(left: Value, right: Value, fraction: Value) -> Value {
     if fraction == 0.0 {
         return left;
     }
@@ -2618,27 +3568,425 @@ mod tests {
         engine
     }
 
+    fn find_at_statement(
+        name: &str,
+        analysis: &str,
+        target: Value,
+        minval: Value,
+    ) -> MeasureStatement {
+        MeasureStatement {
+            default_value: None,
+            print_policy: MeasurePrintPolicy::All,
+            name: name.to_string(),
+            measure_type: MeasureType::Find {
+                signal: "Y".to_string(),
+                at: Some(target),
+                when: None,
+                from: None,
+                to: None,
+                td: None,
+                minval,
+            },
+            analysis: analysis.to_string(),
+            goal: None,
+            tolerance: None,
+        }
+    }
+
+    fn derivative_at_statement(
+        name: &str,
+        analysis: &str,
+        target: Value,
+        minval: Value,
+    ) -> MeasureStatement {
+        MeasureStatement {
+            default_value: None,
+            print_policy: MeasurePrintPolicy::All,
+            name: name.to_string(),
+            measure_type: MeasureType::Derivative {
+                signal: "Y".to_string(),
+                at: Some(target),
+                when: None,
+                from: None,
+                to: None,
+                td: None,
+                minval,
+            },
+            analysis: analysis.to_string(),
+            goal: None,
+            tolerance: None,
+        }
+    }
+
     #[test]
-    fn measurement_interpolation_accepts_exact_singleton_and_final_samples() {
-        assert_eq!(interpolate_measure_signal(&[1.0], &[2.5], 1.0), Some(2.5));
+    fn extended_real_interpolation_preserves_endpoints_and_infinities() {
+        assert_eq!(interpolate_extended_real(3.0, 5.0, 0.5), 4.0);
         assert_eq!(
-            interpolate_measure_signal(&[1.0, 2.0], &[3.0, 5.0], 2.0),
-            Some(5.0)
+            interpolate_extended_real(Value::INFINITY, Value::NEG_INFINITY, 0.0),
+            Value::INFINITY
         );
         assert_eq!(
-            interpolate_measure_signal(&[1.0, 2.0], &[3.0, 5.0], 1.5),
-            Some(4.0)
+            interpolate_extended_real(Value::INFINITY, Value::NEG_INFINITY, 1.0),
+            Value::NEG_INFINITY
         );
-        assert_eq!(interpolate_measure_signal(&[1.0], &[2.5], 2.0), None);
         assert_eq!(
-            interpolate_measure_signal(
-                &[0.0, 1.0],
-                &[Value::NEG_INFINITY, Value::NEG_INFINITY],
-                0.5,
-            ),
-            Some(Value::NEG_INFINITY)
+            interpolate_extended_real(Value::NEG_INFINITY, Value::NEG_INFINITY, 0.5),
+            Value::NEG_INFINITY
         );
+        assert_eq!(
+            interpolate_extended_real(Value::INFINITY, 0.0, 0.5),
+            Value::INFINITY
+        );
+        assert!(interpolate_extended_real(Value::INFINITY, Value::NEG_INFINITY, 0.5).is_nan());
         assert!(interpolate_extended_real(Value::INFINITY, 0.0, 1.5).is_nan());
+    }
+
+    #[test]
+    fn find_at_accepted_rows_follow_xyce_minval_and_segment_rules() {
+        let default_minval = XYCE_DEFAULT_MEASURE_MINVAL;
+
+        assert_eq!(
+            find_at_accepted_row(None, (0.0, 2.0), 5.0e-13, default_minval).unwrap(),
+            Some(2.0),
+            "the default equality band returns the first accepted value"
+        );
+        assert_eq!(
+            find_at_accepted_row(None, (0.0, 2.0), 0.25, 0.5).unwrap(),
+            Some(2.0),
+            "an authored large MINVAL returns the current value early"
+        );
+        assert_eq!(
+            find_at_accepted_row(None, (0.0, 0.0), 5.0e-13, 1.0e-14).unwrap(),
+            None
+        );
+        assert_eq!(
+            find_at_accepted_row(Some((0.0, 0.0)), (1.0, 1.0e12), 5.0e-13, 1.0e-14,).unwrap(),
+            Some(0.5),
+            "a smaller MINVAL waits for the steep segment interpolation"
+        );
+        assert_eq!(
+            find_at_accepted_row(Some((0.0, 0.0)), (1.0, 10.0), 1.0 - 5.0e-13, default_minval,)
+                .unwrap(),
+            Some(10.0),
+            "a near-current endpoint returns the exact current signal"
+        );
+        assert_eq!(
+            find_at_accepted_row(Some((0.0, 2.0)), (1.0, 3.0), 1.0, 0.0).unwrap(),
+            None,
+            "strict MINVAL comparison makes zero reject even exact endpoints"
+        );
+
+        let extrapolated = find_at_accepted_row(Some((1.0, 4.0)), (2.0, 10.0), 0.995, 0.01)
+            .expect("the extrapolation is defined")
+            .expect("a prior point inside MINVAL qualifies the accepted row");
+        assert!((extrapolated - 3.97).abs() < 1.0e-12);
+        assert_eq!(
+            find_at_accepted_row(Some((1.0, 4.0)), (2.0, 10.0), 0.98, 0.01).unwrap(),
+            None,
+            "a target beyond the prior equality band and segment range fails"
+        );
+
+        let nested_axis = [0.0, 1.0, 2.0, 3.0];
+        let nested_signal = [10.0, 11.0, 20.0, 21.0];
+        assert_eq!(
+            find_at_accepted_points(&nested_axis, &nested_signal, 2.0, default_minval, &[2],)
+                .unwrap(),
+            Some(20.0)
+        );
+        assert_eq!(
+            find_at_accepted_points(
+                &nested_axis,
+                &nested_signal,
+                2.0 + 5.0e-13,
+                default_minval,
+                &[2],
+            )
+            .unwrap(),
+            Some(20.0),
+            "a near target at a later segment start has no prior row"
+        );
+        assert_eq!(
+            find_at_accepted_points(&nested_axis, &nested_signal, 1.5, default_minval, &[2],)
+                .unwrap(),
+            None,
+            "the apparent bracket across a DC segment barrier is invalid"
+        );
+
+        let undefined = find_at_accepted_points(
+            &[0.0, 1.0, 0.5],
+            &[Value::INFINITY, Value::NEG_INFINITY, 7.0],
+            0.5,
+            default_minval,
+            &[],
+        )
+        .expect("the first accepted interpolation is a computed numeric result")
+        .expect("the accepted point is found");
+        assert!(undefined.is_nan());
+    }
+
+    #[test]
+    fn scalar_find_and_when_results_retain_their_event_axes() {
+        let axis = [0.0, 1.0];
+        let dependent = [0.0, 10.0];
+        let condition = [-1.0, 1.0];
+        let signals = HashMap::from([
+            ("Y".to_string(), dependent.as_slice()),
+            ("CONDITION".to_string(), condition.as_slice()),
+        ]);
+        let when = WhenCondition {
+            left: "CONDITION".to_string(),
+            right: MeasureOperand::Constant(0.0),
+            occurrence: EventOccurrence::default(),
+        };
+        let mut engine = MeasureEngine::new();
+        engine.add(find_at_statement(
+            "find_at",
+            "TRAN",
+            0.25,
+            XYCE_DEFAULT_MEASURE_MINVAL,
+        ));
+        engine.add(find_at_statement(
+            "find_at_outside",
+            "TRAN",
+            2.0,
+            XYCE_DEFAULT_MEASURE_MINVAL,
+        ));
+        engine.add(MeasureStatement {
+            name: "find_when".to_string(),
+            measure_type: MeasureType::Find {
+                signal: "Y".to_string(),
+                at: None,
+                when: Some(when.clone()),
+                from: None,
+                to: None,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
+            },
+            analysis: "TRAN".to_string(),
+            goal: None,
+            tolerance: None,
+            default_value: None,
+            print_policy: MeasurePrintPolicy::All,
+        });
+        engine.add(MeasureStatement {
+            name: "when".to_string(),
+            measure_type: MeasureType::When {
+                condition: when,
+                from: None,
+                to: None,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
+            },
+            analysis: "TRAN".to_string(),
+            goal: None,
+            tolerance: None,
+            default_value: None,
+            print_policy: MeasurePrintPolicy::All,
+        });
+
+        let results = engine.evaluate(&axis, &signals);
+        assert_eq!(results[0].value, Some(2.5));
+        assert_eq!(results[0].event_axis, Some(0.25));
+        assert!(!results[1].passed);
+        assert_eq!(results[1].event_axis, Some(2.0));
+        assert_eq!(results[2].value, Some(5.0));
+        assert_eq!(results[2].event_axis, Some(0.5));
+        assert_eq!(results[3].value, Some(0.5));
+        assert_eq!(results[3].event_axis, Some(0.5));
+        assert!(results[0].passed && results[2].passed && results[3].passed);
+    }
+
+    #[test]
+    fn find_at_accepted_rows_reject_invalid_programmatic_limits() {
+        let previous = Some((0.0, 1.0));
+        let current = (1.0, 2.0);
+        assert_eq!(
+            find_at_accepted_row(previous, current, 0.5, -1.0).unwrap(),
+            None
+        );
+        assert_eq!(
+            find_at_accepted_row(previous, current, 0.5, Value::NAN).unwrap(),
+            None
+        );
+        assert_eq!(
+            find_at_accepted_row(previous, current, 0.5, Value::INFINITY).unwrap(),
+            None
+        );
+        assert_eq!(
+            find_at_accepted_row(previous, current, Value::NAN, 1.0).unwrap(),
+            None
+        );
+        assert_eq!(
+            find_at_accepted_row(previous, current, Value::INFINITY, 1.0).unwrap(),
+            None
+        );
+
+        let axis = [0.0, 1.0];
+        let values = [0.0, 1.0];
+        let mut signals = HashMap::new();
+        signals.insert("Y".to_string(), values.as_slice());
+        for minval in [-1.0, Value::NAN, Value::INFINITY] {
+            let scalar = engine_with(find_at_statement("invalid", "TRAN", 0.5, minval))
+                .evaluate(&axis, &signals);
+            assert!(!scalar[0].passed);
+
+            let continuous = engine_with(find_at_statement(
+                "invalid_continuous",
+                "TRAN_CONT",
+                0.5,
+                minval,
+            ))
+            .evaluate_continuous(&axis, &signals, &[]);
+            assert!(continuous[0].failure.is_some());
+            assert!(continuous[0].records.is_empty());
+
+            let derivative = engine_with(derivative_at_statement(
+                "invalid_derivative",
+                "TRAN",
+                0.5,
+                minval,
+            ))
+            .evaluate(&axis, &signals);
+            assert!(!derivative[0].passed);
+
+            let continuous_derivative = engine_with(derivative_at_statement(
+                "invalid_continuous_derivative",
+                "TRAN_CONT",
+                0.5,
+                minval,
+            ))
+            .evaluate_continuous(&axis, &signals, &[]);
+            assert!(continuous_derivative[0].failure.is_some());
+            assert!(continuous_derivative[0].records.is_empty());
+        }
+    }
+
+    #[test]
+    fn scalar_and_continuous_find_at_keep_accepted_row_order() {
+        let axis = [0.0, 2.0, 1.0];
+        let values = [0.0, 20.0, 100.0];
+        let mut signals = HashMap::new();
+        signals.insert("Y".to_string(), values.as_slice());
+
+        let scalar = engine_with(find_at_statement(
+            "scalar",
+            "TRAN",
+            1.0,
+            XYCE_DEFAULT_MEASURE_MINVAL,
+        ))
+        .evaluate(&axis, &signals);
+        assert_eq!(scalar[0].value, Some(10.0));
+
+        let continuous = engine_with(find_at_statement(
+            "continuous",
+            "TRAN_CONT",
+            1.0,
+            XYCE_DEFAULT_MEASURE_MINVAL,
+        ))
+        .evaluate_continuous(&axis, &signals, &[]);
+        assert_eq!(continuous[0].records.len(), 1);
+        assert_eq!(continuous[0].records[0].value, 10.0);
+        assert_eq!(continuous[0].records[0].event_axis, Some(1.0));
+    }
+
+    #[test]
+    fn derivative_at_uses_the_first_accepted_rows_backward_secant() {
+        let axis = [0.0, 1.0, 2.0];
+        let values = [0.0, 10.0, 40.0];
+        let mut signals = HashMap::new();
+        signals.insert("Y".to_string(), values.as_slice());
+
+        let scalar = engine_with(derivative_at_statement("slope", "TRAN", 1.05, 0.1))
+            .evaluate(&axis, &signals);
+        assert_eq!(scalar[0].value, Some(10.0));
+
+        let continuous = engine_with(derivative_at_statement(
+            "slope_continuous",
+            "TRAN_CONT",
+            1.05,
+            0.1,
+        ))
+        .evaluate_continuous(&axis, &signals, &[]);
+        assert_eq!(continuous[0].records[0].value, 10.0);
+
+        let nonmonotonic_axis = [0.0, 2.0, 1.0];
+        let nonmonotonic_values = [0.0, 20.0, 100.0];
+        signals.insert("Y".to_string(), nonmonotonic_values.as_slice());
+        let first_bracket = engine_with(derivative_at_statement(
+            "first_bracket",
+            "TRAN",
+            1.0,
+            XYCE_DEFAULT_MEASURE_MINVAL,
+        ))
+        .evaluate(&nonmonotonic_axis, &signals);
+        assert_eq!(first_bracket[0].value, Some(10.0));
+
+        let exact_zero_band = engine_with(derivative_at_statement("zero_band", "TRAN", 1.0, 0.0))
+            .evaluate(&axis, &signals);
+        assert!(!exact_zero_band[0].passed);
+    }
+
+    #[test]
+    fn find_and_derivative_at_classify_singletons_barriers_and_zero_widths() {
+        let singleton_axis = [0.0];
+        let singleton_values = [3.0];
+        let mut singleton_signals = HashMap::new();
+        singleton_signals.insert("Y".to_string(), singleton_values.as_slice());
+        let found = engine_with(find_at_statement(
+            "singleton_find",
+            "TRAN",
+            0.0,
+            XYCE_DEFAULT_MEASURE_MINVAL,
+        ))
+        .evaluate(&singleton_axis, &singleton_signals);
+        assert_eq!(found[0].value, Some(3.0));
+        let derivative = engine_with(derivative_at_statement(
+            "singleton_derivative",
+            "TRAN",
+            0.0,
+            XYCE_DEFAULT_MEASURE_MINVAL,
+        ))
+        .evaluate(&singleton_axis, &singleton_signals);
+        assert!(!derivative[0].passed);
+
+        let nested_axis = [0.0, 1.0, 2.0, 3.0];
+        let nested_values = [10.0, 11.0, 20.0, 21.0];
+        let mut nested_signals = HashMap::new();
+        nested_signals.insert("Y".to_string(), nested_values.as_slice());
+        let nested_engine = engine_with(derivative_at_statement(
+            "segment_start_derivative",
+            "DC",
+            2.0,
+            XYCE_DEFAULT_MEASURE_MINVAL,
+        ));
+        let nested =
+            nested_engine.evaluate_with_segment_starts(&nested_axis, &nested_signals, &[2]);
+        assert!(nested[0].passed, "the rollover self-secant is computed 0/0");
+        assert!(nested[0].value.is_some_and(Value::is_nan));
+
+        let duplicate_axis = [0.0, 0.0];
+        let changing_values = [0.0, 1.0];
+        let constant_values = [1.0, 1.0];
+        let mut duplicate_signals = HashMap::new();
+        duplicate_signals.insert("Y".to_string(), changing_values.as_slice());
+        let infinite = engine_with(derivative_at_statement(
+            "infinite",
+            "TRAN",
+            0.0,
+            XYCE_DEFAULT_MEASURE_MINVAL,
+        ))
+        .evaluate(&duplicate_axis, &duplicate_signals);
+        assert_eq!(infinite[0].value, Some(Value::INFINITY));
+        duplicate_signals.insert("Y".to_string(), constant_values.as_slice());
+        let undefined = engine_with(derivative_at_statement(
+            "undefined",
+            "TRAN",
+            0.0,
+            XYCE_DEFAULT_MEASURE_MINVAL,
+        ))
+        .evaluate(&duplicate_axis, &duplicate_signals);
+        assert!(undefined[0].passed);
+        assert!(undefined[0].value.is_some_and(Value::is_nan));
     }
 
     #[test]
@@ -2934,7 +4282,7 @@ mod tests {
     }
 
     #[test]
-    fn nan_signal_reports_failed_measurement_without_passing_specs() {
+    fn nan_in_an_unreferenced_sample_does_not_fail_other_measurement_state() {
         let time = [0.0, 1.0, 2.0];
         let data = [0.0, f64::NAN, 2.0];
         let mut signals: HashMap<String, &[Value]> = HashMap::new();
@@ -2942,15 +4290,9 @@ mod tests {
 
         let results = engine_with(max_statement("V(out)")).evaluate(&time, &signals);
 
-        assert!(!results[0].passed);
-        assert_eq!(results[0].value, None);
-        assert!(
-            results[0]
-                .error
-                .as_deref()
-                .unwrap_or("")
-                .contains("signal 'V(out)' contains NaN")
-        );
+        assert!(results[0].passed);
+        assert_eq!(results[0].value, Some(2.0));
+        assert_eq!(results[0].error, None);
     }
 
     #[test]
@@ -2970,7 +4312,7 @@ mod tests {
     }
 
     #[test]
-    fn param_measure_rejects_complex_value() {
+    fn param_measure_preserves_ngspice_complex_rejection_and_xyce_real_projection() {
         let statement = MeasureStatement {
             goal: None,
             tolerance: None,
@@ -2978,7 +4320,7 @@ mod tests {
             print_policy: MeasurePrintPolicy::All,
             name: "bad_param".to_string(),
             measure_type: MeasureType::Param {
-                expression: "sqrt(-1)".to_string(),
+                expression: MeasureExpression::expression("sqrt(-1)"),
             },
             analysis: "TRAN".to_string(),
         };
@@ -2986,21 +4328,27 @@ mod tests {
         let mut signals: HashMap<String, &[Value]> = HashMap::new();
         signals.insert("V(out)".to_string(), &[0.0, 1.0]);
 
-        let results = engine_with(statement).evaluate(&time, &signals);
-
-        assert!(!results[0].passed);
-        assert_eq!(results[0].value, None);
+        let engine = engine_with(statement);
+        let ngspice = engine.evaluate(&time, &signals);
+        assert!(!ngspice[0].passed, "{:?}", ngspice[0]);
+        assert_eq!(ngspice[0].value, None);
         assert!(
-            results[0]
+            ngspice[0]
                 .error
                 .as_deref()
-                .unwrap_or("")
-                .contains("complex value")
+                .is_some_and(|error| error.contains("complex value"))
         );
+
+        let mut params = crate::netlist::ParamContext::new();
+        params.set_expression_dialect(crate::config::ExpressionDialect::Xyce);
+        let xyce = engine.evaluate_with_segment_starts_and_context(&time, &signals, &[], &params);
+        assert!(xyce[0].passed, "{:?}", xyce[0]);
+        assert_eq!(xyce[0].value, Some(0.0));
+        assert_eq!(xyce[0].error, None);
     }
 
     #[test]
-    fn param_measure_inherits_xyce_expression_boundary_semantics() {
+    fn generic_param_measure_distinguishes_authored_and_raw_extended_real_results() {
         let mut engine = MeasureEngine::new();
         engine.add(max_statement("VDB(0)"));
         engine.add(MeasureStatement {
@@ -3010,7 +4358,18 @@ mod tests {
             print_policy: MeasurePrintPolicy::All,
             name: "derived".to_string(),
             measure_type: MeasureType::Param {
-                expression: "peak".to_string(),
+                expression: MeasureExpression::expression("peak"),
+            },
+            analysis: "TRAN".to_string(),
+        });
+        engine.add(MeasureStatement {
+            goal: None,
+            tolerance: None,
+            default_value: None,
+            print_policy: MeasurePrintPolicy::All,
+            name: "raw_derived".to_string(),
+            measure_type: MeasureType::Param {
+                expression: MeasureExpression::raw_reference("peak"),
             },
             analysis: "TRAN".to_string(),
         });
@@ -3025,6 +4384,7 @@ mod tests {
 
         assert_eq!(results[0].value, Some(Value::NEG_INFINITY));
         assert_eq!(results[1].value, Some(-1.0e50));
+        assert_eq!(results[2].value, Some(Value::NEG_INFINITY));
         assert!(results.iter().all(|result| result.passed), "{results:?}");
     }
 
@@ -3134,13 +4494,45 @@ mod tests {
     }
 
     #[test]
+    fn derivative_when_retains_found_event_with_nan_secant() {
+        let axis = [0.0, 1.0];
+        let source = [Value::INFINITY, Value::INFINITY];
+        let condition = [-1.0, 1.0];
+        let signals = HashMap::from([
+            ("Y".to_string(), source.as_slice()),
+            ("COND".to_string(), condition.as_slice()),
+        ]);
+        let statement = derivative_statement(
+            "undefined_slope",
+            "Y",
+            None,
+            Some(WhenCondition {
+                left: "COND".to_string(),
+                right: MeasureOperand::Constant(0.0),
+                occurrence: EventOccurrence {
+                    edge: EdgeType::Cross,
+                    number: 1,
+                },
+            }),
+            None,
+            None,
+        );
+
+        let result = engine_with(statement).evaluate(&axis, &signals).remove(0);
+        assert!(result.passed, "{result:?}");
+        assert!(result.value.is_some_and(Value::is_nan));
+        assert_eq!(result.event_axis, Some(0.5));
+    }
+
+    #[test]
     fn derivative_when_intersects_moving_operands_and_filters_each_crossing() {
         let axis = [1.0, 2.0, 3.0, 4.0, 5.0];
         let squares = [1.0, 4.0, 9.0, 16.0, 25.0];
         let four_x = [4.0, 8.0, 12.0, 16.0, 20.0];
         let double_crossing = [4.2, 1.1, 0.0, 0.9, 3.8];
-        // Linear solves can leave roundoff-scale jitter on a physically
-        // constant waveform; it must not fabricate a WHEN event.
+        // Xyce tests exact dependent-variable equality before testing whether
+        // the current row is inside MINVAL. A changed row this close to the
+        // target is therefore a real endpoint event, even at roundoff scale.
         let constant = [1.0, 1.0 + 1.0e-14, 1.0 - 1.0e-14, 1.0, 1.0 + 5.0e-15];
         let mut signals = HashMap::new();
         signals.insert("Y".to_string(), squares.as_slice());
@@ -3190,7 +4582,8 @@ mod tests {
         assert_eq!(results[1].value, Some(0.9));
         assert_eq!(results[0].event_axis, Some(4.0));
         assert_eq!(results[1].event_axis, Some(3.5555555555555554));
-        assert!(!results[2].passed);
+        assert_eq!(results[2].value, Some(3.0));
+        assert_eq!(results[2].event_axis, Some(1.0));
     }
 
     #[test]
@@ -3516,13 +4909,19 @@ mod tests {
             print_policy: MeasurePrintPolicy::All,
             name: "inherited_td".to_string(),
             measure_type: MeasureType::Delay {
+                from: None,
+                to: None,
                 trig: TrigSpec {
                     event: TriggerEvent::At(4.0),
                     td: Some(5.0),
+                    frac_max: None,
+                    occurrence_explicit: false,
                 },
                 targ: TrigSpec {
                     event: TriggerEvent::When(condition(1)),
                     td: None,
+                    frac_max: None,
+                    occurrence_explicit: true,
                 },
                 minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
@@ -3535,13 +4934,19 @@ mod tests {
             print_policy: MeasurePrintPolicy::All,
             name: "last_is_signed".to_string(),
             measure_type: MeasureType::Delay {
+                from: None,
+                to: None,
                 trig: TrigSpec {
                     event: TriggerEvent::When(condition(-1)),
                     td: None,
+                    frac_max: None,
+                    occurrence_explicit: true,
                 },
                 targ: TrigSpec {
                     event: TriggerEvent::At(1.0),
                     td: None,
+                    frac_max: None,
+                    occurrence_explicit: false,
                 },
                 minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
@@ -3552,15 +4957,21 @@ mod tests {
         engine.add(MeasureStatement {
             default_value: None,
             print_policy: MeasurePrintPolicy::All,
-            name: "unsupported_negative_occurrence".to_string(),
+            name: "second_from_last".to_string(),
             measure_type: MeasureType::Delay {
+                from: None,
+                to: None,
                 trig: TrigSpec {
                     event: TriggerEvent::When(condition(-2)),
                     td: None,
+                    frac_max: None,
+                    occurrence_explicit: true,
                 },
                 targ: TrigSpec {
                     event: TriggerEvent::At(1.0),
                     td: None,
+                    frac_max: None,
+                    occurrence_explicit: false,
                 },
                 minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
@@ -3573,15 +4984,93 @@ mod tests {
 
         assert_eq!(results[0].value, Some(1.5));
         assert_eq!(results[1].value, Some(-4.5));
-        assert!(!results[2].passed);
+        assert_eq!(results[2].value, Some(-3.5));
+    }
+
+    #[test]
+    fn legacy_frac_max_recomputes_dynamic_levels_and_absolute_rfc_windows() {
+        let make_clause = |signal: &str, frac_max, edge, number, explicit| TrigSpec {
+            event: TriggerEvent::When(WhenCondition {
+                left: signal.to_string(),
+                // FRAC_MAX owns the dynamic target; the parsed placeholder is
+                // intentionally not used by the legacy evaluator.
+                right: MeasureOperand::Constant(0.0),
+                occurrence: EventOccurrence { edge, number },
+            }),
+            td: None,
+            frac_max: Some(frac_max),
+            occurrence_explicit: explicit,
+        };
+        let statement = |name: &str, trig: TrigSpec, targ: TrigSpec| MeasureStatement {
+            default_value: None,
+            print_policy: MeasurePrintPolicy::All,
+            name: name.to_string(),
+            measure_type: MeasureType::Delay {
+                trig,
+                targ,
+                from: None,
+                to: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
+            },
+            analysis: "TRAN".to_string(),
+            goal: None,
+            tolerance: None,
+        };
+
+        let axis = [0.0, 1.0, 2.0, 3.0, 4.0];
+        let pulse = [0.0, 1.0, 2.0, 1.0, 0.0];
+        let mut signals = HashMap::new();
+        signals.insert("PULSE".to_string(), pulse.as_slice());
+        let mut engine = MeasureEngine::new();
+        engine.add(statement(
+            "dynamic",
+            make_clause("PULSE", 0.5, EdgeType::Cross, 1, false),
+            make_clause("PULSE", 0.75, EdgeType::Cross, 1, false),
+        ));
+        // The early 1 V maximum initially produces 0.5/1.0 crossings. Once
+        // the 2 V maximum arrives, Xyce revises both retained-history results
+        // to 1.0 and 1.5 respectively.
+        assert_eq!(engine.evaluate(&axis, &signals)[0].value, Some(0.5));
+
+        let axis = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
+        let alternating_lobes = [0.0, 1.0, 2.0, 1.0, 0.0, 1.0, 2.0, 1.0, 0.0, 1.0];
+        let mut signals = HashMap::new();
+        signals.insert("LOBES".to_string(), alternating_lobes.as_slice());
+        let mut engine = MeasureEngine::new();
+        engine.add(statement(
+            "absolute_windows",
+            make_clause("LOBES", 0.5, EdgeType::Rise, 2, true),
+            make_clause("LOBES", 0.5, EdgeType::Fall, 2, true),
+        ));
+        assert_eq!(engine.evaluate(&axis, &signals)[0].value, Some(1.5));
     }
 
     #[test]
     fn trigger_target_at_requires_xyce_directional_accepted_point_reach() {
-        assert!(delay_at_is_reached(&[0.0, 1.0, 2.0], 1.0, &[]));
-        assert!(!delay_at_is_reached(&[0.0, 1.0, 2.0], 2.0, &[]));
-        assert!(delay_at_is_reached(&[2.0, 1.0, 0.0], 0.0, &[]));
-        assert!(!delay_at_is_reached(&[0.0, 1.0, 2.0], 3.0, &[]));
+        assert!(delay_at_is_reached(
+            &[0.0, 1.0, 2.0],
+            1.0,
+            &[],
+            XYCE_DEFAULT_MEASURE_MINVAL
+        ));
+        assert!(!delay_at_is_reached(
+            &[0.0, 1.0, 2.0],
+            2.0,
+            &[],
+            XYCE_DEFAULT_MEASURE_MINVAL
+        ));
+        assert!(delay_at_is_reached(
+            &[2.0, 1.0, 0.0],
+            0.0,
+            &[],
+            XYCE_DEFAULT_MEASURE_MINVAL
+        ));
+        assert!(!delay_at_is_reached(
+            &[0.0, 1.0, 2.0],
+            3.0,
+            &[],
+            XYCE_DEFAULT_MEASURE_MINVAL
+        ));
     }
 
     #[test]
@@ -3606,6 +5095,80 @@ mod tests {
     }
 
     #[test]
+    fn err_distinguishes_inactive_windows_from_computed_ieee_results() {
+        let statement = |name: &str,
+                         comparison: &str,
+                         from: Option<Value>,
+                         to: Option<Value>,
+                         minval: Value,
+                         ymin: Value,
+                         ymax: Value| MeasureStatement {
+            name: name.to_string(),
+            measure_type: MeasureType::ErrorFunction {
+                measured: "M".to_string(),
+                comparison: comparison.to_string(),
+                norm: ErrorFunctionNorm::RootMeanSquare,
+                from,
+                to,
+                minval,
+                ymin,
+                ymax,
+                weight: None,
+            },
+            analysis: "TRAN".to_string(),
+            goal: None,
+            tolerance: None,
+            default_value: None,
+            print_policy: MeasurePrintPolicy::All,
+        };
+        let mut engine = MeasureEngine::new();
+        engine.add(statement("filtered", "ZERO", None, None, 0.0, 1.0, 2.0));
+        engine.add(statement(
+            "inactive",
+            "ZERO",
+            Some(3.0),
+            Some(4.0),
+            0.0,
+            0.0,
+            1.0,
+        ));
+        engine.add(statement(
+            "zero_over_zero",
+            "ZERO",
+            None,
+            None,
+            0.0,
+            0.0,
+            1.0,
+        ));
+        engine.add(statement(
+            "nonzero_over_zero",
+            "ONE",
+            None,
+            None,
+            0.0,
+            0.0,
+            1.0,
+        ));
+        let axis = [0.0, 1.0];
+        let measured = [0.0, 0.0];
+        let zero = [0.0, 0.0];
+        let one = [1.0, 1.0];
+        let signals = HashMap::from([
+            ("M".to_string(), measured.as_slice()),
+            ("ZERO".to_string(), zero.as_slice()),
+            ("ONE".to_string(), one.as_slice()),
+        ]);
+
+        let results = engine.evaluate(&axis, &signals);
+        assert!(results[0].passed && results[0].value.is_some_and(Value::is_nan));
+        assert!(!results[1].passed && results[1].value.is_none());
+        assert!(results[2].passed && results[2].value.is_some_and(Value::is_nan));
+        assert_eq!(results[3].value, Some(Value::INFINITY));
+        assert!(results[3].passed, "{:?}", results[3]);
+    }
+
+    #[test]
     fn non_finite_goal_contract_fails_measurement() {
         let mut statement = max_statement("V(out)");
         statement.goal = Some(f64::NAN);
@@ -3619,6 +5182,28 @@ mod tests {
         assert!(!results[0].passed);
         assert_eq!(results[0].value, Some(1.0));
         assert!(results[0].error.as_deref().unwrap_or("").contains("GOAL"));
+    }
+
+    #[test]
+    fn computed_nan_is_success_without_goal_and_retained_on_goal_failure() {
+        let mut statement = max_statement("V(out)");
+        let no_goal = MeasureResult::success("nan", Value::NAN).with_event_axis(Value::NAN);
+        assert!(no_goal.passed);
+        assert!(no_goal.value.is_some_and(Value::is_nan));
+        assert!(no_goal.event_axis.is_some_and(Value::is_nan));
+        assert_eq!(no_goal.error, None);
+
+        statement.goal = Some(0.0);
+        let with_goal = MeasureResult::success("nan", Value::NAN).check_goal(&statement);
+        assert!(!with_goal.passed);
+        assert!(with_goal.value.is_some_and(Value::is_nan));
+        assert_eq!(with_goal.expected, Some(0.0));
+        assert!(
+            with_goal
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("NaN"))
+        );
     }
 
     fn continuous_statement(name: &str, measure_type: MeasureType) -> MeasureStatement {
@@ -3836,7 +5421,7 @@ mod tests {
     }
 
     #[test]
-    fn continuous_extended_real_undefined_results_fail_closed() {
+    fn continuous_extended_real_undefined_results_preserve_ieee_records() {
         let axis = [0.0, 1.0, 2.0];
         let crossing = [-1.0, 1.0, -1.0];
         let opposite_infinities = [Value::INFINITY, Value::NEG_INFINITY, Value::NEG_INFINITY];
@@ -3889,8 +5474,13 @@ mod tests {
         ));
 
         let results = engine.evaluate_continuous(&axis, &signals, &[]);
-        assert!(results.iter().all(|result| result.failure.is_some()));
-        assert!(results.iter().all(|result| result.records.is_empty()));
+        assert!(results.iter().all(|result| result.failure.is_none()));
+        assert!(results.iter().all(|result| !result.records.is_empty()));
+        assert!(
+            results
+                .iter()
+                .all(|result| result.records.iter().any(|record| record.value.is_nan()))
+        );
         assert!(
             results
                 .iter()
@@ -3908,9 +5498,13 @@ mod tests {
         engine.add(continuous_statement(
             "delay",
             MeasureType::Delay {
+                from: None,
+                to: None,
                 trig: TrigSpec {
                     event: TriggerEvent::When(alternating_condition(2)),
                     td: None,
+                    frac_max: None,
+                    occurrence_explicit: true,
                 },
                 targ: TrigSpec {
                     event: TriggerEvent::When(WhenCondition {
@@ -3922,6 +5516,8 @@ mod tests {
                         },
                     }),
                     td: None,
+                    frac_max: None,
+                    occurrence_explicit: true,
                 },
                 minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
@@ -3944,15 +5540,21 @@ mod tests {
         let found = TrigSpec {
             event: TriggerEvent::When(alternating_condition(1)),
             td: None,
+            frac_max: None,
+            occurrence_explicit: true,
         };
         let missing = TrigSpec {
             event: TriggerEvent::At(10.0),
             td: None,
+            frac_max: None,
+            occurrence_explicit: false,
         };
         let mut engine = MeasureEngine::new();
         engine.add(continuous_statement(
             "missing_target",
             MeasureType::Delay {
+                from: None,
+                to: None,
                 trig: found.clone(),
                 targ: missing.clone(),
                 minval: XYCE_DEFAULT_MEASURE_MINVAL,
@@ -3961,6 +5563,8 @@ mod tests {
         engine.add(continuous_statement(
             "missing_trigger",
             MeasureType::Delay {
+                from: None,
+                to: None,
                 trig: missing,
                 targ: found,
                 minval: XYCE_DEFAULT_MEASURE_MINVAL,
