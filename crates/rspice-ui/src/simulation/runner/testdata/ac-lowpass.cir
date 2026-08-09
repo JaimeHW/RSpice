@@ -1,0 +1,7 @@
+* RSpice-owned profile parity: AC RC low-pass
+VINPUT in 0 DC 0 AC 1
+RPATH in out 1k
+CLOAD out 0 1n
+.PROBE V(in) V(out)
+.AC DEC 8 10 1MEG
+.END

@@ -1,0 +1,11 @@
+# RSpice-owned strict foreign-profile numerical corpus v1.
+# id<TAB>analysis<TAB>source body. Every body carries a pre-.END .PROBE marker
+# so the same circuit is source-authenticated for pspice-declarative/2; the
+# test adds each other profile's exact authored marker and compares its sealed
+# result with rspice-canonical/1 bit-for-bit.
+op-divider	op	op-divider.cir
+op-hierarchy	op	op-hierarchy.cir
+dc-dependent-sweep	dc	dc-dependent-sweep.cir
+tran-rc	tran	tran-rc.cir
+ac-lowpass	ac	ac-lowpass.cir
+noise-resistor	noise	noise-resistor.cir

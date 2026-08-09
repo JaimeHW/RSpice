@@ -1,0 +1,10 @@
+* RSpice-owned profile parity: hierarchical operating-point divider
+VINPUT in 0 9
+XDIV in out THIRD
+.SUBCKT THIRD input output
+RUPPER input output 2k
+RLOWER output 0 1k
+.ENDS THIRD
+.PROBE V(in) V(out)
+.OP
+.END

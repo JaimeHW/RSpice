@@ -1,0 +1,7 @@
+* RSpice-owned profile parity: resistor-network noise
+VINPUT in 0 DC 0 AC 1
+RPATH in out 1k
+RLOAD out 0 2k
+.PROBE V(in) V(out)
+.NOISE V(out) VINPUT DEC 6 10 100K
+.END

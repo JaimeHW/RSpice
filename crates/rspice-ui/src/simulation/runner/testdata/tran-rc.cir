@@ -1,0 +1,7 @@
+* RSpice-owned profile parity: transient RC edge response
+VINPUT in 0 PULSE(0 1 0 1n 1n 50u 100u)
+RPATH in out 1k
+CLOAD out 0 1n
+.PROBE V(in) V(out)
+.TRAN 1u 10u 0 250n
+.END

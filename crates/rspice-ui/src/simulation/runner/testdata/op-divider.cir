@@ -1,0 +1,7 @@
+* RSpice-owned profile parity: asymmetric operating-point divider
+VINPUT in 0 12
+RUPPER in out 2k
+RLOWER out 0 1k
+.PROBE V(in) V(out)
+.OP
+.END

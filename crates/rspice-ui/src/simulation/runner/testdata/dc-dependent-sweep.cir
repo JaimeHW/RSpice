@@ -1,0 +1,8 @@
+* RSpice-owned profile parity: dependent-source DC sweep
+VSWEEP in 0 0
+EGAIN driven 0 in 0 2
+RUPPER driven out 3k
+RLOWER out 0 1k
+.PROBE V(in) V(driven) V(out)
+.DC VSWEEP -2 2 0.25
+.END
