@@ -2222,6 +2222,44 @@ fn shared_x_drag_id(model: &StripModel) -> egui::Id {
     egui::Id::new(("rspice.results.shared-x-drag", model.analysis_key))
 }
 
+/// What the inspector's Active pane section reports about the pane the
+/// instrument is acting on.
+///
+/// The pane's identity, scale and limit binding live behind this module's
+/// privacy, so the inspector asks for them rather than reaching in — and the
+/// scale reader sits beside the header toggle that writes it.
+pub(crate) struct ActivePaneFacts {
+    /// The unit that names the pane in a unit-scoped stack.
+    pub unit: Option<String>,
+    pub scale: Option<&'static str>,
+    pub limit_mask: &'static str,
+}
+
+pub(crate) fn active_pane_facts(ctx: &egui::Context, state: &AppState) -> ActivePaneFacts {
+    let key = state.ui.results.active_wave_pane.as_ref();
+    let scale = key.map(|key| {
+        let log = ctx
+            .data_mut(|data| {
+                data.get_persisted::<bool>(egui::Id::new((
+                    "rspice.results.pane-log-y",
+                    key.analysis,
+                    key.unit.as_str(),
+                )))
+            })
+            .unwrap_or(false);
+        if log { "logarithmic" } else { "linear" }
+    });
+    ActivePaneFacts {
+        unit: key.map(|key| key.unit.clone()),
+        scale,
+        limit_mask: if state.ui.results.show_spec_limits {
+            "project specification limits"
+        } else {
+            "none bound"
+        },
+    }
+}
+
 fn pane_log_y_id(model: &StripModel, pane: &UnitPane) -> egui::Id {
     egui::Id::new(("rspice.results.pane-log-y", model.analysis_key, pane.unit))
 }

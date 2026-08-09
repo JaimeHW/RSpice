@@ -1754,10 +1754,22 @@ fn active_result_pane(
         "automatic fit"
     };
 
-    section_header(ui, "Active pane", Some(viewer.label()));
+    // The unit names the pane in a unit-scoped stack; the viewer name is
+    // already on the sheet tab above.
+    let facts =
+        crate::workbench::documents::result_document::active_pane_facts(ui.ctx(), &app.state);
+    section_header(
+        ui,
+        "Active pane",
+        Some(facts.unit.as_deref().unwrap_or_else(|| viewer.label())),
+    );
     property_row(ui, "Pane", &pane_label);
     property_row(ui, "Traces", &format!("{visible} visible · {bound} bound"));
     property_row(ui, "View", view_label);
+    if let Some(scale) = facts.scale {
+        property_row(ui, "Scale", scale);
+    }
+    property_row(ui, "Limit mask", facts.limit_mask);
     if let Some((minimum, maximum)) = view.x {
         property_row(
             ui,
