@@ -16,7 +16,7 @@ use super::calling_convention::HOST_ABI;
 use super::encoder::{ConditionCode, Gpr, Rel32Patch, X64Encoder, Xmm};
 use super::ir::{
     ALLOCATABLE_VALUE_REGISTERS, AllocatedInstruction, AssignmentProgram, Effects as X64Effects,
-    Program as X64SsaProgram, RegisterAllocation, ValueLocation as X64ValueLocation,
+    Program as X64SsaProgram, RegisterAllocation, RegisterBank, ValueLocation as X64ValueLocation,
     ValueType as X64ValueType, dynamic_variable_inline_supported, plan_shared_outputs,
 };
 use super::{
@@ -113,6 +113,14 @@ const INDEXED_ASSIGNMENT_SLOT_PTR_DISP: i32 = 0;
 const MAX_RUNTIME_LOOP_ITERATIONS: i32 = 100_000;
 const MAX_EXPRESSION_STACK_DEPTH: usize = 4096;
 const CALLER_SAVED_XMM_COUNT: usize = HOST_ABI.caller_saved_xmm_count;
+/// XMM0-XMM9 hold allocated values, and everything from
+/// [`CALLER_SAVED_XMM_COUNT`] up is nonvolatile on the host ABI: XMM6-XMM9 on
+/// Win64, nothing at all on System V, whose first nonvolatile index sits past
+/// the end of the bank. Touching one obliges the prologue to preserve it,
+/// which [`callee_saved_xmm_count_for_allocation`] already derives from the
+/// highest register the allocation reaches.
+const X64_VALUE_BANK: RegisterBank =
+    RegisterBank::with_callee_saved_from(ALLOCATABLE_VALUE_REGISTERS, CALLER_SAVED_XMM_COUNT);
 const XMM_STACK: [Xmm; 16] = [
     Xmm::Xmm0,
     Xmm::Xmm1,
@@ -142,7 +150,7 @@ pub(super) fn compile_value_function_artifact(
     validate_expression_stack_depth(program.max_stack_depth())?;
     let ssa = X64SsaProgram::lower(program)?;
     validate_expression_stack_depth(ssa.maximum_stack_depth())?;
-    let allocation = RegisterAllocation::build(&ssa)?;
+    let allocation = RegisterAllocation::build(&ssa, X64_VALUE_BANK)?;
     let callee_saved_xmm_count = callee_saved_xmm_count_for_allocation(&allocation);
     let expression_spill_bytes = allocation_spill_frame_bytes(&allocation)?;
     let local_frame_bytes = checked_local_frame_bytes(&[
@@ -181,7 +189,7 @@ fn compile_assignment_function_artifact(
     validate_expression_stack_depth(program.max_stack_depth())?;
     let ssa = X64SsaProgram::lower(program)?;
     validate_expression_stack_depth(ssa.maximum_stack_depth())?;
-    let allocation = RegisterAllocation::build(&ssa)?;
+    let allocation = RegisterAllocation::build(&ssa, X64_VALUE_BANK)?;
     let callee_saved_xmm_count = callee_saved_xmm_count_for_allocation(&allocation);
     let expression_spill_bytes = allocation_spill_frame_bytes(&allocation)?;
     let local_frame_bytes = checked_local_frame_bytes(&[
@@ -274,7 +282,7 @@ fn compile_fused_kernel_artifact(
         .transpose()?;
     let value_allocations = value_ssa
         .iter()
-        .map(RegisterAllocation::build)
+        .map(|program| RegisterAllocation::build(program, X64_VALUE_BANK))
         .collect::<JitResult<Vec<_>>>()?;
     let jacobian_allocations = jacobian_ssa
         .as_ref()
@@ -284,7 +292,7 @@ fn compile_fused_kernel_artifact(
                 .map(|stamp| {
                     stamp
                         .iter()
-                        .map(RegisterAllocation::build)
+                        .map(|program| RegisterAllocation::build(program, X64_VALUE_BANK))
                         .collect::<JitResult<Vec<_>>>()
                 })
                 .collect::<JitResult<Vec<_>>>()
@@ -769,7 +777,7 @@ impl FunctionCompiler {
 
     fn emit_program(&mut self, ssa: &X64SsaProgram) -> JitResult<()> {
         validate_expression_stack_depth(ssa.maximum_stack_depth())?;
-        let allocation = RegisterAllocation::build(ssa)?;
+        let allocation = RegisterAllocation::build(ssa, X64_VALUE_BANK)?;
         self.emit_allocated_program(ssa, &allocation)
     }
 
@@ -1568,7 +1576,7 @@ impl FunctionCompiler {
             })
             .collect::<JitResult<Vec<_>>>()?;
         let assignment = AssignmentProgram::lower(&direct)?;
-        let allocation = RegisterAllocation::build_for_assignments(&assignment)?;
+        let allocation = RegisterAllocation::build_for_assignments(&assignment, X64_VALUE_BANK)?;
         self.emit_allocated_program_body(assignment.program(), &allocation, Some(&assignment))
     }
 
@@ -4247,7 +4255,8 @@ fn assignment_allocation_requirements(
                     })
                     .collect::<JitResult<Vec<_>>>()?;
                 let assignment = AssignmentProgram::lower(&direct)?;
-                let allocation = RegisterAllocation::build_for_assignments(&assignment)?;
+                let allocation =
+                    RegisterAllocation::build_for_assignments(&assignment, X64_VALUE_BANK)?;
                 maximum_spill_slots = maximum_spill_slots.max(allocation.spill_slot_count());
                 maximum_required_registers =
                     maximum_required_registers.max(allocation.required_register_count());
@@ -4256,7 +4265,7 @@ fn assignment_allocation_requirements(
                 debug_assert_eq!(batch.len(), 1);
                 for program in [index, value] {
                     let ssa = X64SsaProgram::lower(program)?;
-                    let allocation = RegisterAllocation::build(&ssa)?;
+                    let allocation = RegisterAllocation::build(&ssa, X64_VALUE_BANK)?;
                     maximum_spill_slots = maximum_spill_slots.max(allocation.spill_slot_count());
                     maximum_required_registers =
                         maximum_required_registers.max(allocation.required_register_count());
@@ -4268,7 +4277,7 @@ fn assignment_allocation_requirements(
                 maximum_spill_slots = maximum_spill_slots.max(body_spills);
                 maximum_required_registers = maximum_required_registers.max(body_registers);
                 let ssa = X64SsaProgram::lower(condition)?;
-                let allocation = RegisterAllocation::build(&ssa)?;
+                let allocation = RegisterAllocation::build(&ssa, X64_VALUE_BANK)?;
                 maximum_spill_slots = maximum_spill_slots.max(allocation.spill_slot_count());
                 maximum_required_registers =
                     maximum_required_registers.max(allocation.required_register_count());
@@ -4851,8 +4860,9 @@ mod tests {
             2,
         )
         .expect("shared SSA program");
-        let allocation = crate::native::x64::ir::RegisterAllocation::build(&ssa)
-            .expect("allocate shared SSA program");
+        let allocation =
+            crate::native::x64::ir::RegisterAllocation::build(&ssa, super::X64_VALUE_BANK)
+                .expect("allocate shared SSA program");
         let spill_bytes =
             super::allocation_spill_frame_bytes(&allocation).expect("shared SSA spill frame");
         let callee_saved = super::callee_saved_xmm_count_for_allocation(&allocation);
@@ -5788,8 +5798,9 @@ mod tests {
 
         let bytes = compile_value_function(&program).expect("compile full-depth value function");
         let ssa = crate::native::x64::ir::Program::lower(&program).expect("lower full-depth SSA");
-        let allocation = crate::native::x64::ir::RegisterAllocation::build(&ssa)
-            .expect("allocate full-depth SSA");
+        let allocation =
+            crate::native::x64::ir::RegisterAllocation::build(&ssa, super::X64_VALUE_BANK)
+                .expect("allocate full-depth SSA");
         let callee_saved_count = super::callee_saved_xmm_count_for_allocation(&allocation);
         let frame_bytes = super::checked_local_frame_bytes(&[
             super::allocation_spill_frame_bytes(&allocation).expect("liveness spill frame fits"),
@@ -5834,6 +5845,89 @@ mod tests {
             f(&ctx, vars.as_ptr()).to_bits(),
             constant_prefix_sum(prefix.len()).to_bits()
         );
+    }
+
+    /// Values live across a helper call belong in the preserved registers, and
+    /// a function that puts them there owes the prologue a save.
+    ///
+    /// The two halves are asserted together on purpose, because each one is
+    /// what makes the other safe. The allocator may park a value in XMM6-XMM9
+    /// only because Win64 obliges `exp` to give those registers back; and the
+    /// same rule obliges this generated function, which is itself somebody's
+    /// callee, to hand them back to whoever called it. Occupying one without
+    /// the matching prologue save silently corrupts the caller's register --
+    /// which is why the save count is asserted directly rather than left to a
+    /// loop that checks nothing when it happens to be zero.
+    #[cfg(windows)]
+    #[test]
+    fn win64_values_live_across_a_helper_call_occupy_registers_the_prologue_preserves() {
+        let mut instructions = variable_prefix(0, 5);
+        instructions.push(Instruction::Exp);
+        instructions.extend(add_reductions(4));
+        let program = native_program(EntryKind::StampValue, instructions, 0);
+
+        let ssa = crate::native::x64::ir::Program::lower(&program).expect("lower cross-call SSA");
+        let allocation =
+            crate::native::x64::ir::RegisterAllocation::build(&ssa, super::X64_VALUE_BANK)
+                .expect("allocate cross-call SSA");
+        let live_across_call: Vec<crate::native::x64::ir::ValueLocation> = allocation
+            .instructions()[..4]
+            .iter()
+            .map(crate::native::x64::ir::AllocatedInstruction::result)
+            .collect();
+        assert_eq!(
+            live_across_call,
+            vec![
+                crate::native::x64::ir::ValueLocation::Register(6),
+                crate::native::x64::ir::ValueLocation::Register(7),
+                crate::native::x64::ir::ValueLocation::Register(8),
+                crate::native::x64::ir::ValueLocation::Register(9),
+            ],
+            "the four variables the exp() call sits between belong in XMM6-XMM9"
+        );
+        assert_eq!(
+            allocation.spill_slot_count(),
+            0,
+            "nothing needs a spill slot while a preserved register is free"
+        );
+
+        let bytes = compile_value_function(&program).expect("compile cross-call value function");
+        let callee_saved_count = super::callee_saved_xmm_count_for_allocation(&allocation);
+        assert_eq!(
+            callee_saved_count, 4,
+            "XMM6-XMM9 carry values here, so the prologue owes exactly four saves"
+        );
+        let frame_bytes = super::checked_local_frame_bytes(&[
+            super::allocation_spill_frame_bytes(&allocation).expect("liveness spill frame fits"),
+            super::callee_saved_xmm_frame_bytes(callee_saved_count),
+        ])
+        .expect("allocated XMM frame fits");
+        for index in 0..callee_saved_count {
+            let register = super::callee_saved_xmm_register(index);
+            let disp = frame_bytes - super::callee_saved_xmm_frame_bytes(callee_saved_count)
+                + (index as i32 * super::CALLEE_SAVED_XMM_BYTES);
+            assert_eq!(
+                count_bytes(&bytes, &callee_saved_xmm_store_bytes(register, disp)),
+                1,
+                "{register:?} holds a value across the call and must be saved exactly once"
+            );
+            assert_eq!(
+                count_bytes(&bytes, &callee_saved_xmm_load_bytes(register, disp)),
+                1,
+                "{register:?} must be restored exactly once"
+            );
+        }
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate cross-call value leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[], &[], &[], &[]);
+        // exp(0) is exactly 1.0, so the whole sum is exact in binary floating
+        // point and a survivor that came back subtly wrong still fails here.
+        let vars = [1.0, 2.0, 3.0, 4.0, 0.0];
+
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 11.0_f64.to_bits());
     }
 
     #[test]

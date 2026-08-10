@@ -35,7 +35,7 @@ use crate::native::expr::{
 use crate::native::model::{CodeOffset, NativeStampKernelIo};
 use crate::native::ssa::{
     AllocatedInstruction, AssignmentProgram, Instruction, LOGICAL_VALUE_REGISTER_COUNT, Program,
-    RegisterAllocation, ValueLocation, ValueType, dynamic_variable_inline_supported,
+    RegisterAllocation, RegisterBank, ValueLocation, ValueType, dynamic_variable_inline_supported,
     plan_shared_outputs,
 };
 use crate::native::{EvalContext, JitError, JitResult};
@@ -51,6 +51,11 @@ const I64_MAX_EXCLUSIVE_AS_F64: f64 = 9_223_372_036_854_775_808.0;
 const I64_MIN_AS_F64: f64 = -9_223_372_036_854_775_808.0;
 const MAX_RUNTIME_LOOP_ITERATIONS: u64 = 100_000;
 const A64_ALLOCATABLE_VALUE_REGISTERS: usize = 15;
+/// D0-D7 and D16-D22, every one of them volatile: the host convention keeps
+/// the nonvolatile D8-D15 out of the bank entirely, so a value live across a
+/// helper call has nowhere to sit but a spill slot.
+const A64_VALUE_BANK: RegisterBank =
+    RegisterBank::all_caller_saved(A64_ALLOCATABLE_VALUE_REGISTERS);
 
 const VOLTAGES_OFFSET: usize = std::mem::offset_of!(EvalContext, voltages);
 const INTERNAL_VOLTAGES_OFFSET: usize = std::mem::offset_of!(EvalContext, internal_voltages);
@@ -87,8 +92,7 @@ pub(crate) fn compile_value_function(program: &NativeProgram) -> JitResult<Vec<u
     validate_expression_stack_depth(program.max_stack_depth())?;
     let ssa = Program::lower(program)?;
     validate_expression_stack_depth(ssa.maximum_stack_depth())?;
-    let allocation =
-        RegisterAllocation::build_with_register_count(&ssa, A64_ALLOCATABLE_VALUE_REGISTERS)?;
+    let allocation = RegisterAllocation::build(&ssa, A64_VALUE_BANK)?;
     let frame_bytes = spill_frame_bytes(&allocation)?;
     let mut compiler = FunctionCompiler::new(frame_bytes, ssa.requires_call_frame())?;
     compiler.emit_program(&ssa, &allocation)?;
@@ -269,8 +273,7 @@ pub(crate) fn compile_assignment_function(
     validate_expression_stack_depth(program.max_stack_depth())?;
     let ssa = Program::lower(program)?;
     validate_expression_stack_depth(ssa.maximum_stack_depth())?;
-    let allocation =
-        RegisterAllocation::build_with_register_count(&ssa, A64_ALLOCATABLE_VALUE_REGISTERS)?;
+    let allocation = RegisterAllocation::build(&ssa, A64_VALUE_BANK)?;
     let frame_bytes = spill_frame_bytes(&allocation)?;
     let mut compiler = FunctionCompiler::new(frame_bytes, ssa.requires_call_frame())?;
     compiler.emit_program(&ssa, &allocation)?;
@@ -529,9 +532,7 @@ fn compile_fused_kernel(
         .transpose()?;
     let value_allocations = value_ssa
         .iter()
-        .map(|program| {
-            RegisterAllocation::build_with_register_count(program, A64_ALLOCATABLE_VALUE_REGISTERS)
-        })
+        .map(|program| RegisterAllocation::build(program, A64_VALUE_BANK))
         .collect::<JitResult<Vec<_>>>()?;
     let jacobian_allocations = jacobian_ssa
         .as_ref()
@@ -541,12 +542,7 @@ fn compile_fused_kernel(
                 .map(|stamp| {
                     stamp
                         .iter()
-                        .map(|program| {
-                            RegisterAllocation::build_with_register_count(
-                                program,
-                                A64_ALLOCATABLE_VALUE_REGISTERS,
-                            )
-                        })
+                        .map(|program| RegisterAllocation::build(program, A64_VALUE_BANK))
                         .collect::<JitResult<Vec<_>>>()
                 })
                 .collect::<JitResult<Vec<_>>>()
@@ -743,8 +739,7 @@ impl FunctionCompiler {
     ) -> JitResult<ValueLocation> {
         validate_expression_stack_depth(program.max_stack_depth())?;
         let ssa = Program::lower(program)?;
-        let allocation =
-            RegisterAllocation::build_with_register_count(&ssa, A64_ALLOCATABLE_VALUE_REGISTERS)?;
+        let allocation = RegisterAllocation::build(&ssa, A64_VALUE_BANK)?;
         self.emit_program(&ssa, &allocation)?;
         Ok(allocation.result())
     }
@@ -805,10 +800,7 @@ impl FunctionCompiler {
             })
             .collect::<JitResult<Vec<_>>>()?;
         let ssa = AssignmentProgram::lower(&direct)?;
-        let allocation = RegisterAllocation::build_for_assignments_with_register_count(
-            &ssa,
-            A64_ALLOCATABLE_VALUE_REGISTERS,
-        )?;
+        let allocation = RegisterAllocation::build_for_assignments(&ssa, A64_VALUE_BANK)?;
         if ssa.program().instructions().len() != allocation.instructions().len() {
             return Err(verifier_error(
                 "AArch64 assignment SSA and register-allocation instruction counts differ",
@@ -2576,10 +2568,7 @@ fn inspect_assignment_requirements(
                     .collect::<JitResult<Vec<_>>>()?;
                 let ssa = AssignmentProgram::lower(&direct)?;
                 validate_expression_stack_depth(ssa.program().maximum_stack_depth())?;
-                let allocation = RegisterAllocation::build_for_assignments_with_register_count(
-                    &ssa,
-                    A64_ALLOCATABLE_VALUE_REGISTERS,
-                )?;
+                let allocation = RegisterAllocation::build_for_assignments(&ssa, A64_VALUE_BANK)?;
                 record_assignment_allocation_trace(
                     ssa.program(),
                     &allocation,
@@ -2619,8 +2608,7 @@ fn inspect_assignment_program(
 ) -> JitResult<()> {
     validate_expression_stack_depth(program.max_stack_depth())?;
     let ssa = Program::lower(program)?;
-    let allocation =
-        RegisterAllocation::build_with_register_count(&ssa, A64_ALLOCATABLE_VALUE_REGISTERS)?;
+    let allocation = RegisterAllocation::build(&ssa, A64_VALUE_BANK)?;
     record_assignment_allocation_trace(&ssa, &allocation, 1, requirements);
     requirements.maximum_spill_slots = requirements
         .maximum_spill_slots
