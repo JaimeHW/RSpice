@@ -17,6 +17,8 @@ pub(super) const READOUT_BODY_MAX_H: f32 = 212.0;
 /// Tallest complete dock: the fixed header plus its independently capped body.
 pub(super) const READOUT_MAX_H: f32 = READOUT_HEADER_H + READOUT_BODY_MAX_H;
 pub(super) const READOUT_PAD_X: f32 = 10.0;
+/// Width of a trace row's leading line-swatch gutter.
+const READOUT_SWATCH_W: f32 = 16.0;
 const READOUT_DESKTOP_SPLIT_MIN_W: f32 = 680.0;
 const READOUT_COLUMN_SEAM: f32 = 1.0;
 const CURSOR_TABLE_MIN_W: f32 = 660.0;
@@ -394,30 +396,49 @@ fn cursor_readout_table(ui: &mut Ui, state: &mut AppState) {
         rect.left() + READOUT_PAD_X + name_column + value_column * 2.0,
         rect.left() + READOUT_PAD_X + name_column + value_column * 3.0,
     ];
-    let draw_row =
-        |row_index: usize, values: [&str; 5], colors: [egui::Color32; 5], font: egui::FontId| {
-            let top = rect.top() + row_index as f32 * READOUT_ROW_H;
-            let row = egui::Rect::from_min_max(
-                egui::pos2(rect.left(), top),
-                egui::pos2(rect.right(), top + READOUT_ROW_H),
+    // A trace row leads with its own line swatch, so a reader ties the row to
+    // a curve without matching names; the header and X rows keep the bare
+    // column so the table still reads as one grid.
+    let draw_row = |row_index: usize,
+                    values: [&str; 5],
+                    colors: [egui::Color32; 5],
+                    font: egui::FontId,
+                    swatch: Option<egui::Color32>| {
+        let top = rect.top() + row_index as f32 * READOUT_ROW_H;
+        let row = egui::Rect::from_min_max(
+            egui::pos2(rect.left(), top),
+            egui::pos2(rect.right(), top + READOUT_ROW_H),
+        );
+        let painter = ui.painter().with_clip_rect(row);
+        if let Some(color) = swatch {
+            painter.hline(
+                egui::Rangef::new(columns[0], columns[0] + READOUT_SWATCH_W - 6.0),
+                row.center().y,
+                egui::Stroke::new(2.0, color),
             );
-            let painter = ui.painter().with_clip_rect(row);
-            for ((text, x), color) in values.into_iter().zip(columns).zip(colors) {
-                painter.text(
-                    egui::pos2(x, row.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    text,
-                    font.clone(),
-                    color,
-                );
-            }
-        };
+        }
+        for (index, ((text, x), color)) in values.into_iter().zip(columns).zip(colors).enumerate() {
+            let x = if index == 0 && swatch.is_some() {
+                x + READOUT_SWATCH_W
+            } else {
+                x
+            };
+            painter.text(
+                egui::pos2(x, row.center().y),
+                egui::Align2::LEFT_CENTER,
+                text,
+                font.clone(),
+                color,
+            );
+        }
+    };
 
     draw_row(
         0,
         ["TRACE", "A", "B", "\u{0394}", "SLOPE"],
         [c.text_faint; 5],
         theme::mono(tokens::FS_0, FontWeight::SemiBold),
+        None,
     );
     let a_x = model.format_x(a, significant_digits, quantity_policy);
     let b_x = cursors
@@ -433,10 +454,14 @@ fn cursor_readout_table(ui: &mut Ui, state: &mut AppState) {
         [model.x_label(), &a_x, &b_x, &delta_x, ""],
         [c.text_dim, c.accent, c.traces[4], c.text, c.text_faint],
         theme::mono(tokens::FS_0, FontWeight::Regular),
+        None,
     );
 
     // Per-trace values at A and B, their difference, and their own slope.
     let rows = value_rows(model, a, presentation, quantity_policy);
+    let row_colors = readout_traces(model)
+        .map(|trace| trace.color)
+        .collect::<Vec<_>>();
     let b_rows = cursors
         .b
         .map(|b| value_rows(model, b, presentation, quantity_policy));
@@ -462,6 +487,7 @@ fn cursor_readout_table(ui: &mut Ui, state: &mut AppState) {
             [name, a_value, b_value, delta, slope],
             [c.text_dim, c.text, c.text, c.text_dim, c.text_dim],
             theme::mono(tokens::FS_0, FontWeight::Regular),
+            row_colors.get(index).copied(),
         );
     }
 }
@@ -688,6 +714,14 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
+/// The traces the readout lists, in row order.
+///
+/// Every per-row producer reads this one predicate, so the value, delta,
+/// slope and swatch columns cannot fall out of step with each other.
+pub(super) fn readout_traces(model: &StripModel) -> impl Iterator<Item = &StripTrace> {
+    model.traces.iter().filter(|trace| trace.visible)
+}
+
 pub(super) fn value_rows(
     model: &StripModel,
     x: f64,
@@ -696,10 +730,7 @@ pub(super) fn value_rows(
 ) -> Vec<(String, String)> {
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
-    model
-        .traces
-        .iter()
-        .filter(|trace| trace.visible)
+    readout_traces(model)
         .map(|trace| {
             let value = sample_at_with(&trace.x, &trace.y, x, interpolation);
             (
@@ -724,10 +755,7 @@ pub(super) fn delta_values(
 ) -> Vec<String> {
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
-    model
-        .traces
-        .iter()
-        .filter(|trace| trace.visible)
+    readout_traces(model)
         .map(|trace| {
             let dv = sample_at_with(&trace.x, &trace.y, b, interpolation)
                 - sample_at_with(&trace.x, &trace.y, a, interpolation);
@@ -751,10 +779,7 @@ pub(super) fn slope_values(
         XScale::Log10 => f64::NAN,
         XScale::Linear => b - a,
     };
-    model
-        .traces
-        .iter()
-        .filter(|trace| trace.visible)
+    readout_traces(model)
         .map(|trace| {
             if !denominator.is_finite() || denominator.abs() <= 1e-12 {
                 return "—".to_owned();
@@ -765,13 +790,10 @@ pub(super) fn slope_values(
             if !slope.is_finite() {
                 return "—".to_owned();
             }
-            let y_unit = match trace.kind {
-                TraceKind::MagnitudeDb => "dB",
-                TraceKind::PhaseDeg => "deg",
-                TraceKind::PhaseRad => "rad",
-                TraceKind::NoiseDensity => "nV/√Hz",
-                TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => model.y_unit,
-            };
+            // A trace names its slope in its own unit, never the strip's: a
+            // current sharing a sheet with voltages must not report mA/ms of
+            // rise as volts. `trace_unit` is the one owner of that mapping.
+            let y_unit = model.trace_unit(trace);
             let x_unit = match model.x_scale {
                 XScale::Log10 => "dec",
                 XScale::Linear if model.x_unit.is_empty() => "x",

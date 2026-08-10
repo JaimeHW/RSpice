@@ -318,6 +318,66 @@ fn a_value_is_named_by_its_own_unit_not_the_strips() {
 }
 
 #[test]
+fn a_slope_is_named_by_its_own_unit_not_the_strips() {
+    let mut state = AppState::default();
+    state.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+            WaveformData::new("I(VDD)", vec![0.0, 1.0], vec![0.0, 1.5e-3], "#fff"),
+        ]),
+    );
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+
+    let slopes = slope_values(&models[0], 0.0, 1.0, presentation);
+
+    // The SLOPE column had its own copy of the unit mapping, keyed on the
+    // strip, so the current on a mixed sheet reported volts per second.
+    assert_eq!(slopes.len(), 2);
+    assert!(
+        slopes[0].ends_with(" V/s"),
+        "a node voltage's slope reads in volts per second: {}",
+        slopes[0]
+    );
+    assert!(
+        slopes[1].ends_with(" A/s"),
+        "a supply current's slope reads in amps per second: {}",
+        slopes[1]
+    );
+}
+
+#[test]
+fn a_copied_value_is_named_by_its_own_unit_not_the_strips() {
+    let mut state = AppState::default();
+    state.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+            WaveformData::new("I(VDD)", vec![0.0, 1.0], vec![0.0, 1.5e-3], "#fff"),
+        ]),
+    );
+    state.ui.results.cursor_strip = Some(0);
+    state.ui.results.cursors.a = Some(1.0);
+
+    let copied = copy_cursor_text(&mut state).expect("active cursor has copy data");
+
+    // The clipboard carried the third copy of the unit mapping, keyed on the
+    // strip, so a current pasted as millivolts.
+    let current = copied
+        .lines()
+        .find(|line| line.starts_with("I(VDD)"))
+        .expect("the copied readout lists the supply current");
+    assert!(
+        current.ends_with(" mA"),
+        "a supply current copies in amps: {current}"
+    );
+}
+
+#[test]
 fn a_prefixed_unit_never_takes_a_second_prefix() {
     // Output noise of a gain-of-1000 stage is micro-volts per root hertz; in
     // a unit that already says "nano" that must stay a plain number.
@@ -328,6 +388,31 @@ fn a_prefixed_unit_never_takes_a_second_prefix() {
     assert_eq!(fmt_in_unit(4.07, NOISE_DENSITY_UNIT, 3), "4.07 nV/√Hz");
     // Base units keep their SI scaling.
     assert_eq!(fmt_in_unit(1.5e-3, "A", 3), "1.50 mA");
+}
+
+#[test]
+fn a_copied_noise_density_never_takes_a_second_prefix() {
+    let mut state = AppState::default();
+    // 4e-12 V²/Hz projects to 2000 nV/√Hz — past the point where an SI copy
+    // would reach for "k" and paste "2 knV/√Hz".
+    state.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Noise, "Noise").with_waveforms(vec![
+            WaveformData::new("onoise", vec![1.0, 10.0], vec![4.0e-12, 4.0e-12], "#fff"),
+        ]),
+    );
+    state.ui.results.cursor_strip = Some(0);
+    state.ui.results.cursors.a = Some(10.0);
+
+    let copied = copy_cursor_text(&mut state).expect("active cursor has copy data");
+
+    let noise = copied
+        .lines()
+        .find(|line| line.starts_with("onoise"))
+        .expect("the copied readout lists the output noise");
+    assert!(
+        noise.ends_with(" nV/√Hz"),
+        "an already-prefixed unit copies unprefixed: {noise}"
+    );
 }
 
 #[test]

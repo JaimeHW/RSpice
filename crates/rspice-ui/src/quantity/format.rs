@@ -115,6 +115,18 @@ impl QuantityPresentationPolicy {
         }
     }
 
+    /// Copy a value whose unit already states its scale, such as `nV/√Hz`.
+    ///
+    /// Engineering notation must not prefix such a unit a second time: the
+    /// value is written as it stands, never as `knV/√Hz`.
+    #[must_use]
+    pub fn copy_scaled_unit_value(self, value: f64, unit: &str) -> String {
+        match self.copied_value_format {
+            CopiedValueFormat::EngineeringNotationWithUnit => full_fixed_value(value, unit),
+            CopiedValueFormat::ScientificNotationWithSiUnit => scientific_value(value, unit),
+        }
+    }
+
     /// Copy frequency. Scientific mode always emits stored SI hertz;
     /// engineering mode follows the chosen frequency presentation.
     #[must_use]

@@ -2061,9 +2061,12 @@ fn append_copied_cursor(
             TraceKind::PhaseDeg => policy.copy_angle(value.to_radians()),
             TraceKind::PhaseRad => policy.copy_angle(value),
             TraceKind::MagnitudeDb => policy.copy_si_value(value, "dB"),
-            TraceKind::NoiseDensity => policy.copy_si_value(value, "nV/√Hz"),
+            TraceKind::NoiseDensity => policy.copy_scaled_unit_value(value, NOISE_DENSITY_UNIT),
             TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
-                policy.copy_si_value(value, model.y_unit)
+                // The trace's own unit, not the strip's: copying a supply
+                // current off a sheet it shares with node voltages must not
+                // paste milliamps as millivolts.
+                policy.copy_si_value(value, model.trace_unit(trace))
             }
         };
         let _ = writeln!(target, "{} = {}", trace.name, copied.trim_end());
