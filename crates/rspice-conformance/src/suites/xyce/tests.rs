@@ -8,6 +8,19 @@
 use super::output::XyceGeneratedVbicNoiseIssue;
 use super::*;
 
+#[test]
+fn xyce_runner_retains_one_mismatch_when_configured_limit_is_zero() {
+    let runner = XyceTestRunner::new(
+        ".",
+        XyceRunnerConfig {
+            max_mismatches: 0,
+            ..XyceRunnerConfig::default()
+        },
+    );
+
+    assert_eq!(runner.config().max_mismatches, 1);
+}
+
 fn upstream_exclusion_manifest(rows: &[&str]) -> String {
     let mut manifest = format!(
         "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\n\
@@ -7248,6 +7261,51 @@ fn level2_diode_dtemp_fixture(
     (root, owner, reference, runner)
 }
 
+fn capacitor_dtemp_fixture(
+    label: &str,
+    owner_source: &str,
+    reference_source: &str,
+) -> (PathBuf, XyceDeck, XyceDeck, XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-capacitor-dtemp-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = root.join("Netlists/DTEMP");
+    fs::create_dir_all(&family).expect("create capacitor DTEMP fixture directory");
+    let owner_path = family.join("cap_dtemp.cir");
+    let reference_path = family.join("cap_ref.cir");
+    fs::write(&owner_path, owner_source).expect("write capacitor DTEMP owner fixture");
+    fs::write(&reference_path, reference_source).expect("write capacitor TEMP reference fixture");
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        "Netlists/DTEMP/cap_dtemp.cir\trequires_upstream_wrapper\n",
+    )
+    .expect("write capacitor DTEMP wrapper provenance");
+    fs::write(
+        root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[&format!(
+            "Netlists/DTEMP/cap_ref.cir\tNetlists/DTEMP/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_CAPACITOR_DTEMP_REFERENCE_CONTRACT}"
+        )]),
+    )
+    .expect("write capacitor DTEMP exclusion provenance");
+    let owner = XyceDeck {
+        path: owner_path,
+        relative_path: "Netlists/DTEMP/cap_dtemp.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let reference = XyceDeck {
+        path: reference_path,
+        relative_path: "Netlists/DTEMP/cap_ref.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    (root, owner, reference, runner)
+}
+
 #[test]
 fn bug647_resistor_pair_is_manifest_owned_and_structurally_qualified() {
     let (root, owner, reference, runner) = bug647_resistor_fixture(
@@ -9494,6 +9552,203 @@ fn level2_diode_dtemp_provenance_rejects_candidate_mutation() {
         "any source mutation must fail the exact candidate-content census"
     );
     fs::remove_dir_all(root).expect("remove Level-2 diode provenance fixture");
+}
+
+#[test]
+fn capacitor_dtemp_candidate_census_is_an_exact_manifest_bijection() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_root = workspace_root.join("tests/xyce");
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    let selected = runner
+        .discover_tests()
+        .iter()
+        .filter_map(|deck| {
+            runner
+                .capacitor_dtemp_relational_contract(deck)
+                .map(|contract| {
+                    contract.unwrap_or_else(|error| {
+                        panic!("capacitor DTEMP candidate failed qualification: {error}")
+                    });
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                })
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        selected,
+        BTreeSet::from([
+            XYCE_CAPACITOR_DTEMP_OWNER_RECORD.to_string(),
+            XYCE_CAPACITOR_DTEMP_REFERENCE_RECORD.to_string(),
+        ])
+    );
+    assert_eq!(selected.len(), XYCE_CAPACITOR_DTEMP_CANDIDATE_COUNT);
+}
+
+#[test]
+fn capacitor_dtemp_snapshots_reject_semantic_mutations() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let owner = fs::read_to_string(corpus.join("Netlists/DTEMP/cap_dtemp.cir"))
+        .expect("read capacitor DTEMP owner");
+    let reference = fs::read_to_string(corpus.join("Netlists/DTEMP/cap_ref.cir"))
+        .expect("read capacitor TEMP reference");
+    let mutations = [
+        (
+            owner.replace("list 600 700 800", "list 600 701 800"),
+            reference.clone(),
+            XyceCapacitorDtempRole::Owner,
+            "effective-temperature grid",
+        ),
+        (
+            owner.replace("DTEMP={dtempParam}", "TEMP={dtempParam}"),
+            reference.clone(),
+            XyceCapacitorDtempRole::Owner,
+            "TEMP-versus-DTEMP ownership",
+        ),
+        (
+            owner.replace("TC1=1.77M", "TC1=1.78M"),
+            reference.clone(),
+            XyceCapacitorDtempRole::Owner,
+            "temperature coefficient",
+        ),
+        (
+            owner.replace("1uF IC=1", "2uF IC=1"),
+            reference.clone(),
+            XyceCapacitorDtempRole::Owner,
+            "base capacitance",
+        ),
+        (
+            owner.replace("1uF IC=1", "1uF IC=0.5"),
+            reference.clone(),
+            XyceCapacitorDtempRole::Owner,
+            "initial condition",
+        ),
+        (
+            owner.clone(),
+            reference.replace("TEMP={tempParam}", "DTEMP={tempParam}"),
+            XyceCapacitorDtempRole::Reference,
+            "reference absolute temperature",
+        ),
+        (
+            owner.clone(),
+            reference.replace(".tran 0 5ms", ".tran 0 6ms"),
+            XyceCapacitorDtempRole::Reference,
+            "transient domain",
+        ),
+        (
+            owner.clone(),
+            reference.replace("reltol=1e-6", "reltol=2e-6"),
+            XyceCapacitorDtempRole::Reference,
+            "transient tolerance",
+        ),
+        (
+            owner.clone(),
+            reference.replace(".print tran v(1)", ".print tran v(2)"),
+            XyceCapacitorDtempRole::Reference,
+            "probe identity",
+        ),
+    ];
+    for (index, (mutated_owner, mutated_reference, role, reason)) in
+        mutations.into_iter().enumerate()
+    {
+        let (root, owner_deck, reference_deck, runner) = capacitor_dtemp_fixture(
+            &format!("mutation-{index}"),
+            &mutated_owner,
+            &mutated_reference,
+        );
+        let (deck, purpose) = match role {
+            XyceCapacitorDtempRole::Owner => (
+                owner_deck,
+                XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily,
+            ),
+            XyceCapacitorDtempRole::Reference => {
+                (reference_deck, XyceStaticTranPlanPurpose::RelationalFamily)
+            }
+        };
+        let rejected = match runner.static_tran_plan_for_path_with_purpose(&deck.path, purpose) {
+            Err(_) => true,
+            Ok(plan) => match XyceTestRunner::parse_xyce_netlist(&plan.source, &deck.path) {
+                Err(_) => true,
+                Ok(netlist) => {
+                    XyceTestRunner::capacitor_dtemp_snapshot(&plan, &netlist, role).is_err()
+                }
+            },
+        };
+        fs::remove_dir_all(root).expect("remove capacitor DTEMP mutation fixture");
+        assert!(rejected, "{reason} mutation must fail closed");
+    }
+}
+
+#[test]
+fn capacitor_dtemp_causality_uses_one_shared_physical_time() {
+    let table = |middle_time: Value, middle_value: Value, final_value: Value| XycePrnTable {
+        columns: vec!["Index".into(), "TIME".into(), "v(1)".into()],
+        rows: vec![
+            vec![0.0, 0.0, 1.0],
+            vec![1.0, middle_time, middle_value],
+            vec![2.0, 5.0e-3, final_value],
+        ],
+    };
+    let grid_only_differences = vec![
+        table(1.0e-3, 0.8, 0.1),
+        table(2.0e-3, 0.7, 0.1),
+        table(4.0e-3, 0.5, 0.1),
+    ];
+    assert!(
+        !XyceTestRunner::capacitor_dtemp_tables_are_temperature_causal(
+            &grid_only_differences,
+            5.0e-3,
+        )
+        .expect("well-formed shared-tstop tables"),
+        "adaptive-grid drift alone must not prove temperature causality"
+    );
+
+    let temperature_dependent = vec![
+        table(1.0e-3, 0.8, 0.065),
+        table(2.0e-3, 0.7, 0.075),
+        table(4.0e-3, 0.5, 0.085),
+    ];
+    assert!(
+        XyceTestRunner::capacitor_dtemp_tables_are_temperature_causal(
+            &temperature_dependent,
+            5.0e-3,
+        )
+        .expect("well-formed shared-tstop tables"),
+        "different V(1) values at the common tstop must prove temperature causality"
+    );
+
+    let mut missing_tstop = temperature_dependent;
+    missing_tstop[2].rows[2][1] = 4.9e-3;
+    assert!(
+        XyceTestRunner::capacitor_dtemp_tables_are_temperature_causal(&missing_tstop, 5.0e-3)
+            .is_err(),
+        "causality must fail closed when any table lacks the common tstop"
+    );
+}
+
+#[test]
+fn capacitor_dtemp_provenance_rejects_candidate_mutation() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let owner = fs::read_to_string(corpus.join("Netlists/DTEMP/cap_dtemp.cir"))
+        .expect("read capacitor DTEMP owner");
+    let reference = fs::read_to_string(corpus.join("Netlists/DTEMP/cap_ref.cir"))
+        .expect("read capacitor TEMP reference");
+    let (root, owner_deck, _, runner) = capacitor_dtemp_fixture("provenance", &owner, &reference);
+    let contract = runner
+        .capacitor_dtemp_relational_contract(&owner_deck)
+        .expect("capacitor DTEMP fixture is selected")
+        .expect("unmodified capacitor DTEMP provenance qualifies");
+    let mutation = owner.replace("TC2=-0.63U", "TC2=-0.62U");
+    fs::write(&owner_deck.path, mutation).expect("write capacitor DTEMP mutation");
+    assert!(
+        runner
+            .validate_capacitor_dtemp_provenance(&contract)
+            .is_err(),
+        "any source mutation must fail the exact candidate-content census"
+    );
+    fs::remove_dir_all(root).expect("remove capacitor DTEMP provenance fixture");
 }
 
 #[test]

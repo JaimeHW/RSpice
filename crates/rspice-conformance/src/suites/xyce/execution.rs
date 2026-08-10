@@ -488,6 +488,30 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.capacitor_dtemp_relational_contract(deck) {
+            let role = XyceCapacitorDtempRole::for_record(&deck.relative_path)
+                .expect("capacitor DTEMP detector selected a recognized record");
+            let result = match contract {
+                Ok(contract) => self.run_capacitor_dtemp_relational_contract(deck, contract, start),
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    role.result_contract(),
+                    format!("capacitor DTEMP relational qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.bug647_resistor_relational_contract(deck) {
             let result = match contract {
                 Ok(contract) => self.run_bug647_resistor_relational_contract(deck, contract, start),
@@ -6596,6 +6620,407 @@ impl XyceTestRunner {
                             ),
                             Vec::new(),
                         );
+                }
+            };
+            for mismatch in &mut step_mismatches {
+                mismatch.row += row_offset;
+                mismatch.probe = format!("step {index}: {}", mismatch.probe);
+            }
+            row_offset += owner.rows.len();
+            mismatches.extend(step_mismatches);
+            if mismatches.len() >= self.config.max_mismatches {
+                mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, result_contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!(
+                    "{} {LABEL} exact serialized PRN mismatch(es)",
+                    mismatches.len()
+                ),
+                mismatches,
+            )
+        }
+    }
+
+    pub(super) fn capacitor_dtemp_tables_are_temperature_causal(
+        tables: &[XycePrnTable],
+        stop: Value,
+    ) -> Result<bool, String> {
+        const LABEL: &str = "capacitor TEMP/DTEMP family";
+        if tables.len() != 3 {
+            return Err(format!(
+                "{LABEL} causality requires exactly three temperature tables, got {}",
+                tables.len()
+            ));
+        }
+        let expected_stop = Self::xyce_default_prn_text(stop)?;
+        let mut final_values = Vec::with_capacity(tables.len());
+        for (index, table) in tables.iter().enumerate() {
+            if table.columns != ["Index", "TIME", "v(1)"] {
+                return Err(format!(
+                    "{LABEL} causal table {index} lost its Index/TIME/v(1) schema"
+                ));
+            }
+            let final_row = table.rows.last().ok_or_else(|| {
+                format!("{LABEL} causal table {index} has no final transient row")
+            })?;
+            if final_row.len() != table.columns.len() {
+                return Err(format!(
+                    "{LABEL} causal table {index} final row has the wrong width"
+                ));
+            }
+            let final_time = Self::xyce_default_prn_text(final_row[1])?;
+            if final_time != expected_stop {
+                return Err(format!(
+                    "{LABEL} causal table {index} ends at serialized TIME={final_time}, expected tstop={expected_stop}"
+                ));
+            }
+            final_values.push(Self::xyce_default_prn_text(final_row[2])?);
+        }
+        Ok(final_values.windows(2).any(|pair| pair[0] != pair[1]))
+    }
+
+    pub(super) fn run_capacitor_dtemp_relational_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceCapacitorDtempContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        const LABEL: &str = "capacitor TEMP/DTEMP family";
+        let result_contract = contract.role.result_contract();
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let qualification = (|| {
+            self.validate_capacitor_dtemp_provenance(&contract)?;
+            let owner_netlist = Self::parse_xyce_netlist(
+                &contract.owner_plan.source,
+                &contract.owner_plan.deck_path,
+            )
+            .map_err(|error| format!("{LABEL} owner parse failed: {error}"))?;
+            let reference_netlist = Self::parse_xyce_netlist(
+                &contract.reference_plan.source,
+                &contract.reference_plan.deck_path,
+            )
+            .map_err(|error| format!("{LABEL} reference parse failed: {error}"))?;
+            let owner_snapshot = Self::capacitor_dtemp_snapshot(
+                &contract.owner_plan,
+                &owner_netlist,
+                XyceCapacitorDtempRole::Owner,
+            )?;
+            let reference_snapshot = Self::capacitor_dtemp_snapshot(
+                &contract.reference_plan,
+                &reference_netlist,
+                XyceCapacitorDtempRole::Reference,
+            )?;
+            if owner_snapshot != reference_snapshot {
+                return Err(format!(
+                    "{LABEL} base owner/reference topology or analysis semantics differ"
+                ));
+            }
+
+            let expansion_engine = self.create_dc_engine();
+            let owner_runs = Self::nested_step_runs_for_commands_with_limits_and_abort(
+                &expansion_engine,
+                &owner_netlist,
+                &contract.owner_plan.steps,
+                xyce_step_plan_limits(),
+                &abort,
+            )
+            .map_err(|error| format!("{LABEL} owner STEP expansion failed: {error}"))?;
+            let reference_runs = Self::nested_step_runs_for_commands_with_limits_and_abort(
+                &expansion_engine,
+                &reference_netlist,
+                &contract.reference_plan.steps,
+                xyce_step_plan_limits(),
+                &abort,
+            )
+            .map_err(|error| format!("{LABEL} reference STEP expansion failed: {error}"))?;
+            let owner_coordinates: [Value; 3] = [600.0, 700.0, 800.0];
+            let reference_coordinates: [Value; 3] = [627.0, 727.0, 827.0];
+            let expected_capacitances: [Value; 3] = [1.8352e-6, 1.9303e-6, 2.0128e-6];
+            if owner_runs.len() != owner_coordinates.len()
+                || reference_runs.len() != reference_coordinates.len()
+            {
+                return Err(format!(
+                    "{LABEL} requires three owner and three reference materializations, found {}/{}",
+                    owner_runs.len(),
+                    reference_runs.len()
+                ));
+            }
+            let mut resolved_capacitances = Vec::with_capacity(owner_runs.len());
+            for (
+                index,
+                ((((owner_run, reference_run), owner_coordinate), reference_coordinate), expected),
+            ) in owner_runs
+                .iter()
+                .zip(&reference_runs)
+                .zip(owner_coordinates)
+                .zip(reference_coordinates)
+                .zip(expected_capacitances)
+                .enumerate()
+            {
+                let [owner_step_value] = owner_run.step_values.as_slice() else {
+                    return Err(format!(
+                        "{LABEL} owner materialization {index} lost its one STEP coordinate"
+                    ));
+                };
+                let [reference_step_value] = reference_run.step_values.as_slice() else {
+                    return Err(format!(
+                        "{LABEL} reference materialization {index} lost its one STEP coordinate"
+                    ));
+                };
+                if owner_step_value.to_bits() != owner_coordinate.to_bits()
+                    || reference_step_value.to_bits() != reference_coordinate.to_bits()
+                {
+                    return Err(format!(
+                        "{LABEL} materialization {index} changed its ordered STEP coordinates"
+                    ));
+                }
+
+                let owner_capacitance = expansion_engine
+                    .resolved_capacitor_value(&owner_run.netlist, "c1")
+                    .map_err(|error| {
+                        format!(
+                            "{LABEL} owner materialization {index} capacitance resolution failed: {error}"
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        format!(
+                            "{LABEL} owner materialization {index} lost capacitor C1"
+                        )
+                    })?;
+                let reference_capacitance = expansion_engine
+                    .resolved_capacitor_value(&reference_run.netlist, "c1")
+                    .map_err(|error| {
+                        format!(
+                            "{LABEL} reference materialization {index} capacitance resolution failed: {error}"
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        format!(
+                            "{LABEL} reference materialization {index} lost capacitor C1"
+                        )
+                    })?;
+                if !owner_capacitance.is_finite()
+                    || owner_capacitance <= 0.0
+                    || owner_capacitance.to_bits() != reference_capacitance.to_bits()
+                    || (owner_capacitance - expected).abs() >= 1.0e-18
+                {
+                    return Err(format!(
+                        "{LABEL} materialization {index} resolved inconsistent capacitance: owner={owner_capacitance}, reference={reference_capacitance}, expected={expected}"
+                    ));
+                }
+                resolved_capacitances.push(owner_capacitance);
+
+                let normalized_owner = Self::normalize_capacitor_dtemp_materialization(
+                    &owner_run.netlist,
+                    XyceCapacitorDtempRole::Owner,
+                    owner_coordinate,
+                    reference_coordinate,
+                )?;
+                let normalized_reference = Self::normalize_capacitor_dtemp_materialization(
+                    &reference_run.netlist,
+                    XyceCapacitorDtempRole::Reference,
+                    reference_coordinate,
+                    reference_coordinate,
+                )?;
+                let materialized_owner_snapshot = Self::capacitor_dtemp_snapshot(
+                    &contract.owner_plan,
+                    &normalized_owner,
+                    XyceCapacitorDtempRole::Owner,
+                )?;
+                let materialized_reference_snapshot = Self::capacitor_dtemp_snapshot(
+                    &contract.reference_plan,
+                    &normalized_reference,
+                    XyceCapacitorDtempRole::Reference,
+                )?;
+                if materialized_owner_snapshot != owner_snapshot
+                    || materialized_reference_snapshot != reference_snapshot
+                    || materialized_owner_snapshot != materialized_reference_snapshot
+                {
+                    return Err(format!(
+                        "{LABEL} materialization {index} changed non-temperature topology or analysis semantics"
+                    ));
+                }
+            }
+            if resolved_capacitances
+                .windows(2)
+                .any(|pair| pair[0].to_bits() == pair[1].to_bits())
+            {
+                return Err(format!(
+                    "{LABEL} temperature polynomial produced repeated capacitance values"
+                ));
+            }
+            Ok((owner_runs, reference_runs))
+        })();
+        let (owner_runs, reference_runs) = match qualification {
+            Ok(runs) => runs,
+            Err(reason) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("{LABEL} qualification failed: {reason}"),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let simulate = |plan: &XyceStaticTranPlan,
+                        runs: &[XyceStepRun],
+                        role: &str|
+         -> Result<Vec<XycePrnTable>, String> {
+            let mut tables = Vec::with_capacity(runs.len());
+            let expected_initial = Self::xyce_default_prn_text(1.0)?;
+            for (index, run) in runs.iter().enumerate() {
+                let result = self
+                    .run_transient_family_netlist(plan, &run.netlist, start, None, None)
+                    .map_err(|error| {
+                        format!("{LABEL} {role} step {index} simulation failed: {error}")
+                    })?;
+                let table = Self::transient_family_result_to_prn_table(plan, &run.netlist, &result)
+                    .map_err(|error| {
+                        format!("{LABEL} {role} step {index} output failed: {error}")
+                    })?;
+                let initial_value = table
+                    .rows
+                    .first()
+                    .and_then(|row| row.get(2))
+                    .copied()
+                    .ok_or_else(|| {
+                        format!("{LABEL} {role} step {index} has no initial V(1) sample")
+                    })?;
+                if table.columns != ["Index", "TIME", "v(1)"] {
+                    return Err(format!(
+                        "{LABEL} {role} step {index} produced unexpected PRN columns: {:?}",
+                        table.columns
+                    ));
+                }
+                if table.rows.len() < 2 {
+                    return Err(format!(
+                        "{LABEL} {role} step {index} produced only {} PRN row(s)",
+                        table.rows.len()
+                    ));
+                }
+                let first = &table.rows[0];
+                let last = &table.rows[table.rows.len() - 1];
+                let expected_start = plan.tran.start.unwrap_or(0.0);
+                if first.len() != table.columns.len()
+                    || first[1].to_bits() != expected_start.to_bits()
+                {
+                    return Err(format!(
+                        "{LABEL} {role} step {index} PRN starts at {:?}, expected exact TIME={expected_start:e}",
+                        first
+                    ));
+                }
+                if last.len() != table.columns.len()
+                    || last[1].to_bits() != plan.tran.stop.to_bits()
+                {
+                    return Err(format!(
+                        "{LABEL} {role} step {index} PRN ends at {:?}, expected exact TIME={:e}",
+                        last, plan.tran.stop
+                    ));
+                }
+                let serialized_initial = Self::xyce_default_prn_text(initial_value)?;
+                if serialized_initial != expected_initial {
+                    return Err(format!(
+                        "{LABEL} {role} step {index} PRN starts with V(1)={initial_value:e} ({serialized_initial}), expected IC=1 ({expected_initial})"
+                    ));
+                }
+                for (row, values) in table.rows.iter().enumerate() {
+                    if values.len() != table.columns.len()
+                        || values[0].to_bits() != (row as Value).to_bits()
+                        || values.iter().any(|value| !value.is_finite())
+                        || values[1] < expected_start
+                        || values[1] > plan.tran.stop
+                    {
+                        return Err(format!(
+                            "{LABEL} {role} step {index} PRN row {row} is malformed or outside the transient interval: {values:?}"
+                        ));
+                    }
+                }
+                if let Some((row, pair)) = table
+                    .rows
+                    .windows(2)
+                    .enumerate()
+                    .find(|(_, pair)| pair[0][1] >= pair[1][1])
+                {
+                    return Err(format!(
+                        "{LABEL} {role} step {index} PRN time is not strictly increasing between rows {row} and {}: {} then {}",
+                        row + 1,
+                        pair[0][1],
+                        pair[1][1]
+                    ));
+                }
+                tables.push(table);
+            }
+            Ok(tables)
+        };
+
+        // Preserve the historical wrapper order: the live reference deck
+        // runs to completion before the DTEMP owner deck.
+        let reference_tables =
+            match simulate(&contract.reference_plan, &reference_runs, "reference") {
+                Ok(tables) => tables,
+                Err(reason) => {
+                    return self.failure_result(deck, start, result_contract, reason, Vec::new());
+                }
+            };
+        let owner_tables = match simulate(&contract.owner_plan, &owner_runs, "owner") {
+            Ok(tables) => tables,
+            Err(reason) => {
+                return self.failure_result(deck, start, result_contract, reason, Vec::new());
+            }
+        };
+
+        let causal = match Self::capacitor_dtemp_tables_are_temperature_causal(
+            &owner_tables,
+            contract.owner_plan.tran.stop,
+        ) {
+            Ok(causal) => causal,
+            Err(reason) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("{LABEL} causal output validation failed: {reason}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if !causal {
+            return self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("{LABEL} is temperature-invariant at default PRN precision"),
+                Vec::new(),
+            );
+        }
+
+        let mut mismatches = Vec::new();
+        let mut row_offset = 0usize;
+        for (index, (reference, owner)) in reference_tables.iter().zip(&owner_tables).enumerate() {
+            let mut step_mismatches = match self
+                .compare_serialized_default_prn_tables(reference, owner)
+            {
+                Ok(found) => found,
+                Err(reason) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!(
+                            "{LABEL} exact historical diff adapter failed for step {index}: {reason}"
+                        ),
+                        Vec::new(),
+                    );
                 }
             };
             for mismatch in &mut step_mismatches {

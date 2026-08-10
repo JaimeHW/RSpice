@@ -506,7 +506,7 @@ Netlists/DTEMP/bsim4.7_nmos_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/bsim4.7_pmos_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/bsim4.82_nmos_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/bsim4.82_pmos_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
-Netlists/DTEMP/cap_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
+Netlists/DTEMP/cap_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	capacitor_dtemp_relational_wrapper_reference
 Netlists/DTEMP/njfet_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/nmesfet_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/nmos1_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	classic_mos_level1_dtemp_relational_wrapper_reference

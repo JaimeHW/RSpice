@@ -5508,6 +5508,63 @@ impl XyceTestRunner {
         })())
     }
 
+    pub(super) fn capacitor_dtemp_relational_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceCapacitorDtempContract, String>> {
+        let role = XyceCapacitorDtempRole::for_record(&deck.relative_path)?;
+        Some((|| {
+            const LABEL: &str = "capacitor TEMP/DTEMP family";
+            let parent = deck
+                .path
+                .parent()
+                .ok_or_else(|| format!("{LABEL} record has no sibling directory"))?;
+            let owner_path = parent.join("cap_dtemp.cir");
+            let reference_path = parent.join("cap_ref.cir");
+            let contract = XyceCapacitorDtempContract {
+                owner_plan: self.static_tran_plan_for_path_with_purpose(
+                    &owner_path,
+                    XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily,
+                )?,
+                reference_plan: self.static_tran_plan_for_path_with_purpose(
+                    &reference_path,
+                    XyceStaticTranPlanPurpose::RelationalFamily,
+                )?,
+                owner_path,
+                reference_path,
+                role,
+            };
+            self.validate_capacitor_dtemp_provenance(&contract)?;
+
+            let owner_netlist = Self::parse_xyce_netlist(
+                &contract.owner_plan.source,
+                &contract.owner_plan.deck_path,
+            )
+            .map_err(|error| format!("{LABEL} owner parse failed: {error}"))?;
+            let reference_netlist = Self::parse_xyce_netlist(
+                &contract.reference_plan.source,
+                &contract.reference_plan.deck_path,
+            )
+            .map_err(|error| format!("{LABEL} reference parse failed: {error}"))?;
+            let owner_snapshot = Self::capacitor_dtemp_snapshot(
+                &contract.owner_plan,
+                &owner_netlist,
+                XyceCapacitorDtempRole::Owner,
+            )?;
+            let reference_snapshot = Self::capacitor_dtemp_snapshot(
+                &contract.reference_plan,
+                &reference_netlist,
+                XyceCapacitorDtempRole::Reference,
+            )?;
+            if owner_snapshot != reference_snapshot {
+                return Err(format!(
+                    "{LABEL} owner/reference semantics differ after TEMP-versus-DTEMP normalization: owner={owner_snapshot:?}, reference={reference_snapshot:?}"
+                ));
+            }
+            Ok(contract)
+        })())
+    }
+
     pub(super) fn bug647_resistor_relational_contract(
         &self,
         deck: &XyceDeck,

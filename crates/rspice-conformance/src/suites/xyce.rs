@@ -58,15 +58,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 180;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 181;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "0f27d8c2d5de50f363c98824ebdb53e1b9487ddbb20b30166b3686a85b00b492";
+    "32df3123f37783e736f86a496103132bbfe6f0c344bac321548b73988424df05";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "aaa0d90e31a5befd14c4732f69084d8908753a1167beb9051d1a5969ae46922b";
+    "7bc8851df76a42d6ebb03bca6c02edf29de2ce0cb343d0d3b8142063f24de70f";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "129056533ae7a207e4f9ae7d9989c918deefe4f8d3fbb07d9dd899382c169755";
+    "d18ca3433ec029f4377d921ae6084f7b936b032c5c8a162740f7265029f9d731";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -188,6 +188,22 @@ const XYCE_LEVEL2_DIODE_DTEMP_OWNER_MANIFEST_BLAKE3: &str =
 const XYCE_LEVEL2_DIODE_DTEMP_EXCLUSION_COUNT: usize = 1;
 const XYCE_LEVEL2_DIODE_DTEMP_HISTORICAL_EXCLUSION_BLAKE3: &str =
     "89427341a2d1ad7e4c898035eaa0bbab587ce40bafd2394fa5754914c030bdba";
+const XYCE_CAPACITOR_DTEMP_WRAPPER_CONTRACT: &str = "capacitor_dtemp_relational_wrapper_owner";
+const XYCE_CAPACITOR_DTEMP_REFERENCE_CONTRACT: &str =
+    "capacitor_dtemp_relational_wrapper_reference";
+const XYCE_CAPACITOR_DTEMP_OWNER_RECORD: &str = "netlists/dtemp/cap_dtemp.cir";
+const XYCE_CAPACITOR_DTEMP_REFERENCE_RECORD: &str = "netlists/dtemp/cap_ref.cir";
+const XYCE_CAPACITOR_DTEMP_CANDIDATE_COUNT: usize = 2;
+const XYCE_CAPACITOR_DTEMP_CANDIDATE_BLAKE3: &str =
+    "47e922d813ff50051123f160fe38a291260bc61a61558bb6928774ec2a6ced11";
+const XYCE_CAPACITOR_DTEMP_CONTENT_BLAKE3: &str =
+    "438d548e950706c07a8903fcade734d87c2dce479eb6234c938164122333f82c";
+const XYCE_CAPACITOR_DTEMP_OWNER_COUNT: usize = 1;
+const XYCE_CAPACITOR_DTEMP_OWNER_MANIFEST_BLAKE3: &str =
+    "cca5a9169aeb4fa751eb639be7a4c3ee0b7d649f498407d4f97e549aa23d43eb";
+const XYCE_CAPACITOR_DTEMP_EXCLUSION_COUNT: usize = 1;
+const XYCE_CAPACITOR_DTEMP_HISTORICAL_EXCLUSION_BLAKE3: &str =
+    "f54cec2065bc764c4517a7d778265d7aa717bb1bbdc5f77defd4bfe87c7b0a73";
 // The removed Release 7.10 sidecar emits `exp(-TIME/0.001)`. These constants
 // describe that generated oracle; the path-independent candidate detector does
 // not use them as deck-name or value allowlists.
@@ -2563,7 +2579,9 @@ pub struct XyceRunnerConfig {
     pub voltage_absolute_tolerance: f64,
     /// Absolute tolerance for derived power near-zero values.
     pub power_absolute_tolerance: f64,
-    /// Maximum number of mismatches to retain in one result.
+    /// Maximum number of mismatches to retain in one result. The runner
+    /// normalizes zero to one so diagnostic truncation can never erase a
+    /// failure.
     pub max_mismatches: usize,
     /// Maximum wall-clock time allowed for a numerically executed deck.
     pub max_time_per_test_ms: u128,
@@ -5355,6 +5373,54 @@ struct XyceLevel2DiodeDtempSnapshot {
     tran_max_step_bits: Option<u64>,
     probes: Vec<String>,
     effective_temperature_bits: Vec<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceCapacitorDtempRole {
+    Owner,
+    Reference,
+}
+
+impl XyceCapacitorDtempRole {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::Owner => XYCE_CAPACITOR_DTEMP_WRAPPER_CONTRACT,
+            Self::Reference => XYCE_CAPACITOR_DTEMP_REFERENCE_CONTRACT,
+        }
+    }
+
+    fn for_record(relative_path: &str) -> Option<Self> {
+        match XyceTestRunner::normalize_manifest_key(relative_path).as_str() {
+            XYCE_CAPACITOR_DTEMP_OWNER_RECORD => Some(Self::Owner),
+            XYCE_CAPACITOR_DTEMP_REFERENCE_RECORD => Some(Self::Reference),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct XyceCapacitorDtempContract {
+    owner_path: PathBuf,
+    reference_path: PathBuf,
+    owner_plan: XyceStaticTranPlan,
+    reference_plan: XyceStaticTranPlan,
+    role: XyceCapacitorDtempRole,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceCapacitorDtempSnapshot {
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    model_name: String,
+    model_type: String,
+    model_params: Vec<(String, u64)>,
+    tran_step_bits: u64,
+    tran_stop_bits: u64,
+    tran_start_bits: Option<u64>,
+    tran_max_step_bits: Option<u64>,
+    probes: Vec<String>,
+    effective_temperature_bits: Vec<u64>,
+    timeint_reltol_bits: u64,
+    timeint_abstol_bits: u64,
 }
 
 #[derive(Debug, Clone)]

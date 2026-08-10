@@ -9,6 +9,8 @@ use super::*;
 impl XyceTestRunner {
     /// Create a runner rooted at `tests/xyce`.
     pub fn new<P: AsRef<Path>>(root: P, config: XyceRunnerConfig) -> Self {
+        let mut config = config;
+        config.max_mismatches = config.max_mismatches.max(1);
         let root = root
             .as_ref()
             .canonicalize()
