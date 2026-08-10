@@ -19,6 +19,15 @@ on:
 permissions:
   contents: read
 
+# This workflow fans out to ~32 jobs (ten of them macOS, whose concurrency
+# cap is small), so back-to-back pushes to main were queueing hundreds of
+# jobs and starving every other workflow's runners for hours. Serialize per
+# ref: on main the running validation finishes and GitHub keeps only the
+# newest push pending; on pull requests a superseded run is cancelled.
+concurrency:
+  group: python-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
