@@ -517,7 +517,7 @@ impl Engine {
                         )
                     },
                 );
-                circuit.enforce_dc_ideal_voltage_constraints(&mut new_solution);
+                circuit.enforce_dc_ideal_voltage_constraints(&mut new_solution)?;
                 Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
 
                 let converged = self.node_voltage_convergence_met(
@@ -1023,7 +1023,7 @@ impl Engine {
                     || self.b3soi_limiter_owns_global_damping(circuit),
                 |trial| self.nonlinear_merit_with_gmin(circuit, matrix, trial, gmin),
             );
-            circuit.enforce_dc_ideal_voltage_constraints(&mut new_solution);
+            circuit.enforce_dc_ideal_voltage_constraints(&mut new_solution)?;
             Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
 
             let voltage_converged =

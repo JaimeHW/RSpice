@@ -8213,6 +8213,11 @@ impl Engine {
                 .map_err(SimulationError::Circuit)?;
         }
 
+        circuit
+            .voltage_sources
+            .finalize_constraint_projection(circuit.num_nodes())
+            .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+
         check_build_abort(abort)?;
         Ok(circuit)
     }

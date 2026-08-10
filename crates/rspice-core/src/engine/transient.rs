@@ -3401,7 +3401,7 @@ impl Engine {
             } else {
                 new_solution.clone_from(&solution);
             }
-            circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
+            circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt)?;
             for (i, value) in new_solution.iter_mut().enumerate() {
                 let protected_ideal_output = i < num_nodes
                     && force_accept_protected_nodes
@@ -3443,7 +3443,7 @@ impl Engine {
                     &force_accept_protected_nodes,
                 );
                 if damped {
-                    circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
+                    circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt)?;
                 }
                 Self::clip_ideal_output_common_modes(
                     &solution,
@@ -3729,7 +3729,7 @@ impl Engine {
                                 );
                                 new_solution = trial;
                                 circuit
-                                    .enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
+                                    .enforce_ideal_voltage_constraints(&mut new_solution, t + dt)?;
                                 nonlinear_state_matches_new_solution = false;
                                 merit_backtrack = Some((search, rollback));
                                 total_merit_nanos += merit_phase_start.elapsed().as_nanos();
@@ -3775,7 +3775,7 @@ impl Engine {
                             &rollback,
                         );
                         new_solution = trial;
-                        circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
+                        circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt)?;
                         nonlinear_state_matches_new_solution = false;
                         merit_backtrack = Some((search, rollback));
                         total_merit_nanos += merit_phase_start.elapsed().as_nanos();
@@ -4055,7 +4055,7 @@ impl Engine {
                                 &force_accept_protected_nodes,
                             );
                             if damped {
-                                circuit.enforce_ideal_voltage_constraints(sol, t + dt);
+                                circuit.enforce_ideal_voltage_constraints(sol, t + dt)?;
                             }
                             Self::clip_ideal_output_common_modes(
                                 &solution,
@@ -4780,7 +4780,7 @@ impl Engine {
                         force_accept_delta_limit,
                         &force_accept_protected_nodes,
                         &ideal_output_pairs,
-                    );
+                    )?;
                     let unbounded_force_candidate = Self::is_unbounded_step(
                         &solution,
                         &bounded_force_candidate,
@@ -5864,7 +5864,7 @@ impl Engine {
                         force_accept_delta_limit,
                         &force_accept_protected_nodes,
                         &ideal_output_pairs,
-                    );
+                    )?;
                     let unbounded_force_candidate = Self::is_unbounded_step(
                         &solution,
                         &bounded_force_candidate,
@@ -6388,8 +6388,8 @@ impl Engine {
             retry_count = 0;
 
             // Keep ideal source constraints exact before LTE and state updates.
-            let projected_voltage_sources =
-                circuit.enforce_prescribed_transient_voltage_constraints(&mut new_solution, t + dt);
+            let projected_voltage_sources = circuit
+                .enforce_prescribed_transient_voltage_constraints(&mut new_solution, t + dt)?;
             if projected_voltage_sources {
                 nonlinear_state_matches_new_solution = false;
             }
