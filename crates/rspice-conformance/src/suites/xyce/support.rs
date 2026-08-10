@@ -2431,7 +2431,7 @@ impl XyceTestRunner {
             })
             .cloned()
             .collect::<Vec<_>>();
-        if representation == XycePassiveTemperatureRepresentation::ModelCoefficients
+        if representation == XycePassiveTemperatureRepresentation::Model
             && params.len() == 1
             && tc_params.is_empty()
         {
@@ -2439,8 +2439,8 @@ impl XyceTestRunner {
         }
         if matches!(
             representation,
-            XycePassiveTemperatureRepresentation::ScalarInstanceCoefficients
-                | XycePassiveTemperatureRepresentation::VectorInstanceCoefficients
+            XycePassiveTemperatureRepresentation::ScalarInstance
+                | XycePassiveTemperatureRepresentation::VectorInstance
         ) && params.len() == 3
             && tc_params.len() == 2
         {
@@ -2596,20 +2596,20 @@ impl XyceTestRunner {
             .collect::<Vec<_>>();
 
         if vectors.is_empty() && tc1.is_empty() && tc2.is_empty() {
-            return Ok(XycePassiveTemperatureRepresentation::ModelCoefficients);
+            return Ok(XycePassiveTemperatureRepresentation::Model);
         }
         if vectors.is_empty()
             && matches!(tc1.as_slice(), [value] if !value.is_empty() && !value.contains(','))
             && matches!(tc2.as_slice(), [value] if !value.is_empty() && !value.contains(','))
         {
-            return Ok(XycePassiveTemperatureRepresentation::ScalarInstanceCoefficients);
+            return Ok(XycePassiveTemperatureRepresentation::ScalarInstance);
         }
         if tc1.is_empty()
             && tc2.is_empty()
             && matches!(vectors.as_slice(), [value]
                 if Self::passive_temperature_vector_source_value_is_pair(value))
         {
-            return Ok(XycePassiveTemperatureRepresentation::VectorInstanceCoefficients);
+            return Ok(XycePassiveTemperatureRepresentation::VectorInstance);
         }
         Err(format!(
             "{LABEL} passive '{element_name}' must author exactly no instance TC, scalar TC1+TC2, or one two-component TC vector; found {assignments:?}"

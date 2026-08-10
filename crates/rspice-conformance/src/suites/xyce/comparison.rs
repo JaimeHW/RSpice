@@ -1788,11 +1788,11 @@ impl XyceTestRunner {
         baseline: &XycePassiveTemperatureOverrideSnapshot,
         target: &XycePassiveTemperatureOverrideSnapshot,
     ) -> Result<(), String> {
-        if baseline.representation != XycePassiveTemperatureRepresentation::ModelCoefficients
+        if baseline.representation != XycePassiveTemperatureRepresentation::Model
             || !matches!(
                 target.representation,
-                XycePassiveTemperatureRepresentation::ScalarInstanceCoefficients
-                    | XycePassiveTemperatureRepresentation::VectorInstanceCoefficients
+                XycePassiveTemperatureRepresentation::ScalarInstance
+                    | XycePassiveTemperatureRepresentation::VectorInstance
             )
         {
             return Err(

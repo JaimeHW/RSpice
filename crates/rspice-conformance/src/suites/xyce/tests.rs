@@ -12996,15 +12996,15 @@ V1 bias 0 0
         .expect("the canonicalized vector TC pair has the same effective semantics");
     assert_eq!(
         baseline.representation,
-        XycePassiveTemperatureRepresentation::ModelCoefficients
+        XycePassiveTemperatureRepresentation::Model
     );
     assert_eq!(
         target.representation,
-        XycePassiveTemperatureRepresentation::ScalarInstanceCoefficients
+        XycePassiveTemperatureRepresentation::ScalarInstance
     );
     assert_eq!(
         vector.representation,
-        XycePassiveTemperatureRepresentation::VectorInstanceCoefficients
+        XycePassiveTemperatureRepresentation::VectorInstance
     );
     for spelling in ["TC 1m,2u", "TC = 1m,2u", "TC=1m, 2u"] {
         let variant_source = vector_source.replace("TC=1m,2u", spelling);
@@ -13012,7 +13012,7 @@ V1 bias 0 0
             .unwrap_or_else(|error| panic!("vector spelling '{spelling}' failed: {error}"));
         assert_eq!(
             variant.representation,
-            XycePassiveTemperatureRepresentation::VectorInstanceCoefficients
+            XycePassiveTemperatureRepresentation::VectorInstance
         );
         XyceTestRunner::compare_passive_temperature_override_snapshots(&baseline, &variant)
             .unwrap_or_else(|error| panic!("vector spelling '{spelling}' differs: {error}"));

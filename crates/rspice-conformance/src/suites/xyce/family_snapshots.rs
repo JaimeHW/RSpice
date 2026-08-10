@@ -3238,8 +3238,8 @@ impl XyceTestRunner {
         };
         if matches!(
             representation,
-            XycePassiveTemperatureRepresentation::ScalarInstanceCoefficients
-                | XycePassiveTemperatureRepresentation::VectorInstanceCoefficients
+            XycePassiveTemperatureRepresentation::ScalarInstance
+                | XycePassiveTemperatureRepresentation::VectorInstance
         ) && model_tc == winning_tc
         {
             return Err(format!(
