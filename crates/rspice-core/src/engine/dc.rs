@@ -2192,6 +2192,48 @@ D1 1 0 DXX
     }
 
     #[test]
+    fn xyce_dc_sweep_preserves_the_nox_accepted_bjt_iterate() {
+        let deck = "\
+Xyce NOX accepted-iterate regression
+VCC 4 0 DC 12
+RC 3 4 2k
+RB 4 5 377k
+VMON1 5 1 0
+VMON2 3 2 0
+Q1 2 1 0 NBJT
+.MODEL NBJT NPN (BF=100)
+.OPTIONS DEVICE TEMP=15
+.DC VCC 0 12 1
+.END
+";
+        let netlist = Netlist::parse(deck).expect("Xyce BJT sweep parses");
+        let results = xyce_engine()
+            .run_dc_sweep(&netlist, "VCC", 0.0, 12.0, 1.0)
+            .expect("Xyce BJT DC sweep solves");
+
+        assert_eq!(results.len(), 13);
+        let final_result = &results.last().expect("12 V point exists").1;
+        let base_voltage = final_result
+            .try_voltage_named("1")
+            .expect("base voltage is retained");
+        let collector_voltage = final_result
+            .try_voltage_named("2")
+            .expect("collector voltage is retained");
+        assert!(
+            (base_voltage - 8.176696841564984e-1).abs() <= 5.0e-10,
+            "expected Xyce's accepted base-voltage iterate, got {base_voltage:.17e}"
+        );
+        assert!(
+            (collector_voltage - 6.067728204399628).abs() <= 5.0e-10,
+            "expected Xyce's accepted collector-voltage iterate, got {collector_voltage:.17e}"
+        );
+        assert!(
+            (base_voltage - 8.176694343955253e-1).abs() > 1.0e-7,
+            "Xyce mode must not replace the accepted NOX iterate with RSpice's native polish"
+        );
+    }
+
+    #[test]
     fn dc_sweep_supports_dependent_parameter_sources() {
         let deck = "\
 parameter dc sweep
