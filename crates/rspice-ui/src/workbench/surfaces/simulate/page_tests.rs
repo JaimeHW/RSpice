@@ -292,6 +292,57 @@ fn the_resolved_policy_ledger_only_claims_analyses_the_plan_holds() {
     );
 }
 
+/// The page is titled "…& per-analysis overrides", so an analysis that stops
+/// resolving to the plan policy has to be visible on it. The value itself is
+/// owned by the analysis form; this page reports the divergence.
+#[test]
+fn an_analysis_that_leaves_the_plan_policy_is_named_in_the_ledger() {
+    use crate::simulation::plan::AnalysisDraft;
+
+    // The page title contains "per-analysis overrides", so the owner cell is
+    // counted rather than searched for — the title would match either way.
+    let owner_rows = |rendered: &str| rendered.matches("analysis override").count();
+
+    let default_plan = render(SimulationPage::Solver, 1200.0);
+    assert_eq!(
+        owner_rows(&default_plan),
+        1,
+        "nothing diverges yet, so only the page title should say it:\n{default_plan}"
+    );
+
+    let overridden = render_with(SimulationPage::Solver, 1200.0, |app| {
+        let Ok(plan) = app.state.sim_setup.stable_analysis_plan_mut() else {
+            return;
+        };
+        let Some(id) = plan
+            .instances()
+            .iter()
+            .find(|instance| matches!(instance.draft(), AnalysisDraft::Transient(_)))
+            .map(|instance| instance.id())
+        else {
+            return;
+        };
+        let _ = plan.edit(id, |draft| {
+            if let AnalysisDraft::Transient(setup) = draft {
+                setup.max_step = "5n".to_owned();
+            }
+        });
+    });
+    assert_eq!(
+        owner_rows(&overridden),
+        2,
+        "a transient with its own step ceiling must be named as an override:\n{overridden}"
+    );
+    assert!(
+        overridden.contains("TRAN"),
+        "the override row must name which analysis diverged:\n{overridden}"
+    );
+    assert!(
+        overridden.contains("5n"),
+        "the ledger must state the value the analysis actually resolves to:\n{overridden}"
+    );
+}
+
 /// The solver strip pairs each preset with its intent by position, so the two
 /// lists have to stay the same length and in the same order. Getting this
 /// wrong would describe one policy while applying another.

@@ -952,12 +952,13 @@ fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
     );
 }
 
-/// The analyses that carry their own accuracy tier instead of resolving to the
-/// plan preset.
+/// The analyses that resolve to something other than the plan-level policy.
 ///
-/// Only a tier that differs from the default is reported: listing every
-/// analysis at its default would bury the ones that actually diverge, which is
-/// the only thing this section of the ledger exists to show.
+/// Only a divergence is reported: listing every analysis at its default would
+/// bury the ones that actually differ, which is the only thing this section of
+/// the ledger exists to show. Each value is owned by the analysis's own form —
+/// this page reports where the plan policy stops applying, it does not offer a
+/// second place to set the same field.
 fn analysis_overrides(app: &RSpiceApp) -> Vec<(String, String, String, &'static str)> {
     use crate::simulation::dialog::{OpAccuracy, XfAccuracy};
     use crate::simulation::plan::AnalysisDraft;
@@ -970,21 +971,30 @@ fn analysis_overrides(app: &RSpiceApp) -> Vec<(String, String, String, &'static 
         .enumerate()
         .filter(|(_, instance)| instance.enabled())
         .filter_map(|(index, instance)| {
-            let tier = match instance.draft() {
+            let (option, value) = match instance.draft() {
                 AnalysisDraft::OperatingPoint(setup) => OpAccuracy::ALL
                     .get(setup.accuracy_idx)
                     .filter(|accuracy| **accuracy != OpAccuracy::default())
-                    .map(|accuracy| accuracy.display_name()),
+                    .map(|accuracy| ("Accuracy tier", accuracy.display_name().to_owned()))?,
                 AnalysisDraft::TransferFunction(setup) => XfAccuracy::ALL
                     .get(setup.accuracy_idx)
                     .filter(|accuracy| **accuracy != XfAccuracy::default())
-                    .map(|accuracy| accuracy.display_name()),
-                _ => None,
-            }?;
+                    .map(|accuracy| ("Accuracy tier", accuracy.display_name().to_owned()))?,
+                // A transient that names its own step ceiling stops resolving
+                // to the plan's. `auto` means it does not.
+                AnalysisDraft::Transient(setup) => {
+                    let ceiling = setup.max_step.trim();
+                    if ceiling.is_empty() || ceiling.eq_ignore_ascii_case("auto") {
+                        return None;
+                    }
+                    ("Step ceiling", ceiling.to_owned())
+                }
+                _ => return None,
+            };
             Some((
                 format!("#{} · {}", index + 1, instance.kind().code()),
-                "Accuracy tier".to_owned(),
-                tier.to_owned(),
+                option.to_owned(),
+                value,
                 "analysis override",
             ))
         })

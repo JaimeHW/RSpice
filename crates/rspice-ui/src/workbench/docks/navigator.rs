@@ -722,7 +722,10 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
         .id_salt("workbench.simulation.navigator")
         .show(ui, |ui| {
             let active = app.state.workbench.simulation_page;
-            let analyses_meta = format!("{total} active · {enabled} enabled");
+            // Enabled over total. The previous wording called the total
+            // "active", which is what `enabled` means, so a one-analysis plan
+            // read "1 active · 1 enabled".
+            let analyses_meta = format!("{enabled} / {total}");
             let mut requested = None;
             for page in SimulationPage::NAVIGATION {
                 let label = page.label();
