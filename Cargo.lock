@@ -2576,7 +2576,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
  "foldhash 0.1.5",
- "serde",
 ]
 
 [[package]]
@@ -2597,6 +2596,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
  "foldhash 0.2.0",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -5376,7 +5377,7 @@ dependencies = [
  "thiserror 2.0.20",
  "wasm-encoder 0.244.0",
  "wasmi",
- "wasmparser 0.244.0",
+ "wasmparser 0.255.0",
  "web-time",
  "windows-sys 0.61.2",
 ]
@@ -7565,7 +7566,6 @@ dependencies = [
  "hashbrown 0.15.5",
  "indexmap",
  "semver",
- "serde",
 ]
 
 [[package]]
@@ -7575,8 +7575,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8e329ef4b5d46e73b91d3ac6924417cad55a8cbbf869c199283383427c3320b"
 dependencies = [
  "bitflags 2.13.1",
+ "hashbrown 0.17.1",
  "indexmap",
  "semver",
+ "serde",
 ]
 
 [[package]]
