@@ -509,17 +509,17 @@ Netlists/DTEMP/bsim4.82_pmos_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/cap_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/njfet_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/nmesfet_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
-Netlists/DTEMP/nmos1_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
-Netlists/DTEMP/nmos2_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
-Netlists/DTEMP/nmos3_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
-Netlists/DTEMP/nmos6_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
+Netlists/DTEMP/nmos1_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	classic_mos_level1_dtemp_relational_wrapper_reference
+Netlists/DTEMP/nmos2_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	classic_mos_level1_dtemp_relational_wrapper_reference
+Netlists/DTEMP/nmos3_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	classic_mos_level1_dtemp_relational_wrapper_reference
+Netlists/DTEMP/nmos6_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	classic_mos_level1_dtemp_relational_wrapper_reference
 Netlists/DTEMP/npn_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/pjfet_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/pmesfet_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
-Netlists/DTEMP/pmos1_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
-Netlists/DTEMP/pmos2_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
-Netlists/DTEMP/pmos3_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
-Netlists/DTEMP/pmos6_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
+Netlists/DTEMP/pmos1_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	classic_mos_level1_dtemp_relational_wrapper_reference
+Netlists/DTEMP/pmos2_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	classic_mos_level1_dtemp_relational_wrapper_reference
+Netlists/DTEMP/pmos3_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	classic_mos_level1_dtemp_relational_wrapper_reference
+Netlists/DTEMP/pmos6_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	classic_mos_level1_dtemp_relational_wrapper_reference
 Netlists/DTEMP/pnp_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/res_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	resistor_dtemp_relational_wrapper_reference
 Netlists/DTEMP/vdmos_ref.cir	Netlists/DTEMP/exclude	upstream_excluded

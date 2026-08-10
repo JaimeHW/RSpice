@@ -2583,6 +2583,201 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    pub(super) fn validate_classic_mos_dtemp_provenance(
+        &self,
+        contract: &XyceClassicMosDtempContract,
+    ) -> Result<(), String> {
+        const LABEL: &str = "classic level-1 MOS TEMP/DTEMP family";
+        let parent = contract
+            .owner_path
+            .parent()
+            .ok_or_else(|| format!("{LABEL} owner has no parent directory"))?;
+        if contract.reference_path.parent() != Some(parent) {
+            return Err(format!("{LABEL} contract paths do not share one directory"));
+        }
+        let exclusions = self
+            .upstream_exclusions
+            .as_ref()
+            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
+        let entries = fs::read_dir(parent)
+            .map_err(|error| format!("failed to read {LABEL} directory: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("failed to enumerate {LABEL}: {error}"))?;
+
+        let mut candidate_paths = BTreeMap::<String, PathBuf>::new();
+        let mut owner_manifest_rows = Vec::new();
+        let mut historical_exclusion_rows = Vec::new();
+        for entry in entries {
+            let owner_path = entry.path();
+            let owner_relative = self.relative_key(&owner_path);
+            let Some((family, XyceClassicMosDtempRole::Owner)) =
+                XyceClassicMosDtempRole::for_record(&owner_relative)
+            else {
+                continue;
+            };
+            let owner_metadata = fs::symlink_metadata(&owner_path)
+                .map_err(|error| format!("failed to inspect {LABEL} owner: {error}"))?;
+            if owner_metadata.file_type().is_symlink()
+                || !owner_metadata.file_type().is_file()
+                || owner_metadata.len() == 0
+            {
+                return Err(format!(
+                    "{LABEL} owner '{}' must be a nonempty regular non-symlink file",
+                    self.display_path(&owner_path)
+                ));
+            }
+            let reference_path = owner_path.with_file_name(format!("{family}_ref.cir"));
+            let reference_metadata = fs::symlink_metadata(&reference_path).map_err(|error| {
+                format!(
+                    "failed to inspect {LABEL} reference '{}': {error}",
+                    self.display_path(&reference_path)
+                )
+            })?;
+            if reference_metadata.file_type().is_symlink()
+                || !reference_metadata.file_type().is_file()
+                || reference_metadata.len() == 0
+            {
+                return Err(format!(
+                    "{LABEL} reference '{}' must be a nonempty regular non-symlink file",
+                    self.display_path(&reference_path)
+                ));
+            }
+
+            let owner_key = Self::normalize_manifest_key(&owner_relative);
+            let reference_relative = self.relative_key(&reference_path);
+            let reference_key = Self::normalize_manifest_key(&reference_relative);
+            if !self.requires_upstream_wrapper(&owner_relative)
+                || exclusions.contains_key(&owner_key)
+            {
+                return Err(format!(
+                    "{LABEL} owner '{owner_relative}' lost its exclusive wrapper provenance"
+                ));
+            }
+            let Some(exclusion) = exclusions.get(&reference_key) else {
+                return Err(format!(
+                    "{LABEL} reference '{reference_relative}' lost its historical exclusion provenance"
+                ));
+            };
+            if !matches!(
+                &exclusion.disposition,
+                XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                    expected_contract,
+                } if expected_contract == XYCE_CLASSIC_MOS_DTEMP_REFERENCE_CONTRACT
+            ) || self.requires_upstream_wrapper(&reference_relative)
+            {
+                return Err(format!(
+                    "{LABEL} reference '{reference_relative}' does not carry the exact independent qualification"
+                ));
+            }
+
+            owner_manifest_rows.push(format!(
+                "{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"
+            ));
+            historical_exclusion_rows.push(format!(
+                "{reference_relative}\t{}\tupstream_excluded",
+                exclusion.source
+            ));
+            if candidate_paths.insert(owner_key, owner_path).is_some()
+                || candidate_paths
+                    .insert(reference_key, reference_path)
+                    .is_some()
+            {
+                return Err(format!(
+                    "{LABEL} candidate census contains a path collision"
+                ));
+            }
+        }
+
+        let mut candidates = Vec::with_capacity(candidate_paths.len());
+        let mut candidate_content = Vec::with_capacity(candidate_paths.len());
+        for path in candidate_paths.values() {
+            let relative = self.relative_key(path);
+            let bytes = fs::read(path).map_err(|error| {
+                format!("failed to read {LABEL} candidate '{relative}': {error}")
+            })?;
+            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
+            candidates.push(relative.clone());
+            candidate_content.push(format!("{relative}\t{}", blake3::hash(&canonical).to_hex()));
+            self.reject_wrapper_output_artifacts(path)?;
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| format!("{LABEL} candidate filename is not UTF-8"))?;
+            for suffix in ["prn", "res", "prn.gs", "res.gs", "csv", "csd"] {
+                let sidecar = path.with_file_name(format!("{file_name}.{suffix}"));
+                match fs::symlink_metadata(&sidecar) {
+                    Ok(_) => {
+                        return Err(format!(
+                            "{LABEL} candidate must not have source-side output artifact '{}'",
+                            self.display_path(&sidecar)
+                        ));
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        return Err(format!(
+                            "failed to inspect {LABEL} sidecar '{}': {error}",
+                            self.display_path(&sidecar)
+                        ));
+                    }
+                }
+            }
+        }
+
+        candidates.sort();
+        candidate_content.sort();
+        owner_manifest_rows.sort();
+        historical_exclusion_rows.sort();
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(candidate_content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let owner_hash = blake3::hash(owner_manifest_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let exclusion_hash = blake3::hash(historical_exclusion_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if candidates.len() != XYCE_CLASSIC_MOS_DTEMP_CANDIDATE_COUNT
+            || candidate_hash != XYCE_CLASSIC_MOS_DTEMP_CANDIDATE_BLAKE3
+            || content_hash != XYCE_CLASSIC_MOS_DTEMP_CONTENT_BLAKE3
+            || owner_manifest_rows.len() != XYCE_CLASSIC_MOS_DTEMP_OWNER_COUNT
+            || owner_hash != XYCE_CLASSIC_MOS_DTEMP_OWNER_MANIFEST_BLAKE3
+            || historical_exclusion_rows.len() != XYCE_CLASSIC_MOS_DTEMP_EXCLUSION_COUNT
+            || exclusion_hash != XYCE_CLASSIC_MOS_DTEMP_HISTORICAL_EXCLUSION_BLAKE3
+        {
+            return Err(format!(
+                "{LABEL} provenance changed: candidates={}/{candidate_hash}/{content_hash}, owners={}/{owner_hash}, exclusions={}/{exclusion_hash}",
+                candidates.len(),
+                owner_manifest_rows.len(),
+                historical_exclusion_rows.len()
+            ));
+        }
+
+        let expected_owner = Self::normalize_manifest_key(&self.relative_key(&contract.owner_path));
+        let expected_reference =
+            Self::normalize_manifest_key(&self.relative_key(&contract.reference_path));
+        if !candidate_paths.contains_key(&expected_owner)
+            || !candidate_paths.contains_key(&expected_reference)
+            || !Self::same_path(
+                &contract.owner_path,
+                &contract
+                    .reference_path
+                    .with_file_name(format!("{}_dtemp.cir", contract.family)),
+            )
+            || XyceClassicMosDtempRole::for_record(&self.relative_key(&contract.owner_path))
+                != Some((contract.family.clone(), XyceClassicMosDtempRole::Owner))
+            || XyceClassicMosDtempRole::for_record(&self.relative_key(&contract.reference_path))
+                != Some((contract.family.clone(), XyceClassicMosDtempRole::Reference))
+        {
+            return Err(format!(
+                "requested {LABEL} deck or its exact relational sibling is outside the qualified census"
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn validate_nonlinear_core_model_step_provenance(
         &self,
         contract: &XyceNonlinearCoreModelStepReferenceContract,
@@ -8310,6 +8505,460 @@ impl XyceTestRunner {
                 .map(Value::to_bits)
                 .collect(),
         })
+    }
+
+    pub(super) fn classic_mos_dtemp_snapshot(
+        plan: &XyceStaticDcPlan,
+        netlist: &Netlist,
+        role: XyceClassicMosDtempRole,
+    ) -> Result<XyceClassicMosDtempSnapshot, String> {
+        const LABEL: &str = "classic level-1 MOS TEMP/DTEMP family";
+        if plan.expression_dialect != ExpressionDialect::Xyce
+            || plan.execution_dir.is_some()
+            || plan.dc_data.is_some()
+            || plan.print_format.is_some()
+            || !plan.diagnostics.is_empty()
+            || plan.steps.len() != 1
+            || !matches!(plan.dc.mode, DcSweepMode::Linear)
+            || plan.print.probes.len() != 4
+        {
+            return Err(format!(
+                "{LABEL} requires one diagnostic-free LIST STEP, one linear DC analysis, and one default four-probe PRN output"
+            ));
+        }
+        let dc_count = netlist
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Dc { .. }))
+            .count();
+        let step_count = netlist
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Step(_)))
+            .count();
+        if netlist.analyses.len() != 2
+            || dc_count != 1
+            || step_count != 1
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || netlist.models.len() != 1
+        {
+            return Err(format!(
+                "{LABEL} admits only authored R/V/M elements, one scalar model, one DC analysis, and one STEP analysis"
+            ));
+        }
+
+        let step = &plan.steps[0];
+        let StepSweep::List(step_values) = &step.sweep else {
+            return Err(format!("{LABEL} requires a three-value LIST sweep"));
+        };
+        let canonical_temperatures = [15.0f64, 25.0, 35.0];
+        let effective_temperatures = match role {
+            XyceClassicMosDtempRole::Owner => {
+                if step.target != StepTarget::Param
+                    || !step.name.eq_ignore_ascii_case("dtempParam")
+                    || step.param_name.is_some()
+                    || netlist.options.temp.map(Value::to_bits) != Some(15.0f64.to_bits())
+                    || step_values
+                        .iter()
+                        .map(|value| value.to_bits())
+                        .ne([0.0f64, 10.0, 20.0].into_iter().map(Value::to_bits))
+                {
+                    return Err(format!(
+                        "{LABEL} owner must hold circuit TEMP=15 C and STEP dtempParam through 0, 10, 20 C"
+                    ));
+                }
+                step_values
+                    .iter()
+                    .map(|dtemp| 15.0 + dtemp)
+                    .collect::<Vec<_>>()
+            }
+            XyceClassicMosDtempRole::Reference => {
+                if step.target != StepTarget::Param
+                    || !step.name.eq_ignore_ascii_case("tempParam")
+                    || step.param_name.is_some()
+                    || netlist
+                        .options
+                        .temp
+                        .is_some_and(|temp| temp.to_bits() != 15.0f64.to_bits())
+                    || step_values
+                        .iter()
+                        .map(|value| value.to_bits())
+                        .ne(canonical_temperatures.into_iter().map(Value::to_bits))
+                {
+                    return Err(format!(
+                        "{LABEL} reference must STEP the instance tempParam through 15, 25, 35 C"
+                    ));
+                }
+                step_values.clone()
+            }
+        };
+        if effective_temperatures
+            .iter()
+            .map(|value| value.to_bits())
+            .ne(canonical_temperatures.into_iter().map(Value::to_bits))
+        {
+            return Err(format!(
+                "{LABEL} TEMP and circuit-TEMP-plus-DTEMP grids are not identical"
+            ));
+        }
+
+        let explicit_params = netlist
+            .params
+            .all_params()
+            .into_iter()
+            .filter(|(name, _)| {
+                !matches!(name.to_ascii_uppercase().as_str(), "TEMP" | "TEMPER" | "VT")
+            })
+            .collect::<Vec<_>>();
+        match role {
+            XyceClassicMosDtempRole::Owner
+                if explicit_params.len() == 1
+                    && explicit_params[0].0.eq_ignore_ascii_case("dtempParam")
+                    && explicit_params[0].1.to_bits() == 10.0f64.to_bits() => {}
+            XyceClassicMosDtempRole::Reference
+                if explicit_params.len() == 1
+                    && explicit_params[0].0.eq_ignore_ascii_case("tempParam")
+                    && explicit_params[0].1.to_bits() == 15.0f64.to_bits() => {}
+            _ => {
+                return Err(format!(
+                    "{LABEL} admits only its one temperature parameter, got {explicit_params:?}"
+                ));
+            }
+        }
+
+        let model = &netlist.models[0];
+        if !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return Err(format!("{LABEL} requires one native scalar MOS model"));
+        }
+        let model_type = model.model_type.to_ascii_lowercase();
+        let expected_polarity = match model_type.as_str() {
+            "nmos" => "nmos",
+            "pmos" => "pmos",
+            _ => return Err(format!("{LABEL} model must be NMOS or PMOS")),
+        };
+        let mut model_params = model
+            .params
+            .iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+            .collect::<Vec<_>>();
+        model_params.sort();
+        let canonical_kp =
+            rspice_core::netlist::lexer::parse_spice_value(match expected_polarity {
+                "nmos" => "0.5m",
+                "pmos" => "25u",
+                _ => unreachable!(),
+            })
+            .map_err(|error| format!("{LABEL} internal KP literal is invalid: {error}"))?;
+        let mut expected_model_params = match expected_polarity {
+            "nmos" => vec![
+                ("kp".to_string(), canonical_kp.to_bits()),
+                ("level".to_string(), 1.0f64.to_bits()),
+                ("vto".to_string(), 2.0f64.to_bits()),
+            ],
+            "pmos" => vec![
+                ("kp".to_string(), canonical_kp.to_bits()),
+                ("level".to_string(), 1.0f64.to_bits()),
+                ("vto".to_string(), (-0.8f64).to_bits()),
+            ],
+            _ => unreachable!(),
+        };
+        expected_model_params.sort();
+        if model_params != expected_model_params {
+            return Err(format!(
+                "{LABEL} must retain its exact explicit LEVEL=1 model card: actual={model_params:?}, expected={expected_model_params:?}"
+            ));
+        }
+
+        let mut elements = Vec::with_capacity(netlist.elements.len());
+        let mut resistor_count = 0usize;
+        let mut source_count = 0usize;
+        let mut mos_count = 0usize;
+        for element in &netlist.elements {
+            if !matches!(element.provenance, ElementProvenance::Authored) {
+                return Err(format!(
+                    "{LABEL} element '{}' is not authored source topology",
+                    element.name
+                ));
+            }
+            let name = element.name.to_ascii_lowercase();
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| Self::canonical_param_expression_node_name(node))
+                .collect::<Vec<_>>();
+            let snapshot = match &element.kind {
+                ElementKind::Resistor {
+                    value,
+                    value_expr: None,
+                    model: None,
+                    instance_params,
+                    deferred_params,
+                } if value.is_finite()
+                    && *value > 0.0
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty()
+                    && nodes.len() == 2 =>
+                {
+                    resistor_count += 1;
+                    XyceClassicMosDtempElementSnapshot::Resistor {
+                        name,
+                        nodes,
+                        value_bits: value.to_bits(),
+                    }
+                }
+                ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Dc(value))
+                    if value.is_finite() && nodes.len() == 2 =>
+                {
+                    source_count += 1;
+                    XyceClassicMosDtempElementSnapshot::VoltageSource {
+                        name,
+                        nodes,
+                        dc_value_bits: value.to_bits(),
+                    }
+                }
+                ElementKind::Mosfet {
+                    model: instance_model,
+                    mos_type: _,
+                    compact_syntax: false,
+                    instance_params,
+                    deferred_params,
+                } if deferred_params.is_empty() && nodes.len() == 4 => {
+                    mos_count += 1;
+                    // The lexical MOS polarity field is only a placeholder;
+                    // the production builder resolves NMOS/PMOS from the
+                    // referenced model card before device construction.
+                    let polarity = expected_polarity;
+                    if !instance_model.eq_ignore_ascii_case(&model.name) {
+                        return Err(format!("{LABEL} MOS instance model reference changed"));
+                    }
+                    let mut ordinary_params = Vec::new();
+                    let mut temp = None;
+                    let mut dtemp = None;
+                    for (parameter, value) in instance_params {
+                        if parameter.eq_ignore_ascii_case("TEMP") {
+                            if temp.replace(*value).is_some() {
+                                return Err(format!("{LABEL} MOS repeats TEMP"));
+                            }
+                        } else if parameter.eq_ignore_ascii_case("DTEMP") {
+                            if dtemp.replace(*value).is_some() {
+                                return Err(format!("{LABEL} MOS repeats DTEMP"));
+                            }
+                        } else {
+                            ordinary_params.push((parameter.to_ascii_lowercase(), value.to_bits()));
+                        }
+                    }
+                    ordinary_params.sort();
+                    match role {
+                        XyceClassicMosDtempRole::Owner
+                            if temp.is_none()
+                                && dtemp.map(Value::to_bits) == Some(10.0f64.to_bits()) => {}
+                        XyceClassicMosDtempRole::Reference
+                            if dtemp.is_none()
+                                && temp.map(Value::to_bits) == Some(15.0f64.to_bits()) => {}
+                        _ => {
+                            return Err(format!(
+                                "{LABEL} owner must carry only DTEMP and reference only TEMP"
+                            ));
+                        }
+                    }
+                    XyceClassicMosDtempElementSnapshot::Mosfet {
+                        name,
+                        nodes,
+                        model: instance_model.to_ascii_lowercase(),
+                        polarity: polarity.to_string(),
+                        instance_params: ordinary_params,
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} element '{}' is outside the exact R/V/LEVEL=1-MOS envelope",
+                        element.name
+                    ));
+                }
+            };
+            elements.push(snapshot);
+        }
+        elements.sort();
+
+        let probes = plan
+            .print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        let dc_primary = (
+            plan.dc.source.to_ascii_lowercase(),
+            plan.dc.start.to_bits(),
+            plan.dc.stop.to_bits(),
+            plan.dc.step.to_bits(),
+        );
+        let dc_secondary = plan.dc.sweep2.as_ref().map(|sweep| {
+            (
+                sweep.source.to_ascii_lowercase(),
+                sweep.start.to_bits(),
+                sweep.stop.to_bits(),
+                sweep.step.to_bits(),
+            )
+        });
+        let (
+            expected_element_count,
+            expected_resistors,
+            expected_primary,
+            expected_secondary,
+            expected_probes,
+        ) = match expected_polarity {
+            "nmos" => (
+                7,
+                4,
+                (
+                    "vgg".to_string(),
+                    0.0f64.to_bits(),
+                    18.0f64.to_bits(),
+                    1.0f64.to_bits(),
+                ),
+                Some((
+                    "vdd".to_string(),
+                    0.0f64.to_bits(),
+                    18.0f64.to_bits(),
+                    1.0f64.to_bits(),
+                )),
+                vec!["v(3)", "v(5)", "v(3,2)", "v(1,2)"],
+            ),
+            "pmos" => (
+                6,
+                3,
+                (
+                    "vdd".to_string(),
+                    0.0f64.to_bits(),
+                    5.0f64.to_bits(),
+                    1.0f64.to_bits(),
+                ),
+                None,
+                vec!["v(2)", "i(vmon)", "v(2,3)", "v(2,1)"],
+            ),
+            _ => unreachable!(),
+        };
+        if netlist.elements.len() != expected_element_count
+            || resistor_count != expected_resistors
+            || source_count != 2
+            || mos_count != 1
+            || dc_primary != expected_primary
+            || dc_secondary != expected_secondary
+            || probes != expected_probes
+            || plan
+                .dc
+                .sweep2
+                .as_ref()
+                .is_some_and(|sweep| !matches!(sweep.mode, DcSweepMode::Linear))
+        {
+            return Err(format!(
+                "{LABEL} topology, sweep domain, or ordered probe set changed"
+            ));
+        }
+
+        Ok(XyceClassicMosDtempSnapshot {
+            elements,
+            model_name: model.name.to_ascii_lowercase(),
+            model_type,
+            model_params,
+            dc_primary,
+            dc_secondary,
+            probes,
+            effective_temperature_bits: effective_temperatures
+                .into_iter()
+                .map(Value::to_bits)
+                .collect(),
+        })
+    }
+
+    pub(super) fn normalize_classic_mos_dtemp_materialization(
+        netlist: &Netlist,
+        role: XyceClassicMosDtempRole,
+        expected_coordinate: Value,
+        expected_effective_temperature: Value,
+    ) -> Result<Netlist, String> {
+        const LABEL: &str = "classic level-1 MOS TEMP/DTEMP family";
+        if !expected_coordinate.is_finite() || !expected_effective_temperature.is_finite() {
+            return Err(format!("{LABEL} materialization coordinate is non-finite"));
+        }
+        let (parameter_name, instance_parameter, canonical_initial, effective_temperature) =
+            match role {
+                XyceClassicMosDtempRole::Owner => (
+                    "dtempParam",
+                    "DTEMP",
+                    10.0,
+                    netlist.options.temp.unwrap_or(15.0) + expected_coordinate,
+                ),
+                XyceClassicMosDtempRole::Reference => {
+                    ("tempParam", "TEMP", 15.0, expected_coordinate)
+                }
+            };
+        if netlist.params.get(parameter_name).map(Value::to_bits)
+            != Some(expected_coordinate.to_bits())
+            || effective_temperature.to_bits() != expected_effective_temperature.to_bits()
+        {
+            return Err(format!(
+                "{LABEL} materialization lost its exact parameter coordinate or effective temperature"
+            ));
+        }
+
+        let mut normalized = netlist.clone();
+        normalized.params.set(parameter_name, canonical_initial);
+        let mut mos_count = 0usize;
+        for element in &mut normalized.elements {
+            let ElementKind::Mosfet {
+                instance_params, ..
+            } = &mut element.kind
+            else {
+                continue;
+            };
+            mos_count += 1;
+            let mut matching = 0usize;
+            for (name, value) in instance_params {
+                if name.eq_ignore_ascii_case(instance_parameter) {
+                    matching += 1;
+                    if value.to_bits() != expected_coordinate.to_bits() {
+                        return Err(format!(
+                            "{LABEL} materialized {instance_parameter} differs from its STEP coordinate"
+                        ));
+                    }
+                    *value = canonical_initial;
+                } else if (matches!(role, XyceClassicMosDtempRole::Owner)
+                    && name.eq_ignore_ascii_case("TEMP"))
+                    || (matches!(role, XyceClassicMosDtempRole::Reference)
+                        && name.eq_ignore_ascii_case("DTEMP"))
+                {
+                    return Err(format!(
+                        "{LABEL} materialization introduced conflicting TEMP/DTEMP state"
+                    ));
+                }
+            }
+            if matching != 1 {
+                return Err(format!(
+                    "{LABEL} materialized MOS requires exactly one {instance_parameter} value"
+                ));
+            }
+        }
+        if mos_count != 1 {
+            return Err(format!(
+                "{LABEL} materialization produced {mos_count} MOS instances instead of one"
+            ));
+        }
+        Ok(normalized)
     }
 
     pub(super) fn vbic_dc_family_plan_snapshot(

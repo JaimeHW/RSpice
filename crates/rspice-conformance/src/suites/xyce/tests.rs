@@ -9035,6 +9035,158 @@ fn resistor_dtemp_relational_pair_executes_both_roles() {
 }
 
 #[test]
+fn classic_mos_dtemp_candidate_census_is_an_exact_manifest_bijection() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_root = workspace_root.join("tests/xyce");
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    let discovered = runner.discover_tests();
+    let selected = discovered
+        .iter()
+        .filter_map(|deck| {
+            runner
+                .classic_mos_dtemp_relational_contract(deck)
+                .map(|contract| {
+                    contract.unwrap_or_else(|error| {
+                        panic!("classic MOS DTEMP candidate failed qualification: {error}")
+                    });
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                })
+        })
+        .collect::<BTreeSet<_>>();
+    let expected = ["nmos", "pmos"]
+        .into_iter()
+        .flat_map(|polarity| {
+            [1, 2, 3, 6].into_iter().flat_map(move |level_tag| {
+                ["dtemp", "ref"]
+                    .into_iter()
+                    .map(move |suffix| format!("netlists/dtemp/{polarity}{level_tag}_{suffix}.cir"))
+            })
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(selected, expected);
+    assert_eq!(selected.len(), XYCE_CLASSIC_MOS_DTEMP_CANDIDATE_COUNT);
+}
+
+#[test]
+fn classic_mos_dtemp_snapshots_reject_semantic_mutations() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let owner_path = corpus.join("Netlists/DTEMP/nmos1_dtemp.cir");
+    let reference_path = corpus.join("Netlists/DTEMP/nmos1_ref.cir");
+    let owner = fs::read_to_string(&owner_path).expect("read classic MOS DTEMP owner");
+    let reference = fs::read_to_string(&reference_path).expect("read classic MOS DTEMP reference");
+    let mutations = [
+        (
+            owner.replace("level=1", "level=2"),
+            owner_path.clone(),
+            XyceClassicMosDtempRole::Owner,
+            "explicit model level",
+        ),
+        (
+            owner.replace("list 0 10 20", "list 0 11 20"),
+            owner_path,
+            XyceClassicMosDtempRole::Owner,
+            "effective-temperature grid",
+        ),
+        (
+            reference.replace("v(3) v(5) v(3,2) v(1,2)", "v(5) v(3) v(3,2) v(1,2)"),
+            reference_path.clone(),
+            XyceClassicMosDtempRole::Reference,
+            "probe order",
+        ),
+        (
+            reference.replace("temp={tempParam}", "dtemp={tempParam}"),
+            reference_path,
+            XyceClassicMosDtempRole::Reference,
+            "TEMP-versus-DTEMP ownership",
+        ),
+    ];
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    for (source, path, role, reason) in mutations {
+        let plan = runner
+            .static_dc_plan_for_source_with_execution_dir(
+                &path,
+                source,
+                ExpressionDialect::Xyce,
+                None,
+            )
+            .unwrap_or_else(|error| panic!("{reason} mutation should still plan: {error}"));
+        let netlist = XyceTestRunner::parse_xyce_netlist(&plan.source, &path)
+            .unwrap_or_else(|error| panic!("{reason} mutation should still parse: {error}"));
+        assert!(
+            XyceTestRunner::classic_mos_dtemp_snapshot(&plan, &netlist, role).is_err(),
+            "{reason} mutation must fail closed"
+        );
+    }
+}
+
+#[test]
+fn classic_mos_dtemp_provenance_rejects_candidate_mutation() {
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let fixture = tempfile::tempdir().expect("create classic MOS DTEMP fixture");
+    let target_dir = fixture.path().join("Netlists/DTEMP");
+    fs::create_dir_all(&target_dir).expect("create classic MOS DTEMP directory");
+    let families = [
+        "nmos1", "nmos2", "nmos3", "nmos6", "pmos1", "pmos2", "pmos3", "pmos6",
+    ];
+    let mut wrappers = Vec::new();
+    let mut exclusions = Vec::new();
+    for family in families {
+        for suffix in ["dtemp", "ref"] {
+            let name = format!("{family}_{suffix}.cir");
+            fs::copy(
+                source_root.join("Netlists/DTEMP").join(&name),
+                target_dir.join(&name),
+            )
+            .expect("copy classic MOS DTEMP candidate");
+        }
+        wrappers.push(format!(
+            "Netlists/DTEMP/{family}_dtemp.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"
+        ));
+        exclusions.push(format!(
+            "Netlists/DTEMP/{family}_ref.cir\tNetlists/DTEMP/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_CLASSIC_MOS_DTEMP_REFERENCE_CONTRACT}"
+        ));
+    }
+    wrappers.push(String::new());
+    fs::write(
+        fixture.path().join(HARNESS_MANIFEST_FILE),
+        wrappers.join("\n"),
+    )
+    .expect("write classic MOS DTEMP wrapper manifest");
+    let exclusion_rows = exclusions.iter().map(String::as_str).collect::<Vec<_>>();
+    fs::write(
+        fixture.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&exclusion_rows),
+    )
+    .expect("write classic MOS DTEMP exclusion manifest");
+
+    let runner = XyceTestRunner::new(fixture.path(), XyceRunnerConfig::default());
+    let owner_path = target_dir.join("nmos1_dtemp.cir");
+    let deck = XyceDeck {
+        path: owner_path.clone(),
+        relative_path: "Netlists/DTEMP/nmos1_dtemp.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let contract = runner
+        .classic_mos_dtemp_relational_contract(&deck)
+        .expect("classic MOS DTEMP fixture is selected")
+        .expect("unmodified classic MOS DTEMP provenance qualifies");
+    let mutation = fs::read_to_string(&owner_path)
+        .expect("read classic MOS DTEMP mutation target")
+        .replace("47meg", "46meg");
+    fs::write(&owner_path, mutation).expect("write classic MOS DTEMP mutation");
+    assert!(
+        runner
+            .validate_classic_mos_dtemp_provenance(&contract)
+            .is_err(),
+        "any source mutation must fail the exact candidate-content census"
+    );
+}
+
+#[test]
 fn analytic_integer_dc_wrappers_are_manifest_owned_and_structurally_qualified() {
     for (label, relative, source, expected_kind) in [
         (
