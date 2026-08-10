@@ -285,6 +285,33 @@ fn a_companion_pane_takes_two_thirds_of_the_primary() {
 }
 
 #[test]
+fn a_value_is_named_by_its_own_unit_not_the_strips() {
+    let mut state = AppState::default();
+    state.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+            WaveformData::new("I(VDD)", vec![0.0, 1.0], vec![0.0, 1.5e-3], "#fff"),
+        ]),
+    );
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    let model = &models[0];
+    // Two units on one strip: the strip's own y_unit can only be right for
+    // one of them, so a readout that used it mislabelled the other.
+    assert_eq!(model.unit_panes().len(), 2);
+    let volts = model.format_trace_value(&model.traces[0], 5.0, 6, quantity_policy);
+    let amps = model.format_trace_value(&model.traces[1], 1.5e-3, 6, quantity_policy);
+    assert!(volts.ends_with(" V"), "a node voltage reads in volts: {volts}");
+    assert!(amps.ends_with(" mA"), "a supply current reads in amps: {amps}");
+}
+
+#[test]
 fn hidden_unit_signals_keep_a_pane_available_for_reactivation() {
     let mut state = marker_fixture();
     state.simulation.runs[0].analyses[0].waveforms[0].visible = false;

@@ -852,20 +852,11 @@ pub(super) fn measurement_rows(
         let Some((min, max, rms)) = stats else {
             continue;
         };
+        // One formatter for every value the instrument reports, so a
+        // measurement and the cursor readout above it cannot disagree about
+        // a trace's unit.
         let fmt = |v: f64| -> String {
-            match trace.kind {
-                TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
-                    fmt_si_significant(v, model.y_unit, significant_digits)
-                }
-                TraceKind::MagnitudeDb => fmt_significant(v, significant_digits, " dB"),
-                TraceKind::PhaseDeg => {
-                    quantity_policy.format_angle(v.to_radians(), significant_digits)
-                }
-                TraceKind::PhaseRad => quantity_policy.format_angle(v, significant_digits),
-                TraceKind::NoiseDensity => {
-                    fmt_si_significant(v, "nV/√Hz", significant_digits)
-                }
-            }
+            model.format_trace_value(trace, v, significant_digits, quantity_policy)
         };
         rows.push((format!("{} min", trace.name), fmt(min)));
         rows.push((format!("{} max", trace.name), fmt(max)));

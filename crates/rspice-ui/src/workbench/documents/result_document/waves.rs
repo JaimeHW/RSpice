@@ -393,8 +393,11 @@ impl StripModel {
         quantity_policy: crate::quantity::QuantityPresentationPolicy,
     ) -> String {
         match trace.kind {
+            // A strip mixing voltages and currents has no single Y unit, so
+            // a value is named by the unit its own signal is measured in —
+            // the same unit that decided which pane draws it.
             TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
-                fmt_si_significant(value, self.y_unit, significant_digits)
+                fmt_si_significant(value, self.trace_unit(trace), significant_digits)
             }
             TraceKind::MagnitudeDb => fmt_significant(value, significant_digits, " dB"),
             TraceKind::PhaseDeg => {
