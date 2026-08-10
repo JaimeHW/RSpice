@@ -11,8 +11,11 @@ use crate::state::SpecEntry;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::workbench::RSpiceApp;
 
+use crate::ui::widgets::Button;
+
 use super::page_kit::{
-    Tone, card, card_body, card_note, card_row, ledger_head, ledger_row, rule_row,
+    Tone, card, card_body, card_head_row, card_note, card_row, card_with_head, ledger_head,
+    ledger_row, rule_row,
 };
 
 const REGISTRY_COLUMNS: [f32; 5] = [0.24, 0.26, 0.18, 0.16, 0.16];
@@ -100,10 +103,19 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     };
     let selected = app.state.workbench.selected_spec;
     let mut pick = None;
-    card(
+    let mut author = false;
+    card_with_head(
         ui,
-        "Specification registry",
-        Some((status.as_str(), tone)),
+        |ui| {
+            card_head_row(
+                ui,
+                "Specification registry",
+                Some((status.as_str(), tone)),
+                |ui| {
+                    author = Button::new("Author specifications…").show(ui).clicked();
+                },
+            );
+        },
         |ui| {
             ledger_head(
                 ui,
@@ -161,13 +173,29 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                 ui,
                 "A limit is evaluated against the active dataset's measurement of the same name. \
                  A specification with no matching measurement is reported as being without \
-                 evidence — it is never treated as passing.",
+                 evidence — it is never treated as passing. Authoring lives in the                  specification editor, which owns the limits this page reads.",
             );
         },
     );
+    if author {
+        open_specification_editor(app);
+    }
     if let Some(index) = pick {
         app.state.workbench.selected_spec = Some(index);
     }
+}
+
+/// Route to the surface that owns specification authoring.
+///
+/// The limits are plan-owned data with one editor; duplicating that editor
+/// here would give the same records two authors. The page reads them and
+/// hands off.
+fn open_specification_editor(app: &mut RSpiceApp) {
+    app.state.ui.results.viewer = crate::workbench::ResultViewer::Specs;
+    crate::workbench::documents::result_document::open_specification_editor(&mut app.state);
+    app.state
+        .workbench
+        .activate(crate::workbench::state::Workspace::Results);
 }
 
 /// Distance from the nearest bound, in the specification's own unit.
