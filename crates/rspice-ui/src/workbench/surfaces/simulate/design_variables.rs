@@ -647,11 +647,7 @@ fn duplicate_selected(app: &mut RSpiceApp) {
                     app.state.sim_setup = setup;
                     app.invalidate_simulation_preflight();
                     select_variable(app, id);
-                    app.state.workbench.analysis_lifecycle_status = format!(
-                        "Configuration receipt #{} - duplicated {} with a new stable identity.",
-                        receipt.sequence(),
-                        variable.name
-                    );
+                    app.state.workbench.analysis_lifecycle_status = receipt.status_line();
                 }
                 Err(error) => record_failure(app, "Design variable duplicate", &error.to_string()),
             }

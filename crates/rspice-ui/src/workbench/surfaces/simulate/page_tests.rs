@@ -247,6 +247,128 @@ fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
     );
 }
 
+/// A capture policy an engineer can read but not change is a report, not a
+/// control. The Save & streaming page totals these exact fields, so each one
+/// has to be editable through a validated transaction that moves the plan
+/// revision.
+#[test]
+fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
+    use crate::state::{
+        SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
+        SavedOutputPrecision, SavedOutputStreaming,
+    };
+
+    let mut app = RSpiceApp::test_instance();
+    let plan_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("test instance has a stable plan")
+        .id();
+    let output = SavedOutput::new(
+        SavedOutputKind::RawVoltageOrCurrent,
+        "vout",
+        "V(out)",
+        SavedOutputCompatibility::AllCompatibleAnalyses,
+        SavedOutputPolicy::EveryAcceptedPoint,
+        SavedOutputPrecision::FullSourcePrecision,
+        SavedOutputStreaming::StoreOnly,
+    )
+    .expect("valid saved output");
+    let output_id = output.id;
+    let original_revision = output.revision;
+    app.state
+        .workspace
+        .add_saved_output(plan_id, output.clone())
+        .expect("the plan accepts a valid output");
+
+    let mut replacement = output.clone();
+    replacement.save_policy = SavedOutputPolicy::FailureDiagnosticsOnly;
+    replacement.stored_precision = SavedOutputPrecision::DisplayCacheWithFullSourcePrecision;
+    replacement.streaming = SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation;
+    let revision = app
+        .state
+        .workspace
+        .replace_saved_output(plan_id, output_id, replacement)
+        .expect("a valid capture contract is accepted");
+    assert_ne!(
+        revision, original_revision,
+        "an accepted edit must advance the output's own revision"
+    );
+    let stored = app
+        .state
+        .workspace
+        .active_plan_data(plan_id)
+        .expect("payload")
+        .saved_outputs
+        .iter()
+        .find(|candidate| candidate.id == output_id)
+        .expect("the output survives the edit")
+        .clone();
+    assert_eq!(stored.save_policy, SavedOutputPolicy::FailureDiagnosticsOnly);
+    assert_eq!(
+        stored.stored_precision,
+        SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
+    );
+    assert_eq!(
+        stored.streaming,
+        SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
+    );
+    assert_eq!(
+        stored.name, "vout",
+        "editing the capture policy must not rename the output"
+    );
+
+    // Re-committing the same contract is a semantic no-op: it must not spend a
+    // revision, or every repaint that re-selects the same option would.
+    let unchanged = app
+        .state
+        .workspace
+        .replace_saved_output(plan_id, output_id, stored.clone())
+        .expect("an unchanged contract is accepted");
+    assert_eq!(
+        unchanged, revision,
+        "re-committing an identical contract must not advance the revision"
+    );
+
+    // An edit that collides with another output's name is refused whole.
+    let other = SavedOutput::new(
+        SavedOutputKind::RawVoltageOrCurrent,
+        "vin",
+        "V(in)",
+        SavedOutputCompatibility::AllCompatibleAnalyses,
+        SavedOutputPolicy::EveryAcceptedPoint,
+        SavedOutputPrecision::FullSourcePrecision,
+        SavedOutputStreaming::StoreOnly,
+    )
+    .expect("valid saved output");
+    app.state
+        .workspace
+        .add_saved_output(plan_id, other)
+        .expect("the plan accepts a second output");
+    let mut collision = stored;
+    collision.name = "VIN".to_owned();
+    assert!(
+        app.state
+            .workspace
+            .replace_saved_output(plan_id, output_id, collision)
+            .is_err(),
+        "a name that collides case-insensitively with another output must be refused"
+    );
+    assert_eq!(
+        app.state
+            .workspace
+            .active_plan_data(plan_id)
+            .expect("payload")
+            .saved_outputs
+            .iter()
+            .find(|candidate| candidate.id == output_id)
+            .expect("the output is untouched by the refused edit")
+            .name,
+        "vout"
+    );
+}
+
 /// The composed run space decides how many points a dispatch executes, so a
 /// change to it has to move the plan revision. Otherwise an authorized
 /// preflight could be followed by a sweep change and a dispatch that ran a

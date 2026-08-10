@@ -125,7 +125,8 @@ fn capture_groups(
                 ui,
                 "Size is summed from each output's own preflight estimate across the tasks it is \
                  compatible with. An output whose sample count cannot be known before the solve \
-                 is counted as not yet bounded rather than as zero.",
+                 is counted as not yet bounded rather than as zero. Which group an output falls \
+                 in is its save policy, set on Outputs & expressions.",
             );
         },
     );

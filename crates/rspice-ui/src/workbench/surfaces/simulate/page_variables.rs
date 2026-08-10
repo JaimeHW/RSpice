@@ -316,13 +316,7 @@ fn commit_expression(
             app.state.workspace = workspace;
             app.state.sim_setup = setup;
             app.invalidate_simulation_preflight();
-            app.state.workbench.analysis_lifecycle_status = format!(
-                "Configuration receipt #{} · revision {} to {} · {}",
-                receipt.sequence(),
-                receipt.source_revision().get(),
-                receipt.committed_revision().get(),
-                receipt.detail()
-            );
+            app.state.workbench.analysis_lifecycle_status = receipt.status_line();
         }
         Err(error) => app.state.workbench.analysis_lifecycle_status = error,
     }
@@ -413,13 +407,7 @@ fn mutate(
             app.state.workspace = workspace;
             app.state.sim_setup = setup;
             app.invalidate_simulation_preflight();
-            app.state.workbench.analysis_lifecycle_status = format!(
-                "Configuration receipt #{} · revision {} to {} · {}",
-                receipt.sequence(),
-                receipt.source_revision().get(),
-                receipt.committed_revision().get(),
-                receipt.detail()
-            );
+            app.state.workbench.analysis_lifecycle_status = receipt.status_line();
         }
         Err(error) => {
             app.state.workbench.analysis_lifecycle_status = error;
