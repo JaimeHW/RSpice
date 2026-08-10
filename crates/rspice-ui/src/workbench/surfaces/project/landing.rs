@@ -17,7 +17,7 @@ use crate::workbench::app_state::{RecentFile, RecentKind};
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::lifecycle::recovery::{RecoveryCandidate, RecoveryIntegrity};
-use crate::workbench::state::{ProjectLauncherFilter, ProjectLauncherPage, Workspace};
+use crate::workbench::state::{ProjectLauncherFilter, ProjectLauncherPage};
 
 const HEADER_HEIGHT: f32 = 116.0;
 const CONTENT_MAX_WIDTH: f32 = 1240.0;
@@ -34,47 +34,6 @@ const TABLE_ROW_HEIGHT: f32 = 32.0;
 const TABLE_TOOLBAR_HEIGHT: f32 = 34.0;
 const SECTION_HEADER_HEIGHT: f32 = 24.0;
 const ACTION_ROW_HEIGHT: f32 = 51.0;
-const EXAMPLE_ROW_HEIGHT: f32 = 43.0;
-
-const EXAMPLES: [ExampleEntry; 6] = [
-    ExampleEntry {
-        name: "RC Lowpass Filter",
-        category: "Analog",
-        detail: "1st-order RC · 1 kHz corner",
-    },
-    ExampleEntry {
-        name: "Voltage Divider",
-        category: "Basics",
-        detail: "Resistive ratio and loading",
-    },
-    ExampleEntry {
-        name: "Common Emitter Amplifier",
-        category: "Analog",
-        detail: "BJT bias point and small-signal gain",
-    },
-    ExampleEntry {
-        name: "CMOS Inverter",
-        category: "Digital",
-        detail: "Complementary NOT gate",
-    },
-    ExampleEntry {
-        name: "Differential Pair",
-        category: "Analog",
-        detail: "BJT input stage",
-    },
-    ExampleEntry {
-        name: "Opamp Inverting Amplifier",
-        category: "Analog",
-        detail: "Closed-loop gain and bandwidth",
-    },
-];
-
-#[derive(Debug, Clone, Copy)]
-struct ExampleEntry {
-    name: &'static str,
-    category: &'static str,
-    detail: &'static str,
-}
 
 #[derive(Debug, Clone)]
 struct RecentProjectRow {
@@ -96,7 +55,6 @@ enum LandingAction {
     OpenSchematic,
     OpenRecent(RecentFile),
     ReviewRecovery,
-    LoadExample(&'static str),
 }
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -968,20 +926,6 @@ fn start_rail(ui: &mut Ui, action: &mut Option<LandingAction>) {
         }
         ui.add_space(5.0);
     }
-
-    ui.add_space(4.0);
-    compact_section_header(
-        ui,
-        "Example circuits",
-        &EXAMPLES.len().to_string(),
-        Tokens::get(ui.ctx()).color.text_dim,
-    );
-    for example in EXAMPLES {
-        if example_row(ui, example).clicked() {
-            *action = Some(LandingAction::LoadExample(example.name));
-        }
-        ui.add_space(3.0);
-    }
 }
 
 fn landing_action_row(
@@ -1054,84 +998,6 @@ fn landing_action_row(
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-fn example_row(ui: &mut Ui, example: ExampleEntry) -> Response {
-    let t = Tokens::get(ui.ctx());
-    let height = EXAMPLE_ROW_HEIGHT.max(if t.metrics.ctl_h >= 44.0 { 50.0 } else { 0.0 });
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
-    ui.painter().rect(
-        rect,
-        t.radius,
-        if response.hovered() {
-            t.color.bg_hover
-        } else {
-            t.color.bg_inset
-        },
-        Stroke::new(
-            1.0,
-            if response.hovered() {
-                t.color.border_strong
-            } else {
-                Color32::TRANSPARENT
-            },
-        ),
-        egui::StrokeKind::Inside,
-    );
-    let inset = rect.shrink2(vec2(11.0, 5.0));
-    let category_font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
-    let category_width = ui
-        .painter()
-        .layout_no_wrap(
-            example.category.to_owned(),
-            category_font.clone(),
-            t.color.text_faint,
-        )
-        .size()
-        .x;
-    ui.painter().text(
-        inset.right_top(),
-        Align2::RIGHT_TOP,
-        example.category,
-        category_font,
-        t.color.text_faint,
-    );
-    let name_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
-    let name = super::elide_text(
-        ui,
-        example.name,
-        &name_font,
-        (inset.width() - category_width - 10.0).max(1.0),
-    );
-    ui.painter().text(
-        inset.left_top(),
-        Align2::LEFT_TOP,
-        name,
-        name_font,
-        t.color.text,
-    );
-    let detail_font = theme::sans(tokens::FS_MICRO, FontWeight::Regular);
-    let detail = super::elide_text(ui, example.detail, &detail_font, inset.width());
-    ui.painter().text(
-        pos2(inset.left(), inset.bottom()),
-        Align2::LEFT_BOTTOM,
-        detail,
-        detail_font,
-        t.color.text_dim,
-    );
-    response.widget_info(|| {
-        WidgetInfo::labeled(
-            WidgetType::Button,
-            ui.is_enabled(),
-            format!("Load example {}", example.name),
-        )
-    });
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_description(format!("{}; {}", example.category, example.detail));
-    });
-    theme::paint_focus_ring(ui, &response, rect);
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
-}
-
 fn compact_section_header(ui: &mut Ui, title: &str, meta: &str, meta_color: Color32) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(
@@ -1192,22 +1058,7 @@ fn execute_action(app: &mut RSpiceApp, action: LandingAction) {
                 .project_launcher_recovery
                 .request_refresh();
         }
-        LandingAction::LoadExample(name) => load_example_project(app, name),
     }
-}
-
-fn load_example_project(app: &mut RSpiceApp, name: &str) {
-    crate::workbench::workflows::project_workflow::create_new_project(&mut app.state);
-    if !app.state.project_lifecycle.project_open {
-        return;
-    }
-    crate::workbench::examples::load_example(name, &mut app.state.schematic);
-    app.state.sync_active_schematic_to_workspace();
-    app.state
-        .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
-            "Loaded example circuit: {name}"
-        )));
-    Command::OpenWorkspace(Workspace::Design).execute(app);
 }
 
 #[cfg(test)]
@@ -1257,24 +1108,6 @@ mod tests {
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].name, "rf_pa");
-    }
-
-    #[test]
-    fn every_landing_example_creates_authored_project_content() {
-        for example in EXAMPLES {
-            let mut app = RSpiceApp::test_instance();
-            app.state.project_lifecycle.project_open = false;
-
-            load_example_project(&mut app, example.name);
-
-            assert!(app.state.project_lifecycle.project_open, "{}", example.name);
-            assert!(
-                !app.state.schematic.components.is_empty(),
-                "{} did not create a circuit",
-                example.name
-            );
-            assert_eq!(app.state.workbench.workspace, Workspace::Design);
-        }
     }
 
     #[test]
