@@ -291,6 +291,23 @@ pub fn rspice_ui_wasm_jit_eval_op_v1(
     )
 }
 
+/// Frame-free unary transcendental capability for generated modules.
+///
+/// The browser binds this to the secondary module's `math1_v1` import as a raw
+/// WebAssembly export, so the call is wasm-to-wasm with no JavaScript frame
+/// between a model's `exp()` and its implementation.
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub fn rspice_ui_wasm_jit_math1_v1(opcode: i32, value: f64) -> f64 {
+    rspice_veriloga::wasm_jit::math1_v1(opcode, value)
+}
+
+/// Frame-free binary transcendental capability. See
+/// [`rspice_ui_wasm_jit_math1_v1`].
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub fn rspice_ui_wasm_jit_math2_v1(opcode: i32, left: f64, right: f64) -> f64 {
+    rspice_veriloga::wasm_jit::math2_v1(opcode, left, right)
+}
+
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub fn prepare_rspice_ui_wasm_jit_probe() -> Result<u32, String> {
     let mut frame = WASM_JIT_ARCHITECTURE_PROBE_FRAME

@@ -257,6 +257,12 @@ fn status_group_allocation(
 }
 
 fn check_summary(app: &RSpiceApp) -> String {
+    // With nothing open, any retained result describes the bootstrap
+    // placeholder rather than the reader's work, and reporting its findings
+    // beside "No project loaded" states both at once.
+    if !app.state.project_lifecycle.project_open {
+        return "No schematic checks".to_owned();
+    }
     match &app.state.dialogs.drc_results {
         None => "Checks not run".to_owned(),
         Some(_)
@@ -282,6 +288,9 @@ fn check_summary(app: &RSpiceApp) -> String {
 }
 
 fn check_tone(app: &RSpiceApp, tokens: &Tokens) -> egui::Color32 {
+    if !app.state.project_lifecycle.project_open {
+        return tokens.color.text_faint;
+    }
     match &app.state.dialogs.drc_results {
         None => tokens.color.warn,
         Some(_)

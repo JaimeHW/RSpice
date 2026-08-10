@@ -37,6 +37,42 @@ fn closed_project_title_context_does_not_leak_the_previous_document_identity() {
     assert_eq!(active_title_cell(&app), "No project open");
 }
 
+/// The rule above was asserted for years against a `#[cfg(test)]` helper the
+/// painter did not call, so the shipped desktop title still read the project
+/// name with nothing open. Assert what is painted, not what is computable.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_painted_desktop_title_names_no_project_when_none_is_open() {
+    fn painted(project_open: bool) -> String {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = title_test_app();
+        app.state.workbench.workspace = Workspace::Design;
+        app.state.project_lifecycle.project_open = project_open;
+        let bounds = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(640.0, 32.0));
+        let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default()
+                .frame(Frame::NONE)
+                .show(ctx, |ui| {
+                    paint_title_context(ui, &app, bounds, false, false)
+                });
+        });
+        let mut text = String::new();
+        for shape in &output.shapes {
+            if let egui::epaint::Shape::Text(painted) = &shape.shape {
+                text.push_str(&painted.galley.job.text);
+                text.push('\n');
+            }
+        }
+        text
+    }
+
+    let closed = painted(false);
+    assert!(closed.contains("RSpice Workbench"), "{closed}");
+    assert!(!closed.contains("Untitled Project"), "{closed}");
+    assert!(painted(true).contains("Untitled Project"));
+}
+
 fn title_key_event(key: Key) -> egui::Event {
     egui::Event::Key {
         key,

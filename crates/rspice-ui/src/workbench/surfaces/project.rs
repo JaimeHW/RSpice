@@ -6,6 +6,7 @@
 
 mod configuration;
 mod dependencies;
+mod landing;
 mod library;
 mod library_publication;
 mod overview;
@@ -95,6 +96,16 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     {
         poll_browser_technology_checkpoint(&ctx, app);
         poll_browser_recovery_completions(&ctx, app);
+    }
+    // This workspace is a live route with no project behind it whenever the
+    // launcher's "Continue without a project" is taken, a recovery review
+    // declines to reopen, or a live session is waiting for the host's snapshot.
+    // Every section below projects an open project's state, so showing them here
+    // would dress the bootstrap placeholder up as the reader's own work.
+    if !app.state.project_lifecycle.project_open {
+        landing::show(ui, app);
+        show_technology_attachment_dialog(&ctx, app);
+        return;
     }
     let tokens = Tokens::get(ui.ctx());
     egui::Frame::new().fill(tokens.color.bg_app).show(ui, |ui| {
@@ -474,14 +485,17 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
             true,
         )
         .clicked()
-            && app.state.simulation.select_run(index)
         {
-            Command::OpenWorkspace(if has_dataset {
-                Workspace::Results
-            } else {
-                Workspace::Simulate
-            })
-            .execute(app);
+            // A run with no retained dataset sends the reader to wherever the
+            // project can actually be run again, which for a netlist-first
+            // project is the deck, not Simulate.
+            let destination = overview::run_destination(
+                has_dataset,
+                app.state.is_netlist_first_without_schematic(),
+            );
+            if app.state.simulation.select_run(index) {
+                Command::OpenWorkspace(destination).execute(app);
+            }
         }
     } else {
         project_status_chip(
@@ -805,6 +819,71 @@ mod tests {
             let copy = copy.to_ascii_lowercase();
             assert!(!copy.contains("qualified"));
             assert!(!copy.contains("rule deck"));
+        }
+    }
+
+    fn painted_text(output: &egui::FullOutput) -> String {
+        fn collect(shape: &egui::epaint::Shape, rendered: &mut String) {
+            match shape {
+                egui::epaint::Shape::Text(text) => {
+                    rendered.push_str(&text.galley.job.text);
+                    rendered.push('\n');
+                }
+                egui::epaint::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, rendered);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut rendered = String::new();
+        for shape in &output.shapes {
+            collect(&shape.shape, &mut rendered);
+        }
+        rendered
+    }
+
+    fn render_project_workspace(project_open: bool) -> String {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.project_open = project_open;
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app));
+            },
+        );
+        painted_text(&output)
+    }
+
+    /// The launcher's "Continue without a project" and a live-session mirror
+    /// both land here with nothing open. Every section projects an open
+    /// project's state, so the sections must not paint the bootstrap
+    /// placeholder's zeros as if they described the reader's work.
+    #[test]
+    fn a_closed_project_lands_rather_than_dressing_up_the_bootstrap_placeholder() {
+        let closed = render_project_workspace(false);
+        assert!(closed.contains("NO PROJECT OPEN"), "{closed}");
+        for page in ProjectPage::ALL {
+            assert!(
+                !closed.contains(page.label()),
+                "the {} tab is offered with no project behind it",
+                page.label()
+            );
+        }
+
+        let open = render_project_workspace(true);
+        assert!(!open.contains("NO PROJECT OPEN"), "{open}");
+        for page in ProjectPage::ALL {
+            assert!(open.contains(page.label()), "{}", page.label());
         }
     }
 

@@ -25,6 +25,12 @@ pub(crate) struct WasmJitWorkerArtifact {
     pub(crate) value_exports: Vec<String>,
     pub(crate) assignment_export: String,
     pub(crate) post_assignment_export: Option<String>,
+    /// Whole-model drivers. Present only when the model is eligible to fuse;
+    /// the worker keeps the per-entry table either way.
+    #[serde(default)]
+    pub(crate) evaluation_kernel_export: Option<String>,
+    #[serde(default)]
+    pub(crate) stamp_kernel_export: Option<String>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -45,6 +51,8 @@ impl WasmJitWorkerArtifact {
                 .collect(),
             assignment_export: artifact.assignment_export().to_owned(),
             post_assignment_export: artifact.post_assignment_export().map(str::to_owned),
+            evaluation_kernel_export: artifact.evaluation_kernel_export().map(str::to_owned),
+            stamp_kernel_export: artifact.stamp_kernel_export().map(str::to_owned),
         }
     }
 }

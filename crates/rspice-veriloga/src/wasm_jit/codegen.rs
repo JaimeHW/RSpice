@@ -21,16 +21,101 @@ use crate::jit::expr::{
 use crate::jit::ssa::{Instruction, Program};
 
 pub(crate) const WASM_JIT_EVAL_HELPER_IMPORT: &str = "eval_op_v1";
+/// Frame-free unary transcendental capability.
+///
+/// `exp` and `ln` dominate every semiconductor model's inner loop, so they do
+/// not go through the general `eval_op_v1` descriptor: that path pushes ten
+/// arguments, revalidates the evaluation frame, and forces an error-status
+/// reload and branch at every call site. These two imports take only what the
+/// operation needs and cannot fail, so the call site is a push, a call, and
+/// nothing else.
+pub(crate) const WASM_JIT_MATH1_IMPORT: &str = "math1_v1";
+/// Frame-free binary transcendental capability. See [`WASM_JIT_MATH1_IMPORT`].
+pub(crate) const WASM_JIT_MATH2_IMPORT: &str = "math2_v1";
 pub(crate) const WASM_JIT_VALUE_EXPORT: &str = "rspice_wasm_jit_value";
 pub(crate) const WASM_JIT_ASSIGNMENT_EXPORT: &str = "rspice_wasm_jit_assign";
 pub(crate) const WASM_JIT_POST_ASSIGNMENT_EXPORT: &str = "rspice_wasm_jit_post_assign";
+/// Driver evaluating every stamp value in one call.
+pub(crate) const WASM_JIT_EVALUATION_KERNEL_EXPORT: &str = "rspice_wasm_jit_eval_kernel";
+/// Driver evaluating every stamp value and Jacobian entry in one call.
+pub(crate) const WASM_JIT_STAMP_KERNEL_EXPORT: &str = "rspice_wasm_jit_stamp_kernel";
 const MAX_RUNTIME_LOOP_ITERATIONS: i32 = 100_000;
 
 const ENTRY_TYPE_INDEX: u32 = 0;
 const HELPER_TYPE_INDEX: u32 = 1;
+const MATH1_TYPE_INDEX: u32 = 2;
+const MATH2_TYPE_INDEX: u32 = 3;
 const HELPER_FUNCTION_INDEX: u32 = 0;
-const ENTRY_FUNCTION_INDEX: u32 = 1;
+const MATH1_FUNCTION_INDEX: u32 = 1;
+const MATH2_FUNCTION_INDEX: u32 = 2;
+/// Imported functions occupy the low indices, so generated entries start after
+/// the whole capability surface.
+const ENTRY_FUNCTION_INDEX: u32 = 3;
+/// Entry signature plus the three capability signatures.
+const CAPABILITY_TYPE_COUNT: u32 = 4;
+/// Linear memory plus the three imported capability functions.
+const CAPABILITY_IMPORT_COUNT: u32 = 4;
 const FRAME_LOCAL: u32 = 0;
+
+/// Declare the type section every generated module shares.
+fn encode_capability_types(module: &mut Module) {
+    let mut types = TypeSection::new();
+    types.ty().function([ValType::I32], [ValType::I32]);
+    types.ty().function(
+        [
+            ValType::I32,
+            ValType::I32,
+            ValType::I32,
+            ValType::I32,
+            ValType::I64,
+            ValType::F64,
+            ValType::F64,
+            ValType::F64,
+            ValType::F64,
+            ValType::F64,
+        ],
+        [ValType::F64],
+    );
+    types
+        .ty()
+        .function([ValType::I32, ValType::F64], [ValType::F64]);
+    types
+        .ty()
+        .function([ValType::I32, ValType::F64, ValType::F64], [ValType::F64]);
+    module.section(&types);
+}
+
+/// Declare the import section every generated module shares.
+fn encode_capability_imports(module: &mut Module) {
+    let mut imports = ImportSection::new();
+    imports.import(
+        WASM_JIT_IMPORT_MODULE,
+        WASM_JIT_MEMORY_IMPORT,
+        MemoryType {
+            minimum: 0,
+            maximum: None,
+            memory64: false,
+            shared: false,
+            page_size_log2: None,
+        },
+    );
+    imports.import(
+        WASM_JIT_IMPORT_MODULE,
+        WASM_JIT_EVAL_HELPER_IMPORT,
+        wasm_encoder::EntityType::Function(HELPER_TYPE_INDEX),
+    );
+    imports.import(
+        WASM_JIT_IMPORT_MODULE,
+        WASM_JIT_MATH1_IMPORT,
+        wasm_encoder::EntityType::Function(MATH1_TYPE_INDEX),
+    );
+    imports.import(
+        WASM_JIT_IMPORT_MODULE,
+        WASM_JIT_MATH2_IMPORT,
+        wasm_encoder::EntityType::Function(MATH2_TYPE_INDEX),
+    );
+    module.section(&imports);
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WasmAssignment {
@@ -57,47 +142,42 @@ pub(crate) struct WasmAssignmentKernel {
     pub(crate) assignments: Vec<WasmAssignment>,
 }
 
+/// One stamp's work inside a fused kernel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WasmKernelStamp {
+    /// Scalar entry producing the stamp's contribution value.
+    pub(crate) value_entry: u32,
+    /// Terminal-pair matrix slots the value publishes into, forward then
+    /// reverse. The reverse slot receives the negated value.
+    pub(crate) current_pair: Option<(u32, u32)>,
+    /// Scalar entries producing this stamp's Jacobian row, in output order.
+    pub(crate) jacobian_entries: Vec<u32>,
+    /// Offset of this stamp's first Jacobian output in the flattened array.
+    pub(crate) jacobian_output_base: u32,
+}
+
+/// A driver that evaluates a whole model in one call.
+///
+/// Without this, the browser pays a JavaScript round trip per scalar: one for
+/// every stamp value and every Jacobian entry, every Newton iteration, for
+/// every instance. The native backends have always fused the same work behind
+/// a single entry point, and this is the direct port of that driver.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WasmFusedKernel {
+    pub(crate) export_name: &'static str,
+    /// Index of the assignment kernel this driver runs first.
+    pub(crate) assignment_kernel: u32,
+    pub(crate) stamps: Vec<WasmKernelStamp>,
+    /// Whether the driver also evaluates and publishes Jacobian entries.
+    pub(crate) with_jacobians: bool,
+}
+
 #[cfg(test)]
 pub(crate) fn encode_value_program(program: &NativeProgram) -> WasmJitResult<Vec<u8>> {
     let mut module = Module::new();
 
-    let mut types = TypeSection::new();
-    types.ty().function([ValType::I32], [ValType::I32]);
-    types.ty().function(
-        [
-            ValType::I32,
-            ValType::I32,
-            ValType::I32,
-            ValType::I32,
-            ValType::I64,
-            ValType::F64,
-            ValType::F64,
-            ValType::F64,
-            ValType::F64,
-            ValType::F64,
-        ],
-        [ValType::F64],
-    );
-    module.section(&types);
-
-    let mut imports = ImportSection::new();
-    imports.import(
-        WASM_JIT_IMPORT_MODULE,
-        WASM_JIT_MEMORY_IMPORT,
-        MemoryType {
-            minimum: 0,
-            maximum: None,
-            memory64: false,
-            shared: false,
-            page_size_log2: None,
-        },
-    );
-    imports.import(
-        WASM_JIT_IMPORT_MODULE,
-        WASM_JIT_EVAL_HELPER_IMPORT,
-        wasm_encoder::EntityType::Function(HELPER_TYPE_INDEX),
-    );
-    module.section(&imports);
+    encode_capability_types(&mut module);
+    encode_capability_imports(&mut module);
 
     let mut functions = FunctionSection::new();
     functions.function(ENTRY_TYPE_INDEX);
@@ -130,7 +210,7 @@ pub(crate) fn encode_value_program(program: &NativeProgram) -> WasmJitResult<Vec
 pub(crate) fn emit_verified_value_program_set(
     programs: &[&NativeProgram],
 ) -> WasmJitResult<Vec<u8>> {
-    let bytes = encode_model_program_set(programs, &[])?;
+    let bytes = encode_model_program_set(programs, &[], &[])?;
     verify_value_program_set(&bytes, programs)?;
     Ok(bytes)
 }
@@ -138,9 +218,10 @@ pub(crate) fn emit_verified_value_program_set(
 pub(crate) fn emit_verified_model_module(
     programs: &[&NativeProgram],
     kernels: &[WasmAssignmentKernel],
+    fused: &[WasmFusedKernel],
 ) -> WasmJitResult<Vec<u8>> {
-    let bytes = encode_model_program_set(programs, kernels)?;
-    verify_model_module(&bytes, programs, kernels)?;
+    let bytes = encode_model_program_set(programs, kernels, fused)?;
+    verify_model_module(&bytes, programs, kernels, fused)?;
     Ok(bytes)
 }
 
@@ -157,7 +238,7 @@ pub(crate) fn verify_value_program_set(
     Validator::new()
         .validate_all(bytes)
         .map_err(|error| WasmJitError::BinaryValidation(error.to_string()))?;
-    if bytes != encode_model_program_set(expected_programs, &[])? {
+    if bytes != encode_model_program_set(expected_programs, &[], &[])? {
         return Err(WasmJitError::Contract(
             "model value-entry module does not match deterministic translation of its authenticated SSA"
                 .into(),
@@ -166,13 +247,14 @@ pub(crate) fn verify_value_program_set(
 
     let expected_count = u32::try_from(expected_programs.len())
         .map_err(|_| WasmJitError::Encoding("model entry count exceeds u32".into()))?;
-    verify_value_module_shape(bytes, expected_count, &[], false)
+    verify_value_module_shape(bytes, expected_count, &[], &[], false)
 }
 
 fn verify_model_module(
     bytes: &[u8],
     expected_programs: &[&NativeProgram],
     kernels: &[WasmAssignmentKernel],
+    fused: &[WasmFusedKernel],
 ) -> WasmJitResult<()> {
     if bytes.len() > super::SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES {
         return Err(WasmJitError::ArtifactTooLarge {
@@ -183,7 +265,7 @@ fn verify_model_module(
     Validator::new()
         .validate_all(bytes)
         .map_err(|error| WasmJitError::BinaryValidation(error.to_string()))?;
-    if bytes != encode_model_program_set(expected_programs, kernels)? {
+    if bytes != encode_model_program_set(expected_programs, kernels, fused)? {
         return Err(WasmJitError::Contract(
             "model module does not match deterministic translation of its authenticated plan"
                 .into(),
@@ -191,66 +273,41 @@ fn verify_model_module(
     }
     let scalar_count = u32::try_from(expected_programs.len())
         .map_err(|_| WasmJitError::Encoding("model entry count exceeds u32".into()))?;
-    let kernel_exports = kernels
+    let assignment_exports = kernels
         .iter()
         .map(|kernel| kernel.export_name)
         .collect::<Vec<_>>();
-    verify_value_module_shape(bytes, scalar_count, &kernel_exports, false)
+    let fused_exports = fused
+        .iter()
+        .map(|kernel| kernel.export_name)
+        .collect::<Vec<_>>();
+    verify_value_module_shape(
+        bytes,
+        scalar_count,
+        &assignment_exports,
+        &fused_exports,
+        false,
+    )
 }
 
 fn encode_model_program_set(
     programs: &[&NativeProgram],
     kernels: &[WasmAssignmentKernel],
+    fused: &[WasmFusedKernel],
 ) -> WasmJitResult<Vec<u8>> {
     let function_count = u32::try_from(programs.len())
         .map_err(|_| WasmJitError::Encoding("model entry count exceeds u32".into()))?;
     let kernel_count = u32::try_from(kernels.len())
         .map_err(|_| WasmJitError::Encoding("assignment kernel count exceeds u32".into()))?;
+    let fused_count = u32::try_from(fused.len())
+        .map_err(|_| WasmJitError::Encoding("fused kernel count exceeds u32".into()))?;
     let mut module = Module::new();
 
-    let mut types = TypeSection::new();
-    types.ty().function([ValType::I32], [ValType::I32]);
-    types.ty().function(
-        [
-            ValType::I32,
-            ValType::I32,
-            ValType::I32,
-            ValType::I32,
-            ValType::I64,
-            ValType::F64,
-            ValType::F64,
-            ValType::F64,
-            ValType::F64,
-            ValType::F64,
-        ],
-        [ValType::F64],
-    );
-    module.section(&types);
-
-    let mut imports = ImportSection::new();
-    imports.import(
-        WASM_JIT_IMPORT_MODULE,
-        WASM_JIT_MEMORY_IMPORT,
-        MemoryType {
-            minimum: 0,
-            maximum: None,
-            memory64: false,
-            shared: false,
-            page_size_log2: None,
-        },
-    );
-    imports.import(
-        WASM_JIT_IMPORT_MODULE,
-        WASM_JIT_EVAL_HELPER_IMPORT,
-        wasm_encoder::EntityType::Function(HELPER_TYPE_INDEX),
-    );
-    module.section(&imports);
+    encode_capability_types(&mut module);
+    encode_capability_imports(&mut module);
 
     let mut functions = FunctionSection::new();
-    for _ in 0..function_count {
-        functions.function(ENTRY_TYPE_INDEX);
-    }
-    for _ in 0..kernel_count {
+    for _ in 0..function_count + kernel_count + fused_count {
         functions.function(ENTRY_TYPE_INDEX);
     }
     module.section(&functions);
@@ -272,14 +329,24 @@ fn encode_model_program_set(
             ENTRY_FUNCTION_INDEX + function_count + index,
         );
     }
+    for (index, kernel) in fused.iter().enumerate() {
+        let index = u32::try_from(index)
+            .map_err(|_| WasmJitError::Encoding("fused kernel index exceeds u32".into()))?;
+        exports.export(
+            kernel.export_name,
+            ExportKind::Func,
+            ENTRY_FUNCTION_INDEX + function_count + kernel_count + index,
+        );
+    }
     module.section(&exports);
 
-    let mut contract = Vec::with_capacity(20);
+    let mut contract = Vec::with_capacity(24);
     contract.extend_from_slice(&WASM_JIT_ABI_VERSION.to_le_bytes());
     contract.extend_from_slice(&WASM_JIT_EMITTER_VERSION.to_le_bytes());
     contract.extend_from_slice(&WASM_JIT_EVAL_FRAME_BYTES.to_le_bytes());
     contract.extend_from_slice(&function_count.to_le_bytes());
     contract.extend_from_slice(&kernel_count.to_le_bytes());
+    contract.extend_from_slice(&fused_count.to_le_bytes());
     module.section(&CustomSection {
         name: Cow::Borrowed(WASM_JIT_CONTRACT_SECTION),
         data: Cow::Owned(contract),
@@ -291,6 +358,9 @@ fn encode_model_program_set(
     }
     for kernel in kernels {
         code.function(&encode_assignment_kernel(kernel, function_count)?);
+    }
+    for kernel in fused {
+        code.function(&encode_fused_kernel(kernel, function_count, kernel_count)?);
     }
     module.section(&code);
     Ok(module.finish())
@@ -348,6 +418,194 @@ fn encode_assignment_kernel(
     body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_OK));
     body.instruction(&WasmInstruction::End);
     Ok(body)
+}
+
+/// Locals used by a fused kernel body. Local 0 is the frame-offset parameter,
+/// so declared locals begin at 1 and the f64 follows the two i32s.
+const KERNEL_STATUS_LOCAL: u32 = 1;
+const KERNEL_POINTER_LOCAL: u32 = 2;
+const KERNEL_VALUE_LOCAL: u32 = 3;
+const KERNEL_I32_LOCAL_COUNT: u32 = 2;
+
+/// Encode the driver that evaluates a whole model in one call.
+///
+/// The shape mirrors the native fused kernels exactly: run the assignment
+/// pass, then for each stamp skip it when the instance deactivated it,
+/// evaluate its value, reject a non-finite result, publish the value into the
+/// sequential contribution array and the terminal-pair matrix, and -- when the
+/// driver carries Jacobians -- evaluate and publish each Jacobian entry.
+fn encode_fused_kernel(
+    kernel: &WasmFusedKernel,
+    scalar_count: u32,
+    kernel_count: u32,
+) -> WasmJitResult<Function> {
+    if kernel.assignment_kernel >= kernel_count {
+        return Err(WasmJitError::Encoding(format!(
+            "fused kernel references assignment kernel {} outside count {kernel_count}",
+            kernel.assignment_kernel
+        )));
+    }
+    let mut body = Function::new([(KERNEL_I32_LOCAL_COUNT, ValType::I32), (1, ValType::F64)]);
+    debug_assert_eq!(KERNEL_VALUE_LOCAL, 1 + KERNEL_I32_LOCAL_COUNT);
+    emit_frame_guard(&mut body);
+    emit_clear_error_status(&mut body);
+
+    // The assignment kernels follow every scalar entry in the function index
+    // space, so the driver calls its own sibling rather than duplicating the
+    // assignment lowering.
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::Call(
+        ENTRY_FUNCTION_INDEX + scalar_count + kernel.assignment_kernel,
+    ));
+    body.instruction(&WasmInstruction::LocalTee(KERNEL_STATUS_LOCAL));
+    body.instruction(&WasmInstruction::If(BlockType::Empty));
+    body.instruction(&WasmInstruction::LocalGet(KERNEL_STATUS_LOCAL));
+    body.instruction(&WasmInstruction::Return);
+    body.instruction(&WasmInstruction::End);
+
+    for (stamp_index, stamp) in kernel.stamps.iter().enumerate() {
+        let stamp_index = u32::try_from(stamp_index)
+            .map_err(|_| WasmJitError::Encoding("fused kernel stamp index exceeds u32".into()))?;
+
+        // `block ... br_if 0` is the structured equivalent of the native
+        // backends' forward jump over an inactive stamp.
+        body.instruction(&WasmInstruction::Block(BlockType::Empty));
+        emit_program_active_load(&mut body, stamp_index);
+        body.instruction(&WasmInstruction::I32Eqz);
+        body.instruction(&WasmInstruction::BrIf(0));
+
+        emit_value_entry_call(&mut body, stamp.value_entry, scalar_count)?;
+        body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+        body.instruction(&WasmInstruction::F64Load(f64_mem(FRAME_RESULT_OFFSET)));
+        body.instruction(&WasmInstruction::LocalTee(KERNEL_VALUE_LOCAL));
+        emit_non_finite_guard(&mut body);
+
+        // The sequential contribution array the model reads back through
+        // `I(...)` probes, then the terminal-pair matrix.
+        const SEQUENTIAL_CURRENTS: (u64, u64) = (
+            FRAME_PRIOR_CURRENTS_PTR_OFFSET,
+            FRAME_PRIOR_CURRENTS_LEN_OFFSET,
+        );
+        const PAIR_CURRENTS: (u64, u64) = (FRAME_CURRENTS_PTR_OFFSET, FRAME_CURRENTS_LEN_OFFSET);
+        const JACOBIANS: (u64, u64) = (FRAME_JACOBIANS_PTR_OFFSET, FRAME_JACOBIANS_LEN_OFFSET);
+
+        emit_f64_array_store(&mut body, SEQUENTIAL_CURRENTS, stamp_index, &|body| {
+            body.instruction(&WasmInstruction::LocalGet(KERNEL_VALUE_LOCAL));
+        });
+        if let Some((forward, reverse)) = stamp.current_pair {
+            emit_f64_array_store(&mut body, PAIR_CURRENTS, forward, &|body| {
+                body.instruction(&WasmInstruction::LocalGet(KERNEL_VALUE_LOCAL));
+            });
+            if forward != reverse {
+                emit_f64_array_store(&mut body, PAIR_CURRENTS, reverse, &|body| {
+                    body.instruction(&WasmInstruction::LocalGet(KERNEL_VALUE_LOCAL));
+                    body.instruction(&WasmInstruction::F64Neg);
+                });
+            }
+        }
+
+        if kernel.with_jacobians {
+            for (output, entry) in stamp.jacobian_entries.iter().copied().enumerate() {
+                let output = u32::try_from(output)
+                    .ok()
+                    .and_then(|output| stamp.jacobian_output_base.checked_add(output))
+                    .ok_or_else(|| {
+                        WasmJitError::Encoding("fused kernel Jacobian output index overflow".into())
+                    })?;
+                emit_value_entry_call(&mut body, entry, scalar_count)?;
+                emit_f64_array_store(&mut body, JACOBIANS, output, &|body| {
+                    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+                    body.instruction(&WasmInstruction::F64Load(f64_mem(FRAME_RESULT_OFFSET)));
+                });
+            }
+        }
+
+        body.instruction(&WasmInstruction::End);
+    }
+
+    body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_OK));
+    body.instruction(&WasmInstruction::End);
+    Ok(body)
+}
+
+/// Push `program_active[index]` as an i32, or zero when the array is too short.
+///
+/// A short array deactivates the stamp rather than reading out of bounds: the
+/// device always sizes it to the stamp count, and failing closed keeps a
+/// malformed frame from publishing an unevaluated contribution.
+fn emit_program_active_load(body: &mut Function, index: u32) {
+    // A branch rather than a `select`, because `select` evaluates both arms:
+    // the byte load has to stay inside the range check or a malformed frame
+    // traps the whole module instead of deactivating one stamp.
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Load(i32_mem(
+        FRAME_PROGRAM_ACTIVE_LEN_OFFSET,
+    )));
+    body.instruction(&WasmInstruction::I32Const(index as i32));
+    body.instruction(&WasmInstruction::I32GtU);
+    body.instruction(&WasmInstruction::If(BlockType::Result(ValType::I32)));
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Load(i32_mem(
+        FRAME_PROGRAM_ACTIVE_PTR_OFFSET,
+    )));
+    body.instruction(&WasmInstruction::I32Const(index as i32));
+    body.instruction(&WasmInstruction::I32Add);
+    body.instruction(&WasmInstruction::I32Load8U(MemArg {
+        offset: 0,
+        align: 0,
+        memory_index: 0,
+    }));
+    body.instruction(&WasmInstruction::Else);
+    body.instruction(&WasmInstruction::I32Const(0));
+    body.instruction(&WasmInstruction::End);
+}
+
+/// Reject a non-finite contribution, matching the native kernels' guard.
+///
+/// Consumes the value from the stack. `!(|v| < inf)` is true for both NaN and
+/// either infinity, which is exactly the exponent-mask test the x64 driver
+/// emits.
+fn emit_non_finite_guard(body: &mut Function) {
+    body.instruction(&WasmInstruction::F64Abs);
+    body.instruction(&WasmInstruction::F64Const(f64::INFINITY.into()));
+    body.instruction(&WasmInstruction::F64Lt);
+    body.instruction(&WasmInstruction::I32Eqz);
+    body.instruction(&WasmInstruction::If(BlockType::Empty));
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_RUNTIME_ERROR));
+    body.instruction(&WasmInstruction::I32Store(i32_mem(
+        FRAME_ERROR_STATUS_OFFSET,
+    )));
+    body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_RUNTIME_ERROR));
+    body.instruction(&WasmInstruction::Return);
+    body.instruction(&WasmInstruction::End);
+}
+
+/// Store an f64 into a frame-addressed array, bounds-checked against the
+/// array's declared length. An out-of-range index is dropped rather than
+/// written, so a malformed frame cannot corrupt neighbouring memory.
+fn emit_f64_array_store(
+    body: &mut Function,
+    array: (u64, u64),
+    index: u32,
+    value: &dyn Fn(&mut Function),
+) {
+    let (pointer_offset, length_offset) = array;
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Load(i32_mem(pointer_offset)));
+    body.instruction(&WasmInstruction::I32Const((index as i32).wrapping_mul(8)));
+    body.instruction(&WasmInstruction::I32Add);
+    body.instruction(&WasmInstruction::LocalSet(KERNEL_POINTER_LOCAL));
+
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Load(i32_mem(length_offset)));
+    body.instruction(&WasmInstruction::I32Const(index as i32));
+    body.instruction(&WasmInstruction::I32GtU);
+    body.instruction(&WasmInstruction::If(BlockType::Empty));
+    body.instruction(&WasmInstruction::LocalGet(KERNEL_POINTER_LOCAL));
+    value(body);
+    body.instruction(&WasmInstruction::F64Store(f64_mem(0)));
+    body.instruction(&WasmInstruction::End);
 }
 
 fn assignment_loop_depth(assignments: &[WasmAssignment]) -> WasmJitResult<usize> {
@@ -556,19 +814,28 @@ pub(crate) fn verify_value_program(
         ));
     }
 
-    verify_value_module_shape(bytes, 1, &[], true)
+    verify_value_module_shape(bytes, 1, &[], &[], true)
 }
 
 fn verify_value_module_shape(
     bytes: &[u8],
     expected_scalar_count: u32,
-    kernel_exports: &[&str],
+    assignment_exports: &[&str],
+    fused_exports: &[&str],
     single_export: bool,
 ) -> WasmJitResult<()> {
-    let expected_kernel_count = u32::try_from(kernel_exports.len())
+    let expected_kernel_count = u32::try_from(assignment_exports.len())
         .map_err(|_| WasmJitError::Contract("assignment kernel count exceeds u32".into()))?;
+    let expected_fused_count = u32::try_from(fused_exports.len())
+        .map_err(|_| WasmJitError::Contract("fused kernel count exceeds u32".into()))?;
+    let kernel_exports = assignment_exports
+        .iter()
+        .chain(fused_exports)
+        .copied()
+        .collect::<Vec<_>>();
     let expected_count = expected_scalar_count
         .checked_add(expected_kernel_count)
+        .and_then(|count| count.checked_add(expected_fused_count))
         .ok_or_else(|| WasmJitError::Contract("model function count overflow".into()))?;
     let mut version = 0_u32;
     let mut types = 0_u32;
@@ -594,27 +861,26 @@ fn verify_value_module_shape(
                     .into_iter_err_on_gc_types()
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|error| WasmJitError::Contract(error.to_string()))?;
-                if entries.len() != 2
-                    || entries[0].params() != [wasmparser::ValType::I32]
-                    || entries[0].results() != [wasmparser::ValType::I32]
-                    || entries[1].params()
-                        != [
-                            wasmparser::ValType::I32,
-                            wasmparser::ValType::I32,
-                            wasmparser::ValType::I32,
-                            wasmparser::ValType::I32,
-                            wasmparser::ValType::I64,
-                            wasmparser::ValType::F64,
-                            wasmparser::ValType::F64,
-                            wasmparser::ValType::F64,
-                            wasmparser::ValType::F64,
-                            wasmparser::ValType::F64,
-                        ]
-                    || entries[1].results() != [wasmparser::ValType::F64]
+                const I32: wasmparser::ValType = wasmparser::ValType::I32;
+                const I64: wasmparser::ValType = wasmparser::ValType::I64;
+                const F64: wasmparser::ValType = wasmparser::ValType::F64;
+                let expected: [(&[wasmparser::ValType], &[wasmparser::ValType]); 4] = [
+                    (&[I32], &[I32]),
+                    (&[I32, I32, I32, I32, I64, F64, F64, F64, F64, F64], &[F64]),
+                    (&[I32, F64], &[F64]),
+                    (&[I32, F64, F64], &[F64]),
+                ];
+                if entries.len() != expected.len()
+                    || entries
+                        .iter()
+                        .zip(expected)
+                        .any(|(entry, (params, results))| {
+                            entry.params() != params || entry.results() != results
+                        })
                 {
-                    return Err(WasmJitError::Contract(
-                        "value-module function signatures do not match ABI v1".into(),
-                    ));
+                    return Err(WasmJitError::Contract(format!(
+                        "value-module function signatures do not match ABI v{WASM_JIT_ABI_VERSION}"
+                    )));
                 }
             }
             Payload::ImportSection(reader) => {
@@ -629,9 +895,10 @@ fn verify_value_module_shape(
                     };
                     flattened.push(import);
                 }
-                if flattened.len() != 2 {
+                if flattened.len() != 4 {
                     return Err(WasmJitError::Contract(
-                        "value module must import exactly memory and eval_op_v1".into(),
+                        "value module must import exactly memory, eval_op_v1, math1_v1, and math2_v1"
+                            .into(),
                     ));
                 }
                 let memory = &flattened[0];
@@ -656,14 +923,26 @@ fn verify_value_module_shape(
                         "value-module memory import has forbidden limits or flags".into(),
                     ));
                 }
-                let helper = &flattened[1];
-                if helper.module != WASM_JIT_IMPORT_MODULE
-                    || helper.name != WASM_JIT_EVAL_HELPER_IMPORT
-                    || !matches!(helper.ty, wasmparser::TypeRef::Func(HELPER_TYPE_INDEX))
-                {
-                    return Err(WasmJitError::Contract(
-                        "unexpected value-module helper capability".into(),
-                    ));
+                // Order is part of the contract: the browser worker binds by
+                // position-independent name, but the emitted call sites address
+                // imported functions by index.
+                for (import, name, type_index) in [
+                    (
+                        &flattened[1],
+                        WASM_JIT_EVAL_HELPER_IMPORT,
+                        HELPER_TYPE_INDEX,
+                    ),
+                    (&flattened[2], WASM_JIT_MATH1_IMPORT, MATH1_TYPE_INDEX),
+                    (&flattened[3], WASM_JIT_MATH2_IMPORT, MATH2_TYPE_INDEX),
+                ] {
+                    if import.module != WASM_JIT_IMPORT_MODULE
+                        || import.name != name
+                        || import.ty != wasmparser::TypeRef::Func(type_index)
+                    {
+                        return Err(WasmJitError::Contract(format!(
+                            "unexpected value-module capability at the {name} import slot"
+                        )));
+                    }
                 }
             }
             Payload::FunctionSection(reader) => {
@@ -718,13 +997,14 @@ fn verify_value_module_shape(
                     ));
                 }
                 contracts += 1;
-                let mut expected = Vec::with_capacity(if single_export { 12 } else { 20 });
+                let mut expected = Vec::with_capacity(if single_export { 12 } else { 24 });
                 expected.extend_from_slice(&WASM_JIT_ABI_VERSION.to_le_bytes());
                 expected.extend_from_slice(&WASM_JIT_EMITTER_VERSION.to_le_bytes());
                 expected.extend_from_slice(&WASM_JIT_EVAL_FRAME_BYTES.to_le_bytes());
                 if !single_export {
                     expected.extend_from_slice(&expected_scalar_count.to_le_bytes());
                     expected.extend_from_slice(&expected_kernel_count.to_le_bytes());
+                    expected.extend_from_slice(&expected_fused_count.to_le_bytes());
                 }
                 if section.data() != expected {
                     return Err(WasmJitError::Contract(
@@ -760,8 +1040,8 @@ fn verify_value_module_shape(
         code_bodies,
     ) != (
         1,
-        2,
-        2,
+        CAPABILITY_TYPE_COUNT,
+        CAPABILITY_IMPORT_COUNT,
         expected_count,
         expected_count,
         1,
@@ -951,8 +1231,147 @@ fn emit_instruction(body: &mut Function, instruction: &Instruction) -> WasmJitRe
             emit_operand(body, operands, 0)?;
             body.instruction(&WasmInstruction::F64Ceil);
         }
+        NativeOp::Extremum(kind) => emit_extremum(
+            body,
+            kind,
+            &|body| emit_operand(body, operands, 0),
+            &|body| emit_operand(body, operands, 1),
+        )?,
+        NativeOp::ExtremumConst(kind, value) => emit_extremum(
+            body,
+            kind,
+            &|body| emit_operand(body, operands, 0),
+            &|body| {
+                body.instruction(&WasmInstruction::F64Const(value.into()));
+                Ok(())
+            },
+        )?,
+        NativeOp::ExtremumConstLhs(kind, value) => emit_extremum(
+            body,
+            kind,
+            &|body| {
+                body.instruction(&WasmInstruction::F64Const(value.into()));
+                Ok(())
+            },
+            &|body| emit_operand(body, operands, 0),
+        )?,
+        NativeOp::IntegerCast => {
+            emit_operand(body, operands, 0)?;
+            emit_saturating_i64_round_trip(body);
+        }
+        NativeOp::IntegerBinary(kind) if integer_bitwise_instruction(kind).is_some() => {
+            emit_operand(body, operands, 0)?;
+            body.instruction(&WasmInstruction::I64TruncSatF64S);
+            emit_operand(body, operands, 1)?;
+            body.instruction(&WasmInstruction::I64TruncSatF64S);
+            emit_integer_bitwise(body, kind)?;
+        }
+        NativeOp::IntegerBinaryConst(kind, value)
+            if integer_bitwise_instruction(kind).is_some() =>
+        {
+            emit_operand(body, operands, 0)?;
+            body.instruction(&WasmInstruction::I64TruncSatF64S);
+            body.instruction(&WasmInstruction::I64Const(value));
+            emit_integer_bitwise(body, kind)?;
+        }
         _ => emit_helper_call(body, op, operands, instruction.result())?,
     };
+    Ok(())
+}
+
+/// Lower `min`/`max` to match the reference `constant_extremum`.
+///
+/// This cannot be `f64.min`/`f64.max` alone. WebAssembly returns a NaN when
+/// either operand is NaN, and returns the negatively-signed zero when the
+/// operands are zeros of opposite sign. Rust's `f64::min`/`f64::max` -- which
+/// the bytecode VM and both native backends evaluate -- return the non-NaN
+/// operand instead, and the x64 backend's NaN/zero fixup settles the
+/// equal-magnitude zero case by returning the left operand. Compact models
+/// guard divisions with `max(x, 1e-30)` constantly, so this has to agree
+/// exactly, not merely on ordinary values.
+///
+/// Emitted as two `select`s rather than branches: both arms are values that
+/// are already available, and the operands are re-read from their locals
+/// rather than spilled to scratch.
+fn emit_extremum(
+    body: &mut Function,
+    kind: ExtremumOp,
+    left: &dyn Fn(&mut Function) -> WasmJitResult<()>,
+    right: &dyn Fn(&mut Function) -> WasmJitResult<()>,
+) -> WasmJitResult<()> {
+    // Outer select's "condition true" arm: the left operand is NaN, so the
+    // result is whatever the right operand is (NaN included).
+    right(body)?;
+
+    // Inner select's "condition true" arm: return the left operand.
+    left(body)?;
+
+    // Inner select's "condition false" arm: both operands are ordinary, where
+    // WebAssembly and the reference agree.
+    left(body)?;
+    right(body)?;
+    body.instruction(&match kind {
+        ExtremumOp::Min => WasmInstruction::F64Min,
+        ExtremumOp::Max => WasmInstruction::F64Max,
+    });
+
+    // Inner condition: the right operand is NaN, or both operands are zero.
+    right(body)?;
+    right(body)?;
+    body.instruction(&WasmInstruction::F64Ne);
+    emit_is_zero_magnitude(body, left)?;
+    emit_is_zero_magnitude(body, right)?;
+    body.instruction(&WasmInstruction::I32And);
+    body.instruction(&WasmInstruction::I32Or);
+    body.instruction(&WasmInstruction::Select);
+
+    // Outer condition: the left operand is NaN.
+    left(body)?;
+    left(body)?;
+    body.instruction(&WasmInstruction::F64Ne);
+    body.instruction(&WasmInstruction::Select);
+    Ok(())
+}
+
+fn emit_is_zero_magnitude(
+    body: &mut Function,
+    operand: &dyn Fn(&mut Function) -> WasmJitResult<()>,
+) -> WasmJitResult<()> {
+    operand(body)?;
+    body.instruction(&WasmInstruction::F64Abs);
+    body.instruction(&WasmInstruction::F64Const(0.0.into()));
+    body.instruction(&WasmInstruction::F64Eq);
+    Ok(())
+}
+
+/// Truncate to `i64` and convert back, matching Rust's saturating `as` cast:
+/// NaN becomes zero and out-of-range magnitudes clamp to the `i64` bounds,
+/// which is exactly `i64.trunc_sat_f64_s`.
+fn emit_saturating_i64_round_trip(body: &mut Function) {
+    body.instruction(&WasmInstruction::I64TruncSatF64S);
+    body.instruction(&WasmInstruction::F64ConvertI64S);
+}
+
+/// The bitwise integer operations, which cannot fail.
+///
+/// Shifts are deliberately absent: `constant_integer_binary` rejects a shift
+/// count outside `0..64` as a runtime error, and that trap belongs on the
+/// descriptor path that already knows how to publish one.
+fn integer_bitwise_instruction(op: IntegerBinaryOp) -> Option<WasmInstruction<'static>> {
+    match op {
+        IntegerBinaryOp::BitAnd => Some(WasmInstruction::I64And),
+        IntegerBinaryOp::BitOr => Some(WasmInstruction::I64Or),
+        IntegerBinaryOp::BitXor => Some(WasmInstruction::I64Xor),
+        IntegerBinaryOp::Shl | IntegerBinaryOp::Shr => None,
+    }
+}
+
+fn emit_integer_bitwise(body: &mut Function, op: IntegerBinaryOp) -> WasmJitResult<()> {
+    let instruction = integer_bitwise_instruction(op).ok_or_else(|| {
+        WasmJitError::Encoding("integer shifts are not part of the bitwise fast path".into())
+    })?;
+    body.instruction(&instruction);
+    body.instruction(&WasmInstruction::F64ConvertI64S);
     Ok(())
 }
 
@@ -1068,12 +1487,51 @@ fn emit_truthy(
     Ok(())
 }
 
+/// Emit a transcendental through the frame-free capability, or report that the
+/// operation needs the general descriptor path.
+///
+/// These operations read no simulator state and cannot publish a runtime
+/// error: `constant_unary_math` and `constant_binary_math` are total over the
+/// doubles, returning NaN where the function is undefined exactly as the
+/// bytecode and native backends do. That is what lets the call site skip the
+/// error-status reload and branch that every stateful helper needs.
+fn emit_pure_math_call(
+    body: &mut Function,
+    op: NativeOp,
+    operands: &[crate::jit::ssa::ValueId],
+) -> WasmJitResult<bool> {
+    let (function_index, opcode, arity) = match op {
+        NativeOp::UnaryMath(kind) => (MATH1_FUNCTION_INDEX, 100 + unary_math_code(kind), 1),
+        NativeOp::BinaryMath(kind) => (MATH2_FUNCTION_INDEX, 200 + binary_math_code(kind), 2),
+        _ => return Ok(false),
+    };
+    if operands.len() < arity {
+        return Err(WasmJitError::Encoding(format!(
+            "pure math operation expects {arity} operand(s), lowering supplied {}",
+            operands.len()
+        )));
+    }
+    body.instruction(&WasmInstruction::I32Const(opcode));
+    for index in 0..arity {
+        emit_operand(body, operands, index)?;
+    }
+    body.instruction(&WasmInstruction::Call(function_index));
+    Ok(true)
+}
+
 fn emit_helper_call(
     body: &mut Function,
     op: NativeOp,
     operands: &[crate::jit::ssa::ValueId],
     result: crate::jit::ssa::ValueId,
 ) -> WasmJitResult<()> {
+    // The pure-math path has no early-return branch to navigate, so the result
+    // stays on the stack for the caller's own `local.set` rather than making a
+    // round trip through a local.
+    if emit_pure_math_call(body, op, operands)? {
+        return Ok(());
+    }
+
     let descriptor = helper_descriptor(op)?;
     body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
     body.instruction(&WasmInstruction::I32Const(descriptor.opcode));
@@ -1376,6 +1834,32 @@ fn f64_mem(offset: u64) -> MemArg {
     }
 }
 
+/// Bind the frame-free transcendental capabilities for an execution test.
+///
+/// Every module the emitter produces imports these, so each of the crate's
+/// independent-engine harnesses needs them; the bodies are the same production
+/// entry points the browser binds, so a test can never disagree with the
+/// browser about what `exp` means.
+#[cfg(test)]
+pub(super) fn define_test_math_imports<T>(linker: &mut wasmi::Linker<T>) {
+    linker
+        .func_wrap(
+            WASM_JIT_IMPORT_MODULE,
+            WASM_JIT_MATH1_IMPORT,
+            |opcode: i32, value: f64| -> f64 { super::runtime::math1_v1(opcode, value) },
+        )
+        .expect("define unary math import");
+    linker
+        .func_wrap(
+            WASM_JIT_IMPORT_MODULE,
+            WASM_JIT_MATH2_IMPORT,
+            |opcode: i32, left: f64, right: f64| -> f64 {
+                super::runtime::math2_v1(opcode, left, right)
+            },
+        )
+        .expect("define binary math import");
+}
+
 #[cfg(test)]
 mod tests {
     use std::mem::size_of;
@@ -1476,9 +1960,9 @@ mod tests {
                 },
             ],
         }];
-        let first = emit_verified_model_module(&programs, &kernels)
+        let first = emit_verified_model_module(&programs, &kernels, &[])
             .expect("encode complete assignment kernel");
-        let second = emit_verified_model_module(&programs, &kernels)
+        let second = emit_verified_model_module(&programs, &kernels, &[])
             .expect("re-encode complete assignment kernel");
         assert_eq!(first, second);
         Validator::new()
@@ -1528,7 +2012,7 @@ mod tests {
                 },
             ],
         }];
-        let bytes = emit_verified_model_module(&programs, &kernels)
+        let bytes = emit_verified_model_module(&programs, &kernels, &[])
             .expect("encode executable assignment module");
 
         let engine = Engine::default();
@@ -1618,6 +2102,7 @@ mod tests {
                 },
             )
             .expect("define scalar helper import");
+        define_test_math_imports(&mut linker);
         let instance = linker
             .instantiate_and_start(&mut store, &module)
             .expect("instantiate executable assignment module");
@@ -1705,6 +2190,7 @@ mod tests {
                  -> f64 { 0.0 },
             )
             .expect("define unused scalar helper import");
+        define_test_math_imports(&mut linker);
         let instance = linker
             .instantiate_and_start(&mut store, &module)
             .expect("instantiate analysis-mask module");
@@ -1753,6 +2239,289 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Transcendentals take the frame-free capability, and the frame-carrying
+    /// descriptor helper is never reached for them.
+    ///
+    /// `exp` and `ln` dominate every semiconductor model's inner loop. Routing
+    /// them through `eval_op_v1` costs ten pushed arguments, a frame
+    /// revalidation, and an error-status reload and branch at each call site,
+    /// so the trap here is a silent regression back onto that path.
+    #[test]
+    fn transcendentals_execute_through_the_frame_free_math_capability() {
+        // exp(ln(param0)) ** 1.0 -- one unary pair and one binary op, so a
+        // regression on either capability fails this.
+        let program = program(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::UnaryMath(UnaryMathOp::Log),
+                NativeOp::UnaryMath(UnaryMathOp::Exp),
+                NativeOp::Const(1.0),
+                NativeOp::BinaryMath(BinaryMathOp::Pow),
+            ],
+            2,
+        );
+        let bytes = emit_verified_value_program(&program).expect("encode transcendental module");
+
+        let engine = Engine::default();
+        let module = Module::new(&engine, bytes.as_slice()).expect("compile module in wasmi");
+        let mut store = Store::new(&engine, ());
+        let memory = Memory::new(&mut store, MemoryType::new(1, None))
+            .expect("allocate imported primary memory");
+        let mut linker = Linker::new(&engine);
+        linker
+            .define(WASM_JIT_IMPORT_MODULE, WASM_JIT_MEMORY_IMPORT, memory)
+            .expect("define primary memory import");
+        linker
+            .func_wrap(
+                WASM_JIT_IMPORT_MODULE,
+                WASM_JIT_EVAL_HELPER_IMPORT,
+                |_: i32,
+                 _: i32,
+                 _: i32,
+                 _: i32,
+                 _: i64,
+                 _: f64,
+                 _: f64,
+                 _: f64,
+                 _: f64,
+                 _: f64|
+                 -> f64 {
+                    panic!("pure transcendentals must not reach the frame-carrying helper")
+                },
+            )
+            .expect("define trap helper import");
+        define_test_math_imports(&mut linker);
+        let instance = linker
+            .instantiate_and_start(&mut store, &module)
+            .expect("instantiate transcendental module");
+
+        const PARAMETERS_OFFSET: u32 = 256;
+        let mut frame = vec![0_u8; WASM_JIT_EVAL_FRAME_BYTES as usize];
+        let mut write_u32 = |offset: u64, value: u32| {
+            let offset = offset as usize;
+            frame[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        };
+        write_u32(FRAME_MAGIC_OFFSET, WASM_JIT_FRAME_MAGIC);
+        write_u32(FRAME_ABI_VERSION_OFFSET, WASM_JIT_ABI_VERSION);
+        write_u32(FRAME_BYTE_LEN_OFFSET, WASM_JIT_EVAL_FRAME_BYTES);
+        write_u32(FRAME_PARAMETERS_PTR_OFFSET, PARAMETERS_OFFSET);
+        write_u32(FRAME_PARAMETERS_LEN_OFFSET, 1);
+        memory
+            .write(&mut store, 0, &frame)
+            .expect("write evaluation frame");
+
+        let input = 7.5_f64;
+        memory
+            .write(&mut store, PARAMETERS_OFFSET as usize, &input.to_le_bytes())
+            .expect("write parameter");
+
+        let entry = instance
+            .get_typed_func::<i32, i32>(&store, WASM_JIT_VALUE_EXPORT)
+            .expect("resolve transcendental export");
+        assert_eq!(
+            entry.call(&mut store, 0).expect("execute transcendental"),
+            WASM_JIT_STATUS_OK
+        );
+        let raw = memory
+            .data(&store)
+            .get(FRAME_RESULT_OFFSET as usize..FRAME_RESULT_OFFSET as usize + 8)
+            .expect("read result bytes");
+        let result = f64::from_le_bytes(raw.try_into().unwrap());
+        assert_eq!(
+            result,
+            input.ln().exp().powf(1.0),
+            "the capability must be bit-identical to the shared constant-math semantics"
+        );
+    }
+
+    /// The inlined operations agree with the reference bit for bit, including
+    /// the corners where WebAssembly's own instructions disagree with it.
+    ///
+    /// `f64.min`/`f64.max` return a NaN when either operand is NaN and prefer
+    /// the negative zero for equal-magnitude zeros; the reference returns the
+    /// non-NaN operand and settles zeros on the left operand. Comparing raw
+    /// bits rather than values is what makes the zero-sign case meaningful.
+    #[test]
+    fn inlined_extremum_and_integer_ops_match_the_reference_bitwise() {
+        const CORNERS: [f64; 9] = [
+            f64::NAN,
+            0.0,
+            -0.0,
+            1.0,
+            -1.0,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            1.0e-30,
+            -3.5,
+        ];
+
+        let engine = Engine::default();
+        for kind in [ExtremumOp::Min, ExtremumOp::Max] {
+            let program = program(
+                vec![
+                    NativeOp::LoadParam(0),
+                    NativeOp::LoadParam(1),
+                    NativeOp::Extremum(kind),
+                ],
+                2,
+            );
+            let bytes = emit_verified_value_program(&program).expect("encode extremum module");
+            let (mut store, memory, instance) = instantiate_value_module(&engine, &bytes);
+
+            for left in CORNERS {
+                for right in CORNERS {
+                    let actual = call_value_entry(&mut store, &memory, &instance, &[left, right]);
+                    let expected = crate::jit::expr::constant_extremum(kind, left, right);
+                    assert_eq!(
+                        actual.to_bits(),
+                        expected.to_bits(),
+                        "{kind:?}({left}, {right}) produced {actual}, reference is {expected}"
+                    );
+                }
+            }
+        }
+
+        for op in [
+            IntegerBinaryOp::BitAnd,
+            IntegerBinaryOp::BitOr,
+            IntegerBinaryOp::BitXor,
+        ] {
+            let program = program(
+                vec![
+                    NativeOp::LoadParam(0),
+                    NativeOp::LoadParam(1),
+                    NativeOp::IntegerBinary(op),
+                ],
+                2,
+            );
+            let bytes = emit_verified_value_program(&program).expect("encode bitwise module");
+            let (mut store, memory, instance) = instantiate_value_module(&engine, &bytes);
+
+            for left in [0.0, 6.0, -6.0, 255.0, f64::NAN, 1.0e30] {
+                for right in [0.0, 3.0, -3.0, 15.0, f64::NAN, -1.0e30] {
+                    let actual = call_value_entry(&mut store, &memory, &instance, &[left, right]);
+                    let expected = crate::jit::expr::constant_integer_binary(op, left, right)
+                        .expect("bitwise operations are total");
+                    assert_eq!(
+                        actual.to_bits(),
+                        expected.to_bits(),
+                        "{op:?}({left}, {right}) produced {actual}, reference is {expected}"
+                    );
+                }
+            }
+        }
+
+        let program = program(vec![NativeOp::LoadParam(0), NativeOp::IntegerCast], 1);
+        let bytes = emit_verified_value_program(&program).expect("encode integer-cast module");
+        let (mut store, memory, instance) = instantiate_value_module(&engine, &bytes);
+        for value in [
+            0.0,
+            -0.0,
+            2.5,
+            -2.5,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            1.0e30,
+            -1.0e30,
+        ] {
+            let actual = call_value_entry(&mut store, &memory, &instance, &[value]);
+            let expected = (value as i64) as f64;
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "integer cast of {value} produced {actual}, reference is {expected}"
+            );
+        }
+    }
+
+    /// Instantiate a single-entry value module with every capability bound and
+    /// the frame-carrying helper wired to a trap, so an operation that is meant
+    /// to be inlined fails loudly if it regresses onto the descriptor path.
+    fn instantiate_value_module(
+        engine: &Engine,
+        bytes: &[u8],
+    ) -> (Store<()>, Memory, wasmi::Instance) {
+        let module = Module::new(engine, bytes).expect("compile module in wasmi");
+        let mut store = Store::new(engine, ());
+        let memory = Memory::new(&mut store, MemoryType::new(1, None))
+            .expect("allocate imported primary memory");
+        let mut linker = Linker::new(engine);
+        linker
+            .define(WASM_JIT_IMPORT_MODULE, WASM_JIT_MEMORY_IMPORT, memory)
+            .expect("define primary memory import");
+        linker
+            .func_wrap(
+                WASM_JIT_IMPORT_MODULE,
+                WASM_JIT_EVAL_HELPER_IMPORT,
+                |_: i32,
+                 _: i32,
+                 _: i32,
+                 _: i32,
+                 _: i64,
+                 _: f64,
+                 _: f64,
+                 _: f64,
+                 _: f64,
+                 _: f64|
+                 -> f64 {
+                    panic!("inlined operations must not reach the descriptor helper")
+                },
+            )
+            .expect("define trap helper import");
+        define_test_math_imports(&mut linker);
+        let instance = linker
+            .instantiate_and_start(&mut store, &module)
+            .expect("instantiate value module");
+        (store, memory, instance)
+    }
+
+    /// Write `parameters` into a fresh frame and run the module's sole entry.
+    fn call_value_entry(
+        store: &mut Store<()>,
+        memory: &Memory,
+        instance: &wasmi::Instance,
+        parameters: &[f64],
+    ) -> f64 {
+        const PARAMETERS_OFFSET: u32 = 256;
+        let mut frame = vec![0_u8; WASM_JIT_EVAL_FRAME_BYTES as usize];
+        let mut write_u32 = |offset: u64, value: u32| {
+            let offset = offset as usize;
+            frame[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        };
+        write_u32(FRAME_MAGIC_OFFSET, WASM_JIT_FRAME_MAGIC);
+        write_u32(FRAME_ABI_VERSION_OFFSET, WASM_JIT_ABI_VERSION);
+        write_u32(FRAME_BYTE_LEN_OFFSET, WASM_JIT_EVAL_FRAME_BYTES);
+        write_u32(FRAME_PARAMETERS_PTR_OFFSET, PARAMETERS_OFFSET);
+        write_u32(
+            FRAME_PARAMETERS_LEN_OFFSET,
+            u32::try_from(parameters.len()).expect("parameter count fits"),
+        );
+        memory.write(&mut *store, 0, &frame).expect("write frame");
+        for (index, value) in parameters.iter().enumerate() {
+            memory
+                .write(
+                    &mut *store,
+                    PARAMETERS_OFFSET as usize + index * size_of::<f64>(),
+                    &value.to_le_bytes(),
+                )
+                .expect("write parameter");
+        }
+
+        let entry = instance
+            .get_typed_func::<i32, i32>(&*store, WASM_JIT_VALUE_EXPORT)
+            .expect("resolve value export");
+        assert_eq!(
+            entry.call(&mut *store, 0).expect("execute value entry"),
+            WASM_JIT_STATUS_OK
+        );
+        let raw = memory
+            .data(&*store)
+            .get(FRAME_RESULT_OFFSET as usize..FRAME_RESULT_OFFSET as usize + 8)
+            .expect("read result bytes");
+        f64::from_le_bytes(raw.try_into().unwrap())
     }
 
     #[test]

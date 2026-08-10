@@ -242,6 +242,14 @@ jobs:
         run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test mfactor -- --test-threads=1
       - name: Test Verilog-A native contract (Linux x64 release)
         run: cargo test --locked -p rspice-veriloga --release --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
+      # The x64 and AArch64 backends encode, allocate, and verify independently,
+      # so the census has to run on both or it qualifies only one of them.
+      - name: Qualify full shipped device census through the x64 JIT (Linux x64)
+        env:
+          RUST_MIN_STACK: "67108864"
+        run: >-
+          cargo test --locked --release -p rspice-veriloga --features native
+          --test native_shipped_models -- --ignored --nocapture --test-threads=1
       - name: Smoke Verilog-A native JIT benchmark gate (Linux x64)
         run: >-
           cargo run --locked -p rspice-bench --release -- native-jit
@@ -413,13 +421,13 @@ jobs:
         run: cargo test --locked -p rspice-veriloga --features native --test runtime_compile_report -- --test-threads=1
       - name: Test native core builder route
         run: cargo test --locked -p rspice-core --features veriloga-native --test veriloga_transient veriloga_native_builder_ -- --test-threads=1
-      - name: Qualify full shipped device census through AArch64 JIT
+      - name: Qualify full shipped device census through the AArch64 JIT
         env:
           RUSTFLAGS: -D warnings
           RUST_MIN_STACK: "67108864"
         run: >-
           cargo test --locked --release -p rspice-veriloga --features native
-          --test native_aarch64_shipped_models -- --ignored --nocapture --test-threads=1
+          --test native_shipped_models -- --ignored --nocapture --test-threads=1
       - name: Gate AArch64 native JIT performance
         # The dense sweep intentionally calls 53 tiny entrypoints and is most
         # sensitive to hosted-runner microarchitecture. Native device evaluation

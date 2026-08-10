@@ -50,6 +50,14 @@ pub(crate) struct WasmJitEvalFrame {
     pub analysis_mask: u32,
     /// Generation paired with `session_token` to reject stale dispatches.
     pub session_generation: u32,
+    /// Per-stamp instance activation, one byte each. Read only by the fused
+    /// kernels, which skip an inactive stamp exactly as the native drivers do.
+    pub program_active_ptr: u32,
+    pub program_active_len: u32,
+    /// Flattened Jacobian output array written by the fused stamp kernel, in
+    /// stamp-major then entry order.
+    pub jacobians_ptr: u32,
+    pub jacobians_len: u32,
     pub temperature: f64,
     pub thermal_voltage: f64,
     pub time: f64,
@@ -86,6 +94,10 @@ impl Default for WasmJitEvalFrame {
             variables_len: 0,
             analysis_mask: 0,
             session_generation: 0,
+            program_active_ptr: 0,
+            program_active_len: 0,
+            jacobians_ptr: 0,
+            jacobians_len: 0,
             temperature: 0.0,
             thermal_voltage: 0.0,
             time: 0.0,
@@ -134,20 +146,28 @@ pub const FRAME_VARIABLES_LEN_OFFSET: u64 = offset_of!(WasmJitEvalFrame, variabl
 pub const FRAME_ANALYSIS_MASK_OFFSET: u64 = offset_of!(WasmJitEvalFrame, analysis_mask) as u64;
 pub const FRAME_SESSION_GENERATION_OFFSET: u64 =
     offset_of!(WasmJitEvalFrame, session_generation) as u64;
+pub const FRAME_PROGRAM_ACTIVE_PTR_OFFSET: u64 =
+    offset_of!(WasmJitEvalFrame, program_active_ptr) as u64;
+pub const FRAME_PROGRAM_ACTIVE_LEN_OFFSET: u64 =
+    offset_of!(WasmJitEvalFrame, program_active_len) as u64;
+pub const FRAME_JACOBIANS_PTR_OFFSET: u64 = offset_of!(WasmJitEvalFrame, jacobians_ptr) as u64;
+pub const FRAME_JACOBIANS_LEN_OFFSET: u64 = offset_of!(WasmJitEvalFrame, jacobians_len) as u64;
 pub const FRAME_TEMPERATURE_OFFSET: u64 = offset_of!(WasmJitEvalFrame, temperature) as u64;
 pub const FRAME_THERMAL_VOLTAGE_OFFSET: u64 = offset_of!(WasmJitEvalFrame, thermal_voltage) as u64;
 pub const FRAME_TIME_OFFSET: u64 = offset_of!(WasmJitEvalFrame, time) as u64;
 pub const FRAME_M_FACTOR_OFFSET: u64 = offset_of!(WasmJitEvalFrame, m_factor) as u64;
 
 const _: () = {
-    assert!(WASM_JIT_EVAL_FRAME_BYTES == 144);
+    assert!(WASM_JIT_EVAL_FRAME_BYTES == 160);
     assert!(FRAME_RESULT_OFFSET == 16);
     assert!(FRAME_SESSION_TOKEN_OFFSET == 28);
     assert!(FRAME_PARAMETERS_PTR_OFFSET == 32);
     assert!(FRAME_ANALYSIS_MASK_OFFSET == 104);
     assert!(FRAME_SESSION_GENERATION_OFFSET == 108);
-    assert!(FRAME_TEMPERATURE_OFFSET == 112);
-    assert!(FRAME_M_FACTOR_OFFSET == 136);
+    assert!(FRAME_PROGRAM_ACTIVE_PTR_OFFSET == 112);
+    assert!(FRAME_JACOBIANS_PTR_OFFSET == 120);
+    assert!(FRAME_TEMPERATURE_OFFSET == 128);
+    assert!(FRAME_M_FACTOR_OFFSET == 152);
 };
 
 #[cfg(test)]
@@ -159,9 +179,11 @@ mod tests {
         let frame = WasmJitEvalFrame::default();
         assert_eq!(frame.magic, WASM_JIT_FRAME_MAGIC);
         assert_eq!(frame.abi_version, WASM_JIT_ABI_VERSION);
-        assert_eq!(frame.byte_len, 144);
-        assert_eq!(size_of::<WasmJitEvalFrame>(), 144);
+        assert_eq!(frame.byte_len, 160);
+        assert_eq!(size_of::<WasmJitEvalFrame>(), 160);
         assert_eq!(FRAME_VARIABLES_PTR_OFFSET, 96);
         assert_eq!(FRAME_VARIABLES_LEN_OFFSET, 100);
+        assert_eq!(FRAME_PROGRAM_ACTIVE_LEN_OFFSET, 116);
+        assert_eq!(FRAME_JACOBIANS_LEN_OFFSET, 124);
     }
 }

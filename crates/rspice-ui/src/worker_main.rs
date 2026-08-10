@@ -52,6 +52,24 @@ pub fn rspice_ui_wasm_jit_eval_op_v1(
     )
 }
 
+/// Raw capability exports bound directly into generated modules.
+///
+/// The worker passes `wasmExports.rspice_ui_wasm_jit_math1_v1` rather than the
+/// generated JavaScript wrapper, so a model's `exp()` is a wasm-to-wasm import
+/// call. The `js_name` wrappers exist only so the worker can assert the
+/// symbols are present before it instantiates anything.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen(js_name = rspiceUiWasmJitMath1V1)]
+pub fn rspice_ui_wasm_jit_math1_v1(opcode: i32, value: f64) -> f64 {
+    rspice_ui::rspice_ui_wasm_jit_math1_v1(opcode, value)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen(js_name = rspiceUiWasmJitMath2V1)]
+pub fn rspice_ui_wasm_jit_math2_v1(opcode: i32, left: f64, right: f64) -> f64 {
+    rspice_ui::rspice_ui_wasm_jit_math2_v1(opcode, left, right)
+}
+
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = prepareRspiceUiWasmJitProbe)]
 pub fn prepare_rspice_ui_wasm_jit_probe() -> Result<u32, wasm_bindgen::JsValue> {
