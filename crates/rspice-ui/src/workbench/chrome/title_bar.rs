@@ -1741,11 +1741,7 @@ fn paint_title_context(
     let t = Tokens::get(ui.ctx());
     let dirty = app.state.schematic.is_dirty || app.state.workspace.any_dirty();
     let cell = active_title_cell(app);
-    let full = if compact {
-        cell.clone()
-    } else {
-        app.state.workspace.project.display_name().to_owned()
-    };
+    let full = title_context_text(app, compact);
     let font = theme::sans(tokens::FS_1, FontWeight::Regular);
     let clip = bounds.shrink2(egui::vec2(5.0, 0.0));
     let painter = ui.painter().with_clip_rect(clip);
@@ -1793,7 +1789,12 @@ fn paint_title_context(
     });
 }
 
-#[cfg(test)]
+/// The text the centred title paints.
+///
+/// This carried `#[cfg(test)]` while the painter above inlined only its
+/// project-name branch, so the closed-project rule was asserted by a test
+/// against a function the application never called and the shipped title read
+/// "Untitled Project" with nothing open.
 fn title_context_text(app: &RSpiceApp, compact: bool) -> String {
     if !app.state.project_lifecycle.project_open {
         return if compact {
