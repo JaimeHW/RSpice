@@ -2680,6 +2680,29 @@ impl XyceTestRunner {
     }
 
     pub(super) fn validate_static_step_tran_contract(netlist: &Netlist) -> Result<(), String> {
+        if netlist
+            .elements
+            .iter()
+            .any(|element| matches!(element.kind, ElementKind::Subcircuit { .. }))
+        {
+            let flattened =
+                rspice_core::netlist::flatten_netlist_with_models(netlist).map_err(|error| {
+                    format!(
+                        "native .STEP .PRINT TRAN comparison could not flatten subcircuits: {error}"
+                    )
+                })?;
+            Self::validate_flattened_subcircuit_instances_resolved(netlist, &flattened.elements)?;
+            let mut flat_netlist = netlist.clone();
+            flat_netlist.elements = flattened.elements;
+            flat_netlist.models.extend(flattened.scoped_models);
+            flat_netlist
+                .initial_conditions
+                .extend(flattened.scoped_initial_conditions);
+            flat_netlist.node_sets.extend(flattened.scoped_node_sets);
+            flat_netlist.subcircuits.clear();
+            return Self::validate_static_step_tran_contract(&flat_netlist);
+        }
+
         for element in &netlist.elements {
             match &element.kind {
                 ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
@@ -3610,6 +3633,286 @@ impl XyceTestRunner {
             }
         }
         Ok(())
+    }
+
+    pub(super) fn bug1190_mutual_inductor_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceBug1190MutualInductorContract, String>> {
+        if deck.section != XyceDeckSection::Netlists {
+            return None;
+        }
+        let parent = deck.path.parent()?;
+        let exclusions = match &self.upstream_exclusions {
+            Ok(exclusions) => exclusions,
+            Err(error) => {
+                return Some(Err(format!(
+                    "BUG 1190 mutual-inductor exclusion manifest is invalid: {error}"
+                )));
+            }
+        };
+        let entries = fs::read_dir(parent)
+            .ok()?
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
+        let mut claims = BTreeMap::new();
+        let requested_relative = Self::normalize_manifest_key(&self.relative_key(&deck.path));
+        let requested_name = deck.path.file_name()?.to_str()?;
+        if self.requires_upstream_wrapper(&requested_relative) {
+            let family = deck.path.file_stem()?.to_str()?.to_string();
+            if !family.to_ascii_lowercase().ends_with("_baseline") {
+                let owner_path = deck.path.clone();
+                let baseline_path = parent.join(format!("{family}_baseline.cir"));
+                let baseline_relative = requested_relative
+                    .rsplit_once('/')
+                    .map(|(directory, _)| format!("{directory}/{family}_baseline.cir"))
+                    .unwrap_or_else(|| format!("{family}_baseline.cir"));
+                if matches!(
+                    exclusions
+                        .get(&baseline_relative)
+                        .map(|record| &record.disposition),
+                    Some(XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                        expected_contract,
+                    }) if expected_contract == XYCE_BUG1190_MUTUAL_INDUCTOR_BASELINE_CONTRACT
+                ) {
+                    claims.insert(
+                        (requested_relative.clone(), baseline_relative),
+                        (family, owner_path, baseline_path),
+                    );
+                }
+            }
+        } else if requested_name
+            .to_ascii_lowercase()
+            .ends_with("_baseline.cir")
+            && matches!(
+                exclusions
+                    .get(&requested_relative)
+                    .map(|record| &record.disposition),
+                Some(XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                    expected_contract,
+                }) if expected_contract == XYCE_BUG1190_MUTUAL_INDUCTOR_BASELINE_CONTRACT
+            )
+        {
+            let family = requested_name[..requested_name.len() - "_baseline.cir".len()].to_string();
+            if !family.is_empty() {
+                let owner_path = parent.join(format!("{family}.cir"));
+                let owner_relative = Self::normalize_manifest_key(&self.relative_key(&owner_path));
+                if self.requires_upstream_wrapper(&owner_relative) {
+                    claims.insert(
+                        (owner_relative, requested_relative.clone()),
+                        (family, owner_path, deck.path.clone()),
+                    );
+                }
+            }
+        }
+        for entry in &entries {
+            let owner_path = entry.path();
+            if !owner_path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+                || !self.requires_upstream_wrapper(&self.relative_key(&owner_path))
+            {
+                continue;
+            }
+            let owner_stem = owner_path.file_stem()?.to_str()?.to_string();
+            let baseline_name = format!("{owner_stem}_baseline.cir");
+            let baseline_path = parent.join(baseline_name);
+            let owner_relative = Self::normalize_manifest_key(&self.relative_key(&owner_path));
+            let baseline_relative = owner_relative
+                .rsplit_once('/')
+                .map(|(directory, _)| format!("{directory}/{owner_stem}_baseline.cir"))
+                .unwrap_or_else(|| format!("{owner_stem}_baseline.cir"));
+            let promoted = matches!(
+                exclusions
+                    .get(&baseline_relative)
+                    .map(|record| &record.disposition),
+                Some(XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                    expected_contract,
+                }) if expected_contract == XYCE_BUG1190_MUTUAL_INDUCTOR_BASELINE_CONTRACT
+            );
+            if promoted
+                && (Self::same_path(&deck.path, &owner_path)
+                    || Self::same_path(&deck.path, &baseline_path))
+            {
+                claims.insert(
+                    (owner_relative, baseline_relative),
+                    (owner_stem, owner_path, baseline_path),
+                );
+            }
+        }
+        for entry in &entries {
+            let baseline_path = entry.path();
+            let baseline_name = entry.file_name();
+            let baseline_name = baseline_name.to_str()?;
+            let baseline_name_lower = baseline_name.to_ascii_lowercase();
+            let Some(_) = baseline_name_lower.strip_suffix("_baseline.cir") else {
+                continue;
+            };
+            let baseline_relative =
+                Self::normalize_manifest_key(&self.relative_key(&baseline_path));
+            let promoted = matches!(
+                exclusions
+                    .get(&baseline_relative)
+                    .map(|record| &record.disposition),
+                Some(XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                    expected_contract,
+                }) if expected_contract == XYCE_BUG1190_MUTUAL_INDUCTOR_BASELINE_CONTRACT
+            );
+            if !promoted {
+                continue;
+            }
+            let family = baseline_name[..baseline_name.len() - "_baseline.cir".len()].to_string();
+            if family.is_empty() {
+                continue;
+            }
+            let owner_path = parent.join(format!("{family}.cir"));
+            let owner_relative = Self::normalize_manifest_key(&self.relative_key(&owner_path));
+            if self.requires_upstream_wrapper(&owner_relative)
+                && (Self::same_path(&deck.path, &owner_path)
+                    || Self::same_path(&deck.path, &baseline_path))
+            {
+                claims.insert(
+                    (owner_relative, baseline_relative),
+                    (family, owner_path, baseline_path),
+                );
+            }
+        }
+        let mut claims = claims.into_values();
+        let (family, owner_path, baseline_path) = claims.next()?;
+        if claims.next().is_some() {
+            let count = 2 + claims.count();
+            return Some(Err(format!(
+                "BUG 1190 mutual-inductor record belongs to {count} promoted wrapper families"
+            )));
+        }
+
+        Some((|| {
+            let expected_baseline_name = format!("{family}_baseline.cir");
+            if baseline_path.file_name().and_then(|name| name.to_str())
+                != Some(expected_baseline_name.as_str())
+            {
+                return Err(format!(
+                    "BUG 1190 mutual-inductor family '{family}' does not have its exact '_baseline.cir' sibling"
+                ));
+            }
+            let exact_sibling_count = entries
+                .iter()
+                .filter(|entry| entry.file_name().to_str() == Some(expected_baseline_name.as_str()))
+                .count();
+            if exact_sibling_count != 1 {
+                return Err(format!(
+                    "BUG 1190 mutual-inductor family '{family}' requires exactly one physically exact sibling named '{expected_baseline_name}', found {exact_sibling_count}"
+                ));
+            }
+
+            for (role, path) in [("owner", &owner_path), ("baseline", &baseline_path)] {
+                let metadata = fs::symlink_metadata(path).map_err(|error| {
+                    format!("BUG 1190 mutual-inductor {role} metadata failed: {error}")
+                })?;
+                if metadata.file_type().is_symlink()
+                    || !metadata.file_type().is_file()
+                    || metadata.len() == 0
+                {
+                    return Err(format!(
+                        "BUG 1190 mutual-inductor {role} '{}' must be a nonempty regular non-symlink file",
+                        self.display_path(path)
+                    ));
+                }
+                self.reject_wrapper_output_artifacts(path)
+                    .map_err(|error| format!("BUG 1190 mutual-inductor {role} {error}"))?;
+
+                let stem = path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .ok_or_else(|| {
+                        format!("BUG 1190 mutual-inductor {role} filename is not valid UTF-8")
+                    })?
+                    .to_ascii_lowercase();
+                let file_name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .ok_or_else(|| {
+                        format!("BUG 1190 mutual-inductor {role} filename is not valid UTF-8")
+                    })?
+                    .to_ascii_lowercase();
+                for candidate in &entries {
+                    let candidate_path = candidate.path();
+                    if Self::same_path(&candidate_path, path) {
+                        continue;
+                    }
+                    let candidate_name = candidate
+                        .file_name()
+                        .to_str()
+                        .ok_or_else(|| {
+                            "BUG 1190 mutual-inductor directory contains a non-UTF-8 entry"
+                                .to_string()
+                        })?
+                        .to_ascii_lowercase();
+                    if candidate_name.starts_with(&format!("{stem}."))
+                        || candidate_name.starts_with(&format!("{file_name}."))
+                    {
+                        return Err(format!(
+                            "BUG 1190 mutual-inductor {role} must not own source-directory output or sidecar artifact '{}'",
+                            self.display_path(&candidate_path)
+                        ));
+                    }
+                }
+            }
+
+            let owner_relative = Self::normalize_manifest_key(&self.relative_key(&owner_path));
+            let baseline_relative =
+                Self::normalize_manifest_key(&self.relative_key(&baseline_path));
+            if !self.requires_upstream_wrapper(&owner_relative)
+                || self.requires_upstream_wrapper(&baseline_relative)
+            {
+                return Err(format!(
+                    "BUG 1190 mutual-inductor family '{family}' requires owner-only wrapper provenance"
+                ));
+            }
+            if exclusions.contains_key(&owner_relative) {
+                return Err(format!(
+                    "BUG 1190 mutual-inductor owner '{}' must not be upstream-excluded",
+                    self.display_path(&owner_path)
+                ));
+            }
+            let baseline_exclusion = exclusions.get(&baseline_relative).ok_or_else(|| {
+                format!(
+                    "BUG 1190 mutual-inductor baseline '{}' lost upstream exclusion provenance",
+                    self.display_path(&baseline_path)
+                )
+            })?;
+            if !matches!(
+                &baseline_exclusion.disposition,
+                XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                    expected_contract,
+                } if expected_contract == XYCE_BUG1190_MUTUAL_INDUCTOR_BASELINE_CONTRACT
+            ) {
+                return Err(format!(
+                    "BUG 1190 mutual-inductor baseline '{}' is not promoted under contract '{}'",
+                    self.display_path(&baseline_path),
+                    XYCE_BUG1190_MUTUAL_INDUCTOR_BASELINE_CONTRACT
+                ));
+            }
+
+            if (!Self::same_path(&deck.path, &owner_path)
+                && !Self::same_path(&deck.path, &baseline_path))
+                || Self::normalize_manifest_key(&self.relative_key(&deck.path))
+                    != Self::normalize_manifest_key(&deck.relative_path)
+            {
+                return Err(
+                    "BUG 1190 mutual-inductor request is not one canonical physical family member"
+                        .to_string(),
+                );
+            }
+
+            Ok(XyceBug1190MutualInductorContract {
+                family,
+                owner_path,
+                baseline_path,
+                target_path: deck.path.clone(),
+            })
+        })())
     }
 
     pub(super) fn transient_analysis_expression_family_contract(

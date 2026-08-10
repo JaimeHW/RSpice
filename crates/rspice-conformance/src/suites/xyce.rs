@@ -58,15 +58,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 169;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 171;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "2b81ce023872cfa1db40a4aa7d4cc48918fefc28413ba115e34b7b6309b0191b";
+    "0c8052e80cc072ed681cecb2f6d2edff5aa3a3cd60a3b8788b56b48d23a1b1fa";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "bab93133ddfbc0ce36e773ddb9b8b52c20843bdf1283a27143dd76259477df22";
+    "d516cc0ac8402a325f3056534b255ada5d7ef80ea2e8f527f4a03f2d6baffe7c";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "b9e4b80d7802370d53653ff5a484908480a842dd2fef3a322afca27667343cb2";
+    "f6af34ee0a4578c43d613a9bec688f08b98caac5cf716b8e413f9a435f230097";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -141,6 +141,21 @@ const XYCE_NONLINEAR_CORE_MODEL_STEP_OWNER_MANIFEST_BLAKE3: &str =
 const XYCE_NONLINEAR_CORE_MODEL_STEP_EXCLUSION_COUNT: usize = 18;
 const XYCE_NONLINEAR_CORE_MODEL_STEP_HISTORICAL_EXCLUSION_BLAKE3: &str =
     "a38a113c8f72fe3bb98a863de111674d446019c6fd0950d29f6f93da9b8ac65e";
+const XYCE_BUG1190_MUTUAL_INDUCTOR_WRAPPER_CONTRACT: &str =
+    "bug1190_mutual_inductor_parameter_alias_wrapper";
+const XYCE_BUG1190_MUTUAL_INDUCTOR_BASELINE_CONTRACT: &str =
+    "bug1190_mutual_inductor_parameter_alias_baseline";
+const XYCE_BUG1190_MUTUAL_INDUCTOR_CANDIDATE_COUNT: usize = 4;
+const XYCE_BUG1190_MUTUAL_INDUCTOR_CANDIDATE_BLAKE3: &str =
+    "c9e772e38bb06d933f7fa8d47fe58fee6d9dc885534b5c12a9d7edd1b04495f2";
+const XYCE_BUG1190_MUTUAL_INDUCTOR_CONTENT_BLAKE3: &str =
+    "df40a7890f29033c29c938f59dc77a4b7258b1a349a56acea131e920afc60d77";
+const XYCE_BUG1190_MUTUAL_INDUCTOR_OWNER_COUNT: usize = 2;
+const XYCE_BUG1190_MUTUAL_INDUCTOR_OWNER_MANIFEST_BLAKE3: &str =
+    "e7c00713e950019d0b4144fc003a7ffeef38c7a5e3f432117b8f00c2c607263f";
+const XYCE_BUG1190_MUTUAL_INDUCTOR_EXCLUSION_COUNT: usize = 2;
+const XYCE_BUG1190_MUTUAL_INDUCTOR_HISTORICAL_EXCLUSION_BLAKE3: &str =
+    "6d2ca1af02efba66823b08c1597c07f8b7c45dbae4346076343d3245240f0d33";
 // The removed Release 7.10 sidecar emits `exp(-TIME/0.001)`. These constants
 // describe that generated oracle; the path-independent candidate detector does
 // not use them as deck-name or value allowlists.
@@ -4771,6 +4786,12 @@ struct XyceFileCompareTolerance {
 }
 
 impl XyceFileCompareTolerance {
+    const BUG1190_MUTUAL_INDUCTOR: Self = Self {
+        absolute: 1.0e-6,
+        relative: 1.0e-2,
+        zero: 1.0e-12,
+    };
+
     const MEASURE_COMMON_DEFAULT: Self = Self {
         absolute: 1.0e-5,
         relative: 1.0e-3,
@@ -5176,6 +5197,35 @@ struct XyceNonlinearCoreModelStepReferenceContract {
     owner_path: PathBuf,
     member_paths: Vec<PathBuf>,
     target_path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct XyceBug1190MutualInductorContract {
+    family: String,
+    owner_path: PathBuf,
+    baseline_path: PathBuf,
+    target_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBug1190MutualInductorKind {
+    Linear,
+    NonlinearCore,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceBug1190ModelFingerprint {
+    model_type: String,
+    numeric_bits: Vec<(String, u64)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceBug1190MutualInductorSnapshot {
+    kind: XyceBug1190MutualInductorKind,
+    title: String,
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    models: BTreeMap<String, XyceBug1190ModelFingerprint>,
+    swept_inductor_bits: Vec<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

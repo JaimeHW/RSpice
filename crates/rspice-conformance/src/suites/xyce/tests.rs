@@ -11559,6 +11559,229 @@ fn nonlinear_core_model_step_detection_is_promotion_and_sibling_driven() {
     );
 }
 
+#[test]
+fn bug1190_mutual_inductor_detection_is_promotion_and_exact_sibling_driven() {
+    let root = tempfile::tempdir().expect("create BUG 1190 family fixture");
+    let family_dir = root.path().join("Netlists/GENERIC_BUG1190");
+    fs::create_dir_all(&family_dir).expect("create BUG 1190 family directory");
+    let owner_path = family_dir.join("transformer.cir");
+    let baseline_path = family_dir.join("transformer_baseline.cir");
+    fs::write(&owner_path, "generic BUG 1190 owner\n.end\n").expect("write owner");
+    fs::write(&baseline_path, "generic BUG 1190 baseline\n.end\n").expect("write baseline");
+    let owner_relative = "Netlists/GENERIC_BUG1190/transformer.cir";
+    let baseline_relative = "Netlists/GENERIC_BUG1190/transformer_baseline.cir";
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write BUG 1190 wrapper manifest");
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[&format!(
+            "{baseline_relative}\tNetlists/GENERIC_BUG1190/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_BUG1190_MUTUAL_INDUCTOR_BASELINE_CONTRACT}"
+        )]),
+    )
+    .expect("write BUG 1190 promotion manifest");
+
+    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    for (path, relative) in [
+        (&owner_path, owner_relative),
+        (&baseline_path, baseline_relative),
+    ] {
+        let deck = XyceDeck {
+            path: path.clone(),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let contract = runner
+            .bug1190_mutual_inductor_contract(&deck)
+            .expect("promoted exact sibling claims the generic family")
+            .expect("generic BUG 1190 family discovery succeeds");
+        assert_eq!(contract.family, "transformer");
+        assert!(XyceTestRunner::same_path(&contract.owner_path, &owner_path));
+        assert!(XyceTestRunner::same_path(
+            &contract.baseline_path,
+            &baseline_path
+        ));
+        assert!(XyceTestRunner::same_path(&contract.target_path, path));
+    }
+
+    fs::remove_file(&baseline_path).expect("remove promoted BUG 1190 sibling");
+    let owner_deck = XyceDeck {
+        path: owner_path,
+        relative_path: owner_relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    assert!(runner.requires_upstream_wrapper(owner_relative));
+    let missing_sibling = runner.bug1190_mutual_inductor_contract(&owner_deck);
+    assert!(
+        matches!(missing_sibling, Some(Err(_))),
+        "a promoted exact-sibling hole must remain claimed and fail closed: {missing_sibling:?}"
+    );
+}
+
+#[test]
+fn bug1190_mutual_inductor_snapshot_tracks_parameter_alias_step_causality() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/xyce/Netlists/Certification_Tests/BUG_1190_SON");
+    for (owner_name, baseline_name, expected_values) in [
+        ("mutInd1.cir", "mutInd1_baseline.cir", vec![0.5, 1.0, 2.0]),
+        ("mutInd2.cir", "mutInd2_baseline.cir", vec![0.5, 0.75, 1.0]),
+    ] {
+        let owner_path = corpus.join(owner_name);
+        let baseline_path = corpus.join(baseline_name);
+        let owner_source = fs::read_to_string(&owner_path).expect("read BUG 1190 owner");
+        let baseline_source = fs::read_to_string(&baseline_path).expect("read BUG 1190 baseline");
+        let owner = XyceTestRunner::parse_xyce_netlist(&owner_source, &owner_path)
+            .expect("parse BUG 1190 owner");
+        let baseline = XyceTestRunner::parse_xyce_netlist(&baseline_source, &baseline_path)
+            .expect("parse BUG 1190 baseline");
+        assert_eq!(
+            XyceTestRunner::bug1190_mutual_inductor_snapshot(&owner)
+                .expect("snapshot BUG 1190 owner"),
+            XyceTestRunner::bug1190_mutual_inductor_snapshot(&baseline)
+                .expect("snapshot BUG 1190 baseline")
+        );
+        let owner_steps = owner
+            .analyses
+            .iter()
+            .filter_map(|analysis| match analysis {
+                AnalysisCommand::Step(step) => Some(step.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let baseline_steps = baseline
+            .analyses
+            .iter()
+            .filter_map(|analysis| match analysis {
+                AnalysisCommand::Step(step) => Some(step.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        });
+        let owner_runs =
+            XyceTestRunner::nested_step_runs_for_commands(&engine, &owner, &owner_steps)
+                .expect("materialize BUG 1190 owner steps");
+        let baseline_runs =
+            XyceTestRunner::nested_step_runs_for_commands(&engine, &baseline, &baseline_steps)
+                .expect("materialize BUG 1190 baseline steps");
+        assert_eq!(owner_runs.len(), expected_values.len());
+        assert_eq!(baseline_runs.len(), expected_values.len());
+        let mut winding_states = BTreeSet::new();
+        for (index, ((owner_run, baseline_run), expected)) in owner_runs
+            .iter()
+            .zip(&baseline_runs)
+            .zip(expected_values)
+            .enumerate()
+        {
+            assert_eq!(owner_run.step_values, vec![expected]);
+            assert_eq!(baseline_run.step_values, vec![expected]);
+            let owner_snapshot =
+                XyceTestRunner::bug1190_mutual_inductor_snapshot(&owner_run.netlist)
+                    .expect("snapshot materialized BUG 1190 owner");
+            let baseline_snapshot =
+                XyceTestRunner::bug1190_mutual_inductor_snapshot(&baseline_run.netlist)
+                    .expect("snapshot materialized BUG 1190 baseline");
+            assert_eq!(
+                owner_snapshot, baseline_snapshot,
+                "owner/baseline step {index} must be structurally identical"
+            );
+            winding_states.insert(owner_snapshot.swept_inductor_bits);
+        }
+        assert_eq!(winding_states.len(), 3);
+    }
+}
+
+#[test]
+fn bug1190_mutual_inductor_provenance_rejects_source_mutation() {
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let fixture = tempfile::tempdir().expect("create BUG 1190 provenance fixture");
+    let target_dir = fixture
+        .path()
+        .join("Netlists/Certification_Tests/BUG_1190_SON");
+    fs::create_dir_all(&target_dir).expect("create BUG 1190 provenance directory");
+    for name in [
+        "mutInd1.cir",
+        "mutInd1_baseline.cir",
+        "mutInd2.cir",
+        "mutInd2_baseline.cir",
+    ] {
+        fs::copy(
+            source_root
+                .join("Netlists/Certification_Tests/BUG_1190_SON")
+                .join(name),
+            target_dir.join(name),
+        )
+        .expect("copy BUG 1190 provenance candidate");
+    }
+    fs::write(
+        fixture.path().join(HARNESS_MANIFEST_FILE),
+        [
+            "Netlists/Certification_Tests/BUG_1190_SON/mutInd1.cir\trequires_upstream_wrapper",
+            "Netlists/Certification_Tests/BUG_1190_SON/mutInd2.cir\trequires_upstream_wrapper",
+            "",
+        ]
+        .join("\n"),
+    )
+    .expect("write BUG 1190 provenance wrapper manifest");
+    fs::write(
+        fixture.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[
+            "Netlists/Certification_Tests/BUG_1190_SON/mutInd1_baseline.cir\tNetlists/Certification_Tests/BUG_1190_SON/exclude\trspice_independently_qualified\tbug1190_mutual_inductor_parameter_alias_baseline",
+            "Netlists/Certification_Tests/BUG_1190_SON/mutInd2_baseline.cir\tNetlists/Certification_Tests/BUG_1190_SON/exclude\trspice_independently_qualified\tbug1190_mutual_inductor_parameter_alias_baseline",
+        ]),
+    )
+    .expect("write BUG 1190 provenance exclusion manifest");
+
+    let runner = XyceTestRunner::new(fixture.path(), XyceRunnerConfig::default());
+    let owner_path = target_dir.join("mutInd1.cir");
+    let deck = XyceDeck {
+        path: owner_path.clone(),
+        relative_path: "Netlists/Certification_Tests/BUG_1190_SON/mutInd1.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let contract = runner
+        .bug1190_mutual_inductor_contract(&deck)
+        .expect("BUG 1190 provenance fixture is claimed")
+        .expect("BUG 1190 provenance fixture discovers");
+    runner
+        .validate_bug1190_mutual_inductor_provenance(&contract)
+        .expect("unmodified BUG 1190 provenance validates");
+
+    let mutated = fs::read_to_string(&owner_path)
+        .expect("read BUG 1190 mutation target")
+        .replace("100k", "101k");
+    fs::write(&owner_path, mutated).expect("write BUG 1190 semantic mutation");
+    assert!(
+        runner
+            .validate_bug1190_mutual_inductor_provenance(&contract)
+            .is_err(),
+        "any candidate source mutation must fail the exact provenance census"
+    );
+}
+
+#[test]
+fn static_step_tran_preflight_validates_flattened_subcircuits() {
+    let source = "hierarchical STEP transient preflight\n\
+.param scale=1\n\
+.subckt cell a b\n\
+L1 a b {1m*scale}\n\
+.ends\n\
+X1 1 0 cell\n\
+V1 1 0 SIN(0 1 1k)\n\
+.tran 0 1u\n\
+.print tran V(1)\n\
+.step scale list 1 2\n\
+.end\n";
+    let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("hierarchical_step.cir"))
+        .expect("hierarchical STEP transient parses");
+    XyceTestRunner::validate_static_step_tran_contract(&netlist)
+        .expect("preflight validates supported flattened subcircuit elements");
+}
+
 fn nonlinear_core_model_step_source(area: Value, level: Option<u8>, stepped: bool) -> String {
     format!(
         "generic nonlinear CORE family\n\

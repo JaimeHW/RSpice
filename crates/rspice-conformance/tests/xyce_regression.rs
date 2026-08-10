@@ -9314,6 +9314,41 @@ fn test_xyce_bug991_upstream_exclusion_is_typed_without_hiding_sibling_coverage(
     assert_eq!(stats.upstream_excluded, 1);
 }
 
+#[test]
+fn test_xyce_bug1190_mutual_inductor_parameter_alias_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        (
+            "Netlists/Certification_Tests/BUG_1190_SON/mutInd1.cir",
+            "bug1190_mutual_inductor_parameter_alias_wrapper",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1190_SON/mutInd1_baseline.cir",
+            "bug1190_mutual_inductor_parameter_alias_baseline",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1190_SON/mutInd2.cir",
+            "bug1190_mutual_inductor_parameter_alias_wrapper",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1190_SON/mutInd2_baseline.cir",
+            "bug1190_mutual_inductor_parameter_alias_baseline",
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should satisfy the complete BUG 1190 mutual-inductor parameter-alias contract, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.error.is_none());
+        assert!(result.mismatches.is_empty());
+    }
+}
+
 // The aggregate intentionally replays every retained deck and therefore has
 // release-profile runtime requirements. Individual supported contracts remain
 // in the normal test tier above, while nightly release CI runs this full census.

@@ -579,6 +579,32 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.bug1190_mutual_inductor_contract(deck) {
+            let result = match contract {
+                Ok(contract) => self.run_bug1190_mutual_inductor_contract(deck, contract, start),
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    if self.requires_upstream_wrapper(&deck.relative_path) {
+                        XYCE_BUG1190_MUTUAL_INDUCTOR_WRAPPER_CONTRACT
+                    } else {
+                        XYCE_BUG1190_MUTUAL_INDUCTOR_BASELINE_CONTRACT
+                    },
+                    format!("BUG 1190 mutual-inductor family discovery failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.stepped_ic_reference_contract(deck) {
             let result = self.run_stepped_ic_reference_contract(deck, contract, start);
             if self.config.verbose {
@@ -6877,6 +6903,583 @@ impl XyceTestRunner {
                 result_contract,
                 format!(
                     "{} nonlinear CORE model-step Release 7.10 xyce_verify mismatch(es)",
+                    mismatches.len()
+                ),
+                mismatches,
+            )
+        }
+    }
+
+    fn bug1190_normalized_parameter_alias(expression: &str) -> String {
+        let compact = expression
+            .chars()
+            .filter(|character| !character.is_ascii_whitespace())
+            .collect::<String>();
+        compact
+            .strip_prefix('{')
+            .and_then(|inner| inner.strip_suffix('}'))
+            .unwrap_or(&compact)
+            .to_ascii_lowercase()
+    }
+
+    fn validate_bug1190_parameter_alias_source(
+        source: &str,
+        expect_alias: bool,
+    ) -> Result<(), String> {
+        const LABEL: &str = "BUG 1190 mutual-inductor parameter-alias family";
+        let mut subcircuit_depth = 0usize;
+        let mut aliases = 0usize;
+        for line in Self::logical_netlist_lines(source) {
+            let stripped = Self::strip_netlist_comment(&line).trim();
+            let fields = Self::split_grouped_whitespace_fields(stripped, LABEL)?;
+            let Some(command) = fields.first() else {
+                continue;
+            };
+            if command.eq_ignore_ascii_case(".subckt") {
+                subcircuit_depth = subcircuit_depth
+                    .checked_add(1)
+                    .ok_or_else(|| format!("{LABEL} subcircuit nesting depth overflow"))?;
+                continue;
+            }
+            if command.eq_ignore_ascii_case(".ends") {
+                subcircuit_depth = subcircuit_depth
+                    .checked_sub(1)
+                    .ok_or_else(|| format!("{LABEL} has .ENDS without .SUBCKT"))?;
+                continue;
+            }
+            if subcircuit_depth != 0 || !command.eq_ignore_ascii_case(".param") {
+                continue;
+            }
+            if fields.len() != 2 {
+                return Err(format!(
+                    "{LABEL} top-level .PARAM must contain exactly one assignment"
+                ));
+            }
+            let (name, expression) = fields[1].split_once('=').ok_or_else(|| {
+                format!("{LABEL} top-level .PARAM must use NAME=EXPRESSION syntax")
+            })?;
+            if !name.eq_ignore_ascii_case("p_scalefac")
+                || Self::bug1190_normalized_parameter_alias(expression) != "scalefac"
+            {
+                return Err(format!(
+                    "{LABEL} admits only the exact top-level `P_SCALEFAC={{SCALEFAC}}` alias"
+                ));
+            }
+            aliases += 1;
+        }
+        if subcircuit_depth != 0 {
+            return Err(format!("{LABEL} contains an unterminated .SUBCKT"));
+        }
+        let expected = usize::from(expect_alias);
+        if aliases != expected {
+            return Err(format!(
+                "{LABEL} requires {expected} top-level P_SCALEFAC alias definition(s), found {aliases}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_bug1190_prn_batch(
+        table: &XycePrnTable,
+        expected_columns: &[String],
+        expected_stop: Value,
+        role: &str,
+    ) -> Result<(), String> {
+        if table.columns != expected_columns {
+            return Err(format!(
+                "{role} changed the exact default-PRN columns: expected {expected_columns:?}, got {:?}",
+                table.columns
+            ));
+        }
+        if table.rows.len() < 2 {
+            return Err(format!(
+                "{role} default-PRN batch requires at least two rows, found {}",
+                table.rows.len()
+            ));
+        }
+
+        let mut previous_raw_time = None;
+        let mut previous_printed_time = None;
+        for (row_index, row) in table.rows.iter().enumerate() {
+            if row.len() != expected_columns.len() {
+                return Err(format!(
+                    "{role} default-PRN row {row_index} has {} columns, expected {}",
+                    row.len(),
+                    expected_columns.len()
+                ));
+            }
+            let serialized = row
+                .iter()
+                .enumerate()
+                .map(|(column_index, value)| {
+                    Self::xyce_default_prn_roundtrip(*value).map_err(|error| {
+                        format!(
+                            "{role} default-PRN row {row_index} column '{}' is not serializable: {error}",
+                            expected_columns[column_index]
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let expected_index = row_index as Value;
+            if serialized[0].to_bits() != expected_index.to_bits() {
+                return Err(format!(
+                    "{role} default-PRN Index does not reset to zero and advance consecutively at row {row_index}: {}",
+                    serialized[0]
+                ));
+            }
+            let time = serialized[1];
+            if row_index == 0 && time.to_bits() != 0.0f64.to_bits() {
+                return Err(format!(
+                    "{role} default-PRN batch must begin at TIME=0, got {time}"
+                ));
+            }
+            if previous_raw_time.is_some_and(|previous| row[1] <= previous) {
+                return Err(format!(
+                    "{role} transient TIME does not increase strictly at row {row_index}: {}",
+                    row[1]
+                ));
+            }
+            if previous_printed_time.is_some_and(|previous| time < previous) {
+                return Err(format!(
+                    "{role} serialized default-PRN TIME decreases at row {row_index}: {time}"
+                ));
+            }
+            previous_raw_time = Some(row[1]);
+            previous_printed_time = Some(time);
+        }
+        let expected_stop = Self::xyce_default_prn_roundtrip(expected_stop)?;
+        let actual_stop = previous_printed_time.expect("two-row table has a final TIME");
+        if actual_stop.to_bits() != expected_stop.to_bits() {
+            return Err(format!(
+                "{role} default-PRN batch ends at TIME={actual_stop}, expected .TRAN stop {expected_stop}"
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn run_bug1190_mutual_inductor_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceBug1190MutualInductorContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        const LABEL: &str = "BUG 1190 mutual-inductor parameter-alias family";
+        let result_contract = if Self::same_path(&contract.target_path, &contract.owner_path) {
+            XYCE_BUG1190_MUTUAL_INDUCTOR_WRAPPER_CONTRACT
+        } else {
+            XYCE_BUG1190_MUTUAL_INDUCTOR_BASELINE_CONTRACT
+        };
+        let expansion_abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let qualification = (|| {
+            self.validate_bug1190_mutual_inductor_provenance(&contract)?;
+            let owner_plan = self.static_tran_family_plan_for_path(
+                &contract.owner_path,
+                XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily,
+            )?;
+            let baseline_plan = self.static_tran_family_plan_for_path(
+                &contract.baseline_path,
+                XyceStaticTranPlanPurpose::RelationalFamily,
+            )?;
+            if owner_plan.contract != XyceStaticTranContract::WrapperStatic
+                || baseline_plan.contract != XyceStaticTranContract::PlainStatic
+                || !matches!(&owner_plan.oracle, XyceStaticTranOracle::None)
+                || !matches!(&baseline_plan.oracle, XyceStaticTranOracle::None)
+                || owner_plan.output_override
+                || baseline_plan.output_override
+                || owner_plan.timeint_conststep
+                || baseline_plan.timeint_conststep
+                || owner_plan.wrapper_tolerance.is_some()
+                || baseline_plan.wrapper_tolerance.is_some()
+            {
+                return Err(format!(
+                    "{LABEL} requires one wrapper owner and one plain baseline using ordinary default PRN output without file or tolerance overrides"
+                ));
+            }
+            if !Self::tran_analyses_match_exactly(&owner_plan.tran, &baseline_plan.tran)
+                || owner_plan.tran.step.to_bits() != 0.0f64.to_bits()
+                || !owner_plan.tran.stop.is_finite()
+                || owner_plan.tran.stop <= 0.0
+                || owner_plan.tran.start.is_some()
+                || owner_plan.tran.max_step.is_some()
+                || owner_plan.tran.uic
+            {
+                return Err(format!(
+                    "{LABEL} owner and baseline require the same finite positive `.TRAN 0 TSTOP` analysis without TSTART, DTMAX, or UIC"
+                ));
+            }
+            for (role, source) in [
+                ("owner", owner_plan.source.as_str()),
+                ("baseline", baseline_plan.source.as_str()),
+            ] {
+                let time_scale = Self::tran_print_time_scale_factor(source)?;
+                if time_scale.to_bits() != 1.0f64.to_bits() {
+                    return Err(format!(
+                        "{LABEL} {role} requires default transient output time units"
+                    ));
+                }
+            }
+
+            let owner_print = owner_plan.require_print("BUG 1190 owner")?;
+            let baseline_print = baseline_plan.require_print("BUG 1190 baseline")?;
+            if owner_print.probes != baseline_print.probes || owner_print.probes.len() != 2 {
+                return Err(format!(
+                    "{LABEL} owner and baseline require the same two ordered voltage probes"
+                ));
+            }
+            let expected_columns = Self::transient_prn_header_columns(owner_print, true);
+
+            let owner_netlist = Self::parse_xyce_netlist(&owner_plan.source, &owner_plan.deck_path)
+                .map_err(|error| format!("{LABEL} owner parse failed: {error}"))?;
+            let baseline_netlist =
+                Self::parse_xyce_netlist(&baseline_plan.source, &baseline_plan.deck_path)
+                    .map_err(|error| format!("{LABEL} baseline parse failed: {error}"))?;
+            let owner_snapshot = Self::bug1190_mutual_inductor_snapshot(&owner_netlist)?;
+            let baseline_snapshot = Self::bug1190_mutual_inductor_snapshot(&baseline_netlist)?;
+            if owner_snapshot != baseline_snapshot {
+                return Err(format!(
+                    "{LABEL} owner and baseline are not structurally and numerically identical at their nominal parameter values"
+                ));
+            }
+
+            let (expected_steps, expected_stop, expected_probes, nominal_swept_bits): (
+                Vec<Value>,
+                Value,
+                [&str; 2],
+                Vec<u64>,
+            ) = match owner_snapshot.kind {
+                XyceBug1190MutualInductorKind::Linear => (
+                    vec![0.5, 1.0, 2.0],
+                    0.1e-3,
+                    ["v(node1)", "v(node2)"],
+                    vec![4.65e-6f64.to_bits()],
+                ),
+                XyceBug1190MutualInductorKind::NonlinearCore => (
+                    vec![0.5, 0.75, 1.0],
+                    10.0e-3,
+                    ["v(node1)", "v(node6)"],
+                    vec![100.0f64.to_bits(), 100.0f64.to_bits()],
+                ),
+            };
+            if owner_plan.tran.stop.to_bits() != expected_stop.to_bits()
+                || owner_snapshot.swept_inductor_bits != nominal_swept_bits
+            {
+                return Err(format!(
+                    "{LABEL} changed its qualified transient domain or nominal swept winding values"
+                ));
+            }
+            let actual_probes = owner_print
+                .probes
+                .iter()
+                .map(|probe| Self::normalize_probe(probe))
+                .collect::<Vec<_>>();
+            let expected_probes = expected_probes.map(Self::normalize_probe);
+            if actual_probes.as_slice() != expected_probes.as_slice() {
+                return Err(format!(
+                    "{LABEL} changed its ordered voltage probes: {actual_probes:?}"
+                ));
+            }
+
+            let [owner_step] = owner_plan.steps.as_slice() else {
+                return Err(format!(
+                    "{LABEL} owner requires exactly one .STEP command, found {}",
+                    owner_plan.steps.len()
+                ));
+            };
+            let [baseline_step] = baseline_plan.steps.as_slice() else {
+                return Err(format!(
+                    "{LABEL} baseline requires exactly one .STEP command, found {}",
+                    baseline_plan.steps.len()
+                ));
+            };
+            let validate_step = |role: &str, step: &StepCommand| -> Result<(), String> {
+                let StepSweep::List(values) = &step.sweep else {
+                    return Err(format!("{LABEL} {role} requires a LIST parameter sweep"));
+                };
+                if step.target != StepTarget::Param
+                    || !step.name.eq_ignore_ascii_case("scalefac")
+                    || step.param_name.is_some()
+                    || values.len() != expected_steps.len()
+                    || values
+                        .iter()
+                        .zip(&expected_steps)
+                        .any(|(actual, expected)| actual.to_bits() != expected.to_bits())
+                {
+                    return Err(format!(
+                        "{LABEL} {role} requires the exact ordered SCALEFAC LIST sweep {expected_steps:?}"
+                    ));
+                }
+                Ok(())
+            };
+            validate_step("owner", owner_step)?;
+            validate_step("baseline", baseline_step)?;
+
+            Self::validate_bug1190_parameter_alias_source(&owner_plan.source, true)?;
+            Self::validate_bug1190_parameter_alias_source(&baseline_plan.source, false)?;
+            if !owner_netlist.params.has_parameter_binding("p_scalefac")
+                || owner_netlist.params.get("p_scalefac").map(Value::to_bits)
+                    != Some(1.0f64.to_bits())
+                || baseline_netlist.params.has_parameter_binding("p_scalefac")
+            {
+                return Err(format!(
+                    "{LABEL} requires the owner-only ordinary `P_SCALEFAC={{SCALEFAC}}` alias"
+                ));
+            }
+
+            let engine = self.create_xyce_engine();
+            let owner_runs = Self::nested_step_runs_for_commands_with_limits_and_abort(
+                &engine,
+                &owner_netlist,
+                &owner_plan.steps,
+                xyce_step_plan_limits(),
+                &expansion_abort,
+            )
+            .map_err(|error| format!("{LABEL} owner .STEP expansion failed: {error}"))?;
+            let baseline_runs = Self::nested_step_runs_for_commands_with_limits_and_abort(
+                &engine,
+                &baseline_netlist,
+                &baseline_plan.steps,
+                xyce_step_plan_limits(),
+                &expansion_abort,
+            )
+            .map_err(|error| format!("{LABEL} baseline .STEP expansion failed: {error}"))?;
+            if owner_runs.len() != expected_steps.len()
+                || baseline_runs.len() != expected_steps.len()
+            {
+                return Err(format!(
+                    "{LABEL} requires exactly {} owner and baseline materializations, found {}/{}",
+                    expected_steps.len(),
+                    owner_runs.len(),
+                    baseline_runs.len()
+                ));
+            }
+
+            let mut materialized_windings = BTreeSet::new();
+            for (index, ((owner_run, baseline_run), expected_step)) in owner_runs
+                .iter()
+                .zip(&baseline_runs)
+                .zip(&expected_steps)
+                .enumerate()
+            {
+                let [owner_value] = owner_run.step_values.as_slice() else {
+                    return Err(format!(
+                        "{LABEL} owner run {index} lost its step coordinate"
+                    ));
+                };
+                let [baseline_value] = baseline_run.step_values.as_slice() else {
+                    return Err(format!(
+                        "{LABEL} baseline run {index} lost its step coordinate"
+                    ));
+                };
+                if owner_value.to_bits() != expected_step.to_bits()
+                    || baseline_value.to_bits() != expected_step.to_bits()
+                    || owner_run.netlist.params.get("scalefac").map(Value::to_bits)
+                        != Some(expected_step.to_bits())
+                    || owner_run
+                        .netlist
+                        .params
+                        .get("p_scalefac")
+                        .map(Value::to_bits)
+                        != Some(expected_step.to_bits())
+                    || baseline_run
+                        .netlist
+                        .params
+                        .get("scalefac")
+                        .map(Value::to_bits)
+                        != Some(expected_step.to_bits())
+                    || baseline_run
+                        .netlist
+                        .params
+                        .has_parameter_binding("p_scalefac")
+                {
+                    return Err(format!(
+                        "{LABEL} run {index} did not preserve the exact SCALEFAC/P_SCALEFAC parameter semantics"
+                    ));
+                }
+
+                let owner_materialized =
+                    Self::bug1190_mutual_inductor_snapshot(&owner_run.netlist)?;
+                let baseline_materialized =
+                    Self::bug1190_mutual_inductor_snapshot(&baseline_run.netlist)?;
+                if owner_materialized != baseline_materialized
+                    || owner_materialized.kind != owner_snapshot.kind
+                {
+                    return Err(format!(
+                        "{LABEL} owner and baseline materialization {index} are not exactly equivalent"
+                    ));
+                }
+                let expected_windings = match owner_snapshot.kind {
+                    XyceBug1190MutualInductorKind::Linear => {
+                        vec![(4.65e-6 * expected_step).to_bits()]
+                    }
+                    XyceBug1190MutualInductorKind::NonlinearCore => vec![
+                        (100.0 * expected_step).to_bits(),
+                        (100.0 * expected_step).to_bits(),
+                    ],
+                };
+                if owner_materialized.swept_inductor_bits != expected_windings {
+                    return Err(format!(
+                        "{LABEL} run {index} did not materialize the exact swept winding values"
+                    ));
+                }
+                materialized_windings.insert(owner_materialized.swept_inductor_bits);
+            }
+            if materialized_windings.len() != expected_steps.len() {
+                return Err(format!(
+                    "{LABEL} .STEP coordinates do not cause three distinct winding configurations"
+                ));
+            }
+
+            Ok((
+                owner_plan,
+                baseline_plan,
+                owner_runs,
+                baseline_runs,
+                expected_columns,
+                expected_stop,
+            ))
+        })();
+
+        let (owner_plan, baseline_plan, owner_runs, baseline_runs, expected_columns, expected_stop) =
+            match qualification {
+                Ok(qualified) => qualified,
+                Err(reason) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!(
+                            "{LABEL} '{}' qualification failed: {reason}",
+                            contract.family
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+
+        let mut mismatches = Vec::new();
+        let mut row_offset = 0usize;
+        for (index, (owner_run, baseline_run)) in owner_runs.iter().zip(&baseline_runs).enumerate()
+        {
+            let baseline_result = match self.run_transient_family_netlist(
+                &baseline_plan,
+                &baseline_run.netlist,
+                start,
+                None,
+                None,
+            ) {
+                Ok(result) => result,
+                Err(error) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!("{LABEL} baseline step {index} simulation failed: {error}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            let owner_result = match self.run_transient_family_netlist(
+                &owner_plan,
+                &owner_run.netlist,
+                start,
+                None,
+                None,
+            ) {
+                Ok(result) => result,
+                Err(error) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!("{LABEL} owner step {index} simulation failed: {error}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            let baseline_table = match Self::transient_family_result_to_prn_table(
+                &baseline_plan,
+                &baseline_run.netlist,
+                &baseline_result,
+            ) {
+                Ok(table) => table,
+                Err(error) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!("{LABEL} baseline step {index} output failed: {error}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            let owner_table = match Self::transient_family_result_to_prn_table(
+                &owner_plan,
+                &owner_run.netlist,
+                &owner_result,
+            ) {
+                Ok(table) => table,
+                Err(error) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!("{LABEL} owner step {index} output failed: {error}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            for (role, table) in [("baseline", &baseline_table), ("owner", &owner_table)] {
+                if let Err(error) =
+                    Self::validate_bug1190_prn_batch(table, &expected_columns, expected_stop, role)
+                {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!("{LABEL} step {index} output contract failed: {error}"),
+                        Vec::new(),
+                    );
+                }
+            }
+            let mut step_mismatches = match self.compare_release_7_10_file_compare_tables(
+                &baseline_table,
+                &owner_table,
+                XyceFileCompareTolerance::BUG1190_MUTUAL_INDUCTOR,
+            ) {
+                Ok(found) => found,
+                Err(error) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!(
+                            "{LABEL} Release 7.10 file_compare failed for step {index}: {error}"
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            for mismatch in &mut step_mismatches {
+                mismatch.row += row_offset;
+                mismatch.probe = format!("step {index}: {}", mismatch.probe);
+            }
+            row_offset += owner_table.rows.len();
+            mismatches.extend(step_mismatches);
+            if mismatches.len() >= self.config.max_mismatches {
+                mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, result_contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!(
+                    "{} {LABEL} Release 7.10 file_compare mismatch(es)",
                     mismatches.len()
                 ),
                 mismatches,
