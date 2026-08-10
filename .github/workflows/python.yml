@@ -153,7 +153,7 @@ jobs:
         with:
           python-version: "3.14"
       - name: Build abi3 wheel
-        uses: PyO3/maturin-action@3e2bdf6ba6453a61e649744019b8a2d906c7eb38 # v1.51.0
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           maturin-version: v${{ env.MATURIN_VERSION }}
           rust-toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -251,7 +251,7 @@ jobs:
         with:
           python-version: "3.14t"
       - name: Build free-threaded CPython 3.14 wheel
-        uses: PyO3/maturin-action@3e2bdf6ba6453a61e649744019b8a2d906c7eb38 # v1.51.0
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           maturin-version: v${{ env.MATURIN_VERSION }}
           rust-toolchain: ${{ env.RUST_TOOLCHAIN }}
