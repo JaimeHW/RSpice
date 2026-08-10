@@ -397,14 +397,14 @@ impl StripModel {
             // a value is named by the unit its own signal is measured in —
             // the same unit that decided which pane draws it.
             TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
-                fmt_si_significant(value, self.trace_unit(trace), significant_digits)
+                fmt_in_unit(value, self.trace_unit(trace), significant_digits)
             }
             TraceKind::MagnitudeDb => fmt_significant(value, significant_digits, " dB"),
             TraceKind::PhaseDeg => {
                 quantity_policy.format_angle(value.to_radians(), significant_digits)
             }
             TraceKind::PhaseRad => quantity_policy.format_angle(value, significant_digits),
-            TraceKind::NoiseDensity => fmt_si_significant(value, "nV/√Hz", significant_digits),
+            TraceKind::NoiseDensity => fmt_in_unit(value, NOISE_DENSITY_UNIT, significant_digits),
         }
     }
 
@@ -1210,6 +1210,21 @@ fn unwrap_projection(name: &str) -> &str {
 /// applies only where the name carries no accessor to read it from. Without
 /// this, a transient strip carrying `V(out)` and `I(R1)` would label both
 /// against the analysis' nominal volts and quietly misreport the current.
+/// The noise sheet reports amplitude density in a unit that already carries
+/// its own SI prefix.
+const NOISE_DENSITY_UNIT: &str = "nV/√Hz";
+
+/// Format a value in a pane's unit.
+///
+/// A unit that already carries an SI prefix takes no second one: 1.79 µV/√Hz
+/// of output noise reads as `1786.13 nV/√Hz`, never as `1.78613 knV/√Hz`.
+fn fmt_in_unit(value: f64, unit: &str, significant_digits: usize) -> String {
+    if unit == NOISE_DENSITY_UNIT {
+        return fmt_significant(value, significant_digits, " nV/√Hz");
+    }
+    fmt_si_significant(value, unit, significant_digits)
+}
+
 fn signal_unit(name: &str, kind: TraceKind, analysis_unit: &'static str) -> &'static str {
     match kind {
         TraceKind::MagnitudeDb => "dB",
@@ -2324,6 +2339,12 @@ fn shared_x_drag_id(model: &StripModel) -> egui::Id {
 pub(crate) struct ActivePaneFacts {
     /// The unit that names the pane in a unit-scoped stack.
     pub unit: Option<String>,
+    /// The analysis the pane belongs to. A sheet that is not the waveform
+    /// stack still draws exactly one analysis, and it is not necessarily the
+    /// one the run's analysis selector points at.
+    pub analysis: Option<String>,
+    /// Visible and bound trace counts on this pane alone.
+    pub traces: Option<(usize, usize)>,
     pub scale: Option<&'static str>,
     pub limit_mask: &'static str,
     pub x_viewport: Option<String>,
@@ -2339,6 +2360,7 @@ pub(crate) fn active_pane_facts(
     // or it is fitting the retained data. The mockup states the interval
     // either way: "automatic" alone does not tell a reader what they see.
     let (x_viewport, y_viewport) = active_pane_viewports(tokens, state);
+    let (analysis, traces) = active_pane_identity(tokens, state);
     let key = state.ui.results.active_wave_pane.as_ref();
     let scale = key.map(|key| {
         let log = ctx
@@ -2354,6 +2376,8 @@ pub(crate) fn active_pane_facts(
     });
     ActivePaneFacts {
         unit: key.map(|key| key.unit.clone()),
+        analysis,
+        traces,
         scale,
         limit_mask: if state.ui.results.show_spec_limits {
             "project specification limits"
@@ -2417,6 +2441,49 @@ pub(crate) fn active_shared_x_status(
     })
 }
 
+/// The analysis the active pane belongs to and how many of its traces the
+/// pane carries.
+///
+/// A sheet that is not the waveform stack picks its own analysis, so the
+/// run's analysis selector is not the authority here: the pane is.
+fn active_pane_identity(
+    tokens: &Tokens,
+    state: &mut AppState,
+) -> (Option<String>, Option<(usize, usize)>) {
+    let Some(key) = state.ui.results.active_wave_pane.clone() else {
+        return (None, None);
+    };
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        tokens,
+    );
+    let Some(model) = models
+        .iter()
+        .find(|model| model.analysis_key == key.analysis)
+    else {
+        return (None, None);
+    };
+    let bound = model
+        .traces
+        .iter()
+        .filter(|trace| model.trace_unit(trace) == key.unit)
+        .count();
+    let visible = model
+        .traces
+        .iter()
+        .filter(|trace| trace.visible && model.trace_unit(trace) == key.unit)
+        .count();
+    let label = state
+        .simulation
+        .active_run()
+        .and_then(|run| run.analyses.get(model.analysis_index))
+        .map(|analysis| analysis.label.clone());
+    (label, Some((visible, bound)))
+}
+
 /// The active pane's X and Y intervals, formatted through the strip's own
 /// formatter so they read like every other number on the sheet.
 fn active_pane_viewports(
@@ -2467,8 +2534,8 @@ fn active_pane_viewports(
         .map(|(y0, y1)| {
             format!(
                 "{} … {}",
-                fmt_si_significant(y0, pane.unit, digits),
-                fmt_si_significant(y1, pane.unit, digits)
+                fmt_in_unit(y0, pane.unit, digits),
+                fmt_in_unit(y1, pane.unit, digits)
             )
         });
     (x, y)

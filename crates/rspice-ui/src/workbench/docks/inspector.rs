@@ -1852,7 +1852,11 @@ fn active_result_pane(
         "Active pane",
         Some(facts.unit.as_deref().unwrap_or_else(|| viewer.label())),
     );
-    property_row(ui, "Pane", &pane_label);
+    // The pane names the analysis it draws, which on a sheet outside the
+    // waveform stack is not the one the run's analysis selector points at,
+    // and counts only the traces its own axis carries.
+    property_row(ui, "Pane", facts.analysis.as_deref().unwrap_or(&pane_label));
+    let (visible, bound) = facts.traces.unwrap_or((visible, bound));
     property_row(ui, "Traces", &format!("{visible} visible · {bound} bound"));
     property_row(ui, "View", view_label);
     if let Some(x_viewport) = facts.x_viewport.as_deref() {

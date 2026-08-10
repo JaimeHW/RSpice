@@ -318,6 +318,16 @@ fn a_value_is_named_by_its_own_unit_not_the_strips() {
 }
 
 #[test]
+fn a_prefixed_unit_never_takes_a_second_prefix() {
+    // Output noise of a gain-of-1000 stage is micro-volts per root hertz; in
+    // a unit that already says "nano" that must stay a plain number.
+    assert_eq!(fmt_in_unit(1786.131, NOISE_DENSITY_UNIT, 6), "1786.13 nV/√Hz");
+    assert_eq!(fmt_in_unit(4.07, NOISE_DENSITY_UNIT, 3), "4.07 nV/√Hz");
+    // Base units keep their SI scaling.
+    assert_eq!(fmt_in_unit(1.5e-3, "A", 3), "1.50 mA");
+}
+
+#[test]
 fn hidden_unit_signals_keep_a_pane_available_for_reactivation() {
     let mut state = marker_fixture();
     state.simulation.runs[0].analyses[0].waveforms[0].visible = false;
