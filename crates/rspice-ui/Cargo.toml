@@ -212,9 +212,13 @@ js-sys = "0.3"
 # Cloud account boundary, browser half. The typed client, `url` for callback
 # and relay routes, RFC 3339 stamps for session freshness, and the three
 # browser-only primitives the Fetch and socket pumps drive: timeouts, the
-# `select!`/`StreamExt` adapters, and the response-body stream. Every one of
-# these already reaches wasm32 through rspice-cloud-client, so declaring the
-# edges this crate uses directly adds nothing to the browser image.
+# `select!`/`StreamExt` adapters, and the response-body stream.
+#
+# rspice-cloud-client brings reqwest with it, which the identity flow does
+# not use on this target (see `oidc::IdentityHttpClient`) but the client's
+# own transport does. On wasm32 reqwest compiles down to a wrapper over the
+# same Fetch API rather than the native hyper/TLS stack, so the browser image
+# carries the binding layer, not a second HTTP implementation.
 futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 gloo-timers = { workspace = true, features = ["futures"] }
 rspice-cloud-client = { workspace = true }
