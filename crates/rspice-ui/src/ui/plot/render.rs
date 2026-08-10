@@ -1016,6 +1016,42 @@ mod tests {
     use crate::ui::plot::{Axis, Marker, Trace, XScale};
 
     #[test]
+    fn an_ordinary_curve_stays_a_single_unbroken_run() {
+        // Every plot in the workbench goes through this, so the common case
+        // has to stay exactly one stroke. Splitting a clean curve into
+        // fragments would still tessellate finitely and pass every test
+        // that only asks whether the vertices are finite.
+        let points = (0..64)
+            .map(|i| pos2(i as f32, (i as f32 * 0.1).sin()))
+            .collect::<Vec<_>>();
+        let runs = finite_runs(&points).collect::<Vec<_>>();
+
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].len(), points.len());
+    }
+
+    #[test]
+    fn a_hole_breaks_the_curve_without_swallowing_the_data_around_it() {
+        let mut points = (0..10).map(|i| pos2(i as f32, 1.0)).collect::<Vec<_>>();
+        points[4] = pos2(4.0, f32::NAN);
+        points[5] = pos2(f32::INFINITY, 1.0);
+        let runs = finite_runs(&points).collect::<Vec<_>>();
+
+        // Two strokes, and only the two bad samples are missing — the curve
+        // resumes rather than ending at the hole.
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].len(), 4);
+        assert_eq!(runs[1].len(), 4);
+    }
+
+    #[test]
+    fn a_wholly_undefined_series_strokes_nothing() {
+        let points = (0..8).map(|_| pos2(f32::NAN, f32::NAN)).collect::<Vec<_>>();
+
+        assert_eq!(finite_runs(&points).count(), 0);
+    }
+
+    #[test]
     fn color_safe_trace_cycle_has_six_marker_shapes_and_preserves_phase_dashing() {
         let styles = (0..6)
             .map(|index| color_safe_trace_style(index, false))
