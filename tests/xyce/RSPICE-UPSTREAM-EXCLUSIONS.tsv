@@ -1,7 +1,7 @@
 # RSpice Xyce upstream-exclusion provenance and qualification manifest
 # Reproduce with tools/xyce/sync_upstream_exclusions.py.
-# qualification_commit=d0b77b8d9dbd473a7df1570bf2ea651b06517ac4
-# qualification_report_sha256=1a79ea04f8519c1f946aa0eee691b3022596ae2f4ab3df409705709388883a4e
+# qualification_commit=a319d233c23f7bbaaa44aaf071798a590d393c82
+# qualification_report_sha256=6e2ed9d2b820a4e5a08354807276f54f6bbcfc1b151ae3c462be91b96cf807d7
 # Fields: deck, trimmed upstream exclude file, disposition, optional exact contract.
 schema_version	1
 source_commit	80115a9277c0ddb3409acceb3d4e745fd11cddd4
@@ -509,17 +509,17 @@ Netlists/DTEMP/bsim4.82_pmos_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/cap_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/njfet_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/nmesfet_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
-Netlists/DTEMP/nmos1_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
-Netlists/DTEMP/nmos2_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
-Netlists/DTEMP/nmos3_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
-Netlists/DTEMP/nmos6_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
+Netlists/DTEMP/nmos1_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	classic_mos_level1_dtemp_relational_wrapper_reference
+Netlists/DTEMP/nmos2_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	classic_mos_level1_dtemp_relational_wrapper_reference
+Netlists/DTEMP/nmos3_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	classic_mos_level1_dtemp_relational_wrapper_reference
+Netlists/DTEMP/nmos6_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	classic_mos_level1_dtemp_relational_wrapper_reference
 Netlists/DTEMP/npn_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/pjfet_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/pmesfet_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
-Netlists/DTEMP/pmos1_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
-Netlists/DTEMP/pmos2_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
-Netlists/DTEMP/pmos3_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
-Netlists/DTEMP/pmos6_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
+Netlists/DTEMP/pmos1_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	classic_mos_level1_dtemp_relational_wrapper_reference
+Netlists/DTEMP/pmos2_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	classic_mos_level1_dtemp_relational_wrapper_reference
+Netlists/DTEMP/pmos3_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	classic_mos_level1_dtemp_relational_wrapper_reference
+Netlists/DTEMP/pmos6_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	classic_mos_level1_dtemp_relational_wrapper_reference
 Netlists/DTEMP/pnp_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/res_ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	resistor_dtemp_relational_wrapper_reference
 Netlists/DTEMP/vdmos_ref.cir	Netlists/DTEMP/exclude	upstream_excluded

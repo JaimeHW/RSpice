@@ -58,15 +58,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 171;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 179;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "0c8052e80cc072ed681cecb2f6d2edff5aa3a3cd60a3b8788b56b48d23a1b1fa";
+    "c471286d7fb6a4b94638b4fd512707c86b92d6e73416c3ddb46b3efe2951da7f";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "d516cc0ac8402a325f3056534b255ada5d7ef80ea2e8f527f4a03f2d6baffe7c";
+    "7922b2243b670c4d30ad072373e7e52c245101ded1d4112e97e16775325f3985";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "61e6788d1a9944b751b420bae5d3335eebb376e5c75001c0a7266399ecc57ae9";
+    "e5b9abfe98aa793da55cf82dc5a8871ae71259cf083acb677c98f39fc1fe6859";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -156,6 +156,21 @@ const XYCE_BUG1190_MUTUAL_INDUCTOR_OWNER_MANIFEST_BLAKE3: &str =
 const XYCE_BUG1190_MUTUAL_INDUCTOR_EXCLUSION_COUNT: usize = 2;
 const XYCE_BUG1190_MUTUAL_INDUCTOR_HISTORICAL_EXCLUSION_BLAKE3: &str =
     "6d2ca1af02efba66823b08c1597c07f8b7c45dbae4346076343d3245240f0d33";
+const XYCE_CLASSIC_MOS_DTEMP_WRAPPER_CONTRACT: &str =
+    "classic_mos_level1_dtemp_relational_wrapper_owner";
+const XYCE_CLASSIC_MOS_DTEMP_REFERENCE_CONTRACT: &str =
+    "classic_mos_level1_dtemp_relational_wrapper_reference";
+const XYCE_CLASSIC_MOS_DTEMP_CANDIDATE_COUNT: usize = 16;
+const XYCE_CLASSIC_MOS_DTEMP_CANDIDATE_BLAKE3: &str =
+    "3d6d5a6e298f6e768fe45180e038e115bf341ce1b351351b406a714da6927f50";
+const XYCE_CLASSIC_MOS_DTEMP_CONTENT_BLAKE3: &str =
+    "ece370c9a2cf3e650ccadd819f6e08262f340ee44c83ffebc1a704e302104b06";
+const XYCE_CLASSIC_MOS_DTEMP_OWNER_COUNT: usize = 8;
+const XYCE_CLASSIC_MOS_DTEMP_OWNER_MANIFEST_BLAKE3: &str =
+    "1519db656b566549d712c797adf62cd8f3a128b9c2189aba3830956e0ce0f345";
+const XYCE_CLASSIC_MOS_DTEMP_EXCLUSION_COUNT: usize = 8;
+const XYCE_CLASSIC_MOS_DTEMP_HISTORICAL_EXCLUSION_BLAKE3: &str =
+    "1150bc1fda0dd8db1f2091b15b5c280ae881ebdbd8aad31df4b0ec491a75e3fa";
 // The removed Release 7.10 sidecar emits `exp(-TIME/0.001)`. These constants
 // describe that generated oracle; the path-independent candidate detector does
 // not use them as deck-name or value allowlists.
@@ -5197,6 +5212,86 @@ struct XyceNonlinearCoreModelStepReferenceContract {
     owner_path: PathBuf,
     member_paths: Vec<PathBuf>,
     target_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceClassicMosDtempRole {
+    Owner,
+    Reference,
+}
+
+impl XyceClassicMosDtempRole {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::Owner => XYCE_CLASSIC_MOS_DTEMP_WRAPPER_CONTRACT,
+            Self::Reference => XYCE_CLASSIC_MOS_DTEMP_REFERENCE_CONTRACT,
+        }
+    }
+
+    fn for_record(relative_path: &str) -> Option<(String, Self)> {
+        let normalized = relative_path.replace('\\', "/").to_ascii_lowercase();
+        let file_name = normalized.strip_prefix("netlists/dtemp/")?;
+        if file_name.contains('/') {
+            return None;
+        }
+        let (family, role) = if let Some(family) = file_name.strip_suffix("_dtemp.cir") {
+            (family, Self::Owner)
+        } else if let Some(family) = file_name.strip_suffix("_ref.cir") {
+            (family, Self::Reference)
+        } else {
+            return None;
+        };
+        let level_tag = family
+            .strip_prefix("nmos")
+            .or_else(|| family.strip_prefix("pmos"))?;
+        if !matches!(level_tag, "1" | "2" | "3" | "6") {
+            return None;
+        }
+        Some((family.to_string(), role))
+    }
+}
+
+#[derive(Debug, Clone)]
+struct XyceClassicMosDtempContract {
+    owner_path: PathBuf,
+    reference_path: PathBuf,
+    owner_plan: XyceStaticDcPlan,
+    reference_plan: XyceStaticDcPlan,
+    family: String,
+    role: XyceClassicMosDtempRole,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum XyceClassicMosDtempElementSnapshot {
+    Resistor {
+        name: String,
+        nodes: Vec<String>,
+        value_bits: u64,
+    },
+    VoltageSource {
+        name: String,
+        nodes: Vec<String>,
+        dc_value_bits: u64,
+    },
+    Mosfet {
+        name: String,
+        nodes: Vec<String>,
+        model: String,
+        polarity: String,
+        instance_params: Vec<(String, u64)>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceClassicMosDtempSnapshot {
+    elements: Vec<XyceClassicMosDtempElementSnapshot>,
+    model_name: String,
+    model_type: String,
+    model_params: Vec<(String, u64)>,
+    dc_primary: (String, u64, u64, u64),
+    dc_secondary: Option<(String, u64, u64, u64)>,
+    probes: Vec<String>,
+    effective_temperature_bits: Vec<u64>,
 }
 
 #[derive(Debug, Clone)]

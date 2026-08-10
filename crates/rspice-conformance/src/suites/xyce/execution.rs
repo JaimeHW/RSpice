@@ -435,6 +435,33 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.classic_mos_dtemp_relational_contract(deck) {
+            let role = XyceClassicMosDtempRole::for_record(&deck.relative_path)
+                .expect("classic MOS DTEMP detector selected a recognized record")
+                .1;
+            let result = match contract {
+                Ok(contract) => {
+                    self.run_classic_mos_dtemp_relational_contract(deck, contract, start)
+                }
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    role.result_contract(),
+                    format!("classic MOS DTEMP relational qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.bug647_resistor_relational_contract(deck) {
             let result = match contract {
                 Ok(contract) => self.run_bug647_resistor_relational_contract(deck, contract, start),
@@ -5959,6 +5986,304 @@ impl XyceTestRunner {
                 result_contract,
                 format!(
                     "{} resistor DTEMP relational mismatch(es)",
+                    mismatches.len()
+                ),
+                mismatches,
+            )
+        }
+    }
+
+    pub(super) fn run_classic_mos_dtemp_relational_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceClassicMosDtempContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        const LABEL: &str = "classic level-1 MOS TEMP/DTEMP family";
+        let result_contract = contract.role.result_contract();
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let qualification = (|| {
+            self.validate_classic_mos_dtemp_provenance(&contract)?;
+            let parse = |plan: &XyceStaticDcPlan, role: &str| {
+                Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
+                    &plan.source,
+                    &plan.deck_path,
+                    plan.expression_dialect,
+                    plan.parameter_redefinition_policy,
+                    plan.execution_dir.as_deref(),
+                )
+                .map_err(|error| format!("{LABEL} {role} parse failed: {error}"))
+            };
+            let owner_netlist = parse(&contract.owner_plan, "owner")?;
+            let reference_netlist = parse(&contract.reference_plan, "reference")?;
+            let owner_snapshot = Self::classic_mos_dtemp_snapshot(
+                &contract.owner_plan,
+                &owner_netlist,
+                XyceClassicMosDtempRole::Owner,
+            )?;
+            let reference_snapshot = Self::classic_mos_dtemp_snapshot(
+                &contract.reference_plan,
+                &reference_netlist,
+                XyceClassicMosDtempRole::Reference,
+            )?;
+            if owner_snapshot != reference_snapshot {
+                return Err(format!(
+                    "{LABEL} base owner/reference topology or analysis semantics differ"
+                ));
+            }
+
+            let expansion_engine = self.create_dc_engine();
+            let owner_runs = Self::nested_step_runs_for_commands_with_limits_and_abort(
+                &expansion_engine,
+                &owner_netlist,
+                &contract.owner_plan.steps,
+                xyce_step_plan_limits(),
+                &abort,
+            )
+            .map_err(|error| format!("{LABEL} owner STEP expansion failed: {error}"))?;
+            let reference_runs = Self::nested_step_runs_for_commands_with_limits_and_abort(
+                &expansion_engine,
+                &reference_netlist,
+                &contract.reference_plan.steps,
+                xyce_step_plan_limits(),
+                &abort,
+            )
+            .map_err(|error| format!("{LABEL} reference STEP expansion failed: {error}"))?;
+            let owner_coordinates: [Value; 3] = [0.0, 10.0, 20.0];
+            let reference_coordinates: [Value; 3] = [15.0, 25.0, 35.0];
+            if owner_runs.len() != owner_coordinates.len()
+                || reference_runs.len() != reference_coordinates.len()
+            {
+                return Err(format!(
+                    "{LABEL} requires three owner and three reference materializations, found {}/{}",
+                    owner_runs.len(),
+                    reference_runs.len()
+                ));
+            }
+            for (index, (((owner_run, reference_run), owner_coordinate), reference_coordinate)) in
+                owner_runs
+                    .iter()
+                    .zip(&reference_runs)
+                    .zip(owner_coordinates)
+                    .zip(reference_coordinates)
+                    .enumerate()
+            {
+                let [owner_step_value] = owner_run.step_values.as_slice() else {
+                    return Err(format!(
+                        "{LABEL} owner materialization {index} lost its one STEP coordinate"
+                    ));
+                };
+                let [reference_step_value] = reference_run.step_values.as_slice() else {
+                    return Err(format!(
+                        "{LABEL} reference materialization {index} lost its one STEP coordinate"
+                    ));
+                };
+                if owner_step_value.to_bits() != owner_coordinate.to_bits()
+                    || reference_step_value.to_bits() != reference_coordinate.to_bits()
+                {
+                    return Err(format!(
+                        "{LABEL} materialization {index} changed its ordered STEP coordinates"
+                    ));
+                }
+                let normalized_owner = Self::normalize_classic_mos_dtemp_materialization(
+                    &owner_run.netlist,
+                    XyceClassicMosDtempRole::Owner,
+                    owner_coordinate,
+                    reference_coordinate,
+                )?;
+                let normalized_reference = Self::normalize_classic_mos_dtemp_materialization(
+                    &reference_run.netlist,
+                    XyceClassicMosDtempRole::Reference,
+                    reference_coordinate,
+                    reference_coordinate,
+                )?;
+                let materialized_owner_snapshot = Self::classic_mos_dtemp_snapshot(
+                    &contract.owner_plan,
+                    &normalized_owner,
+                    XyceClassicMosDtempRole::Owner,
+                )?;
+                let materialized_reference_snapshot = Self::classic_mos_dtemp_snapshot(
+                    &contract.reference_plan,
+                    &normalized_reference,
+                    XyceClassicMosDtempRole::Reference,
+                )?;
+                if materialized_owner_snapshot != owner_snapshot
+                    || materialized_reference_snapshot != reference_snapshot
+                    || materialized_owner_snapshot != materialized_reference_snapshot
+                {
+                    return Err(format!(
+                        "{LABEL} materialization {index} changed non-temperature topology or analysis semantics"
+                    ));
+                }
+            }
+            Ok((owner_runs, reference_runs))
+        })();
+        let (owner_runs, reference_runs) = match qualification {
+            Ok(runs) => runs,
+            Err(reason) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!(
+                        "{LABEL} '{}' qualification failed: {reason}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let simulate = |plan: &XyceStaticDcPlan,
+                        runs: &[XyceStepRun],
+                        role: &str|
+         -> Result<Vec<XycePrnTable>, String> {
+            let engine = self.create_dc_engine();
+            let mut batch_plan = plan.clone();
+            batch_plan.steps.clear();
+            let expected_rows = if contract.family.starts_with("nmos") {
+                361
+            } else {
+                6
+            };
+            let mut tables = Vec::with_capacity(runs.len());
+            for (index, run) in runs.iter().enumerate() {
+                let results = engine
+                    .run_dc_sweep2_spec_with_report_and_abort(
+                        &run.netlist,
+                        &plan.dc.source,
+                        &plan.dc.primary_spec(),
+                        plan.dc.sweep2.as_ref(),
+                        &abort,
+                    )
+                    .map_err(|error| {
+                        format!("{LABEL} {role} step {index} simulation failed: {error}")
+                    })?;
+                let table = self
+                    .dc_results_to_prn_table(&batch_plan, &run.netlist, &results)
+                    .map_err(|error| {
+                        format!("{LABEL} {role} step {index} output failed: {error}")
+                    })?;
+                if table.rows.len() != expected_rows
+                    || table.columns.len() != 5
+                    || table.columns[0] != "Index"
+                    || table.rows.iter().enumerate().any(|(row, values)| {
+                        values.len() != table.columns.len()
+                            || values[0].to_bits() != (row as Value).to_bits()
+                    })
+                {
+                    return Err(format!(
+                        "{LABEL} {role} step {index} did not produce its canonical {expected_rows}-row indexed PRN batch"
+                    ));
+                }
+                tables.push(table);
+            }
+            Ok(tables)
+        };
+
+        // Preserve the wrapper's process order: the live reference deck runs
+        // to completion before the DTEMP owner deck.
+        let reference_tables =
+            match simulate(&contract.reference_plan, &reference_runs, "reference") {
+                Ok(tables) => tables,
+                Err(reason) => {
+                    return self.failure_result(deck, start, result_contract, reason, Vec::new());
+                }
+            };
+        let owner_tables = match simulate(&contract.owner_plan, &owner_runs, "owner") {
+            Ok(tables) => tables,
+            Err(reason) => {
+                return self.failure_result(deck, start, result_contract, reason, Vec::new());
+            }
+        };
+
+        let mut causal = false;
+        'step_pairs: for pair in owner_tables.windows(2) {
+            for (left_row, right_row) in pair[0].rows.iter().zip(&pair[1].rows) {
+                for (&left, &right) in left_row.iter().skip(1).zip(right_row.iter().skip(1)) {
+                    let left = match Self::xyce_default_prn_text(left) {
+                        Ok(value) => value,
+                        Err(reason) => {
+                            return self.failure_result(
+                                deck,
+                                start,
+                                result_contract,
+                                format!("{LABEL} causal output serialization failed: {reason}"),
+                                Vec::new(),
+                            );
+                        }
+                    };
+                    let right = match Self::xyce_default_prn_text(right) {
+                        Ok(value) => value,
+                        Err(reason) => {
+                            return self.failure_result(
+                                deck,
+                                start,
+                                result_contract,
+                                format!("{LABEL} causal output serialization failed: {reason}"),
+                                Vec::new(),
+                            );
+                        }
+                    };
+                    if left != right {
+                        causal = true;
+                        break 'step_pairs;
+                    }
+                }
+            }
+        }
+        if !causal {
+            return self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!(
+                    "{LABEL} '{}' is temperature-invariant at default PRN precision",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
+
+        let mut mismatches = Vec::new();
+        let mut row_offset = 0usize;
+        for (index, (reference, owner)) in reference_tables.iter().zip(&owner_tables).enumerate() {
+            let mut step_mismatches = match self
+                .compare_serialized_default_prn_tables(reference, owner)
+            {
+                Ok(found) => found,
+                Err(reason) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!(
+                            "{LABEL} exact historical diff adapter failed for step {index}: {reason}"
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            for mismatch in &mut step_mismatches {
+                mismatch.row += row_offset;
+                mismatch.probe = format!("step {index}: {}", mismatch.probe);
+            }
+            row_offset += owner.rows.len();
+            mismatches.extend(step_mismatches);
+            if mismatches.len() >= self.config.max_mismatches {
+                mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, result_contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!(
+                    "{} {LABEL} exact serialized PRN mismatch(es)",
                     mismatches.len()
                 ),
                 mismatches,

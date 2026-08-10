@@ -9349,6 +9349,35 @@ fn test_xyce_bug1190_mutual_inductor_parameter_alias_relational_oracles() {
     }
 }
 
+#[test]
+fn test_xyce_classic_level1_mos_dtemp_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for polarity in ["nmos", "pmos"] {
+        for level_tag in [1, 2, 3, 6] {
+            for (suffix, expected_contract) in [
+                ("dtemp", "classic_mos_level1_dtemp_relational_wrapper_owner"),
+                (
+                    "ref",
+                    "classic_mos_level1_dtemp_relational_wrapper_reference",
+                ),
+            ] {
+                let relative = format!("Netlists/DTEMP/{polarity}{level_tag}_{suffix}.cir");
+                let result = runner.run_test(root.join(&relative));
+                assert!(
+                    result.passed && !result.expected_unsupported && !result.upstream_excluded,
+                    "{relative} should satisfy the exact classic level-1 MOS TEMP/DTEMP relational contract, got {result:?}"
+                );
+                assert_eq!(result.contract, expected_contract);
+                assert!(result.error.is_none());
+                assert!(result.mismatches.is_empty());
+            }
+        }
+    }
+}
+
 // The aggregate intentionally replays every retained deck and therefore has
 // release-profile runtime requirements. Individual supported contracts remain
 // in the normal test tier above, while nightly release CI runs this full census.
