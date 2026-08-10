@@ -540,6 +540,28 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.vbic_dc_wrapper_family_contract(deck) {
+            let result = match contract {
+                Ok(contract) => self.run_vbic_dc_wrapper_family_contract(deck, contract, start),
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    "vbic_dc_wrapper_equivalence_family",
+                    format!("VBIC DC wrapper family qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.shared_stepped_dc_family_contract(deck) {
             let result = match contract {
                 Ok(contract) => self.run_shared_stepped_dc_family_contract(deck, contract, start),
@@ -4591,6 +4613,319 @@ impl XyceTestRunner {
             ),
             mismatches,
         )
+    }
+
+    pub(super) fn run_vbic_dc_wrapper_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceVbicDcWrapperFamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract_name = contract.role.contract();
+        let owner_plan =
+            match self.static_dc_plan_for_path(&contract.owner_path, ExpressionDialect::Xyce) {
+                Ok(plan) => plan,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract_name,
+                        format!(
+                            "VBIC family '{}' owner no longer plans: {err}",
+                            contract.family
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+        let (owner_netlist, owner_steps, owner_batches) =
+            match self.run_vbic_dc_family_plan(&owner_plan, start) {
+                Ok(run) => run,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract_name,
+                        format!(
+                            "VBIC family '{}' owner execution failed: {err}",
+                            contract.family
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+        let owner_table =
+            match self.vbic_dc_result_batches_to_prn_table(&owner_plan, &owner_batches) {
+                Ok(table) => table,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract_name,
+                        format!(
+                            "VBIC family '{}' owner output conversion failed: {err}",
+                            contract.family
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+        let gold = match Self::parse_dc_reference_file(
+            XyceStaticDcContract::WrapperDefault,
+            &contract.reference_path,
+        ) {
+            Ok(reference) => reference,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract_name,
+                    format!(
+                        "VBIC family '{}' gold PRN could not be parsed: {err}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+        let mut mismatches = match self.compare_release_7_10_xyce_verify_dc_batches(
+            &format!("VBIC family '{}' owner/gold", contract.family),
+            &gold,
+            &owner_table,
+            &owner_batches,
+            &owner_batches,
+        ) {
+            Ok(mismatches) => mismatches,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract_name,
+                    format!(
+                        "VBIC family '{}' owner/gold comparison failed: {err}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+        for mismatch in &mut mismatches {
+            mismatch.probe = format!("gold {}", mismatch.probe);
+        }
+        if !owner_plan.steps.is_empty() {
+            let step_reference = contract.owner_path.with_extension("cir.res.gs");
+            if let Err(err) = self.compare_step_res_reference(
+                &step_reference,
+                &owner_netlist,
+                &owner_plan.steps,
+                &owner_steps,
+            ) {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract_name,
+                    format!(
+                        "VBIC family '{}' STEP summary comparison failed: {err}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+            }
+        }
+        if !mismatches.is_empty() {
+            mismatches.truncate(self.config.max_mismatches);
+            return self.failure_result(
+                deck,
+                start,
+                contract_name,
+                format!(
+                    "{} Xyce mismatch(es) between VBIC family '{}' owner and checked gold",
+                    mismatches.len(),
+                    contract.family
+                ),
+                mismatches,
+            );
+        }
+
+        let targets = match contract.role {
+            XyceVbicDcWrapperFamilyRole::Owner => {
+                vec![contract.multiplicity_path, contract.polarity_path]
+            }
+            XyceVbicDcWrapperFamilyRole::MultiplicityControl => {
+                vec![contract.multiplicity_path]
+            }
+            XyceVbicDcWrapperFamilyRole::PolarityControl => vec![contract.polarity_path],
+        };
+        let mut all_mismatches = Vec::new();
+        for target_path in targets {
+            let target_plan =
+                match self.static_dc_plan_for_path(&target_path, ExpressionDialect::Xyce) {
+                    Ok(plan) => plan,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract_name,
+                            format!(
+                                "VBIC family '{}' control '{}' no longer plans: {err}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                };
+            let (target_netlist, target_steps, target_batches) =
+                match self.run_vbic_dc_family_plan(&target_plan, start) {
+                    Ok(run) => run,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract_name,
+                            format!(
+                                "VBIC family '{}' control '{}' execution failed: {err}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                };
+            if !target_plan.steps.is_empty() {
+                let step_reference = contract.owner_path.with_extension("cir.res.gs");
+                if let Err(err) = self.compare_step_res_reference(
+                    &step_reference,
+                    &target_netlist,
+                    &target_plan.steps,
+                    &target_steps,
+                ) {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract_name,
+                        format!(
+                            "VBIC family '{}' control '{}' STEP summary comparison failed: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            }
+            let target_table =
+                match self.vbic_dc_result_batches_to_prn_table(&target_plan, &target_batches) {
+                    Ok(table) => table,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract_name,
+                            format!(
+                                "VBIC family '{}' control '{}' output conversion failed: {err}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                };
+            let mut target_mismatches = match self.compare_release_7_10_xyce_verify_dc_batches(
+                &format!(
+                    "VBIC family '{}' control '{}'",
+                    contract.family,
+                    self.display_path(&target_path)
+                ),
+                &owner_table,
+                &target_table,
+                &owner_batches,
+                &target_batches,
+            ) {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract_name,
+                        format!(
+                            "VBIC family '{}' owner/control comparison failed for '{}': {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            for mismatch in &mut target_mismatches {
+                mismatch.probe = format!("{} {}", self.display_path(&target_path), mismatch.probe);
+            }
+            all_mismatches.extend(target_mismatches);
+            if all_mismatches.len() >= self.config.max_mismatches {
+                all_mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+        if all_mismatches.is_empty() {
+            self.passed_result(deck, start, contract_name)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                contract_name,
+                format!(
+                    "{} Xyce mismatch(es) in VBIC wrapper-equivalence family '{}'",
+                    all_mismatches.len(),
+                    contract.family
+                ),
+                all_mismatches,
+            )
+        }
+    }
+
+    fn run_vbic_dc_family_plan(
+        &self,
+        plan: &XyceStaticDcPlan,
+        start: Instant,
+    ) -> Result<(Netlist, Vec<XyceStepRun>, Vec<XyceDcResultBatch>), SimulationError> {
+        let netlist = Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
+            &plan.source,
+            &plan.deck_path,
+            plan.expression_dialect,
+            plan.parameter_redefinition_policy,
+            plan.execution_dir.as_deref(),
+        )
+        .map_err(|err| SimulationError::Netlist(format!("{err}")))?;
+        let engine = self.create_dc_engine();
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let step_runs = if plan.steps.is_empty() {
+            vec![XyceStepRun {
+                step_values: Vec::new(),
+                netlist: netlist.clone(),
+            }]
+        } else {
+            Self::nested_step_runs_for_commands_with_limits_and_abort(
+                &engine,
+                &netlist,
+                &plan.steps,
+                xyce_step_plan_limits(),
+                &abort,
+            )?
+        };
+        let mut batches = Vec::with_capacity(step_runs.len());
+        for run in &step_runs {
+            let results = engine.run_dc_sweep2_spec_with_report_and_abort(
+                &run.netlist,
+                &plan.dc.source,
+                &plan.dc.primary_spec(),
+                plan.dc.sweep2.as_ref(),
+                &abort,
+            )?;
+            batches.push(XyceDcResultBatch {
+                netlist: run.netlist.clone(),
+                results,
+            });
+        }
+        Ok((netlist, step_runs, batches))
     }
 
     pub(super) fn run_numbered_redefinition_dc_family_contract(

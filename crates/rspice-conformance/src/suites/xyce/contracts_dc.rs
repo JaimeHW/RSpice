@@ -3389,4 +3389,429 @@ impl XyceTestRunner {
             target_path: Some(deck.path.clone()),
         })
     }
+
+    pub(super) fn vbic_dc_wrapper_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceVbicDcWrapperFamilyContract, String>> {
+        let relative = Self::normalize_manifest_key(&deck.relative_path);
+        let (relative_parent, file_name) = relative.rsplit_once('/')?;
+        let exclusions = self.upstream_exclusions.as_ref().ok()?;
+        let mut multiplicity_promotions = 0usize;
+        let mut polarity_promotions = 0usize;
+        let mut promoted_controls = 0usize;
+        for (record, exclusion) in exclusions {
+            let Some((record_parent, _)) = record.rsplit_once('/') else {
+                continue;
+            };
+            if record_parent != relative_parent {
+                continue;
+            }
+            let XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                expected_contract,
+            } = &exclusion.disposition
+            else {
+                continue;
+            };
+            let role = if expected_contract
+                == XyceVbicDcWrapperFamilyRole::MultiplicityControl.contract()
+            {
+                multiplicity_promotions += 1;
+                true
+            } else if expected_contract == XyceVbicDcWrapperFamilyRole::PolarityControl.contract() {
+                polarity_promotions += 1;
+                true
+            } else {
+                false
+            };
+            if role {
+                promoted_controls += 1;
+                if Self::normalize_manifest_key(&exclusion.source)
+                    != format!("{relative_parent}/exclude")
+                {
+                    return Some(Err(format!(
+                        "VBIC control promotion '{record}' does not retain the directory's upstream exclude provenance"
+                    )));
+                }
+            }
+        }
+        if promoted_controls == 0 {
+            return None;
+        }
+        if promoted_controls != 28 || multiplicity_promotions != 14 || polarity_promotions != 14 {
+            return Some(Err(format!(
+                "VBIC DC promotion provenance requires fourteen multiplicity and fourteen polarity controls, found {multiplicity_promotions}/{polarity_promotions}"
+            )));
+        }
+        let stem = file_name.strip_suffix(".cir")?;
+        let folded_stem = stem.to_ascii_lowercase();
+        let candidate_owner_stem = folded_stem
+            .strip_suffix("_noflip_p")
+            .or_else(|| folded_stem.strip_suffix("_m"))
+            .unwrap_or(&folded_stem);
+        let owner_record = self.upstream_wrapper_decks.iter().find(|record| {
+            record.rsplit_once('/').is_some_and(|(parent, name)| {
+                parent == relative_parent
+                    && name
+                        .strip_suffix(".cir")
+                        .is_some_and(|owner| owner.eq_ignore_ascii_case(candidate_owner_stem))
+            })
+        });
+        let owner_record = match owner_record {
+            Some(record) => record,
+            None if exclusions.get(&relative).is_some_and(|exclusion| {
+                matches!(
+                    &exclusion.disposition,
+                    XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                        expected_contract
+                    } if expected_contract
+                        == XyceVbicDcWrapperFamilyRole::MultiplicityControl.contract()
+                        || expected_contract
+                            == XyceVbicDcWrapperFamilyRole::PolarityControl.contract()
+                )
+            }) =>
+            {
+                return Some(Err(format!(
+                    "promoted VBIC control '{relative}' has no matching wrapper-manifest owner"
+                )));
+            }
+            None => return None,
+        };
+        let owner_name = owner_record.rsplit_once('/')?.1;
+        let parent = deck.path.parent()?;
+        let owner_path = parent.join(owner_name);
+        let owner_source = match fs::read_to_string(&owner_path) {
+            Ok(source) => source,
+            Err(err) => {
+                return Some(Err(format!(
+                    "failed to read recognized VBIC DC wrapper owner '{}': {err}",
+                    owner_path.display()
+                )));
+            }
+        };
+        if !Self::source_has_analysis(&owner_source, "DC") {
+            return None;
+        }
+
+        Some((|| {
+            let mut groups = Vec::new();
+            for record in self.upstream_wrapper_decks.iter().filter(|record| {
+                record
+                    .rsplit_once('/')
+                    .is_some_and(|(record_parent, _)| record_parent == relative_parent)
+            }) {
+                let owner_name = record
+                    .rsplit_once('/')
+                    .map(|(_, name)| name)
+                    .ok_or_else(|| "VBIC wrapper manifest record has no filename".to_string())?;
+                let owner_path = parent.join(owner_name);
+                let owner_source = fs::read_to_string(&owner_path).map_err(|err| {
+                    format!(
+                        "failed to read VBIC wrapper owner '{}': {err}",
+                        owner_path.display()
+                    )
+                })?;
+                if !Self::source_has_analysis(&owner_source, "DC") {
+                    continue;
+                }
+                let owner_stem = owner_path
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .ok_or_else(|| "VBIC wrapper owner has a non-UTF-8 stem".to_string())?;
+                let multiplicity_path = parent.join(format!("{owner_stem}_m.cir"));
+                let polarity_path = parent.join(format!("{owner_stem}_noFlip_P.cir"));
+                groups.push((owner_path, multiplicity_path, polarity_path));
+            }
+            groups.sort_by_key(|(owner, _, _)| {
+                owner
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_ascii_lowercase())
+            });
+            if groups.len() != 14 {
+                return Err(format!(
+                    "VBIC DC wrapper provenance requires fourteen manifest-owned families, found {}",
+                    groups.len()
+                ));
+            }
+
+            let mut claimed = BTreeSet::new();
+            let mut selected = None;
+            for (owner_path, multiplicity_path, polarity_path) in groups {
+                for path in [&owner_path, &multiplicity_path, &polarity_path] {
+                    if !path.is_file() {
+                        return Err(format!(
+                            "VBIC DC wrapper family member is missing: {}",
+                            path.display()
+                        ));
+                    }
+                    let canonical = path.canonicalize().map_err(|err| {
+                        format!("failed to canonicalize VBIC family member: {err}")
+                    })?;
+                    if !claimed.insert(canonical) {
+                        return Err(
+                            "a VBIC DC circuit is claimed by more than one family".to_string()
+                        );
+                    }
+                }
+                if !self.requires_upstream_wrapper(&self.relative_key(&owner_path))
+                    || self.requires_upstream_wrapper(&self.relative_key(&multiplicity_path))
+                    || self.requires_upstream_wrapper(&self.relative_key(&polarity_path))
+                {
+                    return Err(
+                        "VBIC DC provenance requires one manifest owner and two non-wrapper controls"
+                            .to_string(),
+                    );
+                }
+                let exclusions = self
+                    .upstream_exclusions
+                    .as_ref()
+                    .map_err(|err| format!("VBIC exclusion provenance is unavailable: {err}"))?;
+                if exclusions.contains_key(&Self::normalize_manifest_key(
+                    &self.relative_key(&owner_path),
+                )) {
+                    return Err(
+                        "VBIC DC wrapper owners must remain manifest-owned rather than exclusion-manifest records"
+                            .to_string(),
+                    );
+                }
+                for (control, expected_contract) in [
+                    (
+                        &multiplicity_path,
+                        XyceVbicDcWrapperFamilyRole::MultiplicityControl.contract(),
+                    ),
+                    (
+                        &polarity_path,
+                        XyceVbicDcWrapperFamilyRole::PolarityControl.contract(),
+                    ),
+                ] {
+                    let record = self.relative_key(control);
+                    let record_key = Self::normalize_manifest_key(&record);
+                    let exclusion = exclusions.get(&record_key).ok_or_else(|| {
+                        format!(
+                            "VBIC control has no retained upstream exclusion provenance: {record}"
+                        )
+                    })?;
+                    if Self::normalize_manifest_key(&exclusion.source)
+                        != format!("{relative_parent}/exclude")
+                        || !matches!(
+                            &exclusion.disposition,
+                            XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                                expected_contract: actual
+                            } if actual == expected_contract
+                        )
+                    {
+                        return Err(format!(
+                            "VBIC control '{record}' must retain its upstream exclude source and independently qualified contract '{expected_contract}'"
+                        ));
+                    }
+                }
+
+                let owner_source = fs::read_to_string(&owner_path)
+                    .map_err(|err| format!("failed to read VBIC owner: {err}"))?;
+                let multiplicity_source = fs::read_to_string(&multiplicity_path)
+                    .map_err(|err| format!("failed to read VBIC multiplicity control: {err}"))?;
+                let polarity_source = fs::read_to_string(&polarity_path)
+                    .map_err(|err| format!("failed to read VBIC polarity control: {err}"))?;
+                let expected_multiplicity =
+                    Self::vbic_dc_multiplicity_control_source(&owner_source)?;
+                if Self::normalize_vbic_dc_source(&multiplicity_source) != expected_multiplicity {
+                    return Err(format!(
+                        "VBIC multiplicity control '{}' is not the canonical M=100/current-scale transform of its owner",
+                        multiplicity_path.display()
+                    ));
+                }
+                let expected_polarity = Self::vbic_dc_polarity_control_source(&owner_source)?;
+                if Self::normalize_vbic_dc_source(&polarity_source) != expected_polarity {
+                    return Err(format!(
+                        "VBIC polarity control '{}' is not the canonical PNP/sign transform of its owner",
+                        polarity_path.display()
+                    ));
+                }
+
+                let owner_plan =
+                    self.static_dc_plan_for_path(&owner_path, ExpressionDialect::Xyce)?;
+                let multiplicity_plan =
+                    self.static_dc_plan_for_path(&multiplicity_path, ExpressionDialect::Xyce)?;
+                let polarity_plan =
+                    self.static_dc_plan_for_path(&polarity_path, ExpressionDialect::Xyce)?;
+                let owner_snapshot = Self::vbic_dc_family_plan_snapshot(&owner_plan)?;
+                if Self::vbic_dc_family_plan_snapshot(&multiplicity_plan)? != owner_snapshot
+                    || Self::vbic_dc_family_plan_snapshot(&polarity_plan)? != owner_snapshot
+                {
+                    return Err(format!(
+                        "VBIC DC controls for '{}' do not preserve the owner's DC/STEP/PRINT semantics",
+                        owner_path.display()
+                    ));
+                }
+
+                let reference_path = self
+                    .static_output_reference_path(&owner_path, "prn")
+                    .ok_or_else(|| "cannot map VBIC owner to OutputData".to_string())?;
+                if !reference_path.is_file() {
+                    return Err(format!(
+                        "VBIC DC wrapper owner has no checked-in gold PRN: {}",
+                        reference_path.display()
+                    ));
+                }
+                for control in [&multiplicity_path, &polarity_path] {
+                    if self
+                        .static_output_reference_path(control, "prn")
+                        .is_some_and(|path| path.exists())
+                    {
+                        return Err(format!(
+                            "VBIC relational control unexpectedly owns a direct gold PRN: {}",
+                            control.display()
+                        ));
+                    }
+                }
+                let step_res = owner_path.with_extension("cir.res.gs");
+                if owner_snapshot.steps.is_empty() == step_res.is_file() {
+                    return Err(format!(
+                        "VBIC owner '{}' must own a .res.gs artifact exactly when it has a .STEP sweep",
+                        owner_path.display()
+                    ));
+                }
+
+                let role = if Self::same_path(&deck.path, &owner_path) {
+                    Some(XyceVbicDcWrapperFamilyRole::Owner)
+                } else if Self::same_path(&deck.path, &multiplicity_path) {
+                    Some(XyceVbicDcWrapperFamilyRole::MultiplicityControl)
+                } else if Self::same_path(&deck.path, &polarity_path) {
+                    Some(XyceVbicDcWrapperFamilyRole::PolarityControl)
+                } else {
+                    None
+                };
+                if let Some(role) = role {
+                    selected = Some(XyceVbicDcWrapperFamilyContract {
+                        family: owner_path
+                            .file_stem()
+                            .unwrap()
+                            .to_string_lossy()
+                            .to_string(),
+                        owner_path,
+                        multiplicity_path,
+                        polarity_path,
+                        reference_path,
+                        role,
+                    });
+                }
+            }
+            if claimed.len() != 42 {
+                return Err(format!(
+                    "VBIC DC wrapper provenance must claim 42 distinct circuits, found {}",
+                    claimed.len()
+                ));
+            }
+            selected.ok_or_else(|| "requested deck is not a VBIC DC family member".to_string())
+        })())
+    }
+
+    pub(super) fn normalize_vbic_dc_source(source: &str) -> String {
+        let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
+        normalized.trim_end_matches('\n').to_string() + "\n"
+    }
+
+    fn replace_vbic_terminal_token(
+        line: &str,
+        expected: &str,
+        replacement: &str,
+    ) -> Option<String> {
+        let trimmed = line.trim_end();
+        let prefix = trimmed.strip_suffix(expected)?;
+        prefix
+            .chars()
+            .next_back()
+            .is_some_and(char::is_whitespace)
+            .then(|| format!("{prefix}{replacement}"))
+    }
+
+    pub(super) fn vbic_dc_multiplicity_control_source(
+        owner_source: &str,
+    ) -> Result<String, String> {
+        let owner = Self::normalize_vbic_dc_source(owner_source);
+        let mut output = Vec::new();
+        let mut cccs_count = 0usize;
+        let mut multiplicity_count = 0usize;
+        for line in owner.lines() {
+            let trimmed = line.trim_start();
+            if trimmed
+                .as_bytes()
+                .first()
+                .is_some_and(|byte| byte.eq_ignore_ascii_case(&b'f'))
+                && let Some(replaced) = Self::replace_vbic_terminal_token(line, "-1", "-0.01")
+            {
+                output.push(replaced);
+                cccs_count += 1;
+                continue;
+            }
+            if trimmed.to_ascii_lowercase().starts_with(".model ") {
+                output.push("+ m=100".to_string());
+                multiplicity_count += 1;
+            }
+            output.push(line.to_string());
+        }
+        if !(3..=4).contains(&cccs_count) || multiplicity_count != 1 {
+            return Err(format!(
+                "VBIC multiplicity transform requires three or four CCCS gains and one model boundary, found {cccs_count}/{multiplicity_count}"
+            ));
+        }
+        Ok(output.join("\n") + "\n")
+    }
+
+    pub(super) fn vbic_dc_polarity_control_source(owner_source: &str) -> Result<String, String> {
+        let owner = Self::normalize_vbic_dc_source(owner_source);
+        let mut output = Vec::new();
+        let mut inside_subcircuit = false;
+        let mut vcvs_count = 0usize;
+        let mut cccs_count = 0usize;
+        let mut model_count = 0usize;
+        for line in owner.lines() {
+            let trimmed = line.trim_start();
+            let folded = trimmed.to_ascii_lowercase();
+            if folded.starts_with(".subckt ") {
+                inside_subcircuit = true;
+            } else if folded == ".ends" || folded.starts_with(".ends ") {
+                inside_subcircuit = false;
+            }
+            if inside_subcircuit
+                && trimmed
+                    .as_bytes()
+                    .first()
+                    .is_some_and(|byte| byte.eq_ignore_ascii_case(&b'e'))
+                && let Some(replaced) = Self::replace_vbic_terminal_token(line, "1", "-1")
+            {
+                output.push(replaced);
+                vcvs_count += 1;
+                continue;
+            }
+            if inside_subcircuit
+                && trimmed
+                    .as_bytes()
+                    .first()
+                    .is_some_and(|byte| byte.eq_ignore_ascii_case(&b'f'))
+                && let Some(replaced) = Self::replace_vbic_terminal_token(line, "-1", "1")
+            {
+                output.push(replaced);
+                cccs_count += 1;
+                continue;
+            }
+            if folded.starts_with(".model ") {
+                let Some(index) = folded.find(" npn ") else {
+                    return Err("VBIC polarity transform requires an NPN model card".to_string());
+                };
+                let mut replaced = line.to_string();
+                replaced.replace_range(index + 1..index + 4, "pnp");
+                output.push(replaced);
+                model_count += 1;
+                continue;
+            }
+            output.push(line.to_string());
+        }
+        if !(3..=4).contains(&vcvs_count) || vcvs_count != cccs_count || model_count != 1 {
+            return Err(format!(
+                "VBIC polarity transform requires matched three/four VCVS/CCCS signs and one NPN model, found {vcvs_count}/{cccs_count}/{model_count}"
+            ));
+        }
+        Ok(output.join("\n") + "\n")
+    }
 }

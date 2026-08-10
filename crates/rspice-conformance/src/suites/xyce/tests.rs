@@ -533,6 +533,170 @@ fn xdm_replaceground_unit_table(axis_offset: Value, dependent: Value) -> XycePrn
 }
 
 #[test]
+fn vbic_dc_control_relations_preserve_strict_provenance_and_fail_closed_on_mutation() {
+    let owner = "* owner comment\n\
+        .SUBCKT mysub c b e\n\
+        E_C c_v 0 c 0 1\n\
+        F_C c 0 v_c -1\n\
+        E_B b_v 0 b 0 1\n\
+        F_B b 0 v_b -1\n\
+        E_E e_v 0 e 0 1\n\
+        F_E e 0 v_e -1\n\
+        Q1 c b e mymodel\n\
+        + sw_et=0\n\
+        .MODEL mymodel NPN LEVEL=11\n\
+        .ENDS\n";
+    let expected_m = XyceTestRunner::vbic_dc_multiplicity_control_source(owner)
+        .expect("derive canonical multiplicity relation");
+    assert_eq!(
+        XyceTestRunner::normalize_vbic_dc_source(&expected_m.replace('\n', "\r\n")),
+        expected_m,
+        "line-ending normalization must not weaken exact source provenance"
+    );
+    let expected_p = XyceTestRunner::vbic_dc_polarity_control_source(owner)
+        .expect("derive canonical polarity relation");
+    assert_eq!(
+        expected_p.matches(" 0 -1\n").count(),
+        3,
+        "all three subcircuit VCVS signs must flip"
+    );
+
+    let changed_gain = expected_m.replacen("v_c -0.01", "v_c -0.02", 1);
+    assert_ne!(
+        XyceTestRunner::normalize_vbic_dc_source(&changed_gain),
+        expected_m,
+        "a controlled-source topology/value mutation must fail qualification"
+    );
+    let changed_comment = format!("* changed provenance\n{expected_p}");
+    assert_ne!(
+        XyceTestRunner::normalize_vbic_dc_source(&changed_comment),
+        expected_p,
+        "fixture comments remain part of strict provenance"
+    );
+}
+
+#[test]
+fn vbic_dc_batch_verifier_preserves_step_boundaries_and_release_710_thresholds() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let netlist =
+        Netlist::parse("VBIC batch verifier fixture\n.END\n").expect("parse inert batch fixture");
+    let results = xdm_replaceground_unit_results();
+    let batches = vec![
+        XyceDcResultBatch {
+            netlist: netlist.clone(),
+            results: results.clone(),
+        },
+        XyceDcResultBatch {
+            netlist,
+            results: results.clone(),
+        },
+    ];
+    let table = XycePrnTable {
+        columns: vec![
+            "Index".to_string(),
+            "V(SWEEP)".to_string(),
+            "I(TEST)".to_string(),
+        ],
+        rows: (0..2)
+            .flat_map(|_| {
+                results
+                    .iter()
+                    .enumerate()
+                    .map(|(index, point)| vec![index as Value, point.sweep_value, 1.0])
+            })
+            .collect(),
+    };
+    let mut within = table.clone();
+    for row in &mut within.rows {
+        row[2] = 1.009;
+    }
+    assert!(
+        runner
+            .compare_release_7_10_xyce_verify_dc_batches(
+                "VBIC batch unit",
+                &table,
+                &within,
+                &batches,
+                &batches,
+            )
+            .expect("batch verifier accepts compatible layouts")
+            .is_empty(),
+        "0.9 normalized RMS must pass independently in each STEP batch"
+    );
+    let mut beyond = table.clone();
+    for row in &mut beyond.rows[results.len()..] {
+        row[2] = 1.011;
+    }
+    let mismatches = runner
+        .compare_release_7_10_xyce_verify_dc_batches(
+            "VBIC batch unit",
+            &table,
+            &beyond,
+            &batches,
+            &batches,
+        )
+        .expect("batch verifier reports threshold failures");
+    assert_eq!(mismatches.len(), 1);
+    assert_eq!(mismatches[0].row, 2 * results.len() - 1);
+    assert!(mismatches[0].probe.starts_with("STEP[1] "));
+
+    let mut broken_index = table.clone();
+    broken_index.rows[results.len()][0] = results.len() as Value;
+    assert!(
+        runner
+            .compare_release_7_10_xyce_verify_dc_batches(
+                "VBIC batch unit",
+                &table,
+                &broken_index,
+                &batches,
+                &batches,
+            )
+            .is_err(),
+        "each STEP batch must restart its serialized Index at zero"
+    );
+}
+
+#[test]
+fn vendored_vbic_dc_controls_have_exact_relational_qualification() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let deck = runner
+        .discover_netlist_tests()
+        .into_iter()
+        .find(|deck| {
+            deck.relative_path
+                .eq_ignore_ascii_case("Netlists/VBIC13/dcFo_3T_noFlip_P.cir")
+        })
+        .expect("discover promoted stepped VBIC polarity control");
+    let contract = runner
+        .vbic_dc_wrapper_family_contract(&deck)
+        .expect("recognize VBIC DC wrapper family")
+        .expect("qualify complete VBIC DC wrapper family");
+    assert_eq!(contract.role, XyceVbicDcWrapperFamilyRole::PolarityControl);
+    assert_eq!(contract.family, "dcfo_3t");
+    assert!(contract.reference_path.is_file());
+    assert!(contract.owner_path.with_extension("cir.res.gs").is_file());
+}
+
+#[test]
+fn unrelated_wrapper_owned_dc_directory_is_not_claimed_by_vbic_family() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let deck = runner
+        .discover_netlist_tests()
+        .into_iter()
+        .find(|deck| {
+            deck.relative_path
+                .eq_ignore_ascii_case("Netlists/ABM_SPLINES/akimaOutOfOrder.cir")
+        })
+        .expect("discover unrelated wrapper-owned DC deck");
+    assert!(
+        runner.vbic_dc_wrapper_family_contract(&deck).is_none(),
+        "VBIC recognition must be gated by retained VBIC control-promotion provenance"
+    );
+}
+
+#[test]
 fn dc_prn_comparison_prefers_exact_device_observable_over_voltage_like_name() {
     let source = "device-owned DC observable collision\n\
 VSWEEP sweep 0 0\n\

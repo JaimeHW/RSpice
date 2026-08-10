@@ -58,15 +58,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 123;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 151;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "ea6bf8b78d0510df524c2e67c39bbe2836057e99929d0a45d283d1e51c31c5f9";
+    "843e7b2ace619784e4d212d4e9a3abc2e262b00a0dbd0be81e7528e2d445cd2d";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "fdf9797e7224a16e775772b2318a91333f17bb688bace0829b8c1c7dd4f5255c";
+    "e613fb8076e88a8863b858835e96dcb8bca6026edcbab8862a3769b25ccd10ea";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "6e3aeff9a4b2e4c28a132afdd3ebcdafeb61a51fb82b9e4674dd992dccad5c92";
+    "d6b949797367774edf4b23b61dc1ac86ec2a1c4216d61c9d4b950c20b2724008";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -4903,6 +4903,33 @@ struct XyceNumberedRedefinitionDcFamilyContract {
     role: XyceNumberedRedefinitionDcFamilyRole,
 }
 
+#[derive(Debug, Clone)]
+struct XyceVbicDcWrapperFamilyContract {
+    family: String,
+    owner_path: PathBuf,
+    multiplicity_path: PathBuf,
+    polarity_path: PathBuf,
+    reference_path: PathBuf,
+    role: XyceVbicDcWrapperFamilyRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceVbicDcWrapperFamilyRole {
+    Owner,
+    MultiplicityControl,
+    PolarityControl,
+}
+
+impl XyceVbicDcWrapperFamilyRole {
+    fn contract(self) -> &'static str {
+        match self {
+            Self::Owner => "vbic_dc_wrapper_equivalence_family_owner",
+            Self::MultiplicityControl => "vbic_dc_wrapper_equivalence_family_multiplicity_control",
+            Self::PolarityControl => "vbic_dc_wrapper_equivalence_family_polarity_control",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceNumberedRedefinitionDcFamilyRole {
     Owner,
@@ -5395,6 +5422,26 @@ struct XyceBjtExternalNodeFamilySnapshot {
     elements: BTreeMap<String, XyceRelationalElementFingerprint>,
     bjt_model_bits: BTreeMap<String, u64>,
     representation: XyceBjtExternalNodeRepresentation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceVbicDcFamilyPlanSnapshot {
+    sweep_source: String,
+    sweep_start_bits: u64,
+    sweep_stop_bits: u64,
+    sweep_step_bits: u64,
+    probes: Vec<String>,
+    steps: Vec<XyceVbicDcStepSnapshot>,
+    subcircuit_ports: usize,
+    subcircuit_bjt_nodes: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceVbicDcStepSnapshot {
+    target: StepTarget,
+    name: String,
+    param_name: Option<String>,
+    values_bits: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

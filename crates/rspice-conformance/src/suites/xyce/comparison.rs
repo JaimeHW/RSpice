@@ -423,6 +423,76 @@ impl XyceTestRunner {
         Ok(mismatches)
     }
 
+    pub(super) fn compare_release_7_10_xyce_verify_dc_batches(
+        &self,
+        label: &str,
+        good: &XycePrnTable,
+        test: &XycePrnTable,
+        good_batches: &[XyceDcResultBatch],
+        test_batches: &[XyceDcResultBatch],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if good_batches.len() != test_batches.len() || good_batches.is_empty() {
+            return Err(format!(
+                "{label} STEP batch count differs: good={}, test={}",
+                good_batches.len(),
+                test_batches.len()
+            ));
+        }
+        let good_row_count = good_batches
+            .iter()
+            .map(|batch| batch.results.len())
+            .sum::<usize>();
+        let test_row_count = test_batches
+            .iter()
+            .map(|batch| batch.results.len())
+            .sum::<usize>();
+        if good.rows.len() != good_row_count || test.rows.len() != test_row_count {
+            return Err(format!(
+                "{label} table/batch row census differs: good={}/{good_row_count}, test={}/{test_row_count}",
+                good.rows.len(),
+                test.rows.len()
+            ));
+        }
+
+        let mut good_offset = 0usize;
+        let mut test_offset = 0usize;
+        let mut all_mismatches = Vec::new();
+        for (batch_index, (good_batch, test_batch)) in
+            good_batches.iter().zip(test_batches).enumerate()
+        {
+            let good_end = good_offset + good_batch.results.len();
+            let test_end = test_offset + test_batch.results.len();
+            let good_table = XycePrnTable {
+                columns: good.columns.clone(),
+                rows: good.rows[good_offset..good_end].to_vec(),
+            };
+            let test_table = XycePrnTable {
+                columns: test.columns.clone(),
+                rows: test.rows[test_offset..test_end].to_vec(),
+            };
+            let batch_label = format!("{label} STEP batch {batch_index}");
+            let mut mismatches = self.compare_release_7_10_xyce_verify_dc_tables(
+                &batch_label,
+                &good_table,
+                &test_table,
+                &good_batch.results,
+                &test_batch.results,
+            )?;
+            for mismatch in &mut mismatches {
+                mismatch.row += good_offset;
+                mismatch.probe = format!("STEP[{batch_index}] {}", mismatch.probe);
+            }
+            all_mismatches.extend(mismatches);
+            if all_mismatches.len() >= self.config.max_mismatches {
+                all_mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+            good_offset = good_end;
+            test_offset = test_end;
+        }
+        Ok(all_mismatches)
+    }
+
     pub(super) fn native_default_prn_tran_wrapper_tolerance(
         relative_path: &str,
     ) -> Option<XyceComparisonTolerance> {

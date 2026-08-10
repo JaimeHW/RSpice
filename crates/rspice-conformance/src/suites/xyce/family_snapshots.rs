@@ -7166,4 +7166,186 @@ impl XyceTestRunner {
                 .collect(),
         })
     }
+
+    pub(super) fn vbic_dc_family_plan_snapshot(
+        plan: &XyceStaticDcPlan,
+    ) -> Result<XyceVbicDcFamilyPlanSnapshot, String> {
+        if plan.expression_dialect != ExpressionDialect::Xyce
+            || plan.execution_dir.is_some()
+            || plan.dc_data.is_some()
+            || plan.print_format.is_some()
+            || plan.dc.sweep2.is_some()
+            || !matches!(plan.dc.mode, DcSweepMode::Linear)
+            || !plan.diagnostics.is_empty()
+            || plan.print.probes.is_empty()
+            || plan.steps.len() > 1
+        {
+            return Err(
+                "VBIC DC wrapper equivalence requires a diagnostic-free default-PRN linear DC plan with at most one STEP sweep"
+                    .to_string(),
+            );
+        }
+        let sweep_points = plan.dc.primary_spec().points();
+        if sweep_points.is_empty() || sweep_points.iter().any(|point| !point.is_finite()) {
+            return Err("VBIC DC wrapper sweep must contain finite points".to_string());
+        }
+
+        let netlist = Self::parse_netlist_with_expression_dialect_and_execution_dir(
+            &plan.source,
+            &plan.deck_path,
+            ExpressionDialect::Xyce,
+            None,
+        )
+        .map_err(|err| format!("failed to parse VBIC DC family member: {err}"))?;
+        let [subcircuit] = netlist.subcircuits.as_slice() else {
+            return Err(format!(
+                "VBIC DC wrapper member requires exactly one subcircuit, found {}",
+                netlist.subcircuits.len()
+            ));
+        };
+        if !matches!(subcircuit.ports.len(), 3 | 4)
+            || !subcircuit.nested_subcircuits.is_empty()
+            || !subcircuit.initial_conditions.is_empty()
+            || !subcircuit.node_sets.is_empty()
+        {
+            return Err(
+                "VBIC DC wrapper subcircuit must be a flat three- or four-terminal device fixture"
+                    .to_string(),
+            );
+        }
+        let subcircuit_bjts = subcircuit
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Bjt { .. }))
+            .collect::<Vec<_>>();
+        let [subcircuit_bjt] = subcircuit_bjts.as_slice() else {
+            return Err(format!(
+                "VBIC DC wrapper subcircuit requires exactly one BJT, found {}",
+                subcircuit_bjts.len()
+            ));
+        };
+        if subcircuit_bjt.nodes.len() != subcircuit.ports.len() {
+            return Err(
+                "VBIC DC wrapper BJT terminal count must match its subcircuit interface"
+                    .to_string(),
+            );
+        }
+        let top_instances = netlist
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Subcircuit { .. }))
+            .count();
+        if top_instances != 1 {
+            return Err(format!(
+                "VBIC DC wrapper member requires exactly one top-level subcircuit instance, found {top_instances}"
+            ));
+        }
+        let flattened = flatten_netlist_with_models(&netlist)
+            .map_err(|err| format!("failed to flatten VBIC DC family member: {err}"))?;
+        let flattened_bjts = flattened
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Bjt { .. }))
+            .collect::<Vec<_>>();
+        let [flattened_bjt] = flattened_bjts.as_slice() else {
+            return Err(format!(
+                "VBIC DC wrapper member must flatten to exactly one BJT, found {}",
+                flattened_bjts.len()
+            ));
+        };
+        if flattened_bjt.nodes.len() != subcircuit.ports.len() {
+            return Err("flattened VBIC BJT lost its qualified terminal count".to_string());
+        }
+        let ElementKind::Bjt { model, .. } = &flattened_bjt.kind else {
+            unreachable!("flattened_bjts contains only BJT elements")
+        };
+        let effective_model = Self::find_unique_model_in(
+            flattened.scoped_models.iter().chain(netlist.models.iter()),
+            model,
+        )
+        .ok_or_else(|| "flattened VBIC BJT does not resolve an effective model".to_string())?;
+        let expected_level: Value = if subcircuit.ports.len() == 3 {
+            11.0
+        } else {
+            12.0
+        };
+        let level = effective_model
+            .params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
+            .map(|(_, value)| *value)
+            .ok_or_else(|| "VBIC family model has no explicit LEVEL selector".to_string())?;
+        if level.to_bits() != expected_level.to_bits()
+            || !(effective_model.model_type.eq_ignore_ascii_case("NPN")
+                || effective_model.model_type.eq_ignore_ascii_case("PNP"))
+        {
+            return Err(format!(
+                "VBIC family requires NPN/PNP LEVEL={expected_level}, got {} LEVEL={level}",
+                effective_model.model_type
+            ));
+        }
+
+        let steps = plan
+            .steps
+            .iter()
+            .map(|step| {
+                let values = step.sweep.values();
+                if values.is_empty() || values.iter().any(|value| !value.is_finite()) {
+                    return Err("VBIC STEP sweep must contain finite values".to_string());
+                }
+                Ok(XyceVbicDcStepSnapshot {
+                    target: step.target,
+                    name: step.name.to_ascii_lowercase(),
+                    param_name: step
+                        .param_name
+                        .as_ref()
+                        .map(|name| name.to_ascii_lowercase()),
+                    values_bits: values.into_iter().map(Value::to_bits).collect(),
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok(XyceVbicDcFamilyPlanSnapshot {
+            sweep_source: plan.dc.source.to_ascii_lowercase(),
+            sweep_start_bits: plan.dc.start.to_bits(),
+            sweep_stop_bits: plan.dc.stop.to_bits(),
+            sweep_step_bits: plan.dc.step.to_bits(),
+            probes: plan
+                .print
+                .probes
+                .iter()
+                .map(|probe| Self::normalize_probe(probe))
+                .collect(),
+            steps,
+            subcircuit_ports: subcircuit.ports.len(),
+            subcircuit_bjt_nodes: subcircuit_bjt.nodes.len(),
+        })
+    }
+
+    pub(super) fn vbic_dc_result_batches_to_prn_table(
+        &self,
+        plan: &XyceStaticDcPlan,
+        batches: &[XyceDcResultBatch],
+    ) -> Result<XycePrnTable, String> {
+        if batches.is_empty() {
+            return Err("VBIC DC relational execution produced no result batches".to_string());
+        }
+        let mut batch_plan = plan.clone();
+        batch_plan.steps.clear();
+        let mut merged = None::<XycePrnTable>;
+        for batch in batches {
+            let table =
+                self.dc_results_to_prn_table(&batch_plan, &batch.netlist, &batch.results)?;
+            if let Some(merged) = merged.as_mut() {
+                if merged.columns != table.columns {
+                    return Err(
+                        "VBIC DC STEP batches produced inconsistent PRN columns".to_string()
+                    );
+                }
+                merged.rows.extend(table.rows);
+            } else {
+                merged = Some(table);
+            }
+        }
+        merged.ok_or_else(|| "VBIC DC relational execution produced no PRN table".to_string())
+    }
 }
