@@ -4,6 +4,9 @@
 
 use super::{DampingStrategy, IntegrationMethod, MatrixSolver, ValidationError};
 
+/// A named numerical policy: its label and how to build it.
+pub type NamedPreset = (&'static str, fn() -> SimulationOptions);
+
 /// Complete simulation options matching Cadence Spectre.
 ///
 /// These options control all aspects of simulation accuracy, convergence,
@@ -174,6 +177,40 @@ impl SimulationOptions {
             timestep_factor: 16.0,
             ..Default::default()
         }
+    }
+
+    /// The named presets, in the order a chooser should offer them: loosest
+    /// first, then the shipping default, then the two that trade time for
+    /// convergence.
+    pub const PRESETS: [NamedPreset; 4] = [
+        ("Fast", Self::fast),
+        ("Balanced", Self::default),
+        ("Accurate", Self::accurate),
+        ("Robust", Self::robust),
+    ];
+
+    /// Which named preset these options are exactly, if any.
+    ///
+    /// Compared by serialized value rather than by a remembered "last preset
+    /// pressed": editing any field leaves the preset, and reporting otherwise
+    /// would misstate what the next run will use. Returns `None` for options
+    /// that match no preset, which is a real state rather than an error.
+    #[must_use]
+    pub fn preset_name(&self) -> Option<&'static str> {
+        let current = serde_json::to_vec(self).ok()?;
+        Self::PRESETS.iter().find_map(|(label, build)| {
+            serde_json::to_vec(&build())
+                .ok()
+                .filter(|preset| *preset == current)
+                .map(|_| *label)
+        })
+    }
+
+    /// The active preset's name, or `Custom` when the options match none.
+    #[must_use]
+    pub fn preset_label(&self) -> String {
+        self.preset_name()
+            .map_or_else(|| "Custom".to_owned(), str::to_owned)
     }
 
     pub fn temp_kelvin(&self) -> f64 {

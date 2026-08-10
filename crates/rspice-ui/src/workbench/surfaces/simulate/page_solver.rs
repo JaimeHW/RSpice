@@ -29,50 +29,23 @@ use super::page_kit::{
     ledger_head, ledger_row, ledger_row_cells, rule_row,
 };
 
-/// A named policy: its label, how to build it, and what choosing it means.
-type Preset = (&'static str, fn() -> SimulationOptions, &'static str);
-
-/// Named numerical policies, in increasing cost.
-const PRESETS: [Preset; 4] = [
-    (
-        "Fast",
-        SimulationOptions::fast,
-        "Exploratory · relaxed update bounds · device bypass on",
-    ),
-    (
-        "Default",
-        SimulationOptions::default,
-        "SPICE-compatible defaults · full continuation ladder",
-    ),
-    (
-        "Accurate",
-        SimulationOptions::accurate,
-        "Tight update and residual bounds · verification intent",
-    ),
-    (
-        "Robust",
-        SimulationOptions::robust,
-        "Aggressive continuation · recovers a solve that stalls",
-    ),
+/// What choosing each named policy means, positionally matched to
+/// `SimulationOptions::PRESETS`.
+///
+/// The labels and the option sets belong to the options themselves, because
+/// the navigator reports the active policy too and cannot reach a page. Only
+/// this presentation copy lives here. `preset_intents_line_up_with_the_named_presets`
+/// pins the pairing.
+pub(super) const PRESET_INTENT: [&str; 4] = [
+    "Exploratory · relaxed update bounds · device bypass on",
+    "SPICE-compatible defaults · full continuation ladder",
+    "Tight update and residual bounds · verification intent",
+    "Aggressive continuation · recovers a solve that stalls",
 ];
 
 /// The preset the effective options match exactly, if any.
-///
-/// Reported by exact comparison rather than by remembering which chip was
-/// pressed: an edit to any field leaves the preset, and saying otherwise
-/// would misreport what the run is about to use.
 pub(super) fn active_preset(app: &RSpiceApp) -> Option<&'static str> {
-    let current = serde_json::to_vec(&app.state.sim_setup.options).ok()?;
-    PRESETS.iter().find_map(|(label, build, _)| {
-        serde_json::to_vec(&build())
-            .ok()
-            .filter(|preset| *preset == current)
-            .map(|_| *label)
-    })
-}
-
-pub(super) fn active_preset_label(app: &RSpiceApp) -> String {
-    active_preset(app).map_or_else(|| "Custom".to_owned(), str::to_owned)
+    app.state.sim_setup.options.preset_name()
 }
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -94,10 +67,11 @@ fn policy_strip(ui: &mut Ui, app: &mut RSpiceApp) {
     let active = active_preset(app);
     let summary = active
         .and_then(|label| {
-            PRESETS
+            SimulationOptions::PRESETS
                 .iter()
-                .find(|(name, _, _)| *name == label)
-                .map(|(_, _, summary)| (*summary).to_owned())
+                .position(|(name, _)| *name == label)
+                .and_then(|index| PRESET_INTENT.get(index))
+                .map(|summary| (*summary).to_owned())
         })
         .unwrap_or_else(|| {
             "Edited from a named preset · the resolved values below are what runs".to_owned()
@@ -119,9 +93,10 @@ fn policy_strip(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui.spacing_mut().item_spacing = egui::vec2(12.0, 8.0);
                 ui.scope(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    for (label, _, tooltip) in PRESETS {
-                        if preset_segment(ui, label, active == Some(label), tooltip) {
-                            requested = Some(label);
+                    for (index, (label, _)) in SimulationOptions::PRESETS.iter().enumerate() {
+                        let tooltip = PRESET_INTENT.get(index).copied().unwrap_or_default();
+                        if preset_segment(ui, label, active == Some(*label), tooltip) {
+                            requested = Some(*label);
                         }
                     }
                 });
@@ -160,7 +135,9 @@ fn policy_strip(ui: &mut Ui, app: &mut RSpiceApp) {
         });
 
     if let Some(label) = requested
-        && let Some((_, build, _)) = PRESETS.iter().find(|(name, _, _)| *name == label)
+        && let Some((_, build)) = SimulationOptions::PRESETS
+            .iter()
+            .find(|(name, _)| *name == label)
     {
         let options = build();
         app.state.sim_setup.options_draft = OptionsDialogState::from_options(&options);

@@ -256,6 +256,32 @@ fn every_edited_option_survives_a_draft_round_trip() {
     );
 }
 
+/// The solver strip pairs each preset with its intent by position, so the two
+/// lists have to stay the same length and in the same order. Getting this
+/// wrong would describe one policy while applying another.
+#[test]
+fn preset_intents_line_up_with_the_named_presets() {
+    assert_eq!(
+        SimulationOptions::PRESETS.len(),
+        super::page_solver::PRESET_INTENT.len()
+    );
+    let labels: Vec<&str> = SimulationOptions::PRESETS
+        .iter()
+        .map(|(label, _)| *label)
+        .collect();
+    assert_eq!(labels, ["Fast", "Balanced", "Accurate", "Robust"]);
+
+    // Each preset must recognize itself, and an edited set must recognize none.
+    for (label, build) in SimulationOptions::PRESETS {
+        assert_eq!(build().preset_name(), Some(label));
+        assert_eq!(build().preset_label(), label);
+    }
+    let mut edited = SimulationOptions::default();
+    edited.reltol *= 2.0;
+    assert_eq!(edited.preset_name(), None);
+    assert_eq!(edited.preset_label(), "Custom");
+}
+
 /// Presets must be distinguishable by exact comparison, because that is how
 /// the strip decides which chip is active. Two presets that serialize
 /// identically would make the strip report the wrong policy.

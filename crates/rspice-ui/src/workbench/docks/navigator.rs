@@ -843,7 +843,10 @@ fn simulate_nav_meta(app: &RSpiceApp, page: SimulationPage, analyses: &str) -> O
             .run_set_point_count()
             .map(|points| format!("{points} pt")),
         SimulationPage::Models => count(app.state.model_library_manager.libraries_sorted().len()),
-        SimulationPage::Solver => None,
+        // The active numerical policy, not a count — the tree's job is to say
+        // what each route currently holds, and for the solver that is which
+        // preset the effective options match.
+        SimulationPage::Solver => Some(app.state.sim_setup.options.preset_label()),
     }
 }
 
