@@ -1,0 +1,15 @@
+Title: * MPDE test of -r output ASCII format.
+Date: Mon Oct 07 03:48:34 2019
+Plotname: Transient Analysis
+Flags: real
+No. Variables: 3
+No. Points: 1                 
+Variables:
+	0	time	time
+	1	V(1)	voltage
+	2	L1#branch	current
+Values:
+0	2.96043000e-09
+	5.75169912e-01
+	4.71300317e-05
+
