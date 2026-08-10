@@ -2274,14 +2274,16 @@ struct SignalRowResponses {
     favorite: Option<egui::Response>,
 }
 
-/// One retained quantity, in the mockup's two-register anatomy: a plot
+/// One retained quantity, in the mockup's two-register anatomy: a selection
 /// checkbox column, the name with its persistent favorite flag and a
 /// right-aligned preview value, and the typed metadata line beneath.
 ///
-/// The favorite flag and the favorite *action* are deliberately different
-/// marks. The flag states membership on an idle row; the action cluster
-/// appears on hover and takes the value column, so a resting list stays pure
-/// data instead of carrying a column of controls down the panel.
+/// Each mark states exactly one fact. The checkbox is batch membership; the
+/// name's ink is plot membership; the favorite flag is a saved preference.
+/// The flag and the favorite *action* are deliberately different marks — the
+/// flag states membership on an idle row, while the action cluster appears on
+/// hover and takes the value column, so a resting list stays pure data
+/// instead of carrying a column of controls down the panel.
 fn result_quantity_row(
     ui: &mut Ui,
     id: egui::Id,
@@ -2353,8 +2355,10 @@ fn result_quantity_row(
         ui.painter().rect_filled(rect, 0.0, c.bg_hover);
     }
 
-    // Plot membership reads as a checkbox, filled in the trace's own colour
-    // so the row still answers "which curve is this" without a swatch column.
+    // The checkbox states one thing: whether this row is in the batch. It
+    // used to double as the plot-membership light, tinted in the trace's
+    // colour, which left an unselected-but-plotted row looking checked.
+    // Plot membership moved to the name below.
     let box_rect = egui::Rect::from_center_size(visibility_rect.center(), egui::vec2(13.0, 13.0));
     if checked {
         ui.painter().rect_stroke(
@@ -2365,14 +2369,6 @@ fn result_quantity_row(
         );
         ui.painter()
             .rect_filled(box_rect.shrink(3.0), 1.0, c.accent);
-    } else if visible {
-        ui.painter().rect_stroke(
-            box_rect,
-            3.0,
-            egui::Stroke::new(1.0, color),
-            egui::StrokeKind::Inside,
-        );
-        ui.painter().rect_filled(box_rect.shrink(3.0), 1.0, color);
     } else {
         ui.painter().rect_filled(box_rect, 3.0, c.bg_panel);
         ui.painter().rect_stroke(
@@ -2384,6 +2380,11 @@ fn result_quantity_row(
     }
 
     // Two baselines inside the row: identity above, typed metadata below.
+    //
+    // The name carries the trace's own colour while the signal is plotted,
+    // so the list answers "which curve is this" in the place the eye already
+    // is — no swatch column, and no second meaning loaded onto the checkbox.
+    // A signal that is not on a pane stays neutral.
     let name_y = rect.top() + 11.0;
     let meta_y = rect.top() + 25.0;
     let text_left = selection_rect.left();
@@ -2394,7 +2395,7 @@ fn result_quantity_row(
             egui::Align2::LEFT_CENTER,
             name,
             theme::mono(tokens::FS_0, FontWeight::Regular),
-            if visible { c.text } else { c.text_dim },
+            if visible { color } else { c.text_dim },
         )
         .right();
     if favorite {
