@@ -1312,10 +1312,14 @@ fn pane_y_range(
     if !min.is_finite() {
         return None;
     }
-    if min == max {
+    let pad = (max - min) * 0.08;
+    // A span that cannot survive its own padding is flat as far as any axis
+    // can draw it: exactly constant, or constant to within a few ulps. Both
+    // widen the same way, because a range finer than the tick ladder can
+    // subdivide leaves the pane with no labels at all.
+    if pad <= 0.0 {
         return Some((min - 1.0, max + 1.0));
     }
-    let pad = (max - min) * 0.08;
     Some((min - pad, max + pad))
 }
 
