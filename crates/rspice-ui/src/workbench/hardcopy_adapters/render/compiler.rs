@@ -1536,12 +1536,8 @@ impl<'a> SemanticSceneCompiler<'a> {
             .as_ref()
             .and_then(|binding| binding.builtin_xspice.as_ref())
             .and_then(|contract| {
-                let (width, height) = component.symbol_dimensions();
-                let offsets = component
-                    .instance_pin_layout()
-                    .into_iter()
-                    .map(|(_, offset)| offset)
-                    .collect::<Vec<_>>();
+                let (width, height) = component.artwork_dimensions();
+                let offsets = component.artwork_pin_offsets();
                 library
                     .asset_matches_terminal_offsets(
                         &contract.symbol_asset,
@@ -1561,6 +1557,7 @@ impl<'a> SemanticSceneCompiler<'a> {
                     })
                     .flatten()
             });
+        let drew_builtin_asset = builtin_asset.is_some();
         let (symbol, rotation, target_width, target_height) = if let Some(asset) = builtin_asset {
             asset
         } else if component
@@ -1666,6 +1663,9 @@ impl<'a> SemanticSceneCompiler<'a> {
             }
             flush(self, &mut points)?;
         }
+        if drew_builtin_asset {
+            self.artwork_lead_extensions(component, stroke)?;
+        }
         Ok(())
     }
 
@@ -1674,8 +1674,6 @@ impl<'a> SemanticSceneCompiler<'a> {
         component: &Component,
         stroke: StrokeStyle,
     ) -> Result<(), HardcopyRenderError> {
-        let (_, height) = component.symbol_dimensions();
-        let half_body_height = (height / 2 - 5).max(15);
         let world = |local: crate::state::Point| {
             let transformed = component.transform_point(local);
             SchematicPoint::new(
@@ -1683,11 +1681,13 @@ impl<'a> SemanticSceneCompiler<'a> {
                 component.pos.y.saturating_add(transformed.y),
             )
         };
+        let block = component.instance_block();
+        let (min, max) = block.body;
         let corners = [
-            world(crate::state::Point::new(-20, -half_body_height)),
-            world(crate::state::Point::new(20, -half_body_height)),
-            world(crate::state::Point::new(20, half_body_height)),
-            world(crate::state::Point::new(-20, half_body_height)),
+            world(min),
+            world(crate::state::Point::new(max.x, min.y)),
+            world(max),
+            world(crate::state::Point::new(min.x, max.y)),
         ];
         self.primitives.push(ScenePrimitive::Polyline {
             points: corners
@@ -1699,37 +1699,52 @@ impl<'a> SemanticSceneCompiler<'a> {
             fill: None,
         });
 
-        for (name, terminal) in component.instance_pin_layout() {
-            let inner = if terminal.y.abs() > half_body_height {
-                crate::state::Point::new(terminal.x, terminal.y.signum() * half_body_height)
-            } else {
-                crate::state::Point::new(terminal.x.signum() * 20, terminal.y)
-            };
+        for pin in block.pins {
+            let inner = crate::state::lead_inner(pin.offset, pin.side, Some(block.body));
             self.primitives.push(ScenePrimitive::Line {
-                from: self.schematic_point(world(terminal))?,
+                from: self.schematic_point(world(pin.offset))?,
                 to: self.schematic_point(world(inner))?,
                 stroke,
             });
             self.primitives.push(ScenePrimitive::Circle {
-                center: self.schematic_point(world(terminal))?,
+                center: self.schematic_point(world(pin.offset))?,
                 radius: Length::from_micrometres(500),
                 stroke: Some(stroke),
                 fill: None,
             });
-            if let Some(name) = name {
-                let inset = if terminal.y.abs() > half_body_height {
-                    crate::state::Point::new(inner.x, inner.y - inner.y.signum() * 3)
-                } else {
-                    crate::state::Point::new(inner.x - inner.x.signum() * 3, inner.y)
-                };
+            if !pin.name.is_empty() {
+                let anchor = crate::state::pin_label_anchor(pin.offset, pin.side, Some(block.body));
                 self.add_text(
-                    self.schematic_point(world(inset))?,
-                    &name,
+                    self.schematic_point(world(anchor))?,
+                    &crate::state::fit_pin_name(&pin.name),
                     SceneFont::Sans,
                     1_900,
                     stroke.color,
                 )?;
             }
+        }
+        Ok(())
+    }
+
+    /// Carry artwork leads out to terminals the drawing itself does not reach.
+    fn artwork_lead_extensions(
+        &mut self,
+        component: &Component,
+        stroke: StrokeStyle,
+    ) -> Result<(), HardcopyRenderError> {
+        let world = |local: crate::state::Point| {
+            let transformed = component.transform_point(local);
+            SchematicPoint::new(
+                component.pos.x.saturating_add(transformed.x),
+                component.pos.y.saturating_add(transformed.y),
+            )
+        };
+        for (edge, terminal) in component.artwork_lead_extensions() {
+            self.primitives.push(ScenePrimitive::Line {
+                from: self.schematic_point(world(edge))?,
+                to: self.schematic_point(world(terminal))?,
+                stroke,
+            });
         }
         Ok(())
     }

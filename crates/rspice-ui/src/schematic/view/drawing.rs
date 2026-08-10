@@ -12,7 +12,7 @@ use crate::workbench::app_state::AppState;
 
 use super::super::symbols::{SymbolLibrary, draw_baked};
 use super::SchematicSymbolContext;
-use super::resolved_symbol_render::draw_resolved_symbol_with_visibility;
+use super::resolved_symbol_render::{draw_resolved_symbol_with_visibility, pin_label_align};
 use super::symbol_primitives::{
     draw_capacitor_symbol, draw_cccs_symbol, draw_ccvs_symbol, draw_diode_symbol,
     draw_ground_symbol, draw_inductor_symbol, draw_isource_symbol, draw_nmos_symbol,
@@ -468,6 +468,7 @@ pub(super) fn draw_component(
             })
             .is_some_and(|baked| {
                 draw_baked(painter, &baked, pos, scale, stroke);
+                draw_artwork_lead_extensions(painter, pos, scale, component, stroke);
                 true
             })
     } else if let Some(library) = symbol_library {
@@ -581,8 +582,14 @@ pub(super) fn draw_component(
 
     // Smart label placement based on component type, rotation, and dimensions
     // Commercial EDA tools (Cadence Virtuoso) place labels to avoid overlapping
-    // terminals and component body, with name/value on opposite sides
-    if resolved_cell_symbol.is_none()
+    // terminals and component body, with name/value on opposite sides.
+    //
+    // A generated block prints its own name and value against the anchors in
+    // its symbol document; everything else — including a cell instance drawn
+    // with authored artwork — is labelled here, so no placed instance can end
+    // up without its reference designator.
+    let symbol_drew_its_own_labels = resolved_cell_symbol.is_some() && !svg_rendered;
+    if !symbol_drew_its_own_labels
         && parameter_labels != crate::state::SchematicParameterLabelVisibility::Hidden
     {
         draw_component_labels(painter, pos, scale, component, parameter_labels);
@@ -597,12 +604,8 @@ pub(super) fn compatible_builtin_xspice_asset<'a>(
     library: &'a SymbolLibrary,
 ) -> Option<(&'a SymbolLibrary, &'a str, f32, f32)> {
     let contract = component.library_cell.as_ref()?.builtin_xspice.as_ref()?;
-    let (width, height) = component.symbol_dimensions();
-    let offsets = component
-        .instance_pin_layout()
-        .into_iter()
-        .map(|(_, offset)| offset)
-        .collect::<Vec<_>>();
+    let (width, height) = component.artwork_dimensions();
+    let offsets = component.artwork_pin_offsets();
     library
         .asset_matches_terminal_offsets(
             &contract.symbol_asset,
@@ -616,6 +619,28 @@ pub(super) fn compatible_builtin_xspice_asset<'a>(
             width as f32,
             height as f32,
         ))
+}
+
+/// Carry artwork leads out to terminals the drawing itself does not reach,
+/// which happens when a long interface widens the block past the size the
+/// artwork was authored for.
+pub(super) fn draw_artwork_lead_extensions(
+    painter: &Painter,
+    pos: Pos2,
+    scale: f32,
+    component: &Component,
+    stroke: Stroke,
+) {
+    for (edge, terminal) in component.artwork_lead_extensions() {
+        let to_screen = |point: crate::state::Point| {
+            let transformed = component.transform_point(point);
+            Pos2::new(
+                pos.x + transformed.x as f32 * scale,
+                pos.y + transformed.y as f32 * scale,
+            )
+        };
+        painter.line_segment([to_screen(edge), to_screen(terminal)], stroke);
+    }
 }
 
 /// Interface port: a flag whose tip is the attachment point at (-10, 0).
@@ -698,52 +723,37 @@ pub(super) fn draw_cell_instance_symbol(
         Pos2::new(pos.x + t.x as f32 * scale, pos.y + t.y as f32 * scale)
     };
 
-    let (_, height) = component.symbol_dimensions();
-    let hh_body = (height / 2 - 5).max(15);
+    let block = component.instance_block();
+    let (min, max) = block.body;
     let corners = [
-        to_screen(Point::new(-20, -hh_body)),
-        to_screen(Point::new(20, -hh_body)),
-        to_screen(Point::new(20, hh_body)),
-        to_screen(Point::new(-20, hh_body)),
+        to_screen(min),
+        to_screen(Point::new(max.x, min.y)),
+        to_screen(max),
+        to_screen(Point::new(min.x, max.y)),
     ];
     for i in 0..4 {
         painter.line_segment([corners[i], corners[(i + 1) % 4]], stroke);
     }
 
-    // Pin stubs from each terminal to the body edge, a connection dot at
-    // the terminal, and the port name just inside the body.
-    let label_font = 6.5 * scale;
-    let pin_layout = component.instance_pin_layout();
-    for (name, offset) in pin_layout {
-        let inner = if offset.y.abs() > hh_body {
-            Point::new(offset.x, offset.y.signum() * hh_body) // supply rail
-        } else {
-            Point::new(offset.x.signum() * 20, offset.y) // side pin
-        };
-        painter.line_segment([to_screen(offset), to_screen(inner)], stroke);
-        painter.circle_filled(to_screen(offset), 1.6 * scale, stroke.color);
+    // Pin leads from each terminal to the body edge its own side implies, a
+    // connection dot at the terminal, and the port name just inside the body.
+    let label_font = crate::state::GENERATED_PIN_LABEL_SIZE * scale;
+    for pin in block.pins {
+        let inner = crate::state::lead_inner(pin.offset, pin.side, Some(block.body));
+        painter.line_segment([to_screen(pin.offset), to_screen(inner)], stroke);
+        painter.circle_filled(to_screen(pin.offset), 1.6 * scale, stroke.color);
 
-        let Some(name) = name else { continue };
-        if label_font < 4.0 {
+        if pin.name.is_empty() || label_font < 4.0 {
             continue;
         }
-        // Anchor the text toward the body center from the pin's edge.
-        let (anchor, text_pos) = if offset.y.abs() > hh_body {
-            let inset = Point::new(inner.x, inner.y - inner.y.signum() * 3);
-            (egui::Align2::CENTER_CENTER, to_screen(inset))
-        } else {
-            let inset = Point::new(inner.x - inner.x.signum() * 3, inner.y);
-            let anchor = if component.transform_point(inner).x < 0 {
-                egui::Align2::LEFT_CENTER
-            } else {
-                egui::Align2::RIGHT_CENTER
-            };
-            (anchor, to_screen(inset))
-        };
         painter.text(
-            text_pos,
-            anchor,
-            name,
+            to_screen(crate::state::pin_label_anchor(
+                pin.offset,
+                pin.side,
+                Some(block.body),
+            )),
+            pin_label_align(component, pin.side),
+            crate::state::fit_pin_name(&pin.name),
             crate::ui::theme::mono(label_font, crate::ui::theme::FontWeight::Regular),
             stroke.color.gamma_multiply(0.75),
         );
@@ -1092,6 +1102,92 @@ mod tests {
             compatible_builtin_xspice_asset(&component("nco"), &library).is_none(),
             "the compact NCO bus artwork must not impersonate seven scalar wire terminals"
         );
+    }
+
+    /// Every catalog device whose artwork was authored for its own interface
+    /// must keep drawing that artwork. Sizing a generated block to its pin
+    /// names must never cost a device its glyph, and must never stretch one.
+    #[test]
+    fn every_catalog_device_with_matching_artwork_still_draws_it_undistorted() {
+        const ARTWORK_DEVICES: [&str; 23] = [
+            "astate",
+            "cmeter",
+            "d_fdiv",
+            "d_open_c",
+            "d_open_e",
+            "d_osc",
+            "d_pwm",
+            "d_source",
+            "d_xnor",
+            "file_source",
+            "hyst",
+            "lmeter",
+            "pwl",
+            "pwlts",
+            "real_gain",
+            "real_to_v",
+            "s_xfer",
+            "sine",
+            "slew",
+            "square",
+            "table2d",
+            "triangle",
+            "xfer",
+        ];
+
+        let library = SymbolLibrary::load_embedded().expect("symbol library");
+        let mut matched = Vec::new();
+        for descriptor in crate::state::engine_only_xspice_devices() {
+            let Ok(binding) = crate::state::builtin_xspice_library_binding(descriptor) else {
+                continue;
+            };
+            let component = Component::new(1, ComponentType::CellInstance, Point::origin())
+                .with_library_cell(binding);
+            if compatible_builtin_xspice_asset(&component, &library).is_none() {
+                continue;
+            }
+            matched.push(descriptor.model_type);
+            let (artwork_width, artwork_height) = component.artwork_dimensions();
+            let (_, height) = component.symbol_dimensions();
+            assert_eq!(
+                (artwork_width, artwork_height),
+                (crate::state::GENERATED_WIDTH, height),
+                "{} artwork must be drawn in the box it was authored for",
+                descriptor.model_type
+            );
+        }
+
+        assert_eq!(
+            matched, ARTWORK_DEVICES,
+            "the set of catalog devices drawn with authored artwork changed"
+        );
+    }
+
+    /// A block widened for its pin names still carries its artwork out to the
+    /// terminals, so nothing is left floating off the drawing.
+    #[test]
+    fn artwork_leads_extend_to_terminals_the_drawing_does_not_reach() {
+        let descriptor = crate::state::engine_only_xspice_devices()
+            .iter()
+            .find(|descriptor| descriptor.model_type == "d_fdiv")
+            .expect("catalog descriptor");
+        let binding =
+            crate::state::builtin_xspice_library_binding(descriptor).expect("catalog binding");
+        let component = Component::new(1, ComponentType::CellInstance, Point::origin())
+            .with_library_cell(binding);
+
+        let (width, _) = component.symbol_dimensions();
+        assert!(
+            width > crate::state::GENERATED_WIDTH,
+            "freq_in/freq_out do not fit the nominal body"
+        );
+        let extensions = component.artwork_lead_extensions();
+        assert_eq!(extensions.len(), 2, "{extensions:?}");
+        for (edge, terminal) in extensions {
+            assert_eq!(edge.y, terminal.y, "a lead extension must run straight");
+            assert_eq!(edge.x.abs(), crate::state::GENERATED_WIDTH / 2);
+            assert_eq!(terminal.x.abs(), width / 2);
+        }
     }
 
     #[test]

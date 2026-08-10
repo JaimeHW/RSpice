@@ -36,31 +36,14 @@ pub(super) fn write_cell_instance_symbol(
     component: &Component,
     config: &SvgExportConfig,
 ) {
-    let cx = component.pos.x as f64 * config.grid_size;
-    let cy = component.pos.y as f64 * config.grid_size;
-    let (_, height) = component.symbol_dimensions();
-    let half_body_height = (height / 2 - 5).max(15);
-    let local = |point: crate::state::Point| {
-        let x = if component.mirror_h {
-            -point.x
-        } else {
-            point.x
-        };
-        let y = if component.mirror_v {
-            -point.y
-        } else {
-            point.y
-        };
-        (
-            cx + f64::from(x) * config.grid_size,
-            cy + f64::from(y) * config.grid_size,
-        )
-    };
+    let local = instance_projection(component, config);
+    let block = component.instance_block();
+    let (min, max) = block.body;
     let corners = [
-        local(crate::state::Point::new(-20, -half_body_height)),
-        local(crate::state::Point::new(20, -half_body_height)),
-        local(crate::state::Point::new(20, half_body_height)),
-        local(crate::state::Point::new(-20, half_body_height)),
+        local(min),
+        local(crate::state::Point::new(max.x, min.y)),
+        local(max),
+        local(crate::state::Point::new(min.x, max.y)),
     ];
     writeln!(
         svg,
@@ -75,14 +58,13 @@ pub(super) fn write_cell_instance_symbol(
         corners[3].1,
     )
     .unwrap();
-    for (name, terminal) in component.instance_pin_layout() {
-        let inner = if terminal.y.abs() > half_body_height {
-            crate::state::Point::new(terminal.x, terminal.y.signum() * half_body_height)
-        } else {
-            crate::state::Point::new(terminal.x.signum() * 20, terminal.y)
-        };
-        let terminal = local(terminal);
-        let inner = local(inner);
+    for pin in block.pins {
+        let inner = local(crate::state::lead_inner(
+            pin.offset,
+            pin.side,
+            Some(block.body),
+        ));
+        let terminal = local(pin.offset);
         writeln!(
             svg,
             r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
@@ -98,16 +80,75 @@ pub(super) fn write_cell_instance_symbol(
             1.6 * config.grid_size,
         )
         .unwrap();
-        if let Some(name) = name {
-            writeln!(
-                svg,
-                r#"<text class="text" x="{}" y="{}" text-anchor="middle">{}</text>"#,
-                inner.0,
-                inner.1,
-                super::escape_xml(&name),
-            )
-            .unwrap();
+        if pin.name.is_empty() {
+            continue;
         }
+        let (x, y) = local(crate::state::pin_label_anchor(
+            pin.offset,
+            pin.side,
+            Some(block.body),
+        ));
+        let (anchor, baseline) = pin_label_anchoring(component, pin.side);
+        writeln!(
+            svg,
+            r#"<text class="text" x="{x}" y="{y}" text-anchor="{anchor}" dominant-baseline="{baseline}">{}</text>"#,
+            super::escape_xml(&crate::state::fit_pin_name(&pin.name)),
+        )
+        .unwrap();
+    }
+}
+
+/// Carry artwork leads out to terminals the drawing itself does not reach.
+pub(super) fn write_artwork_lead_extensions(
+    svg: &mut String,
+    component: &Component,
+    config: &SvgExportConfig,
+) {
+    let local = instance_projection(component, config);
+    for (edge, terminal) in component.artwork_lead_extensions() {
+        let edge = local(edge);
+        let terminal = local(terminal);
+        writeln!(
+            svg,
+            r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+            edge.0, edge.1, terminal.0, terminal.1
+        )
+        .unwrap();
+    }
+}
+
+/// Symbol-local point to page coordinates for one placed instance.
+fn instance_projection<'a>(
+    component: &'a Component,
+    config: &'a SvgExportConfig,
+) -> impl Fn(crate::state::Point) -> (f64, f64) + 'a {
+    let cx = component.pos.x as f64 * config.grid_size;
+    let cy = component.pos.y as f64 * config.grid_size;
+    move |point| {
+        let transformed = component.transform_point(point);
+        (
+            cx + f64::from(transformed.x) * config.grid_size,
+            cy + f64::from(transformed.y) * config.grid_size,
+        )
+    }
+}
+
+/// SVG text anchoring that places a pin name the way the canvas does.
+fn pin_label_anchoring(
+    component: &Component,
+    side: crate::state::SymbolPinSide,
+) -> (&'static str, &'static str) {
+    let inward = component.transform_point(crate::state::inward_step(side));
+    if inward.x.abs() >= inward.y.abs() {
+        if inward.x >= 0 {
+            ("start", "central")
+        } else {
+            ("end", "central")
+        }
+    } else if inward.y >= 0 {
+        ("middle", "hanging")
+    } else {
+        ("middle", "text-after-edge")
     }
 }
 
@@ -124,6 +165,8 @@ pub(super) fn write_catalog_asset_symbol(
     let (symbol_cx, symbol_cy) = symbol.center();
     let scale_x = f64::from(target_width / symbol.width().max(0.001)) * config.grid_size;
     let scale_y = f64::from(target_height / symbol.height().max(0.001)) * config.grid_size;
+    let radians = f64::from(component.rotation.degrees()).to_radians();
+    let (cosine, sine) = (radians.cos(), radians.sin());
     let point = |x: f32, y: f32| {
         let mut x = (f64::from(x) - f64::from(symbol_cx)) * scale_x;
         let mut y = (f64::from(y) - f64::from(symbol_cy)) * scale_y;
@@ -133,7 +176,7 @@ pub(super) fn write_catalog_asset_symbol(
         if component.mirror_v {
             y = -y;
         }
-        (cx + x, cy + y)
+        (cx + x * cosine - y * sine, cy + x * sine + y * cosine)
     };
     for path in &symbol.paths {
         let mut data = String::new();

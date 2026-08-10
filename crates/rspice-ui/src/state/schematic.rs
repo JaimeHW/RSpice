@@ -122,7 +122,10 @@ pub use rotation::Rotation;
 pub use selection::{JunctionSelection, SchematicSelectionFilter, Selection};
 pub use snap::{SnapEngine, SnapResult, SnapTarget, SnapTargetType};
 pub use state::{MoveSelectionMode, SchematicState, StretchOrthogonalPolicy, StretchTarget};
-pub use symbol_gen::generate_symbol;
+pub use symbol_gen::{
+    GENERATED_PIN_LABEL_SIZE, GENERATED_WIDTH, fit_pin_name, generate_symbol, inward_step,
+    lead_inner, pin_label_anchor,
+};
 pub use tool::Tool;
 pub use undo_history::SchematicSnapshot;
 pub use validated_revision::{

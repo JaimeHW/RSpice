@@ -120,7 +120,7 @@ pub use symbol::{
     MAX_SYMBOL_DOCUMENT_BYTES, MAX_SYMBOL_PIN_NAME_BYTES, MAX_SYMBOL_TEXT_BYTES, PinFindingKind,
     PinSummary, SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY, SYMBOL_TERMINAL_GRID,
     SymbolAttribute, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata, SymbolPin,
-    SymbolPinElectricalKind, SymbolShape, SymbolTextObject,
+    SymbolPinElectricalKind, SymbolShape, SymbolTextObject, pin_side_against_body,
 };
 pub use symbol_resolver::{
     ResolvedCellSymbol, ResolvedSymbolIssueKind, ResolvedSymbolSource, SymbolResolver,
