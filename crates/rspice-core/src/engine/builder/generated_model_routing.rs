@@ -589,26 +589,34 @@ fn generated_params(
     if let Some(model) = model_def {
         for (name, value) in &model.params {
             if should_pass_model_param(target, name) {
-                params.push(generated_model_card_assignment(
+                if let Some(assignment) = generated_model_card_assignment(
                     target,
                     name,
                     ParametricValue::Resolved(*value),
                     spice_dialect,
-                )?);
+                )? {
+                    params.push(assignment);
+                }
             }
         }
         for (name, expr) in &model.expr_params {
             if should_pass_model_param(target, name) {
-                params.push(generated_model_card_assignment(
+                if let Some(assignment) = generated_model_card_assignment(
                     target,
                     name,
                     ParametricValue::Expression(expr.clone()),
                     spice_dialect,
-                )?);
+                )? {
+                    params.push(assignment);
+                }
             }
         }
         for (name, value) in &model.string_params {
             if should_pass_model_param(target, name) {
+                let Some(scope) = generated_model_parameter_scope(target, name, spice_dialect)?
+                else {
+                    continue;
+                };
                 if name.eq_ignore_ascii_case("VERSION") {
                     let version = parse_dotted_version_metadata(value).ok_or_else(|| {
                         SimulationError::Circuit(format!(
@@ -616,11 +624,12 @@ fn generated_params(
                             target.model_name, value, model.name
                         ))
                     })?;
-                    params.push(generated_model_card_assignment(
+                    params.push(generated_model_card_assignment_for_scope(
                         target,
                         name,
                         ParametricValue::Resolved(version),
                         spice_dialect,
+                        scope,
                     )?);
                     continue;
                 }
@@ -642,13 +651,51 @@ fn generated_model_card_assignment(
     name: &str,
     value: ParametricValue,
     spice_dialect: crate::config::SpiceDialect,
-) -> Result<BuiltinParameterAssignment, SimulationError> {
-    let scope = builtins::parameter_scope(target.model_name, name).ok_or_else(|| {
-        SimulationError::Circuit(format!(
+) -> Result<Option<BuiltinParameterAssignment>, SimulationError> {
+    let Some(scope) = generated_model_parameter_scope(target, name, spice_dialect)? else {
+        return Ok(None);
+    };
+    Ok(Some(generated_model_card_assignment_for_scope(
+        target,
+        name,
+        value,
+        spice_dialect,
+        scope,
+    )?))
+}
+
+fn generated_model_parameter_scope(
+    target: GeneratedTarget,
+    name: &str,
+    spice_dialect: crate::config::SpiceDialect,
+) -> Result<Option<GeneratedVerilogAParameterScope>, SimulationError> {
+    let Some(scope) = builtins::parameter_scope(target.model_name, name) else {
+        if spice_dialect == crate::config::SpiceDialect::Xyce {
+            // Xyce warns and ignores model-card names that the selected ADMS
+            // device does not declare. Preserve that compatibility behavior
+            // without inventing aliases or weakening canonical assignments.
+            log::warn!(
+                "Generated Verilog-A model '{}' has no declared model parameter '{}'; parameter ignored in Xyce compatibility mode",
+                target.model_name,
+                name
+            );
+            return Ok(None);
+        }
+        return Err(SimulationError::Circuit(format!(
             "Generated Verilog-A model '{}' has no unambiguous declaration-scope metadata for model-card parameter '{}'",
             target.model_name, name
-        ))
-    })?;
+        )));
+    };
+    Ok(Some(scope))
+}
+
+fn generated_model_card_assignment_for_scope(
+    target: GeneratedTarget,
+    name: &str,
+    value: ParametricValue,
+    spice_dialect: crate::config::SpiceDialect,
+    scope: GeneratedVerilogAParameterScope,
+) -> Result<BuiltinParameterAssignment, SimulationError> {
     let origin = match scope {
         GeneratedVerilogAParameterScope::Model | GeneratedVerilogAParameterScope::Dual => {
             GeneratedParameterOrigin::ModelCard
@@ -1062,5 +1109,52 @@ mod tests {
                 "unexpected scope error: {message}"
             );
         }
+    }
+
+    #[test]
+    fn xyce_ignores_only_undeclared_generated_model_parameters() {
+        let netlist = Netlist::parse(
+            "generated VBIC unknown model-card compatibility\n\
+             Q1 c b e model\n\
+             .MODEL model NPN LEVEL=11 rb=4 rc=5 legacy_label=\"ignored\" rbx=2\n\
+             .END\n",
+        )
+        .expect("VBIC compatibility fixture parses");
+        let model = find_model_def(&netlist, "model").expect("fixture model exists");
+        let assignments = generated_params(
+            GeneratedTarget::new("VBIC13"),
+            Some(model),
+            &[],
+            &[],
+            crate::config::SpiceDialect::Xyce,
+        )
+        .expect("Xyce ignores undeclared ADMS model parameters");
+
+        assert!(
+            assignments
+                .iter()
+                .all(|assignment| !matches_model_type(&assignment.name, &["RB", "RC"])),
+            "undeclared legacy BJT parameters must not be fabricated as canonical VBIC parameters"
+        );
+        let rbx = assignments
+            .iter()
+            .find(|assignment| assignment.name.eq_ignore_ascii_case("RBX"))
+            .expect("declared canonical RBX remains assigned");
+        assert_eq!(rbx.origin, GeneratedParameterOrigin::ModelCard);
+        assert!(matches!(rbx.value, ParametricValue::Resolved(2.0)));
+
+        let error = generated_params(
+            GeneratedTarget::new("VBIC13"),
+            Some(model),
+            &[],
+            &[],
+            crate::config::SpiceDialect::BestAvailable,
+        )
+        .expect_err("non-Xyce routing must continue to reject undeclared parameters");
+        let message = error.to_string();
+        assert!(
+            message.contains("RB") || message.contains("RC"),
+            "unexpected undeclared-parameter error: {message}"
+        );
     }
 }
