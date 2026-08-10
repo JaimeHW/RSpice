@@ -113,9 +113,13 @@ complete set of ways to reach it.
 
 ## Devices
 
-The executable engine, schematic-editor, symbol, generated-model, and target
-release contracts are tracked in the
-[device support and release matrix](DEVICE_SUPPORT_RELEASE_MATRIX.md).
+One descriptor drives every surface a device touches — properties, persistence,
+hierarchy, DRC, netlisting, preview, export, and hardcopy — across 74 stable
+schematic kinds, 64 canonical XSPICE catalog entries covering 113 registered
+canonical and alias names, and 42 generated Verilog-A models. A device whose
+stable id, registry entry, terminal contract, parameter contract, or symbol
+cannot be resolved fails closed; nothing silently degrades to a generic
+two-terminal element or drops unsupported parameters.
 
 | Family | Models |
 | :--- | :--- |
@@ -160,6 +164,22 @@ implementation; a hand-written native port of the same family serves the
 `LEVEL`-card decks that reach it. The generated ASM-HEMT and MVSG-CMC devices
 are present but not yet oracle-qualified; the in-tree `Z`-device GaN HEMT is a
 physics-style model, not a CMC one.
+
+The full catalog is available on every shipped target:
+
+| Target | Release configuration | Catalog status |
+| :--- | :--- | :--- |
+| Windows, Linux, macOS desktop | `rspice-ui --features generated-veriloga-catalog` | All 42 generated models compile into the GUI catalog; native and XSPICE catalogs are always present |
+| Browser / WebAssembly | `wasm32-unknown-unknown`, UI release feature enabled | All 42 generated models and the complete GUI catalog, with no native JIT dependency |
+| Android ARM64 | `rspice-core --no-default-features --features veriloga-builtins` | All 42 generated model crates, portable hash implementation |
+| iOS ARM64 | `rspice-core --no-default-features --features veriloga-builtins` | All 42 generated model crates, portable hash implementation |
+
+Catalog, schema, symbol, round-trip, netlist, and cross-target checks prove a
+device is reachable and consistently represented. They do not establish
+semiconductor-model accuracy: golden operating-point, DC, AC, transient, noise,
+temperature, corner, and convergence comparisons against independent references
+remain required per compact-model version before RSpice claims numerical
+equivalence.
 
 ## Netlist dialect
 
