@@ -2080,10 +2080,10 @@ impl StaticMatrix {
                 ws.factored_values.resize(values.len(), 0.0);
                 ws.factored_values.copy_from_slice(values);
             }
-            // SAFETY: `numeric` was produced by this exact symbolic object.
+            // INVARIANT: `numeric` was produced by this exact symbolic object.
             // The value cache is empty until the first successful numeric
             // factorization and changes only after another successful one.
-            let lu_ref = unsafe { sparse_lu::LuRef::new_unchecked(&ws.symbolic, &ws.numeric) };
+            let lu_ref = sparse_lu::LuRef::new_unchecked(&ws.symbolic, &ws.numeric);
             match operation {
                 RealSolveOp::Normal if rhs_count > ws.solve_rhs_capacity => {
                     ws.solve_mem = MemBuffer::try_new(
@@ -2369,9 +2369,9 @@ impl StaticMatrix {
             ws.factored_values.copy_from_slice(values);
         }
 
-        // SAFETY: see the batched path above. A non-empty value cache proves
+        // INVARIANT: see the batched path above. A non-empty value cache proves
         // this workspace contains a successful factorization for these values.
-        let lu_ref = unsafe { sparse_lu::LuRef::new_unchecked(&ws.symbolic, &ws.numeric) };
+        let lu_ref = sparse_lu::LuRef::new_unchecked(&ws.symbolic, &ws.numeric);
 
         ws.scaled_rhs.resize(rhs.len(), 0.0);
         let rhs_scale = match operation {
@@ -3768,7 +3768,7 @@ impl ComplexMatrix {
                     ws.rhs[(row, rhs_index)] = value;
                 }
             }
-            let lu_ref = unsafe { sparse_lu::LuRef::new_unchecked(&ws.symbolic, &ws.numeric) };
+            let lu_ref = sparse_lu::LuRef::new_unchecked(&ws.symbolic, &ws.numeric);
             match operation {
                 ComplexSolveOp::Normal => lu_ref.solve_in_place_with_conj(
                     Conj::No,
@@ -3940,10 +3940,10 @@ impl ComplexMatrix {
         let scaled_denominator_floor =
             denominator_floor.map(|_| ws.scaled_denominator_floor.as_slice());
 
-        // SAFETY: `ws.numeric` was produced by `ws.symbolic.factorize_numeric_lu`
+        // INVARIANT: `ws.numeric` was produced by `ws.symbolic.factorize_numeric_lu`
         // on this matrix's pattern, and `factorization_valid` guarantees the
         // values have not been mutated since (every mutator clears the flag).
-        let lu_ref = unsafe { sparse_lu::LuRef::new_unchecked(&ws.symbolic, &ws.numeric) };
+        let lu_ref = sparse_lu::LuRef::new_unchecked(&ws.symbolic, &ws.numeric);
 
         ws.rhs.col_as_slice_mut(0).copy_from_slice(&ws.scaled_rhs);
         match operation {
