@@ -209,7 +209,7 @@ jobs:
           if-no-files-found: error
       - name: Generate wheel provenance attestation
         if: github.event_name != 'pull_request'
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-path: crates/rspice-python/dist/*.whl
 
@@ -290,7 +290,7 @@ jobs:
           if-no-files-found: error
       - name: Generate free-threaded wheel provenance attestation
         if: github.event_name != 'pull_request'
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-path: crates/rspice-python/dist/*.whl
 
@@ -343,6 +343,6 @@ jobs:
           if-no-files-found: error
       - name: Generate source-distribution provenance attestation
         if: github.event_name != 'pull_request'
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-path: crates/rspice-python/dist/*.tar.gz
