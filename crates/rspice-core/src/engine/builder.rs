@@ -3355,6 +3355,33 @@ mod tests {
         assert_eq!(circuit.resistors.conductances[rs_index], 1.0);
     }
 
+    #[test]
+    fn xyce_jfet_inherits_global_tnom_and_keeps_b_distinct_from_beta() {
+        let deck = "Xyce JFET model options\n\
+            .options tnom=-40\n\
+            VDS d 0 1\n\
+            VGS g 0 0\n\
+            J1 d g 0 JMOD\n\
+            .model JMOD NJF LEVEL=1 B=0.605\n\
+            .end\n";
+        let netlist = Netlist::parse(deck).expect("Xyce JFET deck parses");
+        let mut config = SimulationConfig::default();
+        config.spice_dialect = SpiceDialect::Xyce;
+        let circuit = Engine::new(config)
+            .build_circuit(&netlist)
+            .expect("Xyce JFET deck builds");
+        let [jfet] = circuit.jfets.as_slice() else {
+            panic!("expected one native JFET");
+        };
+        assert_eq!(jfet.params.tnom.to_bits(), (-40.0_f64 + 273.15).to_bits());
+        assert_eq!(jfet.params.beta.to_bits(), 1.0e-4_f64.to_bits());
+        assert_eq!(jfet.params.mes_b.to_bits(), 0.605_f64.to_bits());
+        assert!(matches!(
+            jfet.params.channel_model,
+            JfetChannelModel::XyceSydney
+        ));
+    }
+
     /// A geometry sitting exactly on a shared bin edge takes the *lower* bin.
     ///
     /// ngspice's ranges are inclusive at both ends and it returns the first
@@ -6424,6 +6451,7 @@ impl Engine {
                         } else if self.config.spice_dialect == SpiceDialect::Xyce {
                             jfet = jfet.enable_xyce_jfet1_model();
                         }
+                        jfet.params.tnom = netlist.options.tnom.unwrap_or(27.0) + 273.15;
                         jfet = jfet.with_model_params(&params_map);
                     }
                     jfet = jfet.with_instance_params(instance_params);

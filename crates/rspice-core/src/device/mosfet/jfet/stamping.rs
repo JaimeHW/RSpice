@@ -280,6 +280,12 @@ impl NonlinearDevice for Jfet {
             limiter_applied |= (vgd_limited - vgd).abs() > 0.0;
             vgs = vgs_limited;
             vgd = vgd_limited;
+        } else if matches!(self.params.channel_model, JfetChannelModel::XyceSydney) {
+            let (vgs_limited, vgd_limited) = self.xyce_jfet1_limited_branch_voltages(vgs, vgd);
+            limiter_applied |= (vgs_limited - vgs).abs() > 0.0;
+            limiter_applied |= (vgd_limited - vgd).abs() > 0.0;
+            vgs = vgs_limited;
+            vgd = vgd_limited;
         }
 
         let mut bypassed = false;

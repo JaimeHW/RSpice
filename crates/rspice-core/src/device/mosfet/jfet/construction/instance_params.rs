@@ -59,7 +59,7 @@ impl Jfet {
             }
 
             if name.eq_ignore_ascii_case("TEMP") {
-                if *value > 0.0 {
+                if *value > -273.15 {
                     temp_override = Some(*value + 273.15);
                 }
                 continue;
@@ -71,13 +71,13 @@ impl Jfet {
             }
 
             if name.eq_ignore_ascii_case("TS") {
-                if *value > 0.0 {
+                if *value > -273.15 {
                     ts_override = Some(*value + 273.15);
                 }
                 continue;
             }
 
-            if name.eq_ignore_ascii_case("TD") && *value > 0.0 {
+            if name.eq_ignore_ascii_case("TD") && *value > -273.15 {
                 td_override = Some(*value + 273.15);
             }
         }

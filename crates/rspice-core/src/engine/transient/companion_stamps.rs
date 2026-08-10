@@ -593,7 +593,7 @@ impl Engine {
     ) -> (Value, Value) {
         if matches!(
             jfet.params.channel_model,
-            crate::device::JfetChannelModel::Hfet1
+            crate::device::JfetChannelModel::Hfet1 | crate::device::JfetChannelModel::XyceSydney
         ) && let Some((vgs, vgd, _vds)) = jfet.internal_branch_state_voltages()
         {
             return (vgs, vgd);
@@ -629,7 +629,7 @@ impl Engine {
         // matching the existing level-2..4 path and its convergence behavior.
         if matches!(
             jfet.params.channel_model,
-            crate::device::JfetChannelModel::Hfet1
+            crate::device::JfetChannelModel::Hfet1 | crate::device::JfetChannelModel::XyceSydney
         ) && let Some((vgs, vgd, _vds)) = jfet.internal_branch_state_voltages()
         {
             return (vgs, vgd);
@@ -843,6 +843,30 @@ mod tests {
         assert!(
             bytes <= 48,
             "compact two-terminal stamp plan regressed to {bytes} bytes; keep pattern identity in the enclosing cache"
+        );
+    }
+
+    #[test]
+    fn xyce_jfet1_transient_charge_uses_limited_branch_state() {
+        let mut jfet = crate::device::Jfet::njf("j1", 1, 2, 0).enable_xyce_jfet1_model();
+        crate::device::NonlinearDevice::update(&mut jfet, &[0.0, 0.0]);
+        let raw_solution = [0.0, 10.0];
+        crate::device::NonlinearDevice::update(&mut jfet, &raw_solution);
+        let (limited_vgs, limited_vgd, _) = jfet
+            .internal_branch_state_voltages()
+            .expect("second nonlinear update establishes limited JFET state");
+        assert_ne!(limited_vgs.to_bits(), 10.0_f64.to_bits());
+        assert_ne!(limited_vgd.to_bits(), 10.0_f64.to_bits());
+
+        let evaluation = Engine::jfet_branch_voltages(&jfet, &raw_solution);
+        let charge = Engine::jfet_charge_branch_voltages(&jfet, &raw_solution);
+        assert_eq!(
+            [evaluation.0.to_bits(), evaluation.1.to_bits()],
+            [limited_vgs.to_bits(), limited_vgd.to_bits()]
+        );
+        assert_eq!(
+            [charge.0.to_bits(), charge.1.to_bits()],
+            [limited_vgs.to_bits(), limited_vgd.to_bits()]
         );
     }
 

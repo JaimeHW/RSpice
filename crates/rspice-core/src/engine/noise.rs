@@ -1240,7 +1240,7 @@ impl Engine {
             let vgs = vg - vs;
             let vds = vd - vs;
             let vgd = vg - vd;
-            let temp = jfet.params.tnom;
+            let temp = jfet.analysis_temperature();
             let (ids, gm, _) = jfet.calculate(vgs, vds, temp);
             if gm.abs() > 1e-18 {
                 let resistance = 1.0 / ((2.0 / 3.0) * gm.abs()).max(1e-30);
