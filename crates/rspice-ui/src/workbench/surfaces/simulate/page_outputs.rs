@@ -7,12 +7,15 @@
 
 use egui::Ui;
 
+use crate::product::SimulationPlanId;
 use crate::simulation::SavedOutputSemanticStatus;
 use crate::state::workspace::SimulationPlanPayload;
+use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
 
 use super::page_kit::{
-    Tone, card, card_body, card_note, card_row, ledger_head, ledger_row, rule_row,
+    Tone, card, card_body, card_head_row, card_note, card_row, card_with_head, ledger_head,
+    ledger_row, rule_row,
 };
 
 const REGISTRY_COLUMNS: [f32; 5] = [0.20, 0.13, 0.28, 0.17, 0.22];
@@ -59,53 +62,81 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     };
     let tone = if invalid == 0 { Tone::Ok } else { Tone::Error };
     let selected = app.state.workbench.selected_saved_output.clone();
+    let selected_output = selected
+        .as_deref()
+        .and_then(|name| outputs.iter().find(|output| output.name == name))
+        .map(|output| (output.id, output.name.clone()));
     let mut pick = None;
-    card(ui, "Saved outputs", Some((status.as_str(), tone)), |ui| {
-        ledger_head(
-            ui,
-            &REGISTRY_COLUMNS,
-            &["Name", "Kind", "Expression", "Save policy", "Status"],
-        );
-        if outputs.is_empty() {
-            ledger_row(
+    let mut remove = false;
+    card_with_head(
+        ui,
+        |ui| {
+            card_head_row(ui, "Saved outputs", Some((status.as_str(), tone)), |ui| {
+                remove = Button::new("Remove")
+                    .enabled(selected_output.is_some())
+                    .show(ui)
+                    .clicked();
+            });
+        },
+        |ui| {
+            ledger_head(
                 ui,
                 &REGISTRY_COLUMNS,
-                &[
-                    ("No saved outputs", Tone::Neutral),
-                    ("—", Tone::Neutral),
-                    ("the run stores nothing", Tone::Warn),
-                    ("—", Tone::Neutral),
-                    ("—", Tone::Neutral),
-                ],
-                false,
+                &["Name", "Kind", "Expression", "Save policy", "Status"],
             );
-        }
-        for (index, output) in outputs.iter().enumerate() {
-            let (status_text, status_tone) = status_cell(reports.get(index));
-            if ledger_row(
-                ui,
-                &REGISTRY_COLUMNS,
-                &[
-                    (output.name.as_str(), Tone::Accent),
-                    (output.kind.label(), Tone::Neutral),
-                    (output.source_expression.as_str(), Tone::Neutral),
-                    (output.save_policy.label(), Tone::Neutral),
-                    (status_text.as_str(), status_tone),
-                ],
-                selected.as_deref() == Some(output.name.as_str()),
-            )
-            .clicked()
-            {
-                pick = Some(output.name.clone());
+            if outputs.is_empty() {
+                ledger_row(
+                    ui,
+                    &REGISTRY_COLUMNS,
+                    &[
+                        ("No saved outputs", Tone::Neutral),
+                        ("—", Tone::Neutral),
+                        ("the run stores nothing", Tone::Warn),
+                        ("—", Tone::Neutral),
+                        ("—", Tone::Neutral),
+                    ],
+                    false,
+                );
             }
-        }
-        card_note(
-            ui,
-            "Status is resolved against the elaborated design, not against the text: an expression \
+            for (index, output) in outputs.iter().enumerate() {
+                let (status_text, status_tone) = status_cell(reports.get(index));
+                if ledger_row(
+                    ui,
+                    &REGISTRY_COLUMNS,
+                    &[
+                        (output.name.as_str(), Tone::Accent),
+                        (output.kind.label(), Tone::Neutral),
+                        (output.source_expression.as_str(), Tone::Neutral),
+                        (output.save_policy.label(), Tone::Neutral),
+                        (status_text.as_str(), status_tone),
+                    ],
+                    selected.as_deref() == Some(output.name.as_str()),
+                )
+                .clicked()
+                {
+                    pick = Some(output.name.clone());
+                }
+            }
+            card_note(
+                ui,
+                "Status is resolved against the elaborated design, not against the text: an expression \
              that parses but names a node the design does not have is reported as unresolved here \
              rather than failing after dispatch.",
-        );
-    });
+            );
+        },
+    );
+    if remove
+        && let Some((output_id, name)) = selected_output
+        && let Ok(plan_id) = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .map(|plan| plan.id())
+    {
+        let detail = format!("Removed saved output {name}.");
+        remove_output(app, plan_id, output_id, &detail);
+        app.state.workbench.selected_saved_output = None;
+    }
     if let Some(name) = pick {
         app.state.workbench.selected_saved_output = Some(name);
     }
@@ -231,5 +262,39 @@ fn format_bytes(bytes: u64) -> String {
         format!("{mib:.2} MiB")
     } else {
         format!("{:.1} KiB", bytes as f64 / 1024.0)
+    }
+}
+
+/// Remove one saved output as a single plan-configuration transaction.
+fn remove_output(
+    app: &mut RSpiceApp,
+    plan_id: SimulationPlanId,
+    output_id: crate::product::SavedOutputId,
+    detail: &str,
+) {
+    let mut workspace = app.state.workspace.clone();
+    let mut setup = app.state.sim_setup.clone();
+    let outcome = workspace
+        .remove_saved_output(plan_id, output_id)
+        .map_err(|error| error.to_string())
+        .and_then(|_| {
+            setup
+                .commit_active_plan_configuration_change(detail.to_owned())
+                .map_err(|error| error.to_string())
+        });
+    match outcome {
+        Ok(receipt) => {
+            app.state.workspace = workspace;
+            app.state.sim_setup = setup;
+            app.invalidate_simulation_preflight();
+            app.state.workbench.analysis_lifecycle_status = format!(
+                "Configuration receipt #{} · revision {} to {} · {}",
+                receipt.sequence(),
+                receipt.source_revision().get(),
+                receipt.committed_revision().get(),
+                receipt.detail()
+            );
+        }
+        Err(error) => app.state.workbench.analysis_lifecycle_status = error,
     }
 }

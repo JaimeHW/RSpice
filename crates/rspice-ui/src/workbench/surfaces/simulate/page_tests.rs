@@ -175,6 +175,78 @@ fn the_named_presets_are_pairwise_distinct() {
     }
 }
 
+/// A registry that can only grow is not an editor. Removal has to be a real,
+/// validated transaction on the plan payload — not a view-local filter.
+#[test]
+fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
+    use crate::product::SavedOutputId;
+    use crate::state::{
+        SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
+        SavedOutputPrecision, SavedOutputStreaming,
+    };
+
+    let mut app = RSpiceApp::test_instance();
+    let plan_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("test instance has a stable plan")
+        .id();
+    let output = SavedOutput::new(
+        SavedOutputKind::RawVoltageOrCurrent,
+        "vout",
+        "V(out)",
+        SavedOutputCompatibility::AllCompatibleAnalyses,
+        SavedOutputPolicy::ALL[0],
+        SavedOutputPrecision::ALL[0],
+        SavedOutputStreaming::StoreOnly,
+    )
+    .expect("valid saved output");
+    let output_id = output.id;
+    app.state
+        .workspace
+        .add_saved_output(plan_id, output)
+        .expect("the plan accepts a valid output");
+    assert_eq!(
+        app.state
+            .workspace
+            .active_plan_data(plan_id)
+            .expect("payload")
+            .saved_outputs
+            .len(),
+        1
+    );
+
+    let removed = app
+        .state
+        .workspace
+        .remove_saved_output(plan_id, output_id)
+        .expect("the output it just accepted can be removed");
+    assert_eq!(removed.name, "vout");
+    assert!(
+        app.state
+            .workspace
+            .active_plan_data(plan_id)
+            .expect("payload")
+            .saved_outputs
+            .is_empty()
+    );
+
+    // Removing the same identity twice must fail rather than silently succeed.
+    assert!(
+        app.state
+            .workspace
+            .remove_saved_output(plan_id, output_id)
+            .is_err()
+    );
+    assert!(
+        app.state
+            .workspace
+            .remove_saved_output(plan_id, SavedOutputId::new())
+            .is_err()
+    );
+}
+
 #[test]
 fn ledger_columns_tile_their_row_without_a_gap_or_an_overhang() {
     let row = Rect::from_min_size(egui::Pos2::ZERO, vec2(640.0, 28.0));
