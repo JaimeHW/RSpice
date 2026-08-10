@@ -2656,6 +2656,51 @@ mod tests {
         ))
     }
 
+    fn passive_test_state<'a>(
+        elements: &'a [Element],
+        name: &str,
+    ) -> (Value, &'a [(String, Value)], &'a [(String, String)]) {
+        let element = elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(name))
+            .unwrap_or_else(|| panic!("passive element {name} exists"));
+        match &element.kind {
+            ElementKind::Resistor {
+                value,
+                instance_params,
+                deferred_params,
+                ..
+            }
+            | ElementKind::Capacitor {
+                value,
+                instance_params,
+                deferred_params,
+                ..
+            }
+            | ElementKind::Inductor {
+                value,
+                instance_params,
+                deferred_params,
+                ..
+            } => (*value, instance_params, deferred_params),
+            _ => panic!("{name} is not an R/C/L passive"),
+        }
+    }
+
+    fn assert_unique_passive_param(params: &[(String, Value)], name: &str, expected: Value) {
+        let matches = params
+            .iter()
+            .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+            .collect::<Vec<_>>();
+        assert_eq!(matches.len(), 1, "expected one {name} in {params:?}");
+        let tolerance = expected.abs().max(1.0) * 1.0e-12;
+        assert!(
+            (matches[0].1 - expected).abs() <= tolerance,
+            "{name}={}, expected {expected}; params={params:?}",
+            matches[0].1
+        );
+    }
+
     #[test]
     fn source_file_ingestion_aborts_between_read_chunks() {
         let path = cancellation_fixture_path("chunked-read");
@@ -9249,6 +9294,145 @@ mod tests {
         assert_eq!(l2.0, "L2");
         assert!((l2.1 - 20.0e-3).abs() < 1.0e-15, "L2 value {}", l2.1);
         assert!(l2.2.is_some_and(|model| model.eq_ignore_ascii_case("lmod")));
+    }
+
+    #[test]
+    fn passive_tc_vectors_canonicalize_without_changing_base_values() {
+        let netlist = Netlist::parse(
+            "passive TC vectors\n\
+             R1 1 0 100 TC=1m,-2u\n\
+             C1 2 0 3u TC 4m,-5u\n\
+             L1 3 0 6m TC=7m\n\
+             .end\n",
+        )
+        .expect("valid R/C/L TC vector spellings should parse");
+
+        for (name, expected_value, tc1, tc2) in [
+            ("R1", 100.0, 1.0e-3, Some(-2.0e-6)),
+            ("C1", 3.0e-6, 4.0e-3, Some(-5.0e-6)),
+            ("L1", 6.0e-3, 7.0e-3, None),
+        ] {
+            let (value, params, deferred) = passive_test_state(&netlist.elements, name);
+            assert!(
+                (value - expected_value).abs() <= expected_value.abs().max(1.0) * 1.0e-12,
+                "{name} base value {value}, expected {expected_value}"
+            );
+            assert!(
+                deferred.is_empty(),
+                "{name} unexpectedly deferred {deferred:?}"
+            );
+            assert_unique_passive_param(params, "TC1", tc1);
+            if let Some(tc2) = tc2 {
+                assert_unique_passive_param(params, "TC2", tc2);
+            } else {
+                assert!(
+                    params
+                        .iter()
+                        .all(|(parameter, _)| !parameter.eq_ignore_ascii_case("TC2")),
+                    "one-component vector must not synthesize TC2: {params:?}"
+                );
+            }
+            assert!(
+                params
+                    .iter()
+                    .all(|(parameter, _)| !parameter.eq_ignore_ascii_case("TC")),
+                "raw TC alias must not survive canonicalization: {params:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn passive_tc_vector_components_dominate_scalars_component_wise() {
+        let netlist = Netlist::parse(
+            "passive TC precedence\n\
+             R1 1 0 1k TC1=9 TC=1,2 TC1=8 TC2=7\n\
+             R2 2 0 1k TC2=4 TC=1\n\
+             R3 3 0 1k TC=1,2 TC=3\n\
+             C1 4 0 1u TC1=9 TC=1,2 TC1=8 TC2=7\n\
+             C2 5 0 1u TC2=4 TC=1\n\
+             C3 6 0 1u TC=1,2 TC=3\n\
+             L1 7 0 1m TC1=9 TC=1,2 TC1=8 TC2=7\n\
+             L2 8 0 1m TC2=4 TC=1\n\
+             L3 9 0 1m TC=1,2 TC=3\n\
+             .end\n",
+        )
+        .expect("mixed scalar/vector TC assignments should parse");
+
+        for prefix in ["R", "C", "L"] {
+            for (index, expected_tc1, expected_tc2) in [(1, 1.0, 2.0), (2, 1.0, 4.0), (3, 3.0, 2.0)]
+            {
+                let name = format!("{prefix}{index}");
+                let (_, params, deferred) = passive_test_state(&netlist.elements, &name);
+                assert!(
+                    deferred.is_empty(),
+                    "{name} unexpectedly deferred {deferred:?}"
+                );
+                assert_unique_passive_param(params, "TC1", expected_tc1);
+                assert_unique_passive_param(params, "TC2", expected_tc2);
+                assert!(
+                    params
+                        .iter()
+                        .all(|(parameter, _)| !parameter.eq_ignore_ascii_case("TC")),
+                    "{name} retained raw TC: {params:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn deferred_passive_tc_vectors_resolve_in_instance_scope() {
+        let netlist = Netlist::parse(
+            "deferred passive TC vectors\n\
+             X1 1 0 passives PARAMS: A=5 B=6\n\
+             .subckt passives p n PARAMS: A=1 B=2\n\
+             R1 p n 1k TC1={A+10} TC=1,{B} TC1=9\n\
+             C1 p n 1u TC={A},{B} TC2=9\n\
+             L1 p n 1m TC1=9 TC={A},2\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("deferred TC vectors should parse");
+        let flattened = flatten_netlist_with_models(&netlist)
+            .expect("deferred TC vectors should resolve while flattening");
+
+        for (name, expected_tc1, expected_tc2) in [
+            ("X1.R1", 1.0, 6.0),
+            ("X1.C1", 5.0, 6.0),
+            ("X1.L1", 5.0, 2.0),
+        ] {
+            let (_, params, deferred) = passive_test_state(&flattened.elements, name);
+            assert!(deferred.is_empty(), "{name} retained {deferred:?}");
+            assert_unique_passive_param(params, "TC1", expected_tc1);
+            assert_unique_passive_param(params, "TC2", expected_tc2);
+            assert!(
+                params
+                    .iter()
+                    .all(|(parameter, _)| !parameter.eq_ignore_ascii_case("TC")),
+                "{name} retained raw TC: {params:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_passive_tc_vectors_fail_closed() {
+        for device in ["R1 1 0 1k", "C1 1 0 1u", "L1 1 0 1m"] {
+            for invalid in [
+                "TC",
+                "TC=",
+                "TC=,2",
+                "TC=1,",
+                "TC=1 2",
+                "TC=1,,2",
+                "TC=1,2,3",
+                "TC=1,2, TEMP=4",
+            ] {
+                let deck = format!("invalid passive TC\n{device} {invalid}\n.end\n");
+                assert!(
+                    Netlist::parse(&deck).is_err(),
+                    "malformed passive vector parsed: {device} {invalid}"
+                );
+            }
+        }
     }
 
     #[test]

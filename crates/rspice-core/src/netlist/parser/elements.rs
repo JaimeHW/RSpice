@@ -24,6 +24,7 @@ pub(super) fn parse_resistor(
     let mut model: Option<String> = None;
     let mut instance_params: Vec<(String, Value)> = Vec::new();
     let mut deferred_params: Vec<(String, String)> = Vec::new();
+    let mut tc_vector_given = [false; 2];
 
     skip_commas(stream);
 
@@ -100,8 +101,31 @@ pub(super) fn parse_resistor(
                 let raw_name = name.clone();
                 let name_upper = raw_name.to_ascii_uppercase();
                 stream.advance();
+                let has_equals = stream.consume(&TokenKind::Equals);
 
-                if stream.consume(&TokenKind::Equals) {
+                if name_upper == "TC" {
+                    let first = take_passive_tc_component(stream, params, defer_simple_param_refs)
+                        .ok_or_else(|| ParseError::Syntax {
+                            line: line_num,
+                            message:
+                                "Expected first temperature coefficient in resistor parameter 'TC'"
+                                    .to_string(),
+                        })?;
+                    parse_passive_tc_assignment(
+                        stream,
+                        line_num,
+                        params,
+                        "resistor",
+                        defer_simple_param_refs,
+                        first,
+                        &mut instance_params,
+                        &mut deferred_params,
+                        &mut tc_vector_given,
+                    )?;
+                    continue;
+                }
+
+                if has_equals {
                     if name_upper == "MODEL" {
                         let model_name = expect_model_name(stream, line_num)?;
                         model = Some(model_name);
@@ -121,50 +145,30 @@ pub(super) fn parse_resistor(
                         continue;
                     }
 
-                    match take_deferrable_value(stream, params, defer_simple_param_refs) {
-                        Some(DeferrableValue::Resolved(param_value)) => {
+                    let parsed = take_deferrable_value(stream, params, defer_simple_param_refs)
+                        .ok_or_else(|| ParseError::Syntax {
+                            line: line_num,
+                            message: format!("Expected value for resistor parameter '{raw_name}'"),
+                        })?;
+                    match parsed {
+                        DeferrableValue::Resolved(param_value) => {
                             if name_upper == "R" || name_upper == "VALUE" {
                                 value = Some(param_value);
                                 value_expr = None;
                             }
-                            instance_params.push((name_upper, param_value));
-
-                            // SPICE/Xyce allow the resistor temperature
-                            // coefficients in the compact form `TC=TC1,TC2`.
-                            // The second numeric token is the TC2 value, not
-                            // a second unnamed resistance override.  Consume
-                            // it here before the general tail parser sees it
-                            // as a replacement for the explicit resistance.
-                            if raw_name.eq_ignore_ascii_case("TC")
-                                && stream.consume(&TokenKind::Comma)
-                                && !matches!(
-                                    stream.peek().kind,
-                                    TokenKind::Newline | TokenKind::Eof
-                                )
-                                && !matches!(
-                                    (&stream.peek().kind, &stream.peek_n(1).kind),
-                                    (TokenKind::Ident(_), TokenKind::Equals)
-                                )
-                            {
-                                match take_deferrable_value(stream, params, defer_simple_param_refs)
-                                {
-                                    Some(DeferrableValue::Resolved(tc2)) => {
-                                        instance_params.push(("TC2".to_string(), tc2));
-                                    }
-                                    Some(DeferrableValue::Deferred(tc2)) => {
-                                        deferred_params.push(("TC2".to_string(), tc2));
-                                    }
-                                    None => {
-                                        return Err(ParseError::Syntax {
-                                            line: line_num,
-                                            message: "Expected value for resistor parameter 'TC2'"
-                                                .to_string(),
-                                        });
-                                    }
-                                }
+                            if matches!(name_upper.as_str(), "TC1" | "TC2") {
+                                upsert_passive_scalar_tc(
+                                    &mut instance_params,
+                                    &mut deferred_params,
+                                    &tc_vector_given,
+                                    &name_upper,
+                                    DeferrableValue::Resolved(param_value),
+                                );
+                            } else {
+                                instance_params.push((name_upper, param_value));
                             }
                         }
-                        Some(DeferrableValue::Deferred(expr)) => {
+                        DeferrableValue::Deferred(expr) => {
                             if name_upper == "R" || name_upper == "VALUE" {
                                 value_expr = Some(expr);
                                 value = None;
@@ -180,47 +184,17 @@ pub(super) fn parse_resistor(
                                          as an explicit element instead"
                                     ),
                                 });
+                            } else if matches!(name_upper.as_str(), "TC1" | "TC2") {
+                                upsert_passive_scalar_tc(
+                                    &mut instance_params,
+                                    &mut deferred_params,
+                                    &tc_vector_given,
+                                    &name_upper,
+                                    DeferrableValue::Deferred(expr),
+                                );
                             } else {
                                 deferred_params.push((name_upper, expr));
                             }
-
-                            if raw_name.eq_ignore_ascii_case("TC")
-                                && stream.consume(&TokenKind::Comma)
-                                && !matches!(
-                                    stream.peek().kind,
-                                    TokenKind::Newline | TokenKind::Eof
-                                )
-                                && !matches!(
-                                    (&stream.peek().kind, &stream.peek_n(1).kind),
-                                    (TokenKind::Ident(_), TokenKind::Equals)
-                                )
-                            {
-                                match take_deferrable_value(stream, params, defer_simple_param_refs)
-                                {
-                                    Some(DeferrableValue::Resolved(tc2)) => {
-                                        instance_params.push(("TC2".to_string(), tc2));
-                                    }
-                                    Some(DeferrableValue::Deferred(tc2)) => {
-                                        deferred_params.push(("TC2".to_string(), tc2));
-                                    }
-                                    None => {
-                                        return Err(ParseError::Syntax {
-                                            line: line_num,
-                                            message: "Expected value for resistor parameter 'TC2'"
-                                                .to_string(),
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            return Err(ParseError::Syntax {
-                                line: line_num,
-                                message: format!(
-                                    "Expected value for resistor parameter '{}'",
-                                    raw_name
-                                ),
-                            });
                         }
                     }
                 } else if model.is_none() {
@@ -361,6 +335,129 @@ struct PassiveTail {
     deferred_params: Vec<(String, String)>,
 }
 
+/// Store one passive instance parameter. Resolved and deferred forms share a
+/// single namespace so replacing an assignment cannot leave stale state in
+/// the other representation.
+fn upsert_passive_instance_param(
+    instance_params: &mut Vec<(String, Value)>,
+    deferred_params: &mut Vec<(String, String)>,
+    name: &str,
+    value: DeferrableValue,
+) {
+    instance_params.retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
+    deferred_params.retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
+    match value {
+        DeferrableValue::Resolved(value) => {
+            instance_params.push((name.to_string(), value));
+        }
+        DeferrableValue::Deferred(expression) => {
+            deferred_params.push((name.to_string(), expression));
+        }
+    }
+}
+
+fn take_passive_tc_component(
+    stream: &mut TokenStream,
+    params: &ParamContext,
+    defer_simple_param_refs: bool,
+) -> Option<DeferrableValue> {
+    if matches!(
+        stream.peek().kind,
+        TokenKind::Comma | TokenKind::Equals | TokenKind::Newline | TokenKind::Eof
+    ) {
+        return None;
+    }
+    take_deferrable_value(stream, params, defer_simple_param_refs)
+}
+
+fn passive_tc_assignment_ended(stream: &TokenStream) -> bool {
+    matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
+        || matches!(
+            (&stream.peek().kind, &stream.peek_n(1).kind),
+            (TokenKind::Ident(_), TokenKind::Equals)
+        )
+}
+
+fn upsert_passive_scalar_tc(
+    instance_params: &mut Vec<(String, Value)>,
+    deferred_params: &mut Vec<(String, String)>,
+    vector_given: &[bool; 2],
+    name: &str,
+    value: DeferrableValue,
+) {
+    let index = usize::from(name.eq_ignore_ascii_case("TC2"));
+    if !vector_given[index] {
+        upsert_passive_instance_param(instance_params, deferred_params, name, value);
+    }
+}
+
+/// Canonicalize Xyce's passive `TC=a[,b]` vector spelling to the same
+/// `TC1`/`TC2` parameter namespace used by the scalar spelling.
+///
+/// Xyce declares TC as a vector with at most two components for R/C/L
+/// instances: one component assigns TC1, while two assign TC1 and TC2.  A
+/// third component and a dangling comma are syntax errors.  Canonicalizing at
+/// parse time keeps model resolution, stepping, sensitivity, and flattening on
+/// one representation. Xyce stores scalar TC1/TC2 in fixed metadata slots and
+/// appends vector components, so a supplied vector component dominates scalar
+/// assignments for that component regardless of textual order; repeated
+/// vectors remain component-wise last-wins.
+fn parse_passive_tc_assignment(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    element_label: &str,
+    defer_simple_param_refs: bool,
+    first: DeferrableValue,
+    instance_params: &mut Vec<(String, Value)>,
+    deferred_params: &mut Vec<(String, String)>,
+    vector_given: &mut [bool; 2],
+) -> Result<(), ParseError> {
+    let second = if !stream.consume(&TokenKind::Comma) {
+        if passive_tc_assignment_ended(stream) {
+            None
+        } else {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Unexpected token after {element_label} parameter 'TC'; separate a second coefficient with a comma"
+                ),
+            });
+        }
+    } else {
+        let second = take_passive_tc_component(stream, params, defer_simple_param_refs)
+            .ok_or_else(|| ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Expected second temperature coefficient in {element_label} parameter 'TC'"
+                ),
+            })?;
+        if stream.consume(&TokenKind::Comma) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "{element_label} parameter 'TC' accepts at most two temperature coefficients"
+                ),
+            });
+        }
+        if !passive_tc_assignment_ended(stream) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unexpected token after {element_label} parameter 'TC'"),
+            });
+        }
+        Some(second)
+    };
+
+    upsert_passive_instance_param(instance_params, deferred_params, "TC1", first);
+    vector_given[0] = true;
+    if let Some(second) = second {
+        upsert_passive_instance_param(instance_params, deferred_params, "TC2", second);
+        vector_given[1] = true;
+    }
+    Ok(())
+}
+
 /// Remove one instance parameter by name, returning its value.
 fn extract_instance_param(params: &mut Vec<(String, Value)>, key: &str) -> Option<Value> {
     let idx = params
@@ -463,6 +560,7 @@ fn parse_passive_tail(
         instance_params: Vec::new(),
         deferred_params: Vec::new(),
     };
+    let mut tc_vector_given = [false; 2];
 
     skip_commas(stream);
 
@@ -530,8 +628,35 @@ fn parse_passive_tail(
                 let raw_name = raw_name.clone();
                 let name_upper = raw_name.to_ascii_uppercase();
                 stream.advance();
+                let has_equals = stream.consume(&TokenKind::Equals);
 
-                if stream.consume(&TokenKind::Equals) {
+                if name_upper == "TC" {
+                    let first = take_passive_tc_component(
+                        stream,
+                        params,
+                        defer_simple_param_refs,
+                    )
+                    .ok_or_else(|| ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "Expected first temperature coefficient in {element_label} parameter 'TC'"
+                        ),
+                    })?;
+                    parse_passive_tc_assignment(
+                        stream,
+                        line_num,
+                        params,
+                        element_label,
+                        defer_simple_param_refs,
+                        first,
+                        &mut tail.instance_params,
+                        &mut tail.deferred_params,
+                        &mut tc_vector_given,
+                    )?;
+                    continue;
+                }
+
+                if has_equals {
                     if name_upper == "MODEL" {
                         tail.model = Some(expect_model_name(stream, line_num)?);
                         continue;
@@ -551,16 +676,33 @@ fn parse_passive_tail(
                         continue;
                     }
 
-                    match take_deferrable_value(stream, params, defer_simple_param_refs) {
-                        Some(DeferrableValue::Resolved(param_value)) => {
+                    let parsed = take_deferrable_value(stream, params, defer_simple_param_refs)
+                        .ok_or_else(|| ParseError::Syntax {
+                            line: line_num,
+                            message: format!(
+                                "Expected value for {element_label} parameter '{raw_name}'"
+                            ),
+                        })?;
+                    match parsed {
+                        DeferrableValue::Resolved(param_value) => {
                             if value_keys.iter().any(|key| name_upper == *key) {
                                 tail.value = Some(param_value);
                                 tail.value_expr = None;
                                 continue;
                             }
-                            tail.instance_params.push((name_upper, param_value));
+                            if matches!(name_upper.as_str(), "TC1" | "TC2") {
+                                upsert_passive_scalar_tc(
+                                    &mut tail.instance_params,
+                                    &mut tail.deferred_params,
+                                    &tc_vector_given,
+                                    &name_upper,
+                                    DeferrableValue::Resolved(param_value),
+                                );
+                            } else {
+                                tail.instance_params.push((name_upper, param_value));
+                            }
                         }
-                        Some(DeferrableValue::Deferred(expr)) => {
+                        DeferrableValue::Deferred(expr) => {
                             if value_keys.iter().any(|key| name_upper == *key) {
                                 tail.value_expr = Some(expr);
                                 tail.value = None;
@@ -576,16 +718,17 @@ fn parse_passive_tail(
                                     ),
                                 });
                             }
-                            tail.deferred_params.push((name_upper, expr));
-                        }
-                        None => {
-                            return Err(ParseError::Syntax {
-                                line: line_num,
-                                message: format!(
-                                    "Expected value for {} parameter '{}'",
-                                    element_label, raw_name
-                                ),
-                            });
+                            if matches!(name_upper.as_str(), "TC1" | "TC2") {
+                                upsert_passive_scalar_tc(
+                                    &mut tail.instance_params,
+                                    &mut tail.deferred_params,
+                                    &tc_vector_given,
+                                    &name_upper,
+                                    DeferrableValue::Deferred(expr),
+                                );
+                            } else {
+                                tail.deferred_params.push((name_upper, expr));
+                            }
                         }
                     }
                 } else if let Some(param_value) = params.get(&raw_name) {

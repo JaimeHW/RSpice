@@ -756,10 +756,10 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
     } else {
         10.0e-6
     };
-    let tc1 = if let Some(tc1) = instance_param(instance_params, &["TC1", "TC"]) {
+    let tc1 = if let Some(tc1) = instance_param(instance_params, &["TC1"]) {
         tc1
     } else if let Some(model_def) = model_def {
-        resolve_model_param(model_def, &["TC1", "TC"], &eval_ctx)?.unwrap_or(0.0)
+        resolve_model_param(model_def, &["TC1"], &eval_ctx)?.unwrap_or(0.0)
     } else {
         0.0
     };
@@ -1095,6 +1095,28 @@ R1 a 0 rm L=1000u W=5u TC1=4e-2 TC2=6e-4 TEMP=31
         assert_eq!(instance_overrides.tc1, 4e-2);
         assert_eq!(instance_overrides.tc2, 6e-4);
         assert_eq!(instance_overrides.temperature_celsius, 31.0);
+
+        let scalar_tc = resolve_effective_parameters_from_source(
+            r#"scalar resistor temperature coefficients
+.options temp=35
+R1 a 0 1k rm TEMP=31 TC1=4e-2 TC2=6e-4
+.model rm R (TC1=-2e-2 TC2=-3e-4 TNOM=27)
+.end
+"#,
+            "R1",
+        );
+        let vector_tc = resolve_effective_parameters_from_source(
+            r#"vector resistor temperature coefficients
+.options temp=35
+R1 a 0 1k rm TEMP=31 TC=4e-2,6e-4
+.model rm R (TC1=-2e-2 TC2=-3e-4 TNOM=27)
+.end
+"#,
+            "R1",
+        );
+        assert_eq!(vector_tc, scalar_tc);
+        assert_eq!(vector_tc.tc1, 4e-2);
+        assert_eq!(vector_tc.tc2, 6e-4);
 
         let defaults = resolve_effective_parameters_from_source(
             r#"default resistor report values
