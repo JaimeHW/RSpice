@@ -309,13 +309,13 @@ windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 # Inflates the part catalog the build script compiles into the browser image.
 # Pure Rust, no C, and already in the browser dependency graph beneath png and
 # tiff, so this edge adds no crate to the shipped wasm.
-miniz_oxide = "0.8"
+miniz_oxide = "0.9"
 
 [build-dependencies]
 blake3 = { version = "1.5", features = ["pure"] }
 # Deflates the browser part catalog; see `embed_browser_catalog` in build.rs.
 # A host-side dependency, so it never reaches a shipped binary.
-miniz_oxide = "0.8"
+miniz_oxide = "0.9"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 
