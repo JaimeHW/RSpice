@@ -629,7 +629,7 @@ impl Engine {
                     .filter(|bjt| bjt.legacy_junction_limited_for_trace())
                     .count();
                 let nl_res = self.nonlinear_merit(circuit, matrix, new_solution);
-                eprintln!(
+                log::debug!(
                     "DCTRACE iter={iteration} max_dv={max_dv:.3e} vconv={voltage_converged} dconv={device_converged} linres={linearized_residual_converged} limited_bjts={limited} merit={nl_res:?}"
                 );
             }
@@ -756,7 +756,7 @@ impl Engine {
         if hit_voltage_limit && limit_cycle_detected && !circuit.bjts.is_empty() {
             let hints = Self::legacy_bjt_half_bias_startup_hints(circuit, &startup_seed);
             if std::env::var("RSPICE_DC_TRACE").as_deref() == Ok("1") {
-                eprintln!(
+                log::debug!(
                     "DCTRACE legacy_bjt_half_bias hints={hints:?} startup={:?}",
                     startup_seed
                         .iter()
@@ -776,7 +776,7 @@ impl Engine {
                 ) {
                     Ok(constrained_seed) => {
                         if std::env::var("RSPICE_DC_TRACE").as_deref() == Ok("1") {
-                            eprintln!(
+                            log::debug!(
                                 "DCTRACE legacy_bjt_half_bias constrained={:?}",
                                 constrained_seed
                                     .iter()
@@ -798,7 +798,7 @@ impl Engine {
                             }
                             Ok(None) => {
                                 if std::env::var("RSPICE_DC_TRACE").as_deref() == Ok("1") {
-                                    eprintln!(
+                                    log::debug!(
                                         "DCTRACE legacy_bjt_half_bias unconstrained restart rejected"
                                     );
                                 }
@@ -808,7 +808,9 @@ impl Engine {
                             }
                             Err(error) => {
                                 if std::env::var("RSPICE_DC_TRACE").as_deref() == Ok("1") {
-                                    eprintln!("DCTRACE legacy_bjt_half_bias restart_error={error}");
+                                    log::debug!(
+                                        "DCTRACE legacy_bjt_half_bias restart_error={error}"
+                                    );
                                 }
                                 log::debug!("Legacy BJT half-bias restart failed: {error}");
                             }
@@ -817,7 +819,7 @@ impl Engine {
                     Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
                     Err(error) => {
                         if std::env::var("RSPICE_DC_TRACE").as_deref() == Ok("1") {
-                            eprintln!("DCTRACE legacy_bjt_half_bias constrained_error={error}");
+                            log::debug!("DCTRACE legacy_bjt_half_bias constrained_error={error}");
                         }
                         log::debug!("Legacy BJT half-bias constrained startup failed: {error}");
                     }
