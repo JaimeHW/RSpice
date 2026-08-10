@@ -302,6 +302,10 @@ pub struct VerilogADevice {
     /// Dense semantic export table for the worker-installed secondary module.
     #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
     wasm_jit_model: std::sync::Arc<WasmJitExecutable>,
+    /// Byte-addressable mirror of `program_active` for the fused browser
+    /// drivers, which read activation out of linear memory.
+    #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+    wasm_program_active: Vec<u8>,
     /// $discontinuity level at the last accepted timestep (edge detector)
     prev_discontinuity: bool,
 }
@@ -525,6 +529,8 @@ impl VerilogADevice {
             native_stamp_jacobians: vec![0.0; native_jacobian_count],
             #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
             wasm_jit_model,
+            #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+            wasm_program_active: vec![1; num_stamp_programs],
             prev_discontinuity: false,
         };
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];
@@ -2231,6 +2237,11 @@ impl VerilogADevice {
             return self.try_evaluate_native_kernel(mode);
         }
 
+        #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+        if self.wasm_jit_model.evaluation_kernel_is_eligible() {
+            return self.try_evaluate_wasm_kernel(mode);
+        }
+
         self.begin_evaluation(mode);
         self.context.clear_currents();
         self.context.clear_timer_event_bound();
@@ -2293,6 +2304,63 @@ impl VerilogADevice {
         Self::run_post_assignment_pass(&mut vm, &self.model, wasm)?;
 
         Ok(currents)
+    }
+
+    /// Evaluate through the browser's fused driver.
+    ///
+    /// One dispatch replaces the assignment call plus one JavaScript round
+    /// trip per stamp. The driver publishes contributions into the context's
+    /// own arrays, so the post-pass and the finiteness audit below read the
+    /// same state the per-entry path would have produced.
+    #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+    fn try_evaluate_wasm_kernel(
+        &mut self,
+        mode: crate::vm::VerilogAEvaluationMode,
+    ) -> Result<Vec<f64>, VmError> {
+        self.begin_evaluation(mode);
+        self.context.clear_timer_event_bound();
+
+        let stamp_count = self.model.stamp_programs.len();
+        self.wasm_program_active.clear();
+        self.wasm_program_active
+            .extend(self.program_active.iter().map(|active| u8::from(*active)));
+        if self.wasm_program_active.len() != stamp_count {
+            return Err(VmError::WasmJit(format!(
+                "browser fused-evaluation buffer does not match compiled model shape ({}/{stamp_count} active flags); no interpreter fallback",
+                self.wasm_program_active.len()
+            )));
+        }
+
+        self.context.prepare_indexed_currents(stamp_count);
+        if self.context.variables.len() < self.model.num_variables {
+            self.context.variables.resize(self.model.num_variables, 0.0);
+        }
+
+        let wasm = std::sync::Arc::clone(&self.wasm_jit_model);
+        let fused = wasm
+            .run_evaluation_kernel(&mut self.context, &self.wasm_program_active, None)
+            .map_err(VmError::WasmJit)?;
+        if !fused {
+            return Err(VmError::WasmJit(
+                "browser JIT module is missing its fused evaluation entry; no interpreter fallback"
+                    .into(),
+            ));
+        }
+
+        for program_idx in 0..stamp_count {
+            if self.wasm_program_active[program_idx] != 0 {
+                Self::finite_result(
+                    self.context.currents[program_idx],
+                    format!("contribution {program_idx} during device evaluation"),
+                )?;
+            }
+        }
+        {
+            let mut vm = Vm::new(&mut self.context);
+            Self::run_post_assignment_pass(&mut vm, &self.model, wasm.as_ref())?;
+        }
+
+        Ok(self.context.currents.clone())
     }
 
     #[cfg(feature = "native")]

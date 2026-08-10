@@ -36,6 +36,13 @@ const WASM_JIT_RAW_CAPABILITY_EXPORTS = [
   "rspice_ui_wasm_jit_math2_v1",
 ];
 const WASM_JIT_VALUE_EXPORT = /^rspice_wasm_jit_value_[0-9a-f]{8}$/;
+// Whole-model drivers. A module carries these only when the shared
+// contribution-ordering rule allows fusing, so they are validated when present
+// and simply absent otherwise.
+const WASM_JIT_KERNEL_EXPORTS = {
+  evaluationKernelExport: "rspice_wasm_jit_eval_kernel",
+  stampKernelExport: "rspice_wasm_jit_stamp_kernel",
+};
 let wasmJitCacheBytes = 0;
 let wasmJitCapability = {
   available: false,
@@ -206,6 +213,11 @@ async function installWasmJitArtifact(module, artifact) {
   ) {
     throw new Error("WASM JIT model artifact has an invalid post-assignment export.");
   }
+  for (const [field, expected] of Object.entries(WASM_JIT_KERNEL_EXPORTS)) {
+    if (artifact[field] != null && artifact[field] !== expected) {
+      throw new Error(`WASM JIT model artifact has an invalid ${field}.`);
+    }
+  }
   const cached = wasmJitModelCache.get(artifact.cacheKey);
   if (cached) {
     wasmJitModelCache.delete(artifact.cacheKey);
@@ -235,6 +247,11 @@ async function installWasmJitArtifact(module, artifact) {
     typeof instance.exports[artifact.postAssignmentExport] !== "function"
   ) {
     throw new Error("WASM JIT model is missing its post-assignment kernel.");
+  }
+  for (const field of Object.keys(WASM_JIT_KERNEL_EXPORTS)) {
+    if (artifact[field] && typeof instance.exports[artifact[field]] !== "function") {
+      throw new Error(`WASM JIT model declares ${field} but does not export it.`);
+    }
   }
   const installed = {
     artifact: { ...artifact, moduleBytes: undefined },

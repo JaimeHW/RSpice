@@ -25,6 +25,10 @@ pub(crate) struct WasmJitExecutable {
     cache_key: String,
     assignment_export: String,
     post_assignment_export: Option<String>,
+    /// Whole-model drivers, absent when the shared contribution-ordering rule
+    /// forbids fusing this model.
+    evaluation_kernel_export: Option<String>,
+    stamp_kernel_export: Option<String>,
     parameter_defaults: Vec<Option<String>>,
     static_conditions: Vec<Option<String>>,
     stamp_values: Vec<String>,
@@ -43,6 +47,8 @@ impl WasmJitExecutable {
             cache_key: artifact.cache_key().to_owned(),
             assignment_export: artifact.assignment_export().to_owned(),
             post_assignment_export: artifact.post_assignment_export().map(str::to_owned),
+            evaluation_kernel_export: artifact.evaluation_kernel_export().map(str::to_owned),
+            stamp_kernel_export: artifact.stamp_kernel_export().map(str::to_owned),
             parameter_defaults: vec![None; model.parameters.len()],
             static_conditions: vec![None; model.stamp_programs.len()],
             stamp_values: vec![String::new(); model.stamp_programs.len()],
@@ -289,6 +295,35 @@ impl WasmJitExecutable {
         self.dispatch(&self.assignment_export, context).map(|_| ())
     }
 
+    /// Run the assignment pass and every stamp value in one dispatch.
+    ///
+    /// Returns `Ok(false)` when this model cannot fuse, leaving the caller on
+    /// the per-entry path. `program_active` and, for the stamp driver, the
+    /// Jacobian output array come from the caller because they are per
+    /// instance rather than per model.
+    pub(crate) fn run_evaluation_kernel(
+        &self,
+        context: &mut crate::vm::VmContext,
+        program_active: &[u8],
+        jacobians: Option<&mut [f64]>,
+    ) -> Result<bool, String> {
+        let with_jacobians = jacobians.is_some();
+        let export = if with_jacobians {
+            self.stamp_kernel_export.as_deref()
+        } else {
+            self.evaluation_kernel_export.as_deref()
+        };
+        let Some(export) = export.map(str::to_owned) else {
+            return Ok(false);
+        };
+        self.dispatch_kernel(&export, context, program_active, jacobians)
+            .map(|()| true)
+    }
+
+    pub(crate) fn evaluation_kernel_is_eligible(&self) -> bool {
+        self.evaluation_kernel_export.is_some()
+    }
+
     pub(crate) fn run_post_assignments(
         &self,
         context: &mut crate::vm::VmContext,
@@ -299,12 +334,39 @@ impl WasmJitExecutable {
         self.dispatch(export, context).map(|_| ())
     }
 
+    /// Dispatch a fused driver, additionally publishing the per-instance
+    /// activation and Jacobian capabilities into the frame.
+    fn dispatch_kernel(
+        &self,
+        export: &str,
+        context: &mut crate::vm::VmContext,
+        program_active: &[u8],
+        jacobians: Option<&mut [f64]>,
+    ) -> Result<(), String> {
+        let mut frame = evaluation_frame(context)?;
+        (frame.program_active_ptr, frame.program_active_len) = slice_capability(program_active)?;
+        if let Some(jacobians) = jacobians {
+            (frame.jacobians_ptr, frame.jacobians_len) = slice_capability(jacobians)?;
+        }
+        self.dispatch_frame(export, context, frame).map(|_| ())
+    }
+
     fn dispatch(
         &self,
         export: &str,
         context: &mut crate::vm::VmContext,
     ) -> Result<super::WasmJitEvalFrame, String> {
-        let mut frame = evaluation_frame(context)?;
+        let frame = evaluation_frame(context)?;
+        self.dispatch_frame(export, context, frame)
+    }
+
+    fn dispatch_frame(
+        &self,
+        export: &str,
+        context: &mut crate::vm::VmContext,
+        frame: super::WasmJitEvalFrame,
+    ) -> Result<super::WasmJitEvalFrame, String> {
+        let mut frame = frame;
         let frame_offset = pointer_offset((&mut frame as *mut super::WasmJitEvalFrame).cast())?;
         let session = super::WasmJitRuntimeSession::new(std::mem::take(context));
         let (dispatch, mut session) = super::with_runtime_session(frame_offset, session, || {

@@ -90,25 +90,7 @@ impl VerilogAWorkerResponse {
                     &report.model,
                     &report.canonical_ir,
                 ) {
-                    Ok(artifact) => (
-                        Some(WasmJitWorkerArtifact {
-                            abi_version: artifact.module().abi_version(),
-                            emitter_version: artifact.module().emitter_version(),
-                            cache_key: artifact.cache_key().to_owned(),
-                            digest: artifact.module().digest().to_owned(),
-                            module_bytes: artifact.module().bytes().to_vec(),
-                            value_exports: artifact
-                                .entries()
-                                .iter()
-                                .map(|entry| entry.export_name().to_owned())
-                                .collect(),
-                            assignment_export: artifact.assignment_export().to_owned(),
-                            post_assignment_export: artifact
-                                .post_assignment_export()
-                                .map(str::to_owned),
-                        }),
-                        None,
-                    ),
+                    Ok(artifact) => (Some(WasmJitWorkerArtifact::from_compiled(&artifact)), None),
                     Err(error) => (None, Some(error.to_string())),
                 }
             }

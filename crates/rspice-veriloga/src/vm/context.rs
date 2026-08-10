@@ -513,7 +513,7 @@ impl VmContext {
     /// establishes the final logical length up front so native code can write
     /// values by contribution index. Terminal-pair probes are invalidated for
     /// the new pass exactly as they are on the scalar path.
-    #[cfg(feature = "native")]
+    #[cfg(any(feature = "native", feature = "wasm-jit"))]
     pub(crate) fn prepare_indexed_currents(&mut self, count: usize) {
         if self.currents.len() != count {
             self.currents.resize(count, 0.0);
