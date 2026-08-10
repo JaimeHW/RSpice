@@ -8,9 +8,10 @@ target/
 /target-codex-*/
 
 # Standalone benchmark probes are throwaway harnesses rebuilt on demand, so
-# their lockfiles are not part of the reproducible build. Drop this rule if a
-# probe result ever needs to be reproduced exactly.
-benchmarks/reference/*/Cargo.lock
+# their lockfiles are not part of the reproducible build. The probes live in
+# tools/perf-probes/archive/, which owns their README and is the path cited by
+# crates/rspice-veriloga/src/canonical_ir/schedule.rs.
+tools/perf-probes/*/*/Cargo.lock
 
 # IDE
 .idea/
@@ -49,7 +50,12 @@ Thumbs.db
 
 # Test outputs
 *.raw
-!tests/xyce/OutputData/Output/DC/*.raw
+# tests/xyce is a vendored upstream corpus, not generated output. The global
+# *.raw rule above silently withheld 43 of its reference files from git — the
+# whole of OutputData/Certification_Tests/BUG_746_SON/ among them — so a fresh
+# clone got a smaller corpus than the machine that vendored it. Re-include the
+# corpus wholesale rather than one directory at a time.
+!tests/xyce/**/*.raw
 *.log
 *.pyc
 __pycache__/
@@ -71,7 +77,12 @@ __pycache__/
 /_site-source/
 /.codex-candidates/
 /.qualification-worktrees/
-/rust_out.pdb
+/_codex_perf_tmp/
+*.pdb
+
+# Claude Code session state. Previously carried only in .git/info/exclude, which
+# is local to one clone and so never travelled with the repository.
+.claude/
 
 # Working notes. Audits, implementation plans, and agent task contracts are
 # session scratch, not product documentation, and go stale the moment the code
