@@ -23,8 +23,9 @@ use super::documentation_shapes::{
     draw_documentation_shape, draw_geometry, preview_anchor_color, preview_stroke,
 };
 use super::drawing::{
-    compatible_builtin_xspice_asset, draw_bus, draw_bus_tap, draw_cell_instance_symbol,
-    draw_component, draw_junction, draw_port_symbol, draw_wire, nearest_wire_screen_hit,
+    compatible_builtin_xspice_asset, draw_artwork_lead_extensions, draw_bus, draw_bus_tap,
+    draw_cell_instance_symbol, draw_component, draw_junction, draw_port_symbol, draw_wire,
+    nearest_wire_screen_hit,
 };
 use super::net_labels::draw_net_label;
 use super::resolved_symbol_render::draw_resolved_symbol;
@@ -1049,16 +1050,9 @@ fn draw_component_preview(
         if component_type == ComponentType::CellInstance
             && let Some(preview_component) = pending_library_cell_component(state, grid_pos)
         {
-            if let Some(symbol) = symbol_context.pending_library_symbol() {
-                draw_resolved_symbol(
-                    painter,
-                    preview_pos,
-                    viewport.zoom,
-                    &preview_component,
-                    symbol,
-                    preview_stroke,
-                );
-            } else if let Some((library, filename, width, height)) = symbol_library
+            // Artwork first, exactly as the canvas resolves it: the ghost
+            // must be the symbol that lands when the pointer is released.
+            if let Some((library, filename, width, height)) = symbol_library
                 .and_then(|library| compatible_builtin_xspice_asset(&preview_component, library))
                 && let Some((symbol, adjusted_rotation)) =
                     library.get_asset_with_rotation(filename, preview_rotation_degrees)
@@ -1073,6 +1067,22 @@ fn draw_component_preview(
                     adjusted_rotation,
                     preview_component.mirror_h,
                     preview_component.mirror_v,
+                    preview_stroke,
+                );
+                draw_artwork_lead_extensions(
+                    painter,
+                    preview_pos,
+                    viewport.zoom,
+                    &preview_component,
+                    preview_stroke,
+                );
+            } else if let Some(symbol) = symbol_context.pending_library_symbol() {
+                draw_resolved_symbol(
+                    painter,
+                    preview_pos,
+                    viewport.zoom,
+                    &preview_component,
+                    symbol,
                     preview_stroke,
                 );
             } else {
@@ -1170,27 +1180,11 @@ pub(super) fn draw_shelf_drag_preview(
     );
 
     if let Some(binding) = payload.binding() {
-        let resolver =
-            SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers);
-        if let Some(symbol) = resolver.resolve_binding(binding) {
-            let component = Component::new(0, ComponentType::CellInstance, grid_pos)
-                .with_rotation(rotation)
-                .with_mirror_h(mirror_h)
-                .with_library_cell(binding.clone());
-            draw_resolved_symbol(
-                painter,
-                preview_pos,
-                viewport.zoom,
-                &component,
-                &symbol,
-                preview_stroke,
-            );
-            return;
-        }
         let component = Component::new(0, ComponentType::CellInstance, grid_pos)
             .with_rotation(rotation)
             .with_mirror_h(mirror_h)
             .with_library_cell(binding.clone());
+        // Artwork first, exactly as the canvas resolves it.
         if let Some((library, filename, width, height)) =
             symbol_library.and_then(|library| compatible_builtin_xspice_asset(&component, library))
             && let Some((symbol, adjusted_rotation)) =
@@ -1206,6 +1200,25 @@ pub(super) fn draw_shelf_drag_preview(
                 adjusted_rotation,
                 mirror_h,
                 false,
+                preview_stroke,
+            );
+            draw_artwork_lead_extensions(
+                painter,
+                preview_pos,
+                viewport.zoom,
+                &component,
+                preview_stroke,
+            );
+        } else if let Some(symbol) =
+            SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers)
+                .resolve_binding(binding)
+        {
+            draw_resolved_symbol(
+                painter,
+                preview_pos,
+                viewport.zoom,
+                &component,
+                &symbol,
                 preview_stroke,
             );
         } else {

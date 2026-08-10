@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::{
     Cell, CellViewRef, LibraryCellInstance, LibraryManager, Point, PortDirection, PortSpec,
-    SYMBOL_DOCUMENT_METADATA_KEY, SchematicState, SymbolDocument, View, ViewType,
+    SYMBOL_DOCUMENT_METADATA_KEY, SchematicState, SymbolDocument, SymbolPinSide, View, ViewType,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +37,9 @@ pub struct ResolvedSymbolIssue {
 pub struct ResolvedSymbolPin {
     pub name: String,
     pub direction: PortDirection,
+    /// Body edge the pin is drawn against. Its lead and its name both follow
+    /// this, so neither can be inferred from the terminal coordinate alone.
+    pub side: SymbolPinSide,
     pub offset: Point,
 }
 
@@ -51,6 +54,13 @@ pub struct ResolvedCellSymbol {
 impl ResolvedCellSymbol {
     pub fn from_authored_document(document: SymbolDocument, ports: &[PortSpec]) -> Self {
         Self::from_authored(document, ports)
+    }
+
+    /// The generated block for an interface, without a library to resolve
+    /// against. Renderer tests need the exact symbol a placed instance draws.
+    #[cfg(test)]
+    pub fn from_ports_for_test(ports: &[PortSpec]) -> Self {
+        Self::from_generated(ports)
     }
 
     pub fn source(&self) -> ResolvedSymbolSource {
@@ -77,6 +87,24 @@ impl ResolvedCellSymbol {
         self.effective_point(pin.offset)
     }
 
+    /// Inner end of a pin's lead, where it meets the body outline.
+    pub fn pin_lead_inner(&self, pin: &ResolvedSymbolPin) -> Point {
+        self.effective_point(crate::state::lead_inner(
+            pin.offset,
+            pin.side,
+            self.document.drawn_body_bounds(),
+        ))
+    }
+
+    /// Where a pin's name is drawn: inside the body, clear of the outline.
+    pub fn pin_label_anchor(&self, pin: &ResolvedSymbolPin) -> Point {
+        self.effective_point(crate::state::pin_label_anchor(
+            pin.offset,
+            pin.side,
+            self.document.drawn_body_bounds(),
+        ))
+    }
+
     fn from_authored(document: SymbolDocument, ports: &[PortSpec]) -> Self {
         let mut pins = Vec::new();
         let mut issues = Vec::new();
@@ -87,6 +115,7 @@ impl ResolvedCellSymbol {
                     Some(offset) => pins.push(ResolvedSymbolPin {
                         name: pin.name.clone(),
                         direction: pin.direction,
+                        side: document.pin_side(pin),
                         offset,
                     }),
                     None => issues.push(ResolvedSymbolIssue {
@@ -99,10 +128,14 @@ impl ResolvedCellSymbol {
         } else {
             let port_names = port_name_set(ports);
             for port in ports {
-                match document.pin(&port.name).and_then(|pin| pin.position) {
-                    Some(offset) => pins.push(ResolvedSymbolPin {
+                match document
+                    .pin(&port.name)
+                    .and_then(|pin| pin.position.map(|offset| (pin, offset)))
+                {
+                    Some((pin, offset)) => pins.push(ResolvedSymbolPin {
                         name: port.name.clone(),
                         direction: port.direction,
+                        side: document.pin_side(pin),
                         offset,
                     }),
                     None => issues.push(ResolvedSymbolIssue {
@@ -155,6 +188,7 @@ impl ResolvedCellSymbol {
                     pin.position.map(|offset| ResolvedSymbolPin {
                         name: port.name.clone(),
                         direction: port.direction,
+                        side: document.pin_side(pin),
                         offset,
                     })
                 })

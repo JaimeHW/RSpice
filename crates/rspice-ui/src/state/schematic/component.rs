@@ -345,6 +345,14 @@ impl LibraryCellInstance {
     }
 }
 
+/// The drawn block of a bound cell instance: every pin with the body edge it
+/// belongs to, and the body outline those leads land on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct InstanceBlock {
+    pub pins: Vec<super::symbol_gen::GeneratedPin>,
+    pub body: (Point, Point),
+}
+
 /// A placed component on the schematic
 ///
 /// Components are circuit elements placed on the schematic canvas.
@@ -574,28 +582,84 @@ impl Component {
     /// Drawing and terminal extraction both read this, so the symbol and
     /// the connectivity can never disagree.
     pub(crate) fn instance_pin_layout(&self) -> Vec<(Option<String>, Point)> {
+        self.instance_block_pins()
+            .into_iter()
+            .map(|pin| ((!pin.name.is_empty()).then_some(pin.name), pin.offset))
+            .collect()
+    }
+
+    /// Local pin layout with the body edge each pin is drawn against.
+    ///
+    /// Everything that draws a block — canvas, SVG export, printed sheet —
+    /// needs the edge, not just the point: it is what decides which way a
+    /// lead runs and which way its name reads. An unnamed legacy terminal
+    /// comes back with an empty name.
+    pub(crate) fn instance_block_pins(&self) -> Vec<super::symbol_gen::GeneratedPin> {
+        self.instance_block().pins
+    }
+
+    /// The whole drawn block: its pins, their edges, and the body they meet.
+    pub(crate) fn instance_block(&self) -> InstanceBlock {
+        use super::symbol_gen::GeneratedPin;
+
         let Some(cell) = &self.library_cell else {
-            return Vec::new();
+            return InstanceBlock {
+                pins: Vec::new(),
+                body: (Point::origin(), Point::origin()),
+            };
         };
 
         if let Some(ports) = cell.interface() {
-            return super::symbol_gen::generate_symbol(&ports)
-                .pins
-                .into_iter()
-                .map(|pin| (Some(pin.name), pin.offset))
-                .collect();
+            let generated = super::symbol_gen::generate_symbol(&ports);
+            let body = generated.body_bounds();
+            return InstanceBlock {
+                pins: generated.pins,
+                body,
+            };
         }
 
+        // A cell bound by terminal order alone has no direction contract, so
+        // its pins are distributed left and right over the full body height.
+        // The body is drawn one pin pitch past them, keeping every lead on
+        // the outline rather than at a corner.
         let pin_count = if cell.terminal_order.is_empty() {
             self.kind.terminal_count()
         } else {
             cell.terminal_order.len()
         };
-        self.dynamic_terminal_offsets(pin_count)
+        let (width, height) = self.symbol_dimensions();
+        let half_width = super::symbol_gen::body_half_width(width);
+        let half_height =
+            super::symbol_gen::body_half_height(height) + super::symbol_gen::GENERATED_STUB;
+        let pins = self
+            .dynamic_terminal_offsets(pin_count)
             .into_iter()
             .enumerate()
-            .map(|(idx, offset)| (cell.terminal_order.get(idx).cloned(), offset))
-            .collect()
+            .map(|(idx, offset)| {
+                let left = offset.x < 0;
+                GeneratedPin {
+                    name: cell.terminal_order.get(idx).cloned().unwrap_or_default(),
+                    direction: if left {
+                        crate::state::PortDirection::In
+                    } else {
+                        crate::state::PortDirection::Out
+                    },
+                    side: if left {
+                        crate::state::SymbolPinSide::Left
+                    } else {
+                        crate::state::SymbolPinSide::Right
+                    },
+                    offset,
+                }
+            })
+            .collect();
+        InstanceBlock {
+            pins,
+            body: (
+                Point::new(-half_width, -half_height),
+                Point::new(half_width, half_height),
+            ),
+        }
     }
 
     fn dynamic_terminal_offsets(&self, pin_count: usize) -> Vec<Point> {
@@ -649,6 +713,44 @@ impl Component {
             "17", "18", "19", "20", "21", "22", "23", "24",
         ];
         LABELS.get(idx).copied().unwrap_or("P")
+    }
+
+    /// Box that authored artwork for this instance is drawn in, and the
+    /// terminal offsets it is matched against.
+    ///
+    /// Artwork is authored against the nominal block. A body widened to
+    /// print long pin names must therefore stretch the leads that reach it,
+    /// never the drawing — otherwise every extra character of a port name
+    /// would distort the glyph a little further.
+    pub(crate) fn artwork_dimensions(&self) -> (i32, i32) {
+        let (width, height) = self.symbol_dimensions();
+        (width.min(super::symbol_gen::GENERATED_WIDTH), height)
+    }
+
+    /// Terminal offsets as authored artwork draws them, in interface order.
+    pub(crate) fn artwork_pin_offsets(&self) -> Vec<Point> {
+        let (artwork_width, _) = self.artwork_dimensions();
+        self.instance_block_pins()
+            .into_iter()
+            .map(|pin| match pin.side {
+                crate::state::SymbolPinSide::Left => Point::new(-artwork_width / 2, pin.offset.y),
+                crate::state::SymbolPinSide::Right => Point::new(artwork_width / 2, pin.offset.y),
+                crate::state::SymbolPinSide::Top | crate::state::SymbolPinSide::Bottom => {
+                    pin.offset
+                }
+            })
+            .collect()
+    }
+
+    /// Leads that carry authored artwork out to terminals it does not reach,
+    /// as `(artwork edge, terminal)` pairs in unrotated symbol coordinates.
+    pub(crate) fn artwork_lead_extensions(&self) -> Vec<(Point, Point)> {
+        self.artwork_pin_offsets()
+            .into_iter()
+            .zip(self.instance_block_pins())
+            .filter(|(edge, pin)| *edge != pin.offset)
+            .map(|(edge, pin)| (edge, pin.offset))
+            .collect()
     }
 
     /// Effective symbol dimensions, allowing generic block scaling for bound library cells.

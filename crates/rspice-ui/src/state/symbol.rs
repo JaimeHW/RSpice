@@ -162,6 +162,55 @@ fn default_pin_side(direction: PortDirection, position: Option<Point>) -> Symbol
     }
 }
 
+/// Which body edge a terminal belongs to, judged against the artwork it is
+/// drawn beside.
+///
+/// A terminal outside the body belongs to the edge it stands off from; one
+/// on or inside the outline belongs to the edge it is nearest. Comparing the
+/// terminal's own `|x|` against its `|y|` cannot answer this — on any body
+/// taller than it is wide, that reads an outer side pin as a rail and turns
+/// its lead through ninety degrees, away from the body it should reach.
+pub fn pin_side_against_body(
+    position: Point,
+    direction: PortDirection,
+    body_bounds: Option<(Point, Point)>,
+) -> SymbolPinSide {
+    let Some(bounds) = body_bounds else {
+        return default_pin_side(direction, Some(position));
+    };
+    let (min, max) = bounds;
+    let outside = SymbolPinSide::ALL.map(|side| (side, edge_standoff(position, bounds, side)));
+    if let Some((side, _)) = outside
+        .iter()
+        .filter(|(_, standoff)| *standoff > 0)
+        .max_by_key(|(_, standoff)| *standoff)
+    {
+        return *side;
+    }
+    let inside = [
+        (SymbolPinSide::Left, position.x.saturating_sub(min.x)),
+        (SymbolPinSide::Right, max.x.saturating_sub(position.x)),
+        (SymbolPinSide::Top, position.y.saturating_sub(min.y)),
+        (SymbolPinSide::Bottom, max.y.saturating_sub(position.y)),
+    ];
+    inside
+        .iter()
+        .min_by_key(|(_, reach)| *reach)
+        .map(|(side, _)| *side)
+        .unwrap_or_else(|| default_pin_side(direction, Some(position)))
+}
+
+/// How far a terminal stands off one body edge: positive outside the body,
+/// zero on the edge itself, negative inside.
+fn edge_standoff(position: Point, (min, max): (Point, Point), side: SymbolPinSide) -> i32 {
+    match side {
+        SymbolPinSide::Left => min.x.saturating_sub(position.x),
+        SymbolPinSide::Right => position.x.saturating_sub(max.x),
+        SymbolPinSide::Top => min.y.saturating_sub(position.y),
+        SymbolPinSide::Bottom => position.y.saturating_sub(max.y),
+    }
+}
+
 fn pin_offset(side: SymbolPinSide, position: Option<Point>) -> i32 {
     let Some(position) = position else {
         return 0;
@@ -709,13 +758,26 @@ impl Default for SymbolDocument {
 impl SymbolDocument {
     pub fn generated_from_ports(ports: &[PortSpec]) -> Self {
         let generated = super::generate_symbol(ports);
-        let body_half_width =
-            (generated.width / 2 - SYMBOL_TERMINAL_GRID).max(SYMBOL_TERMINAL_GRID);
-        let body_half_height = (generated.height / 2).max(SYMBOL_TERMINAL_GRID * 2);
+        let body_half_width = generated.body_half_width();
+        let body_half_height = generated.body_half_height();
+        // The generator already knows which edge every pin belongs to; record
+        // it, so nothing downstream has to re-derive the edge from a terminal
+        // coordinate that cannot express it.
         let pins = generated
             .pins
             .into_iter()
-            .map(|pin| SymbolPin::new(pin.name, pin.direction, Some(pin.offset)))
+            .map(|pin| {
+                let offset = pin.offset;
+                let side = pin.side;
+                SymbolPin::new(pin.name, pin.direction, Some(offset)).with_contract(
+                    default_electrical_type(pin.direction),
+                    side,
+                    match side {
+                        SymbolPinSide::Left | SymbolPinSide::Right => offset.y,
+                        SymbolPinSide::Top | SymbolPinSide::Bottom => offset.x,
+                    },
+                )
+            })
             .collect();
         Self {
             pins,
@@ -983,6 +1045,34 @@ impl SymbolDocument {
             name: self.name_anchor,
             value: self.value_anchor,
         }
+    }
+
+    /// Body bounds when there is drawn artwork to judge a pin against.
+    ///
+    /// [`Self::body_bounds`] answers with a nominal box for an empty body so
+    /// that pin placement always has somewhere to anchor; callers that are
+    /// reasoning about real geometry need to know the difference.
+    pub fn drawn_body_bounds(&self) -> Option<(Point, Point)> {
+        (!self.body.is_empty()).then(|| self.body_bounds())
+    }
+
+    /// Which body edge a pin is drawn against.
+    ///
+    /// The authored side wins wherever the artwork agrees it could be that
+    /// edge. Geometry only steps in for a terminal that stands off a
+    /// different edge entirely — a document written before the side was
+    /// recorded, or one derived from a terminal list — so that no lead is
+    /// ever drawn away from the body it is supposed to reach.
+    pub fn pin_side(&self, pin: &SymbolPin) -> SymbolPinSide {
+        let (Some(position), Some(bounds)) = (pin.position, self.drawn_body_bounds()) else {
+            return pin.side();
+        };
+        if let Some(declared) = pin.side
+            && edge_standoff(position, bounds, declared) >= 0
+        {
+            return declared;
+        }
+        pin_side_against_body(position, pin.direction, Some(bounds))
     }
 
     /// Body-only bounds used for side/offset pin placement.

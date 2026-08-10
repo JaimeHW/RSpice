@@ -87,7 +87,40 @@ def current_decks(repo: Path) -> dict[str, str]:
     return decks
 
 
+def ensure_source_commit(repo: Path) -> None:
+    """Make the pinned pre-trim commit available in shallow checkouts.
+
+    CI checks the repository out at depth 1, which drops the historical
+    commit this inventory is reproduced from. Fetching the pinned hash
+    directly stays exact: every digest check downstream still fails closed
+    if the fetched history does not match.
+    """
+    probe = subprocess.run(
+        ["git", "cat-file", "-e", f"{SOURCE_COMMIT}^{{commit}}"],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+    )
+    if probe.returncode == 0:
+        return
+    fetch = subprocess.run(
+        ["git", "fetch", "--depth=1", "origin", SOURCE_COMMIT],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if fetch.returncode != 0:
+        raise RuntimeError(
+            f"source commit {SOURCE_COMMIT} is absent from this clone and "
+            f"fetching it from origin failed with exit code {fetch.returncode}: "
+            f"{fetch.stderr.strip()}"
+        )
+
+
 def recover_exclusions(repo: Path) -> list[Exclusion]:
+    ensure_source_commit(repo)
     actual_tree = run_git(repo, "rev-parse", f"{SOURCE_COMMIT}:tests/xyce/Netlists").strip()
     if actual_tree != SOURCE_NETLISTS_TREE:
         raise RuntimeError(

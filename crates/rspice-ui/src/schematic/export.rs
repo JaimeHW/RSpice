@@ -26,7 +26,8 @@ pub use self::config::SvgExportConfig;
 
 use self::bjt_diode_symbols::{write_diode_symbol, write_npn_symbol, write_pnp_symbol};
 use self::block_symbols::{
-    write_catalog_asset_symbol, write_cell_instance_symbol, write_port_symbol, write_xspice_symbol,
+    write_artwork_lead_extensions, write_catalog_asset_symbol, write_cell_instance_symbol,
+    write_port_symbol, write_xspice_symbol,
 };
 use self::controlled_symbols::{
     write_cccs_symbol, write_ccvs_symbol, write_opamp_symbol, write_vccs_symbol, write_vcvs_symbol,
@@ -337,13 +338,14 @@ fn write_component(
 ) {
     let cx = component.pos.x as f64 * config.grid_size;
     let cy = component.pos.y as f64 * config.grid_size;
-    let resolved_cell_instance =
-        component.kind == ComponentType::CellInstance && resolved_symbol.is_some();
-    let transform = if resolved_cell_instance {
+    // Every cell-instance writer places its own rotated geometry, so the
+    // group must not rotate it a second time.
+    let transform = if component.kind == ComponentType::CellInstance {
         String::new()
     } else {
         get_rotation_transform(component.rotation, cx, cy)
     };
+    let mut symbol_wrote_labels = false;
 
     if transform.is_empty() {
         svg.push_str("<g>\n");
@@ -420,20 +422,16 @@ fn write_component(
             write_vswitch_symbol(svg, cx, cy, config)
         }
         ComponentType::CellInstance => {
-            if let Some(symbol) = resolved_symbol {
-                write_resolved_symbol_svg(svg, component, symbol, config);
-            } else if let Some((symbol, width, height)) = component
+            // Artwork first, exactly as the canvas resolves it: an exported
+            // sheet must show the same symbol the schematic was drawn with.
+            if let Some((symbol, width, height)) = component
                 .library_cell
                 .as_ref()
                 .and_then(|binding| binding.builtin_xspice.as_ref())
                 .and_then(|contract| {
                     let library = symbol_library?;
-                    let (width, height) = component.symbol_dimensions();
-                    let offsets = component
-                        .instance_pin_layout()
-                        .into_iter()
-                        .map(|(_, offset)| offset)
-                        .collect::<Vec<_>>();
+                    let (width, height) = component.artwork_dimensions();
+                    let offsets = component.artwork_pin_offsets();
                     library
                         .asset_matches_terminal_offsets(
                             &contract.symbol_asset,
@@ -450,6 +448,10 @@ fn write_component(
                 })
             {
                 write_catalog_asset_symbol(svg, component, symbol, width, height, config);
+                write_artwork_lead_extensions(svg, component, config);
+            } else if let Some(symbol) = resolved_symbol {
+                write_resolved_symbol_svg(svg, component, symbol, config);
+                symbol_wrote_labels = true;
             } else {
                 write_cell_instance_symbol(svg, component, config);
             }
@@ -478,7 +480,7 @@ fn write_component(
         }
     }
 
-    if !resolved_cell_instance {
+    if !symbol_wrote_labels {
         // Component label
         if component
             .display_mode
@@ -771,12 +773,14 @@ mod tests {
         let svg =
             export_to_svg_with_symbol_resolver(&schematic, &SvgExportConfig::default(), &resolver);
 
+        // Each lead runs from the saved terminal all the way to the body it
+        // belongs to, so neither instance exports a pin left floating.
         assert!(
-            svg.contains(r#"<line class="component" x1="600" y1="1000" x2="700" y2="1000"/>"#),
+            svg.contains(r#"<line class="component" x1="600" y1="1000" x2="900" y2="1000"/>"#),
             "first instance should export its saved IN terminal"
         );
         assert!(
-            svg.contains(r#"<line class="component" x1="2400" y1="1000" x2="2300" y2="1000"/>"#),
+            svg.contains(r#"<line class="component" x1="2400" y1="1000" x2="2100" y2="1000"/>"#),
             "second instance should export its saved OUT terminal, not reuse the first interface"
         );
     }

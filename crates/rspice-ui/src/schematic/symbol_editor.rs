@@ -1014,33 +1014,13 @@ fn finish_pending_polyline(state: &mut AppState, document: &mut SymbolDocument) 
     true
 }
 
-fn inferred_side_from_point(
-    point: Point,
-    (min, max): (Point, Point),
-) -> crate::state::SymbolPinSide {
-    let distances = [
-        (
-            point.x.saturating_sub(min.x).unsigned_abs(),
-            crate::state::SymbolPinSide::Left,
-        ),
-        (
-            point.x.saturating_sub(max.x).unsigned_abs(),
-            crate::state::SymbolPinSide::Right,
-        ),
-        (
-            point.y.saturating_sub(min.y).unsigned_abs(),
-            crate::state::SymbolPinSide::Top,
-        ),
-        (
-            point.y.saturating_sub(max.y).unsigned_abs(),
-            crate::state::SymbolPinSide::Bottom,
-        ),
-    ];
-    distances
-        .into_iter()
-        .min_by_key(|(distance, _)| *distance)
-        .map(|(_, side)| side)
-        .unwrap_or(crate::state::SymbolPinSide::Left)
+/// The edge a dropped terminal belongs to.
+///
+/// A terminal placed clear of the body belongs to the edge it stands off
+/// from — not merely the edge whose coordinate it happens to sit closest to,
+/// which on a tall body reads an outer left pin as a rail.
+fn inferred_side_from_point(point: Point, bounds: (Point, Point)) -> crate::state::SymbolPinSide {
+    crate::state::pin_side_against_body(point, crate::state::PortDirection::InOut, Some(bounds))
 }
 
 pub(crate) fn rotate_selected_pin(state: &mut AppState) {
@@ -1361,12 +1341,17 @@ fn draw_pins(
         .iter()
         .map(|port| port.name.to_ascii_lowercase())
         .collect();
+    let body = document.drawn_body_bounds();
     for pin in &document.pins {
         let Some(position) = pin.position else {
             continue;
         };
         let start = viewport.world_to_screen(position);
-        let inner = viewport.world_to_screen(stub_inner(position));
+        let inner = viewport.world_to_screen(crate::state::lead_inner(
+            position,
+            document.pin_side(pin),
+            body,
+        ));
         let orphan = !ports.is_empty() && !port_names.contains(&pin.name.to_ascii_lowercase());
         let color = if orphan { t.color.err } else { t.color.wire };
         let stroke = Stroke::new(1.2, color);
@@ -1388,7 +1373,7 @@ fn draw_pins(
             theme::mono(tokens::FS_0, FontWeight::Regular),
             t.color.symbol,
         );
-        draw_direction_mark(painter, viewport, pin, color);
+        draw_direction_mark(painter, viewport, document, pin, color);
     }
 }
 
@@ -1752,20 +1737,6 @@ fn snap_point(point: Point, spacing: SymbolGridSpacing) -> Point {
     Point::new(snap(point.x), snap(point.y))
 }
 
-fn stub_inner(position: Point) -> Point {
-    if position.x.abs() >= position.y.abs() {
-        Point::new(
-            position.x - SYMBOL_TERMINAL_GRID * position.x.signum(),
-            position.y,
-        )
-    } else {
-        Point::new(
-            position.x,
-            position.y - SYMBOL_TERMINAL_GRID * position.y.signum(),
-        )
-    }
-}
-
 fn pin_label_pos(position: Point, viewport: SymbolViewport) -> Pos2 {
     let pad = SYMBOL_TERMINAL_GRID as f32 * viewport.zoom * 0.75;
     let base = viewport.world_to_screen(position);
@@ -1780,9 +1751,12 @@ fn pin_label_pos(position: Point, viewport: SymbolViewport) -> Pos2 {
     }
 }
 
+/// Signal-flow arrow on a pin's lead: an input points into the body it
+/// drives, an output points out toward the net it drives.
 fn draw_direction_mark(
     painter: &egui::Painter,
     viewport: SymbolViewport,
+    document: &SymbolDocument,
     pin: &SymbolPin,
     color: Color32,
 ) {
@@ -1792,25 +1766,41 @@ fn draw_direction_mark(
     let Some(position) = pin.position else {
         return;
     };
-    let inner = viewport.world_to_screen(stub_inner(position));
-    let outward = viewport.world_to_screen(position);
-    let dir = (outward - inner).normalized();
-    let tip = if pin.direction == PortDirection::In {
-        inner + dir * 5.0
+    let terminal = viewport.world_to_screen(position);
+    let inner = viewport.world_to_screen(crate::state::lead_inner(
+        position,
+        document.pin_side(pin),
+        document.drawn_body_bounds(),
+    ));
+    let lead = inner - terminal;
+    let inward = lead.normalized();
+    if !inward.is_finite() {
+        return;
+    }
+    let length = (MARK_LENGTH * viewport.zoom).min(lead.length() * 0.5);
+    let base_offset = (lead.length() - length) * 0.5;
+    let (tip, base) = if pin.direction == PortDirection::In {
+        (
+            terminal + inward * (base_offset + length),
+            terminal + inward * base_offset,
+        )
     } else {
-        outward - dir * 5.0
+        (
+            terminal + inward * base_offset,
+            terminal + inward * (base_offset + length),
+        )
     };
-    let side = vec2(-dir.y, dir.x);
+    let across = vec2(-inward.y, inward.x) * (MARK_HALF_WIDTH * viewport.zoom);
     painter.add(Shape::convex_polygon(
-        vec![
-            tip,
-            tip - dir * 7.0 + side * 3.5,
-            tip - dir * 7.0 - side * 3.5,
-        ],
+        vec![tip, base + across, base - across],
         color,
         Stroke::NONE,
     ));
 }
+
+/// Direction-mark extents in symbol units.
+const MARK_LENGTH: f32 = 5.0;
+const MARK_HALF_WIDTH: f32 = 2.0;
 
 fn draw_arrow(
     painter: &egui::Painter,
