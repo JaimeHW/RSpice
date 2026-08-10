@@ -39,6 +39,15 @@ crates/rspice-publication-contract/tests/fixtures/** text eol=lf
 # exactly these bytes, so CRLF materialization would change every bundle.
 crates/rspice-publish/src/assets/** text eol=lf
 
+# The browser Python runtime is integrity-pinned: automation-worker.js records
+# the exact byte length and sha256 of the bootstrap and of every Pyodide
+# execution asset, and rspice-runtime-manifest.json digests the same bytes.
+# With core.autocrlf=true and no attribute here, a Windows checkout inflated
+# rspice_browser_bootstrap.py by its 1018 CRs and pyodide.mjs by 4, so the
+# worker rejected its own runtime — invisibly, because Linux CI checks out LF.
+# Verbatim rather than eol=lf: the tree holds .wasm and .zip payloads too.
+crates/rspice-ui/web/python/** -text
+
 # Regenerated built-in Rust must stay clean after generator rewrites. The
 # manifest records a blake3 over each generated file's exact bytes and
 # `build.rs` re-derives it from the checkout, so an end-of-line translation

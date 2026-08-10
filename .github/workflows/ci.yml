@@ -66,6 +66,10 @@ jobs:
         run: python3 tools/ci/test_ide_worker.py
       - name: Native release packager tests
         run: python3 tools/release/test_package_native.py
+      - name: Managed Python runtime staging tests
+        run: python3 tools/release/test_stage_managed_python.py
+      - name: Browser automation runtime asset integrity
+        run: python3 tools/ci/test_automation_runtime_assets.py
       - name: Source-distribution lockfile repair tests
         run: python3 tools/release/test_repair_sdist_lock.py
       - name: No restricted model files are vendored
