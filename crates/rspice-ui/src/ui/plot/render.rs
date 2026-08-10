@@ -232,6 +232,21 @@ fn paint_trace_marker(
     }
 }
 
+/// The contiguous runs of finite points in a projected series.
+///
+/// A non-finite sample is a hole in the data, not a coordinate: a step that
+/// failed to converge, or a division by zero inside a plotted expression.
+/// The curve has to break there. Drawing straight through the gap would
+/// assert a value the run never produced, and handing the raw coordinate to
+/// the tessellator puts a vertex at infinity, which degenerates the whole
+/// mesh — one bad sample would blank the trace rather than a single point of
+/// it. Markers already skip non-finite points individually.
+fn finite_runs(points: &[Pos2]) -> impl Iterator<Item = &[Pos2]> {
+    points
+        .split(|point| !(point.x.is_finite() && point.y.is_finite()))
+        .filter(|run| !run.is_empty())
+}
+
 fn paint_trace_markers(
     painter: &egui::Painter,
     points: &[Pos2],
@@ -587,10 +602,16 @@ pub fn show(
             // dash along a path that zig-zags every column — thousands of
             // segments reading as noise. Sparse curves dash normally.
             if points.len() >= 2 {
-                if let Some((dash_length, gap_length)) = dash.filter(|_| points.len() < columns) {
-                    clipped.extend(Shape::dashed_line(&points, stroke, dash_length, gap_length));
-                } else {
-                    clipped.add(Shape::line(points.clone(), stroke));
+                let dash = dash.filter(|_| points.len() < columns);
+                for run in finite_runs(&points) {
+                    if run.len() < 2 {
+                        continue;
+                    }
+                    if let Some((dash_length, gap_length)) = dash {
+                        clipped.extend(Shape::dashed_line(run, stroke, dash_length, gap_length));
+                    } else {
+                        clipped.add(Shape::line(run.to_vec(), stroke));
+                    }
                 }
             }
             let marker = resolved_trace_marker(
