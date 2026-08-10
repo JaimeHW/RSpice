@@ -232,6 +232,7 @@ fn preset_segment(ui: &mut Ui, label: &str, selected: bool, tooltip: &str) -> bo
             t.color.text_dim
         },
     );
+    theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_text(tooltip).clicked()
 }
 

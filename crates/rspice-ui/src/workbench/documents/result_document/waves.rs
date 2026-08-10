@@ -2866,6 +2866,7 @@ fn show_unit_pane_header(
                                 format!("Toggle {} visibility", trace.name),
                             )
                         });
+                        theme::paint_focus_ring(ui, &swatch_response, swatch);
                         if swatch_response.clicked() {
                             if let Some(key) = trace.family_visibility_key {
                                 state.ui.results.toggle_family_trace_visibility(key);
@@ -3487,6 +3488,7 @@ fn show_shared_x_axis(
     if response.double_clicked() {
         set_shared_x_view(&mut state.ui.results, model.analysis_key, pane_count, None);
     }
+    theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_text(
         "Shared X overview — drag the window or its edges, click to recenter, wheel to zoom, drag A/B, F to fit",
     );

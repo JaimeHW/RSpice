@@ -498,6 +498,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                 ),
                             )
                         });
+                        theme::paint_focus_ring(ui, &response, row);
                         if response.clicked() {
                             clicked_sample = Some(sample);
                         }

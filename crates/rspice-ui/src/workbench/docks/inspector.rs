@@ -1674,6 +1674,7 @@ fn inspector_disclosure(ui: &mut Ui, key: &str, title: &str, status: &str) -> bo
         theme::mono(tokens::FS_0, FontWeight::Regular),
         c.ok,
     );
+    theme::paint_focus_ring(ui, &response, rect);
     open
 }
 

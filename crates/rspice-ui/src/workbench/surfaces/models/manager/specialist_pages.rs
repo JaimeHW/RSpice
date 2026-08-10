@@ -1400,6 +1400,21 @@ fn include_closure_graph(
                             .with(("models-include-node", source.path.as_os_str())),
                         Sense::click(),
                     );
+                    let node_label = format!(
+                        "{} · {} · {}",
+                        path_label(&source.path),
+                        library.name,
+                        short_digest(&source.digest.to_string())
+                    );
+                    response.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::WidgetType::SelectableLabel,
+                            ui.is_enabled(),
+                            selected,
+                            node_label.clone(),
+                        )
+                    });
+                    crate::ui::theme::paint_focus_ring(ui, &response, node);
                     if response.clicked() {
                         app.state.workbench.models_view.include_selected_source =
                             Some(source.path.to_string_lossy().into_owned());
