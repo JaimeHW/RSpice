@@ -2366,6 +2366,223 @@ impl XyceTestRunner {
         })
     }
 
+    pub(super) fn validate_bug1190_mutual_inductor_provenance(
+        &self,
+        contract: &XyceBug1190MutualInductorContract,
+    ) -> Result<(), String> {
+        const LABEL: &str = "BUG 1190 mutual-inductor parameter-alias family";
+        let parent = contract
+            .owner_path
+            .parent()
+            .ok_or_else(|| format!("{LABEL} owner has no parent directory"))?;
+        if contract.baseline_path.parent() != Some(parent)
+            || contract.target_path.parent() != Some(parent)
+        {
+            return Err(format!(
+                "{LABEL} contract paths do not share one family directory"
+            ));
+        }
+        let exclusions = self
+            .upstream_exclusions
+            .as_ref()
+            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
+        let entries = fs::read_dir(parent)
+            .map_err(|error| format!("failed to read {LABEL} directory: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("failed to enumerate {LABEL}: {error}"))?;
+
+        let mut candidate_paths = BTreeMap::<String, PathBuf>::new();
+        let mut owner_manifest_rows = Vec::new();
+        let mut historical_exclusion_rows = Vec::new();
+        for entry in &entries {
+            let owner_path = entry.path();
+            let metadata = fs::symlink_metadata(&owner_path)
+                .map_err(|error| format!("failed to inspect {LABEL} entry: {error}"))?;
+            if metadata.file_type().is_symlink()
+                || !metadata.file_type().is_file()
+                || !owner_path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+                || !self.requires_upstream_wrapper(&self.relative_key(&owner_path))
+            {
+                continue;
+            }
+            let owner_stem = owner_path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .ok_or_else(|| format!("{LABEL} owner filename is not UTF-8"))?;
+            if owner_stem.to_ascii_lowercase().ends_with("_baseline") {
+                continue;
+            }
+            let baseline_path = owner_path.with_file_name(format!("{owner_stem}_baseline.cir"));
+            let baseline_relative = self.relative_key(&baseline_path);
+            let baseline_key = Self::normalize_manifest_key(&baseline_relative);
+            let Some(exclusion) = exclusions.get(&baseline_key) else {
+                continue;
+            };
+            if !matches!(
+                &exclusion.disposition,
+                XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                    expected_contract,
+                } if expected_contract == XYCE_BUG1190_MUTUAL_INDUCTOR_BASELINE_CONTRACT
+            ) {
+                continue;
+            }
+
+            let baseline_metadata = fs::symlink_metadata(&baseline_path).map_err(|error| {
+                format!(
+                    "failed to inspect {LABEL} baseline '{}': {error}",
+                    self.display_path(&baseline_path)
+                )
+            })?;
+            if baseline_metadata.file_type().is_symlink()
+                || !baseline_metadata.file_type().is_file()
+                || baseline_metadata.len() == 0
+            {
+                return Err(format!(
+                    "{LABEL} baseline '{}' must be a nonempty regular non-symlink file",
+                    self.display_path(&baseline_path)
+                ));
+            }
+
+            let owner_relative = self.relative_key(&owner_path);
+            let owner_key = Self::normalize_manifest_key(&owner_relative);
+            if exclusions.contains_key(&owner_key) {
+                return Err(format!(
+                    "{LABEL} owner '{owner_relative}' unexpectedly has exclusion provenance"
+                ));
+            }
+            owner_manifest_rows.push(format!(
+                "{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"
+            ));
+            historical_exclusion_rows.push(format!(
+                "{baseline_relative}\t{}\tupstream_excluded",
+                exclusion.source
+            ));
+            if candidate_paths
+                .insert(owner_key, owner_path.clone())
+                .is_some()
+                || candidate_paths
+                    .insert(baseline_key, baseline_path)
+                    .is_some()
+            {
+                return Err(format!(
+                    "{LABEL} candidate census contains a path collision"
+                ));
+            }
+        }
+
+        let mut candidates = Vec::with_capacity(candidate_paths.len());
+        let mut candidate_content = Vec::with_capacity(candidate_paths.len());
+        for path in candidate_paths.values() {
+            let metadata = fs::symlink_metadata(path)
+                .map_err(|error| format!("failed to inspect {LABEL} candidate: {error}"))?;
+            if metadata.file_type().is_symlink()
+                || !metadata.file_type().is_file()
+                || metadata.len() == 0
+            {
+                return Err(format!(
+                    "{LABEL} candidate '{}' must be a nonempty regular non-symlink file",
+                    self.display_path(path)
+                ));
+            }
+            let relative = self.relative_key(path);
+            let bytes = fs::read(path).map_err(|error| {
+                format!("failed to read {LABEL} candidate '{relative}': {error}")
+            })?;
+            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
+            candidates.push(relative.clone());
+            candidate_content.push(format!("{relative}\t{}", blake3::hash(&canonical).to_hex()));
+            self.reject_wrapper_output_artifacts(path)?;
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| format!("{LABEL} candidate filename is not UTF-8"))?;
+            for suffix in ["prn", "res", "prn.gs", "res.gs", "csv", "csd"] {
+                let sidecar = path.with_file_name(format!("{file_name}.{suffix}"));
+                match fs::symlink_metadata(&sidecar) {
+                    Ok(_) => {
+                        return Err(format!(
+                            "{LABEL} candidate must not have source-side output artifact '{}'",
+                            self.display_path(&sidecar)
+                        ));
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        return Err(format!(
+                            "failed to inspect {LABEL} sidecar '{}': {error}",
+                            self.display_path(&sidecar)
+                        ));
+                    }
+                }
+            }
+        }
+
+        candidates.sort();
+        candidate_content.sort();
+        owner_manifest_rows.sort();
+        historical_exclusion_rows.sort();
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(candidate_content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let owner_hash = blake3::hash(owner_manifest_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let exclusion_hash = blake3::hash(historical_exclusion_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if candidates.len() != XYCE_BUG1190_MUTUAL_INDUCTOR_CANDIDATE_COUNT
+            || candidate_hash != XYCE_BUG1190_MUTUAL_INDUCTOR_CANDIDATE_BLAKE3
+            || content_hash != XYCE_BUG1190_MUTUAL_INDUCTOR_CONTENT_BLAKE3
+            || owner_manifest_rows.len() != XYCE_BUG1190_MUTUAL_INDUCTOR_OWNER_COUNT
+            || owner_hash != XYCE_BUG1190_MUTUAL_INDUCTOR_OWNER_MANIFEST_BLAKE3
+            || historical_exclusion_rows.len() != XYCE_BUG1190_MUTUAL_INDUCTOR_EXCLUSION_COUNT
+            || exclusion_hash != XYCE_BUG1190_MUTUAL_INDUCTOR_HISTORICAL_EXCLUSION_BLAKE3
+        {
+            return Err(format!(
+                "{LABEL} provenance changed: candidates={}/{candidate_hash}/{content_hash}, owners={}/{owner_hash}, exclusions={}/{exclusion_hash}",
+                candidates.len(),
+                owner_manifest_rows.len(),
+                historical_exclusion_rows.len()
+            ));
+        }
+
+        let expected_owner = Self::normalize_manifest_key(&self.relative_key(&contract.owner_path));
+        let expected_baseline =
+            Self::normalize_manifest_key(&self.relative_key(&contract.baseline_path));
+        let requested = Self::normalize_manifest_key(&self.relative_key(&contract.target_path));
+        if !candidate_paths.contains_key(&expected_owner)
+            || !candidate_paths.contains_key(&expected_baseline)
+            || !candidate_paths.contains_key(&requested)
+        {
+            return Err(format!(
+                "requested {LABEL} deck or its relational pair is outside the exact candidate census"
+            ));
+        }
+        let owner_stem = contract
+            .owner_path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .ok_or_else(|| format!("{LABEL} owner filename is not UTF-8"))?;
+        if owner_stem != contract.family
+            || !Self::same_path(
+                &contract.baseline_path,
+                &contract
+                    .owner_path
+                    .with_file_name(format!("{owner_stem}_baseline.cir")),
+            )
+        {
+            return Err(format!(
+                "{LABEL} contract lost its exact owner/baseline pairing"
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn validate_nonlinear_core_model_step_provenance(
         &self,
         contract: &XyceNonlinearCoreModelStepReferenceContract,
@@ -2593,6 +2810,393 @@ impl XyceTestRunner {
             );
         }
         Ok(())
+    }
+
+    pub(super) fn bug1190_mutual_inductor_snapshot(
+        netlist: &Netlist,
+    ) -> Result<XyceBug1190MutualInductorSnapshot, String> {
+        const LABEL: &str = "BUG 1190 mutual-inductor parameter-alias family";
+        let tran_count = netlist
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Tran { .. }))
+            .count();
+        if netlist.title.trim().is_empty()
+            || netlist.title.trim_start().starts_with('.')
+            || tran_count != 1
+            || netlist.analyses.iter().any(|analysis| {
+                !matches!(
+                    analysis,
+                    AnalysisCommand::Tran { .. } | AnalysisCommand::Step(_)
+                )
+            })
+            || netlist.lin_analysis.is_some()
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || netlist.device_initial_conditions.is_some()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || netlist.output_requests.len() != 1
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+            || netlist
+                .params
+                .all_params()
+                .iter()
+                .any(|(_, value)| !value.is_finite())
+        {
+            return Err(format!(
+                "{LABEL} requires one finite, diagnostic-free transient circuit with one output request and no auxiliary analyses or state"
+            ));
+        }
+
+        let flattened = rspice_core::netlist::flatten_netlist_with_models(netlist)
+            .map_err(|error| format!("could not flatten {LABEL}: {error}"))?;
+        if !flattened.scoped_initial_conditions.is_empty()
+            || !flattened.scoped_node_sets.is_empty()
+            || !flattened.scoped_startup_directives.is_empty()
+            || !flattened.xspice_auto_bridge_node_hints.is_empty()
+        {
+            return Err(format!(
+                "flattened {LABEL} contains scoped startup state or XSPICE bridge hints"
+            ));
+        }
+
+        let mut models = BTreeMap::new();
+        for model in netlist.models.iter().chain(flattened.scoped_models.iter()) {
+            if model.name.trim().is_empty()
+                || model.model_type.trim().is_empty()
+                || !model.expr_params.is_empty()
+                || !model.string_params.is_empty()
+                || !model.string_vector_params.is_empty()
+                || !model.real_vector_params.is_empty()
+                || !model.real_vector_expr_params.is_empty()
+                || !model.integer_vector_params.is_empty()
+            {
+                return Err(format!(
+                    "{LABEL} contains an unnamed, unresolved, string-valued, or vector-valued model"
+                ));
+            }
+            let mut numeric = BTreeMap::new();
+            for (name, value) in &model.params {
+                let name = name.trim().to_ascii_lowercase();
+                if name.is_empty()
+                    || !value.is_finite()
+                    || numeric.insert(name, value.to_bits()).is_some()
+                {
+                    return Err(format!(
+                        "{LABEL} model '{}' contains an empty, duplicate, or non-finite scalar parameter",
+                        model.name
+                    ));
+                }
+            }
+            let name = Self::normalize_device_instance_name(&model.name);
+            if name.is_empty()
+                || models
+                    .insert(
+                        name.clone(),
+                        XyceBug1190ModelFingerprint {
+                            model_type: model.model_type.trim().to_ascii_lowercase(),
+                            numeric_bits: numeric.into_iter().collect(),
+                        },
+                    )
+                    .is_some()
+            {
+                return Err(format!(
+                    "{LABEL} contains an empty or duplicate effective model name '{name}'"
+                ));
+            }
+        }
+
+        let mut elements = BTreeMap::new();
+        let mut resistor_count = 0usize;
+        let mut capacitor_count = 0usize;
+        let mut inductor_bits = BTreeMap::<String, u64>::new();
+        let mut dc_source_bits = Vec::new();
+        let mut sin_source_bits = Vec::new();
+        let mut couplings = Vec::<(Vec<String>, u64, Option<String>)>::new();
+        for element in &flattened.elements {
+            if !matches!(
+                element.provenance,
+                rspice_core::netlist::ElementProvenance::Authored
+            ) {
+                return Err(format!(
+                    "{LABEL} contains generated element '{}'",
+                    element.name
+                ));
+            }
+            if element.nodes.iter().any(|node| {
+                node.trim().is_empty() || (Self::node_name_is_ground(node) && node.trim() != "0")
+            }) {
+                return Err(format!(
+                    "{LABEL} element '{}' contains an empty node or a non-literal ground alias",
+                    element.name
+                ));
+            }
+            let name = Self::normalize_device_instance_name(&element.name);
+            if name.is_empty() {
+                return Err(format!("{LABEL} contains an empty element name"));
+            }
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| node.trim().to_ascii_lowercase().replace(':', "."))
+                .collect::<Vec<_>>();
+            let fingerprint = match &element.kind {
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } if nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    resistor_count += 1;
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::Capacitor {
+                    value,
+                    value_expr,
+                    initial_voltage,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } if nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && initial_voltage.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    capacitor_count += 1;
+                    XyceRelationalElementFingerprint {
+                        kind: "C".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::Inductor {
+                    value,
+                    value_expr,
+                    initial_current,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } if nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && initial_current.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    if inductor_bits
+                        .insert(name.clone(), value.to_bits())
+                        .is_some()
+                    {
+                        return Err(format!("{LABEL} contains a duplicate inductor name"));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: "L".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Dc(value))
+                    if nodes.len() == 2 && value.is_finite() =>
+                {
+                    dc_source_bits.push(value.to_bits());
+                    XyceRelationalElementFingerprint {
+                        kind: "V:DC".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Sin {
+                    offset,
+                    amplitude,
+                    frequency,
+                    delay,
+                    damping,
+                    phase,
+                }) if nodes.len() == 2
+                    && [*offset, *amplitude, *frequency, *delay, *damping, *phase]
+                        .into_iter()
+                        .all(Value::is_finite)
+                    && *amplitude > 0.0
+                    && *frequency > 0.0
+                    && delay.to_bits() == 0.0f64.to_bits()
+                    && damping.to_bits() == 0.0f64.to_bits()
+                    && phase.to_bits() == 0.0f64.to_bits() =>
+                {
+                    let bits = [*offset, *amplitude, *frequency, *delay, *damping, *phase]
+                        .into_iter()
+                        .map(Value::to_bits)
+                        .collect::<Vec<_>>();
+                    sin_source_bits.push(bits.clone());
+                    XyceRelationalElementFingerprint {
+                        kind: "V:SIN".to_string(),
+                        nodes,
+                        numeric_bits: bits,
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::Coupling {
+                    inductors,
+                    coefficient,
+                    model,
+                } if nodes.is_empty()
+                    && inductors.len() >= 2
+                    && coefficient.is_finite()
+                    && *coefficient > 0.0
+                    && *coefficient <= 1.0 =>
+                {
+                    let winding_names = inductors
+                        .iter()
+                        .map(|winding| Self::normalize_device_instance_name(winding))
+                        .collect::<Vec<_>>();
+                    if winding_names.iter().any(String::is_empty)
+                        || winding_names.iter().collect::<BTreeSet<_>>().len()
+                            != winding_names.len()
+                    {
+                        return Err(format!(
+                            "{LABEL} coupling '{}' contains an empty or duplicate winding name",
+                            element.name
+                        ));
+                    }
+                    let model = model
+                        .as_ref()
+                        .map(|model| Self::normalize_device_instance_name(model));
+                    let mut text = winding_names.clone();
+                    if let Some(model) = &model {
+                        text.push(model.clone());
+                    }
+                    couplings.push((winding_names, coefficient.to_bits(), model));
+                    XyceRelationalElementFingerprint {
+                        kind: "K".to_string(),
+                        nodes,
+                        numeric_bits: vec![coefficient.to_bits()],
+                        text,
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} contains unresolved or unqualified element '{}'",
+                        element.name
+                    ));
+                }
+            };
+            if elements.insert(name.clone(), fingerprint).is_some() {
+                return Err(format!(
+                    "{LABEL} contains duplicate normalized element name '{name}'"
+                ));
+            }
+        }
+
+        let [(winding_names, coupling_bits, coupling_model)] = couplings.as_slice() else {
+            return Err(format!(
+                "{LABEL} requires exactly one mutual-inductor coupling"
+            ));
+        };
+        if winding_names
+            .iter()
+            .any(|winding| !inductor_bits.contains_key(winding))
+            || winding_names.len() != inductor_bits.len()
+        {
+            return Err(format!(
+                "{LABEL} coupling must reference every qualified inductor exactly once"
+            ));
+        }
+
+        let (kind, swept_inductor_bits) = if elements.len() == 17
+            && resistor_count == 8
+            && capacitor_count == 3
+            && inductor_bits.len() == 2
+            && dc_source_bits.len() == 2
+            && dc_source_bits.iter().all(|bits| *bits == 0.0f64.to_bits())
+            && sin_source_bits.len() == 1
+            && models.is_empty()
+            && winding_names.len() == 2
+            && *coupling_bits == 0.75f64.to_bits()
+            && coupling_model.is_none()
+        {
+            (
+                XyceBug1190MutualInductorKind::Linear,
+                vec![
+                    *inductor_bits
+                        .get(&winding_names[1])
+                        .expect("qualified coupling winding exists"),
+                ],
+            )
+        } else if elements.len() == 8
+            && resistor_count == 3
+            && capacitor_count == 0
+            && inductor_bits.len() == 3
+            && dc_source_bits.is_empty()
+            && sin_source_bits.len() == 1
+            && models.len() == 1
+            && winding_names.len() == 3
+            && *coupling_bits == 1.0f64.to_bits()
+        {
+            let model_name = coupling_model
+                .as_ref()
+                .ok_or_else(|| format!("{LABEL} nonlinear coupling has no effective CORE model"))?;
+            let model = models.get(model_name).ok_or_else(|| {
+                format!("{LABEL} nonlinear coupling references unknown model '{model_name}'")
+            })?;
+            if model.model_type != "core"
+                || model.numeric_bits != vec![("c".to_string(), 0.001f64.to_bits())]
+            {
+                return Err(format!(
+                    "{LABEL} nonlinear member requires exactly one scalar CORE C=0.001 model"
+                ));
+            }
+            (
+                XyceBug1190MutualInductorKind::NonlinearCore,
+                winding_names[1..]
+                    .iter()
+                    .map(|winding| {
+                        *inductor_bits
+                            .get(winding)
+                            .expect("qualified coupling winding exists")
+                    })
+                    .collect(),
+            )
+        } else {
+            return Err(format!(
+                "{LABEL} is neither the qualified 17-element linear transformer nor the qualified 8-element nonlinear CORE transformer"
+            ));
+        };
+
+        Ok(XyceBug1190MutualInductorSnapshot {
+            kind,
+            title: netlist.title.trim().to_string(),
+            elements,
+            models,
+            swept_inductor_bits,
+        })
     }
 
     pub(super) fn nonlinear_core_model_step_snapshot(

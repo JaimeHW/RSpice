@@ -6,6 +6,27 @@
 
 use super::*;
 
+impl XyceFileCompareTolerance {
+    /// Validate tolerances before reproducing Release 7.10's `file_compare.pl`.
+    ///
+    /// Zero-valued tolerances are meaningful because the historical script
+    /// uses strict comparisons; negative and non-finite tolerances are not.
+    pub(super) fn validate(self) -> Result<Self, String> {
+        if !self.absolute.is_finite()
+            || self.absolute < 0.0
+            || !self.relative.is_finite()
+            || self.relative < 0.0
+            || !self.zero.is_finite()
+            || self.zero < 0.0
+        {
+            return Err(format!(
+                "Release 7.10 file_compare tolerances must be finite and nonnegative, got {self:?}"
+            ));
+        }
+        Ok(self)
+    }
+}
+
 impl XyceTestRunner {
     pub(super) fn compare_measure_cont_step_waveforms(
         index: usize,
@@ -1366,6 +1387,89 @@ impl XyceTestRunner {
                 mismatches.push(XyceValueMismatch {
                     row: row_index,
                     probe: reference.columns[column_index].clone(),
+                    expected,
+                    actual,
+                    relative_error,
+                });
+                if mismatches.len() >= self.config.max_mismatches {
+                    return Ok(mismatches);
+                }
+            }
+        }
+        Ok(mismatches)
+    }
+
+    /// Reproduce the numeric-table comparison performed by Xyce Release
+    /// 7.10's `file_compare.pl`.
+    ///
+    /// `gold` is intentionally the denominator of the asymmetric relative
+    /// error calculation. Values are compared only after the default Xyce
+    /// PRN serialization round trip, matching the Perl script's view of the
+    /// generated files. The final clause preserves the script's historical
+    /// FFT-phase bug literally: it omitted an outer absolute value around
+    /// `abs(value) - 180`.
+    pub(super) fn compare_release_7_10_file_compare_tables(
+        &self,
+        gold: &XycePrnTable,
+        test: &XycePrnTable,
+        tolerance: XyceFileCompareTolerance,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let tolerance = tolerance.validate()?;
+        if gold.columns != test.columns {
+            return Err(format!(
+                "Release 7.10 file_compare headers differ: gold {:?}, test {:?}",
+                gold.columns, test.columns
+            ));
+        }
+        if gold.rows.len() != test.rows.len() {
+            return Err(format!(
+                "Release 7.10 file_compare row counts differ: gold {}, test {}",
+                gold.rows.len(),
+                test.rows.len()
+            ));
+        }
+
+        let mut mismatches = Vec::new();
+        for (row_index, (gold_row, test_row)) in gold.rows.iter().zip(&test.rows).enumerate() {
+            if gold_row.len() != gold.columns.len() || test_row.len() != test.columns.len() {
+                return Err(format!(
+                    "Release 7.10 file_compare row {row_index} width differs from its header: gold {}/{}, test {}/{}",
+                    gold_row.len(),
+                    gold.columns.len(),
+                    test_row.len(),
+                    test.columns.len()
+                ));
+            }
+
+            for (column_index, (&gold_value, &test_value)) in
+                gold_row.iter().zip(test_row).enumerate()
+            {
+                let probe = &gold.columns[column_index];
+                let expected = Self::xyce_default_prn_roundtrip(gold_value).map_err(|error| {
+                    format!(
+                        "Release 7.10 file_compare cannot serialize gold {probe} at row {row_index}: {error}"
+                    )
+                })?;
+                let actual = Self::xyce_default_prn_roundtrip(test_value).map_err(|error| {
+                    format!(
+                        "Release 7.10 file_compare cannot serialize test {probe} at row {row_index}: {error}"
+                    )
+                })?;
+                let absolute_error = (actual - expected).abs();
+                let relative_error = absolute_error / expected.abs();
+                let exact = actual == expected;
+                let both_zero = actual.abs() <= tolerance.zero && expected.abs() <= tolerance.zero;
+                let within_both =
+                    absolute_error < tolerance.absolute && relative_error < tolerance.relative;
+                let phase_clause = (expected.abs() - 180.0) < tolerance.absolute
+                    && (actual.abs() - 180.0) < tolerance.absolute;
+                if exact || both_zero || within_both || phase_clause {
+                    continue;
+                }
+
+                mismatches.push(XyceValueMismatch {
+                    row: row_index,
+                    probe: probe.clone(),
                     expected,
                     actual,
                     relative_error,
@@ -5917,5 +6021,218 @@ impl XyceTestRunner {
                 "continuous artifact expects {probe}={value} at row {row}, but evaluation omitted it"
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod release_7_10_file_compare_tests {
+    use super::*;
+
+    fn runner() -> XyceTestRunner {
+        let config = XyceRunnerConfig {
+            max_mismatches: 16,
+            ..XyceRunnerConfig::default()
+        };
+        XyceTestRunner::new(env!("CARGO_MANIFEST_DIR"), config)
+    }
+
+    fn table(columns: &[&str], rows: &[&[Value]]) -> XycePrnTable {
+        XycePrnTable {
+            columns: columns.iter().map(|column| (*column).to_string()).collect(),
+            rows: rows.iter().map(|row| row.to_vec()).collect(),
+        }
+    }
+
+    fn tolerance(absolute: Value, relative: Value, zero: Value) -> XyceFileCompareTolerance {
+        XyceFileCompareTolerance {
+            absolute,
+            relative,
+            zero,
+        }
+    }
+
+    #[test]
+    fn release_7_10_file_compare_requires_exact_layout() {
+        let runner = runner();
+        let gold = table(&["Index", "V(1)"], &[&[0.0, 200.0]]);
+        let different_case = table(&["Index", "v(1)"], &[&[0.0, 200.0]]);
+        assert!(
+            runner
+                .compare_release_7_10_file_compare_tables(
+                    &gold,
+                    &different_case,
+                    tolerance(1.0e-6, 1.0e-2, 1.0e-12),
+                )
+                .unwrap_err()
+                .contains("headers differ")
+        );
+
+        let extra_row = table(&["Index", "V(1)"], &[&[0.0, 200.0], &[1.0, 201.0]]);
+        assert!(
+            runner
+                .compare_release_7_10_file_compare_tables(
+                    &gold,
+                    &extra_row,
+                    tolerance(1.0e-6, 1.0e-2, 1.0e-12),
+                )
+                .unwrap_err()
+                .contains("row counts differ")
+        );
+
+        let short_row = table(&["Index", "V(1)"], &[&[0.0]]);
+        assert!(
+            runner
+                .compare_release_7_10_file_compare_tables(
+                    &gold,
+                    &short_row,
+                    tolerance(1.0e-6, 1.0e-2, 1.0e-12),
+                )
+                .unwrap_err()
+                .contains("width differs")
+        );
+    }
+
+    #[test]
+    fn release_7_10_file_compare_rounds_through_default_prn_and_uses_strict_bounds() {
+        let runner = runner();
+        let serialized_equal_gold = table(&["V(1)"], &[&[200.000_000_001]]);
+        let serialized_equal_test = table(&["V(1)"], &[&[200.0]]);
+        assert!(
+            runner
+                .compare_release_7_10_file_compare_tables(
+                    &serialized_equal_gold,
+                    &serialized_equal_test,
+                    tolerance(0.0, 0.0, 0.0),
+                )
+                .unwrap()
+                .is_empty()
+        );
+
+        let gold = table(&["V(1)"], &[&[200.0]]);
+        let absolute_boundary = table(&["V(1)"], &[&[201.0]]);
+        assert_eq!(
+            runner
+                .compare_release_7_10_file_compare_tables(
+                    &gold,
+                    &absolute_boundary,
+                    tolerance(1.0, 1.0, 0.0),
+                )
+                .unwrap()
+                .len(),
+            1,
+            "absolute equality must fail the script's strict '<' check"
+        );
+
+        let relative_boundary = table(&["V(1)"], &[&[202.0]]);
+        let expected = XyceTestRunner::xyce_default_prn_roundtrip(200.0).unwrap();
+        let actual = XyceTestRunner::xyce_default_prn_roundtrip(202.0).unwrap();
+        let exact_relative_boundary = (actual - expected).abs() / expected.abs();
+        assert_eq!(
+            runner
+                .compare_release_7_10_file_compare_tables(
+                    &gold,
+                    &relative_boundary,
+                    tolerance(3.0, exact_relative_boundary, 0.0),
+                )
+                .unwrap()
+                .len(),
+            1,
+            "relative equality must fail the script's strict '<' check"
+        );
+
+        let inside_both = table(&["V(1)"], &[&[200.5]]);
+        assert!(
+            runner
+                .compare_release_7_10_file_compare_tables(
+                    &gold,
+                    &inside_both,
+                    tolerance(0.500_001, 0.003, 0.0),
+                )
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn release_7_10_file_compare_relative_error_is_gold_asymmetric() {
+        let runner = runner();
+        let smaller = table(&["V(1)"], &[&[200.0]]);
+        let larger = table(&["V(1)"], &[&[300.0]]);
+        let tolerance = tolerance(101.0, 0.4, 0.0);
+
+        assert_eq!(
+            runner
+                .compare_release_7_10_file_compare_tables(&smaller, &larger, tolerance)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            runner
+                .compare_release_7_10_file_compare_tables(&larger, &smaller, tolerance)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn release_7_10_file_compare_preserves_zero_and_phase_clauses() {
+        let runner = runner();
+        let zero_gold = table(&["V(1)"], &[&[1.0e-12]]);
+        let zero_test = table(&["V(1)"], &[&[-1.0e-12]]);
+        assert!(
+            runner
+                .compare_release_7_10_file_compare_tables(
+                    &zero_gold,
+                    &zero_test,
+                    tolerance(0.0, 0.0, 1.0e-12),
+                )
+                .unwrap()
+                .is_empty()
+        );
+
+        // This pair is neither exact, near zero, nor within either numeric
+        // tolerance. It passes only because the Perl phase clause compares
+        // `abs(value) - 180` directly instead of taking its outer absolute.
+        let phase_gold = table(&["P(V(1))"], &[&[100.0]]);
+        let phase_test = table(&["P(V(1))"], &[&[-170.0]]);
+        assert!(
+            runner
+                .compare_release_7_10_file_compare_tables(
+                    &phase_gold,
+                    &phase_test,
+                    tolerance(1.0e-6, 0.0, 0.0),
+                )
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn release_7_10_file_compare_rejects_nonfinite_values_and_tolerances() {
+        let runner = runner();
+        let finite = table(&["V(1)"], &[&[200.0]]);
+        let nonfinite = table(&["V(1)"], &[&[Value::INFINITY]]);
+        assert!(
+            runner
+                .compare_release_7_10_file_compare_tables(
+                    &finite,
+                    &nonfinite,
+                    tolerance(1.0e-6, 1.0e-2, 1.0e-12),
+                )
+                .unwrap_err()
+                .contains("cannot serialize")
+        );
+
+        assert!(
+            runner
+                .compare_release_7_10_file_compare_tables(
+                    &finite,
+                    &finite,
+                    tolerance(-1.0, 1.0e-2, 1.0e-12),
+                )
+                .unwrap_err()
+                .contains("finite and nonnegative")
+        );
     }
 }
