@@ -9,6 +9,22 @@
 //! is called. This module is the whole of the crate's raw-pointer and page-
 //! permission surface by design: keeping it here is what lets the rest of the
 //! native backend be reviewed as ordinary code.
+//!
+//! ## Floating-point environment
+//!
+//! Generated code inherits the calling thread's floating-point control word
+//! (`MXCSR` on x64, `FPCR` on AArch64) and never writes it. Round-to-nearest
+//! with denormals enabled is assumed, which is what every supported host
+//! establishes at thread creation and what Rust itself relies on.
+//!
+//! This is deliberately not enforced. A third-party library that enables
+//! flush-to-zero on a simulation thread would change generated code's denormal
+//! behaviour -- but it would change the bytecode interpreter's and the
+//! ahead-of-time compiled models' behaviour identically, because they are
+//! ordinary compiled `f64` arithmetic on the same thread. Setting the control
+//! word here would therefore make the backends *disagree* rather than agree.
+//! Any such policy has to be a process-wide decision, not one this module
+//! makes on its own.
 
 #[cfg(all(target_arch = "aarch64", unix))]
 use super::aarch64::unwind::A64UnwindFunction;
