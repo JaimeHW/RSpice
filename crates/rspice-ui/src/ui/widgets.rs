@@ -13,6 +13,7 @@ mod form;
 mod pane;
 mod schematic_command;
 mod section;
+mod segmented;
 mod select;
 mod selection_command;
 mod table;
@@ -32,6 +33,7 @@ pub use pane::{
 };
 pub(crate) use schematic_command::{SchematicCommandPreview, schematic_command_workflow};
 pub use section::section_header;
+pub(crate) use segmented::{SegmentedWidth, segmented};
 pub use select::select;
 pub(crate) use select::{select_mono_with_response, select_with_disabled, select_with_response};
 pub(crate) use selection_command::{
