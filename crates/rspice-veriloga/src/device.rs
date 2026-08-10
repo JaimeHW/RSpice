@@ -183,11 +183,11 @@ const NATIVE_COMPILE_CACHE_MAX_BYTES_ENV: &str = "RSPICE_VERILOGA_NATIVE_CACHE_M
 /// Recorded per model rather than as one counter: the test binary compiles
 /// models on several threads at once, so a single count sampled across a
 /// window observes whatever other tests happened to compile meanwhile.
-#[cfg(all(test, feature = "native"))]
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 static NATIVE_COMPILE_LOG: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
 /// How many times `module` reached the backend.
-#[cfg(all(test, feature = "native"))]
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 pub(crate) fn native_compile_count(module: &str) -> usize {
     NATIVE_COMPILE_LOG
         .lock()
@@ -730,7 +730,7 @@ impl VerilogADevice {
             return cached.map_err(VmError::NativeJit);
         }
 
-        #[cfg(test)]
+        #[cfg(all(test, target_arch = "x86_64"))]
         NATIVE_COMPILE_LOG
             .lock()
             .expect("native compile log")
