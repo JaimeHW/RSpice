@@ -139,6 +139,7 @@ fn process_axis(ui: &mut Ui, app: &mut RSpiceApp) {
                         .changed()
                     {
                         *process_flag(app, corner) = enabled;
+                        commit_run_space(app, "Updated the process axis.");
                     }
                 }
             });
@@ -181,6 +182,7 @@ fn supply_axis(ui: &mut Ui, app: &mut RSpiceApp) {
         Some((status, if on { Tone::Ok } else { Tone::Neutral })),
         |ui| {
             card_body(ui, |ui| {
+                let released = std::cell::Cell::new(false);
                 let mut enable = on;
                 if ui
                     .checkbox(
@@ -191,23 +193,51 @@ fn supply_axis(ui: &mut Ui, app: &mut RSpiceApp) {
                     .changed()
                 {
                     app.state.sim_setup.corner.enable_voltage_sweep = enable;
+                    commit_run_space(app, "Updated the supply axis.");
                 }
                 field_pair(
                     ui,
                     ("Minimum", &mut |ui: &mut Ui, width: f32| {
-                        mono_input(ui, &mut app.state.sim_setup.corner.voltage_min, width);
+                        released.set(
+                            released.get()
+                                | mono_input(
+                                    ui,
+                                    &mut app.state.sim_setup.corner.voltage_min,
+                                    width,
+                                )
+                                .lost_focus(),
+                        );
                     }),
                     Some(("Nominal", &mut |ui: &mut Ui, width: f32| {
-                        mono_input(ui, &mut app.state.sim_setup.corner.voltage_nom, width);
+                        released.set(
+                            released.get()
+                                | mono_input(
+                                    ui,
+                                    &mut app.state.sim_setup.corner.voltage_nom,
+                                    width,
+                                )
+                                .lost_focus(),
+                        );
                     })),
                 );
                 field_pair(
                     ui,
                     ("Maximum", &mut |ui: &mut Ui, width: f32| {
-                        mono_input(ui, &mut app.state.sim_setup.corner.voltage_max, width);
+                        released.set(
+                            released.get()
+                                | mono_input(
+                                    ui,
+                                    &mut app.state.sim_setup.corner.voltage_max,
+                                    width,
+                                )
+                                .lost_focus(),
+                        );
                     }),
                     None,
                 );
+                if released.get() {
+                    commit_run_space(app, "Updated the supply axis values.");
+                }
             });
             card_note(
                 ui,
@@ -228,6 +258,7 @@ fn temperature_axis(ui: &mut Ui, app: &mut RSpiceApp) {
         Some((status, if on { Tone::Ok } else { Tone::Neutral })),
         |ui| {
             card_body(ui, |ui| {
+                let released = std::cell::Cell::new(false);
                 let mut enable = on;
                 if ui
                     .checkbox(
@@ -238,23 +269,39 @@ fn temperature_axis(ui: &mut Ui, app: &mut RSpiceApp) {
                     .changed()
                 {
                     app.state.sim_setup.corner.enable_temp_sweep = enable;
+                    commit_run_space(app, "Updated the temperature axis.");
                 }
                 field_pair(
                     ui,
                     ("Cold · °C", &mut |ui: &mut Ui, width: f32| {
-                        mono_input(ui, &mut app.state.sim_setup.corner.temp_cold, width);
+                        released.set(
+                            released.get()
+                                | mono_input(ui, &mut app.state.sim_setup.corner.temp_cold, width)
+                                    .lost_focus(),
+                        );
                     }),
                     Some(("Room · °C", &mut |ui: &mut Ui, width: f32| {
-                        mono_input(ui, &mut app.state.sim_setup.corner.temp_room, width);
+                        released.set(
+                            released.get()
+                                | mono_input(ui, &mut app.state.sim_setup.corner.temp_room, width)
+                                    .lost_focus(),
+                        );
                     })),
                 );
                 field_pair(
                     ui,
                     ("Hot · °C", &mut |ui: &mut Ui, width: f32| {
-                        mono_input(ui, &mut app.state.sim_setup.corner.temp_hot, width);
+                        released.set(
+                            released.get()
+                                | mono_input(ui, &mut app.state.sim_setup.corner.temp_hot, width)
+                                    .lost_focus(),
+                        );
                     }),
                     None,
                 );
+                if released.get() {
+                    commit_run_space(app, "Updated the temperature axis values.");
+                }
             });
             card_note(
                 ui,
@@ -388,6 +435,7 @@ fn composition_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                     );
                     if let Some(index) = picked {
                         app.state.sim_setup.corner.full_matrix = index == 0;
+                        commit_run_space(app, "Updated the axis composition.");
                     }
                 }
                 rule_row(
@@ -457,4 +505,32 @@ fn point_table(ui: &mut Ui, app: &RSpiceApp) {
             }
         },
     );
+}
+
+/// Record a run-space change as a plan-configuration transaction.
+///
+/// The composed run space decides how many points a dispatch executes, so a
+/// change to it has to move the plan revision and invalidate preflight. Without
+/// this an authorized preflight could be followed by a sweep change and then a
+/// dispatch that ran a different run space than the one that was checked.
+fn commit_run_space(app: &mut RSpiceApp, detail: &str) {
+    match app
+        .state
+        .sim_setup
+        .commit_active_plan_configuration_change(detail.to_owned())
+    {
+        Ok(receipt) => {
+            app.invalidate_simulation_preflight();
+            app.state.workbench.analysis_lifecycle_status = format!(
+                "Configuration receipt #{} · revision {} to {} · {}",
+                receipt.sequence(),
+                receipt.source_revision().get(),
+                receipt.committed_revision().get(),
+                receipt.detail()
+            );
+        }
+        Err(error) => {
+            app.state.workbench.analysis_lifecycle_status = error.to_string();
+        }
+    }
 }

@@ -1103,6 +1103,11 @@ pub struct WorkbenchState {
     /// Selected saved-output row on the outputs page, by exact name.
     #[serde(default)]
     pub selected_saved_output: Option<String>,
+    /// In-progress edit of the selected design variable's expression.
+    /// Runtime-only: a partially typed expression must never be restored as
+    /// authoritative plan data.
+    #[serde(skip)]
+    pub design_variable_expression_draft: Option<String>,
     /// Selected model name within the currently selected model library.
     #[serde(default)]
     pub selected_model: Option<String>,
@@ -1269,6 +1274,7 @@ impl Default for WorkbenchState {
             selected_spec: None,
             selected_design_variable: None,
             selected_saved_output: None,
+            design_variable_expression_draft: None,
             selected_model: None,
             analysis_query: String::new(),
             navigator_query: String::new(),

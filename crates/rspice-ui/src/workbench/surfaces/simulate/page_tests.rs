@@ -247,6 +247,94 @@ fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
     );
 }
 
+/// The composed run space decides how many points a dispatch executes, so a
+/// change to it has to move the plan revision. Otherwise an authorized
+/// preflight could be followed by a sweep change and a dispatch that ran a
+/// different run space than the one that was checked.
+#[test]
+fn a_run_space_change_moves_the_plan_revision() {
+    let mut app = RSpiceApp::test_instance();
+    let before = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("stable plan")
+        .revision();
+    app.state.sim_setup.corner.enable_temp_sweep = true;
+    app.state
+        .sim_setup
+        .commit_active_plan_configuration_change("Updated the temperature axis.".to_owned())
+        .expect("a run-space change commits as a configuration change");
+    let after = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("stable plan")
+        .revision();
+    assert_ne!(
+        before, after,
+        "a run-space change must advance the plan revision so preflight is invalidated"
+    );
+}
+
+/// An expression an engineer cannot change is a create-only registry.
+#[test]
+fn a_design_variable_expression_can_be_edited_in_place() {
+    use crate::state::{
+        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
+        DesignVariableSweepEligibility,
+    };
+
+    let mut app = RSpiceApp::test_instance();
+    let plan_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("stable plan")
+        .id();
+    let variable = DesignVariable::new(
+        "rload",
+        "1kohm",
+        DesignVariableQuantity::Resistance,
+        DesignVariableScope::Testbench,
+        "load resistance",
+        None,
+        DesignVariableSweepEligibility::NestedSweepAndOptimization,
+        DesignVariableOverridePolicy::ExplicitTestLocalOverride,
+    )
+    .expect("valid design variable");
+    let variable_id = variable.id;
+    let original_revision = variable.revision;
+    app.state
+        .workspace
+        .add_design_variable(plan_id, variable)
+        .expect("the plan accepts a valid variable");
+
+    let revision = app
+        .state
+        .workspace
+        .update_design_variable_expression(plan_id, variable_id, "2kohm")
+        .expect("a valid expression is accepted");
+    assert_ne!(
+        revision, original_revision,
+        "an accepted edit must advance the variable's own revision"
+    );
+    let stored = app
+        .state
+        .workspace
+        .active_plan_data(plan_id)
+        .expect("payload")
+        .design_variables
+        .iter()
+        .find(|candidate| candidate.id == variable_id)
+        .expect("the variable survives the edit");
+    assert_eq!(stored.expression, "2kohm");
+    assert_eq!(
+        stored.name, "rload",
+        "editing the expression must not rename the variable"
+    );
+}
+
 #[test]
 fn ledger_columns_tile_their_row_without_a_gap_or_an_overhang() {
     let row = Rect::from_min_size(egui::Pos2::ZERO, vec2(640.0, 28.0));

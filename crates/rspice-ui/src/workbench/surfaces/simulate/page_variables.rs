@@ -7,13 +7,16 @@
 
 use egui::Ui;
 
-use crate::product::SimulationPlanId;
+use crate::product::{DesignVariableId, SimulationPlanId};
 use crate::state::workspace::SimulationPlanPayload;
 use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
 
+use crate::ui::widgets::mono_input;
+
 use super::page_kit::{
-    Tone, card, card_body, card_head_row, card_note, card_row, ledger_head, ledger_row, rule_row,
+    Tone, card, card_body, card_head_row, card_note, card_row, field_pair, ledger_head, ledger_row,
+    rule_row,
 };
 
 const REGISTRY_COLUMNS: [f32; 6] = [0.18, 0.14, 0.20, 0.14, 0.16, 0.18];
@@ -203,7 +206,7 @@ fn unique_name(variables: &[crate::state::DesignVariable], base: &str) -> String
         .unwrap_or(first)
 }
 
-fn selected_record(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) {
+fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     let selected = app
         .state
         .workbench
@@ -231,31 +234,98 @@ fn selected_record(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload
         return;
     };
     let title = format!("Selected variable · {}", variable.name);
-    card(
-        ui,
-        &title,
-        Some(("plan revision retained", Tone::Ok)),
-        |ui| {
-            card_body(ui, |ui| {
-                rule_row(ui, "Expression", &variable.expression);
-                rule_row(ui, "Quantity", variable.quantity.label());
-                rule_row(ui, "Scope", variable.scope.label());
-                rule_row(ui, "Sweep role", variable.sweep_eligibility.label());
-                rule_row(ui, "Override policy", variable.override_policy.label());
-                rule_row(
-                    ui,
-                    "Bounds",
-                    &variable.allowed_range.as_ref().map_or_else(
-                        || "unbounded · preflight cannot reject an out-of-range value".to_owned(),
-                        |range| format!("{} … {}", range.minimum, range.maximum),
-                    ),
-                );
-                if !variable.description.trim().is_empty() {
-                    rule_row(ui, "Description", &variable.description);
-                }
-            });
-        },
-    );
+    let variable_id = variable.id;
+    let revision = variable.revision.get();
+    let mut draft = app
+        .state
+        .workbench
+        .design_variable_expression_draft
+        .clone()
+        .unwrap_or_else(|| variable.expression.clone());
+    let mut committed = false;
+    let status = format!("revision {revision}");
+    card(ui, &title, Some((status.as_str(), Tone::Ok)), |ui| {
+        card_body(ui, |ui| {
+            // The expression is the one field an engineer changes repeatedly
+            // while exploring, so it is editable in place rather than only
+            // through the create dialog. It commits on release, as one
+            // validated transaction that advances the variable's revision.
+            field_pair(
+                ui,
+                ("Expression", &mut |ui: &mut Ui, width: f32| {
+                    committed = mono_input(ui, &mut draft, width).lost_focus();
+                }),
+                None,
+            );
+            rule_row(ui, "Quantity", variable.quantity.label());
+            rule_row(ui, "Scope", variable.scope.label());
+            rule_row(ui, "Sweep role", variable.sweep_eligibility.label());
+            rule_row(ui, "Override policy", variable.override_policy.label());
+            rule_row(
+                ui,
+                "Bounds",
+                &variable.allowed_range.as_ref().map_or_else(
+                    || "unbounded · preflight cannot reject an out-of-range value".to_owned(),
+                    |range| format!("{} … {}", range.minimum, range.maximum),
+                ),
+            );
+            if !variable.description.trim().is_empty() {
+                rule_row(ui, "Description", &variable.description);
+            }
+        });
+    });
+
+    if committed {
+        if draft.trim() != variable.expression.trim() {
+            commit_expression(app, variable_id, &draft, &variable.name);
+        }
+        app.state.workbench.design_variable_expression_draft = None;
+    } else if draft != variable.expression {
+        app.state.workbench.design_variable_expression_draft = Some(draft);
+    }
+}
+
+/// Replace one variable's expression as a single validated transaction.
+///
+/// The workspace mutator advances the variable's revision and re-validates the
+/// whole configuration, so an expression that breaks a bound or a dimensional
+/// rule leaves the plan exactly as it was and reports why.
+fn commit_expression(
+    app: &mut RSpiceApp,
+    variable_id: DesignVariableId,
+    expression: &str,
+    name: &str,
+) {
+    let mut workspace = app.state.workspace.clone();
+    let mut setup = app.state.sim_setup.clone();
+    let Ok(plan_id) = setup.stable_analysis_plan().map(|plan| plan.id()) else {
+        return;
+    };
+    let outcome = workspace
+        .update_design_variable_expression(plan_id, variable_id, expression.to_owned())
+        .map_err(|error| error.to_string())
+        .and_then(|_| {
+            setup
+                .commit_active_plan_configuration_change(format!(
+                    "Updated design variable {name} to {expression}."
+                ))
+                .map_err(|error| error.to_string())
+        });
+    match outcome {
+        Ok(receipt) => {
+            app.state.workspace = workspace;
+            app.state.sim_setup = setup;
+            app.invalidate_simulation_preflight();
+            app.state.workbench.analysis_lifecycle_status = format!(
+                "Configuration receipt #{} · revision {} to {} · {}",
+                receipt.sequence(),
+                receipt.source_revision().get(),
+                receipt.committed_revision().get(),
+                receipt.detail()
+            );
+        }
+        Err(error) => app.state.workbench.analysis_lifecycle_status = error,
+    }
 }
 
 fn change_impact(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) {
