@@ -288,6 +288,12 @@ const ZOOM_FIT: &[ShortcutBinding] = &[primary(chord(Key::F, false, false, false
 const FIT_SCHEMATIC_CONTENT: &[ShortcutBinding] =
     &[primary(chord(Key::F, false, false, true, "Shift+F"), ALL)];
 const GRID: &[ShortcutBinding] = &[primary(chord(Key::G, false, false, false, "G"), ALL)];
+// The mockup gives the results managers M, A and Q. Every one of those bare
+// letters already has a single canonical owner in this product — move,
+// symbol arc, object properties — and that one-owner rule is pinned by test
+// so a reader never has to know which context they are in to predict a key.
+// These commands therefore ship with no default chord; the shortcut editor
+// can assign one, and the Results menu is the discoverable way in.
 const FULL_SCREEN: &[ShortcutBinding] = &[
     primary(chord(Key::F11, false, false, false, "F11"), DESKTOP),
     alternate(chord(Key::F, true, true, false, "Ctrl+Alt+F"), HOST),
@@ -643,6 +649,7 @@ impl Command {
             | Self::DatasetManifestBrowser
             | Self::CreateResultDocument
             | Self::WaveformCalculator
+            | Self::ExpressionDiagnostics
             | Self::CompareResultDatasets
             | Self::ReviewNotes
             | Self::MeasurementLibrary
