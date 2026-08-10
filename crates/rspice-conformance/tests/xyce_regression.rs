@@ -26,6 +26,8 @@ const XYCE_AGGREGATE_HARD_CASE_TIMEOUT_MS: u128 = 30_000;
 const XYCE_CASE_RUNNER_RESULT_GRACE_MS: u128 = 1_000;
 const XYCE_PROGRESS_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const XYCE_PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
+const XYCE_CLASSIFICATION_REPORT_ENV: &str = "RSPICE_XYCE_CLASSIFICATION_REPORT";
+const XYCE_RETAINED_UPSTREAM_EXCLUSION_COUNT: usize = 1_143;
 
 fn run_xyce_case_with_watchdog(
     test_dir: &Path,
@@ -206,6 +208,110 @@ fn unique_xyce_case_result_path(circuit_path: &Path) -> PathBuf {
         "rspice-xyce-{stem}-{}-{timestamp}-{id}.result",
         std::process::id()
     ))
+}
+
+fn write_xyce_classification_report_if_requested(
+    results: &[XyceTestResult],
+) -> io::Result<Option<PathBuf>> {
+    let Some(path) = std::env::var_os(XYCE_CLASSIFICATION_REPORT_ENV).map(PathBuf::from) else {
+        return Ok(None);
+    };
+    if path.as_os_str().is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{XYCE_CLASSIFICATION_REPORT_ENV} must not be empty"),
+        ));
+    }
+    write_xyce_classification_report(results, &path)?;
+    Ok(Some(path))
+}
+
+fn write_xyce_classification_report(
+    results: &[XyceTestResult],
+    output_path: &Path,
+) -> io::Result<()> {
+    let mut classified = results
+        .iter()
+        .filter(|result| result.upstream_exclusion_source.is_some())
+        .collect::<Vec<_>>();
+    if classified.len() != XYCE_RETAINED_UPSTREAM_EXCLUSION_COUNT {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "classification report has {} upstream-exclusion records; expected {}",
+                classified.len(),
+                XYCE_RETAINED_UPSTREAM_EXCLUSION_COUNT
+            ),
+        ));
+    }
+    classified.sort_by(|left, right| {
+        left.relative_path
+            .to_ascii_lowercase()
+            .cmp(&right.relative_path.to_ascii_lowercase())
+            .then_with(|| left.relative_path.cmp(&right.relative_path))
+    });
+
+    let mut normalized_paths = BTreeSet::new();
+    let mut report =
+        String::from("relative_path\tpassed\texpected_unsupported\tcontract\tprocess_status\n");
+    for result in classified {
+        validate_xyce_classification_field("relative_path", &result.relative_path)?;
+        validate_xyce_classification_field("contract", &result.contract)?;
+        let normalized = result.relative_path.to_ascii_lowercase();
+        if !normalized_paths.insert(normalized) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "classification report contains a case-insensitive duplicate: {}",
+                    result.relative_path
+                ),
+            ));
+        }
+        let independently_qualified = result.passed && !result.upstream_excluded;
+        report.push_str(&result.relative_path);
+        report.push('\t');
+        report.push_str(if independently_qualified {
+            "true"
+        } else {
+            "false"
+        });
+        report.push('\t');
+        report.push_str(if result.expected_unsupported {
+            "true"
+        } else {
+            "false"
+        });
+        report.push('\t');
+        report.push_str(&result.contract);
+        report.push_str("\tcompleted\n");
+    }
+
+    let parent = output_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    temporary.write_all(report.as_bytes())?;
+    temporary.flush()?;
+    temporary.as_file().sync_all()?;
+    temporary
+        .persist_noclobber(output_path)
+        .map_err(|error| error.error)?;
+    Ok(())
+}
+
+fn validate_xyce_classification_field(name: &str, value: &str) -> io::Result<()> {
+    if value.is_empty()
+        || value
+            .bytes()
+            .any(|byte| matches!(byte, b'\t' | b'\r' | b'\n'))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("classification report {name} is not a nonempty TSV field: {value:?}"),
+        ));
+    }
+    Ok(())
 }
 
 fn decode_xyce_test_result(encoded: &str) -> Result<XyceTestResult, String> {
@@ -474,6 +580,78 @@ fn harness_manifest_entries(root: &Path) -> BTreeSet<String> {
         );
     }
     entries
+}
+
+#[test]
+fn test_xyce_classification_report_is_deterministic_and_fail_closed() {
+    let results = (0..XYCE_RETAINED_UPSTREAM_EXCLUSION_COUNT)
+        .rev()
+        .map(|index| {
+            let independently_qualified = index == 0;
+            XyceTestResult {
+                name: format!("fixture_{index:04}"),
+                relative_path: format!("Netlists/Fixture/{index:04}.cir"),
+                passed: true,
+                expected_unsupported: false,
+                upstream_excluded: !independently_qualified,
+                upstream_exclusion_source: Some("Netlists/Fixture/exclude".to_string()),
+                error: None,
+                mismatches: Vec::new(),
+                duration_ms: 1,
+                contract: if independently_qualified {
+                    "qualified_contract"
+                } else {
+                    "upstream_excluded"
+                }
+                .to_string(),
+            }
+        })
+        .collect::<Vec<_>>();
+    let directory = tempfile::tempdir().expect("create classification report directory");
+    let first = directory.path().join("first.tsv");
+    let second = directory.path().join("second.tsv");
+
+    write_xyce_classification_report(&results, &first).expect("write first report");
+    write_xyce_classification_report(&results, &second).expect("write second report");
+    let first_bytes = fs::read(&first).expect("read first report");
+    assert_eq!(first_bytes, fs::read(&second).expect("read second report"));
+
+    let report = String::from_utf8(first_bytes).expect("report is UTF-8");
+    let mut lines = report.lines();
+    assert_eq!(
+        lines.next(),
+        Some("relative_path\tpassed\texpected_unsupported\tcontract\tprocess_status")
+    );
+    assert_eq!(
+        lines.next(),
+        Some("Netlists/Fixture/0000.cir\ttrue\tfalse\tqualified_contract\tcompleted")
+    );
+    assert_eq!(
+        lines.next(),
+        Some("Netlists/Fixture/0001.cir\tfalse\tfalse\tupstream_excluded\tcompleted")
+    );
+    assert_eq!(
+        report.lines().count(),
+        XYCE_RETAINED_UPSTREAM_EXCLUSION_COUNT + 1
+    );
+
+    let overwrite = write_xyce_classification_report(&results, &first)
+        .expect_err("classification reports must never overwrite provenance evidence");
+    assert_eq!(overwrite.kind(), io::ErrorKind::AlreadyExists);
+
+    let mut missing = results.clone();
+    missing[0].upstream_exclusion_source = None;
+    let missing_error =
+        write_xyce_classification_report(&missing, &directory.path().join("missing.tsv"))
+            .expect_err("incomplete exclusion inventory must fail");
+    assert_eq!(missing_error.kind(), io::ErrorKind::InvalidData);
+
+    let mut duplicate = results;
+    duplicate[0].relative_path = duplicate[1].relative_path.to_ascii_uppercase();
+    let duplicate_error =
+        write_xyce_classification_report(&duplicate, &directory.path().join("duplicate.tsv"))
+            .expect_err("case-insensitive duplicate inventory must fail");
+    assert_eq!(duplicate_error.kind(), io::ErrorKind::InvalidData);
 }
 
 #[test]
@@ -9179,4 +9357,9 @@ fn test_full_xyce_suite_summary_accounts_for_every_deck() {
         "Xyce full suite has {} failing deck(s): {} executed pass, {} expected unsupported, {} upstream excluded",
         stats.failed, stats.passed, stats.expected_unsupported, stats.upstream_excluded
     );
+    if let Some(report_path) = write_xyce_classification_report_if_requested(&results)
+        .expect("write requested clean-HEAD Xyce classification report")
+    {
+        println!("Xyce classification report: {}", report_path.display());
+    }
 }
