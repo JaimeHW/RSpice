@@ -1,12 +1,15 @@
 import sys
+import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from repair_sdist_lock import (  # noqa: E402
     RepairError,
+    _embedded_workspace_files,
     _external_package_identities,
+    _missing_embedded_files,
     _validate_reconciliation,
 )
 
@@ -77,6 +80,98 @@ class ReconciliationTests(unittest.TestCase):
     def test_lock_parser_rejects_invalid_utf8(self) -> None:
         with self.assertRaisesRegex(RepairError, "not valid UTF-8"):
             _external_package_identities(b"\xff")
+
+
+def write(root: Path, relative: str, text: str) -> None:
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+class EmbeddedFileTests(unittest.TestCase):
+    """`cargo package --list` stops at the package boundary; the compile does not."""
+
+    def archive(self, root: Path) -> None:
+        write(root, "Cargo.toml", "[workspace]\n")
+        write(root, "crates/core/Cargo.toml", '[package]\nname = "core"\n')
+        # `assets/pack.lib` is deliberately absent: an asset outside the package
+        # directory is exactly what maturin leaves out.
+        write(root, "crates/core/src/inside.txt", "inside\n")
+
+    def test_only_out_of_package_literals_from_the_compiled_tree_are_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.archive(root)
+            write(
+                root,
+                "crates/core/src/lib.rs",
+                'const PACK: &str = include_str!("../../../assets/pack.lib");\n'
+                'const NEAR: &str = include_str!("inside.txt");\n'
+                'const GEN: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/x"));\n',
+            )
+            # A test target is never built by an sdist install, so what it embeds
+            # must not enter the archive.
+            write(
+                root,
+                "crates/core/tests/it.rs",
+                'const DECK: &str = include_str!("../../../benchmarks/deck.cir");\n',
+            )
+
+            self.assertEqual(
+                _embedded_workspace_files(root),
+                {PurePosixPath("assets/pack.lib"): PurePosixPath("crates/core/src/lib.rs")},
+            )
+
+    def test_an_embed_escaping_the_archive_root_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.archive(root)
+            write(
+                root,
+                "crates/core/src/lib.rs",
+                'const OUT: &str = include_str!("../../../../outside.lib");\n',
+            )
+
+            with self.assertRaisesRegex(RepairError, "escapes the archive"):
+                _embedded_workspace_files(root)
+
+    def test_a_file_the_checkout_cannot_supply_is_an_error(self) -> None:
+        """Silently shipping the incomplete archive is the defect being fixed."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "archive"
+            checkout = Path(temporary) / "checkout"
+            checkout.mkdir()
+            root.mkdir()
+            self.archive(root)
+            write(
+                root,
+                "crates/core/src/lib.rs",
+                'const PACK: &str = include_str!("../../../assets/pack.lib");\n',
+            )
+
+            with self.assertRaisesRegex(RepairError, "neither the source distribution"):
+                _missing_embedded_files(root, checkout)
+
+            write(checkout, "assets/pack.lib", "* pack\n")
+            self.assertEqual(
+                _missing_embedded_files(root, checkout),
+                {PurePosixPath("assets/pack.lib"): checkout / "assets" / "pack.lib"},
+            )
+
+    def test_a_file_the_archive_already_carries_is_not_added_twice(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "archive"
+            checkout = Path(temporary) / "checkout"
+            checkout.mkdir()
+            root.mkdir()
+            self.archive(root)
+            write(
+                root,
+                "crates/core/src/lib.rs",
+                'const NEAR: &str = include_str!("inside.txt");\n',
+            )
+
+            self.assertEqual(_missing_embedded_files(root, checkout), {})
 
 
 if __name__ == "__main__":

@@ -44,7 +44,8 @@ pub enum XfAccuracy {
 impl XfAccuracy {
     pub const ALL: [Self; 4] = [Self::Fast, Self::Balanced, Self::Accurate, Self::Robust];
 
-    #[cfg(test)]
+    /// The tier's name, as the analysis form offers it and the solver page's
+    /// resolved-policy ledger reports it.
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::Fast => "Fast",

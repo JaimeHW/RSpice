@@ -1716,6 +1716,10 @@ impl Command {
                 activate_workspace(app, Workspace::Models);
                 app.state.workbench.models_page = page;
             }
+            Self::SimulationPage(page) => {
+                activate_workspace(app, Workspace::Simulate);
+                app.state.workbench.simulation_page = page;
+            }
             Self::ModelBrowser => app.state.model_browser_state.open = true,
             Self::ModelCreateProjectCopy => match selected_model_for_project_copy(app) {
                 Ok((library_name, model_name)) => {

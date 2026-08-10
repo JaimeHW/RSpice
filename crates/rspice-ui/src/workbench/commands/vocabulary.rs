@@ -11,7 +11,9 @@
 //! that runs it.
 
 use crate::state::ComponentType;
-use crate::workbench::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
+use crate::workbench::state::{
+    ModelsPage, ProjectPage, SimulationPage, VerificationPage, Workspace,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -203,6 +205,7 @@ pub enum Command {
     VerificationPage(VerificationPage),
     ProjectPage(ProjectPage),
     ModelsPage(ModelsPage),
+    SimulationPage(SimulationPage),
     ModelBrowser,
     ModelCreateProjectCopy,
     ModelEditor,
@@ -762,6 +765,37 @@ impl Command {
             Self::ModelsPage(ModelsPage::Qualification) => {
                 spec("model-qualification", "Model qualification", "Models")
             }
+            // Every setup route is addressable, the way the Project, Verify and
+            // Models pages are. The Solver route keeps its own dedicated
+            // command as well, because that one is also a menu action.
+            Self::SimulationPage(SimulationPage::Analyses) => {
+                spec("simulation-analyses", "Analyses", "Simulate")
+            }
+            Self::SimulationPage(SimulationPage::Variables) => {
+                spec("simulation-variables", "Design variables", "Simulate")
+            }
+            Self::SimulationPage(SimulationPage::Outputs) => {
+                spec("simulation-outputs", "Outputs & expressions", "Simulate")
+            }
+            Self::SimulationPage(SimulationPage::Specifications) => spec(
+                "simulation-specifications",
+                "Requirements & specifications",
+                "Simulate",
+            ),
+            Self::SimulationPage(SimulationPage::RunSet) => {
+                spec("simulation-run-set", "PVT, sweeps & variation", "Simulate")
+            }
+            Self::SimulationPage(SimulationPage::Models) => {
+                spec("simulation-models", "Models & sections", "Simulate")
+            }
+            Self::SimulationPage(SimulationPage::Solver) => {
+                spec("simulation-solver", "Solver & convergence", "Simulate")
+            }
+            Self::SimulationPage(SimulationPage::Save) => spec(
+                "simulation-save-policy",
+                "Save, streaming & retention policy",
+                "Simulate",
+            ),
             Self::ModelBrowser => spec("model-browser", "Model browser…", "Models"),
             Self::ModelCreateProjectCopy => spec(
                 "model-create-project-copy",
@@ -938,6 +972,14 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ProjectPage(ProjectPage::Configuration),
     Command::ProjectPage(ProjectPage::Dependencies),
     Command::ProjectPage(ProjectPage::Recovery),
+    Command::SimulationPage(SimulationPage::Analyses),
+    Command::SimulationPage(SimulationPage::Variables),
+    Command::SimulationPage(SimulationPage::Outputs),
+    Command::SimulationPage(SimulationPage::Specifications),
+    Command::SimulationPage(SimulationPage::RunSet),
+    Command::SimulationPage(SimulationPage::Models),
+    Command::SimulationPage(SimulationPage::Solver),
+    Command::SimulationPage(SimulationPage::Save),
     Command::ResultViewer(crate::workbench::ResultViewer::Waves),
     Command::VerificationPage(VerificationPage::Yield),
     Command::ModelsPage(ModelsPage::Models),

@@ -460,6 +460,22 @@ fn qualification_suite_rail(
                             theme::mono(tokens::FS_0, FontWeight::SemiBold),
                             qualification_gate_color(summary.gate, &t),
                         );
+                        let row_label = format!(
+                            "{} in {}, {} vectors, {}",
+                            summary.model,
+                            summary.library,
+                            summary.vectors,
+                            qualification_gate_label(summary.gate)
+                        );
+                        response.widget_info(|| {
+                            egui::WidgetInfo::selected(
+                                egui::WidgetType::SelectableLabel,
+                                ui.is_enabled(),
+                                selected,
+                                row_label.clone(),
+                            )
+                        });
+                        theme::paint_focus_ring(ui, &response, rect);
                         if response.clicked() {
                             app.state
                                 .model_library_manager

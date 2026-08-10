@@ -256,6 +256,68 @@ fn every_edited_option_survives_a_draft_round_trip() {
     );
 }
 
+/// The resolved-policy ledger states what the next run freezes, so it must not
+/// state a policy for a solve the plan will not perform. Time-stepping rows
+/// appear only when the plan holds a time-stepped analysis.
+#[test]
+fn the_resolved_policy_ledger_only_claims_analyses_the_plan_holds() {
+    let default_plan = render(SimulationPage::Solver, 1200.0);
+    assert!(
+        default_plan.contains("Update bound"),
+        "the ledger must always state the plan-wide bounds:\n{default_plan}"
+    );
+    assert!(
+        default_plan.contains("Time stepped"),
+        "the test instance holds a transient, so time-stepping rows belong:\n{default_plan}"
+    );
+
+    // With every analysis disabled there is no time-stepped solve to describe.
+    let no_time_stepping = render_with(SimulationPage::Solver, 1200.0, |app| {
+        let Ok(plan) = app.state.sim_setup.stable_analysis_plan_mut() else {
+            return;
+        };
+        let ids: Vec<_> = plan.instances().iter().map(|i| i.id()).collect();
+        for id in ids {
+            let _ = plan.set_enabled(id, false);
+        }
+    });
+    assert!(
+        !no_time_stepping.contains("Iterations per step"),
+        "the ledger stated a time-stepping budget with no time-stepped analysis enabled:\n\
+         {no_time_stepping}"
+    );
+    assert!(
+        no_time_stepping.contains("Update bound"),
+        "the plan-wide bounds still apply with nothing enabled:\n{no_time_stepping}"
+    );
+}
+
+/// The solver strip pairs each preset with its intent by position, so the two
+/// lists have to stay the same length and in the same order. Getting this
+/// wrong would describe one policy while applying another.
+#[test]
+fn preset_intents_line_up_with_the_named_presets() {
+    assert_eq!(
+        SimulationOptions::PRESETS.len(),
+        super::page_solver::PRESET_INTENT.len()
+    );
+    let labels: Vec<&str> = SimulationOptions::PRESETS
+        .iter()
+        .map(|(label, _)| *label)
+        .collect();
+    assert_eq!(labels, ["Fast", "Balanced", "Accurate", "Robust"]);
+
+    // Each preset must recognize itself, and an edited set must recognize none.
+    for (label, build) in SimulationOptions::PRESETS {
+        assert_eq!(build().preset_name(), Some(label));
+        assert_eq!(build().preset_label(), label);
+    }
+    let mut edited = SimulationOptions::default();
+    edited.reltol *= 2.0;
+    assert_eq!(edited.preset_name(), None);
+    assert_eq!(edited.preset_label(), "Custom");
+}
+
 /// Presets must be distinguishable by exact comparison, because that is how
 /// the strip decides which chip is active. Two presets that serialize
 /// identically would make the strip report the wrong policy.

@@ -10,14 +10,35 @@ tools/cloud/sync_vendored_client.py instead of editing in place.
 """
 
 import hashlib
+import importlib.util
 import json
+import sys
 import unittest
 from pathlib import Path
 
-from tools.cloud.sync_vendored_client import source_origin_is_authoritative
-
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = ROOT / "tools" / "cloud" / "vendor-manifest.json"
+
+
+def load_sync_tool():
+    """Load the sync tool by path.
+
+    CI runs this file as a script, so the repository root is never on
+    ``sys.path`` and ``tools`` is not an importable package. Loading by
+    location is what the other CI tests do for the tool they cover.
+    """
+    tool_path = ROOT / "tools" / "cloud" / "sync_vendored_client.py"
+    sys.dont_write_bytecode = True
+    spec = importlib.util.spec_from_file_location("sync_vendored_client", tool_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError(f"cannot load {tool_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+source_origin_is_authoritative = load_sync_tool().source_origin_is_authoritative
 
 
 class CloudClientVendorTests(unittest.TestCase):

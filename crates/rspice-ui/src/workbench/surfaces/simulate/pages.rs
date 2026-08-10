@@ -73,7 +73,7 @@ fn eyebrow(app: &RSpiceApp, page: SimulationPage) -> String {
         SimulationPage::Models => "MODEL CLOSURE · SECTION BINDING".to_owned(),
         SimulationPage::Solver => format!(
             "NUMERICS · {} · DESIGN CONTRACT",
-            super::page_solver::active_preset_label(app).to_uppercase()
+            app.state.sim_setup.options.preset_label().to_uppercase()
         ),
         SimulationPage::Save => "RESULT STORAGE · STREAMING · RETENTION".to_owned(),
     }

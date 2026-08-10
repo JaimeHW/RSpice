@@ -473,6 +473,7 @@ impl Command {
                 | Self::RevisionHistory
                 | Self::CreateHierarchy
                 | Self::ProjectPage(_)
+                | Self::SimulationPage(_)
                 | Self::PreflightChecks
                 | Self::SimulationOptions
                 | Self::GenerateNetlist

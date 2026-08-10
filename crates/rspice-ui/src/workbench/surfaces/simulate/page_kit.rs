@@ -285,6 +285,21 @@ pub(super) fn ledger_row(
             color,
         );
     }
+    // The first cell is the row's identifier in every caller, so it is the
+    // name a screen reader should announce for the selection.
+    let row_label = cells
+        .first()
+        .map(|(text, _)| (*text).to_owned())
+        .unwrap_or_default();
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            row_label.clone(),
+        )
+    });
+    theme::paint_focus_ring(ui, &response, rect);
     response
 }
 

@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Repair maturin's lockfile in a Cargo-workspace source distribution.
+"""Repair maturin's Cargo-workspace source distribution so consumers can build it.
 
-Maturin's Cargo sdist generator prunes unrelated workspace members but currently
-copies the original workspace Cargo.lock unchanged.  Cargo therefore rejects the
-archive when a consumer builds it with ``--locked``.  This utility asks Cargo to
-reconcile that copied lockfile against the pruned workspace, validates the result
-under ``--locked``, and atomically replaces only the lockfile in the archive.
+Maturin's Cargo sdist generator leaves the archive unbuildable in two ways.  It
+fills the archive from ``cargo package --list``, which never reports a file
+outside a package directory, so a crate that ``include_str!``s an asset from the
+workspace root ships an archive whose compile fails on a missing file; and it
+prunes unrelated workspace members but copies the original workspace Cargo.lock
+unchanged, so Cargo rejects the archive under ``--locked``.  This utility adds
+the embedded files the compiled sources name, asks Cargo to reconcile the copied
+lockfile against the pruned workspace, validates the result under ``--locked``,
+and rewrites the archive once with both corrections.
 """
 
 from __future__ import annotations
@@ -32,6 +36,14 @@ class RepairError(RuntimeError):
 _LOCK_STRING = re.compile(
     r'^(name|version|source|checksum)\s*=\s*("(?:[^"\\]|\\.)*")\s*$'
 )
+
+# Installing an sdist compiles each package's `src` tree and nothing else, so an
+# embed reached from `tests`, `benches` or `examples` is out of scope: those
+# targets are never built by the consumer this archive exists for.
+_COMPILED_TREE = "src"
+
+_EMBED_CALL = re.compile(r"\binclude_(?:str|bytes)!\s*\(\s*")
+_EMBED_LITERAL = re.compile(r'"((?:[^"\\]|\\.)*)"')
 
 
 def _external_package_identities(lockfile: bytes) -> frozenset[tuple[str, str, str, str | None]]:
@@ -155,6 +167,84 @@ def _workspace_root(destination: Path, members: Iterable[tarfile.TarInfo]) -> tu
     return root_name, root
 
 
+def _normalize_relative(parts: Iterable[str]) -> PurePosixPath | None:
+    """Resolve ``.`` and ``..`` textually, or return None if the path escapes."""
+
+    resolved: list[str] = []
+    for part in parts:
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            if not resolved:
+                return None
+            resolved.pop()
+        else:
+            resolved.append(part)
+    return PurePosixPath(*resolved) if resolved else None
+
+
+def _package_directories(root: Path) -> list[PurePosixPath]:
+    return [
+        PurePosixPath(manifest.parent.relative_to(root).as_posix())
+        for manifest in root.rglob("Cargo.toml")
+    ]
+
+
+def _embedded_workspace_files(root: Path) -> dict[PurePosixPath, PurePosixPath]:
+    """Map each file the compiled sources embed from outside their own package.
+
+    Values are the source file naming the target, for diagnostics.  Only string
+    literals are resolved; the remaining call sites build their argument with
+    ``concat!(env!(..), ..)`` and are gated to ``wasm32`` or to ``cfg(test)``,
+    neither of which an sdist install compiles.
+    """
+
+    packages = _package_directories(root)
+    embedded: dict[PurePosixPath, PurePosixPath] = {}
+    for path in sorted(root.rglob("*.rs")):
+        relative = PurePosixPath(path.relative_to(root).as_posix())
+        owners = [package for package in packages if package in relative.parents]
+        if not owners:
+            continue
+        owner = max(owners, key=lambda package: len(package.parts))
+        within = relative.parts[len(owner.parts) :]
+        if not within or within[0] != _COMPILED_TREE:
+            continue
+
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for call in _EMBED_CALL.finditer(text):
+            literal = _EMBED_LITERAL.match(text, call.end())
+            if literal is None:
+                continue
+            target = _normalize_relative(
+                [*relative.parent.parts, *PurePosixPath(literal.group(1)).parts]
+            )
+            if target is None:
+                raise RepairError(
+                    f"{relative} embeds '{literal.group(1)}', which escapes the archive"
+                )
+            if owner not in target.parents:
+                embedded.setdefault(target, relative)
+    return embedded
+
+
+def _missing_embedded_files(root: Path, checkout: Path) -> dict[PurePosixPath, Path]:
+    """Locate every embedded file the archive lacks in the repository checkout."""
+
+    missing: dict[PurePosixPath, Path] = {}
+    for target, named_by in sorted(_embedded_workspace_files(root).items()):
+        if root.joinpath(*target.parts).is_file():
+            continue
+        source = checkout.joinpath(*target.parts)
+        if not source.is_file():
+            raise RepairError(
+                f"{named_by} embeds '{target}', which is in neither the source "
+                f"distribution nor the checkout at {checkout}"
+            )
+        missing[target] = source
+    return missing
+
+
 def _run_cargo_metadata(root: Path, cargo: str, offline: bool, locked: bool) -> None:
     command = [
         cargo,
@@ -185,11 +275,12 @@ def _run_cargo_metadata(root: Path, cargo: str, offline: bool, locked: bool) -> 
         raise RepairError(f"Cargo {mode} failed:\n{detail}")
 
 
-def _replace_lock_member(
+def _rewrite_archive(
     archive: Path,
     output: Path,
     lock_member_name: str,
     repaired_lock: bytes,
+    added: dict[str, Path],
 ) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     with archive.open("rb") as raw_input, output.open("wb") as raw_output:
@@ -197,7 +288,9 @@ def _replace_lock_member(
             with gzip.GzipFile(filename="", mode="wb", fileobj=raw_output, mtime=0) as compressed:
                 with tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as target:
                     replaced = 0
+                    carried: set[str] = set()
                     for member in source:
+                        carried.add(member.name)
                         payload = source.extractfile(member) if member.isreg() else None
                         if member.name == lock_member_name:
                             member.size = len(repaired_lock)
@@ -208,14 +301,46 @@ def _replace_lock_member(
                             target.addfile(member)
                         else:
                             target.addfile(member, payload)
+
+                    collisions = sorted(carried & set(added))
+                    if collisions:
+                        raise RepairError(f"embedded files are already archived: {collisions}")
+                    for name, embedded in sorted(added.items()):
+                        payload_bytes = embedded.read_bytes()
+                        info = tarfile.TarInfo(name)
+                        info.size = len(payload_bytes)
+                        info.mode = 0o644
+                        info.mtime = 0
+                        target.addfile(info, io.BytesIO(payload_bytes))
     if replaced != 1:
         raise RepairError(f"expected one {lock_member_name!r} member, replaced {replaced}")
 
 
-def repair_archive(archive: Path, cargo: str, offline: bool) -> None:
+def _verify_rewritten_archive(
+    archive: Path,
+    lock_member_name: str,
+    repaired_lock: bytes,
+    added: dict[str, Path],
+) -> None:
+    with tarfile.open(archive, mode="r:gz") as verified:
+        expected = {lock_member_name: repaired_lock}
+        expected.update((name, source.read_bytes()) for name, source in added.items())
+        for name, payload in sorted(expected.items()):
+            try:
+                member = verified.getmember(name)
+            except KeyError as exc:
+                raise RepairError(f"repacked archive is missing {name!r}") from exc
+            extracted = verified.extractfile(member)
+            if extracted is None or extracted.read() != payload:
+                raise RepairError(f"repacked archive failed integrity verification for {name!r}")
+
+
+def repair_archive(archive: Path, cargo: str, offline: bool, checkout: Path) -> None:
     archive = archive.resolve()
     if not archive.is_file():
         raise RepairError(f"source distribution does not exist: {archive}")
+    if not (checkout / "Cargo.toml").is_file():
+        raise RepairError(f"checkout has no workspace manifest: {checkout}")
 
     with tempfile.TemporaryDirectory(prefix="rspice-sdist-") as temporary:
         extraction_root = Path(temporary) / "source"
@@ -223,6 +348,14 @@ def repair_archive(archive: Path, cargo: str, offline: bool) -> None:
         members = _extract_regular_archive(archive, extraction_root)
         root_name, root = _workspace_root(extraction_root, members)
         original_lock = (root / "Cargo.lock").read_bytes()
+
+        # Restore the embedded files before Cargo runs, so the tree Cargo
+        # validates below is the tree the archive ships.
+        missing = _missing_embedded_files(root, checkout)
+        for target, source in missing.items():
+            destination = root.joinpath(*target.parts)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
 
         # The first command is intentionally unlocked: it removes stale workspace
         # packages from the copied lockfile. The identity comparison proves it did
@@ -234,19 +367,19 @@ def repair_archive(archive: Path, cargo: str, offline: bool) -> None:
         _validate_reconciliation(original_lock, repaired_lock)
         _run_cargo_metadata(root, cargo, offline=offline, locked=True)
 
+        added = {f"{root_name}/{target}": source for target, source in missing.items()}
         temporary_archive = archive.with_name(f".{archive.name}.repairing")
         try:
-            _replace_lock_member(
+            _rewrite_archive(
                 archive,
                 temporary_archive,
                 f"{root_name}/Cargo.lock",
                 repaired_lock,
+                added,
             )
-            with tarfile.open(temporary_archive, mode="r:gz") as verified:
-                member = verified.getmember(f"{root_name}/Cargo.lock")
-                extracted = verified.extractfile(member)
-                if extracted is None or extracted.read() != repaired_lock:
-                    raise RepairError("repacked archive failed lockfile integrity verification")
+            _verify_rewritten_archive(
+                temporary_archive, f"{root_name}/Cargo.lock", repaired_lock, added
+            )
             os.replace(temporary_archive, archive)
         finally:
             temporary_archive.unlink(missing_ok=True)
@@ -265,14 +398,26 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="allow Cargo network access while reconciling the existing lockfile",
     )
+    parser.add_argument(
+        "--checkout",
+        default=Path(__file__).resolve().parents[2],
+        type=Path,
+        help="repository the embedded files are restored from (default: this checkout)",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
+    checkout = arguments.checkout.resolve()
     try:
         for archive in arguments.archives:
-            repair_archive(archive, cargo=arguments.cargo, offline=not arguments.online)
+            repair_archive(
+                archive,
+                cargo=arguments.cargo,
+                offline=not arguments.online,
+                checkout=checkout,
+            )
             print(f"repaired and validated {archive}")
     except (OSError, tarfile.TarError, RepairError) as exc:
         print(f"error: {exc}", file=sys.stderr)

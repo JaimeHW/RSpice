@@ -92,12 +92,16 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             symbol::show(ui, app);
         }
         Workspace::Design => design::show(ui, app),
+        // The data browser leads with its tab band and owns the search below
+        // it, because the query and the kind/sort facets filter the tab that
+        // is showing — a search above the tabs would read as filtering all
+        // three at once.
+        Workspace::Results => results(ui, app),
         workspace => {
             workspace_search(ui, app, workspace);
             match workspace {
                 Workspace::Project => project(ui, app),
                 Workspace::Simulate => simulate(ui, app),
-                Workspace::Results => results(ui, app),
                 Workspace::Verify => {
                     let scroll_bar_visibility =
                         if verification_navigator_requires_scroll(ui.available_height()) {
@@ -115,8 +119,9 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                         });
                 }
                 Workspace::Models => models(ui, app),
-                Workspace::Netlist => unreachable!("handled above"),
-                Workspace::Design => unreachable!("handled above"),
+                Workspace::Netlist | Workspace::Design | Workspace::Results => {
+                    unreachable!("handled above")
+                }
             }
         }
     }
@@ -838,7 +843,10 @@ fn simulate_nav_meta(app: &RSpiceApp, page: SimulationPage, analyses: &str) -> O
             .run_set_point_count()
             .map(|points| format!("{points} pt")),
         SimulationPage::Models => count(app.state.model_library_manager.libraries_sorted().len()),
-        SimulationPage::Solver => None,
+        // The active numerical policy, not a count — the tree's job is to say
+        // what each route currently holds, and for the solver that is which
+        // preset the effective options match.
+        SimulationPage::Solver => Some(app.state.sim_setup.options.preset_label()),
     }
 }
 
@@ -968,15 +976,18 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             query.is_empty() || waveform.name.to_lowercase().contains(&query)
                         })
                         .filter(|(_, waveform)| {
-                            let current =
-                                crate::workbench::documents::result_document::browser_signal_is_current(
+                            // The unit the signal actually reads in decides
+                            // its kind. Treating "not a current" as a voltage
+                            // filed noise densities and decibel magnitudes
+                            // under Voltage.
+                            kind.admits(
+                                crate::workbench::documents::result_document::browser_signal_unit(
                                     &waveform.name,
-                                );
-                            match kind {
-                                ResultsBrowserKind::All => true,
-                                ResultsBrowserKind::Current => current,
-                                ResultsBrowserKind::Voltage => !current,
-                            }
+                                    crate::workbench::documents::result_document::analysis_default_unit(
+                                        analysis.analysis_type,
+                                    ),
+                                ),
+                            )
                         })
                         .filter(|(_, waveform)| match scope {
                             ResultsBrowserScope::All => true,
@@ -1098,52 +1109,11 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .map(|analysis| analysis.signals.len())
         .sum::<usize>();
     let tab = results_browser_tab_band(ui, [signal_count, runs.len(), expressions.len()]);
-    // The mockup's browser toolbar: kind and sort facets, present only on
-    // the quantity-bearing tabs — the dataset manifest has no kinds.
+    // The mockup's browser toolbar: the query over this tab, then the kind
+    // and sort facets. Both are absent on Datasets — a manifest binding has
+    // no kind to filter and no hierarchy to order.
     if tab != ResultsBrowserTab::Datasets {
-        ui.horizontal(|ui| {
-            ui.add_space(8.0);
-            let mut kind_now = kind;
-            egui::ComboBox::from_id_salt("workbench.results.browser-kind")
-                .width(96.0)
-                .selected_text(match kind_now {
-                    ResultsBrowserKind::All => "All kinds",
-                    ResultsBrowserKind::Voltage => "Voltage",
-                    ResultsBrowserKind::Current => "Current",
-                })
-                .show_ui(ui, |ui| {
-                    for (value, label) in [
-                        (ResultsBrowserKind::All, "All kinds"),
-                        (ResultsBrowserKind::Voltage, "Voltage"),
-                        (ResultsBrowserKind::Current, "Current"),
-                    ] {
-                        ui.selectable_value(&mut kind_now, value, label);
-                    }
-                });
-            if kind_now != kind {
-                ui.ctx()
-                    .data_mut(|data| data.insert_temp(results_browser_kind_id(), kind_now));
-            }
-            let mut sort_now = sort;
-            egui::ComboBox::from_id_salt("workbench.results.browser-sort")
-                .width(120.0)
-                .selected_text(match sort_now {
-                    ResultsBrowserSort::Hierarchy => "Hierarchy order",
-                    ResultsBrowserSort::Name => "Name",
-                })
-                .show_ui(ui, |ui| {
-                    for (value, label) in [
-                        (ResultsBrowserSort::Hierarchy, "Hierarchy order"),
-                        (ResultsBrowserSort::Name, "Name"),
-                    ] {
-                        ui.selectable_value(&mut sort_now, value, label);
-                    }
-                });
-            if sort_now != sort {
-                ui.ctx()
-                    .data_mut(|data| data.insert_temp(results_browser_sort_id(), sort_now));
-            }
-        });
+        results_browser_toolbar(ui, app, kind, sort);
     }
     // The mockup's status band: the signals tab owns the scope control on
     // the left — All | Favorites | Recent over the session's real star and
@@ -1151,14 +1121,38 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     // right, with the provenance sentence riding its tooltip.
     {
         let t = Tokens::get(ui.ctx());
-        let filtering = !query.is_empty();
+        // A narrowing of any kind puts the count in the mockup's two-number
+        // form, so the reader can see how much of the dataset is hidden
+        // rather than only how much survived.
+        let filtering =
+            !query.is_empty() || kind != ResultsBrowserKind::All || scope != ResultsBrowserScope::All;
         let (shown, noun) = match tab {
             ResultsBrowserTab::Signals => (signal_count, "signals"),
             ResultsBrowserTab::Datasets => (runs.len(), "immutable datasets"),
             ResultsBrowserTab::Expressions => (expressions.len(), "expressions"),
         };
+        let loaded = match tab {
+            ResultsBrowserTab::Signals => app
+                .state
+                .simulation
+                .active_run()
+                .map(|run| {
+                    run.analyses
+                        .iter()
+                        .map(|analysis| analysis.waveforms.len())
+                        .sum::<usize>()
+                })
+                .unwrap_or(0),
+            ResultsBrowserTab::Datasets => app.state.simulation.runs.len(),
+            ResultsBrowserTab::Expressions => app
+                .state
+                .simulation
+                .active_analysis_idx
+                .and_then(|index| app.state.ui.results.exprs.get(&index))
+                .map_or(0, Vec::len),
+        };
         let count_copy = if filtering {
-            format!("{shown} matching")
+            format!("{shown} / {loaded}")
         } else if tab == ResultsBrowserTab::Signals {
             match scope {
                 ResultsBrowserScope::All => format!("{shown} {noun}"),
@@ -1169,37 +1163,31 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             format!("{shown} {noun}")
         };
         ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), 24.0),
+            egui::vec2(ui.available_width(), 28.0),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
-                ui.add_space(6.0);
+                ui.add_space(8.0);
                 if tab == ResultsBrowserTab::Signals {
-                    ui.spacing_mut().item_spacing.x = 3.0;
-                    let mut scope_now = scope;
-                    for (value, label, purpose) in [
-                        (
-                            ResultsBrowserScope::All,
-                            "All",
-                            "Every signal of the active dataset",
-                        ),
-                        (
-                            ResultsBrowserScope::Favorites,
-                            "Favorites",
-                            "Signals starred in this session",
-                        ),
-                        (
-                            ResultsBrowserScope::Recent,
-                            "Recent",
-                            "Signals selected or shown most recently",
-                        ),
-                    ] {
-                        let response = crate::ui::widgets::chip(ui, label, scope_now == value)
-                            .on_hover_text(purpose);
-                        if response.clicked() {
-                            scope_now = value;
-                        }
-                    }
-                    if scope_now != scope {
+                    // One scope is in force at a time, so the three read as
+                    // one control rather than three independent marks.
+                    const SCOPES: [ResultsBrowserScope; 3] = [
+                        ResultsBrowserScope::All,
+                        ResultsBrowserScope::Favorites,
+                        ResultsBrowserScope::Recent,
+                    ];
+                    let mut index = SCOPES
+                        .iter()
+                        .position(|candidate| *candidate == scope)
+                        .unwrap_or(0);
+                    let changed = crate::ui::widgets::segmented(
+                        ui,
+                        "workbench.results.browser-scope",
+                        &["All", "Favorites", "Recent"],
+                        &mut index,
+                        crate::ui::widgets::SegmentedWidth::Natural,
+                    );
+                    if changed {
+                        let scope_now = SCOPES[index];
                         ui.ctx().data_mut(|data| {
                             data.insert_temp(results_browser_scope_id(), scope_now);
                         });
@@ -1407,6 +1395,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                 }
                             },
                         );
+                        results_browser_clear_filters(ui, app, kind, scope);
                     }
                 }
                 ResultsBrowserTab::Datasets => {
@@ -1573,13 +1562,53 @@ enum ResultsBrowserTab {
     Expressions,
 }
 
-/// Quantity-kind facet of the browser toolbar, derived from accessor names.
+/// Quantity-kind facet of the browser toolbar.
+///
+/// The kinds are exactly the ones the results unit owner can name from a
+/// retained signal — anything it cannot name belongs to no kind rather than
+/// being swept into the commonest one. The mockup lists further kinds
+/// (complex, spectrum, scalar, contribution) that a name and a unit alone do
+/// not distinguish here; offering them would be a taxonomy this browser
+/// cannot actually apply.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum ResultsBrowserKind {
     #[default]
     All,
     Voltage,
     Current,
+    Power,
+    NoiseDensity,
+}
+
+impl ResultsBrowserKind {
+    const ALL: [Self; 5] = [
+        Self::All,
+        Self::Voltage,
+        Self::Current,
+        Self::Power,
+        Self::NoiseDensity,
+    ];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::All => "All kinds",
+            Self::Voltage => "Voltage",
+            Self::Current => "Current",
+            Self::Power => "Power",
+            Self::NoiseDensity => "Noise density",
+        }
+    }
+
+    /// Whether a signal reading in `unit` belongs to this kind.
+    fn admits(self, unit: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::Voltage => unit == "V",
+            Self::Current => unit == "A",
+            Self::Power => unit == "W",
+            Self::NoiseDensity => matches!(unit, "nV/√Hz" | "V^2/Hz"),
+        }
+    }
 }
 
 /// Row ordering facet: retained hierarchy order, or name.
@@ -1588,6 +1617,20 @@ enum ResultsBrowserSort {
     #[default]
     Hierarchy,
     Name,
+}
+
+impl ResultsBrowserSort {
+    const ALL: [Self; 2] = [Self::Hierarchy, Self::Name];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Hierarchy => "Hierarchy order",
+            // The mockup's third option, "Recently used", is the Recent
+            // scope on the status band below: one owner for recency, not a
+            // sort that silently competes with it.
+            Self::Name => "Name",
+        }
+    }
 }
 
 /// Working-set scope of the signals tab: everything, the user's starred
@@ -1599,6 +1642,146 @@ enum ResultsBrowserScope {
     All,
     Favorites,
     Recent,
+}
+
+/// One way back when a narrowing has hidden everything.
+///
+/// A reader who filters to nothing has to be able to undo it without
+/// remembering which of the three controls did it. Nothing is offered when
+/// the emptiness is the dataset's own — there would be no filter to clear.
+fn results_browser_clear_filters(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    kind: ResultsBrowserKind,
+    scope: ResultsBrowserScope,
+) {
+    let filtering = !app.state.workbench.navigator_query.trim().is_empty()
+        || kind != ResultsBrowserKind::All
+        || scope != ResultsBrowserScope::All;
+    if !filtering {
+        return;
+    }
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.add_space(PANEL_SEARCH_MARGIN_X);
+        if ui
+            .small_button("Clear filters")
+            .on_hover_text("Reset the query, the kind facet, and the scope")
+            .clicked()
+        {
+            app.state.workbench.navigator_query.clear();
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(results_browser_kind_id(), ResultsBrowserKind::All);
+                data.insert_temp(results_browser_scope_id(), ResultsBrowserScope::All);
+            });
+        }
+    });
+}
+
+/// The data browser's own toolbar: the query, then the kind and sort facets.
+///
+/// The mockup lays this out as one bordered block under the tab band — an
+/// 8 px inset, a 5 px gutter, and two facets that split the row evenly. They
+/// are sized to the panel rather than to their own labels so the pair reads
+/// as one control row at any dock width, and so neither facet's width
+/// implies it is the more important of the two.
+fn results_browser_toolbar(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    kind: ResultsBrowserKind,
+    sort: ResultsBrowserSort,
+) {
+    const GUTTER: f32 = 5.0;
+
+    let t = Tokens::get(ui.ctx());
+    ui.add_space(7.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.add_space(PANEL_SEARCH_MARGIN_X);
+        let field_width = panel_search_field_width(ui.available_width() + PANEL_SEARCH_MARGIN_X);
+        let placeholder = "Find canonical name, path, unit, or type…";
+        let response = ui.add_sized(
+            [field_width, t.metrics.ctl_h],
+            egui::TextEdit::singleline(&mut app.state.workbench.navigator_query)
+                .id_salt("workbench.navigator.filter")
+                .hint_text(placeholder)
+                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                .margin(egui::Margin {
+                    left: 29,
+                    right: 8,
+                    top: 5,
+                    bottom: 5,
+                }),
+        );
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_label(placeholder);
+            node.set_description("Filter the quantities of the selected browser tab");
+        });
+        WorkbenchIcon::Search.paint(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(response.rect.left() + 15.0, response.rect.center().y),
+                egui::vec2(16.0, 16.0),
+            ),
+            t.color.text_faint,
+        );
+        if std::mem::take(&mut app.state.workbench.focus_navigator_search) {
+            response.request_focus();
+        }
+    });
+    ui.add_space(GUTTER);
+    ui.horizontal(|ui| {
+        // Spacing is added explicitly: an `add_space` inside a horizontal
+        // with item spacing pays for both, and the facets drift off the
+        // query field's inset.
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.add_space(PANEL_SEARCH_MARGIN_X);
+        // The design system's select allocates exactly the width it is
+        // given, so the pair can be halved against the row. A raw combo box
+        // pads itself past the width it is asked for, which pushed the sort
+        // facet off the query's inset and clipped it at the panel edge.
+        let row_width = ui.available_width() - PANEL_SEARCH_MARGIN_X;
+        let facet_width = ((row_width - GUTTER) / 2.0).max(48.0);
+        let kind_options = ResultsBrowserKind::ALL
+            .map(|value| value.label().to_owned())
+            .to_vec();
+        if let Some(picked) = crate::ui::widgets::select(
+            ui,
+            "workbench.results.browser-kind",
+            "Quantity kind",
+            kind.label(),
+            &kind_options,
+            facet_width,
+        ) {
+            let kind_now = ResultsBrowserKind::ALL[picked];
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(results_browser_kind_id(), kind_now));
+        }
+        ui.add_space(GUTTER);
+        let sort_options = ResultsBrowserSort::ALL
+            .map(|value| value.label().to_owned())
+            .to_vec();
+        if let Some(picked) = crate::ui::widgets::select(
+            ui,
+            "workbench.results.browser-sort",
+            "Quantity sort",
+            sort.label(),
+            &sort_options,
+            facet_width,
+        ) {
+            let sort_now = ResultsBrowserSort::ALL[picked];
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(results_browser_sort_id(), sort_now));
+        }
+    });
+    ui.add_space(7.0);
+    // The toolbar is one block, so it closes with a rule like the tab band
+    // above it rather than bleeding into the status band below.
+    ui.painter().hline(
+        egui::Rangef::new(ui.max_rect().left(), ui.max_rect().right()),
+        ui.cursor().top() - 0.5,
+        egui::Stroke::new(1.0, t.color.border),
+    );
 }
 
 fn results_browser_kind_id() -> egui::Id {
@@ -1670,6 +1853,14 @@ fn results_browser_tab_band(ui: &mut Ui, counts: [usize; 3]) -> ResultsBrowserTa
             )
             .on_hover_text(format!("Show {label}"));
         let selected = tab == candidate;
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::SelectableLabel,
+                ui.is_enabled(),
+                selected,
+                format!("{label}, {count}"),
+            )
+        });
         if response.clicked() {
             tab = candidate;
             ui.ctx().data_mut(|data| data.insert_temp(band_id, tab));
@@ -1713,6 +1904,7 @@ fn results_browser_tab_band(ui: &mut Ui, counts: [usize; 3]) -> ResultsBrowserTa
                 t.color.accent,
             );
         }
+        theme::paint_focus_ring(ui, &response, cell);
     }
     painter.hline(
         band.x_range(),
@@ -3824,6 +4016,96 @@ mod tests {
             node.role() == egui::accesskit::Role::TextInput
                 && node.label() == Some("Find instance, net or port")
         }));
+    }
+
+    /// The mockup's data browser reads top to bottom as: tab band, then the
+    /// query and facets that filter the tab it selected, then the scope and
+    /// count band. A search above the tabs would read as filtering all three
+    /// tabs at once, which is what this pins against.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_data_browser_puts_its_query_under_the_tab_it_filters() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.activate(Workspace::Results);
+
+        let mut search_rect: Option<egui::Rect> = None;
+        let mut facet_rects: Vec<egui::Rect> = Vec::new();
+        let output = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.set_width(255.0);
+                super::show(ui, &mut app);
+            });
+        });
+        for (_, node) in output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("AccessKit tree update")
+            .nodes
+            .iter()
+        {
+            if node.role() == egui::accesskit::Role::TextInput
+                && node.label() == Some("Find canonical name, path, unit, or type…")
+                && let Some(bounds) = node.bounds()
+            {
+                search_rect = Some(egui::Rect::from_min_max(
+                    egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                    egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                ));
+            }
+            if node.role() == egui::accesskit::Role::ComboBox
+                && matches!(node.label(), Some("Quantity kind" | "Quantity sort"))
+                && let Some(bounds) = node.bounds()
+            {
+                facet_rects.push(egui::Rect::from_min_max(
+                    egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                    egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                ));
+            }
+        }
+
+        let search = search_rect.expect("the browser owns a query field with its own placeholder");
+        // The tab band is a painted strip 30 px tall directly under the panel
+        // header, so anything below it starts lower than that.
+        assert!(
+            search.top() > 30.0,
+            "the query must sit below the tab band, not above it ({})",
+            search.top()
+        );
+        assert_eq!(facet_rects.len(), 2, "kind and sort facets");
+        facet_rects.sort_by(|a, b| a.left().total_cmp(&b.left()));
+        let [kind, sort] = [facet_rects[0], facet_rects[1]];
+        assert!(
+            (kind.width() - sort.width()).abs() <= 1.0,
+            "the facets split the row evenly ({} vs {})",
+            kind.width(),
+            sort.width()
+        );
+        assert!(
+            (kind.top() - sort.top()).abs() <= 1.0,
+            "the facets share one row"
+        );
+        assert!(
+            kind.top() > search.bottom(),
+            "the facets sit under the query, as one toolbar block"
+        );
+        // The whole toolbar shares one inset, so the pair reads as a control
+        // row belonging to the field above it at any dock width.
+        assert!(
+            (kind.left() - search.left()).abs() <= 1.0,
+            "the facet row starts on the query's inset ({} vs {})",
+            kind.left(),
+            search.left()
+        );
+        assert!(
+            (sort.right() - search.right()).abs() <= 1.5,
+            "the facet row ends on the query's inset ({} vs {})",
+            sort.right(),
+            search.right()
+        );
     }
 
     #[test]

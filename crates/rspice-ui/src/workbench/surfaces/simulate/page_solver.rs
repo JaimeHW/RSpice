@@ -18,6 +18,7 @@ use egui::Ui;
 use crate::simulation::dialog::{
     DampingStrategy, IntegrationMethod, MatrixSolver, OptionsDialogState, SimulationOptions,
 };
+use crate::simulation::plan::AnalysisKind;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, mono_input, select};
@@ -29,50 +30,23 @@ use super::page_kit::{
     ledger_head, ledger_row, ledger_row_cells, rule_row,
 };
 
-/// A named policy: its label, how to build it, and what choosing it means.
-type Preset = (&'static str, fn() -> SimulationOptions, &'static str);
-
-/// Named numerical policies, in increasing cost.
-const PRESETS: [Preset; 4] = [
-    (
-        "Fast",
-        SimulationOptions::fast,
-        "Exploratory · relaxed update bounds · device bypass on",
-    ),
-    (
-        "Default",
-        SimulationOptions::default,
-        "SPICE-compatible defaults · full continuation ladder",
-    ),
-    (
-        "Accurate",
-        SimulationOptions::accurate,
-        "Tight update and residual bounds · verification intent",
-    ),
-    (
-        "Robust",
-        SimulationOptions::robust,
-        "Aggressive continuation · recovers a solve that stalls",
-    ),
+/// What choosing each named policy means, positionally matched to
+/// `SimulationOptions::PRESETS`.
+///
+/// The labels and the option sets belong to the options themselves, because
+/// the navigator reports the active policy too and cannot reach a page. Only
+/// this presentation copy lives here. `preset_intents_line_up_with_the_named_presets`
+/// pins the pairing.
+pub(super) const PRESET_INTENT: [&str; 4] = [
+    "Exploratory · relaxed update bounds · device bypass on",
+    "SPICE-compatible defaults · full continuation ladder",
+    "Tight update and residual bounds · verification intent",
+    "Aggressive continuation · recovers a solve that stalls",
 ];
 
 /// The preset the effective options match exactly, if any.
-///
-/// Reported by exact comparison rather than by remembering which chip was
-/// pressed: an edit to any field leaves the preset, and saying otherwise
-/// would misreport what the run is about to use.
 pub(super) fn active_preset(app: &RSpiceApp) -> Option<&'static str> {
-    let current = serde_json::to_vec(&app.state.sim_setup.options).ok()?;
-    PRESETS.iter().find_map(|(label, build, _)| {
-        serde_json::to_vec(&build())
-            .ok()
-            .filter(|preset| *preset == current)
-            .map(|_| *label)
-    })
-}
-
-pub(super) fn active_preset_label(app: &RSpiceApp) -> String {
-    active_preset(app).map_or_else(|| "Custom".to_owned(), str::to_owned)
+    app.state.sim_setup.options.preset_name()
 }
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -94,10 +68,11 @@ fn policy_strip(ui: &mut Ui, app: &mut RSpiceApp) {
     let active = active_preset(app);
     let summary = active
         .and_then(|label| {
-            PRESETS
+            SimulationOptions::PRESETS
                 .iter()
-                .find(|(name, _, _)| *name == label)
-                .map(|(_, _, summary)| (*summary).to_owned())
+                .position(|(name, _)| *name == label)
+                .and_then(|index| PRESET_INTENT.get(index))
+                .map(|summary| (*summary).to_owned())
         })
         .unwrap_or_else(|| {
             "Edited from a named preset · the resolved values below are what runs".to_owned()
@@ -119,9 +94,10 @@ fn policy_strip(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui.spacing_mut().item_spacing = egui::vec2(12.0, 8.0);
                 ui.scope(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    for (label, _, tooltip) in PRESETS {
-                        if preset_segment(ui, label, active == Some(label), tooltip) {
-                            requested = Some(label);
+                    for (index, (label, _)) in SimulationOptions::PRESETS.iter().enumerate() {
+                        let tooltip = PRESET_INTENT.get(index).copied().unwrap_or_default();
+                        if preset_segment(ui, label, active == Some(*label), tooltip) {
+                            requested = Some(*label);
                         }
                     }
                 });
@@ -160,7 +136,9 @@ fn policy_strip(ui: &mut Ui, app: &mut RSpiceApp) {
         });
 
     if let Some(label) = requested
-        && let Some((_, build, _)) = PRESETS.iter().find(|(name, _, _)| *name == label)
+        && let Some((_, build)) = SimulationOptions::PRESETS
+            .iter()
+            .find(|(name, _)| *name == label)
     {
         let options = build();
         app.state.sim_setup.options_draft = OptionsDialogState::from_options(&options);
@@ -232,6 +210,7 @@ fn preset_segment(ui: &mut Ui, label: &str, selected: bool, tooltip: &str) -> bo
             t.color.text_dim
         },
     );
+    theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_text(tooltip).clicked()
 }
 
@@ -860,7 +839,27 @@ const LEDGER_COLUMNS: [f32; 4] = [0.26, 0.24, 0.24, 0.26];
 
 fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
     let options = &app.state.sim_setup.options;
-    let rows: Vec<(String, String, String, &'static str)> = vec![
+    // Which analyses the plan actually holds. A row scoped to transient
+    // integration is a claim about a run, so it is only shown when a transient
+    // is enabled — the alternative states a policy for a solve that will never
+    // happen.
+    let kinds: Vec<AnalysisKind> = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .map(|plan| {
+            plan.instances()
+                .iter()
+                .filter(|instance| instance.enabled())
+                .map(|instance| instance.kind())
+                .collect()
+        })
+        .unwrap_or_default();
+    let has = |kind: AnalysisKind| kinds.contains(&kind);
+    let time_stepped =
+        has(AnalysisKind::Transient) || has(AnalysisKind::Pss) || has(AnalysisKind::MonteCarlo);
+
+    let mut rows: Vec<(String, String, String, &'static str)> = vec![
         (
             "Every analysis".to_owned(),
             "Update bound · RELTOL".to_owned(),
@@ -879,24 +878,30 @@ fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
             options.itl1.to_string(),
             "plan preset",
         ),
-        (
-            "Transient".to_owned(),
-            "Integration method".to_owned(),
-            options.method.spice_name().to_owned(),
-            "plan preset",
-        ),
-        (
-            "Transient".to_owned(),
-            "Iterations per step · ITL4".to_owned(),
-            options.itl4.to_string(),
-            "plan preset",
-        ),
-        (
-            "Transient".to_owned(),
-            "Step ceiling".to_owned(),
-            format_value(options.max_timestep),
-            "plan preset",
-        ),
+    ];
+    if time_stepped {
+        rows.extend([
+            (
+                "Time stepped".to_owned(),
+                "Integration method".to_owned(),
+                options.method.spice_name().to_owned(),
+                "plan preset",
+            ),
+            (
+                "Time stepped".to_owned(),
+                "Iterations per step · ITL4".to_owned(),
+                options.itl4.to_string(),
+                "plan preset",
+            ),
+            (
+                "Time stepped".to_owned(),
+                "Step ceiling".to_owned(),
+                format_value(options.max_timestep),
+                "plan preset",
+            ),
+        ]);
+    }
+    rows.extend([
         (
             "Every analysis".to_owned(),
             "Factorization".to_owned(),
@@ -909,7 +914,11 @@ fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
             format!("{:.1} °C", options.temp),
             "run set",
         ),
-    ];
+    ]);
+    // The overrides the page's own title promises. An analysis that carries
+    // its own accuracy tier does not resolve to the plan preset, and the
+    // ledger is the only place that difference is visible.
+    rows.extend(analysis_overrides(app));
     card(
         ui,
         "Resolved policy",
@@ -941,6 +950,45 @@ fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
             );
         },
     );
+}
+
+/// The analyses that carry their own accuracy tier instead of resolving to the
+/// plan preset.
+///
+/// Only a tier that differs from the default is reported: listing every
+/// analysis at its default would bury the ones that actually diverge, which is
+/// the only thing this section of the ledger exists to show.
+fn analysis_overrides(app: &RSpiceApp) -> Vec<(String, String, String, &'static str)> {
+    use crate::simulation::dialog::{OpAccuracy, XfAccuracy};
+    use crate::simulation::plan::AnalysisDraft;
+
+    let Ok(plan) = app.state.sim_setup.stable_analysis_plan() else {
+        return Vec::new();
+    };
+    plan.instances()
+        .iter()
+        .enumerate()
+        .filter(|(_, instance)| instance.enabled())
+        .filter_map(|(index, instance)| {
+            let tier = match instance.draft() {
+                AnalysisDraft::OperatingPoint(setup) => OpAccuracy::ALL
+                    .get(setup.accuracy_idx)
+                    .filter(|accuracy| **accuracy != OpAccuracy::default())
+                    .map(|accuracy| accuracy.display_name()),
+                AnalysisDraft::TransferFunction(setup) => XfAccuracy::ALL
+                    .get(setup.accuracy_idx)
+                    .filter(|accuracy| **accuracy != XfAccuracy::default())
+                    .map(|accuracy| accuracy.display_name()),
+                _ => None,
+            }?;
+            Some((
+                format!("#{} · {}", index + 1, instance.kind().code()),
+                "Accuracy tier".to_owned(),
+                tier.to_owned(),
+                "analysis override",
+            ))
+        })
+        .collect()
 }
 
 fn format_value(value: f64) -> String {
