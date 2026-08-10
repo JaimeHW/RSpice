@@ -59,6 +59,24 @@ pub struct GeneratedVerilogAParameterBound {
     pub exclusive: bool,
 }
 
+impl GeneratedVerilogAParameterBound {
+    #[inline]
+    pub const fn inclusive(value: Value) -> Self {
+        Self {
+            value,
+            exclusive: false,
+        }
+    }
+
+    #[inline]
+    pub const fn exclusive(value: Value) -> Self {
+        Self {
+            value,
+            exclusive: true,
+        }
+    }
+}
+
 /// Immutable, engine-neutral parameter metadata emitted by the compiler.
 ///
 /// `default` is `None` when the source default is an expression rather than a
@@ -76,6 +94,77 @@ pub struct GeneratedVerilogAParameterDescriptor {
     pub maximum: Option<GeneratedVerilogAParameterBound>,
     pub excluded_values: &'static [Value],
     pub has_dynamic_constraints: bool,
+}
+
+impl GeneratedVerilogAParameterDescriptor {
+    const fn with_scope(
+        name: &'static str,
+        default: Option<Value>,
+        scope: GeneratedVerilogAParameterScope,
+    ) -> Self {
+        Self {
+            name,
+            aliases: &[],
+            scope,
+            is_integer: false,
+            default,
+            minimum: None,
+            maximum: None,
+            excluded_values: &[],
+            has_dynamic_constraints: false,
+        }
+    }
+
+    #[inline]
+    pub const fn model(name: &'static str, default: Option<Value>) -> Self {
+        Self::with_scope(name, default, GeneratedVerilogAParameterScope::Model)
+    }
+
+    #[inline]
+    pub const fn instance(name: &'static str, default: Option<Value>) -> Self {
+        Self::with_scope(name, default, GeneratedVerilogAParameterScope::Instance)
+    }
+
+    #[inline]
+    pub const fn dual(name: &'static str, default: Option<Value>) -> Self {
+        Self::with_scope(name, default, GeneratedVerilogAParameterScope::Dual)
+    }
+
+    #[inline]
+    pub const fn integer(mut self) -> Self {
+        self.is_integer = true;
+        self
+    }
+
+    #[inline]
+    pub const fn aliases(mut self, aliases: &'static [&'static str]) -> Self {
+        self.aliases = aliases;
+        self
+    }
+
+    #[inline]
+    pub const fn minimum(mut self, minimum: GeneratedVerilogAParameterBound) -> Self {
+        self.minimum = Some(minimum);
+        self
+    }
+
+    #[inline]
+    pub const fn maximum(mut self, maximum: GeneratedVerilogAParameterBound) -> Self {
+        self.maximum = Some(maximum);
+        self
+    }
+
+    #[inline]
+    pub const fn excluded_values(mut self, excluded_values: &'static [Value]) -> Self {
+        self.excluded_values = excluded_values;
+        self
+    }
+
+    #[inline]
+    pub const fn dynamic_constraints(mut self) -> Self {
+        self.has_dynamic_constraints = true;
+        self
+    }
 }
 
 /// Stable identity and exact external contract for one compiled Verilog-A
@@ -6331,26 +6420,53 @@ mod fixed_lane_tests {
                 discipline: "electrical",
                 current_parameter: "ifg",
             }];
-        const PARAMETERS: [GeneratedVerilogAParameterDescriptor; 1] =
-            [GeneratedVerilogAParameterDescriptor {
+        const PARAMETER: GeneratedVerilogAParameterDescriptor =
+            GeneratedVerilogAParameterDescriptor::dual("rth0", Some(0.0))
+                .integer()
+                .aliases(&["rth"])
+                .minimum(GeneratedVerilogAParameterBound::inclusive(0.0))
+                .maximum(GeneratedVerilogAParameterBound::exclusive(100.0))
+                .excluded_values(&[50.0])
+                .dynamic_constraints();
+        const EXPECTED_PARAMETER: GeneratedVerilogAParameterDescriptor =
+            GeneratedVerilogAParameterDescriptor {
                 name: "rth0",
                 aliases: &["rth"],
                 scope: GeneratedVerilogAParameterScope::Dual,
-                is_integer: false,
+                is_integer: true,
                 default: Some(0.0),
                 minimum: Some(GeneratedVerilogAParameterBound {
                     value: 0.0,
                     exclusive: false,
                 }),
-                maximum: None,
-                excluded_values: &[],
-                has_dynamic_constraints: false,
-            }];
+                maximum: Some(GeneratedVerilogAParameterBound {
+                    value: 100.0,
+                    exclusive: true,
+                }),
+                excluded_values: &[50.0],
+                has_dynamic_constraints: true,
+            };
+        const MODEL_PARAMETER: GeneratedVerilogAParameterDescriptor =
+            GeneratedVerilogAParameterDescriptor::model("model_only", None);
+        const INSTANCE_PARAMETER: GeneratedVerilogAParameterDescriptor =
+            GeneratedVerilogAParameterDescriptor::instance("instance_only", Some(1.0));
 
         assert_eq!(GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, 2);
         assert_eq!(TERMINALS[0].name, "FG");
         assert_eq!(TERMINALS[0].current_parameter, "ifg");
-        assert_eq!(PARAMETERS[0].scope, GeneratedVerilogAParameterScope::Dual);
+        assert_eq!(PARAMETER, EXPECTED_PARAMETER);
+        assert_eq!(
+            MODEL_PARAMETER.scope,
+            GeneratedVerilogAParameterScope::Model
+        );
+        assert_eq!(MODEL_PARAMETER.default, None);
+        assert_eq!(
+            INSTANCE_PARAMETER.scope,
+            GeneratedVerilogAParameterScope::Instance
+        );
+        assert_eq!(INSTANCE_PARAMETER.default, Some(1.0));
+        assert!(!GeneratedVerilogAParameterBound::inclusive(1.0).exclusive);
+        assert!(GeneratedVerilogAParameterBound::exclusive(1.0).exclusive);
         assert_eq!(
             GeneratedParameterAssignment::new("rth", 1.0, GeneratedParameterOrigin::ModelCard)
                 .origin,

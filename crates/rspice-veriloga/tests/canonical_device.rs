@@ -90,8 +90,9 @@ endmodule
     );
 
     assert!(state.contains(
-        "GeneratedVerilogAParameterDescriptor { name: \"gain\", aliases: &[\"GAIN_ALIAS\"], scope: GeneratedVerilogAParameterScope::Dual, is_integer: true, default: Some(2.0), minimum: Some(GeneratedVerilogAParameterBound { value: 0.0, exclusive: false }), maximum: None, excluded_values: &[], has_dynamic_constraints: true }"
+        "P::dual(\"gain\", Some(2.0)).integer().aliases(&[\"GAIN_ALIAS\"]).minimum(B::inclusive(0.0)).dynamic_constraints()"
     ));
+    assert!(!state.contains("GeneratedVerilogAParameterDescriptor {"));
     assert!(!state.contains("pub fn parameter_scope"));
 }
 
@@ -2582,6 +2583,16 @@ pub mod runtime {
         pub exclusive: bool,
     }
 
+    impl GeneratedVerilogAParameterBound {
+        pub const fn inclusive(value: Value) -> Self {
+            Self { value, exclusive: false }
+        }
+
+        pub const fn exclusive(value: Value) -> Self {
+            Self { value, exclusive: true }
+        }
+    }
+
     #[derive(Debug, Clone, Copy, PartialEq)]
     pub struct GeneratedVerilogAParameterDescriptor {
         pub name: &'static str,
@@ -2593,6 +2604,68 @@ pub mod runtime {
         pub maximum: Option<GeneratedVerilogAParameterBound>,
         pub excluded_values: &'static [Value],
         pub has_dynamic_constraints: bool,
+    }
+
+    impl GeneratedVerilogAParameterDescriptor {
+        const fn with_scope(
+            name: &'static str,
+            default: Option<Value>,
+            scope: GeneratedVerilogAParameterScope,
+        ) -> Self {
+            Self {
+                name,
+                aliases: &[],
+                scope,
+                is_integer: false,
+                default,
+                minimum: None,
+                maximum: None,
+                excluded_values: &[],
+                has_dynamic_constraints: false,
+            }
+        }
+
+        pub const fn model(name: &'static str, default: Option<Value>) -> Self {
+            Self::with_scope(name, default, GeneratedVerilogAParameterScope::Model)
+        }
+
+        pub const fn instance(name: &'static str, default: Option<Value>) -> Self {
+            Self::with_scope(name, default, GeneratedVerilogAParameterScope::Instance)
+        }
+
+        pub const fn dual(name: &'static str, default: Option<Value>) -> Self {
+            Self::with_scope(name, default, GeneratedVerilogAParameterScope::Dual)
+        }
+
+        pub const fn integer(mut self) -> Self {
+            self.is_integer = true;
+            self
+        }
+
+        pub const fn aliases(mut self, aliases: &'static [&'static str]) -> Self {
+            self.aliases = aliases;
+            self
+        }
+
+        pub const fn minimum(mut self, minimum: GeneratedVerilogAParameterBound) -> Self {
+            self.minimum = Some(minimum);
+            self
+        }
+
+        pub const fn maximum(mut self, maximum: GeneratedVerilogAParameterBound) -> Self {
+            self.maximum = Some(maximum);
+            self
+        }
+
+        pub const fn excluded_values(mut self, excluded_values: &'static [Value]) -> Self {
+            self.excluded_values = excluded_values;
+            self
+        }
+
+        pub const fn dynamic_constraints(mut self) -> Self {
+            self.has_dynamic_constraints = true;
+            self
+        }
     }
 
     #[derive(Debug, Clone, Copy, PartialEq)]

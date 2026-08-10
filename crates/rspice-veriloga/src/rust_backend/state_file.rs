@@ -122,7 +122,7 @@ pub(super) fn generate_state_file_with_extensions(
         ""
     };
     out.push_str(&format!(
-        "use {}::{{GeneratedDdtCoefficients, GeneratedParameterAssignment, GeneratedParameterOrigin, GeneratedVerilogAParameterBound, GeneratedVerilogAParameterDescriptor, GeneratedVerilogAParameterScope, GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState, GeneratedVerilogATerminalDescriptor, GeneratedVerilogATerminalDirection, boxed_zero_bool_array, boxed_zero_f64_array{parameter_alias_installer}}};\n",
+        "use {}::{{GeneratedDdtCoefficients, GeneratedParameterAssignment, GeneratedParameterOrigin, GeneratedVerilogAParameterBound as B, GeneratedVerilogAParameterDescriptor as P, GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState, GeneratedVerilogATerminalDescriptor, GeneratedVerilogATerminalDirection, boxed_zero_bool_array, boxed_zero_f64_array{parameter_alias_installer}}};\n",
         options.runtime_path,
     ));
     if !artifact.mir.parameters.is_empty() {
@@ -896,45 +896,55 @@ fn emit_public_parameter_descriptors(artifact: &CanonicalIrArtifact, out: &mut S
         .filter(|parameter| parameter.is_public)
         .collect::<Vec<_>>();
     out.push_str(&format!(
-        "    pub const PARAMETER_DESCRIPTORS: [GeneratedVerilogAParameterDescriptor; {}] = [\n",
+        "    pub const PARAMETER_DESCRIPTORS: [P; {}] = [\n",
         public_parameters.len()
     ));
     for parameter in public_parameters {
-        let scope = if parameter.scope == crate::semantic::ParameterScope::Model {
-            "GeneratedVerilogAParameterScope::Model"
+        let scope_constructor = if parameter.scope == crate::semantic::ParameterScope::Model {
+            "model"
         } else if parameter.also_model {
-            "GeneratedVerilogAParameterScope::Dual"
+            "dual"
         } else {
-            "GeneratedVerilogAParameterScope::Instance"
+            "instance"
         };
         let default = parameter.default.map_or_else(
             || "None".to_string(),
             |value| format!("Some({})", format_f64(value)),
         );
-        let minimum = parameter.range.as_ref().and_then(|range| {
-            range.min.map(|value| {
-                format!(
-                    "Some(GeneratedVerilogAParameterBound {{ value: {}, exclusive: {} }})",
-                    format_f64(value),
-                    range.min_exclusive
-                )
-            })
-        });
-        let maximum = parameter.range.as_ref().and_then(|range| {
-            range.max.map(|value| {
-                format!(
-                    "Some(GeneratedVerilogAParameterBound {{ value: {}, exclusive: {} }})",
-                    format_f64(value),
-                    range.max_exclusive
-                )
-            })
-        });
+        let mut descriptor = format!(
+            "P::{scope_constructor}({:?}, {default})",
+            parameter.name.as_str()
+        );
+        if parameter.value_type == CanonicalValueType::Integer {
+            descriptor.push_str(".integer()");
+        }
         let aliases = parameter
             .aliases
             .iter()
             .map(|alias| format!("{:?}", alias.as_str()))
             .collect::<Vec<_>>()
             .join(", ");
+        if !aliases.is_empty() {
+            descriptor.push_str(&format!(".aliases(&[{aliases}])"));
+        }
+        if let Some(range) = parameter.range.as_ref() {
+            if let Some(value) = range.min {
+                let bound = if range.min_exclusive {
+                    "exclusive"
+                } else {
+                    "inclusive"
+                };
+                descriptor.push_str(&format!(".minimum(B::{bound}({}))", format_f64(value)));
+            }
+            if let Some(value) = range.max {
+                let bound = if range.max_exclusive {
+                    "exclusive"
+                } else {
+                    "inclusive"
+                };
+                descriptor.push_str(&format!(".maximum(B::{bound}({}))", format_f64(value)));
+            }
+        }
         let excluded_values = parameter
             .range
             .as_ref()
@@ -947,6 +957,9 @@ fn emit_public_parameter_descriptors(artifact: &CanonicalIrArtifact, out: &mut S
                     .join(", ")
             })
             .unwrap_or_default();
+        if !excluded_values.is_empty() {
+            descriptor.push_str(&format!(".excluded_values(&[{excluded_values}])"));
+        }
         let has_dynamic_constraints = parameter.range.as_ref().is_some_and(|range| {
             range.min_parameter.is_some()
                 || range.max_parameter.is_some()
@@ -955,13 +968,10 @@ fn emit_public_parameter_descriptors(artifact: &CanonicalIrArtifact, out: &mut S
                 || !range.exclude_parameters.is_empty()
                 || !range.exclude_expressions.is_empty()
         });
-        out.push_str(&format!(
-            "        GeneratedVerilogAParameterDescriptor {{ name: {:?}, aliases: &[{aliases}], scope: {scope}, is_integer: {}, default: {default}, minimum: {}, maximum: {}, excluded_values: &[{excluded_values}], has_dynamic_constraints: {has_dynamic_constraints} }},\n",
-            parameter.name.as_str(),
-            parameter.value_type == CanonicalValueType::Integer,
-            minimum.unwrap_or_else(|| "None".to_string()),
-            maximum.unwrap_or_else(|| "None".to_string()),
-        ));
+        if has_dynamic_constraints {
+            descriptor.push_str(".dynamic_constraints()");
+        }
+        out.push_str(&format!("        {descriptor},\n"));
     }
     out.push_str("    ];\n");
 }
