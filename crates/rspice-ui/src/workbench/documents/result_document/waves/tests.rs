@@ -1778,11 +1778,16 @@ fn arm_cursors(state: &mut AppState) {
     state.ui.results.readout_collapsed = false;
 }
 
+// The crate bans stderr printing so debugging scaffolding cannot reach a
+// release build. This is the one place it earns its keep: the failures this
+// test exists to catch abort the process rather than panic — the tick ladder
+// once asked the allocator for 128 GiB on a denormal span — and an abort
+// unwinds nothing, so a panic message would never be printed. Naming each
+// case as it starts is the only record of which shape broke the instrument.
+#[allow(clippy::print_stderr)]
 #[test]
 fn the_instrument_survives_each_degenerate_trace_alone() {
     for (label, waveform) in degenerate_waveforms() {
-        // Named per case: an abort here takes the process with it, so the
-        // last line printed is the shape that broke the instrument.
         eprintln!("degenerate case: {label}");
         let mut state = AppState::default();
         state.simulation.start_run().add_analysis(

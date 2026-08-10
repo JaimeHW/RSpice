@@ -446,10 +446,11 @@ pub fn show(
     // ---- grid + ticks
     // The x-axis unit owns the right end of the tick row; a tick label that
     // would run into it is dropped (its gridline stays).
-    let x_end_label = spec
-        .x_axis_chrome
-        .then(|| spec.x.end_label())
-        .unwrap_or_default();
+    let x_end_label = if spec.x_axis_chrome {
+        spec.x.end_label()
+    } else {
+        String::new()
+    };
     let x_unit_left = if x_end_label.is_empty() {
         f32::INFINITY
     } else {

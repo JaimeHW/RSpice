@@ -935,9 +935,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let passing = summary.passing;
     let bounded = summary.bounded;
     let unavailable = summary.unavailable;
-    let unavailable_text = (unavailable > 0)
-        .then(|| format!(" · {unavailable} unavailable"))
-        .unwrap_or_default();
+    let unavailable_text = if unavailable > 0 {
+        format!(" · {unavailable} unavailable")
+    } else {
+        String::new()
+    };
     paint_summary(
         ui,
         &format!("Specifications · Run #{run_id}"),

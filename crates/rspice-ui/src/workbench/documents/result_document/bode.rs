@@ -401,7 +401,7 @@ mod tests {
         // falls back to the Noise analysis rather than relabeling
         // phase-noise data. The nV/√Hz conversion itself is pinned by the
         // waves pane-stack projection tests.
-        let fallback = build_noise_model(&mut state).expect("ordinary noise fallback");
+        let fallback = build_noise_model(&state).expect("ordinary noise fallback");
         assert_eq!(fallback.frequency.as_slice(), &[1.0, 10.0]);
         assert_eq!(fallback.trace_count, 1);
     }
