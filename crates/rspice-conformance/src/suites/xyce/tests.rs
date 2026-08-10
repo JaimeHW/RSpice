@@ -7306,6 +7306,82 @@ fn capacitor_dtemp_fixture(
     (root, owner, reference, runner)
 }
 
+fn legacy_bjt_dtemp_fixture(
+    label: &str,
+    sources: [&str; 4],
+) -> (PathBuf, [XyceDeck; 4], XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-legacy-bjt-dtemp-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = root.join("Netlists/DTEMP");
+    fs::create_dir_all(&family).expect("create legacy BJT DTEMP fixture directory");
+    let records = [
+        (
+            "Netlists/DTEMP/npn_dtemp.cir",
+            XYCE_LEGACY_BJT_DTEMP_NPN_OWNER_RECORD,
+            sources[0],
+        ),
+        (
+            "Netlists/DTEMP/npn_ref.cir",
+            XYCE_LEGACY_BJT_DTEMP_NPN_REFERENCE_RECORD,
+            sources[1],
+        ),
+        (
+            "Netlists/DTEMP/pnp_dtemp.cir",
+            XYCE_LEGACY_BJT_DTEMP_PNP_OWNER_RECORD,
+            sources[2],
+        ),
+        (
+            "Netlists/DTEMP/pnp_ref.cir",
+            XYCE_LEGACY_BJT_DTEMP_PNP_REFERENCE_RECORD,
+            sources[3],
+        ),
+    ];
+    let decks = records.map(|(relative_path, normalized_record, source)| {
+        assert_eq!(
+            XyceTestRunner::normalize_manifest_key(relative_path),
+            normalized_record,
+            "fixture source-case path must map to its qualified record"
+        );
+        let path = root.join(relative_path);
+        fs::write(&path, source).expect("write legacy BJT DTEMP fixture source");
+        XyceDeck {
+            path,
+            relative_path: relative_path.to_string(),
+            section: XyceDeckSection::Netlists,
+        }
+    });
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!(
+            "{}\trequires_upstream_wrapper\n{}\trequires_upstream_wrapper\n",
+            decks[0].relative_path, decks[2].relative_path
+        ),
+    )
+    .expect("write legacy BJT DTEMP wrapper provenance");
+    fs::write(
+        root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[
+            &format!(
+                "{}\tNetlists/DTEMP/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_LEGACY_BJT_DTEMP_REFERENCE_CONTRACT}",
+                decks[1].relative_path
+            ),
+            &format!(
+                "{}\tNetlists/DTEMP/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_LEGACY_BJT_DTEMP_REFERENCE_CONTRACT}",
+                decks[3].relative_path
+            ),
+        ]),
+    )
+    .expect("write legacy BJT DTEMP exclusion provenance");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    (root, decks, runner)
+}
+
 #[test]
 fn bug647_resistor_pair_is_manifest_owned_and_structurally_qualified() {
     let (root, owner, reference, runner) = bug647_resistor_fixture(
@@ -9288,6 +9364,167 @@ fn classic_mos_dtemp_provenance_rejects_candidate_mutation() {
             .is_err(),
         "any source mutation must fail the exact candidate-content census"
     );
+}
+
+#[test]
+fn legacy_bjt_dtemp_candidate_census_is_an_exact_manifest_bijection() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_root = workspace_root.join("tests/xyce");
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    let selected = runner
+        .discover_tests()
+        .iter()
+        .filter_map(|deck| {
+            runner
+                .legacy_bjt_dtemp_relational_contract(deck)
+                .map(|contract| {
+                    contract.unwrap_or_else(|error| {
+                        panic!("legacy BJT DTEMP candidate failed qualification: {error}")
+                    });
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                })
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        selected,
+        BTreeSet::from([
+            XYCE_LEGACY_BJT_DTEMP_NPN_OWNER_RECORD.to_string(),
+            XYCE_LEGACY_BJT_DTEMP_NPN_REFERENCE_RECORD.to_string(),
+            XYCE_LEGACY_BJT_DTEMP_PNP_OWNER_RECORD.to_string(),
+            XYCE_LEGACY_BJT_DTEMP_PNP_REFERENCE_RECORD.to_string(),
+        ])
+    );
+    assert_eq!(selected.len(), XYCE_LEGACY_BJT_DTEMP_CANDIDATE_COUNT);
+}
+
+#[test]
+fn legacy_bjt_dtemp_snapshots_reject_semantic_mutations() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let baseline = [
+        fs::read_to_string(corpus.join(XYCE_LEGACY_BJT_DTEMP_NPN_OWNER_RECORD))
+            .expect("read NPN DTEMP owner"),
+        fs::read_to_string(corpus.join(XYCE_LEGACY_BJT_DTEMP_NPN_REFERENCE_RECORD))
+            .expect("read NPN TEMP reference"),
+        fs::read_to_string(corpus.join(XYCE_LEGACY_BJT_DTEMP_PNP_OWNER_RECORD))
+            .expect("read PNP DTEMP owner"),
+        fs::read_to_string(corpus.join(XYCE_LEGACY_BJT_DTEMP_PNP_REFERENCE_RECORD))
+            .expect("read PNP TEMP reference"),
+    ];
+    let mutations = [
+        (
+            0usize,
+            "(bf=100)",
+            "(bf=101)",
+            XyceLegacyBjtDtempFamily::Npn,
+            XyceLegacyBjtDtempRole::Owner,
+            "NPN model gain",
+        ),
+        (
+            0,
+            "dtemp={dtempParam}",
+            "temp={dtempParam}",
+            XyceLegacyBjtDtempFamily::Npn,
+            XyceLegacyBjtDtempRole::Owner,
+            "NPN TEMP-versus-DTEMP ownership",
+        ),
+        (
+            1,
+            "list 15 25 35",
+            "list 15 26 35",
+            XyceLegacyBjtDtempFamily::Npn,
+            XyceLegacyBjtDtempRole::Reference,
+            "NPN effective-temperature grid",
+        ),
+        (
+            2,
+            "is=100fa bf=60",
+            "is=101fa bf=60",
+            XyceLegacyBjtDtempFamily::Pnp,
+            XyceLegacyBjtDtempRole::Owner,
+            "PNP saturation current",
+        ),
+        (
+            3,
+            "vbb 0 -2 -0.5",
+            "vbb 0 -2.5 -0.5",
+            XyceLegacyBjtDtempFamily::Pnp,
+            XyceLegacyBjtDtempRole::Reference,
+            "PNP secondary sweep domain",
+        ),
+    ];
+    for (index, (deck_index, needle, replacement, family, role, reason)) in
+        mutations.into_iter().enumerate()
+    {
+        let mut sources = baseline.clone();
+        let mutated = sources[deck_index].replace(needle, replacement);
+        assert_ne!(
+            mutated, sources[deck_index],
+            "{reason} mutation must alter its fixture"
+        );
+        sources[deck_index] = mutated;
+        let source_refs = [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+            sources[3].as_str(),
+        ];
+        let (root, decks, runner) =
+            legacy_bjt_dtemp_fixture(&format!("mutation-{index}"), source_refs);
+        let deck = &decks[deck_index];
+        let rejected = match runner.static_dc_plan_for_path(&deck.path, ExpressionDialect::Xyce) {
+            Err(_) => true,
+            Ok(plan) => match XyceTestRunner::parse_xyce_netlist(&plan.source, &deck.path) {
+                Err(_) => true,
+                Ok(netlist) => {
+                    XyceTestRunner::legacy_bjt_dtemp_snapshot(&plan, &netlist, family, role)
+                        .is_err()
+                }
+            },
+        };
+        fs::remove_dir_all(root).expect("remove legacy BJT DTEMP mutation fixture");
+        assert!(rejected, "{reason} mutation must fail closed");
+    }
+}
+
+#[test]
+fn legacy_bjt_dtemp_provenance_rejects_cross_family_candidate_mutation() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let sources = [
+        fs::read_to_string(corpus.join(XYCE_LEGACY_BJT_DTEMP_NPN_OWNER_RECORD))
+            .expect("read NPN DTEMP owner"),
+        fs::read_to_string(corpus.join(XYCE_LEGACY_BJT_DTEMP_NPN_REFERENCE_RECORD))
+            .expect("read NPN TEMP reference"),
+        fs::read_to_string(corpus.join(XYCE_LEGACY_BJT_DTEMP_PNP_OWNER_RECORD))
+            .expect("read PNP DTEMP owner"),
+        fs::read_to_string(corpus.join(XYCE_LEGACY_BJT_DTEMP_PNP_REFERENCE_RECORD))
+            .expect("read PNP TEMP reference"),
+    ];
+    let (root, decks, runner) = legacy_bjt_dtemp_fixture(
+        "provenance",
+        [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+            sources[3].as_str(),
+        ],
+    );
+    let contract = runner
+        .legacy_bjt_dtemp_relational_contract(&decks[0])
+        .expect("NPN owner is selected")
+        .expect("unmodified four-record BJT provenance qualifies");
+    let mutation = sources[3].replace("bf=60", "bf=61");
+    fs::write(&decks[3].path, mutation).expect("write PNP reference mutation");
+    assert!(
+        runner
+            .validate_legacy_bjt_dtemp_provenance(&contract)
+            .is_err(),
+        "a sibling-family candidate mutation must fail the shared four-record provenance census"
+    );
+    fs::remove_dir_all(root).expect("remove legacy BJT DTEMP provenance fixture");
 }
 
 #[test]

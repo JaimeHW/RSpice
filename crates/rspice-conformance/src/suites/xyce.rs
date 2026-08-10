@@ -58,15 +58,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 181;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 183;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "32df3123f37783e736f86a496103132bbfe6f0c344bac321548b73988424df05";
+    "07552dfa43ba63f2277fa2333da76c8b1731a1c90b849f256b9738f8c022d91e";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "7bc8851df76a42d6ebb03bca6c02edf29de2ce0cb343d0d3b8142063f24de70f";
+    "55a79c378e486af2805543090a94bdea15a1d812dc9e512281b38f12e8f0672c";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "ea12cba89cf145669f18e9c1d43bf38711123a6b5f5635321a7bc001f4041b8f";
+    "0f08864f52f942db522662838d964a5bb650751735bbed0d5d7349f2df0eb9f6";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -171,6 +171,25 @@ const XYCE_CLASSIC_MOS_DTEMP_OWNER_MANIFEST_BLAKE3: &str =
 const XYCE_CLASSIC_MOS_DTEMP_EXCLUSION_COUNT: usize = 8;
 const XYCE_CLASSIC_MOS_DTEMP_HISTORICAL_EXCLUSION_BLAKE3: &str =
     "1150bc1fda0dd8db1f2091b15b5c280ae881ebdbd8aad31df4b0ec491a75e3fa";
+const XYCE_LEGACY_BJT_DTEMP_WRAPPER_CONTRACT: &str =
+    "legacy_gummel_poon_bjt_dtemp_relational_wrapper_owner";
+const XYCE_LEGACY_BJT_DTEMP_REFERENCE_CONTRACT: &str =
+    "legacy_gummel_poon_bjt_dtemp_relational_wrapper_reference";
+const XYCE_LEGACY_BJT_DTEMP_NPN_OWNER_RECORD: &str = "netlists/dtemp/npn_dtemp.cir";
+const XYCE_LEGACY_BJT_DTEMP_NPN_REFERENCE_RECORD: &str = "netlists/dtemp/npn_ref.cir";
+const XYCE_LEGACY_BJT_DTEMP_PNP_OWNER_RECORD: &str = "netlists/dtemp/pnp_dtemp.cir";
+const XYCE_LEGACY_BJT_DTEMP_PNP_REFERENCE_RECORD: &str = "netlists/dtemp/pnp_ref.cir";
+const XYCE_LEGACY_BJT_DTEMP_CANDIDATE_COUNT: usize = 4;
+const XYCE_LEGACY_BJT_DTEMP_CANDIDATE_BLAKE3: &str =
+    "57301c7c863570abfbce995121166c364792cf9b47d95275b5155eed84e9819c";
+const XYCE_LEGACY_BJT_DTEMP_CONTENT_BLAKE3: &str =
+    "0469c5b96dc5ec35562ac6e84422c5c810205f2a70c037a55298ffae84ab3e94";
+const XYCE_LEGACY_BJT_DTEMP_OWNER_COUNT: usize = 2;
+const XYCE_LEGACY_BJT_DTEMP_OWNER_MANIFEST_BLAKE3: &str =
+    "8c415000b5df6ebd473ae1828b92ab03fb61fb175357bc44e8c62dbcdca4e512";
+const XYCE_LEGACY_BJT_DTEMP_EXCLUSION_COUNT: usize = 2;
+const XYCE_LEGACY_BJT_DTEMP_HISTORICAL_EXCLUSION_BLAKE3: &str =
+    "69ef9ba2bf3cf5c275c546f5cea47a684ee90ca07f72926c2b8542997ac10e78";
 const XYCE_LEVEL2_DIODE_DTEMP_WRAPPER_CONTRACT: &str =
     "level2_diode_dtemp_relational_wrapper_owner";
 const XYCE_LEVEL2_DIODE_DTEMP_REFERENCE_CONTRACT: &str =
@@ -5320,6 +5339,90 @@ enum XyceClassicMosDtempElementSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct XyceClassicMosDtempSnapshot {
     elements: Vec<XyceClassicMosDtempElementSnapshot>,
+    model_name: String,
+    model_type: String,
+    model_params: Vec<(String, u64)>,
+    dc_primary: (String, u64, u64, u64),
+    dc_secondary: Option<(String, u64, u64, u64)>,
+    probes: Vec<String>,
+    effective_temperature_bits: Vec<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceLegacyBjtDtempFamily {
+    Npn,
+    Pnp,
+}
+
+impl XyceLegacyBjtDtempFamily {
+    fn owner_file(self) -> &'static str {
+        match self {
+            Self::Npn => "npn_dtemp.cir",
+            Self::Pnp => "pnp_dtemp.cir",
+        }
+    }
+
+    fn reference_file(self) -> &'static str {
+        match self {
+            Self::Npn => "npn_ref.cir",
+            Self::Pnp => "pnp_ref.cir",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Npn => "NPN",
+            Self::Pnp => "PNP",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceLegacyBjtDtempRole {
+    Owner,
+    Reference,
+}
+
+impl XyceLegacyBjtDtempRole {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::Owner => XYCE_LEGACY_BJT_DTEMP_WRAPPER_CONTRACT,
+            Self::Reference => XYCE_LEGACY_BJT_DTEMP_REFERENCE_CONTRACT,
+        }
+    }
+
+    fn for_record(relative_path: &str) -> Option<(XyceLegacyBjtDtempFamily, Self)> {
+        match XyceTestRunner::normalize_manifest_key(relative_path).as_str() {
+            XYCE_LEGACY_BJT_DTEMP_NPN_OWNER_RECORD => {
+                Some((XyceLegacyBjtDtempFamily::Npn, Self::Owner))
+            }
+            XYCE_LEGACY_BJT_DTEMP_NPN_REFERENCE_RECORD => {
+                Some((XyceLegacyBjtDtempFamily::Npn, Self::Reference))
+            }
+            XYCE_LEGACY_BJT_DTEMP_PNP_OWNER_RECORD => {
+                Some((XyceLegacyBjtDtempFamily::Pnp, Self::Owner))
+            }
+            XYCE_LEGACY_BJT_DTEMP_PNP_REFERENCE_RECORD => {
+                Some((XyceLegacyBjtDtempFamily::Pnp, Self::Reference))
+            }
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct XyceLegacyBjtDtempContract {
+    owner_path: PathBuf,
+    reference_path: PathBuf,
+    owner_plan: XyceStaticDcPlan,
+    reference_plan: XyceStaticDcPlan,
+    family: XyceLegacyBjtDtempFamily,
+    role: XyceLegacyBjtDtempRole,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceLegacyBjtDtempSnapshot {
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
     model_name: String,
     model_type: String,
     model_params: Vec<(String, u64)>,

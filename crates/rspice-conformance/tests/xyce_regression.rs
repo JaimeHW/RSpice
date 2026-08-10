@@ -9379,6 +9379,41 @@ fn test_xyce_classic_level1_mos_dtemp_relational_oracles() {
 }
 
 #[test]
+fn test_xyce_legacy_bjt_dtemp_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        (
+            "Netlists/DTEMP/npn_dtemp.cir",
+            "legacy_gummel_poon_bjt_dtemp_relational_wrapper_owner",
+        ),
+        (
+            "Netlists/DTEMP/npn_ref.cir",
+            "legacy_gummel_poon_bjt_dtemp_relational_wrapper_reference",
+        ),
+        (
+            "Netlists/DTEMP/pnp_dtemp.cir",
+            "legacy_gummel_poon_bjt_dtemp_relational_wrapper_owner",
+        ),
+        (
+            "Netlists/DTEMP/pnp_ref.cir",
+            "legacy_gummel_poon_bjt_dtemp_relational_wrapper_reference",
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should satisfy the exact native legacy BJT TEMP/DTEMP relational contract, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.error.is_none());
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_level2_diode_dtemp_relational_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

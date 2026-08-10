@@ -462,6 +462,33 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.legacy_bjt_dtemp_relational_contract(deck) {
+            let role = XyceLegacyBjtDtempRole::for_record(&deck.relative_path)
+                .expect("legacy BJT DTEMP detector selected a recognized record")
+                .1;
+            let result = match contract {
+                Ok(contract) => {
+                    self.run_legacy_bjt_dtemp_relational_contract(deck, contract, start)
+                }
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    role.result_contract(),
+                    format!("legacy BJT DTEMP relational qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.level2_diode_dtemp_relational_contract(deck) {
             let role = XyceLevel2DiodeDtempRole::for_record(&deck.relative_path)
                 .expect("Level-2 diode DTEMP detector selected a recognized record");
@@ -6317,6 +6344,401 @@ impl XyceTestRunner {
             for mismatch in &mut step_mismatches {
                 mismatch.row += row_offset;
                 mismatch.probe = format!("step {index}: {}", mismatch.probe);
+            }
+            row_offset += owner.rows.len();
+            mismatches.extend(step_mismatches);
+            if mismatches.len() >= self.config.max_mismatches {
+                mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, result_contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!(
+                    "{} {LABEL} exact serialized PRN mismatch(es)",
+                    mismatches.len()
+                ),
+                mismatches,
+            )
+        }
+    }
+
+    pub(super) fn run_legacy_bjt_dtemp_relational_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceLegacyBjtDtempContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        const LABEL: &str = "legacy Gummel-Poon BJT TEMP/DTEMP family";
+        let result_contract = contract.role.result_contract();
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let qualification = (|| {
+            self.validate_legacy_bjt_dtemp_provenance(&contract)?;
+            let parse = |plan: &XyceStaticDcPlan, role: &str| {
+                Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
+                    &plan.source,
+                    &plan.deck_path,
+                    plan.expression_dialect,
+                    plan.parameter_redefinition_policy,
+                    plan.execution_dir.as_deref(),
+                )
+                .map_err(|error| format!("{LABEL} {role} parse failed: {error}"))
+            };
+            let owner_netlist = parse(&contract.owner_plan, "owner")?;
+            let reference_netlist = parse(&contract.reference_plan, "reference")?;
+            let owner_snapshot = Self::legacy_bjt_dtemp_snapshot(
+                &contract.owner_plan,
+                &owner_netlist,
+                contract.family,
+                XyceLegacyBjtDtempRole::Owner,
+            )?;
+            let reference_snapshot = Self::legacy_bjt_dtemp_snapshot(
+                &contract.reference_plan,
+                &reference_netlist,
+                contract.family,
+                XyceLegacyBjtDtempRole::Reference,
+            )?;
+            if owner_snapshot != reference_snapshot {
+                return Err(format!(
+                    "{LABEL} {} base owner/reference topology or analysis semantics differ",
+                    contract.family.label()
+                ));
+            }
+
+            let expansion_engine = self.create_dc_engine();
+            let owner_runs = Self::nested_step_runs_for_commands_with_limits_and_abort(
+                &expansion_engine,
+                &owner_netlist,
+                &contract.owner_plan.steps,
+                xyce_step_plan_limits(),
+                &abort,
+            )
+            .map_err(|error| format!("{LABEL} owner STEP expansion failed: {error}"))?;
+            let reference_runs = Self::nested_step_runs_for_commands_with_limits_and_abort(
+                &expansion_engine,
+                &reference_netlist,
+                &contract.reference_plan.steps,
+                xyce_step_plan_limits(),
+                &abort,
+            )
+            .map_err(|error| format!("{LABEL} reference STEP expansion failed: {error}"))?;
+            let owner_coordinates: [Value; 3] = [0.0, 10.0, 20.0];
+            let reference_coordinates: [Value; 3] = [15.0, 25.0, 35.0];
+            if owner_runs.len() != owner_coordinates.len()
+                || reference_runs.len() != reference_coordinates.len()
+            {
+                return Err(format!(
+                    "{LABEL} requires three owner and three reference materializations, found {}/{}",
+                    owner_runs.len(),
+                    reference_runs.len()
+                ));
+            }
+            for (index, (((owner_run, reference_run), owner_coordinate), reference_coordinate)) in
+                owner_runs
+                    .iter()
+                    .zip(&reference_runs)
+                    .zip(owner_coordinates)
+                    .zip(reference_coordinates)
+                    .enumerate()
+            {
+                let [owner_step_value] = owner_run.step_values.as_slice() else {
+                    return Err(format!(
+                        "{LABEL} owner materialization {index} lost its one STEP coordinate"
+                    ));
+                };
+                let [reference_step_value] = reference_run.step_values.as_slice() else {
+                    return Err(format!(
+                        "{LABEL} reference materialization {index} lost its one STEP coordinate"
+                    ));
+                };
+                if owner_step_value.to_bits() != owner_coordinate.to_bits()
+                    || reference_step_value.to_bits() != reference_coordinate.to_bits()
+                {
+                    return Err(format!(
+                        "{LABEL} materialization {index} changed its ordered STEP coordinates"
+                    ));
+                }
+                let normalized_owner = Self::normalize_legacy_bjt_dtemp_materialization(
+                    &owner_run.netlist,
+                    XyceLegacyBjtDtempRole::Owner,
+                    owner_coordinate,
+                    reference_coordinate,
+                )?;
+                let normalized_reference = Self::normalize_legacy_bjt_dtemp_materialization(
+                    &reference_run.netlist,
+                    XyceLegacyBjtDtempRole::Reference,
+                    reference_coordinate,
+                    reference_coordinate,
+                )?;
+                let materialized_owner_snapshot = Self::legacy_bjt_dtemp_snapshot(
+                    &contract.owner_plan,
+                    &normalized_owner,
+                    contract.family,
+                    XyceLegacyBjtDtempRole::Owner,
+                )?;
+                let materialized_reference_snapshot = Self::legacy_bjt_dtemp_snapshot(
+                    &contract.reference_plan,
+                    &normalized_reference,
+                    contract.family,
+                    XyceLegacyBjtDtempRole::Reference,
+                )?;
+                if materialized_owner_snapshot != owner_snapshot
+                    || materialized_reference_snapshot != reference_snapshot
+                    || materialized_owner_snapshot != materialized_reference_snapshot
+                {
+                    return Err(format!(
+                        "{LABEL} materialization {index} changed non-temperature topology or analysis semantics"
+                    ));
+                }
+            }
+            Ok((owner_runs, reference_runs))
+        })();
+        let (owner_runs, reference_runs) = match qualification {
+            Ok(runs) => runs,
+            Err(reason) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!(
+                        "{LABEL} {} qualification failed: {reason}",
+                        contract.family.label()
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let simulate = |plan: &XyceStaticDcPlan,
+                        runs: &[XyceStepRun],
+                        role: &str|
+         -> Result<Vec<XycePrnTable>, String> {
+            let engine = self.create_dc_engine();
+            let mut batch_plan = plan.clone();
+            batch_plan.steps.clear();
+            let (expected_rows, expected_columns) = match contract.family {
+                XyceLegacyBjtDtempFamily::Npn => (
+                    13,
+                    ["Index", "v(4)", "i(vmon1)", "i(vmon2)", "v(1)", "v(2)"],
+                ),
+                XyceLegacyBjtDtempFamily::Pnp => (
+                    30,
+                    ["Index", "v(1)", "v(6)", "i(vmon1)", "i(vmon2)", "i(vmon3)"],
+                ),
+            };
+            let mut tables = Vec::with_capacity(runs.len());
+            for (step_index, run) in runs.iter().enumerate() {
+                let results = engine
+                    .run_dc_sweep2_spec_with_report_and_abort(
+                        &run.netlist,
+                        &plan.dc.source,
+                        &plan.dc.primary_spec(),
+                        plan.dc.sweep2.as_ref(),
+                        &abort,
+                    )
+                    .map_err(|error| {
+                        format!("{LABEL} {role} step {step_index} simulation failed: {error}")
+                    })?;
+                let table = self
+                    .dc_results_to_prn_table(&batch_plan, &run.netlist, &results)
+                    .map_err(|error| {
+                        format!("{LABEL} {role} step {step_index} output failed: {error}")
+                    })?;
+                if table.columns != expected_columns || table.rows.len() != expected_rows {
+                    return Err(format!(
+                        "{LABEL} {role} step {step_index} produced schema {:?} with {} rows, expected {expected_columns:?} with {expected_rows}",
+                        table.columns,
+                        table.rows.len()
+                    ));
+                }
+                for (row_index, values) in table.rows.iter().enumerate() {
+                    if values.len() != table.columns.len()
+                        || values[0].to_bits() != (row_index as Value).to_bits()
+                        || values.iter().any(|value| !value.is_finite())
+                    {
+                        return Err(format!(
+                            "{LABEL} {role} step {step_index} row {row_index} is malformed: {values:?}"
+                        ));
+                    }
+                    let sweep_coordinates_match = match contract.family {
+                        XyceLegacyBjtDtempFamily::Npn => {
+                            values[1].to_bits() == (row_index as Value).to_bits()
+                        }
+                        XyceLegacyBjtDtempFamily::Pnp => {
+                            let vpos = (row_index % 6) as Value;
+                            let outer_index = row_index / 6;
+                            let vbb = if outer_index == 0 {
+                                0.0
+                            } else {
+                                -0.5 * outer_index as Value
+                            };
+                            values[1].to_bits() == vpos.to_bits()
+                                && values[2].to_bits() == vbb.to_bits()
+                        }
+                    };
+                    if !sweep_coordinates_match {
+                        return Err(format!(
+                            "{LABEL} {role} step {step_index} row {row_index} lost canonical DC traversal: {values:?}"
+                        ));
+                    }
+                }
+                tables.push(table);
+            }
+            Ok(tables)
+        };
+
+        // Preserve the historical wrapper's process order: the live reference
+        // deck runs to completion before the DTEMP owner deck.
+        let reference_tables =
+            match simulate(&contract.reference_plan, &reference_runs, "reference") {
+                Ok(tables) => tables,
+                Err(reason) => {
+                    return self.failure_result(deck, start, result_contract, reason, Vec::new());
+                }
+            };
+        let owner_tables = match simulate(&contract.owner_plan, &owner_runs, "owner") {
+            Ok(tables) => tables,
+            Err(reason) => {
+                return self.failure_result(deck, start, result_contract, reason, Vec::new());
+            }
+        };
+
+        // Lock default Xyce 7.10 PRN anchors so the owner/reference equality
+        // check cannot pass vacuously and the Xyce-dialect solver contract is
+        // exercised independently of the relational comparison.
+        let (dependent_columns, expected_anchors): (&[usize], Vec<Vec<Value>>) =
+            match contract.family {
+                XyceLegacyBjtDtempFamily::Npn => (
+                    &[2, 3, 4, 5],
+                    vec![
+                        vec![2.96613536e-5, 2.96613590e-3, 8.17669684e-1, 6.06772820],
+                        vec![2.96951607e-5, 2.96951661e-3, 8.04924401e-1, 6.06096678],
+                        vec![2.97291922e-5, 2.97291976e-3, 7.92094526e-1, 6.05416048],
+                    ],
+                ),
+                XyceLegacyBjtDtempFamily::Pnp => (
+                    &[3, 4, 5],
+                    vec![
+                        vec![2.04352027e-5, 1.22611228e-3, 1.24654748e-3],
+                        vec![2.04974145e-5, 1.22984499e-3, 1.25034241e-3],
+                        vec![2.05598872e-5, 1.23359337e-3, 1.25415326e-3],
+                    ],
+                ),
+            };
+        for &column in dependent_columns {
+            let causal = (|| -> Result<bool, String> {
+                for pair in owner_tables.windows(2) {
+                    for (left, right) in pair[0].rows.iter().zip(&pair[1].rows) {
+                        let left = Self::xyce_default_prn_text(left[column])?;
+                        let right = Self::xyce_default_prn_text(right[column])?;
+                        if left != right {
+                            return Ok(true);
+                        }
+                    }
+                }
+                Ok(false)
+            })();
+            let causal = match causal {
+                Ok(causal) => causal,
+                Err(reason) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!(
+                            "{LABEL} {} dependent-column serialization failed: {reason}",
+                            contract.family.label()
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            if !causal {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!(
+                        "{LABEL} {} dependent column '{}' is temperature-invariant at default PRN precision",
+                        contract.family.label(),
+                        owner_tables[0].columns[column]
+                    ),
+                    Vec::new(),
+                );
+            }
+        }
+        for (step_index, (table, expected)) in
+            owner_tables.iter().zip(&expected_anchors).enumerate()
+        {
+            let Some(anchor) = table.rows.last() else {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("{LABEL} owner step {step_index} has no maximum-bias row"),
+                    Vec::new(),
+                );
+            };
+            for (&column, &expected_value) in dependent_columns.iter().zip(expected) {
+                let actual_text = match Self::xyce_default_prn_text(anchor[column]) {
+                    Ok(value) => value,
+                    Err(reason) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            result_contract,
+                            format!("{LABEL} anchor serialization failed: {reason}"),
+                            Vec::new(),
+                        );
+                    }
+                };
+                let expected_text = Self::xyce_default_prn_text(expected_value)
+                    .expect("finite locked Xyce BJT anchor");
+                if actual_text != expected_text {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!(
+                            "{LABEL} {} step {step_index} maximum-bias '{}' is {actual_text}, expected Xyce 7.10 {expected_text}",
+                            contract.family.label(),
+                            table.columns[column]
+                        ),
+                        Vec::new(),
+                    );
+                }
+            }
+        }
+
+        let mut mismatches = Vec::new();
+        let mut row_offset = 0usize;
+        for (step_index, (reference, owner)) in
+            reference_tables.iter().zip(&owner_tables).enumerate()
+        {
+            let mut step_mismatches = match self
+                .compare_serialized_default_prn_tables(reference, owner)
+            {
+                Ok(found) => found,
+                Err(reason) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!(
+                            "{LABEL} exact historical diff adapter failed for step {step_index}: {reason}"
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            for mismatch in &mut step_mismatches {
+                mismatch.row += row_offset;
+                mismatch.probe = format!("step {step_index}: {}", mismatch.probe);
             }
             row_offset += owner.rows.len();
             mismatches.extend(step_mismatches);

@@ -3098,6 +3098,184 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    pub(super) fn validate_legacy_bjt_dtemp_provenance(
+        &self,
+        contract: &XyceLegacyBjtDtempContract,
+    ) -> Result<(), String> {
+        const LABEL: &str = "legacy Gummel-Poon BJT TEMP/DTEMP family";
+        let parent = contract
+            .owner_path
+            .parent()
+            .ok_or_else(|| format!("{LABEL} owner has no parent directory"))?;
+        if contract.reference_path.parent() != Some(parent) {
+            return Err(format!("{LABEL} contract paths do not share one directory"));
+        }
+        let exclusions = self
+            .upstream_exclusions
+            .as_ref()
+            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
+        let entries = fs::read_dir(parent)
+            .map_err(|error| format!("failed to read {LABEL} directory: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("failed to enumerate {LABEL}: {error}"))?;
+
+        let mut candidate_paths = BTreeMap::<String, PathBuf>::new();
+        for entry in entries {
+            let path = entry.path();
+            let relative = self.relative_key(&path);
+            if XyceLegacyBjtDtempRole::for_record(&relative).is_none() {
+                continue;
+            }
+            let metadata = fs::symlink_metadata(&path)
+                .map_err(|error| format!("failed to inspect {LABEL} candidate: {error}"))?;
+            if metadata.file_type().is_symlink()
+                || !metadata.file_type().is_file()
+                || metadata.len() == 0
+            {
+                return Err(format!(
+                    "{LABEL} candidate '{}' must be a nonempty regular non-symlink file",
+                    self.display_path(&path)
+                ));
+            }
+            let key = Self::normalize_manifest_key(&relative);
+            if candidate_paths.insert(key, path).is_some() {
+                return Err(format!(
+                    "{LABEL} candidate census contains a path collision"
+                ));
+            }
+        }
+
+        let owner_relative = self.relative_key(&contract.owner_path);
+        let reference_relative = self.relative_key(&contract.reference_path);
+        let owner_key = Self::normalize_manifest_key(&owner_relative);
+        let reference_key = Self::normalize_manifest_key(&reference_relative);
+        let expected_owner_key = format!("netlists/dtemp/{}", contract.family.owner_file());
+        let expected_reference_key = format!("netlists/dtemp/{}", contract.family.reference_file());
+        if owner_key != expected_owner_key
+            || reference_key != expected_reference_key
+            || !candidate_paths.contains_key(&owner_key)
+            || !candidate_paths.contains_key(&reference_key)
+            || XyceLegacyBjtDtempRole::for_record(&owner_relative)
+                != Some((contract.family, XyceLegacyBjtDtempRole::Owner))
+            || XyceLegacyBjtDtempRole::for_record(&reference_relative)
+                != Some((contract.family, XyceLegacyBjtDtempRole::Reference))
+        {
+            return Err(format!(
+                "requested {LABEL} deck or its exact relational sibling is outside the qualified census"
+            ));
+        }
+
+        let mut owner_manifest_rows = Vec::new();
+        let mut historical_exclusion_rows = Vec::new();
+        for (key, path) in &candidate_paths {
+            let relative = self.relative_key(path);
+            let Some((_, role)) = XyceLegacyBjtDtempRole::for_record(&relative) else {
+                return Err(format!("{LABEL} candidate role became ambiguous"));
+            };
+            match role {
+                XyceLegacyBjtDtempRole::Owner => {
+                    if !self.requires_upstream_wrapper(&relative) || exclusions.contains_key(key) {
+                        return Err(format!(
+                            "{LABEL} owner '{relative}' lost its exclusive wrapper provenance"
+                        ));
+                    }
+                    owner_manifest_rows
+                        .push(format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"));
+                }
+                XyceLegacyBjtDtempRole::Reference => {
+                    let exclusion = exclusions.get(key).ok_or_else(|| {
+                        format!(
+                            "{LABEL} reference '{relative}' lost its historical exclusion provenance"
+                        )
+                    })?;
+                    if !matches!(
+                        &exclusion.disposition,
+                        XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                            expected_contract,
+                        } if expected_contract == XYCE_LEGACY_BJT_DTEMP_REFERENCE_CONTRACT
+                    ) || self.requires_upstream_wrapper(&relative)
+                    {
+                        return Err(format!(
+                            "{LABEL} reference '{relative}' does not carry the exact independent qualification"
+                        ));
+                    }
+                    historical_exclusion_rows.push(format!(
+                        "{relative}\t{}\tupstream_excluded",
+                        exclusion.source
+                    ));
+                }
+            }
+        }
+
+        let mut candidates = Vec::with_capacity(candidate_paths.len());
+        let mut candidate_content = Vec::with_capacity(candidate_paths.len());
+        for path in candidate_paths.values() {
+            let relative = self.relative_key(path);
+            let bytes = fs::read(path).map_err(|error| {
+                format!("failed to read {LABEL} candidate '{relative}': {error}")
+            })?;
+            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
+            candidates.push(relative.clone());
+            candidate_content.push(format!("{relative}\t{}", blake3::hash(&canonical).to_hex()));
+            self.reject_wrapper_output_artifacts(path)?;
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| format!("{LABEL} candidate filename is not UTF-8"))?;
+            for suffix in ["prn", "res", "prn.gs", "res.gs", "csv", "csd"] {
+                let sidecar = path.with_file_name(format!("{file_name}.{suffix}"));
+                match fs::symlink_metadata(&sidecar) {
+                    Ok(_) => {
+                        return Err(format!(
+                            "{LABEL} candidate must not have source-side output artifact '{}'",
+                            self.display_path(&sidecar)
+                        ));
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        return Err(format!(
+                            "failed to inspect {LABEL} sidecar '{}': {error}",
+                            self.display_path(&sidecar)
+                        ));
+                    }
+                }
+            }
+        }
+
+        candidates.sort();
+        candidate_content.sort();
+        owner_manifest_rows.sort();
+        historical_exclusion_rows.sort();
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(candidate_content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let owner_hash = blake3::hash(owner_manifest_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let exclusion_hash = blake3::hash(historical_exclusion_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if candidates.len() != XYCE_LEGACY_BJT_DTEMP_CANDIDATE_COUNT
+            || candidate_hash != XYCE_LEGACY_BJT_DTEMP_CANDIDATE_BLAKE3
+            || content_hash != XYCE_LEGACY_BJT_DTEMP_CONTENT_BLAKE3
+            || owner_manifest_rows.len() != XYCE_LEGACY_BJT_DTEMP_OWNER_COUNT
+            || owner_hash != XYCE_LEGACY_BJT_DTEMP_OWNER_MANIFEST_BLAKE3
+            || historical_exclusion_rows.len() != XYCE_LEGACY_BJT_DTEMP_EXCLUSION_COUNT
+            || exclusion_hash != XYCE_LEGACY_BJT_DTEMP_HISTORICAL_EXCLUSION_BLAKE3
+        {
+            return Err(format!(
+                "{LABEL} provenance changed: candidates={}/{candidate_hash}/{content_hash}, owners={}/{owner_hash}, exclusions={}/{exclusion_hash}",
+                candidates.len(),
+                owner_manifest_rows.len(),
+                historical_exclusion_rows.len()
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn validate_nonlinear_core_model_step_provenance(
         &self,
         contract: &XyceNonlinearCoreModelStepReferenceContract,
@@ -9276,6 +9454,517 @@ impl XyceTestRunner {
         if mos_count != 1 {
             return Err(format!(
                 "{LABEL} materialization produced {mos_count} MOS instances instead of one"
+            ));
+        }
+        Ok(normalized)
+    }
+
+    pub(super) fn legacy_bjt_dtemp_snapshot(
+        plan: &XyceStaticDcPlan,
+        netlist: &Netlist,
+        family: XyceLegacyBjtDtempFamily,
+        role: XyceLegacyBjtDtempRole,
+    ) -> Result<XyceLegacyBjtDtempSnapshot, String> {
+        const LABEL: &str = "legacy Gummel-Poon BJT TEMP/DTEMP family";
+        if plan.expression_dialect != ExpressionDialect::Xyce
+            || plan.execution_dir.is_some()
+            || plan.dc_data.is_some()
+            || plan.print_format.is_some()
+            || !plan.diagnostics.is_empty()
+            || plan.steps.len() != 1
+            || !matches!(plan.dc.mode, DcSweepMode::Linear)
+            || plan.print.probes.len() != 5
+        {
+            return Err(format!(
+                "{LABEL} requires one diagnostic-free LIST STEP, one linear DC analysis, and one default five-probe PRN output"
+            ));
+        }
+        let dc_count = netlist
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Dc { .. }))
+            .count();
+        let step_count = netlist
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Step(_)))
+            .count();
+        if netlist.analyses.len() != 2
+            || dc_count != 1
+            || step_count != 1
+            || netlist.lin_analysis.is_some()
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || netlist.device_initial_conditions.is_some()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || netlist.output_requests.len() != 1
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+            || netlist.models.len() != 1
+        {
+            return Err(format!(
+                "{LABEL} admits only authored R/V/Q elements, one native scalar model, one DC analysis, one STEP analysis, and one output request"
+            ));
+        }
+
+        let step = &plan.steps[0];
+        let StepSweep::List(step_values) = &step.sweep else {
+            return Err(format!("{LABEL} requires a three-value LIST sweep"));
+        };
+        let canonical_temperatures = [15.0f64, 25.0, 35.0];
+        let effective_temperatures = match role {
+            XyceLegacyBjtDtempRole::Owner => {
+                if step.target != StepTarget::Param
+                    || !step.name.eq_ignore_ascii_case("dtempParam")
+                    || step.param_name.is_some()
+                    || netlist.options.temp.map(Value::to_bits) != Some(15.0f64.to_bits())
+                    || step_values
+                        .iter()
+                        .map(|value| value.to_bits())
+                        .ne([0.0f64, 10.0, 20.0].into_iter().map(Value::to_bits))
+                {
+                    return Err(format!(
+                        "{LABEL} owner must hold circuit TEMP=15 C and STEP dtempParam through 0, 10, 20 C"
+                    ));
+                }
+                step_values
+                    .iter()
+                    .map(|dtemp| 15.0 + dtemp)
+                    .collect::<Vec<_>>()
+            }
+            XyceLegacyBjtDtempRole::Reference => {
+                if step.target != StepTarget::Param
+                    || !step.name.eq_ignore_ascii_case("tempParam")
+                    || step.param_name.is_some()
+                    || netlist.options.temp.map(Value::to_bits) != Some(15.0f64.to_bits())
+                    || step_values
+                        .iter()
+                        .map(|value| value.to_bits())
+                        .ne(canonical_temperatures.into_iter().map(Value::to_bits))
+                {
+                    return Err(format!(
+                        "{LABEL} reference must retain circuit TEMP=15 C and STEP absolute tempParam through 15, 25, 35 C"
+                    ));
+                }
+                step_values.clone()
+            }
+        };
+        if effective_temperatures
+            .iter()
+            .map(|value| value.to_bits())
+            .ne(canonical_temperatures.into_iter().map(Value::to_bits))
+        {
+            return Err(format!(
+                "{LABEL} TEMP and circuit-TEMP-plus-DTEMP grids are not identical"
+            ));
+        }
+
+        let explicit_params = netlist
+            .params
+            .all_params()
+            .into_iter()
+            .filter(|(name, _)| {
+                !matches!(name.to_ascii_uppercase().as_str(), "TEMP" | "TEMPER" | "VT")
+            })
+            .collect::<Vec<_>>();
+        let expected_parameter = match role {
+            XyceLegacyBjtDtempRole::Owner => "dtempParam",
+            XyceLegacyBjtDtempRole::Reference => "tempParam",
+        };
+        if explicit_params.len() != 1
+            || !explicit_params[0]
+                .0
+                .eq_ignore_ascii_case(expected_parameter)
+            || explicit_params[0].1.to_bits() != 10.0f64.to_bits()
+        {
+            return Err(format!(
+                "{LABEL} admits only {expected_parameter}=10, got {explicit_params:?}"
+            ));
+        }
+
+        let model = &netlist.models[0];
+        if !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return Err(format!("{LABEL} requires one native scalar BJT model"));
+        }
+        let (expected_model_name, expected_model_type, expected_model_params) = match family {
+            XyceLegacyBjtDtempFamily::Npn => {
+                ("nbjt", "npn", vec![("bf".to_string(), 100.0f64.to_bits())])
+            }
+            XyceLegacyBjtDtempFamily::Pnp => {
+                let is = rspice_core::netlist::lexer::parse_spice_value("100fa")
+                    .map_err(|error| format!("{LABEL} internal IS literal is invalid: {error}"))?;
+                let mut params = vec![
+                    ("is".to_string(), is.to_bits()),
+                    ("bf".to_string(), 60.0f64.to_bits()),
+                ];
+                params.sort();
+                ("pbjt", "pnp", params)
+            }
+        };
+        let mut model_params = model
+            .params
+            .iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+            .collect::<Vec<_>>();
+        model_params.sort();
+        if !model.name.eq_ignore_ascii_case(expected_model_name)
+            || !model.model_type.eq_ignore_ascii_case(expected_model_type)
+            || model_params != expected_model_params
+        {
+            return Err(format!(
+                "{LABEL} {} must retain its exact no-LEVEL native model card",
+                family.label()
+            ));
+        }
+
+        let mut elements = BTreeMap::new();
+        let mut bjt_count = 0usize;
+        for element in &netlist.elements {
+            if !matches!(element.provenance, ElementProvenance::Authored) {
+                return Err(format!(
+                    "{LABEL} element '{}' is not authored source topology",
+                    element.name
+                ));
+            }
+            let name = element.name.to_ascii_lowercase();
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| Self::canonical_param_expression_node_name(node))
+                .collect::<Vec<_>>();
+            let fingerprint = match &element.kind {
+                ElementKind::Resistor {
+                    value,
+                    value_expr: None,
+                    model: None,
+                    instance_params,
+                    deferred_params,
+                } if nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Dc(value))
+                    if nodes.len() == 2 && value.is_finite() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "V:DC".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::Bjt {
+                    model: instance_model,
+                    bjt_type: _,
+                    instance_params,
+                    deferred_params,
+                } if nodes.len() == 3
+                    && deferred_params.is_empty()
+                    && instance_model.eq_ignore_ascii_case(expected_model_name) =>
+                {
+                    bjt_count += 1;
+                    let mut temp = None;
+                    let mut dtemp = None;
+                    let mut ordinary_params = Vec::new();
+                    for (parameter, value) in instance_params {
+                        if parameter.eq_ignore_ascii_case("TEMP") {
+                            if temp.replace(*value).is_some() {
+                                return Err(format!("{LABEL} BJT repeats TEMP"));
+                            }
+                        } else if parameter.eq_ignore_ascii_case("DTEMP") {
+                            if dtemp.replace(*value).is_some() {
+                                return Err(format!("{LABEL} BJT repeats DTEMP"));
+                            }
+                        } else {
+                            ordinary_params.push((parameter.to_ascii_lowercase(), value.to_bits()));
+                        }
+                    }
+                    ordinary_params.sort();
+                    if !ordinary_params.is_empty() {
+                        return Err(format!(
+                            "{LABEL} BJT admits no instance parameters besides its one temperature selector"
+                        ));
+                    }
+                    match role {
+                        XyceLegacyBjtDtempRole::Owner
+                            if temp.is_none()
+                                && dtemp.map(Value::to_bits) == Some(10.0f64.to_bits()) => {}
+                        XyceLegacyBjtDtempRole::Reference
+                            if dtemp.is_none()
+                                && temp.map(Value::to_bits) == Some(10.0f64.to_bits()) => {}
+                        _ => {
+                            return Err(format!(
+                                "{LABEL} owner must carry only DTEMP and reference only TEMP"
+                            ));
+                        }
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: format!("Q:{}:LEGACY_GUMMEL_POON", family.label()),
+                        nodes,
+                        numeric_bits: Vec::new(),
+                        text: vec![instance_model.to_ascii_lowercase()],
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} element '{}' with nodes {nodes:?} and kind {:?} is outside the exact authored R/V/native-BJT envelope",
+                        element.name, element.kind
+                    ));
+                }
+            };
+            if elements.insert(name.clone(), fingerprint).is_some() {
+                return Err(format!("{LABEL} contains duplicate element name '{name}'"));
+            }
+        }
+        if bjt_count != 1 {
+            return Err(format!(
+                "{LABEL} requires exactly one native BJT, found {bjt_count}"
+            ));
+        }
+
+        let fingerprint = |kind: &str, nodes: &[&str], numeric: &[Value], text: &[&str]| {
+            XyceRelationalElementFingerprint {
+                kind: kind.to_string(),
+                nodes: nodes.iter().map(|node| (*node).to_string()).collect(),
+                numeric_bits: numeric.iter().map(|value| value.to_bits()).collect(),
+                text: text.iter().map(|value| (*value).to_string()).collect(),
+            }
+        };
+        let expected_elements = match family {
+            XyceLegacyBjtDtempFamily::Npn => BTreeMap::from([
+                (
+                    "q".to_string(),
+                    fingerprint("Q:NPN:LEGACY_GUMMEL_POON", &["2", "1", "0"], &[], &["nbjt"]),
+                ),
+                (
+                    "rb".to_string(),
+                    fingerprint("R", &["4", "5"], &[377_000.0], &[]),
+                ),
+                (
+                    "rc".to_string(),
+                    fingerprint("R", &["3", "4"], &[2_000.0], &[]),
+                ),
+                (
+                    "vcc".to_string(),
+                    fingerprint("V:DC", &["4", "0"], &[12.0], &[]),
+                ),
+                (
+                    "vmon1".to_string(),
+                    fingerprint("V:DC", &["5", "1"], &[0.0], &[]),
+                ),
+                (
+                    "vmon2".to_string(),
+                    fingerprint("V:DC", &["3", "2"], &[0.0], &[]),
+                ),
+            ]),
+            XyceLegacyBjtDtempFamily::Pnp => BTreeMap::from([
+                (
+                    "q".to_string(),
+                    fingerprint("Q:PNP:LEGACY_GUMMEL_POON", &["5", "3", "7"], &[], &["pbjt"]),
+                ),
+                (
+                    "rb".to_string(),
+                    fingerprint("R", &["3", "4"], &[190_000.0], &[]),
+                ),
+                (
+                    "re".to_string(),
+                    fingerprint("R", &["1", "2"], &[2_000.0], &[]),
+                ),
+                (
+                    "vbb".to_string(),
+                    fingerprint("V:DC", &["6", "0"], &[-2.0], &[]),
+                ),
+                (
+                    "vmon1".to_string(),
+                    fingerprint("V:DC", &["4", "6"], &[0.0], &[]),
+                ),
+                (
+                    "vmon2".to_string(),
+                    fingerprint("V:DC", &["5", "0"], &[0.0], &[]),
+                ),
+                (
+                    "vmon3".to_string(),
+                    fingerprint("V:DC", &["2", "7"], &[0.0], &[]),
+                ),
+                (
+                    "vpos".to_string(),
+                    fingerprint("V:DC", &["1", "0"], &[5.0], &[]),
+                ),
+            ]),
+        };
+        if elements != expected_elements {
+            return Err(format!(
+                "{LABEL} {} topology or authored values changed",
+                family.label()
+            ));
+        }
+
+        let probes = plan
+            .print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        let dc_primary = (
+            plan.dc.source.to_ascii_lowercase(),
+            plan.dc.start.to_bits(),
+            plan.dc.stop.to_bits(),
+            plan.dc.step.to_bits(),
+        );
+        let dc_secondary = plan.dc.sweep2.as_ref().map(|sweep| {
+            (
+                sweep.source.to_ascii_lowercase(),
+                sweep.start.to_bits(),
+                sweep.stop.to_bits(),
+                sweep.step.to_bits(),
+            )
+        });
+        let (expected_primary, expected_secondary, expected_probes) = match family {
+            XyceLegacyBjtDtempFamily::Npn => (
+                (
+                    "vcc".to_string(),
+                    0.0f64.to_bits(),
+                    12.0f64.to_bits(),
+                    1.0f64.to_bits(),
+                ),
+                None,
+                vec!["v(4)", "i(vmon1)", "i(vmon2)", "v(1)", "v(2)"],
+            ),
+            XyceLegacyBjtDtempFamily::Pnp => (
+                (
+                    "vpos".to_string(),
+                    0.0f64.to_bits(),
+                    5.0f64.to_bits(),
+                    1.0f64.to_bits(),
+                ),
+                Some((
+                    "vbb".to_string(),
+                    0.0f64.to_bits(),
+                    (-2.0f64).to_bits(),
+                    (-0.5f64).to_bits(),
+                )),
+                vec!["v(1)", "v(6)", "i(vmon1)", "i(vmon2)", "i(vmon3)"],
+            ),
+        };
+        if dc_primary != expected_primary
+            || dc_secondary != expected_secondary
+            || probes != expected_probes
+            || plan
+                .dc
+                .sweep2
+                .as_ref()
+                .is_some_and(|sweep| !matches!(sweep.mode, DcSweepMode::Linear))
+        {
+            return Err(format!(
+                "{LABEL} {} sweep domain, sweep order, or ordered probe set changed",
+                family.label()
+            ));
+        }
+
+        Ok(XyceLegacyBjtDtempSnapshot {
+            elements,
+            model_name: model.name.to_ascii_lowercase(),
+            model_type: model.model_type.to_ascii_lowercase(),
+            model_params,
+            dc_primary,
+            dc_secondary,
+            probes,
+            effective_temperature_bits: effective_temperatures
+                .into_iter()
+                .map(Value::to_bits)
+                .collect(),
+        })
+    }
+
+    pub(super) fn normalize_legacy_bjt_dtemp_materialization(
+        netlist: &Netlist,
+        role: XyceLegacyBjtDtempRole,
+        expected_coordinate: Value,
+        expected_effective_temperature: Value,
+    ) -> Result<Netlist, String> {
+        const LABEL: &str = "legacy Gummel-Poon BJT TEMP/DTEMP family";
+        if !expected_coordinate.is_finite() || !expected_effective_temperature.is_finite() {
+            return Err(format!("{LABEL} materialization coordinate is non-finite"));
+        }
+        let (parameter_name, instance_parameter, effective_temperature) = match role {
+            XyceLegacyBjtDtempRole::Owner => (
+                "dtempParam",
+                "DTEMP",
+                netlist.options.temp.unwrap_or(15.0) + expected_coordinate,
+            ),
+            XyceLegacyBjtDtempRole::Reference => ("tempParam", "TEMP", expected_coordinate),
+        };
+        if netlist.params.get(parameter_name).map(Value::to_bits)
+            != Some(expected_coordinate.to_bits())
+            || effective_temperature.to_bits() != expected_effective_temperature.to_bits()
+        {
+            return Err(format!(
+                "{LABEL} materialization lost its exact parameter coordinate or effective temperature"
+            ));
+        }
+
+        let mut normalized = netlist.clone();
+        normalized.params.set(parameter_name, 10.0);
+        let mut bjt_count = 0usize;
+        for element in &mut normalized.elements {
+            let ElementKind::Bjt {
+                instance_params, ..
+            } = &mut element.kind
+            else {
+                continue;
+            };
+            bjt_count += 1;
+            let mut matching = 0usize;
+            for (name, value) in instance_params {
+                if name.eq_ignore_ascii_case(instance_parameter) {
+                    matching += 1;
+                    if value.to_bits() != expected_coordinate.to_bits() {
+                        return Err(format!(
+                            "{LABEL} materialized {instance_parameter} differs from its STEP coordinate"
+                        ));
+                    }
+                    *value = 10.0;
+                } else if (matches!(role, XyceLegacyBjtDtempRole::Owner)
+                    && name.eq_ignore_ascii_case("TEMP"))
+                    || (matches!(role, XyceLegacyBjtDtempRole::Reference)
+                        && name.eq_ignore_ascii_case("DTEMP"))
+                {
+                    return Err(format!(
+                        "{LABEL} materialization introduced conflicting TEMP/DTEMP state"
+                    ));
+                }
+            }
+            if matching != 1 {
+                return Err(format!(
+                    "{LABEL} materialized BJT requires exactly one {instance_parameter} value"
+                ));
+            }
+        }
+        if bjt_count != 1 {
+            return Err(format!(
+                "{LABEL} materialization produced {bjt_count} BJT instances instead of one"
             ));
         }
         Ok(normalized)
