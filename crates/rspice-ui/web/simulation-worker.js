@@ -25,6 +25,16 @@ const WASM_JIT_CACHE_MAX_MODELS = 64;
 const WASM_JIT_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 const WASM_JIT_MODEL_MAX_BYTES = 32 * 1024 * 1024;
 const WASM_JIT_IDENTITY = /^[0-9a-f]{64}$/;
+// Raw WebAssembly exports of the primary module, bound straight into every
+// generated module. Passing the wasm-bindgen JavaScript wrappers instead would
+// put a JS frame -- and, for eval_op_v1, BigInt marshalling of its i64
+// argument -- between a model's exp() and its implementation, on a path that
+// runs thousands of times per device evaluation.
+const WASM_JIT_RAW_CAPABILITY_EXPORTS = [
+  "rspice_ui_wasm_jit_eval_op_v1",
+  "rspice_ui_wasm_jit_math1_v1",
+  "rspice_ui_wasm_jit_math2_v1",
+];
 const WASM_JIT_VALUE_EXPORT = /^rspice_wasm_jit_value_[0-9a-f]{8}$/;
 let wasmJitCacheBytes = 0;
 let wasmJitCapability = {
@@ -65,12 +75,24 @@ function hardcopyResponseTransferList(response) {
   return protocolResponseTransferList(response, HARDCOPY_PROTOCOL_VERSION);
 }
 
+/// Build the capability record every generated module is instantiated against.
+function wasmJitImports(wasmExports) {
+  return {
+    memory: wasmExports.memory,
+    eval_op_v1: wasmExports.rspice_ui_wasm_jit_eval_op_v1,
+    math1_v1: wasmExports.rspice_ui_wasm_jit_math1_v1,
+    math2_v1: wasmExports.rspice_ui_wasm_jit_math2_v1,
+  };
+}
+
 async function qualifyWasmJitArchitecture(module, wasmExports) {
   const requiredFunctions = [
     "rspiceUiWasmJitProbeModule",
     "rspiceUiWasmJitAbiVersion",
     "rspiceUiWasmJitEmitterVersion",
     "rspiceUiWasmJitEvalOpV1",
+    "rspiceUiWasmJitMath1V1",
+    "rspiceUiWasmJitMath2V1",
     "prepareRspiceUiWasmJitProbe",
     "finishRspiceUiWasmJitProbe",
     "rspiceUiWasmJitSolverProbeArtifact",
@@ -81,6 +103,14 @@ async function qualifyWasmJitArchitecture(module, wasmExports) {
       return {
         available: false,
         reason: `RSpice worker package is missing ${name}.`,
+      };
+    }
+  }
+  for (const name of WASM_JIT_RAW_CAPABILITY_EXPORTS) {
+    if (typeof wasmExports?.[name] !== "function") {
+      return {
+        available: false,
+        reason: `RSpice worker did not expose raw capability export ${name}.`,
       };
     }
   }
@@ -105,10 +135,7 @@ async function qualifyWasmJitArchitecture(module, wasmExports) {
     const compileMs = performance.now() - compileStarted;
     const instantiateStarted = performance.now();
     const instance = await WebAssembly.instantiate(compiled, {
-      rspice_jit: {
-        memory: wasmExports.memory,
-        eval_op_v1: module.rspiceUiWasmJitEvalOpV1,
-      },
+      rspice_jit: wasmJitImports(wasmExports),
     });
     const instantiateMs = performance.now() - instantiateStarted;
     const probe = instance.exports.rspice_wasm_jit_probe;
@@ -193,10 +220,7 @@ async function installWasmJitArtifact(module, artifact) {
   }
   const compiled = await WebAssembly.compile(bytes);
   const instance = await WebAssembly.instantiate(compiled, {
-    rspice_jit: {
-      memory: primaryWasmExports.memory,
-      eval_op_v1: module.rspiceUiWasmJitEvalOpV1,
-    },
+    rspice_jit: wasmJitImports(primaryWasmExports),
   });
   for (const name of artifact.valueExports || []) {
     if (typeof instance.exports[name] !== "function") {

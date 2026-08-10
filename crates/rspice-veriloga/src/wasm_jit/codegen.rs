@@ -21,6 +21,17 @@ use crate::jit::expr::{
 use crate::jit::ssa::{Instruction, Program};
 
 pub(crate) const WASM_JIT_EVAL_HELPER_IMPORT: &str = "eval_op_v1";
+/// Frame-free unary transcendental capability.
+///
+/// `exp` and `ln` dominate every semiconductor model's inner loop, so they do
+/// not go through the general `eval_op_v1` descriptor: that path pushes ten
+/// arguments, revalidates the evaluation frame, and forces an error-status
+/// reload and branch at every call site. These two imports take only what the
+/// operation needs and cannot fail, so the call site is a push, a call, and
+/// nothing else.
+pub(crate) const WASM_JIT_MATH1_IMPORT: &str = "math1_v1";
+/// Frame-free binary transcendental capability. See [`WASM_JIT_MATH1_IMPORT`].
+pub(crate) const WASM_JIT_MATH2_IMPORT: &str = "math2_v1";
 pub(crate) const WASM_JIT_VALUE_EXPORT: &str = "rspice_wasm_jit_value";
 pub(crate) const WASM_JIT_ASSIGNMENT_EXPORT: &str = "rspice_wasm_jit_assign";
 pub(crate) const WASM_JIT_POST_ASSIGNMENT_EXPORT: &str = "rspice_wasm_jit_post_assign";
@@ -28,9 +39,79 @@ const MAX_RUNTIME_LOOP_ITERATIONS: i32 = 100_000;
 
 const ENTRY_TYPE_INDEX: u32 = 0;
 const HELPER_TYPE_INDEX: u32 = 1;
+const MATH1_TYPE_INDEX: u32 = 2;
+const MATH2_TYPE_INDEX: u32 = 3;
 const HELPER_FUNCTION_INDEX: u32 = 0;
-const ENTRY_FUNCTION_INDEX: u32 = 1;
+const MATH1_FUNCTION_INDEX: u32 = 1;
+const MATH2_FUNCTION_INDEX: u32 = 2;
+/// Imported functions occupy the low indices, so generated entries start after
+/// the whole capability surface.
+const ENTRY_FUNCTION_INDEX: u32 = 3;
+/// Entry signature plus the three capability signatures.
+const CAPABILITY_TYPE_COUNT: u32 = 4;
+/// Linear memory plus the three imported capability functions.
+const CAPABILITY_IMPORT_COUNT: u32 = 4;
 const FRAME_LOCAL: u32 = 0;
+
+/// Declare the type section every generated module shares.
+fn encode_capability_types(module: &mut Module) {
+    let mut types = TypeSection::new();
+    types.ty().function([ValType::I32], [ValType::I32]);
+    types.ty().function(
+        [
+            ValType::I32,
+            ValType::I32,
+            ValType::I32,
+            ValType::I32,
+            ValType::I64,
+            ValType::F64,
+            ValType::F64,
+            ValType::F64,
+            ValType::F64,
+            ValType::F64,
+        ],
+        [ValType::F64],
+    );
+    types
+        .ty()
+        .function([ValType::I32, ValType::F64], [ValType::F64]);
+    types
+        .ty()
+        .function([ValType::I32, ValType::F64, ValType::F64], [ValType::F64]);
+    module.section(&types);
+}
+
+/// Declare the import section every generated module shares.
+fn encode_capability_imports(module: &mut Module) {
+    let mut imports = ImportSection::new();
+    imports.import(
+        WASM_JIT_IMPORT_MODULE,
+        WASM_JIT_MEMORY_IMPORT,
+        MemoryType {
+            minimum: 0,
+            maximum: None,
+            memory64: false,
+            shared: false,
+            page_size_log2: None,
+        },
+    );
+    imports.import(
+        WASM_JIT_IMPORT_MODULE,
+        WASM_JIT_EVAL_HELPER_IMPORT,
+        wasm_encoder::EntityType::Function(HELPER_TYPE_INDEX),
+    );
+    imports.import(
+        WASM_JIT_IMPORT_MODULE,
+        WASM_JIT_MATH1_IMPORT,
+        wasm_encoder::EntityType::Function(MATH1_TYPE_INDEX),
+    );
+    imports.import(
+        WASM_JIT_IMPORT_MODULE,
+        WASM_JIT_MATH2_IMPORT,
+        wasm_encoder::EntityType::Function(MATH2_TYPE_INDEX),
+    );
+    module.section(&imports);
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WasmAssignment {
@@ -61,43 +142,8 @@ pub(crate) struct WasmAssignmentKernel {
 pub(crate) fn encode_value_program(program: &NativeProgram) -> WasmJitResult<Vec<u8>> {
     let mut module = Module::new();
 
-    let mut types = TypeSection::new();
-    types.ty().function([ValType::I32], [ValType::I32]);
-    types.ty().function(
-        [
-            ValType::I32,
-            ValType::I32,
-            ValType::I32,
-            ValType::I32,
-            ValType::I64,
-            ValType::F64,
-            ValType::F64,
-            ValType::F64,
-            ValType::F64,
-            ValType::F64,
-        ],
-        [ValType::F64],
-    );
-    module.section(&types);
-
-    let mut imports = ImportSection::new();
-    imports.import(
-        WASM_JIT_IMPORT_MODULE,
-        WASM_JIT_MEMORY_IMPORT,
-        MemoryType {
-            minimum: 0,
-            maximum: None,
-            memory64: false,
-            shared: false,
-            page_size_log2: None,
-        },
-    );
-    imports.import(
-        WASM_JIT_IMPORT_MODULE,
-        WASM_JIT_EVAL_HELPER_IMPORT,
-        wasm_encoder::EntityType::Function(HELPER_TYPE_INDEX),
-    );
-    module.section(&imports);
+    encode_capability_types(&mut module);
+    encode_capability_imports(&mut module);
 
     let mut functions = FunctionSection::new();
     functions.function(ENTRY_TYPE_INDEX);
@@ -208,43 +254,8 @@ fn encode_model_program_set(
         .map_err(|_| WasmJitError::Encoding("assignment kernel count exceeds u32".into()))?;
     let mut module = Module::new();
 
-    let mut types = TypeSection::new();
-    types.ty().function([ValType::I32], [ValType::I32]);
-    types.ty().function(
-        [
-            ValType::I32,
-            ValType::I32,
-            ValType::I32,
-            ValType::I32,
-            ValType::I64,
-            ValType::F64,
-            ValType::F64,
-            ValType::F64,
-            ValType::F64,
-            ValType::F64,
-        ],
-        [ValType::F64],
-    );
-    module.section(&types);
-
-    let mut imports = ImportSection::new();
-    imports.import(
-        WASM_JIT_IMPORT_MODULE,
-        WASM_JIT_MEMORY_IMPORT,
-        MemoryType {
-            minimum: 0,
-            maximum: None,
-            memory64: false,
-            shared: false,
-            page_size_log2: None,
-        },
-    );
-    imports.import(
-        WASM_JIT_IMPORT_MODULE,
-        WASM_JIT_EVAL_HELPER_IMPORT,
-        wasm_encoder::EntityType::Function(HELPER_TYPE_INDEX),
-    );
-    module.section(&imports);
+    encode_capability_types(&mut module);
+    encode_capability_imports(&mut module);
 
     let mut functions = FunctionSection::new();
     for _ in 0..function_count {
@@ -594,27 +605,26 @@ fn verify_value_module_shape(
                     .into_iter_err_on_gc_types()
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|error| WasmJitError::Contract(error.to_string()))?;
-                if entries.len() != 2
-                    || entries[0].params() != [wasmparser::ValType::I32]
-                    || entries[0].results() != [wasmparser::ValType::I32]
-                    || entries[1].params()
-                        != [
-                            wasmparser::ValType::I32,
-                            wasmparser::ValType::I32,
-                            wasmparser::ValType::I32,
-                            wasmparser::ValType::I32,
-                            wasmparser::ValType::I64,
-                            wasmparser::ValType::F64,
-                            wasmparser::ValType::F64,
-                            wasmparser::ValType::F64,
-                            wasmparser::ValType::F64,
-                            wasmparser::ValType::F64,
-                        ]
-                    || entries[1].results() != [wasmparser::ValType::F64]
+                const I32: wasmparser::ValType = wasmparser::ValType::I32;
+                const I64: wasmparser::ValType = wasmparser::ValType::I64;
+                const F64: wasmparser::ValType = wasmparser::ValType::F64;
+                let expected: [(&[wasmparser::ValType], &[wasmparser::ValType]); 4] = [
+                    (&[I32], &[I32]),
+                    (&[I32, I32, I32, I32, I64, F64, F64, F64, F64, F64], &[F64]),
+                    (&[I32, F64], &[F64]),
+                    (&[I32, F64, F64], &[F64]),
+                ];
+                if entries.len() != expected.len()
+                    || entries
+                        .iter()
+                        .zip(expected)
+                        .any(|(entry, (params, results))| {
+                            entry.params() != params || entry.results() != results
+                        })
                 {
-                    return Err(WasmJitError::Contract(
-                        "value-module function signatures do not match ABI v1".into(),
-                    ));
+                    return Err(WasmJitError::Contract(format!(
+                        "value-module function signatures do not match ABI v{WASM_JIT_ABI_VERSION}"
+                    )));
                 }
             }
             Payload::ImportSection(reader) => {
@@ -629,9 +639,10 @@ fn verify_value_module_shape(
                     };
                     flattened.push(import);
                 }
-                if flattened.len() != 2 {
+                if flattened.len() != 4 {
                     return Err(WasmJitError::Contract(
-                        "value module must import exactly memory and eval_op_v1".into(),
+                        "value module must import exactly memory, eval_op_v1, math1_v1, and math2_v1"
+                            .into(),
                     ));
                 }
                 let memory = &flattened[0];
@@ -656,14 +667,26 @@ fn verify_value_module_shape(
                         "value-module memory import has forbidden limits or flags".into(),
                     ));
                 }
-                let helper = &flattened[1];
-                if helper.module != WASM_JIT_IMPORT_MODULE
-                    || helper.name != WASM_JIT_EVAL_HELPER_IMPORT
-                    || !matches!(helper.ty, wasmparser::TypeRef::Func(HELPER_TYPE_INDEX))
-                {
-                    return Err(WasmJitError::Contract(
-                        "unexpected value-module helper capability".into(),
-                    ));
+                // Order is part of the contract: the browser worker binds by
+                // position-independent name, but the emitted call sites address
+                // imported functions by index.
+                for (import, name, type_index) in [
+                    (
+                        &flattened[1],
+                        WASM_JIT_EVAL_HELPER_IMPORT,
+                        HELPER_TYPE_INDEX,
+                    ),
+                    (&flattened[2], WASM_JIT_MATH1_IMPORT, MATH1_TYPE_INDEX),
+                    (&flattened[3], WASM_JIT_MATH2_IMPORT, MATH2_TYPE_INDEX),
+                ] {
+                    if import.module != WASM_JIT_IMPORT_MODULE
+                        || import.name != name
+                        || import.ty != wasmparser::TypeRef::Func(type_index)
+                    {
+                        return Err(WasmJitError::Contract(format!(
+                            "unexpected value-module capability at the {name} import slot"
+                        )));
+                    }
                 }
             }
             Payload::FunctionSection(reader) => {
@@ -760,8 +783,8 @@ fn verify_value_module_shape(
         code_bodies,
     ) != (
         1,
-        2,
-        2,
+        CAPABILITY_TYPE_COUNT,
+        CAPABILITY_IMPORT_COUNT,
         expected_count,
         expected_count,
         1,
@@ -1068,12 +1091,51 @@ fn emit_truthy(
     Ok(())
 }
 
+/// Emit a transcendental through the frame-free capability, or report that the
+/// operation needs the general descriptor path.
+///
+/// These operations read no simulator state and cannot publish a runtime
+/// error: `constant_unary_math` and `constant_binary_math` are total over the
+/// doubles, returning NaN where the function is undefined exactly as the
+/// bytecode and native backends do. That is what lets the call site skip the
+/// error-status reload and branch that every stateful helper needs.
+fn emit_pure_math_call(
+    body: &mut Function,
+    op: NativeOp,
+    operands: &[crate::jit::ssa::ValueId],
+) -> WasmJitResult<bool> {
+    let (function_index, opcode, arity) = match op {
+        NativeOp::UnaryMath(kind) => (MATH1_FUNCTION_INDEX, 100 + unary_math_code(kind), 1),
+        NativeOp::BinaryMath(kind) => (MATH2_FUNCTION_INDEX, 200 + binary_math_code(kind), 2),
+        _ => return Ok(false),
+    };
+    if operands.len() < arity {
+        return Err(WasmJitError::Encoding(format!(
+            "pure math operation expects {arity} operand(s), lowering supplied {}",
+            operands.len()
+        )));
+    }
+    body.instruction(&WasmInstruction::I32Const(opcode));
+    for index in 0..arity {
+        emit_operand(body, operands, index)?;
+    }
+    body.instruction(&WasmInstruction::Call(function_index));
+    Ok(true)
+}
+
 fn emit_helper_call(
     body: &mut Function,
     op: NativeOp,
     operands: &[crate::jit::ssa::ValueId],
     result: crate::jit::ssa::ValueId,
 ) -> WasmJitResult<()> {
+    // The pure-math path has no early-return branch to navigate, so the result
+    // stays on the stack for the caller's own `local.set` rather than making a
+    // round trip through a local.
+    if emit_pure_math_call(body, op, operands)? {
+        return Ok(());
+    }
+
     let descriptor = helper_descriptor(op)?;
     body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
     body.instruction(&WasmInstruction::I32Const(descriptor.opcode));
@@ -1376,6 +1438,32 @@ fn f64_mem(offset: u64) -> MemArg {
     }
 }
 
+/// Bind the frame-free transcendental capabilities for an execution test.
+///
+/// Every module the emitter produces imports these, so each of the crate's
+/// independent-engine harnesses needs them; the bodies are the same production
+/// entry points the browser binds, so a test can never disagree with the
+/// browser about what `exp` means.
+#[cfg(test)]
+pub(super) fn define_test_math_imports<T>(linker: &mut wasmi::Linker<T>) {
+    linker
+        .func_wrap(
+            WASM_JIT_IMPORT_MODULE,
+            WASM_JIT_MATH1_IMPORT,
+            |opcode: i32, value: f64| -> f64 { super::runtime::math1_v1(opcode, value) },
+        )
+        .expect("define unary math import");
+    linker
+        .func_wrap(
+            WASM_JIT_IMPORT_MODULE,
+            WASM_JIT_MATH2_IMPORT,
+            |opcode: i32, left: f64, right: f64| -> f64 {
+                super::runtime::math2_v1(opcode, left, right)
+            },
+        )
+        .expect("define binary math import");
+}
+
 #[cfg(test)]
 mod tests {
     use std::mem::size_of;
@@ -1618,6 +1706,7 @@ mod tests {
                 },
             )
             .expect("define scalar helper import");
+        define_test_math_imports(&mut linker);
         let instance = linker
             .instantiate_and_start(&mut store, &module)
             .expect("instantiate executable assignment module");
@@ -1705,6 +1794,7 @@ mod tests {
                  -> f64 { 0.0 },
             )
             .expect("define unused scalar helper import");
+        define_test_math_imports(&mut linker);
         let instance = linker
             .instantiate_and_start(&mut store, &module)
             .expect("instantiate analysis-mask module");
@@ -1753,6 +1843,101 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Transcendentals take the frame-free capability, and the frame-carrying
+    /// descriptor helper is never reached for them.
+    ///
+    /// `exp` and `ln` dominate every semiconductor model's inner loop. Routing
+    /// them through `eval_op_v1` costs ten pushed arguments, a frame
+    /// revalidation, and an error-status reload and branch at each call site,
+    /// so the trap here is a silent regression back onto that path.
+    #[test]
+    fn transcendentals_execute_through_the_frame_free_math_capability() {
+        // exp(ln(param0)) ** 1.0 -- one unary pair and one binary op, so a
+        // regression on either capability fails this.
+        let program = program(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::UnaryMath(UnaryMathOp::Log),
+                NativeOp::UnaryMath(UnaryMathOp::Exp),
+                NativeOp::Const(1.0),
+                NativeOp::BinaryMath(BinaryMathOp::Pow),
+            ],
+            2,
+        );
+        let bytes = emit_verified_value_program(&program).expect("encode transcendental module");
+
+        let engine = Engine::default();
+        let module = Module::new(&engine, bytes.as_slice()).expect("compile module in wasmi");
+        let mut store = Store::new(&engine, ());
+        let memory = Memory::new(&mut store, MemoryType::new(1, None))
+            .expect("allocate imported primary memory");
+        let mut linker = Linker::new(&engine);
+        linker
+            .define(WASM_JIT_IMPORT_MODULE, WASM_JIT_MEMORY_IMPORT, memory)
+            .expect("define primary memory import");
+        linker
+            .func_wrap(
+                WASM_JIT_IMPORT_MODULE,
+                WASM_JIT_EVAL_HELPER_IMPORT,
+                |_: i32,
+                 _: i32,
+                 _: i32,
+                 _: i32,
+                 _: i64,
+                 _: f64,
+                 _: f64,
+                 _: f64,
+                 _: f64,
+                 _: f64|
+                 -> f64 {
+                    panic!("pure transcendentals must not reach the frame-carrying helper")
+                },
+            )
+            .expect("define trap helper import");
+        define_test_math_imports(&mut linker);
+        let instance = linker
+            .instantiate_and_start(&mut store, &module)
+            .expect("instantiate transcendental module");
+
+        const PARAMETERS_OFFSET: u32 = 256;
+        let mut frame = vec![0_u8; WASM_JIT_EVAL_FRAME_BYTES as usize];
+        let mut write_u32 = |offset: u64, value: u32| {
+            let offset = offset as usize;
+            frame[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        };
+        write_u32(FRAME_MAGIC_OFFSET, WASM_JIT_FRAME_MAGIC);
+        write_u32(FRAME_ABI_VERSION_OFFSET, WASM_JIT_ABI_VERSION);
+        write_u32(FRAME_BYTE_LEN_OFFSET, WASM_JIT_EVAL_FRAME_BYTES);
+        write_u32(FRAME_PARAMETERS_PTR_OFFSET, PARAMETERS_OFFSET);
+        write_u32(FRAME_PARAMETERS_LEN_OFFSET, 1);
+        memory
+            .write(&mut store, 0, &frame)
+            .expect("write evaluation frame");
+
+        let input = 7.5_f64;
+        memory
+            .write(&mut store, PARAMETERS_OFFSET as usize, &input.to_le_bytes())
+            .expect("write parameter");
+
+        let entry = instance
+            .get_typed_func::<i32, i32>(&store, WASM_JIT_VALUE_EXPORT)
+            .expect("resolve transcendental export");
+        assert_eq!(
+            entry.call(&mut store, 0).expect("execute transcendental"),
+            WASM_JIT_STATUS_OK
+        );
+        let raw = memory
+            .data(&store)
+            .get(FRAME_RESULT_OFFSET as usize..FRAME_RESULT_OFFSET as usize + 8)
+            .expect("read result bytes");
+        let result = f64::from_le_bytes(raw.try_into().unwrap());
+        assert_eq!(
+            result,
+            input.ln().exp().powf(1.0),
+            "the capability must be bit-identical to the shared constant-math semantics"
+        );
     }
 
     #[test]

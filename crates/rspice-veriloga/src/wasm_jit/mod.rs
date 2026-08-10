@@ -29,7 +29,7 @@ pub use dispatch::install_browser_dispatcher;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) use executable::{WasmJitExecutable, WasmJitExecutableEntry};
 #[cfg(target_arch = "wasm32")]
-pub use runtime::{WasmJitRuntimeSession, eval_op_v1, with_runtime_session};
+pub use runtime::{WasmJitRuntimeSession, eval_op_v1, math1_v1, math2_v1, with_runtime_session};
 
 use std::borrow::Cow;
 
@@ -47,12 +47,12 @@ use wasmparser::{Encoding, ExternalKind, Imports, Operator, Parser, Payload, Typ
 
 /// Version of the linear-memory and helper-function contract understood by
 /// emitted modules and the browser worker.
-pub const WASM_JIT_ABI_VERSION: u32 = 2;
+pub const WASM_JIT_ABI_VERSION: u32 = 3;
 
 /// Version of the deterministic encoder. It participates in cache identity
 /// independently of the ABI because code layout may change without changing
 /// runtime frames.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 2;
+pub const WASM_JIT_EMITTER_VERSION: u32 = 3;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -1251,6 +1251,7 @@ endmodule
                 },
             )
             .expect("define helper import");
+        super::codegen::define_test_math_imports(&mut linker);
         let instance = linker
             .instantiate_and_start(&mut store, &module)
             .expect("instantiate browser-WASM differential model");

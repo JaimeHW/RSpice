@@ -590,6 +590,29 @@ pub fn eval_op_v1(
     }
 }
 
+/// Frame-free unary transcendental capability imported by generated modules.
+///
+/// Deliberately not `wasm32`-gated and deliberately not taking a frame: this
+/// is the hot path, it reads no simulator state, and it is host-testable
+/// against the same `constant_unary_math` the bytecode and native backends
+/// call. An opcode outside the emitted range cannot be produced by the
+/// emitter; returning NaN for one keeps the failure loud, because every
+/// consumer of a value entry rejects a non-finite result with a typed error.
+pub fn math1_v1(opcode: i32, value: f64) -> f64 {
+    match unary(opcode - 100) {
+        Ok(op) => constant_unary_math(op, value),
+        Err(_) => f64::NAN,
+    }
+}
+
+/// Frame-free binary transcendental capability. See [`math1_v1`].
+pub fn math2_v1(opcode: i32, left: f64, right: f64) -> f64 {
+    match binary(opcode - 200) {
+        Ok(op) => constant_binary_math(op, left, right),
+        Err(_) => f64::NAN,
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 fn is_stateful_opcode(opcode: i32) -> bool {
     matches!(opcode, 400..=429 | 440..=444)
@@ -613,11 +636,93 @@ unsafe fn validated_frame(frame_offset: u32) -> Option<&'static mut WasmJitEvalF
     Some(frame)
 }
 
+/// Last frame that passed full validation, and the memory size it was checked
+/// against.
+///
+/// Every helper call used to re-derive the frame and variable slices from raw
+/// offsets: a `memory.size` probe, a magic and ABI check, and an overlap test,
+/// per `exp()`. One evaluation drives thousands of those against the same
+/// frame. Caching the validated result collapses that to once per frame, and
+/// the guard is exact rather than heuristic — a changed offset, a grown
+/// memory, or a rewritten frame header all miss and revalidate.
+#[cfg(target_arch = "wasm32")]
+struct ValidatedFrameCache {
+    frame_offset: u32,
+    memory_bytes: usize,
+    variables_ptr: u32,
+    variables_len: u32,
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static VALIDATED_FRAME: Cell<Option<ValidatedFrameCache>> = const { Cell::new(None) };
+}
+
 #[cfg(target_arch = "wasm32")]
 unsafe fn validated_frame_and_variables(
     frame_offset: u32,
 ) -> Option<(&'static mut WasmJitEvalFrame, &'static [f64])> {
     let memory_bytes = core::arch::wasm32::memory_size(0).checked_mul(65_536)?;
+    let cached = VALIDATED_FRAME.with(|slot| {
+        let cached = slot.take();
+        let hit = cached.as_ref().is_some_and(|entry| {
+            entry.frame_offset == frame_offset && entry.memory_bytes == memory_bytes
+        });
+        slot.set(cached);
+        hit
+    });
+    if cached {
+        // Safety: the offsets in the cache passed the full validation below
+        // against this exact memory size, and linear memory never shrinks.
+        // The header is re-read because only the offsets were authenticated.
+        let frame = unsafe { &mut *(frame_offset as usize as *mut WasmJitEvalFrame) };
+        if frame.magic == WASM_JIT_FRAME_MAGIC
+            && frame.abi_version == WASM_JIT_ABI_VERSION
+            && frame.byte_len >= WASM_JIT_EVAL_FRAME_BYTES
+        {
+            let variables_ptr = frame.variables_ptr;
+            let variables_len = frame.variables_len;
+            let unchanged = VALIDATED_FRAME.with(|slot| {
+                let entry = slot.take();
+                let unchanged = entry.as_ref().is_some_and(|entry| {
+                    entry.variables_ptr == variables_ptr && entry.variables_len == variables_len
+                });
+                slot.set(entry);
+                unchanged
+            });
+            if unchanged {
+                let variables = if variables_len == 0 {
+                    &[][..]
+                } else {
+                    unsafe {
+                        std::slice::from_raw_parts(
+                            variables_ptr as usize as *const f64,
+                            variables_len as usize,
+                        )
+                    }
+                };
+                return Some((frame, variables));
+            }
+        }
+        VALIDATED_FRAME.with(|slot| slot.set(None));
+    }
+    let validated = unsafe { validate_frame_and_variables_uncached(frame_offset, memory_bytes) }?;
+    VALIDATED_FRAME.with(|slot| {
+        slot.set(Some(ValidatedFrameCache {
+            frame_offset,
+            memory_bytes,
+            variables_ptr: validated.0.variables_ptr,
+            variables_len: validated.0.variables_len,
+        }));
+    });
+    Some(validated)
+}
+
+#[cfg(target_arch = "wasm32")]
+unsafe fn validate_frame_and_variables_uncached(
+    frame_offset: u32,
+    memory_bytes: usize,
+) -> Option<(&'static mut WasmJitEvalFrame, &'static [f64])> {
     let frame_start = usize::try_from(frame_offset).ok()?;
     let frame_end = frame_start.checked_add(WASM_JIT_EVAL_FRAME_BYTES as usize)?;
     let frame = unsafe { validated_frame(frame_offset) }?;
