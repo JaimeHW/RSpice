@@ -974,6 +974,10 @@ impl DrawingSheetManagedTemplateSnapshot {
         )
     }
 
+    // One argument per independently authored field of the snapshot this
+    // builds. A parameter struct here would be the same fields a second time,
+    // with nothing to validate until it was unpacked again.
+    #[allow(clippy::too_many_arguments)]
     pub fn try_new_with_logo(
         template_id: impl Into<String>,
         revision: impl Into<String>,

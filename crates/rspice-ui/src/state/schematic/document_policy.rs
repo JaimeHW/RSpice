@@ -91,57 +91,10 @@ pub enum OperatingPointAnnotationPolicy {
     Hidden,
 }
 
-/// Physical drawing-sheet format retained with the schematic document.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "kebab-case")]
-pub enum SchematicPageSize {
-    #[default]
-    A4,
-    A3,
-    UsLetter,
-    UsLedger,
-}
-
-impl SchematicPageSize {
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::A4 => "A4",
-            Self::A3 => "A3",
-            Self::UsLetter => "US Letter",
-            Self::UsLedger => "US Ledger",
-        }
-    }
-
-    /// Nominal portrait dimensions in tenths of a millimetre.
-    #[must_use]
-    pub const fn portrait_dimensions_tenth_mm(self) -> (u32, u32) {
-        match self {
-            Self::A4 => (2_100, 2_970),
-            Self::A3 => (2_970, 4_200),
-            Self::UsLetter => (2_159, 2_794),
-            Self::UsLedger => (2_794, 4_318),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "kebab-case")]
-pub enum SchematicPageOrientation {
-    Portrait,
-    #[default]
-    Landscape,
-}
-
-impl SchematicPageOrientation {
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Portrait => "portrait",
-            Self::Landscape => "landscape",
-        }
-    }
-}
+// Page size and orientation are named by the persisted design-management
+// schema and by the signed drawing-sheet package, so they are defined in
+// `rspice-design-model` and re-exported from the module that owned them.
+pub use rspice_design_model::{SchematicPageOrientation, SchematicPageSize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]

@@ -5,7 +5,6 @@
 
 mod configuration_set;
 mod connectivity_contract;
-mod design_management;
 pub(crate) mod engineering_table;
 pub(crate) mod library_browser;
 mod model_bound_symbol;
@@ -41,7 +40,6 @@ pub use configuration_set::ALLOWED_EXECUTABLE_VIEW_TYPES;
 pub use connectivity_contract::{
     ConnectivityAliasGroup, DialectAliasCatalog, TechnologyGlobalNetCatalog,
 };
-pub use design_management::*;
 pub use engineering_table::{
     EngineeringDataset, EngineeringFilterGrammar, EngineeringSortRule, EngineeringTableView,
     EngineeringTableViewStore, EngineeringViewScope, EngineeringVirtualizationPolicy,
@@ -97,6 +95,11 @@ pub use property_types::{
     DisplayMode, PropertyDefinition, PropertyRegistry, PropertySheet, PropertyType, PropertyValue,
     format_engineering,
 };
+// The design-management model is a crate of its own so the offline
+// drawing-sheet publisher can link it without linking the GUI. It is
+// re-exported here because it is still the application's state authority and
+// every caller names it through `crate::state`.
+pub use rspice_design_model::design_management::*;
 pub use schematic::*;
 pub use simulation::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,

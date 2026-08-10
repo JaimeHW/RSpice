@@ -35,3 +35,19 @@ impl PdkPublisherTrustStore {
             })
     }
 }
+
+/// Let the drawing-sheet package contract consult this trust store without
+/// depending on it. The contract crate owns the authenticity rule; the
+/// application owns which keys are trusted and which were revoked.
+impl rspice_design_model::sheet_package::PublisherTrust for PdkPublisherTrustStore {
+    fn verify_publisher_signature(
+        &self,
+        publisher_id: &str,
+        key_id: &str,
+        message: &[u8],
+        signature: &[u8],
+    ) -> Result<(), String> {
+        Self::verify_publisher_signature(self, publisher_id, key_id, message, signature)
+            .map_err(|error| error.to_string())
+    }
+}

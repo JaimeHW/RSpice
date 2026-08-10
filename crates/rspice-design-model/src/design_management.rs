@@ -16,9 +16,9 @@ use thiserror::Error;
 use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
-use crate::product::ContentDigest;
-
-use super::{ConfigurationSetId, Point, SchematicPageOrientation, SchematicPageSize};
+use crate::primitives::{
+    ConfigurationSetId, ContentDigest, Point, SchematicPageOrientation, SchematicPageSize,
+};
 
 pub const DESIGN_MANAGEMENT_SCHEMA_VERSION: u16 = 1;
 pub const SHEET_CATALOG_SCHEMA_VERSION: u16 = 1;

@@ -14,7 +14,10 @@ name = "rspice-sheet-publisher"
 path = "src/main.rs"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rspice-ui = { path = "../rspice-ui", version = "0.1.0" }
+# The package contract only. A signing ceremony's trusted computing base must
+# not include a GPU renderer, a circuit solver, or a Verilog-A compiler, so
+# this tool links the shared model rather than the application that imports it.
+rspice-design-model = { workspace = true }
 base64 = "0.22"
 clap.workspace = true
 zeroize = "1"

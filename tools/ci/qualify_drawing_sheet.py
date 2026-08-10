@@ -43,8 +43,10 @@ SUPPORTED_TARGETS = frozenset(
 
 SHEET_SOURCE_SCOPES = (
     "crates/rspice-ui/src/hardcopy",
-    "crates/rspice-ui/src/state/design_management/drawing_sheet.rs",
-    "crates/rspice-ui/src/state/design_management/drawing_sheet",
+    "crates/rspice-design-model/src/design_management/drawing_sheet.rs",
+    "crates/rspice-design-model/src/design_management/drawing_sheet",
+    "crates/rspice-design-model/src/sheet_authoring.rs",
+    "crates/rspice-design-model/src/sheet_package.rs",
     "crates/rspice-ui/src/schematic/view/drawing_sheet.rs",
     "crates/rspice-ui/src/workbench/app/dialogs/drawing_sheet_setup.rs",
     "crates/rspice-ui/src/workbench/app/dialogs/drawing_sheet_setup",
@@ -60,6 +62,7 @@ QUALIFICATION_INPUTS = (
     "crates/rspice-core/Cargo.toml",
     "crates/rspice-core/tests/save_directives.rs",
     "crates/rspice-ui/Cargo.toml",
+    "crates/rspice-design-model/Cargo.toml",
     "crates/rspice-sheet-publisher/Cargo.toml",
     "crates/rspice-sheet-publisher/src",
     PROCEDURE,
@@ -347,8 +350,23 @@ def command_gates(
             7,
         ),
         Gate(
+            "design-model-drawing-sheet",
+            "Drawing-sheet geometry, preset catalog, and signed package contract",
+            (
+                "cargo",
+                "test",
+                "--locked",
+                "-p",
+                "rspice-design-model",
+                "-j",
+                cargo_jobs,
+                "--lib",
+            ),
+            59,
+        ),
+        Gate(
             "ui-drawing-sheet",
-            "Drawing-sheet geometry, state, Page Setup, and preset tests",
+            "Page Setup, sheet rendering, and preset dialog tests",
             (
                 "cargo",
                 "test",
@@ -360,7 +378,7 @@ def command_gates(
                 "--lib",
                 "drawing_sheet",
             ),
-            125,
+            98,
         ),
         Gate(
             "ui-hardcopy",

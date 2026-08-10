@@ -7,12 +7,10 @@
 //! the catalog.
 
 use std::collections::HashSet;
-use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest as ShaDigest, Sha256};
 use thiserror::Error;
-use uuid::Uuid;
 
 use crate::product::ContentDigest;
 
@@ -34,44 +32,10 @@ pub const MAX_CONFIGURATION_MODEL_SECTION_BYTES: usize = 256;
 pub const ALLOWED_EXECUTABLE_VIEW_TYPES: [&str; 5] =
     ["schematic", "testbench", "extracted", "spice", "veriloga"];
 
-/// Stable project identity for one configuration set.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ConfigurationSetId(Uuid);
-
-impl ConfigurationSetId {
-    #[must_use]
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
-    }
-
-    #[must_use]
-    pub const fn from_uuid(value: Uuid) -> Self {
-        Self(value)
-    }
-
-    #[must_use]
-    pub const fn as_uuid(self) -> Uuid {
-        self.0
-    }
-
-    #[must_use]
-    pub fn is_nil(self) -> bool {
-        self.0.is_nil()
-    }
-}
-
-impl Default for ConfigurationSetId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl fmt::Display for ConfigurationSetId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
+// The hierarchy-audit receipts in `rspice-design-model` name this identity, so
+// it is defined there and re-exported from the module that owns configuration
+// sets.
+pub use rspice_design_model::ConfigurationSetId;
 
 /// Exact-path view and model override inside a configuration's expanded DUT
 /// hierarchy.

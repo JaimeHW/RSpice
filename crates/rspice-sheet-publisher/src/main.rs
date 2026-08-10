@@ -21,7 +21,7 @@ mod native {
     #[cfg(test)]
     use clap::CommandFactory as _;
     use clap::{Args, Parser, Subcommand, ValueEnum};
-    use rspice_ui::{
+    use rspice_design_model::sheet_package::{
         DRAWING_SHEET_PACKAGE_MAX_BYTES, DrawingSheetPackageEncoding,
         drawing_sheet_publisher_public_key, inspect_drawing_sheet_package,
         publish_organization_drawing_sheet_package, verify_published_drawing_sheet_package,

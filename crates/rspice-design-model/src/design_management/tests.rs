@@ -1144,20 +1144,22 @@ fn drawing_sheet_preset_import_receipts_are_bounded_and_serde_compatible() {
     let restored_legacy: DrawingSheetProjectSettings = serde_json::from_value(legacy).unwrap();
     assert!(restored_legacy.preset_import_receipts.is_empty());
 
-    let mut over_limit = DrawingSheetProjectSettings::default();
-    over_limit.preset_import_receipts = vec![
-        DrawingSheetPresetImportReceipt {
-            source_digest_sha256: "b".repeat(64),
-            source_schema: "rspice-sheet-formats".to_owned(),
-            source_schema_version: 1,
-            reviewed_candidate_count: 0,
-            selected_candidates: Vec::new(),
-            mappings: Vec::new(),
-            conflicts: Vec::new(),
-            skipped_candidates: Vec::new(),
-        };
-        MAX_DRAWING_SHEET_PRESET_IMPORT_RECEIPTS + 1
-    ];
+    let over_limit = DrawingSheetProjectSettings {
+        preset_import_receipts: vec![
+            DrawingSheetPresetImportReceipt {
+                source_digest_sha256: "b".repeat(64),
+                source_schema: "rspice-sheet-formats".to_owned(),
+                source_schema_version: 1,
+                reviewed_candidate_count: 0,
+                selected_candidates: Vec::new(),
+                mappings: Vec::new(),
+                conflicts: Vec::new(),
+                skipped_candidates: Vec::new(),
+            };
+            MAX_DRAWING_SHEET_PRESET_IMPORT_RECEIPTS + 1
+        ],
+        ..DrawingSheetProjectSettings::default()
+    };
     assert!(matches!(
         over_limit.validate(),
         Err(DesignManagementError::LimitExceeded {

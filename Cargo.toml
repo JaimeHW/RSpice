@@ -6,6 +6,7 @@ members = [
     "crates/rspice-veriloga-models",
     "crates/rspice-veriloga-models/models/*",
     "crates/rspice-core",
+    "crates/rspice-design-model",
     "crates/rspice-automation-protocol",
     "crates/rspice-automation-runtime",
     "crates/rspice-cli",
@@ -113,6 +114,7 @@ web-sys = { version = "0.3", features = [
 rspice-cloud-client = { path = "crates/rspice-cloud-client", version = "0.1.0" }
 rspice-cloud-contract = { path = "crates/rspice-cloud-contract", version = "0.1.0" }
 rspice-cloud-domain = { path = "crates/rspice-cloud-domain", version = "0.1.0" }
+rspice-design-model = { path = "crates/rspice-design-model", version = "0.1.0" }
 rspice-engine-adapter = { path = "crates/rspice-engine-adapter", version = "0.1.0" }
 rspice-matrix = { path = "crates/rspice-matrix", version = "0.1.0" }
 rspice-publication-contract = { path = "crates/rspice-publication-contract", version = "0.1.0" }

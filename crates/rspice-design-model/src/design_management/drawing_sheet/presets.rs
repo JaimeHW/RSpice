@@ -564,7 +564,7 @@ impl DrawingSheetPreset {
     }
 }
 
-pub(in crate::state::design_management) fn validate_drawing_sheet_preset_label(
+pub(in crate::design_management) fn validate_drawing_sheet_preset_label(
     name: &str,
 ) -> Result<(), DesignManagementError> {
     if name.chars().count() > MAX_DRAWING_SHEET_PRESET_NAME_CHARS
@@ -878,7 +878,7 @@ impl<'de> Deserialize<'de> for DrawingSheetProjectSettings {
 }
 
 impl DrawingSheetProjectSettings {
-    pub(in crate::state::design_management) fn normalize_preset_references(&mut self) {
+    pub(in crate::design_management) fn normalize_preset_references(&mut self) {
         let available = self
             .presets
             .iter()
@@ -1098,7 +1098,7 @@ fn validate_no_project_owned_title_values(
     Ok(())
 }
 
-pub(in crate::state::design_management) fn normalize_format_preset_reference(
+pub(in crate::design_management) fn normalize_format_preset_reference(
     format: &mut SchematicSheetFormat,
     available: &BTreeMap<String, (String, bool)>,
 ) {

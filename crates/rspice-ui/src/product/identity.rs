@@ -6,7 +6,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
 use super::ProductObjectKind;
@@ -226,91 +226,10 @@ pub enum RevisionError {
     Exhausted,
 }
 
-/// Exact SHA-256 content identity. Parsing is strict and serialization is
-/// always 64 lowercase hexadecimal characters.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ContentDigest([u8; 32]);
-
-impl ContentDigest {
-    #[must_use]
-    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
-        Self(bytes)
-    }
-
-    #[must_use]
-    pub const fn as_bytes(&self) -> &[u8; 32] {
-        &self.0
-    }
-}
-
-impl fmt::Debug for ContentDigest {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_tuple("ContentDigest")
-            .field(&self.to_string())
-            .finish()
-    }
-}
-
-impl fmt::Display for ContentDigest {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for byte in self.0 {
-            write!(formatter, "{byte:02x}")?;
-        }
-        Ok(())
-    }
-}
-
-impl FromStr for ContentDigest {
-    type Err = DigestError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        if value.len() != 64 {
-            return Err(DigestError::Length(value.len()));
-        }
-        let mut bytes = [0_u8; 32];
-        for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
-            bytes[index] = (decode_nibble(pair[0])? << 4) | decode_nibble(pair[1])?;
-        }
-        Ok(Self(bytes))
-    }
-}
-
-fn decode_nibble(value: u8) -> Result<u8, DigestError> {
-    match value {
-        b'0'..=b'9' => Ok(value - b'0'),
-        b'a'..=b'f' => Ok(value - b'a' + 10),
-        b'A'..=b'F' => Ok(value - b'A' + 10),
-        _ => Err(DigestError::Character(value as char)),
-    }
-}
-
-impl Serialize for ContentDigest {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> Deserialize<'de> for ContentDigest {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        value.parse().map_err(serde::de::Error::custom)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum DigestError {
-    #[error("SHA-256 digest must contain 64 hexadecimal characters, received {0}")]
-    Length(usize),
-    #[error("SHA-256 digest contains non-hexadecimal character {0:?}")]
-    Character(char),
-}
+// Semantic digests are stamped into persisted design-management records, so
+// the type is defined in `rspice-design-model` and named here through the
+// module that has always owned product identity.
+pub use rspice_design_model::ContentDigest;
 
 /// A dataset named together with the exact bytes it held when it was bound.
 /// Presentation that carries a binding rather than a bare `DatasetId` cannot

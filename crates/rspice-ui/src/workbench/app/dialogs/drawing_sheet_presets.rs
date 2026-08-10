@@ -31,17 +31,23 @@ use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
 pub(crate) use model::capture_personal_preset_into_project;
-pub use model::{
+// The signing and verification surface belongs to the shared package
+// contract, not to this dialog. It is re-exported here because `lib.rs` has
+// always published it from this path.
+pub use rspice_design_model::sheet_package::{
     DRAWING_SHEET_PACKAGE_MAX_BYTES, DrawingSheetPackageEncoding, DrawingSheetPackageInspection,
     DrawingSheetPackageVerification, PublishedDrawingSheetPackage,
     drawing_sheet_publisher_public_key, inspect_drawing_sheet_package,
     publish_organization_drawing_sheet_package, verify_published_drawing_sheet_package,
 };
 
+use rspice_design_model::sheet_package::{
+    build_package_with_options, encode_package_with_format, parse_package,
+};
+
 use model::{
     ImportResolution, PresetEditorDraft, PresetEditorMode, PresetEditorUnit, PresetPackageFormat,
-    PresetTransferState, StartingFrame, TransferMode, all_visible_presets,
-    build_package_with_options, encode_package_with_format, imported_project_preset, parse_package,
+    PresetTransferState, StartingFrame, TransferMode, all_visible_presets, imported_project_preset,
     prepare_import_candidates, preset_from_editor, unavailable, unique_copy_name,
     unsigned_exportable, validate_preset_name,
 };
@@ -1371,7 +1377,61 @@ fn export_package_file(name: &str, source: &str) -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use ed25519_dalek::{Signer as _, SigningKey};
+
+    use rspice_design_model::sheet_package::{
+        DrawingSheetPresetPackage, DrawingSheetPresetPublisherSignature, package_digest,
+        package_signature_message,
+    };
+
+    use crate::state::pdk_config::{PdkPublisherTrustStore, TrustedPdkPublisherKey};
+
     use super::*;
+
+    fn build_package(
+        presets: impl IntoIterator<Item = DrawingSheetPreset>,
+    ) -> Result<DrawingSheetPresetPackage, String> {
+        build_package_with_options(presets, true, true)
+    }
+
+    fn encode_package(package: &DrawingSheetPresetPackage) -> Result<String, String> {
+        encode_package_with_format(package, DrawingSheetPackageEncoding::CanonicalSchema1)
+    }
+
+    /// Sign a package and return the trust store that accepts it, so an
+    /// import test can exercise the real application path rather than a
+    /// bypass. The signature is produced through the shared contract, so a
+    /// change to what gets signed fails this test too.
+    fn authenticate_package_for_test(
+        mut package: DrawingSheetPresetPackage,
+    ) -> (DrawingSheetPresetPackage, PdkPublisherTrustStore) {
+        let signing_key = SigningKey::from_bytes(&[0x53; 32]);
+        package.publisher_signature = Some(DrawingSheetPresetPublisherSignature {
+            publisher_id: "rspice-test-publisher".to_owned(),
+            signing_key_id: "sheet-formats-2026".to_owned(),
+            signature_base64: String::new(),
+        });
+        package.source_digest_sha256 =
+            package_digest(&package).expect("test package contract is canonical");
+        let signature = signing_key.sign(
+            &package_signature_message(&package)
+                .expect("test package signature message is canonical"),
+        );
+        package
+            .publisher_signature
+            .as_mut()
+            .expect("test publisher identity is present")
+            .signature_base64 = STANDARD.encode(signature.to_bytes());
+        let mut trust = PdkPublisherTrustStore::default();
+        trust.keys.push(TrustedPdkPublisherKey {
+            publisher_id: "rspice-test-publisher".to_owned(),
+            key_id: "sheet-formats-2026".to_owned(),
+            verifying_key: signing_key.verifying_key().to_bytes(),
+            revoked: false,
+        });
+        (package, trust)
+    }
 
     #[test]
     fn transfer_identity_keeps_equal_ids_in_distinct_authorities() {
@@ -1502,16 +1562,16 @@ mod tests {
             )
             .unwrap(),
         };
-        let package = model::build_package([
+        let package = build_package([
             existing.clone(),
             imported.clone(),
             not_selected.clone(),
             explicitly_skipped.clone(),
         ])
         .unwrap();
-        let (package, trust) = model::authenticate_package_for_test(package);
+        let (package, trust) = authenticate_package_for_test(package);
         app.state.pdk_config.publisher_trust_store = trust;
-        let source = model::encode_package(&package).unwrap();
+        let source = encode_package(&package).unwrap();
 
         assert!(open_custom_sheet_size_library(&mut app.state));
         let personal = app
