@@ -10397,6 +10397,11 @@ fn transient_plan_purpose_keeps_absolute_and_relational_requirements_distinct() 
     assert!(!XyceStaticTranPlanPurpose::AbsoluteOracle.admits_default_level9_bsim3());
     assert!(!XyceStaticTranPlanPurpose::AnalyticOracle.requires_reference_file());
     assert!(XyceStaticTranPlanPurpose::AnalyticOracle.validates_absolute_device_contract());
+    assert!(!XyceStaticTranPlanPurpose::PassiveTemperatureAnalyticOracle.requires_reference_file());
+    assert!(
+        XyceStaticTranPlanPurpose::PassiveTemperatureAnalyticOracle
+            .validates_absolute_device_contract()
+    );
     assert!(!XyceStaticTranPlanPurpose::RelationalFamily.requires_reference_file());
     assert!(!XyceStaticTranPlanPurpose::RelationalFamily.validates_absolute_device_contract());
     assert!(
@@ -10440,6 +10445,12 @@ fn transient_plan_purpose_keeps_absolute_and_relational_requirements_distinct() 
         Some(missing),
     )
     .expect("analytic plans generate their qualified reference on the actual time grid");
+    XyceTestRunner::validate_static_tran_reference_requirement(
+        XyceStaticTranPlanPurpose::PassiveTemperatureAnalyticOracle,
+        XyceStaticTranContract::PlainStatic,
+        None,
+    )
+    .expect("qualified passive-temperature plans generate an independent analytic reference");
 }
 
 #[test]
@@ -12960,6 +12971,337 @@ fn passive_temperature_override_detection_is_structural_and_fail_closed() {
     fs::remove_dir_all(&root).expect("remove generic passive-temperature fixture");
 }
 
+fn bug546_temperature_rc_fixture(
+    label: &str,
+) -> (tempfile::TempDir, XyceTestRunner, Vec<XyceDeck>) {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_root = workspace_root.join("tests/xyce");
+    let root = tempfile::Builder::new()
+        .prefix(&format!("rspice-xyce-bug546-{label}-"))
+        .tempdir()
+        .expect("create BUG546 fixture root");
+    let mut decks = Vec::new();
+    for member in XyceBug546TemperatureRcMember::ALL {
+        let relative = member.source_relative_path();
+        let source = corpus_root.join(relative);
+        let target = root.path().join(relative);
+        fs::create_dir_all(target.parent().expect("BUG546 member has a parent"))
+            .expect("create BUG546 family directory");
+        fs::copy(&source, &target).expect("copy BUG546 corpus member");
+        decks.push(XyceDeck {
+            path: target,
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        });
+    }
+    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    (root, runner, decks)
+}
+
+#[test]
+fn bug546_temperature_rc_candidate_census_is_exactly_three_records() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_root = workspace_root.join("tests/xyce");
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    let selected = runner
+        .discover_tests()
+        .into_iter()
+        .filter_map(|deck| {
+            runner
+                .bug546_temperature_rc_contract(&deck)
+                .map(|contract| {
+                    let contract = contract.unwrap_or_else(|error| {
+                        panic!(
+                            "BUG546 candidate '{}' failed qualification: {error}",
+                            deck.relative_path
+                        )
+                    });
+                    assert_eq!(contract.kind, XyceAnalyticRcKind::PassiveTemperature);
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                })
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        selected,
+        XyceBug546TemperatureRcMember::ALL
+            .map(|member| member.record().to_string())
+            .into_iter()
+            .collect()
+    );
+}
+
+#[test]
+fn bug546_temperature_rc_contract_is_structural_and_fail_closed() {
+    let (root, runner, decks) = bug546_temperature_rc_fixture("structure");
+    for deck in &decks {
+        let contract = runner
+            .bug546_temperature_rc_contract(deck)
+            .expect("exact BUG546 record is selected")
+            .expect("canonical BUG546 family qualifies");
+        assert_eq!(contract.kind, XyceAnalyticRcKind::PassiveTemperature);
+        assert_eq!(contract.plan.contract, XyceStaticTranContract::PlainStatic);
+        assert!(matches!(contract.plan.oracle, XyceStaticTranOracle::None));
+    }
+
+    let family_dir = root.path().join("Netlists/Certification_Tests/BUG_546_SON");
+    let model_deck = &decks[0];
+    let missing = family_dir.join("tempcap_instance2.cir");
+    fs::remove_file(&missing).expect("remove BUG546 vector member");
+    assert!(
+        runner
+            .bug546_temperature_rc_contract(model_deck)
+            .expect("exact BUG546 record remains selected")
+            .is_err(),
+        "a missing family member must fail qualification"
+    );
+    fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+            "../../tests/xyce/Netlists/Certification_Tests/BUG_546_SON/tempcap_instance2.cir",
+        ),
+        &missing,
+    )
+    .expect("restore BUG546 vector member");
+    fs::write(&missing, "").expect("empty BUG546 vector member");
+    assert!(
+        runner
+            .bug546_temperature_rc_contract(model_deck)
+            .expect("exact BUG546 record remains selected")
+            .is_err(),
+        "an empty family member must fail qualification"
+    );
+    fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+            "../../tests/xyce/Netlists/Certification_Tests/BUG_546_SON/tempcap_instance2.cir",
+        ),
+        &missing,
+    )
+    .expect("restore nonempty BUG546 vector member");
+
+    let extra = family_dir.join("unexpected.cir");
+    fs::write(&extra, "unexpected BUG546 member\n.END\n").expect("write extra BUG546 deck");
+    assert!(
+        runner
+            .bug546_temperature_rc_contract(model_deck)
+            .expect("exact BUG546 record remains selected")
+            .is_err(),
+        "an extra physical circuit member must fail qualification"
+    );
+    fs::remove_file(extra).expect("remove extra BUG546 deck");
+
+    let output_dir = root
+        .path()
+        .join("OutputData/Certification_Tests/BUG_546_SON");
+    fs::create_dir_all(&output_dir).expect("create BUG546 output fixture directory");
+    fs::write(output_dir.join("README"), "non-oracle metadata\n")
+        .expect("write unrelated BUG546 output metadata");
+    runner
+        .bug546_temperature_rc_contract(model_deck)
+        .expect("exact BUG546 record remains selected")
+        .expect("unrelated OutputData metadata does not replace the analytic oracle");
+    fs::write(output_dir.join("tempcap.cir.prn"), "oracle\n")
+        .expect("write forbidden BUG546 file oracle");
+    assert!(
+        runner
+            .bug546_temperature_rc_contract(model_deck)
+            .expect("exact BUG546 record remains selected")
+            .is_err(),
+        "a checked file oracle must not silently replace the analytic contract"
+    );
+    fs::remove_dir_all(output_dir).expect("remove BUG546 output fixture directory");
+
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!(
+            "{}\t{}\n",
+            model_deck.relative_path, REQUIRES_UPSTREAM_WRAPPER_CONTRACT
+        ),
+    )
+    .expect("write forbidden BUG546 wrapper ownership");
+    let wrapper_runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    assert!(
+        wrapper_runner
+            .bug546_temperature_rc_contract(model_deck)
+            .expect("exact BUG546 record remains selected")
+            .is_err(),
+        "ordinary BUG546 decks must reject wrapper provenance"
+    );
+
+    let mut forged_path = model_deck.clone();
+    forged_path.path = decks[1].path.clone();
+    assert!(
+        runner
+            .bug546_temperature_rc_contract(&forged_path)
+            .expect("canonical relative record remains selected")
+            .is_err(),
+        "a relative record cannot attribute execution of a different physical deck"
+    );
+    let mut forged_section = model_deck.clone();
+    forged_section.section = XyceDeckSection::Other;
+    assert!(
+        runner
+            .bug546_temperature_rc_contract(&forged_section)
+            .expect("canonical relative record remains selected")
+            .is_err(),
+        "BUG546 qualification is restricted to the Netlists corpus section"
+    );
+}
+
+#[test]
+fn bug546_temperature_rc_contract_rejects_semantic_mutations() {
+    let mutations = [
+        (
+            XyceBug546TemperatureRcMember::Model,
+            "CAP1 1uF",
+            "CAP1 2uF",
+            "base capacitance",
+        ),
+        (
+            XyceBug546TemperatureRcMember::Model,
+            "TEMP=727",
+            "TEMP=728",
+            "temperature",
+        ),
+        (
+            XyceBug546TemperatureRcMember::Model,
+            "TNOM=55",
+            "TNOM=56",
+            "nominal temperature",
+        ),
+        (
+            XyceBug546TemperatureRcMember::Model,
+            "TC1=1.77M",
+            "TC1=1.76M",
+            "winning model coefficient",
+        ),
+        (
+            XyceBug546TemperatureRcMember::ScalarInstance,
+            "TC1=-1.77M",
+            "TC1=-1.76M",
+            "shadowed model coefficient",
+        ),
+        (
+            XyceBug546TemperatureRcMember::ScalarInstance,
+            "TC1=1.77m",
+            "TC1=1.76m",
+            "winning scalar coefficient",
+        ),
+        (
+            XyceBug546TemperatureRcMember::VectorInstance,
+            "TC=1.77m,-0.63U",
+            "TC1=1.77m TC2=-0.63U",
+            "vector representation",
+        ),
+        (
+            XyceBug546TemperatureRcMember::Model,
+            "c1    1 0",
+            "c1    3 0",
+            "topology",
+        ),
+        (
+            XyceBug546TemperatureRcMember::Model,
+            "IC=1",
+            "IC=.9",
+            "initial condition",
+        ),
+        (
+            XyceBug546TemperatureRcMember::Model,
+            "r1    1 2 1K",
+            "r1    1 2 2K",
+            "resistance",
+        ),
+        (
+            XyceBug546TemperatureRcMember::Model,
+            "v1 2 0 0V",
+            "v1 2 0 1V",
+            "source",
+        ),
+        (
+            XyceBug546TemperatureRcMember::Model,
+            ".tran 0 5ms",
+            ".tran 0 4ms",
+            "transient stop",
+        ),
+        (
+            XyceBug546TemperatureRcMember::Model,
+            ".tran 0 5ms",
+            ".tran 0 5ms 0",
+            "transient start",
+        ),
+        (
+            XyceBug546TemperatureRcMember::Model,
+            ".tran 0 5ms",
+            ".tran 0 5ms 0 1us",
+            "transient maximum step",
+        ),
+        (
+            XyceBug546TemperatureRcMember::Model,
+            ".tran 0 5ms",
+            ".tran 0 5ms UIC",
+            "transient UIC",
+        ),
+        (
+            XyceBug546TemperatureRcMember::Model,
+            "reltol=1e-6",
+            "reltol=2e-6",
+            "TIMEINT options",
+        ),
+        (
+            XyceBug546TemperatureRcMember::Model,
+            ".print tran v(1)",
+            ".print tran v(2)",
+            "print probe",
+        ),
+        (
+            XyceBug546TemperatureRcMember::Model,
+            ".print tran v(1)",
+            ".print tran TIMESCALEFACTOR=2 v(1)",
+            "print time scale",
+        ),
+        (
+            XyceBug546TemperatureRcMember::Model,
+            ".END",
+            "*COMP V(1) RELTOL=1\n.END",
+            "comparison override",
+        ),
+        (
+            XyceBug546TemperatureRcMember::Model,
+            ".END",
+            ".PARAM EXTRA=1\n.END",
+            "auxiliary state",
+        ),
+    ];
+    for (index, (member, from, to, reason)) in mutations.into_iter().enumerate() {
+        let (_root, runner, decks) = bug546_temperature_rc_fixture(&format!("mutation-{index}"));
+        let deck = decks
+            .iter()
+            .find(|deck| {
+                XyceBug546TemperatureRcMember::for_record(&deck.relative_path) == Some(member)
+            })
+            .expect("mutated BUG546 member exists");
+        let source = fs::read_to_string(&deck.path).expect("read BUG546 mutation source");
+        assert!(
+            source.contains(from),
+            "{reason} mutation source marker exists"
+        );
+        fs::write(&deck.path, source.replacen(from, to, 1)).expect("write BUG546 mutation");
+        assert!(
+            runner
+                .bug546_temperature_rc_contract(deck)
+                .expect("exact BUG546 record remains selected")
+                .is_err(),
+            "{reason} mutation must fail closed"
+        );
+    }
+}
+
 #[test]
 fn passive_temperature_override_snapshot_proves_instance_precedence_and_identity() {
     let print = XycePrintRequest {
@@ -12970,7 +13312,7 @@ generic passive temperature override
 C1 out 0 CM 1u IC=1 TEMP=100
 R1 out bias 1k
 V1 bias 0 0
-.MODEL CM C (TC1=1m TC2=2u)
+.MODEL CM C (TC1=1m TC2=2u TNOM=27)
 .TRAN 0 1m
 .PRINT TRAN V(out)
 .OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6
@@ -12978,10 +13320,10 @@ V1 bias 0 0
 ";
     let target_source = baseline_source
         .replace("TEMP=100", "TEMP=100 TC1=1m TC2=2u")
-        .replace("(TC1=1m TC2=2u)", "(TC1=-1m TC2=-2u)");
+        .replace("(TC1=1m TC2=2u TNOM=27)", "(TC1=-1m TC2=-2u TNOM=27)");
     let vector_source = baseline_source
         .replace("TEMP=100", "TEMP=100 TC=1m,2u")
-        .replace("(TC1=1m TC2=2u)", "(TC1=-1m TC2=-2u)");
+        .replace("(TC1=1m TC2=2u TNOM=27)", "(TC1=-1m TC2=-2u TNOM=27)");
     let snapshot = |source: &str| {
         let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("member.cir"))
             .expect("passive temperature snapshot fixture parses");
@@ -13006,6 +13348,16 @@ V1 bias 0 0
         vector.representation,
         XycePassiveTemperatureRepresentation::VectorInstance
     );
+    assert_eq!(
+        baseline.model_tc_bits,
+        [1.0e-3f64.to_bits(), 2.0e-6f64.to_bits()]
+    );
+    assert_eq!(
+        target.model_tc_bits,
+        [(-1.0e-3f64).to_bits(), (-2.0e-6f64).to_bits()]
+    );
+    assert_eq!(baseline.model_tnom_bits, Some(27.0f64.to_bits()));
+    assert_eq!(target.model_tnom_bits, Some(27.0f64.to_bits()));
     for spelling in ["TC 1m,2u", "TC = 1m,2u", "TC=1m, 2u"] {
         let variant_source = vector_source.replace("TC=1m,2u", spelling);
         let variant = snapshot(&variant_source)
@@ -13040,6 +13392,7 @@ V1 bias 0 0
         target_source.replace("generic passive temperature override", "changed title"),
         target_source.replace("RELTOL=1e-6", "RELTOL=2e-6"),
         target_source.replace("TC1=1m TC2=2u", "TC1=2m TC2=2u"),
+        target_source.replacen("TNOM=27", "TNOM=28", 1),
     ] {
         let changed = snapshot(&changed).expect("semantic mutation remains individually valid");
         assert!(

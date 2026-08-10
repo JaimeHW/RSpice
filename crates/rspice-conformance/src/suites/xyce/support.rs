@@ -2402,6 +2402,46 @@ impl XyceTestRunner {
         Ok(pair)
     }
 
+    pub(super) fn passive_temperature_model_state(
+        params: &[(String, Value)],
+    ) -> Result<([Value; 2], Option<Value>), String> {
+        let coefficient_params = params
+            .iter()
+            .filter(|(name, _)| {
+                name.eq_ignore_ascii_case("TC1") || name.eq_ignore_ascii_case("TC2")
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let coefficients =
+            Self::passive_temperature_coefficient_pair(&coefficient_params, "model")?;
+        let tnom_values = params
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("TNOM"))
+            .map(|(_, value)| *value)
+            .collect::<Vec<_>>();
+        let tnom = match tnom_values.as_slice() {
+            [] => None,
+            [value] if value.is_finite() => Some(*value),
+            [value] => {
+                return Err(format!(
+                    "passive temperature-coefficient model TNOM must be finite, found {value}"
+                ));
+            }
+            _ => {
+                return Err(
+                    "passive temperature-coefficient model admits at most one TNOM".to_string(),
+                );
+            }
+        };
+        if params.len() != coefficient_params.len() + usize::from(tnom.is_some()) {
+            return Err(
+                "passive temperature-coefficient model admits only TC1, TC2, and optional TNOM"
+                    .to_string(),
+            );
+        }
+        Ok((coefficients, tnom))
+    }
+
     pub(super) fn passive_temperature_instance_state(
         params: &[(String, Value)],
         model_tc: [Value; 2],
