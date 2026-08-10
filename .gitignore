@@ -72,3 +72,12 @@ __pycache__/
 /.codex-candidates/
 /.qualification-worktrees/
 /rust_out.pdb
+
+# Working notes. Audits, implementation plans, and agent task contracts are
+# session scratch, not product documentation, and go stale the moment the code
+# moves. Shipped docs live in README.md, SECURITY.md, the per-crate READMEs,
+# and security/.
+/*_AUDIT.md
+/*_IMPLEMENTATION_PLAN.md
+/*_IMPLEMENTATION_PROMPT.md
+/PYTHON_AUTOMATION_RUNTIME_ARCHITECTURE.md
