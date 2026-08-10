@@ -850,9 +850,9 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .ctx()
         .data(|data| data.get_temp::<ResultsBrowserScope>(results_browser_scope_id()))
         .unwrap_or_default();
-    // Snapshots keep the scope predicates borrow-free inside the run map.
+    // A snapshot keeps the favorites predicate borrow-free inside the run map;
+    // recency reads its owning accessor, which states the rank once.
     let favorite_signals = app.state.ui.results.favorite_signals.clone();
-    let recent_signals = app.state.ui.results.recent_signals.clone();
     let active_run = app.state.simulation.active_run_idx;
     let active_analysis = app.state.simulation.active_analysis_idx;
     let selected_trace = app
@@ -910,9 +910,12 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             ResultsBrowserScope::Favorites => {
                                 favorite_signals.contains(&waveform.name)
                             }
-                            ResultsBrowserScope::Recent => recent_signals
-                                .iter()
-                                .any(|recent| recent == &waveform.name),
+                            ResultsBrowserScope::Recent => app
+                                .state
+                                .ui
+                                .results
+                                .recent_signal_rank(&waveform.name)
+                                .is_some(),
                         })
                         .map(|(waveform_index, waveform)| {
                             let unit =
@@ -953,9 +956,10 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                     if scope == ResultsBrowserScope::Recent {
                         // Recent means recency order; the sort facet yields.
                         signals.sort_by_key(|signal| {
-                            recent_signals
-                                .iter()
-                                .position(|recent| recent == &signal.name)
+                            app.state
+                                .ui
+                                .results
+                                .recent_signal_rank(&signal.name)
                                 .unwrap_or(usize::MAX)
                         });
                     } else if sort == ResultsBrowserSort::Name {
@@ -1902,7 +1906,7 @@ fn grouped_count(value: usize) -> String {
     let digits = value.to_string();
     let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
     for (index, digit) in digits.chars().enumerate() {
-        if index > 0 && (digits.len() - index) % 3 == 0 {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
             grouped.push(',');
         }
         grouped.push(digit);
