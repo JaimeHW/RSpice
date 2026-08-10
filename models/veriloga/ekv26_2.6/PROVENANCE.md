@@ -13,3 +13,7 @@ RSpice integration status:
 - Generated model name: `ekv_va`.
 - `.model ... NMOS LEVEL=260` and `.model ... PMOS LEVEL=260` route to this
   generated model when `veriloga-builtins` are available.
+- The `L`, `W`, `M`, `NS`, `AS`, `AD`, `PS`, and `PD` declarations carry the
+  Xyce 7.10 EKV compatibility attributes `type="instance"` and
+  `xyceAlsoModel="yes"`. These preserve Xyce's instance-override/model-card-
+  fallback semantics without changing the published EKV equations.

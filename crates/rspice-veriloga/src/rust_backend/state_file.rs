@@ -683,9 +683,10 @@ pub(super) fn generate_state_file_with_extensions(
     }
     out.push_str("    }\n\n");
     out.push_str("    fn finalize_parameter_vector(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {\n");
-    emit_parameter_finalization(artifact, parameter_fields, &mut out)?;
+    emit_parameter_finalization(artifact, &mut out);
     out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
+    emit_parameter_finalization_helpers(artifact, parameter_fields, &mut out)?;
     out.push_str("    fn commit_parameter_state(&mut self, params: Box<Parameters>, model_params: Box<Parameters>, param_given: Box<[bool; Self::PARAMETER_COUNT]>, model_param_given: Box<[bool; Self::PARAMETER_COUNT]>) {\n");
     out.push_str(
         "        let mut changed = boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>();\n",
@@ -1320,32 +1321,68 @@ fn emit_parameter_defaults(
     Ok(())
 }
 
-fn emit_parameter_finalization(
+fn emit_parameter_finalization(artifact: &CanonicalIrArtifact, out: &mut String) {
+    let dependent_defaults = dependent_parameter_defaults(artifact);
+    for chunk_index in 0..dependent_defaults
+        .len()
+        .div_ceil(PARAMETER_FINALIZATION_CHUNK_SIZE)
+    {
+        out.push_str(&format!(
+            "        Self::finalize_parameter_vector_chunk_{chunk_index}(params, param_given, model_storage)?;\n"
+        ));
+    }
+}
+
+// Each helper becomes one native stack frame in debug builds. Eight dependent
+// expressions keeps the frame bounded without producing one function per slot.
+const PARAMETER_FINALIZATION_CHUNK_SIZE: usize = 8;
+
+fn dependent_parameter_defaults(artifact: &CanonicalIrArtifact) -> Vec<(usize, &MirParameterSlot)> {
+    artifact
+        .mir
+        .parameters
+        .iter()
+        .enumerate()
+        .filter(|(_, parameter)| parameter.default.is_none() && parameter.default_expr.is_some())
+        .collect()
+}
+
+fn emit_parameter_finalization_helpers(
     artifact: &CanonicalIrArtifact,
     parameter_fields: &HashMap<String, String>,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
-    for (index, parameter) in artifact.mir.parameters.iter().enumerate() {
-        if parameter.default.is_some() || parameter.default_expr.is_none() {
-            continue;
+    let dependent_defaults = dependent_parameter_defaults(artifact);
+    for (chunk_index, chunk) in dependent_defaults
+        .chunks(PARAMETER_FINALIZATION_CHUNK_SIZE)
+        .enumerate()
+    {
+        out.push_str("    // Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.\n");
+        out.push_str("    #[inline(never)]\n");
+        out.push_str(&format!(
+            "    fn finalize_parameter_vector_chunk_{chunk_index}(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {{\n"
+        ));
+        for &(index, parameter) in chunk {
+            let default = parameter_default_rust_expr(
+                artifact,
+                parameter,
+                parameter_fields,
+                ParameterGivenLowering::Slice("param_given"),
+            )?;
+            out.push_str(&format!(
+                "        if (if model_storage {{ PARAMETER_MODEL_FLAGS[{index}] || PARAMETER_DUAL_SCOPE_FLAGS[{index}] }} else {{ !PARAMETER_MODEL_FLAGS[{index}] }}) && !param_given[{index}] {{\n"
+            ));
+            out.push_str("            let value = {\n");
+            out.push_str(&format!("                {default}\n"));
+            out.push_str("            };\n");
+            out.push_str(&format!(
+                "            validate_parameter_scalar_metadata({index}, value)?;\n"
+            ));
+            out.push_str(&format!("            params.values[{index}] = value;\n"));
+            out.push_str("        }\n");
         }
-        let default = parameter_default_rust_expr(
-            artifact,
-            parameter,
-            parameter_fields,
-            ParameterGivenLowering::Slice("param_given"),
-        )?;
-        out.push_str(&format!(
-            "        if (if model_storage {{ PARAMETER_MODEL_FLAGS[{index}] || PARAMETER_DUAL_SCOPE_FLAGS[{index}] }} else {{ !PARAMETER_MODEL_FLAGS[{index}] }}) && !param_given[{index}] {{\n"
-        ));
-        out.push_str("            let value = {\n");
-        out.push_str(&format!("                {default}\n"));
-        out.push_str("            };\n");
-        out.push_str(&format!(
-            "            validate_parameter_scalar_metadata({index}, value)?;\n"
-        ));
-        out.push_str(&format!("            params.values[{index}] = value;\n"));
-        out.push_str("        }\n");
+        out.push_str("        Ok(())\n");
+        out.push_str("    }\n\n");
     }
     Ok(())
 }

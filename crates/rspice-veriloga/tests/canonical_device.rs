@@ -179,6 +179,34 @@ endmodule
 }
 
 #[test]
+fn generated_dependent_parameter_defaults_use_bounded_ordered_helpers() {
+    let mut parameters = String::from("    parameter real p0 = 1.0;\n");
+    for index in 1..=17 {
+        parameters.push_str(&format!(
+            "    parameter real p{index} = p{} + 1.0;\n",
+            index - 1
+        ));
+    }
+    let source = format!(
+        "module bounded_defaults(p, n);\n    inout p, n;\n    electrical p, n;\n{parameters}    analog I(p, n) <+ p17 * V(p, n);\nendmodule\n"
+    );
+    let (state, stamp, noise) = generated_parts(&source, "bounded dependent defaults");
+
+    assert!(state.contains("fn finalize_parameter_vector_chunk_0"));
+    assert!(state.contains("fn finalize_parameter_vector_chunk_1"));
+    assert!(state.contains("fn finalize_parameter_vector_chunk_2"));
+    assert!(!state.contains("fn finalize_parameter_vector_chunk_3"));
+    assert_eq!(state.matches("#[inline(never)]").count(), 3);
+
+    let body = r#"
+let instance = device::state::Instance::new(&[0, 1]);
+assert_eq!(instance.params.values[17], 18.0, "dependent defaults must finalize in source order across helper boundaries");
+"#;
+    run_generated_main("bounded dependent defaults", &state, &stamp, &noise, body)
+        .unwrap_or_else(|report| panic!("generated bounded dependent defaults failed:\n{report}"));
+}
+
+#[test]
 fn generated_parameter_assignment_scope_and_dual_fallback_are_preserved() {
     let (state, stamp, noise) = generated_parts(
         r#"
