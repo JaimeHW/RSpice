@@ -1805,6 +1805,7 @@ impl XyceTestRunner {
             || baseline.elements != target.elements
             || baseline.model_name != target.model_name
             || baseline.model_type != target.model_type
+            || baseline.model_tnom_bits != target.model_tnom_bits
             || baseline.option_directives != target.option_directives
         {
             return Err(

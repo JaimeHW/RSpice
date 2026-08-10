@@ -8691,6 +8691,34 @@ fn test_xyce_passive_temperature_coefficient_override_oracles() {
 }
 
 #[test]
+fn test_xyce_bug546_passive_temperature_analytic_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/Certification_Tests/BUG_546_SON/tempcap.cir",
+        "Netlists/Certification_Tests/BUG_546_SON/tempcap_instance.cir",
+        "Netlists/Certification_Tests/BUG_546_SON/tempcap_instance2.cir",
+    ] {
+        assert!(
+            !runner.requires_upstream_wrapper(relative),
+            "{relative} must remain an ordinary upstream deck"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should pass its independently derived passive-temperature RC oracle, got {result:?}"
+        );
+        assert_eq!(
+            result.contract, "analytic_passive_temperature_rc_tran",
+            "{relative} should report the strict BUG546 analytic contract"
+        );
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_transient_analysis_expression_relational_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

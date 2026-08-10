@@ -65,6 +65,45 @@ fn dc_sweep_point_value_count(point: &DcSweepPointResult) -> usize {
     dc_result_value_count(&point.result, &point.device_op_report).saturating_add(1)
 }
 
+fn populate_public_dc_solution(
+    circuit: &CircuitData,
+    solution: &[Value],
+    result: &mut SimulationResult,
+) -> Result<(), SimulationError> {
+    let node_count = circuit.num_nodes();
+    let branch_count = circuit.num_branches();
+    let public_value_count = node_count.checked_add(branch_count).ok_or_else(|| {
+        SimulationError::Circuit(
+            "DC public node/branch result size overflows the platform address space".to_string(),
+        )
+    })?;
+    if solution.len() < public_value_count {
+        return Err(SimulationError::Circuit(format!(
+            "DC solver returned {} value(s), fewer than the {public_value_count} public node/branch unknown(s)",
+            solution.len()
+        )));
+    }
+    if result.node_voltages.len() != node_count.saturating_add(1)
+        || result.branch_currents.len() != branch_count
+    {
+        return Err(SimulationError::Circuit(format!(
+            "DC result storage has {} node voltage(s) and {} branch current(s), expected {} and {branch_count}",
+            result.node_voltages.len(),
+            result.branch_currents.len(),
+            node_count.saturating_add(1)
+        )));
+    }
+
+    result.node_voltages[1..].copy_from_slice(&solution[..node_count]);
+    result
+        .branch_currents
+        .copy_from_slice(&solution[node_count..public_value_count]);
+    // Some devices own solver-only unknowns after the public branch range.
+    // Those internal states remain available to device observation through
+    // `solution`, but they are intentionally not exposed as branch currents.
+    Ok(())
+}
+
 enum DcSweepSource {
     Voltage {
         index: usize,
@@ -639,13 +678,7 @@ impl Engine {
             .collect();
         result.branch_names = branch_names;
 
-        for (i, &v) in solution.iter().enumerate() {
-            if i < circuit.num_nodes() {
-                result.node_voltages[i + 1] = v; // +1 because node 0 is ground
-            } else {
-                result.branch_currents[i - circuit.num_nodes()] = v;
-            }
-        }
+        populate_public_dc_solution(&circuit, &solution, &mut result)?;
         Self::populate_dc_observables(&mut circuit, &solution, &mut result)?;
         let device_op_report = circuit.device_op_report();
         engine.ensure_result_values(dc_result_value_count(&result, &device_op_report))?;
@@ -1131,13 +1164,7 @@ impl Engine {
                     .chain(sorted_node_names.iter().cloned())
                     .collect();
                 result.branch_names = branch_names.clone();
-                for (i, &v) in solution.iter().enumerate() {
-                    if i < circuit.num_nodes() {
-                        result.node_voltages[i + 1] = v;
-                    } else {
-                        result.branch_currents[i - circuit.num_nodes()] = v;
-                    }
-                }
+                populate_public_dc_solution(&circuit, &solution, &mut result)?;
                 Self::populate_dc_observables(&mut circuit, &solution, &mut result)?;
 
                 let point = DcSweepPointResult {
@@ -1244,6 +1271,89 @@ mod tests {
             (actual - expected).abs() <= 1.0e-10,
             "expected V({node})={expected:.17e}, got {actual:.17e}"
         );
+    }
+
+    fn nonlinear_core_netlist(model_level: &str, analysis: &str) -> Netlist {
+        Netlist::parse(&format!(
+            "nonlinear core public result contract\n\
+             V1 in 0 0\n\
+             R1 in p 1k\n\
+             R2 s 0 1k\n\
+             L1 p 0 200\n\
+             L2 s 0 100\n\
+             K1 L1 L2 1 nlcore\n\
+             .model nlcore core {model_level} gap=.1 path=1 area=.01\n\
+             {analysis}\n\
+             .end\n"
+        ))
+        .expect("nonlinear CORE deck parses")
+    }
+
+    fn assert_nonlinear_core_public_result(result: &SimulationResult) {
+        assert_eq!(result.node_voltages.len(), 4);
+        assert_eq!(result.node_names.len(), 4);
+        assert_eq!(result.branch_currents.len(), 3);
+        assert_eq!(result.branch_names.len(), 3);
+        assert!(
+            result
+                .node_voltages
+                .iter()
+                .chain(&result.branch_currents)
+                .all(|value| value.is_finite())
+        );
+    }
+
+    #[test]
+    fn dc_operating_point_excludes_private_nonlinear_core_states_from_public_results() {
+        for model_level in ["", "level=2"] {
+            let netlist = nonlinear_core_netlist(model_level, ".op");
+            let result = xyce_engine()
+                .run_dc_op(&netlist)
+                .expect("nonlinear CORE operating point solves");
+            assert_nonlinear_core_public_result(&result);
+        }
+    }
+
+    #[test]
+    fn dc_source_sweep_excludes_private_nonlinear_core_states_from_each_result() {
+        let netlist = nonlinear_core_netlist("", ".dc V1 0 0 1");
+        let points = xyce_engine()
+            .run_dc_sweep(&netlist, "V1", 0.0, 0.0, 1.0)
+            .expect("nonlinear CORE DC sweep solves");
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0].0.to_bits(), 0.0f64.to_bits());
+        assert_nonlinear_core_public_result(&points[0].1);
+    }
+
+    #[test]
+    fn model_parameter_step_excludes_private_nonlinear_core_states_from_each_result() {
+        let netlist = nonlinear_core_netlist("", ".step nlcore:area .05 .15 .05");
+        let command = netlist
+            .analyses
+            .iter()
+            .find_map(|analysis| match analysis {
+                crate::netlist::AnalysisCommand::Step(command) => Some(command),
+                _ => None,
+            })
+            .expect("deck retains its STEP command");
+        assert_eq!(command.target, crate::netlist::StepTarget::Device);
+        assert!(command.name.eq_ignore_ascii_case("nlcore"));
+        assert!(
+            command
+                .param_name
+                .as_deref()
+                .is_some_and(|name| name.eq_ignore_ascii_case("area"))
+        );
+
+        let expected = [0.05, 0.10, 0.15];
+        let points = xyce_engine()
+            .run_step_command(&netlist, command, &expected)
+            .expect("nonlinear CORE model-parameter STEP solves");
+        assert_eq!(points.len(), expected.len());
+        for ((actual, result), expected) in points.iter().zip(expected) {
+            assert_eq!(actual.to_bits(), expected.to_bits());
+            assert_nonlinear_core_public_result(result);
+        }
     }
 
     fn op_error(deck: &str) -> SimulationError {

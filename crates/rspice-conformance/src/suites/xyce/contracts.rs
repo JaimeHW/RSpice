@@ -5106,6 +5106,153 @@ impl XyceTestRunner {
         })
     }
 
+    pub(super) fn bug546_temperature_rc_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceAnalyticRcContract, String>> {
+        let requested_member = XyceBug546TemperatureRcMember::for_record(&deck.relative_path)?;
+        Some((|| {
+            const LABEL: &str = "BUG546 analytic passive-temperature RC family";
+            let requested_path = self.root.join(requested_member.source_relative_path());
+            if deck.section != XyceDeckSection::Netlists
+                || !Self::same_path(&deck.path, &requested_path)
+                || XyceTestRunner::normalize_manifest_key(&self.relative_key(&deck.path))
+                    != requested_member.record()
+            {
+                return Err(format!(
+                    "{LABEL} request provenance must identify the canonical physical Netlists member"
+                ));
+            }
+            let family_dir = self.root.join("Netlists/Certification_Tests/BUG_546_SON");
+            let family_metadata = fs::symlink_metadata(&family_dir)
+                .map_err(|error| format!("{LABEL} directory metadata failed: {error}"))?;
+            if !family_metadata.is_dir() || family_metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "{LABEL} requires a physical, non-symlinked family directory"
+                ));
+            }
+            let mut expected_names = XyceBug546TemperatureRcMember::ALL
+                .map(|member| {
+                    Path::new(member.source_relative_path())
+                        .file_name()
+                        .expect("BUG546 record has a file name")
+                        .to_string_lossy()
+                        .to_ascii_lowercase()
+                })
+                .into_iter()
+                .collect::<Vec<_>>();
+            expected_names.sort();
+            let mut physical_names = fs::read_dir(&family_dir)
+                .map_err(|error| format!("{LABEL} directory read failed: {error}"))?
+                .map(|entry| {
+                    entry.map_err(|error| format!("{LABEL} directory entry failed: {error}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .filter(|entry| {
+                    entry
+                        .path()
+                        .extension()
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+                })
+                .map(|entry| entry.file_name().to_string_lossy().to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            physical_names.sort();
+            if physical_names != expected_names {
+                return Err(format!(
+                    "{LABEL} requires exactly the model/scalar/vector circuit census: expected={expected_names:?}, actual={physical_names:?}"
+                ));
+            }
+            let mut qualified = Vec::new();
+            for member in XyceBug546TemperatureRcMember::ALL {
+                let path = self.root.join(member.source_relative_path());
+                let metadata = fs::symlink_metadata(&path)
+                    .map_err(|error| format!("{LABEL} member metadata failed: {error}"))?;
+                let relative = self.relative_key(&path);
+                if !metadata.is_file()
+                    || metadata.file_type().is_symlink()
+                    || metadata.len() == 0
+                    || self.requires_upstream_wrapper(&relative)
+                    || self.has_static_tran_reference_oracle(&path)
+                {
+                    return Err(format!(
+                        "{LABEL} member '{}' must be a nonempty ordinary deck without a static waveform oracle",
+                        member.source_relative_path()
+                    ));
+                }
+                let plan = self.static_tran_plan_for_path_with_purpose(
+                    &path,
+                    XyceStaticTranPlanPurpose::PassiveTemperatureAnalyticOracle,
+                )?;
+                Self::validate_passive_temperature_override_transient_plan(&plan)?;
+                let netlist = Self::parse_xyce_netlist(&plan.source, &path)
+                    .map_err(|error| format!("{LABEL} parse failed: {error}"))?;
+                let print = plan.require_print(LABEL)?;
+                let snapshot = Self::passive_temperature_override_snapshot(&netlist, print)?;
+                if snapshot.representation != member.representation() {
+                    return Err(format!(
+                        "{LABEL} member '{}' has source representation {:?}, expected {:?}",
+                        member.source_relative_path(),
+                        snapshot.representation,
+                        member.representation()
+                    ));
+                }
+                const WINNING_TC: [Value; 2] = [1.77e-3, -0.63e-6];
+                const SHADOWED_MODEL_TC: [Value; 2] = [-1.77e-3, 0.63e-6];
+                const TNOM: Value = 55.0;
+                let expected_model_tc = match member {
+                    XyceBug546TemperatureRcMember::Model => WINNING_TC,
+                    XyceBug546TemperatureRcMember::ScalarInstance
+                    | XyceBug546TemperatureRcMember::VectorInstance => SHADOWED_MODEL_TC,
+                };
+                if snapshot.winning_tc_bits != WINNING_TC.map(Value::to_bits)
+                    || snapshot.model_tc_bits != expected_model_tc.map(Value::to_bits)
+                    || snapshot.model_tnom_bits != Some(TNOM.to_bits())
+                {
+                    return Err(format!(
+                        "{LABEL} member '{}' must preserve the canonical winning, shadowed-model, and TNOM coefficient tuple",
+                        member.source_relative_path()
+                    ));
+                }
+                let specification =
+                    Self::bug546_temperature_rc_specification(&netlist, &plan, &snapshot)?;
+                qualified.push((member, path, plan, snapshot, specification));
+            }
+            let baseline = qualified
+                .iter()
+                .find(|(member, ..)| *member == XyceBug546TemperatureRcMember::Model)
+                .expect("all BUG546 members were qualified");
+            for target in qualified
+                .iter()
+                .filter(|(member, ..)| *member != XyceBug546TemperatureRcMember::Model)
+            {
+                Self::compare_passive_temperature_override_snapshots(&baseline.3, &target.3)?;
+                let left = &baseline.4;
+                let right = &target.4;
+                if left.output_node != right.output_node
+                    || left.source_value.to_bits() != right.source_value.to_bits()
+                    || left.initial_voltage.to_bits() != right.initial_voltage.to_bits()
+                    || left.resistance.to_bits() != right.resistance.to_bits()
+                    || left.capacitance.to_bits() != right.capacitance.to_bits()
+                    || left.time_constant.to_bits() != right.time_constant.to_bits()
+                {
+                    return Err(format!(
+                        "{LABEL} model/scalar/vector members derive different analytic RC specifications"
+                    ));
+                }
+            }
+            let (_, _, plan, _, specification) = qualified
+                .into_iter()
+                .find(|(member, ..)| *member == requested_member)
+                .expect("requested BUG546 member was qualified");
+            Ok(XyceAnalyticRcContract {
+                plan,
+                specification,
+                kind: XyceAnalyticRcKind::PassiveTemperature,
+            })
+        })())
+    }
+
     pub(super) fn analytic_rc_wrapper_contract(
         &self,
         deck: &XyceDeck,
@@ -5127,6 +5274,7 @@ impl XyceTestRunner {
             Ok(XyceAnalyticRcContract {
                 plan,
                 specification,
+                kind: XyceAnalyticRcKind::GeneratedWrapper,
             })
         })())
     }
