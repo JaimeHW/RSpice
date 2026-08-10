@@ -4491,3 +4491,117 @@ fn format_current_endpoint(endpoint: usize) -> String {
         endpoint.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{CompilerOptions, VerilogACompiler};
+
+    /// Build a plan the way both machine backends and the browser emitter do.
+    fn plan(source: &str, module: &str) -> (CompiledModel, NativeModelPlan) {
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let report = compiler
+            .compile_runtime(source, Some(module))
+            .expect("compile runtime artifacts");
+        let plan = build_model_plan_with_canonical_ir(&report.model, &report.canonical_ir)
+            .expect("build canonical model plan");
+        (report.model, plan)
+    }
+
+    const RESISTOR: &str = r#"
+`include "disciplines.vams"
+module plan_resistor(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real resistance = 2.0 from (0:inf);
+  real voltage;
+  analog begin
+    voltage = V(p, n);
+    I(p, n) <+ voltage / resistance;
+  end
+endmodule
+"#;
+
+    /// Everything downstream trusts the plan's shape, so it is validated
+    /// against the compiled model it was derived from rather than assumed.
+    #[test]
+    fn canonical_plan_shape_matches_its_compiled_model() {
+        let (model, plan) = plan(RESISTOR, "plan_resistor");
+        plan.validate_shape(&model)
+            .expect("planned shape must match the compiled model");
+        assert_eq!(plan.stamp_values.len(), model.stamp_programs.len());
+        assert_eq!(plan.parameter_defaults.len(), model.parameters.len());
+        assert_eq!(
+            plan.published_current_pairs.len(),
+            model.stamp_programs.len()
+        );
+        assert!(!plan.assignments.is_empty(), "the model assigns a variable");
+    }
+
+    /// The bytecode lane must produce the same shape as the canonical lane,
+    /// because the contract tests compile through it and the production path
+    /// does not.
+    #[cfg(feature = "native-bytecode-contract-tests")]
+    #[test]
+    fn bytecode_and_canonical_lanes_agree_on_plan_shape() {
+        let (model, canonical) = plan(RESISTOR, "plan_resistor");
+        let bytecode = build_model_plan_from_bytecode(&model).expect("build bytecode plan");
+        bytecode
+            .validate_shape(&model)
+            .expect("bytecode plan shape must match the compiled model");
+        assert_eq!(bytecode.stamp_values.len(), canonical.stamp_values.len());
+        assert_eq!(bytecode.jacobians.len(), canonical.jacobians.len());
+        assert_eq!(
+            bytecode.published_current_pairs,
+            canonical.published_current_pairs
+        );
+    }
+
+    /// A model whose expressions read no earlier contribution must be eligible
+    /// to fuse. Both the machine backends and the browser emitter gate their
+    /// whole-model drivers on this, so a regression here silently costs the
+    /// browser one JavaScript round trip per scalar.
+    #[test]
+    fn a_model_without_prior_current_reads_is_fusion_eligible() {
+        let (_, plan) = plan(RESISTOR, "plan_resistor");
+        assert!(plan.current_dependencies.evaluation_kernel_order_safe());
+        assert!(plan.current_dependencies.stamp_kernel_order_safe());
+    }
+
+    #[test]
+    fn ddt_and_noise_intrinsics_are_recognized_by_exact_name() {
+        assert!(canonical_is_ddt_call("ddt"));
+        assert!(!canonical_is_ddt_call("ddx"));
+        assert!(!canonical_is_ddt_call("ddt_"));
+        assert!(canonical_noise_intrinsic_kind("white_noise").is_some());
+        assert!(canonical_noise_intrinsic_kind("flicker_noise").is_some());
+        assert!(canonical_noise_intrinsic_kind("noise_table").is_some());
+        assert!(canonical_noise_intrinsic_kind("white_noise_").is_none());
+        assert!(canonical_noise_intrinsic_kind("exp").is_none());
+    }
+
+    #[test]
+    fn derivative_shadow_axes_reject_malformed_suffixes() {
+        assert!(derivative_shadow_axes_from_suffix("").is_none());
+        assert!(derivative_shadow_axes_from_suffix("@").is_none());
+        assert!(derivative_shadow_axes_from_suffix("not_an_axis").is_none());
+    }
+
+    #[test]
+    fn logical_index_and_range_overlap_reject_out_of_range_arrays() {
+        let (model, _) = plan(RESISTOR, "plan_resistor");
+        assert_eq!(
+            checked_logical_index(&model, "array", 0, 3).expect("in-range offset"),
+            3
+        );
+        assert!(
+            checked_logical_index(&model, "array", i64::MAX, 1).is_err(),
+            "an offset that overflows the logical index space must be rejected"
+        );
+
+        // Ranges are half-open, so touching endpoints do not overlap.
+        assert!(!ranges_overlap(&model, "array", 0, 2, 2, 2).expect("disjoint ranges"));
+        assert!(ranges_overlap(&model, "array", 0, 3, 2, 2).expect("overlapping ranges"));
+        assert!(!ranges_overlap(&model, "array", 5, 2, 0, 2).expect("disjoint reversed ranges"));
+    }
+}

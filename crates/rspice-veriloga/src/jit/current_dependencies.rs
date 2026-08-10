@@ -66,3 +66,74 @@ impl JitCurrentDependencies {
                 })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::JitCurrentDependencies;
+
+    /// The boundary cases decide whether a model fuses, and all three
+    /// executable backends gate on this one predicate. A stamp may read a
+    /// contribution published strictly before it; its own index is already
+    /// too late, because a fused driver publishes each value as it goes.
+    #[test]
+    fn stamp_values_may_read_only_strictly_earlier_contributions() {
+        let dependencies = |prior: Vec<Vec<usize>>| JitCurrentDependencies {
+            stamp_value_prior_currents: prior,
+            ..JitCurrentDependencies::default()
+        };
+
+        assert!(dependencies(vec![vec![], vec![0]]).evaluation_kernel_order_safe());
+        assert!(
+            !dependencies(vec![vec![], vec![1]]).evaluation_kernel_order_safe(),
+            "a stamp reading its own contribution reads a value not yet published"
+        );
+        assert!(
+            !dependencies(vec![vec![], vec![2]]).evaluation_kernel_order_safe(),
+            "a stamp reading a later contribution reads a stale value"
+        );
+        assert!(
+            !dependencies(vec![vec![0]]).evaluation_kernel_order_safe(),
+            "stamp zero has no earlier contribution to read"
+        );
+    }
+
+    /// An assignment runs before any contribution is published, so reading one
+    /// at all forbids fusing regardless of index.
+    #[test]
+    fn any_assignment_current_read_forbids_fusing() {
+        let dependencies = JitCurrentDependencies {
+            assignment_prior_currents: vec![0],
+            ..JitCurrentDependencies::default()
+        };
+        assert!(!dependencies.evaluation_kernel_order_safe());
+        assert!(!dependencies.stamp_kernel_order_safe());
+    }
+
+    /// Jacobian entries are evaluated after their own stamp publishes, so
+    /// unlike stamp values they may read it.
+    #[test]
+    fn jacobian_entries_may_read_their_own_stamp_but_not_a_later_one() {
+        let dependencies = |prior: Vec<Vec<Vec<usize>>>| JitCurrentDependencies {
+            stamp_value_prior_currents: vec![Vec::new(); prior.len()],
+            jacobian_prior_currents: prior,
+            ..JitCurrentDependencies::default()
+        };
+
+        assert!(dependencies(vec![vec![vec![0]]]).stamp_kernel_order_safe());
+        assert!(dependencies(vec![vec![], vec![vec![0]]]).stamp_kernel_order_safe());
+        assert!(
+            !dependencies(vec![vec![vec![1]]]).stamp_kernel_order_safe(),
+            "a Jacobian entry reading a later stamp's contribution must not fuse"
+        );
+
+        // The stamp driver is a strict refinement: it can never fuse a model
+        // the evaluation driver rejects.
+        let unsafe_assignment = JitCurrentDependencies {
+            assignment_prior_currents: vec![0],
+            jacobian_prior_currents: vec![vec![vec![0]]],
+            stamp_value_prior_currents: vec![Vec::new()],
+            ..JitCurrentDependencies::default()
+        };
+        assert!(!unsafe_assignment.stamp_kernel_order_safe());
+    }
+}
