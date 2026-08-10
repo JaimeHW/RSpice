@@ -143,6 +143,25 @@ pub(crate) struct Jfet2ChargeState {
     pub cgd: Value,
 }
 
+/// Per-instance temperature state used by Xyce's native LEVEL=1 JFET model.
+///
+/// These quantities mirror `N_DEV_JFET.C::Instance::updateTemperature()`.
+/// Keeping them together prevents the DC, AC, transient, and voltage-limiting
+/// paths from silently applying different temperature laws.
+#[derive(Debug, Clone, Copy)]
+struct XyceJfet1TemperatureTerms {
+    thermal_voltage: Value,
+    saturation_current: Value,
+    junction_potential: Value,
+    gate_source_capacitance: Value,
+    gate_drain_capacitance: Value,
+    depletion_transition_voltage: Value,
+    depletion_charge_at_transition: Value,
+    depletion_denominator: Value,
+    depletion_linear_factor: Value,
+    critical_voltage: Value,
+}
+
 //=============================================================================
 // JFET Parameters
 //=============================================================================

@@ -27,8 +27,10 @@ impl Jfet {
     pub(crate) fn analysis_temperature(&self) -> Value {
         if self.analysis_temp.is_finite() && self.analysis_temp > 0.0 {
             self.analysis_temp
+        } else if self.params.tnom.is_finite() && self.params.tnom > 0.0 {
+            self.params.tnom
         } else {
-            self.params.tnom.max(1.0)
+            crate::constants::TEMP_REFERENCE
         }
     }
 
@@ -36,8 +38,10 @@ impl Jfet {
     pub(super) fn resolved_temperatures(&self, ambient: Value) -> (Value, Value, Value) {
         let mut base = if ambient.is_finite() && ambient > 0.0 {
             ambient
+        } else if self.params.tnom.is_finite() && self.params.tnom > 0.0 {
+            self.params.tnom
         } else {
-            self.params.tnom.max(1.0)
+            crate::constants::TEMP_REFERENCE
         };
 
         if let Some(temp) = self.instance_temp.filter(|v| v.is_finite() && *v > 0.0) {
@@ -46,7 +50,11 @@ impl Jfet {
             base += self.instance_dtemp;
         }
         if !base.is_finite() || base <= 0.0 {
-            base = self.params.tnom.max(1.0);
+            base = if self.params.tnom.is_finite() && self.params.tnom > 0.0 {
+                self.params.tnom
+            } else {
+                crate::constants::TEMP_REFERENCE
+            };
         }
 
         let ts = self
@@ -58,7 +66,170 @@ impl Jfet {
             .filter(|v| v.is_finite() && *v > 0.0)
             .unwrap_or(base);
 
-        (base.max(1.0), ts.max(1.0), td.max(1.0))
+        (base, ts, td)
+    }
+
+    /// Derive Xyce's native LEVEL=1 JFET temperature state for an ambient
+    /// analysis temperature, including instance `TEMP`/`DTEMP` resolution.
+    #[inline]
+    pub(super) fn xyce_jfet1_temperature_terms(&self, ambient: Value) -> XyceJfet1TemperatureTerms {
+        let (temperature, _, _) = self.resolved_temperatures(ambient);
+        self.xyce_jfet1_temperature_terms_at(temperature)
+    }
+
+    /// Mirror Xyce 7.10 `N_DEV_JFET.C::Instance::updateTemperature()` at an
+    /// already-resolved device temperature.
+    pub(super) fn xyce_jfet1_temperature_terms_at(
+        &self,
+        temperature: Value,
+    ) -> XyceJfet1TemperatureTerms {
+        use crate::constants::{TEMP_REFERENCE, XYCE_K_BOLTZMANN, XYCE_Q_ELECTRON};
+
+        const SILICON_BANDGAP_REFERENCE: Value = 1.115_087_7;
+        const SILICON_BANDGAP_ZERO_KELVIN: Value = 1.16;
+        const SILICON_BANDGAP_TEMPERATURE_COEFFICIENT: Value = 7.02e-4;
+        const SILICON_BANDGAP_TEMPERATURE_OFFSET: Value = 1108.0;
+        const JUNCTION_POTENTIAL_TEMPERATURE_COEFFICIENT: Value = 4.0e-4;
+
+        let tnom = if self.params.tnom.is_finite() && self.params.tnom > 0.0 {
+            self.params.tnom
+        } else {
+            TEMP_REFERENCE
+        };
+        let temperature = if temperature.is_finite() && temperature > 0.0 {
+            temperature
+        } else {
+            tnom
+        };
+        let model_junction_potential = if self.params.pb.is_finite() && self.params.pb > 0.0 {
+            self.params.pb
+        } else {
+            Value::MIN_POSITIVE
+        };
+        let k_over_q = XYCE_K_BOLTZMANN / XYCE_Q_ELECTRON;
+
+        let nominal_thermal_voltage = tnom * k_over_q;
+        let nominal_reference_ratio = tnom / TEMP_REFERENCE;
+        let nominal_thermal_energy = XYCE_K_BOLTZMANN * tnom;
+        let nominal_bandgap = SILICON_BANDGAP_ZERO_KELVIN
+            - SILICON_BANDGAP_TEMPERATURE_COEFFICIENT * tnom * tnom
+                / (tnom + SILICON_BANDGAP_TEMPERATURE_OFFSET);
+        let nominal_bandgap_argument = -nominal_bandgap / (2.0 * nominal_thermal_energy)
+            + SILICON_BANDGAP_REFERENCE / (2.0 * XYCE_K_BOLTZMANN * TEMP_REFERENCE);
+        let nominal_potential_correction = -2.0
+            * nominal_thermal_voltage
+            * (1.5 * nominal_reference_ratio.ln() + XYCE_Q_ELECTRON * nominal_bandgap_argument);
+        let zero_kelvin_junction_potential =
+            (model_junction_potential - nominal_potential_correction) / nominal_reference_ratio;
+        let safe_zero_kelvin_junction_potential =
+            if zero_kelvin_junction_potential.abs() > Value::MIN_POSITIVE {
+                zero_kelvin_junction_potential
+            } else {
+                Value::MIN_POSITIVE.copysign(zero_kelvin_junction_potential)
+            };
+        let nominal_gamma = (model_junction_potential - zero_kelvin_junction_potential)
+            / safe_zero_kelvin_junction_potential;
+        let nominal_capacitance_denominator = 1.0
+            + 0.5
+                * (JUNCTION_POTENTIAL_TEMPERATURE_COEFFICIENT * (tnom - TEMP_REFERENCE)
+                    - nominal_gamma);
+        let nominal_capacitance_factor = if nominal_capacitance_denominator.is_finite()
+            && nominal_capacitance_denominator.abs() > Value::MIN_POSITIVE
+        {
+            nominal_capacitance_denominator.recip()
+        } else {
+            1.0
+        };
+
+        let thermal_voltage = temperature * k_over_q;
+        let temperature_reference_ratio = temperature / TEMP_REFERENCE;
+        let temperature_ratio_delta = temperature / tnom - 1.0;
+        let saturation_scale = (temperature_ratio_delta * 1.11 / thermal_voltage).exp();
+        let geometry_scale = self.junction_scale().max(0.0);
+        let model_saturation_current = self.params.is.max(0.0);
+        let saturation_current = model_saturation_current * saturation_scale * geometry_scale;
+
+        let thermal_energy = XYCE_K_BOLTZMANN * temperature;
+        let bandgap = SILICON_BANDGAP_ZERO_KELVIN
+            - SILICON_BANDGAP_TEMPERATURE_COEFFICIENT * temperature * temperature
+                / (temperature + SILICON_BANDGAP_TEMPERATURE_OFFSET);
+        let bandgap_argument = -bandgap / (2.0 * thermal_energy)
+            + SILICON_BANDGAP_REFERENCE / (2.0 * XYCE_K_BOLTZMANN * TEMP_REFERENCE);
+        let potential_correction = -2.0
+            * thermal_voltage
+            * (1.5 * temperature_reference_ratio.ln() + XYCE_Q_ELECTRON * bandgap_argument);
+        let raw_junction_potential =
+            temperature_reference_ratio * zero_kelvin_junction_potential + potential_correction;
+        let junction_potential =
+            if raw_junction_potential.is_finite() && raw_junction_potential > Value::MIN_POSITIVE {
+                raw_junction_potential
+            } else {
+                Value::MIN_POSITIVE
+            };
+        let temperature_gamma = (junction_potential - zero_kelvin_junction_potential)
+            / safe_zero_kelvin_junction_potential;
+        let temperature_capacitance_factor = 1.0
+            + 0.5
+                * (JUNCTION_POTENTIAL_TEMPERATURE_COEFFICIENT * (temperature - TEMP_REFERENCE)
+                    - temperature_gamma);
+        let capacitance_factor = nominal_capacitance_factor * temperature_capacitance_factor;
+        let gate_source_capacitance =
+            (self.params.cgs * capacitance_factor * geometry_scale).max(0.0);
+        let gate_drain_capacitance =
+            (self.params.cgd * capacitance_factor * geometry_scale).max(0.0);
+
+        // Xyce caps FC at 0.95 before deriving its fixed, square-root
+        // depletion-capacitance continuation coefficients.
+        let forward_bias_coefficient = self.params.fc.min(0.95);
+        let log_one_minus_fc = (1.0 - forward_bias_coefficient).ln();
+        let depletion_denominator = (1.5 * log_one_minus_fc).exp();
+        let depletion_linear_factor = 1.0 - 1.5 * forward_bias_coefficient;
+        let depletion_transition_voltage = forward_bias_coefficient * junction_potential;
+        let depletion_charge_at_transition =
+            2.0 * junction_potential * (1.0 - (0.5 * log_one_minus_fc).exp());
+        let critical_voltage = if saturation_current.is_finite() && saturation_current > 0.0 {
+            thermal_voltage
+                * (thermal_voltage / (core::f64::consts::SQRT_2 * saturation_current)).ln()
+        } else {
+            Value::INFINITY
+        };
+
+        XyceJfet1TemperatureTerms {
+            thermal_voltage,
+            saturation_current,
+            junction_potential,
+            gate_source_capacitance,
+            gate_drain_capacitance,
+            depletion_transition_voltage,
+            depletion_charge_at_transition,
+            depletion_denominator,
+            depletion_linear_factor,
+            critical_voltage,
+        }
+    }
+
+    /// Xyce LEVEL=1 gate-junction current and conductance at an
+    /// already-resolved device temperature.
+    #[inline]
+    pub(super) fn xyce_jfet1_junction_terms(
+        &self,
+        voltage: Value,
+        terms: XyceJfet1TemperatureTerms,
+    ) -> (Value, Value) {
+        let gmin = if self.junction_gmin.is_finite() {
+            self.junction_gmin.max(0.0)
+        } else {
+            0.0
+        };
+        if voltage <= -5.0 * terms.thermal_voltage {
+            let conductance = -terms.saturation_current / voltage + gmin;
+            (conductance * voltage, conductance)
+        } else {
+            let exponential = (voltage / terms.thermal_voltage).exp();
+            let conductance = terms.saturation_current * exponential / terms.thermal_voltage + gmin;
+            let current = terms.saturation_current * (exponential - 1.0) + gmin * voltage;
+            (current, conductance)
+        }
     }
 
     /// ngspice-compatible gate-junction branch evaluation for Level-1 JFETs.
@@ -538,6 +709,91 @@ impl Jfet {
         vnew
     }
 
+    /// Xyce's legacy PN-junction limiter (`DeviceSupport::pnjlim`).
+    ///
+    /// Xyce's native JFET deliberately uses the original SPICE limiter, not
+    /// the later ngspice variant with reverse-voltage limiting.
+    #[inline]
+    fn xyce_pnjlim(vnew: Value, vold: Value, vt: Value, vcrit: Value) -> Value {
+        if !vnew.is_finite()
+            || !vold.is_finite()
+            || !vt.is_finite()
+            || !vcrit.is_finite()
+            || vt <= 0.0
+        {
+            return vnew;
+        }
+
+        if (vnew > vcrit) && ((vnew - vold).abs() > 2.0 * vt) {
+            if vold > 0.0 {
+                let argument = 1.0 + (vnew - vold) / vt;
+                if argument > 0.0 {
+                    vold + vt * argument.ln()
+                } else {
+                    vcrit
+                }
+            } else {
+                vt * (vnew / vt).ln()
+            }
+        } else {
+            vnew
+        }
+    }
+
+    /// Xyce's native FET limiter (`DeviceSupport::fetlim`).
+    #[inline]
+    fn xyce_fetlim(vnew: Value, vold: Value, vto: Value) -> Value {
+        if !vnew.is_finite() || !vold.is_finite() || !vto.is_finite() {
+            return vnew;
+        }
+
+        let high_step = (2.0 * (vold - vto)).abs() + 2.0;
+        let low_step = high_step / 2.0 + 2.0;
+        let high_gate_voltage = vto + 3.5;
+        let delta = vnew - vold;
+
+        if vold >= vto {
+            if vold >= high_gate_voltage {
+                if delta <= 0.0 {
+                    if vnew >= high_gate_voltage {
+                        if -delta > low_step {
+                            vold - low_step
+                        } else {
+                            vnew
+                        }
+                    } else {
+                        vnew.max(vto + 2.0)
+                    }
+                } else if delta >= high_step {
+                    vold + high_step
+                } else {
+                    vnew
+                }
+            } else if delta <= 0.0 {
+                vnew.max(vto - 0.5)
+            } else {
+                vnew.min(vto + 4.0)
+            }
+        } else if delta <= 0.0 {
+            if -delta > high_step {
+                vold - high_step
+            } else {
+                vnew
+            }
+        } else {
+            let transition_voltage = vto + 0.5;
+            if vnew <= transition_voltage {
+                if delta > low_step {
+                    vold + low_step
+                } else {
+                    vnew
+                }
+            } else {
+                transition_voltage
+            }
+        }
+    }
+
     #[inline]
     pub(super) fn classic_gate_vcrit(&self, nvt: Value) -> Value {
         let isat = (self.params.is * self.junction_scale()).max(0.0);
@@ -582,6 +838,48 @@ impl Jfet {
         vgd_int = Self::fetlim(vgd_int, vgd_old_int, self.params.vto);
 
         (vgs_int / pol, vgd_int / pol)
+    }
+
+    /// Apply the exact Xyce LEVEL=1 JFET `pnjlim`/`fetlim` sequence.
+    #[inline]
+    pub(super) fn xyce_jfet1_limited_branch_voltages(
+        &self,
+        vgs_new: Value,
+        vgd_new: Value,
+    ) -> (Value, Value) {
+        let polarity = self.jfet_type.polarity();
+        if !polarity.is_finite() || polarity.abs() < 0.5 {
+            return (vgs_new, vgd_new);
+        }
+
+        if !self.vgs.is_finite() || !self.vds.is_finite() {
+            // Xyce treats the current branch voltages as their own history in
+            // a no-history DC operating-point evaluation.
+            return (vgs_new, vgd_new);
+        }
+
+        let terms = self.xyce_jfet1_temperature_terms(self.analysis_temperature());
+        let vgs_old_internal = polarity * self.vgs;
+        let vgd_old_internal = polarity * (self.vgs - self.vds);
+        let mut vgs_internal = polarity * vgs_new;
+        let mut vgd_internal = polarity * vgd_new;
+
+        vgs_internal = Self::xyce_pnjlim(
+            vgs_internal,
+            vgs_old_internal,
+            terms.thermal_voltage,
+            terms.critical_voltage,
+        );
+        vgd_internal = Self::xyce_pnjlim(
+            vgd_internal,
+            vgd_old_internal,
+            terms.thermal_voltage,
+            terms.critical_voltage,
+        );
+        vgs_internal = Self::xyce_fetlim(vgs_internal, vgs_old_internal, self.params.vto);
+        vgd_internal = Self::xyce_fetlim(vgd_internal, vgd_old_internal, self.params.vto);
+
+        (vgs_internal / polarity, vgd_internal / polarity)
     }
 
     #[inline]
@@ -921,6 +1219,7 @@ impl Jfet {
         &self,
         vgs: Value,
         vds: Value,
+        temperature: Value,
     ) -> (Value, Value, Value) {
         let pol = self.jfet_type.polarity();
         let vgs_int = pol * vgs;
@@ -930,12 +1229,15 @@ impl Jfet {
         let beta = (self.params.beta * self.area * self.m).max(0.0);
         let vto = self.params.vto;
         let lambda = self.params.lambda;
-        let pb = self.params.pb;
+        let pb = self
+            .xyce_jfet1_temperature_terms_at(temperature)
+            .junction_potential;
         let b = self.params.mes_b;
-        let bfac_base = if (pb - vto).abs() > 1.0e-30 {
-            (1.0 - b) / (pb - vto)
-        } else {
+        let bfac_numerator = 1.0 - b;
+        let bfac_base = if bfac_numerator == 0.0 {
             0.0
+        } else {
+            bfac_numerator / (pb - vto)
         };
 
         let (cdrain, gm, gds) = if vds_int >= 0.0 {
@@ -1066,5 +1368,345 @@ impl Jfet {
             if gm.is_finite() { gm } else { 0.0 },
             if gds.is_finite() { gds } else { 0.0 },
         )
+    }
+}
+
+#[cfg(test)]
+mod xyce_jfet1_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn assert_close(actual: Value, expected: Value, relative_tolerance: Value, label: &str) {
+        let tolerance = (relative_tolerance * expected.abs()).max(1.0e-30);
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "{label}: actual={actual:.17e}, expected={expected:.17e}, tolerance={tolerance:.3e}"
+        );
+    }
+
+    fn temperature_oracle_device() -> Jfet {
+        let mut device = Jfet::njf("j_oracle", 1, 2, 3).enable_xyce_jfet1_model();
+        device.params.cgs = 2.0e-12;
+        device.params.cgd = 1.0e-12;
+        device
+    }
+
+    fn sa2109_njf() -> Jfet {
+        let mut device = Jfet::njf("j_sa2109", 1, 2, 3).enable_xyce_jfet1_model();
+        device.params.beta = 2.690e-5;
+        device.params.vto = -3.795;
+        device.params.pb = 1.07;
+        device.params.lambda = 0.0181;
+        device.params.mes_b = 0.605;
+        device.params.is = 1.393e-10;
+        device
+    }
+
+    fn sa2108_pjf() -> Jfet {
+        let mut device = Jfet::pjf("j_sa2108", 1, 2, 3).enable_xyce_jfet1_model();
+        device.params.beta = 2.78e-4;
+        device.params.vto = -2.10;
+        device.params.pb = 0.265;
+        device.params.lambda = 0.0055;
+        device.params.mes_b = 0.590;
+        device.params.is = 1.393e-10;
+        device
+    }
+
+    #[test]
+    fn xyce_jfet1_temperature_state_matches_xyce_710_equations() {
+        // Independent anchors evaluated from Xyce 7.10
+        // N_DEV_JFET.C::Instance::updateTemperature() using its rounded
+        // physical constants. The device uses default PB/IS/TNOM and explicit
+        // CGS/CGD so every temperature-dependent quantity is exercised.
+        let device = temperature_oracle_device();
+        let anchors = [
+            (
+                288.15,
+                1.674_189_265_294_86e-15,
+                1.010_804_127_910_272,
+                1.984_395_871_304_202_2e-12,
+                0.024_830_135_954_384_484,
+                0.744_436_690_384_469_3,
+            ),
+            (
+                298.15,
+                7.498_476_693_804_42e-15,
+                1.001_815_672_447_988_3,
+                1.997_384_327_420_142e-12,
+                0.025_691_844_646_190_298,
+                0.732_626_618_590_806_6,
+            ),
+            (
+                308.15,
+                3.047_042_089_511_081_5e-14,
+                0.992_678_497_745_189_1,
+                2.010_521_502_786_015_2e-12,
+                0.026_553_553_337_996_11,
+                0.720_845_454_069_546_5,
+            ),
+        ];
+
+        for (temperature, isat, pb, cgs, vt, vcrit) in anchors {
+            let terms = device.xyce_jfet1_temperature_terms_at(temperature);
+            assert_close(
+                terms.saturation_current,
+                isat,
+                5.0e-13,
+                "saturation current",
+            );
+            assert_close(terms.junction_potential, pb, 5.0e-14, "junction potential");
+            assert_close(
+                terms.gate_source_capacitance,
+                cgs,
+                5.0e-14,
+                "gate-source capacitance",
+            );
+            assert_close(
+                terms.gate_drain_capacitance,
+                0.5 * cgs,
+                5.0e-14,
+                "gate-drain capacitance",
+            );
+            assert_close(terms.thermal_voltage, vt, 5.0e-15, "thermal voltage");
+            assert_close(terms.critical_voltage, vcrit, 5.0e-14, "critical voltage");
+        }
+
+        let nominal = device.xyce_jfet1_temperature_terms_at(300.15);
+        assert_close(nominal.saturation_current, 1.0e-14, 5.0e-15, "nominal IS");
+        assert_close(nominal.junction_potential, 1.0, 5.0e-15, "nominal PB");
+        assert_close(
+            nominal.gate_source_capacitance,
+            2.0e-12,
+            5.0e-15,
+            "nominal CGS",
+        );
+    }
+
+    #[test]
+    fn xyce_jfet1_temp_overrides_dtemp_and_accepts_subzero_celsius() {
+        let dtemp_device =
+            temperature_oracle_device().with_instance_params(&[("DTEMP".to_string(), 10.0)]);
+        let temp_device = temperature_oracle_device()
+            .with_instance_params(&[("TEMP".to_string(), 35.0), ("DTEMP".to_string(), -100.0)]);
+        let dtemp_terms = dtemp_device.xyce_jfet1_temperature_terms(298.15);
+        let temp_terms = temp_device.xyce_jfet1_temperature_terms(298.15);
+        assert_eq!(
+            dtemp_terms.thermal_voltage.to_bits(),
+            temp_terms.thermal_voltage.to_bits(),
+            "TEMP=35 C and ambient 25 C + DTEMP=10 C must resolve identically"
+        );
+        assert_eq!(
+            dtemp_terms.junction_potential.to_bits(),
+            temp_terms.junction_potential.to_bits()
+        );
+
+        let cold_device =
+            temperature_oracle_device().with_instance_params(&[("TEMP".to_string(), -40.0)]);
+        let cold_terms = cold_device.xyce_jfet1_temperature_terms(298.15);
+        let expected_vt =
+            233.15 * crate::constants::XYCE_K_BOLTZMANN / crate::constants::XYCE_Q_ELECTRON;
+        assert_close(
+            cold_terms.thermal_voltage,
+            expected_vt,
+            5.0e-15,
+            "subzero TEMP",
+        );
+    }
+
+    #[test]
+    fn xyce_jfet1_channel_matches_both_polarity_temperature_oracles() {
+        let n_device = sa2109_njf();
+        let p_device = sa2108_pjf();
+        let anchors = [
+            (
+                288.15,
+                1.078_005_527_210_621_7,
+                (
+                    4.495_534_263_100_225e-4,
+                    2.768_481_661_003_685e-4,
+                    6.399_462_851_916_167e-6,
+                ),
+                0.305_189_435_256_598_7,
+                (
+                    -1.258_081_033_372_559_4e-3,
+                    1.424_400_154_103_656e-3,
+                    6.392_097_629_144_643e-6,
+                ),
+            ),
+            (
+                298.15,
+                1.071_349_238_998_046_6,
+                (
+                    4.497_606_946_751_582e-4,
+                    2.770_120_146_103_572_3e-4,
+                    6.402_413_349_288_527e-6,
+                ),
+                0.271_713_223_672_376_1,
+                (
+                    -1.264_786_658_693_273_1e-3,
+                    1.433_979_618_847_532_8e-3,
+                    6.426_167_780_889_608e-6,
+                ),
+            ),
+            (
+                308.15,
+                1.064_544_231_544_955_8,
+                (
+                    4.499_731_809_453_122e-4,
+                    2.771_799_879_464_473_7e-4,
+                    6.405_438_124_349_313e-6,
+                ),
+                0.238_088_292_847_637_83,
+                (
+                    -1.271_715_374_670_672e-3,
+                    1.443_877_784_529_531_5e-3,
+                    6.461_371_418_650_065e-6,
+                ),
+            ),
+        ];
+
+        for (temperature, n_pb, n_channel, p_pb, p_channel) in anchors {
+            let n_terms = n_device.xyce_jfet1_temperature_terms_at(temperature);
+            let p_terms = p_device.xyce_jfet1_temperature_terms_at(temperature);
+            assert_close(n_terms.junction_potential, n_pb, 5.0e-13, "NJF tPB");
+            assert_close(p_terms.junction_potential, p_pb, 5.0e-13, "PJF tPB");
+
+            let n_actual = n_device.calculate(0.0, 15.0, temperature);
+            let p_actual = p_device.calculate(0.0, -15.0, temperature);
+            for (actual, expected, label) in [
+                (n_actual.0, n_channel.0, "NJF ids"),
+                (n_actual.1, n_channel.1, "NJF gm"),
+                (n_actual.2, n_channel.2, "NJF gds"),
+                (p_actual.0, p_channel.0, "PJF ids"),
+                (p_actual.1, p_channel.1, "PJF gm"),
+                (p_actual.2, p_channel.2, "PJF gds"),
+            ] {
+                assert_close(actual, expected, 5.0e-13, label);
+            }
+        }
+    }
+
+    #[test]
+    fn xyce_jfet1_nonzero_junction_caps_follow_temperature_and_polarity() {
+        let mut n_device = sa2109_njf();
+        n_device.params.cgs = 1.0e-12;
+        n_device.params.cgd = 2.0e-12;
+        let mut p_device = sa2108_pjf();
+        p_device.params.cgs = 1.0e-12;
+        p_device.params.cgd = 2.0e-12;
+
+        for (temperature, n_expected, p_expected) in [
+            (
+                288.15,
+                (1.101_251_941_465_028_2e-12, 3.491_646_732_334_209_5e-12),
+                (1.124_165_424_260_502e-12, 4.720_686_945_621_017e-12),
+            ),
+            (
+                308.15,
+                (1.114_260_128_732_948_8e-12, 3.554_451_269_688_122e-12),
+                (1.381_853_055_268_949_4e-12, 6.489_070_954_119_502e-12),
+            ),
+        ] {
+            let n_charge = n_device.xyce_jfet1_charge_state(0.2, 0.8, temperature);
+            let p_charge = p_device.xyce_jfet1_charge_state(-0.1, -0.4, temperature);
+            assert_close(n_charge.cgs, n_expected.0, 5.0e-13, "NJF Cgs");
+            assert_close(n_charge.cgd, n_expected.1, 5.0e-13, "NJF Cgd");
+            assert_close(p_charge.cgs, p_expected.0, 5.0e-13, "PJF Cgs");
+            assert_close(p_charge.cgd, p_expected.1, 5.0e-13, "PJF Cgd");
+            assert!(n_charge.qgs.is_finite() && n_charge.qgd.is_finite());
+            assert!(p_charge.qgs.is_finite() && p_charge.qgd.is_finite());
+        }
+    }
+
+    #[test]
+    fn xyce_jfet1_gate_branch_uses_temperature_scaled_is_and_xfive_vt_tail() {
+        let mut device = temperature_oracle_device();
+        device.params.n = 9.0;
+        device.junction_gmin = 2.5e-12;
+        let terms = device.xyce_jfet1_temperature_terms_at(298.15);
+
+        let reverse_voltage = -0.2;
+        assert!(reverse_voltage <= -5.0 * terms.thermal_voltage);
+        let (reverse_current, reverse_conductance) =
+            device.xyce_jfet1_junction_terms(reverse_voltage, terms);
+        let expected_reverse_conductance =
+            -terms.saturation_current / reverse_voltage + device.junction_gmin;
+        assert_close(
+            reverse_conductance,
+            expected_reverse_conductance,
+            5.0e-15,
+            "reverse conductance",
+        );
+        assert_close(
+            reverse_current,
+            expected_reverse_conductance * reverse_voltage,
+            5.0e-15,
+            "reverse current",
+        );
+
+        let exponential_voltage = -0.1;
+        assert!(exponential_voltage > -5.0 * terms.thermal_voltage);
+        let (current, conductance) = device.xyce_jfet1_junction_terms(exponential_voltage, terms);
+        let exponential = (exponential_voltage / terms.thermal_voltage).exp();
+        assert_close(
+            current,
+            terms.saturation_current * (exponential - 1.0)
+                + device.junction_gmin * exponential_voltage,
+            5.0e-15,
+            "exponential current",
+        );
+        assert_close(
+            conductance,
+            terms.saturation_current * exponential / terms.thermal_voltage + device.junction_gmin,
+            5.0e-15,
+            "exponential conductance",
+        );
+    }
+
+    #[test]
+    fn xyce_jfet_model_b_is_not_a_beta_alias() {
+        let mut parameters = HashMap::new();
+        parameters.insert("B".to_string(), 0.605);
+        let device = Jfet::njf("j_b", 1, 2, 3)
+            .enable_xyce_jfet1_model()
+            .with_model_params(&parameters);
+        assert_eq!(device.params.beta.to_bits(), 1.0e-4_f64.to_bits());
+        assert_eq!(device.params.mes_b.to_bits(), 0.605_f64.to_bits());
+
+        parameters.insert("BETA".to_string(), 2.69e-5);
+        parameters.insert("TNOM".to_string(), -40.0);
+        let explicit_beta = Jfet::njf("j_beta", 1, 2, 3)
+            .enable_xyce_jfet1_model()
+            .with_model_params(&parameters);
+        assert_eq!(explicit_beta.params.beta.to_bits(), 2.69e-5_f64.to_bits());
+        assert_eq!(explicit_beta.params.mes_b.to_bits(), 0.605_f64.to_bits());
+        assert_eq!(
+            explicit_beta.params.tnom.to_bits(),
+            (-40.0_f64 + 273.15).to_bits()
+        );
+    }
+
+    #[test]
+    fn xyce_jfet_limiters_match_legacy_device_support_equations() {
+        let vt = 0.025;
+        let vcrit = 0.6;
+        let limited = Jfet::xyce_pnjlim(1.2, 0.2, vt, vcrit);
+        let expected = 0.2 + vt * (1.0_f64 + (1.2 - 0.2) / vt).ln();
+        assert_close(limited, expected, 5.0e-15, "Xyce pnjlim");
+        assert_eq!(
+            Jfet::xyce_pnjlim(-10.0, -0.2, vt, vcrit).to_bits(),
+            (-10.0_f64).to_bits(),
+            "Xyce's legacy pnjlim has no negative-voltage clamp"
+        );
+
+        assert_eq!(
+            Jfet::xyce_fetlim(-10.0, 5.0, -2.0).to_bits(),
+            0.0_f64.to_bits()
+        );
+        assert_eq!(
+            Jfet::xyce_fetlim(30.0, 5.0, -2.0).to_bits(),
+            21.0_f64.to_bits()
+        );
     }
 }

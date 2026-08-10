@@ -317,6 +317,12 @@ impl Jfet {
         ) {
             return self.xyce_jfet2_gate_junctions(vgs, vgd, temp_common);
         }
+        if matches!(self.params.channel_model, JfetChannelModel::XyceSydney) {
+            let terms = self.xyce_jfet1_temperature_terms_at(temp_common);
+            let (igs_internal, ggs) = self.xyce_jfet1_junction_terms(vgs_int, terms);
+            let (igd_internal, ggd) = self.xyce_jfet1_junction_terms(vgd_int, terms);
+            return (pol * igs_internal, pol * igd_internal, ggs, ggd);
+        }
 
         if matches!(self.params.channel_model, JfetChannelModel::Hfet1) {
             // GATEMOD=1 gate currents are produced by the channel
@@ -562,11 +568,13 @@ impl Jfet {
     pub fn transient_capacitances(&self, vgs: Value, vgd: Value, temp: Value) -> (Value, Value) {
         let (temp_common, temp_source, _) = self.resolved_temperatures(temp);
         let (mut cgs, mut cgd) = match self.params.channel_model {
-            JfetChannelModel::ShichmanHodges
-            | JfetChannelModel::XyceSydney
-            | JfetChannelModel::LegacyMesfet => {
+            JfetChannelModel::ShichmanHodges | JfetChannelModel::LegacyMesfet => {
                 let pol = self.jfet_type.polarity();
                 self.capacitances(pol * vgs, pol * vgd)
+            }
+            JfetChannelModel::XyceSydney => {
+                let charge = self.xyce_jfet1_charge_state(vgs, vgd, temp);
+                (charge.cgs, charge.cgd)
             }
             JfetChannelModel::XyceModifiedShockley => {
                 let charge = self.xyce_jfet2_charge_state(vgs, vgd, temp_common);
@@ -627,12 +635,14 @@ impl Jfet {
         };
 
         match self.params.channel_model {
-            JfetChannelModel::ShichmanHodges
-            | JfetChannelModel::XyceSydney
-            | JfetChannelModel::LegacyMesfet => {
+            JfetChannelModel::ShichmanHodges | JfetChannelModel::LegacyMesfet => {
                 let pol = self.jfet_type.polarity();
                 let (cgs, cgd) = self.capacitances(pol * vgs, pol * vgd);
                 (cgs, cgd, cds)
+            }
+            JfetChannelModel::XyceSydney => {
+                let charge = self.xyce_jfet1_charge_state(vgs, vgd, temp);
+                (charge.cgs, charge.cgd, cds)
             }
             JfetChannelModel::XyceModifiedShockley => {
                 let charge = self.xyce_jfet2_charge_state(vgs, vgd, temp);
@@ -837,6 +847,59 @@ impl Jfet {
         };
 
         (cgs.max(cgs0 * 0.01), cgd.max(cgd0 * 0.01))
+    }
+
+    /// Xyce LEVEL=1 analytic gate-junction charge and differential
+    /// capacitance for one internal branch.
+    #[inline]
+    fn xyce_jfet1_junction_charge(
+        voltage: Value,
+        zero_bias_capacitance: Value,
+        terms: XyceJfet1TemperatureTerms,
+    ) -> (Value, Value) {
+        if zero_bias_capacitance == 0.0 {
+            return (0.0, 0.0);
+        }
+
+        if voltage < terms.depletion_transition_voltage {
+            let root = (1.0 - voltage / terms.junction_potential).sqrt();
+            let charge = 2.0 * terms.junction_potential * zero_bias_capacitance * (1.0 - root);
+            let capacitance = zero_bias_capacitance / root;
+            (charge, capacitance)
+        } else {
+            let transition_voltage_squared =
+                terms.depletion_transition_voltage * terms.depletion_transition_voltage;
+            let charge = zero_bias_capacitance * terms.depletion_charge_at_transition
+                + zero_bias_capacitance / terms.depletion_denominator
+                    * (terms.depletion_linear_factor
+                        * (voltage - terms.depletion_transition_voltage)
+                        + (voltage * voltage - transition_voltage_squared)
+                            / (4.0 * terms.junction_potential));
+            let capacitance = zero_bias_capacitance / terms.depletion_denominator
+                * (terms.depletion_linear_factor + voltage / (2.0 * terms.junction_potential));
+            (charge, capacitance)
+        }
+    }
+
+    /// Xyce LEVEL=1 analytic gate charge in external terminal orientation.
+    pub(crate) fn xyce_jfet1_charge_state(
+        &self,
+        vgs: Value,
+        vgd: Value,
+        ambient_temperature: Value,
+    ) -> Jfet2ChargeState {
+        let polarity = self.jfet_type.polarity();
+        let terms = self.xyce_jfet1_temperature_terms(ambient_temperature);
+        let (qgs_internal, cgs) =
+            Self::xyce_jfet1_junction_charge(polarity * vgs, terms.gate_source_capacitance, terms);
+        let (qgd_internal, cgd) =
+            Self::xyce_jfet1_junction_charge(polarity * vgd, terms.gate_drain_capacitance, terms);
+        Jfet2ChargeState {
+            qgs: polarity * qgs_internal,
+            qgd: polarity * qgd_internal,
+            cgs,
+            cgd,
+        }
     }
 
     /// Get IDSS (drain current at Vgs=0 in saturation)

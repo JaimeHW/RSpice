@@ -54,6 +54,18 @@ struct Jfet2RawTerms {
 
 impl Jfet {
     #[inline]
+    fn jfet2_forward_bias_coefficient(&self) -> Value {
+        if matches!(
+            self.params.channel_model,
+            JfetChannelModel::XyceModifiedShockley
+        ) {
+            self.params.fc.min(0.95)
+        } else {
+            self.params.fc
+        }
+    }
+
+    #[inline]
     fn jfet2_hfgam(&self) -> Value {
         if self.params.jfet2_hfgam.is_finite() {
             self.params.jfet2_hfgam
@@ -108,7 +120,7 @@ impl Jfet {
         t_cgs *= cjfact1;
         t_cgd *= cjfact1;
 
-        let cor_dep_cap = self.params.fc * t_gate_pot;
+        let cor_dep_cap = self.jfet2_forward_bias_coefficient() * t_gate_pot;
         let woo = (t_gate_pot - self.params.vto).max(1.0e-30);
         let xi = self.params.jfet2_xi.max(1.0e-30);
         let p = self.params.jfet2_p.max(1.0e-30);
@@ -889,7 +901,7 @@ impl Jfet {
             return (0.0, 0.0);
         }
         let pb = gate_potential.max(1.0e-30);
-        let fc = forward_coeff.clamp(0.0, 0.95);
+        let fc = forward_coeff.min(0.95);
         let one_minus_fc = (1.0 - fc).max(1.0e-30);
         let dep_cap = fc * pb;
         if voltage < dep_cap {
@@ -917,6 +929,7 @@ impl Jfet {
     ) -> Jfet2ChargeState {
         let pol = self.jfet_type.polarity();
         let temp_terms = self.jfet2_temperature_terms(temp);
+        let forward_bias_coefficient = self.jfet2_forward_bias_coefficient();
         let scale = self.area.max(0.0) * self.m.max(0.0);
         let vgs_int = pol * vgs;
         let vgd_int = pol * vgd;
@@ -924,13 +937,13 @@ impl Jfet {
             vgs_int,
             temp_terms.t_cgs * scale,
             temp_terms.t_gate_pot,
-            self.params.fc,
+            forward_bias_coefficient,
         );
         let (qgd_int, cgd) = Self::xyce_jfet2_junction_charge(
             vgd_int,
             temp_terms.t_cgd * scale,
             temp_terms.t_gate_pot,
-            self.params.fc,
+            forward_bias_coefficient,
         );
 
         Jfet2ChargeState {
@@ -949,6 +962,7 @@ impl Jfet {
         previous: Option<(Value, Value, Value, Value)>,
     ) -> Option<Jfet2ChargeState> {
         match self.params.channel_model {
+            JfetChannelModel::XyceSydney => Some(self.xyce_jfet1_charge_state(vgs, vgd, temp)),
             JfetChannelModel::ParkerSkellern => {
                 Some(self.jfet2_charge_state(vgs, vgd, temp, previous))
             }
@@ -1167,5 +1181,22 @@ mod tests {
         assert!((charge.cgs - 1.767_766_952_966_368_8e-6).abs() < 1.0e-18);
         assert!((charge.qgd - -4.721_359_549_995_796e-7).abs() < 1.0e-18);
         assert!((charge.cgd - 1.788_854_381_999_831_5e-6).abs() < 1.0e-18);
+    }
+
+    #[test]
+    fn xyce_jfet2_clamps_only_its_forward_bias_coefficient() {
+        let mut xyce = Jfet::njf("jxyce", 1, 2, 3).enable_xyce_jfet2_model();
+        xyce.params.fc = 0.99;
+        assert_eq!(
+            xyce.jfet2_forward_bias_coefficient().to_bits(),
+            0.95_f64.to_bits()
+        );
+
+        let mut parker = Jfet::njf("jparker", 1, 2, 3).enable_jfet2_model();
+        parker.params.fc = 0.99;
+        assert_eq!(
+            parker.jfet2_forward_bias_coefficient().to_bits(),
+            0.99_f64.to_bits()
+        );
     }
 }

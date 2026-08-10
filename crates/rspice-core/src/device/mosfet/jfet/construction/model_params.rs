@@ -34,9 +34,14 @@ impl Jfet {
             .get("BETA")
             .copied()
             .or_else(|| {
-                (!matches!(p.channel_model, JfetChannelModel::LegacyMesfet))
-                    .then(|| params.get("B").copied())
-                    .flatten()
+                (!matches!(
+                    p.channel_model,
+                    JfetChannelModel::LegacyMesfet
+                        | JfetChannelModel::XyceSydney
+                        | JfetChannelModel::XyceModifiedShockley
+                ))
+                .then(|| params.get("B").copied())
+                .flatten()
             })
             .filter(|v| v.is_finite() && *v >= 0.0);
         let idss_from_card = params
@@ -159,11 +164,13 @@ impl Jfet {
             }
         }
 
-        if let Some(v) = params
-            .get("FC")
-            .copied()
-            .filter(|v| v.is_finite() && *v >= 0.0 && *v < 1.0)
-        {
+        if let Some(v) = params.get("FC").copied().filter(|v| {
+            v.is_finite()
+                && (matches!(
+                    p.channel_model,
+                    JfetChannelModel::XyceSydney | JfetChannelModel::XyceModifiedShockley
+                ) || (*v >= 0.0 && *v < 1.0))
+        }) {
             p.fc = v;
         }
         if let Some(v) = params
@@ -679,9 +686,9 @@ impl Jfet {
         if let Some(v) = params
             .get("TNOM")
             .copied()
-            .filter(|v| v.is_finite() && *v > 0.0)
+            .filter(|v| v.is_finite() && *v > -273.15)
         {
-            p.tnom = if v > 200.0 { v } else { v + 273.15 };
+            p.tnom = v + 273.15;
         }
         self.params = p;
         self
