@@ -2348,6 +2348,11 @@ pub(crate) struct ActivePaneFacts {
     pub analysis: Option<String>,
     /// Visible and bound trace counts on this pane alone.
     pub traces: Option<(usize, usize)>,
+    /// How many runs the pane draws at once. The mockup's corner families are
+    /// a Visualization Studio presentation; on this workspace the same
+    /// question — one curve, or several realizations of it? — is answered by
+    /// the overlaid runs the pane is actually carrying.
+    pub runs: Option<usize>,
     pub scale: Option<&'static str>,
     pub limit_mask: &'static str,
     pub x_viewport: Option<String>,
@@ -2363,7 +2368,7 @@ pub(crate) fn active_pane_facts(
     // or it is fitting the retained data. The mockup states the interval
     // either way: "automatic" alone does not tell a reader what they see.
     let (x_viewport, y_viewport) = active_pane_viewports(tokens, state);
-    let (analysis, traces) = active_pane_identity(tokens, state);
+    let (analysis, traces, runs) = active_pane_identity(tokens, state);
     let key = state.ui.results.active_wave_pane.as_ref();
     let scale = key.map(|key| {
         let log = ctx
@@ -2381,6 +2386,7 @@ pub(crate) fn active_pane_facts(
         unit: key.map(|key| key.unit.clone()),
         analysis,
         traces,
+        runs,
         scale,
         limit_mask: if state.ui.results.show_spec_limits {
             "project specification limits"
@@ -2452,9 +2458,9 @@ pub(crate) fn active_shared_x_status(
 fn active_pane_identity(
     tokens: &Tokens,
     state: &mut AppState,
-) -> (Option<String>, Option<(usize, usize)>) {
+) -> (Option<String>, Option<(usize, usize)>, Option<usize>) {
     let Some(key) = state.ui.results.active_wave_pane.clone() else {
-        return (None, None);
+        return (None, None, None);
     };
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
@@ -2467,7 +2473,7 @@ fn active_pane_identity(
         .iter()
         .find(|model| model.analysis_key == key.analysis)
     else {
-        return (None, None);
+        return (None, None, None);
     };
     let bound = model
         .traces
@@ -2479,12 +2485,19 @@ fn active_pane_identity(
         .iter()
         .filter(|trace| trace.visible && model.trace_unit(trace) == key.unit)
         .count();
+    let runs = model
+        .traces
+        .iter()
+        .filter(|trace| model.trace_unit(trace) == key.unit)
+        .map(|trace| trace.run_id)
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
     let label = state
         .simulation
         .active_run()
         .and_then(|run| run.analyses.get(model.analysis_index))
         .map(|analysis| analysis.label.clone());
-    (label, Some((visible, bound)))
+    (label, Some((visible, bound)), Some(runs))
 }
 
 /// The active pane's X and Y intervals, formatted through the strip's own

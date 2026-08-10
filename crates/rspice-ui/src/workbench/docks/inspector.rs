@@ -1869,6 +1869,17 @@ fn active_result_pane(
         property_row(ui, "Scale", scale);
     }
     property_row(ui, "Limit mask", facts.limit_mask);
+    // Where the mockup states a corner family, this workspace states the run
+    // composition: overlaying runs is how a pane here comes to draw the same
+    // signal more than once.
+    if let Some(runs) = facts.runs {
+        let composition = if runs > 1 {
+            format!("{runs} runs overlaid")
+        } else {
+            "active run only".to_owned()
+        };
+        property_row(ui, "Composition", &composition);
+    }
     if let Some((minimum, maximum)) = view.x {
         property_row(
             ui,

@@ -318,6 +318,38 @@ fn a_value_is_named_by_its_own_unit_not_the_strips() {
 }
 
 #[test]
+fn a_pane_states_how_many_runs_it_draws() {
+    let mut state = AppState::default();
+    state.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+        ]),
+    );
+    let first = state.simulation.runs[0].dataset_id;
+    state.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 4.0], "#fff"),
+        ]),
+    );
+    let run = state.simulation.active_run().expect("active run");
+    let analysis = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+    state.ui.results.active_wave_pane = Some(WavePanePresentationKey {
+        analysis,
+        unit: "V".to_owned(),
+    });
+
+    let (_, _, alone) = active_pane_identity(&Tokens::default(), &mut state);
+    assert_eq!(alone, Some(1), "one run drawn before anything is overlaid");
+
+    // Overlaying the earlier run makes the pane draw the same signal twice.
+    // `models_fingerprint` hashes `display_runs`, so the cache reruns itself.
+    state.simulation.overlay_dataset_ids.push(first);
+    let (_, _, overlaid) = active_pane_identity(&Tokens::default(), &mut state);
+
+    assert_eq!(overlaid, Some(2), "the active run plus one overlay");
+}
+
+#[test]
 fn a_slope_is_named_by_its_own_unit_not_the_strips() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
