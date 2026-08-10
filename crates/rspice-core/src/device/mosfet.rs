@@ -5,9 +5,7 @@
 
 #![allow(clippy::module_inception)]
 pub mod b3soi;
-mod bsim3;
 pub mod bsim3v3;
-mod bsim4;
 pub mod bsim4v8;
 mod ekv;
 mod ekv3;
@@ -19,9 +17,7 @@ mod smooth;
 mod vdmos;
 
 pub use b3soi::{B3SoiDd, B3SoiDdModel, B3SoiFd, B3SoiFdModel, B3SoiPd, B3SoiPdModel, BodyMode};
-pub use bsim3::{Bsim3, Bsim3Params, Bsim3Region, Bsim3Type};
 pub use bsim3v3::{Bsim3v3, Bsim3v3Device, Bsim3v3EquationSet, Bsim3v3Model};
-pub use bsim4::{Bsim4, Bsim4Params, Bsim4Type};
 pub use bsim4v8::{Bsim4v8, Bsim4v8Device, Bsim4v8Model};
 pub use ekv::EkvMosfet;
 pub use ekv3::{Ekv3Device, Ekv3Op};
