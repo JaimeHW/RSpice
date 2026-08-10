@@ -128,14 +128,128 @@ impl std::fmt::Display for ParameterValueError {
 
 impl std::error::Error for ParameterValueError {}
 
+/// Content identity of one native compilation.
+///
+/// Keying on content rather than on the `Arc<CompiledModel>` address is what
+/// lets a second engine build reuse the first build's image: the runtime model
+/// cache hands back a freshly allocated `Arc` after a disk-cache hit, so
+/// pointer identity reports a miss for a model that is byte-identical.
+///
+/// The digests are carried together because the emitted image is a function of
+/// both artifacts the compiler consumes. `mir_digest` alone determines the
+/// image for artifacts produced by one compiler build, but the pair costs
+/// nothing and keeps the key honest if that ever stops being true.
 #[cfg(feature = "native")]
 #[derive(Clone, PartialEq, Eq)]
 enum NativeCompileCacheKey {
     /// Internal bytecode-native contract-test cache lane. Production native
     /// construction must compile through `CanonicalMir`.
     #[cfg(feature = "native-bytecode-contract-tests")]
-    Bytecode,
-    CanonicalMir(SmolStr),
+    Bytecode {
+        source_digest: SmolStr,
+        module: SmolStr,
+    },
+    CanonicalMir {
+        mir_digest: SmolStr,
+        source_digest: SmolStr,
+        module: SmolStr,
+    },
+}
+
+/// Content identity of one browser-side compilation, matching
+/// [`NativeCompileCacheKey`]'s canonical lane.
+#[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+#[derive(Clone, PartialEq, Eq)]
+struct WasmCompileCacheKey {
+    mir_digest: SmolStr,
+    source_digest: SmolStr,
+    module: SmolStr,
+}
+
+/// Executable-image budget for the process-wide native compilation cache.
+///
+/// Entries hold committed executable pages, so the cache is bounded by bytes
+/// rather than by entry count. Compilation failures are retained at zero cost
+/// so a failing model is not recompiled once per instance.
+#[cfg(feature = "native")]
+const NATIVE_COMPILE_CACHE_DEFAULT_MAX_BYTES: usize = 512 * 1024 * 1024;
+
+#[cfg(feature = "native")]
+const NATIVE_COMPILE_CACHE_MAX_BYTES_ENV: &str = "RSPICE_VERILOGA_NATIVE_CACHE_MAX_BYTES";
+
+/// Counts compilations that actually reached the backend, so tests can assert
+/// a cache hit rather than infer one from wall-clock time.
+#[cfg(all(test, feature = "native"))]
+pub(crate) static NATIVE_COMPILE_COUNT: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(feature = "native")]
+struct NativeCompileCacheEntry {
+    key: NativeCompileCacheKey,
+    compiled: Result<std::sync::Arc<NativeModel>, String>,
+    image_bytes: usize,
+}
+
+#[cfg(feature = "native")]
+#[derive(Default)]
+struct NativeCompileCache {
+    /// Most-recently-used first.
+    entries: Vec<NativeCompileCacheEntry>,
+    image_bytes: usize,
+}
+
+#[cfg(feature = "native")]
+impl NativeCompileCache {
+    fn max_bytes() -> usize {
+        std::env::var(NATIVE_COMPILE_CACHE_MAX_BYTES_ENV)
+            .ok()
+            .and_then(|raw| raw.trim().parse::<usize>().ok())
+            .filter(|budget| *budget > 0)
+            .unwrap_or(NATIVE_COMPILE_CACHE_DEFAULT_MAX_BYTES)
+    }
+
+    fn get(
+        &mut self,
+        key: &NativeCompileCacheKey,
+    ) -> Option<Result<std::sync::Arc<NativeModel>, String>> {
+        let index = self.entries.iter().position(|entry| entry.key == *key)?;
+        let entry = self.entries.remove(index);
+        let compiled = entry.compiled.clone();
+        self.entries.insert(0, entry);
+        Some(compiled)
+    }
+
+    fn insert(
+        &mut self,
+        key: NativeCompileCacheKey,
+        compiled: Result<std::sync::Arc<NativeModel>, String>,
+    ) {
+        let image_bytes = compiled
+            .as_ref()
+            .map_or(0, |native| native.code_size_bytes());
+        self.entries.insert(
+            0,
+            NativeCompileCacheEntry {
+                key,
+                compiled,
+                image_bytes,
+            },
+        );
+        self.image_bytes = self.image_bytes.saturating_add(image_bytes);
+        self.evict_to(Self::max_bytes());
+    }
+
+    /// Drop least-recently-used images until the budget is met, always keeping
+    /// the entry that was just inserted so one oversized model cannot evict
+    /// itself into an infinite recompile loop.
+    fn evict_to(&mut self, max_bytes: usize) {
+        while self.image_bytes > max_bytes && self.entries.len() > 1 {
+            let Some(evicted) = self.entries.pop() else {
+                break;
+            };
+            self.image_bytes = self.image_bytes.saturating_sub(evicted.image_bytes);
+        }
+    }
 }
 
 /// A Verilog-A device instance in a circuit
@@ -556,7 +670,11 @@ impl VerilogADevice {
     fn try_native_compile(
         model: &std::sync::Arc<CompiledModel>,
     ) -> Result<std::sync::Arc<NativeModel>, VmError> {
-        Self::try_native_compile_cached(model, NativeCompileCacheKey::Bytecode, |model| {
+        let cache_key = NativeCompileCacheKey::Bytecode {
+            source_digest: model.source_digest.clone(),
+            module: model.name.clone(),
+        };
+        Self::try_native_compile_cached(model, cache_key, |model| {
             crate::native::compile_native(model)
         })
     }
@@ -566,11 +684,14 @@ impl VerilogADevice {
         model: &std::sync::Arc<CompiledModel>,
         artifact: &CanonicalIrArtifact,
     ) -> Result<std::sync::Arc<NativeModel>, VmError> {
-        Self::try_native_compile_cached(
-            model,
-            NativeCompileCacheKey::CanonicalMir(artifact.mir_digest.clone()),
-            |model| crate::native::compile_native_with_canonical_ir(model, artifact),
-        )
+        let cache_key = NativeCompileCacheKey::CanonicalMir {
+            mir_digest: artifact.mir_digest.clone(),
+            source_digest: model.source_digest.clone(),
+            module: model.name.clone(),
+        };
+        Self::try_native_compile_cached(model, cache_key, |model| {
+            crate::native::compile_native_with_canonical_ir(model, artifact)
+        })
     }
 
     #[cfg(feature = "native")]
@@ -579,23 +700,21 @@ impl VerilogADevice {
         cache_key: NativeCompileCacheKey,
         compile: impl FnOnce(&CompiledModel) -> crate::native::JitResult<NativeModel>,
     ) -> Result<std::sync::Arc<NativeModel>, VmError> {
-        use std::sync::{Arc, Mutex, Weak};
+        use std::sync::Mutex;
 
-        type CacheEntry = (
-            Weak<CompiledModel>,
-            NativeCompileCacheKey,
-            Result<Arc<NativeModel>, String>,
-        );
-        static NATIVE_CACHE: Mutex<Vec<CacheEntry>> = Mutex::new(Vec::new());
+        static NATIVE_CACHE: Mutex<Option<NativeCompileCache>> = Mutex::new(None);
 
-        let mut cache = NATIVE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-        cache.retain(|(weak, _, _)| weak.strong_count() > 0);
-        if let Some((_, _, cached)) = cache
-            .iter()
-            .find(|(weak, key, _)| weak.as_ptr() == Arc::as_ptr(model) && *key == cache_key)
-        {
-            return cached.clone().map_err(VmError::NativeJit);
+        // The lock is held across compilation, as it always has been: two
+        // threads reaching the same uncached model would otherwise both pay
+        // the full compile and both commit an executable image.
+        let mut guard = NATIVE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        let cache = guard.get_or_insert_with(NativeCompileCache::default);
+        if let Some(cached) = cache.get(&cache_key) {
+            return cached.map_err(VmError::NativeJit);
         }
+
+        #[cfg(test)]
+        NATIVE_COMPILE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         let compiled = match compile(model.as_ref()) {
             Ok(native) => {
@@ -619,43 +738,54 @@ impl VerilogADevice {
                 Err(msg)
             }
         };
-        cache.push((Arc::downgrade(model), cache_key, compiled.clone()));
+        cache.insert(cache_key, compiled.clone());
         compiled.map_err(VmError::NativeJit)
     }
 
+    /// Browser-side entry-table cache, keyed on the same content identity as
+    /// the native cache.
+    ///
+    /// The entries here are export-name tables, not code: the compiled modules
+    /// themselves live in the worker's own bounded registry. The bound is an
+    /// entry count matching that registry so the two tiers cannot disagree
+    /// about how many models are resident.
     #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
     fn try_wasm_compile_with_canonical_ir(
         model: &std::sync::Arc<CompiledModel>,
         artifact: &CanonicalIrArtifact,
     ) -> Result<std::sync::Arc<WasmJitExecutable>, VmError> {
         use std::cell::RefCell;
-        use std::sync::{Arc, Weak};
+        use std::sync::Arc;
 
-        type CacheEntry = (
-            Weak<CompiledModel>,
-            SmolStr,
-            Result<Arc<WasmJitExecutable>, String>,
-        );
+        /// Mirrors `WASM_JIT_CACHE_MAX_MODELS` in the browser worker.
+        const WASM_CACHE_MAX_MODELS: usize = 64;
+
+        type CacheEntry = (WasmCompileCacheKey, Result<Arc<WasmJitExecutable>, String>);
         thread_local! {
+            /// Most-recently-used first.
             static WASM_CACHE: RefCell<Vec<CacheEntry>> = const { RefCell::new(Vec::new()) };
         }
 
-        let cache_key = artifact.mir_digest.clone();
+        let cache_key = WasmCompileCacheKey {
+            mir_digest: artifact.mir_digest.clone(),
+            source_digest: model.source_digest.clone(),
+            module: model.name.clone(),
+        };
         WASM_CACHE.with(|cache| {
             let mut cache = cache.borrow_mut();
-            cache.retain(|(weak, _, _)| weak.strong_count() > 0);
-            if let Some((_, _, cached)) = cache
-                .iter()
-                .find(|(weak, key, _)| weak.as_ptr() == Arc::as_ptr(model) && *key == cache_key)
-            {
-                return cached.clone().map_err(VmError::WasmJit);
+            if let Some(index) = cache.iter().position(|(key, _)| *key == cache_key) {
+                let entry = cache.remove(index);
+                let compiled = entry.1.clone();
+                cache.insert(0, entry);
+                return compiled.map_err(VmError::WasmJit);
             }
 
             let compiled = crate::wasm_jit::compile_model_value_module(model, artifact)
                 .and_then(|module| WasmJitExecutable::from_artifact(model, &module))
                 .map(Arc::new)
                 .map_err(|error| error.to_string());
-            cache.push((Arc::downgrade(model), cache_key, compiled.clone()));
+            cache.insert(0, (cache_key, compiled.clone()));
+            cache.truncate(WASM_CACHE_MAX_MODELS);
             compiled.map_err(VmError::WasmJit)
         })
     }
@@ -4206,6 +4336,100 @@ mod tests {
         fn assert_send_sync<T: Send + Sync>() {}
 
         assert_send_sync::<VerilogADevice>();
+    }
+
+    /// A second engine build reuses the first build's image.
+    ///
+    /// The runtime model cache allocates a fresh `Arc<CompiledModel>` whenever
+    /// it restores a record from disk, so an address-keyed cache reports a miss
+    /// for a byte-identical model and recompiles it. Large compact models cost
+    /// seconds there, so this is pinned on content identity.
+    #[test]
+    fn native_compilation_is_reused_across_distinct_model_allocations() {
+        use std::sync::atomic::Ordering::Relaxed;
+
+        let source = r#"
+`include "disciplines.vams"
+module native_cache_identity(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real resistance = 4.0;
+  analog I(p, n) <+ V(p, n) / resistance;
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler
+            .compile(source)
+            .expect("compile cache-identity model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile cache-identity canonical IR");
+
+        let before = NATIVE_COMPILE_COUNT.load(Relaxed);
+        let first = Arc::new(model.clone());
+        VerilogADevice::try_new_with_canonical_ir(
+            "XCACHE1",
+            Arc::clone(&first),
+            &artifact,
+            &[1, 0],
+        )
+        .expect("build first cache-identity device");
+        let after_first = NATIVE_COMPILE_COUNT.load(Relaxed);
+        assert_eq!(
+            after_first - before,
+            1,
+            "the first device must reach the backend exactly once"
+        );
+
+        // A separate allocation holding identical content: what a disk-cache
+        // hit hands back on the next engine build.
+        let second = Arc::new(model.clone());
+        assert!(
+            !Arc::ptr_eq(&first, &second),
+            "the test must exercise two distinct allocations"
+        );
+        VerilogADevice::try_new_with_canonical_ir("XCACHE2", second, &artifact, &[1, 0])
+            .expect("build second cache-identity device");
+        assert_eq!(
+            NATIVE_COMPILE_COUNT.load(Relaxed),
+            after_first,
+            "an identical model must not be recompiled for a new allocation"
+        );
+
+        // Dropping every device must not invalidate the cache either: the
+        // engine rebuild that motivates this cache drops the old circuit first.
+        drop(first);
+        VerilogADevice::try_new_with_canonical_ir("XCACHE3", Arc::new(model), &artifact, &[1, 0])
+            .expect("build third cache-identity device");
+        assert_eq!(
+            NATIVE_COMPILE_COUNT.load(Relaxed),
+            after_first,
+            "the cache must survive the last live model reference being dropped"
+        );
+    }
+
+    #[test]
+    fn native_compile_cache_evicts_by_image_bytes_and_keeps_the_newest_entry() {
+        let mut cache = NativeCompileCache::default();
+        for index in 0..4_u32 {
+            cache.insert(
+                NativeCompileCacheKey::CanonicalMir {
+                    mir_digest: SmolStr::new(format!("mir{index}")),
+                    source_digest: SmolStr::new("src"),
+                    module: SmolStr::new("m"),
+                },
+                Err(format!("failure {index}")),
+            );
+        }
+        assert_eq!(cache.entries.len(), 4, "failures cost no image bytes");
+
+        cache.image_bytes = 8;
+        cache.evict_to(0);
+        assert_eq!(
+            cache.entries.len(),
+            1,
+            "eviction must retain the most recent entry so an oversized image cannot loop"
+        );
     }
 
     fn compile(source: &str) -> CompiledModel {
