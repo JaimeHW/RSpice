@@ -5374,7 +5374,7 @@ dependencies = [
  "serde_json",
  "smol_str 0.3.6",
  "thiserror 2.0.20",
- "wasm-encoder 0.244.0",
+ "wasm-encoder 0.255.0",
  "wasmi",
  "wasmparser 0.244.0",
  "web-time",
