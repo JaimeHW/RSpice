@@ -207,8 +207,12 @@ pub struct SpiceLibraryIndex {
     root: PathBuf,
     packs: Vec<SpicePack>,
     addressable_catalog: Arc<OnceLock<Result<Arc<AddressableCatalog>, String>>>,
+    /// The compiled-in catalog, still deflated. See [`Self::embedded_catalog_text`].
     #[cfg(target_arch = "wasm32")]
-    embedded_catalog: Option<&'static str>,
+    embedded_catalog: Option<&'static [u8]>,
+    /// The inflated catalog, populated on first use and shared by every clone.
+    #[cfg(target_arch = "wasm32")]
+    embedded_catalog_text: Arc<OnceLock<String>>,
 }
 
 #[derive(Debug)]
@@ -243,10 +247,10 @@ impl SpiceLibraryIndex {
                 env!("CARGO_MANIFEST_DIR"),
                 "/../../models/spice/PACKS.tsv"
             ));
-            const CATALOG: &str = include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../models/spice/CATALOG.tsv"
-            ));
+            // Deflated by `embed_browser_catalog` in build.rs. The pack index is
+            // a few kilobytes and stays plain text; the catalog is ~16 MB and
+            // would otherwise be a third of the browser image.
+            const CATALOG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/CATALOG.tsv.deflate"));
             Ok(Some(Self::from_embedded_indexes(PACKS, CATALOG)))
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -292,17 +296,48 @@ impl SpiceLibraryIndex {
             addressable_catalog: Arc::new(OnceLock::new()),
             #[cfg(target_arch = "wasm32")]
             embedded_catalog: None,
+            #[cfg(target_arch = "wasm32")]
+            embedded_catalog_text: Arc::new(OnceLock::new()),
         })
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn from_embedded_indexes(packs: &'static str, catalog: &'static str) -> Self {
+    fn from_embedded_indexes(packs: &'static str, catalog: &'static [u8]) -> Self {
         Self {
             root: PathBuf::from("/rspice-browser/model-catalog"),
             packs: parse_packs(packs),
             addressable_catalog: Arc::new(OnceLock::new()),
             embedded_catalog: Some(catalog),
+            embedded_catalog_text: Arc::new(OnceLock::new()),
         }
+    }
+
+    /// The compiled-in catalog as text, inflating it the first time it is asked
+    /// for.
+    ///
+    /// Nothing inflates at startup: a session that never consults the catalog
+    /// never materialises those ~16 MB, and one that does pays once and shares
+    /// the result with every clone of this index. A catalog that fails to
+    /// inflate reads as an empty one, which is the same thing a native build
+    /// reports for a model tree it cannot open — the built-in library still
+    /// works, so this is not fatal.
+    #[cfg(target_arch = "wasm32")]
+    fn embedded_catalog_text(&self) -> &str {
+        let Some(deflated) = self.embedded_catalog else {
+            return "";
+        };
+        self.embedded_catalog_text.get_or_init(|| {
+            match miniz_oxide::inflate::decompress_to_vec(deflated) {
+                Ok(bytes) => String::from_utf8(bytes).unwrap_or_else(|error| {
+                    log::error!("embedded part catalog is not valid UTF-8: {error}");
+                    String::new()
+                }),
+                Err(error) => {
+                    log::error!("embedded part catalog could not be inflated: {error:?}");
+                    String::new()
+                }
+            }
+        })
     }
 
     /// Root directory of the model tree.
@@ -812,7 +847,8 @@ impl SpiceLibraryIndex {
         mut visit: impl FnMut(CatalogEntry) -> bool,
     ) -> io::Result<()> {
         #[cfg(target_arch = "wasm32")]
-        if let Some(catalog) = self.embedded_catalog {
+        if self.embedded_catalog.is_some() {
+            let catalog = self.embedded_catalog_text();
             for line in catalog.lines() {
                 if line.starts_with('#') || line.is_empty() {
                     continue;

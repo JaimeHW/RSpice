@@ -5190,6 +5190,7 @@ dependencies = [
  "libloading 0.9.0",
  "libm",
  "log",
+ "miniz_oxide",
  "nom",
  "num-complex",
  "portable-atomic",
