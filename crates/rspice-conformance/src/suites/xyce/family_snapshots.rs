@@ -3276,6 +3276,184 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    pub(super) fn validate_xyce_sydney_level1_jfet_dtemp_provenance(
+        &self,
+        contract: &XyceSydneyLevel1JfetDtempContract,
+    ) -> Result<(), String> {
+        const LABEL: &str = "Xyce Sydney level-1 JFET TEMP/DTEMP family";
+        let parent = contract
+            .owner_path
+            .parent()
+            .ok_or_else(|| format!("{LABEL} owner has no parent directory"))?;
+        if contract.reference_path.parent() != Some(parent) {
+            return Err(format!("{LABEL} contract paths do not share one directory"));
+        }
+        let exclusions = self
+            .upstream_exclusions
+            .as_ref()
+            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
+        let entries = fs::read_dir(parent)
+            .map_err(|error| format!("failed to read {LABEL} directory: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("failed to enumerate {LABEL}: {error}"))?;
+
+        let mut candidate_paths = BTreeMap::<String, PathBuf>::new();
+        for entry in entries {
+            let path = entry.path();
+            let relative = self.relative_key(&path);
+            if XyceSydneyLevel1JfetDtempRole::for_record(&relative).is_none() {
+                continue;
+            }
+            let metadata = fs::symlink_metadata(&path)
+                .map_err(|error| format!("failed to inspect {LABEL} candidate: {error}"))?;
+            if metadata.file_type().is_symlink()
+                || !metadata.file_type().is_file()
+                || metadata.len() == 0
+            {
+                return Err(format!(
+                    "{LABEL} candidate '{}' must be a nonempty regular non-symlink file",
+                    self.display_path(&path)
+                ));
+            }
+            let key = Self::normalize_manifest_key(&relative);
+            if candidate_paths.insert(key, path).is_some() {
+                return Err(format!(
+                    "{LABEL} candidate census contains a path collision"
+                ));
+            }
+        }
+
+        let owner_relative = self.relative_key(&contract.owner_path);
+        let reference_relative = self.relative_key(&contract.reference_path);
+        let owner_key = Self::normalize_manifest_key(&owner_relative);
+        let reference_key = Self::normalize_manifest_key(&reference_relative);
+        let expected_owner_key = format!("netlists/dtemp/{}", contract.family.owner_file());
+        let expected_reference_key = format!("netlists/dtemp/{}", contract.family.reference_file());
+        if owner_key != expected_owner_key
+            || reference_key != expected_reference_key
+            || !candidate_paths.contains_key(&owner_key)
+            || !candidate_paths.contains_key(&reference_key)
+            || XyceSydneyLevel1JfetDtempRole::for_record(&owner_relative)
+                != Some((contract.family, XyceSydneyLevel1JfetDtempRole::Owner))
+            || XyceSydneyLevel1JfetDtempRole::for_record(&reference_relative)
+                != Some((contract.family, XyceSydneyLevel1JfetDtempRole::Reference))
+        {
+            return Err(format!(
+                "requested {LABEL} deck or its exact relational sibling is outside the qualified census"
+            ));
+        }
+
+        let mut owner_manifest_rows = Vec::new();
+        let mut historical_exclusion_rows = Vec::new();
+        for (key, path) in &candidate_paths {
+            let relative = self.relative_key(path);
+            let Some((_, role)) = XyceSydneyLevel1JfetDtempRole::for_record(&relative) else {
+                return Err(format!("{LABEL} candidate role became ambiguous"));
+            };
+            match role {
+                XyceSydneyLevel1JfetDtempRole::Owner => {
+                    if !self.requires_upstream_wrapper(&relative) || exclusions.contains_key(key) {
+                        return Err(format!(
+                            "{LABEL} owner '{relative}' lost its exclusive wrapper provenance"
+                        ));
+                    }
+                    owner_manifest_rows
+                        .push(format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"));
+                }
+                XyceSydneyLevel1JfetDtempRole::Reference => {
+                    let exclusion = exclusions.get(key).ok_or_else(|| {
+                        format!(
+                            "{LABEL} reference '{relative}' lost its historical exclusion provenance"
+                        )
+                    })?;
+                    if !matches!(
+                        &exclusion.disposition,
+                        XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                            expected_contract,
+                        } if expected_contract == XYCE_SYDNEY_LEVEL1_JFET_DTEMP_REFERENCE_CONTRACT
+                    ) || self.requires_upstream_wrapper(&relative)
+                    {
+                        return Err(format!(
+                            "{LABEL} reference '{relative}' does not carry the exact independent qualification"
+                        ));
+                    }
+                    historical_exclusion_rows.push(format!(
+                        "{relative}\t{}\tupstream_excluded",
+                        exclusion.source
+                    ));
+                }
+            }
+        }
+
+        let mut candidates = Vec::with_capacity(candidate_paths.len());
+        let mut candidate_content = Vec::with_capacity(candidate_paths.len());
+        for path in candidate_paths.values() {
+            let relative = self.relative_key(path);
+            let bytes = fs::read(path).map_err(|error| {
+                format!("failed to read {LABEL} candidate '{relative}': {error}")
+            })?;
+            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
+            candidates.push(relative.clone());
+            candidate_content.push(format!("{relative}\t{}", blake3::hash(&canonical).to_hex()));
+            self.reject_wrapper_output_artifacts(path)?;
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| format!("{LABEL} candidate filename is not UTF-8"))?;
+            for suffix in ["prn", "res", "prn.gs", "res.gs", "csv", "csd"] {
+                let sidecar = path.with_file_name(format!("{file_name}.{suffix}"));
+                match fs::symlink_metadata(&sidecar) {
+                    Ok(_) => {
+                        return Err(format!(
+                            "{LABEL} candidate must not have source-side output artifact '{}'",
+                            self.display_path(&sidecar)
+                        ));
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        return Err(format!(
+                            "failed to inspect {LABEL} sidecar '{}': {error}",
+                            self.display_path(&sidecar)
+                        ));
+                    }
+                }
+            }
+        }
+
+        candidates.sort();
+        candidate_content.sort();
+        owner_manifest_rows.sort();
+        historical_exclusion_rows.sort();
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(candidate_content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let owner_hash = blake3::hash(owner_manifest_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let exclusion_hash = blake3::hash(historical_exclusion_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if candidates.len() != XYCE_SYDNEY_LEVEL1_JFET_DTEMP_CANDIDATE_COUNT
+            || candidate_hash != XYCE_SYDNEY_LEVEL1_JFET_DTEMP_CANDIDATE_BLAKE3
+            || content_hash != XYCE_SYDNEY_LEVEL1_JFET_DTEMP_CONTENT_BLAKE3
+            || owner_manifest_rows.len() != XYCE_SYDNEY_LEVEL1_JFET_DTEMP_OWNER_COUNT
+            || owner_hash != XYCE_SYDNEY_LEVEL1_JFET_DTEMP_OWNER_MANIFEST_BLAKE3
+            || historical_exclusion_rows.len() != XYCE_SYDNEY_LEVEL1_JFET_DTEMP_EXCLUSION_COUNT
+            || exclusion_hash != XYCE_SYDNEY_LEVEL1_JFET_DTEMP_HISTORICAL_EXCLUSION_BLAKE3
+        {
+            return Err(format!(
+                "{LABEL} provenance changed: candidates={}/{candidate_hash}/{content_hash}, owners={}/{owner_hash}, exclusions={}/{exclusion_hash}",
+                candidates.len(),
+                owner_manifest_rows.len(),
+                historical_exclusion_rows.len()
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn validate_nonlinear_core_model_step_provenance(
         &self,
         contract: &XyceNonlinearCoreModelStepReferenceContract,
@@ -9965,6 +10143,520 @@ impl XyceTestRunner {
         if bjt_count != 1 {
             return Err(format!(
                 "{LABEL} materialization produced {bjt_count} BJT instances instead of one"
+            ));
+        }
+        Ok(normalized)
+    }
+
+    pub(super) fn xyce_sydney_level1_jfet_dtemp_snapshot(
+        plan: &XyceStaticDcPlan,
+        netlist: &Netlist,
+        family: XyceSydneyLevel1JfetDtempFamily,
+        role: XyceSydneyLevel1JfetDtempRole,
+    ) -> Result<XyceSydneyLevel1JfetDtempSnapshot, String> {
+        const LABEL: &str = "Xyce Sydney level-1 JFET TEMP/DTEMP family";
+        if plan.expression_dialect != ExpressionDialect::Xyce
+            || plan.execution_dir.is_some()
+            || plan.dc_data.is_some()
+            || plan.print_format.is_some()
+            || !plan.diagnostics.is_empty()
+            || plan.steps.len() != 1
+            || !matches!(plan.dc.mode, DcSweepMode::Linear)
+            || plan.print.probes.len() != 3
+        {
+            return Err(format!(
+                "{LABEL} requires one diagnostic-free LIST STEP, one two-source linear DC analysis, and one default three-probe PRN output"
+            ));
+        }
+        let dc_count = netlist
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Dc { .. }))
+            .count();
+        let step_count = netlist
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Step(_)))
+            .count();
+        if netlist.analyses.len() != 2
+            || dc_count != 1
+            || step_count != 1
+            || netlist.lin_analysis.is_some()
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || netlist.device_initial_conditions.is_some()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || netlist.output_requests.len() != 1
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+            || netlist.models.len() != 1
+        {
+            return Err(format!(
+                "{LABEL} admits only authored V/J elements, one native scalar model, one DC analysis, one STEP analysis, and one output request"
+            ));
+        }
+
+        let step = &plan.steps[0];
+        let StepSweep::List(step_values) = &step.sweep else {
+            return Err(format!("{LABEL} requires a three-value LIST sweep"));
+        };
+        let canonical_temperatures = [15.0f64, 25.0, 35.0];
+        let effective_temperatures = match role {
+            XyceSydneyLevel1JfetDtempRole::Owner => {
+                if step.target != StepTarget::Param
+                    || !step.name.eq_ignore_ascii_case("dtempParam")
+                    || step.param_name.is_some()
+                    || netlist.options.temp.map(Value::to_bits) != Some(25.0f64.to_bits())
+                    || step_values
+                        .iter()
+                        .map(|value| value.to_bits())
+                        .ne([-10.0f64, 0.0, 10.0].into_iter().map(Value::to_bits))
+                {
+                    return Err(format!(
+                        "{LABEL} owner must hold circuit TEMP=25 C and STEP dtempParam through -10, 0, 10 C; observed target={:?}, name='{}', param_name={:?}, TEMP={:?}, values={step_values:?}",
+                        step.target, step.name, step.param_name, netlist.options.temp
+                    ));
+                }
+                step_values
+                    .iter()
+                    .map(|dtemp| 25.0 + dtemp)
+                    .collect::<Vec<_>>()
+            }
+            XyceSydneyLevel1JfetDtempRole::Reference => {
+                if step.target != StepTarget::Param
+                    || !step.name.eq_ignore_ascii_case("tempParam")
+                    || step.param_name.is_some()
+                    || netlist.options.temp.is_some()
+                    || step_values
+                        .iter()
+                        .map(|value| value.to_bits())
+                        .ne(canonical_temperatures.into_iter().map(Value::to_bits))
+                {
+                    return Err(format!(
+                        "{LABEL} reference must retain no circuit TEMP override and STEP absolute tempParam through 15, 25, 35 C; observed target={:?}, name='{}', param_name={:?}, TEMP={:?}, values={step_values:?}",
+                        step.target, step.name, step.param_name, netlist.options.temp
+                    ));
+                }
+                step_values.clone()
+            }
+        };
+        if effective_temperatures
+            .iter()
+            .map(|value| value.to_bits())
+            .ne(canonical_temperatures.into_iter().map(Value::to_bits))
+        {
+            return Err(format!(
+                "{LABEL} TEMP and circuit-TEMP-plus-DTEMP grids are not identical"
+            ));
+        }
+
+        let explicit_params = netlist
+            .params
+            .all_params()
+            .into_iter()
+            .filter(|(name, _)| {
+                !matches!(name.to_ascii_uppercase().as_str(), "TEMP" | "TEMPER" | "VT")
+            })
+            .collect::<Vec<_>>();
+        let (expected_parameter, expected_initial): (&str, Value) = match role {
+            XyceSydneyLevel1JfetDtempRole::Owner => ("dtempParam", 10.0),
+            XyceSydneyLevel1JfetDtempRole::Reference => match family {
+                XyceSydneyLevel1JfetDtempFamily::Njf => ("tempParam", 15.0),
+                XyceSydneyLevel1JfetDtempFamily::Pjf => ("tempParam", 10.0),
+            },
+        };
+        if explicit_params.len() != 1
+            || !explicit_params[0]
+                .0
+                .eq_ignore_ascii_case(expected_parameter)
+            || explicit_params[0].1.to_bits() != expected_initial.to_bits()
+        {
+            return Err(format!(
+                "{LABEL} admits only {expected_parameter}={expected_initial}, got {explicit_params:?}"
+            ));
+        }
+
+        let model = &netlist.models[0];
+        if !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return Err(format!("{LABEL} requires one native scalar JFET model"));
+        }
+        let (expected_model_name, expected_model_type, mut expected_model_params) = match family {
+            XyceSydneyLevel1JfetDtempFamily::Njf => (
+                "sa2109",
+                "njf",
+                vec![
+                    ("af".to_string(), 1.0f64.to_bits()),
+                    ("b".to_string(), 0.605f64.to_bits()),
+                    ("beta".to_string(), 0.00002690f64.to_bits()),
+                    ("cgd".to_string(), 0.0f64.to_bits()),
+                    ("cgs".to_string(), 0.0f64.to_bits()),
+                    ("fc".to_string(), 0.5f64.to_bits()),
+                    ("is".to_string(), 1.393e-10f64.to_bits()),
+                    ("kf".to_string(), 0.05f64.to_bits()),
+                    ("lambda".to_string(), 0.0181f64.to_bits()),
+                    ("level".to_string(), 1.0f64.to_bits()),
+                    ("pb".to_string(), 1.07f64.to_bits()),
+                    ("rd".to_string(), 338.0f64.to_bits()),
+                    ("rs".to_string(), 232.0f64.to_bits()),
+                    ("vto".to_string(), (-3.795f64).to_bits()),
+                ],
+            ),
+            XyceSydneyLevel1JfetDtempFamily::Pjf => (
+                "sa2108",
+                "pjf",
+                vec![
+                    ("af".to_string(), 1.0f64.to_bits()),
+                    ("b".to_string(), 0.590f64.to_bits()),
+                    ("beta".to_string(), 0.000278f64.to_bits()),
+                    ("cgd".to_string(), 0.0f64.to_bits()),
+                    ("cgs".to_string(), 0.0f64.to_bits()),
+                    ("fc".to_string(), 0.5f64.to_bits()),
+                    ("is".to_string(), 1.393e-10f64.to_bits()),
+                    ("kf".to_string(), 0.05f64.to_bits()),
+                    ("lambda".to_string(), 0.0055f64.to_bits()),
+                    ("level".to_string(), 1.0f64.to_bits()),
+                    ("pb".to_string(), 0.265f64.to_bits()),
+                    ("rd".to_string(), 302.5f64.to_bits()),
+                    ("rs".to_string(), 0.0f64.to_bits()),
+                    ("vto".to_string(), (-2.10f64).to_bits()),
+                ],
+            ),
+        };
+        expected_model_params.sort();
+        let mut model_params = model
+            .params
+            .iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+            .collect::<Vec<_>>();
+        model_params.sort();
+        if !model.name.eq_ignore_ascii_case(expected_model_name)
+            || !model.model_type.eq_ignore_ascii_case(expected_model_type)
+            || model_params != expected_model_params
+        {
+            return Err(format!(
+                "{LABEL} {} must retain its exact native LEVEL=1 Sydney model card",
+                family.label()
+            ));
+        }
+
+        let mut elements = BTreeMap::new();
+        let mut jfet_count = 0usize;
+        for element in &netlist.elements {
+            if !matches!(element.provenance, ElementProvenance::Authored) {
+                return Err(format!(
+                    "{LABEL} element '{}' is not authored source topology",
+                    element.name
+                ));
+            }
+            let name = element.name.to_ascii_lowercase();
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| Self::canonical_param_expression_node_name(node))
+                .collect::<Vec<_>>();
+            let fingerprint = match &element.kind {
+                ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Dc(value))
+                    if nodes.len() == 2 && value.is_finite() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "V:DC".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::Jfet {
+                    model: instance_model,
+                    jfet_type: _,
+                    instance_params,
+                    deferred_params,
+                } if nodes.len() == 3
+                    && deferred_params.is_empty()
+                    && instance_model.eq_ignore_ascii_case(expected_model_name) =>
+                {
+                    jfet_count += 1;
+                    let mut temp = None;
+                    let mut dtemp = None;
+                    let mut ordinary_params = Vec::new();
+                    for (parameter, value) in instance_params {
+                        if parameter.eq_ignore_ascii_case("TEMP") {
+                            if temp.replace(*value).is_some() {
+                                return Err(format!("{LABEL} JFET repeats TEMP"));
+                            }
+                        } else if parameter.eq_ignore_ascii_case("DTEMP") {
+                            if dtemp.replace(*value).is_some() {
+                                return Err(format!("{LABEL} JFET repeats DTEMP"));
+                            }
+                        } else {
+                            ordinary_params.push((parameter.to_ascii_lowercase(), value.to_bits()));
+                        }
+                    }
+                    ordinary_params.sort();
+                    if !ordinary_params.is_empty() {
+                        return Err(format!(
+                            "{LABEL} JFET admits no instance parameters besides its one temperature selector"
+                        ));
+                    }
+                    match role {
+                        XyceSydneyLevel1JfetDtempRole::Owner
+                            if temp.is_none()
+                                && dtemp.map(Value::to_bits)
+                                    == Some(expected_initial.to_bits()) => {}
+                        XyceSydneyLevel1JfetDtempRole::Reference
+                            if dtemp.is_none()
+                                && temp.map(Value::to_bits) == Some(expected_initial.to_bits()) => {
+                        }
+                        _ => {
+                            return Err(format!(
+                                "{LABEL} owner must carry only DTEMP and reference only TEMP"
+                            ));
+                        }
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: format!("J:{}:XYCE_SYDNEY_LEVEL1", family.label()),
+                        nodes,
+                        numeric_bits: Vec::new(),
+                        text: vec![instance_model.to_ascii_lowercase()],
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} element '{}' with nodes {nodes:?} and kind {:?} is outside the exact authored V/native-JFET envelope",
+                        element.name, element.kind
+                    ));
+                }
+            };
+            if elements.insert(name.clone(), fingerprint).is_some() {
+                return Err(format!("{LABEL} contains duplicate element name '{name}'"));
+            }
+        }
+        if jfet_count != 1 {
+            return Err(format!(
+                "{LABEL} requires exactly one native JFET, found {jfet_count}"
+            ));
+        }
+
+        let fingerprint = |kind: &str, nodes: &[&str], numeric: &[Value], text: &[&str]| {
+            XyceRelationalElementFingerprint {
+                kind: kind.to_string(),
+                nodes: nodes.iter().map(|node| (*node).to_string()).collect(),
+                numeric_bits: numeric.iter().map(|value| value.to_bits()).collect(),
+                text: text.iter().map(|value| (*value).to_string()).collect(),
+            }
+        };
+        let expected_elements = BTreeMap::from([
+            (
+                "jtest".to_string(),
+                fingerprint(
+                    &format!("J:{}:XYCE_SYDNEY_LEVEL1", family.label()),
+                    &["1a", "2a", "3"],
+                    &[],
+                    &[expected_model_name],
+                ),
+            ),
+            (
+                "vds".to_string(),
+                fingerprint("V:DC", &["1", "0"], &[0.0], &[]),
+            ),
+            (
+                "vgs".to_string(),
+                fingerprint("V:DC", &["2", "0"], &[0.0], &[]),
+            ),
+            (
+                "vidmon".to_string(),
+                fingerprint("V:DC", &["1", "1a"], &[0.0], &[]),
+            ),
+            (
+                "vigmon".to_string(),
+                fingerprint("V:DC", &["2", "2a"], &[0.0], &[]),
+            ),
+            (
+                "vismon".to_string(),
+                fingerprint("V:DC", &["0", "3"], &[0.0], &[]),
+            ),
+        ]);
+        if elements != expected_elements {
+            return Err(format!(
+                "{LABEL} {} topology or authored values changed",
+                family.label()
+            ));
+        }
+
+        let probes = plan
+            .print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        let dc_primary = (
+            plan.dc.source.to_ascii_lowercase(),
+            plan.dc.start.to_bits(),
+            plan.dc.stop.to_bits(),
+            plan.dc.step.to_bits(),
+        );
+        let dc_secondary = plan.dc.sweep2.as_ref().map(|sweep| {
+            (
+                sweep.source.to_ascii_lowercase(),
+                sweep.start.to_bits(),
+                sweep.stop.to_bits(),
+                sweep.step.to_bits(),
+            )
+        });
+        let (expected_primary, expected_secondary) = match family {
+            XyceSydneyLevel1JfetDtempFamily::Njf => (
+                (
+                    "vgs".to_string(),
+                    0.0f64.to_bits(),
+                    (-1.875f64).to_bits(),
+                    (-0.625f64).to_bits(),
+                ),
+                Some((
+                    "vds".to_string(),
+                    0.0f64.to_bits(),
+                    15.0f64.to_bits(),
+                    1.0f64.to_bits(),
+                )),
+            ),
+            XyceSydneyLevel1JfetDtempFamily::Pjf => (
+                (
+                    "vgs".to_string(),
+                    0.0f64.to_bits(),
+                    1.5f64.to_bits(),
+                    0.5f64.to_bits(),
+                ),
+                Some((
+                    "vds".to_string(),
+                    (-15.0f64).to_bits(),
+                    0.0f64.to_bits(),
+                    1.0f64.to_bits(),
+                )),
+            ),
+        };
+        let expected_probes = vec!["v(1)", "v(2)", "i(vidmon)"];
+        if dc_primary != expected_primary
+            || dc_secondary != expected_secondary
+            || probes != expected_probes
+            || !matches!(
+                plan.dc.sweep2.as_ref().map(|sweep| &sweep.mode),
+                Some(&DcSweepMode::Linear)
+            )
+        {
+            return Err(format!(
+                "{LABEL} {} sweep domain, sweep order, or ordered probe set changed",
+                family.label()
+            ));
+        }
+
+        Ok(XyceSydneyLevel1JfetDtempSnapshot {
+            elements,
+            model_name: model.name.to_ascii_lowercase(),
+            model_type: model.model_type.to_ascii_lowercase(),
+            model_params,
+            dc_primary,
+            dc_secondary,
+            probes,
+            effective_temperature_bits: effective_temperatures
+                .into_iter()
+                .map(Value::to_bits)
+                .collect(),
+        })
+    }
+
+    pub(super) fn normalize_xyce_sydney_level1_jfet_dtemp_materialization(
+        netlist: &Netlist,
+        family: XyceSydneyLevel1JfetDtempFamily,
+        role: XyceSydneyLevel1JfetDtempRole,
+        expected_coordinate: Value,
+        expected_effective_temperature: Value,
+    ) -> Result<Netlist, String> {
+        const LABEL: &str = "Xyce Sydney level-1 JFET TEMP/DTEMP family";
+        if !expected_coordinate.is_finite() || !expected_effective_temperature.is_finite() {
+            return Err(format!("{LABEL} materialization coordinate is non-finite"));
+        }
+        let (parameter_name, instance_parameter, canonical_initial, effective_temperature): (
+            &str,
+            &str,
+            Value,
+            Value,
+        ) = match role {
+            XyceSydneyLevel1JfetDtempRole::Owner => (
+                "dtempParam",
+                "DTEMP",
+                10.0,
+                netlist.options.temp.unwrap_or(25.0) + expected_coordinate,
+            ),
+            XyceSydneyLevel1JfetDtempRole::Reference => (
+                "tempParam",
+                "TEMP",
+                match family {
+                    XyceSydneyLevel1JfetDtempFamily::Njf => 15.0,
+                    XyceSydneyLevel1JfetDtempFamily::Pjf => 10.0,
+                },
+                expected_coordinate,
+            ),
+        };
+        if netlist.params.get(parameter_name).map(Value::to_bits)
+            != Some(expected_coordinate.to_bits())
+            || effective_temperature.to_bits() != expected_effective_temperature.to_bits()
+        {
+            return Err(format!(
+                "{LABEL} materialization lost its exact parameter coordinate or effective temperature"
+            ));
+        }
+
+        let mut normalized = netlist.clone();
+        normalized.params.set(parameter_name, canonical_initial);
+        let mut jfet_count = 0usize;
+        for element in &mut normalized.elements {
+            let ElementKind::Jfet {
+                instance_params, ..
+            } = &mut element.kind
+            else {
+                continue;
+            };
+            jfet_count += 1;
+            let mut matching = 0usize;
+            for (name, value) in instance_params {
+                if name.eq_ignore_ascii_case(instance_parameter) {
+                    matching += 1;
+                    if value.to_bits() != expected_coordinate.to_bits() {
+                        return Err(format!(
+                            "{LABEL} materialized {instance_parameter} differs from its STEP coordinate"
+                        ));
+                    }
+                    *value = canonical_initial;
+                } else if (matches!(role, XyceSydneyLevel1JfetDtempRole::Owner)
+                    && name.eq_ignore_ascii_case("TEMP"))
+                    || (matches!(role, XyceSydneyLevel1JfetDtempRole::Reference)
+                        && name.eq_ignore_ascii_case("DTEMP"))
+                {
+                    return Err(format!(
+                        "{LABEL} materialization introduced conflicting TEMP/DTEMP state"
+                    ));
+                }
+            }
+            if matching != 1 {
+                return Err(format!(
+                    "{LABEL} materialized JFET requires exactly one {instance_parameter} value"
+                ));
+            }
+        }
+        if jfet_count != 1 {
+            return Err(format!(
+                "{LABEL} materialization produced {jfet_count} JFET instances instead of one"
             ));
         }
         Ok(normalized)

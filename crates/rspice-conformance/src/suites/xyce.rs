@@ -58,15 +58,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 183;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 185;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "07552dfa43ba63f2277fa2333da76c8b1731a1c90b849f256b9738f8c022d91e";
+    "2c75c2b98e7ecddac1febe0917c6982f59edcfc3e89a3028fcff16cc72d4b25d";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "55a79c378e486af2805543090a94bdea15a1d812dc9e512281b38f12e8f0672c";
+    "284f62413e33715a2537de52ae645040cd18c278a13d59ee1b3b3f03af575de9";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "f01b6b6d7bd41d324bfbe815f282f0d1f3cfd26b848d59c9c116d520edc88e1d";
+    "71c3c2204a1076e2e15e649bb80b51752dcfa490ec232fed30fe55f30c8943b7";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -190,6 +190,25 @@ const XYCE_LEGACY_BJT_DTEMP_OWNER_MANIFEST_BLAKE3: &str =
 const XYCE_LEGACY_BJT_DTEMP_EXCLUSION_COUNT: usize = 2;
 const XYCE_LEGACY_BJT_DTEMP_HISTORICAL_EXCLUSION_BLAKE3: &str =
     "69ef9ba2bf3cf5c275c546f5cea47a684ee90ca07f72926c2b8542997ac10e78";
+const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_WRAPPER_CONTRACT: &str =
+    "xyce_sydney_level1_jfet_dtemp_relational_wrapper_owner";
+const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_REFERENCE_CONTRACT: &str =
+    "xyce_sydney_level1_jfet_dtemp_relational_wrapper_reference";
+const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_OWNER_RECORD: &str = "netlists/dtemp/njfet_dtemp.cir";
+const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_REFERENCE_RECORD: &str = "netlists/dtemp/njfet_ref.cir";
+const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_OWNER_RECORD: &str = "netlists/dtemp/pjfet_dtemp.cir";
+const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_REFERENCE_RECORD: &str = "netlists/dtemp/pjfet_ref.cir";
+const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_CANDIDATE_COUNT: usize = 4;
+const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_CANDIDATE_BLAKE3: &str =
+    "bf6231fca25d849be8da71e8a6cf8325f6acd7943e0d5682830316992d1df1dc";
+const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_CONTENT_BLAKE3: &str =
+    "863a33c867f670cd527fe448b0e39d60e338d0a53c6a86cf7401605955e90360";
+const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_OWNER_COUNT: usize = 2;
+const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_OWNER_MANIFEST_BLAKE3: &str =
+    "fd62e0ecd815ffec85dea49ebace91df14654e4ab289fbe81d0b8c230f85b462";
+const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_EXCLUSION_COUNT: usize = 2;
+const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_HISTORICAL_EXCLUSION_BLAKE3: &str =
+    "cab5d8a6b0743784cdc19c143d5068ccee23569733ec7ae6c61eb3f51971dfa4";
 const XYCE_LEVEL2_DIODE_DTEMP_WRAPPER_CONTRACT: &str =
     "level2_diode_dtemp_relational_wrapper_owner";
 const XYCE_LEVEL2_DIODE_DTEMP_REFERENCE_CONTRACT: &str =
@@ -5422,6 +5441,90 @@ struct XyceLegacyBjtDtempContract {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct XyceLegacyBjtDtempSnapshot {
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    model_name: String,
+    model_type: String,
+    model_params: Vec<(String, u64)>,
+    dc_primary: (String, u64, u64, u64),
+    dc_secondary: Option<(String, u64, u64, u64)>,
+    probes: Vec<String>,
+    effective_temperature_bits: Vec<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceSydneyLevel1JfetDtempFamily {
+    Njf,
+    Pjf,
+}
+
+impl XyceSydneyLevel1JfetDtempFamily {
+    fn owner_file(self) -> &'static str {
+        match self {
+            Self::Njf => "njfet_dtemp.cir",
+            Self::Pjf => "pjfet_dtemp.cir",
+        }
+    }
+
+    fn reference_file(self) -> &'static str {
+        match self {
+            Self::Njf => "njfet_ref.cir",
+            Self::Pjf => "pjfet_ref.cir",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Njf => "NJF",
+            Self::Pjf => "PJF",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceSydneyLevel1JfetDtempRole {
+    Owner,
+    Reference,
+}
+
+impl XyceSydneyLevel1JfetDtempRole {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::Owner => XYCE_SYDNEY_LEVEL1_JFET_DTEMP_WRAPPER_CONTRACT,
+            Self::Reference => XYCE_SYDNEY_LEVEL1_JFET_DTEMP_REFERENCE_CONTRACT,
+        }
+    }
+
+    fn for_record(relative_path: &str) -> Option<(XyceSydneyLevel1JfetDtempFamily, Self)> {
+        match XyceTestRunner::normalize_manifest_key(relative_path).as_str() {
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_OWNER_RECORD => {
+                Some((XyceSydneyLevel1JfetDtempFamily::Njf, Self::Owner))
+            }
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_REFERENCE_RECORD => {
+                Some((XyceSydneyLevel1JfetDtempFamily::Njf, Self::Reference))
+            }
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_OWNER_RECORD => {
+                Some((XyceSydneyLevel1JfetDtempFamily::Pjf, Self::Owner))
+            }
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_REFERENCE_RECORD => {
+                Some((XyceSydneyLevel1JfetDtempFamily::Pjf, Self::Reference))
+            }
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct XyceSydneyLevel1JfetDtempContract {
+    owner_path: PathBuf,
+    reference_path: PathBuf,
+    owner_plan: XyceStaticDcPlan,
+    reference_plan: XyceStaticDcPlan,
+    family: XyceSydneyLevel1JfetDtempFamily,
+    role: XyceSydneyLevel1JfetDtempRole,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceSydneyLevel1JfetDtempSnapshot {
     elements: BTreeMap<String, XyceRelationalElementFingerprint>,
     model_name: String,
     model_type: String,

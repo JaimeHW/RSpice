@@ -9414,6 +9414,41 @@ fn test_xyce_legacy_bjt_dtemp_relational_oracles() {
 }
 
 #[test]
+fn test_xyce_sydney_level1_jfet_dtemp_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        (
+            "Netlists/DTEMP/njfet_dtemp.cir",
+            "xyce_sydney_level1_jfet_dtemp_relational_wrapper_owner",
+        ),
+        (
+            "Netlists/DTEMP/njfet_ref.cir",
+            "xyce_sydney_level1_jfet_dtemp_relational_wrapper_reference",
+        ),
+        (
+            "Netlists/DTEMP/pjfet_dtemp.cir",
+            "xyce_sydney_level1_jfet_dtemp_relational_wrapper_owner",
+        ),
+        (
+            "Netlists/DTEMP/pjfet_ref.cir",
+            "xyce_sydney_level1_jfet_dtemp_relational_wrapper_reference",
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should satisfy the exact native Xyce Sydney level-1 JFET TEMP/DTEMP relational contract, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.error.is_none());
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_level2_diode_dtemp_relational_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

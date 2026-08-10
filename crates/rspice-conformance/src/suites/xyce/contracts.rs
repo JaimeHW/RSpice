@@ -5507,6 +5507,62 @@ impl XyceTestRunner {
         })())
     }
 
+    pub(super) fn xyce_sydney_level1_jfet_dtemp_relational_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceSydneyLevel1JfetDtempContract, String>> {
+        let (family, role) = XyceSydneyLevel1JfetDtempRole::for_record(&deck.relative_path)?;
+        Some((|| {
+            const LABEL: &str = "Xyce Sydney level-1 JFET TEMP/DTEMP family";
+            let parent = deck
+                .path
+                .parent()
+                .ok_or_else(|| format!("{LABEL} record has no sibling directory"))?;
+            let owner_path = parent.join(family.owner_file());
+            let reference_path = parent.join(family.reference_file());
+            let contract = XyceSydneyLevel1JfetDtempContract {
+                owner_plan: self.static_dc_plan_for_path(&owner_path, ExpressionDialect::Xyce)?,
+                reference_plan: self
+                    .static_dc_plan_for_path(&reference_path, ExpressionDialect::Xyce)?,
+                owner_path,
+                reference_path,
+                family,
+                role,
+            };
+            self.validate_xyce_sydney_level1_jfet_dtemp_provenance(&contract)?;
+
+            let owner_netlist = Self::parse_xyce_netlist(
+                &contract.owner_plan.source,
+                &contract.owner_plan.deck_path,
+            )
+            .map_err(|error| format!("{LABEL} owner parse failed: {error}"))?;
+            let reference_netlist = Self::parse_xyce_netlist(
+                &contract.reference_plan.source,
+                &contract.reference_plan.deck_path,
+            )
+            .map_err(|error| format!("{LABEL} reference parse failed: {error}"))?;
+            let owner_snapshot = Self::xyce_sydney_level1_jfet_dtemp_snapshot(
+                &contract.owner_plan,
+                &owner_netlist,
+                family,
+                XyceSydneyLevel1JfetDtempRole::Owner,
+            )?;
+            let reference_snapshot = Self::xyce_sydney_level1_jfet_dtemp_snapshot(
+                &contract.reference_plan,
+                &reference_netlist,
+                family,
+                XyceSydneyLevel1JfetDtempRole::Reference,
+            )?;
+            if owner_snapshot != reference_snapshot {
+                return Err(format!(
+                    "{LABEL} {} owner/reference semantics differ after TEMP-versus-DTEMP normalization: owner={owner_snapshot:?}, reference={reference_snapshot:?}",
+                    family.label()
+                ));
+            }
+            Ok(contract)
+        })())
+    }
+
     pub(super) fn level2_diode_dtemp_relational_contract(
         &self,
         deck: &XyceDeck,

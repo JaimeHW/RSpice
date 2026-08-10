@@ -7382,6 +7382,82 @@ fn legacy_bjt_dtemp_fixture(
     (root, decks, runner)
 }
 
+fn xyce_sydney_level1_jfet_dtemp_fixture(
+    label: &str,
+    sources: [&str; 4],
+) -> (PathBuf, [XyceDeck; 4], XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-sydney-level1-jfet-dtemp-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = root.join("Netlists/DTEMP");
+    fs::create_dir_all(&family).expect("create Xyce Sydney level-1 JFET DTEMP fixture directory");
+    let records = [
+        (
+            "Netlists/DTEMP/njfet_dtemp.cir",
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_OWNER_RECORD,
+            sources[0],
+        ),
+        (
+            "Netlists/DTEMP/njfet_ref.cir",
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_REFERENCE_RECORD,
+            sources[1],
+        ),
+        (
+            "Netlists/DTEMP/pjfet_dtemp.cir",
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_OWNER_RECORD,
+            sources[2],
+        ),
+        (
+            "Netlists/DTEMP/pjfet_ref.cir",
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_REFERENCE_RECORD,
+            sources[3],
+        ),
+    ];
+    let decks = records.map(|(relative_path, normalized_record, source)| {
+        assert_eq!(
+            XyceTestRunner::normalize_manifest_key(relative_path),
+            normalized_record,
+            "fixture source-case path must map to its qualified record"
+        );
+        let path = root.join(relative_path);
+        fs::write(&path, source).expect("write Xyce Sydney level-1 JFET DTEMP fixture source");
+        XyceDeck {
+            path,
+            relative_path: relative_path.to_string(),
+            section: XyceDeckSection::Netlists,
+        }
+    });
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!(
+            "{}\trequires_upstream_wrapper\n{}\trequires_upstream_wrapper\n",
+            decks[0].relative_path, decks[2].relative_path
+        ),
+    )
+    .expect("write Xyce Sydney level-1 JFET DTEMP wrapper provenance");
+    fs::write(
+        root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[
+            &format!(
+                "{}\tNetlists/DTEMP/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_SYDNEY_LEVEL1_JFET_DTEMP_REFERENCE_CONTRACT}",
+                decks[1].relative_path
+            ),
+            &format!(
+                "{}\tNetlists/DTEMP/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_SYDNEY_LEVEL1_JFET_DTEMP_REFERENCE_CONTRACT}",
+                decks[3].relative_path
+            ),
+        ]),
+    )
+    .expect("write Xyce Sydney level-1 JFET DTEMP exclusion provenance");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    (root, decks, runner)
+}
+
 #[test]
 fn bug647_resistor_pair_is_manifest_owned_and_structurally_qualified() {
     let (root, owner, reference, runner) = bug647_resistor_fixture(
@@ -9525,6 +9601,173 @@ fn legacy_bjt_dtemp_provenance_rejects_cross_family_candidate_mutation() {
         "a sibling-family candidate mutation must fail the shared four-record provenance census"
     );
     fs::remove_dir_all(root).expect("remove legacy BJT DTEMP provenance fixture");
+}
+
+#[test]
+fn xyce_sydney_level1_jfet_dtemp_candidate_census_is_an_exact_manifest_bijection() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_root = workspace_root.join("tests/xyce");
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    let selected = runner
+        .discover_tests()
+        .iter()
+        .filter_map(|deck| {
+            runner
+                .xyce_sydney_level1_jfet_dtemp_relational_contract(deck)
+                .map(|contract| {
+                    contract.unwrap_or_else(|error| {
+                        panic!(
+                            "Xyce Sydney level-1 JFET DTEMP candidate failed qualification: {error}"
+                        )
+                    });
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                })
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        selected,
+        BTreeSet::from([
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_OWNER_RECORD.to_string(),
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_REFERENCE_RECORD.to_string(),
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_OWNER_RECORD.to_string(),
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_REFERENCE_RECORD.to_string(),
+        ])
+    );
+    assert_eq!(
+        selected.len(),
+        XYCE_SYDNEY_LEVEL1_JFET_DTEMP_CANDIDATE_COUNT
+    );
+}
+
+#[test]
+fn xyce_sydney_level1_jfet_dtemp_snapshots_reject_semantic_mutations() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let baseline = [
+        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_OWNER_RECORD))
+            .expect("read NJF DTEMP owner"),
+        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_REFERENCE_RECORD))
+            .expect("read NJF TEMP reference"),
+        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_OWNER_RECORD))
+            .expect("read PJF DTEMP owner"),
+        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_REFERENCE_RECORD))
+            .expect("read PJF TEMP reference"),
+    ];
+    let mutations = [
+        (
+            0usize,
+            "beta= 0.00002690",
+            "beta= 0.00002691",
+            XyceSydneyLevel1JfetDtempFamily::Njf,
+            XyceSydneyLevel1JfetDtempRole::Owner,
+            "NJF model transconductance",
+        ),
+        (
+            0,
+            "dtemp={dtempParam}",
+            "temp={dtempParam}",
+            XyceSydneyLevel1JfetDtempFamily::Njf,
+            XyceSydneyLevel1JfetDtempRole::Owner,
+            "NJF TEMP-versus-DTEMP ownership",
+        ),
+        (
+            1,
+            "list 15 25 35",
+            "list 15 26 35",
+            XyceSydneyLevel1JfetDtempFamily::Njf,
+            XyceSydneyLevel1JfetDtempRole::Reference,
+            "NJF effective-temperature grid",
+        ),
+        (
+            2,
+            "jtest 1a 2a 3",
+            "jtest 1a 2a 4",
+            XyceSydneyLevel1JfetDtempFamily::Pjf,
+            XyceSydneyLevel1JfetDtempRole::Owner,
+            "PJF source topology",
+        ),
+        (
+            3,
+            "vds -15 0 1",
+            "vds -14 0 1",
+            XyceSydneyLevel1JfetDtempFamily::Pjf,
+            XyceSydneyLevel1JfetDtempRole::Reference,
+            "PJF secondary sweep domain",
+        ),
+    ];
+    for (index, (deck_index, needle, replacement, family, role, reason)) in
+        mutations.into_iter().enumerate()
+    {
+        let mut sources = baseline.clone();
+        let mutated = sources[deck_index].replace(needle, replacement);
+        assert_ne!(
+            mutated, sources[deck_index],
+            "{reason} mutation must alter its fixture"
+        );
+        sources[deck_index] = mutated;
+        let source_refs = [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+            sources[3].as_str(),
+        ];
+        let (root, decks, runner) =
+            xyce_sydney_level1_jfet_dtemp_fixture(&format!("mutation-{index}"), source_refs);
+        let deck = &decks[deck_index];
+        let rejected = match runner.static_dc_plan_for_path(&deck.path, ExpressionDialect::Xyce) {
+            Err(_) => true,
+            Ok(plan) => match XyceTestRunner::parse_xyce_netlist(&plan.source, &deck.path) {
+                Err(_) => true,
+                Ok(netlist) => XyceTestRunner::xyce_sydney_level1_jfet_dtemp_snapshot(
+                    &plan, &netlist, family, role,
+                )
+                .is_err(),
+            },
+        };
+        fs::remove_dir_all(root).expect("remove Xyce Sydney level-1 JFET mutation fixture");
+        assert!(rejected, "{reason} mutation must fail closed");
+    }
+}
+
+#[test]
+fn xyce_sydney_level1_jfet_dtemp_provenance_rejects_cross_family_candidate_mutation() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let sources = [
+        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_OWNER_RECORD))
+            .expect("read NJF DTEMP owner"),
+        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_REFERENCE_RECORD))
+            .expect("read NJF TEMP reference"),
+        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_OWNER_RECORD))
+            .expect("read PJF DTEMP owner"),
+        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_REFERENCE_RECORD))
+            .expect("read PJF TEMP reference"),
+    ];
+    let (root, decks, runner) = xyce_sydney_level1_jfet_dtemp_fixture(
+        "provenance",
+        [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+            sources[3].as_str(),
+        ],
+    );
+    let contract = runner
+        .xyce_sydney_level1_jfet_dtemp_relational_contract(&decks[0])
+        .expect("NJF owner is selected")
+        .expect("unmodified four-record JFET provenance qualifies");
+    let mutation = sources[3].replace("beta= 0.000278", "beta= 0.000279");
+    assert_ne!(mutation, sources[3], "PJF mutation must alter its fixture");
+    fs::write(&decks[3].path, mutation).expect("write PJF reference mutation");
+    assert!(
+        runner
+            .validate_xyce_sydney_level1_jfet_dtemp_provenance(&contract)
+            .is_err(),
+        "a sibling-family candidate mutation must fail the shared four-record provenance census"
+    );
+    fs::remove_dir_all(root).expect("remove Xyce Sydney level-1 JFET provenance fixture");
 }
 
 #[test]
