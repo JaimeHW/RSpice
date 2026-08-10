@@ -17,6 +17,13 @@ V1 in 0 10
 R1 in out {rval}
 C1 out 0 {cval}
 M1 d g s b NMOS W=2u L=180n
+* M1 is here to be introspected, not driven. Every node still needs a DC path
+* to ground for an operating point to exist, and a 1T tie supplies one without
+* conducting or reaching `out`.
+Rd d 0 1T
+Rg g 0 1T
+Rs s 0 1T
+Rb b 0 1T
 .model NMOS NMOS(LEVEL=1 VTO=0.5)
 .subckt cell a b
 .param rval=99

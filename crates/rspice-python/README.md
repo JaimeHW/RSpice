@@ -70,8 +70,11 @@ them to PyPI. The same six targets also produce version-specific `cp314t`
 wheels for free-threaded CPython 3.14; the full binding suite runs with the GIL
 disabled on Linux, macOS, and Windows.
 
-The workspace-aware source distribution requires one post-processing step to
-reconcile maturin's pruned workspace with the repository lockfile:
+The workspace-aware source distribution requires one post-processing step. It
+reconciles maturin's pruned workspace with the repository lockfile, and it
+restores the files `rspice-core` embeds from the workspace root: maturin fills
+the archive from `cargo package --list`, which never reports a file outside a
+package directory, so without them the archive does not compile at all.
 
 ```bash
 maturin sdist --out dist
