@@ -169,7 +169,7 @@ a bytecode expression VM that also backs B-sources; `.IF`/`.ELSEIF`/`.ELSE`/`.EN
 select at parse time. `.INCLUDE`, `.LIB`, and `.MODEL` bring in model cards —
 the model library ships under [models/spice/](models/spice/), where four open
 foundry PDKs sit alongside academic, community and manufacturer packs for some
-191,000 model cards, and a starter set for diodes, MOSFETs, transistors and
+198,000 model cards, and a starter set for diodes, MOSFETs, transistors and
 op-amps is compiled into the binary from
 [models/spice/builtin/](models/spice/builtin/). `.GLOBAL`,
 `.IC`, `.NODESET`, `.SAVE`/`.PROBE`, `.PRINT`/`.PLOT`, `.OPTIONS`, and `.TEMP`
@@ -297,7 +297,7 @@ API details and the feature-flag matrix: [crates/rspice-core/README.md](crates/r
 
 ## Validation
 
-Correctness is measured at four levels: unit tests per crate, 99 integration
+Correctness is measured at four levels: unit tests per crate, 107 integration
 test files in `rspice-core` alone, oracle-replay fixtures for history-coupled
 device runtimes, and two simulator corpus harnesses.
 

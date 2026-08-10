@@ -4,9 +4,9 @@
 # here exactly once. This file is the single source of truth for provenance and
 # licensing; nothing is copied into the tree by hand.
 #
-#   python tools/models/sync_packs.py       materialize packs from upstream
-#   python tools/models/build_manifest.py   regenerate MANIFEST.toml
-#   python tools/models/validate_packs.py   check every pack against this file
+#   python tools/models/sync_packs.py             materialize packs from upstream
+#   python tools/models/sync_packs.py --check     check every pack against this file
+#   python tools/models/build_manifest.py         regenerate MANIFEST.toml
 #
 # license.tier drives what may be shipped in a build:
 #

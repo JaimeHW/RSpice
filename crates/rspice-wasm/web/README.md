@@ -50,5 +50,7 @@ after engine changes. The wasm-bindgen CLI version must match the
   the toolchain is added.
 - The bindings expose op/ac/tran only; `.meas`, sweeps, and noise come with
   the full app.
-- `tools/ci/test_wasm_playground.py` guards this canonical worker contract;
-  the deployment build copies it into the assembled site's `/play/` route.
+- `tools/ci/test_wasm_playground.py` guards this canonical worker contract.
+  Publication is owned by the separate RSpice-Site repository, whose
+  `tools/build_simulator.py` compiles this crate and assembles the `/play/`
+  route; the in-repo site pipeline was retired.

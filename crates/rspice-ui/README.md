@@ -181,11 +181,13 @@ config directory (via `dirs`).
 
 For the wasm build of the full UI, the target is wired up in `Cargo.toml`
 (`main.rs` has a `wasm32` entry point that attaches to a `#rspice_canvas`
-element). The deployed `/ide/` surface is an experimental browser IDE that
-requires a WebGPU-capable browser and routes simulations through the module
-worker guarded by `tools/ci/test_ide_worker.py`. The narrower
+element). The `/ide/` surface is an experimental browser IDE that requires a
+WebGPU-capable browser and routes simulations through the module worker guarded
+by `tools/ci/test_ide_worker.py`. The narrower
 [rspice-wasm](../rspice-wasm/README.md) `/play/` playground remains the
-lightweight OP/AC/TRAN engine demo.
+lightweight OP/AC/TRAN engine demo. Both routes are assembled and published by
+the separate RSpice-Site repository (`tools/build_simulator.py`); this repo
+builds and size-gates the wasm images but does not deploy them.
 
 ### License issuance
 

@@ -4,9 +4,9 @@
 //! Rust-native RSpice adapter, not the upstream Perl/Bash harness. Upstream
 //! platform scripts are intentionally trimmed from this corpus.
 //!
-//! The harness is gated behind `conformance` while it is split and moved to
-//! the `rspice-conformance` crate, so this file compiles to nothing without
-//! `--features conformance`.
+//! The harness is unconditional. It lives in `rspice-conformance`, which no
+//! shipping crate depends on (enforced by `tools/ci/test_ci_configuration.py`),
+//! so the GPL-3 corpus never reaches a product binary.
 
 use rspice_conformance::suites::xyce::{
     XyceDeck, XyceDeckSection, XyceRunnerConfig, XyceTestResult, XyceTestRunner, XyceValueMismatch,

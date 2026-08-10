@@ -161,7 +161,9 @@ separate review of their custom terms.
 -------------------------------------------------------------------------------
 
 tests/xyce/ contains the Xyce Regression Suite runtime materials, vendored from
-the local upstream checkout at C:\Users\James\Desktop\Xyce_Regression-master.
+the upstream Xyce_Regression repository at commit
+80115a9277c0ddb3409acceb3d4e745fd11cddd4, as recorded in
+tests/xyce/RSPICE-UPSTREAM-EXCLUSIONS.tsv.
 The upstream README identifies Xyce as free software under the GNU General
 Public License, version 3 or later.
 
