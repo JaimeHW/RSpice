@@ -421,11 +421,12 @@ fn encode_assignment_kernel(
 }
 
 /// Locals used by a fused kernel body. Local 0 is the frame-offset parameter,
-/// so declared locals begin at 1 and the f64 follows the two i32s.
+/// so declared locals begin at 1 and the f64 follows the i32s. The status slot
+/// deliberately aliases [`ASSIGNMENT_STATUS_LOCAL`]: both hold a callee's
+/// return status only until the branch that inspects it.
 const KERNEL_STATUS_LOCAL: u32 = 1;
-const KERNEL_POINTER_LOCAL: u32 = 2;
-const KERNEL_VALUE_LOCAL: u32 = 3;
-const KERNEL_I32_LOCAL_COUNT: u32 = 2;
+const KERNEL_VALUE_LOCAL: u32 = 2;
+const KERNEL_I32_LOCAL_COUNT: u32 = 1;
 
 /// Encode the driver that evaluates a whole model in one call.
 ///
@@ -582,8 +583,14 @@ fn emit_non_finite_guard(body: &mut Function) {
 }
 
 /// Store an f64 into a frame-addressed array, bounds-checked against the
-/// array's declared length. An out-of-range index is dropped rather than
-/// written, so a malformed frame cannot corrupt neighbouring memory.
+/// array's declared length.
+///
+/// An out-of-range index fails the dispatch instead of writing, and instead of
+/// being dropped: the device sizes every one of these arrays from the compiled
+/// model before dispatching, so a short array means the frame disagrees with
+/// the module about the model's shape. Dropping the write would leave the
+/// caller reading a stale zero and stamping it as a real contribution or
+/// derivative, which is a wrong answer rather than a reported failure.
 fn emit_f64_array_store(
     body: &mut Function,
     array: (u64, u64),
@@ -592,20 +599,25 @@ fn emit_f64_array_store(
 ) {
     let (pointer_offset, length_offset) = array;
     body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Load(i32_mem(length_offset)));
+    body.instruction(&WasmInstruction::I32Const(index as i32));
+    body.instruction(&WasmInstruction::I32LeU);
+    body.instruction(&WasmInstruction::If(BlockType::Empty));
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_RUNTIME_ERROR));
+    body.instruction(&WasmInstruction::I32Store(i32_mem(
+        FRAME_ERROR_STATUS_OFFSET,
+    )));
+    body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_RUNTIME_ERROR));
+    body.instruction(&WasmInstruction::Return);
+    body.instruction(&WasmInstruction::End);
+
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
     body.instruction(&WasmInstruction::I32Load(i32_mem(pointer_offset)));
     body.instruction(&WasmInstruction::I32Const((index as i32).wrapping_mul(8)));
     body.instruction(&WasmInstruction::I32Add);
-    body.instruction(&WasmInstruction::LocalSet(KERNEL_POINTER_LOCAL));
-
-    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
-    body.instruction(&WasmInstruction::I32Load(i32_mem(length_offset)));
-    body.instruction(&WasmInstruction::I32Const(index as i32));
-    body.instruction(&WasmInstruction::I32GtU);
-    body.instruction(&WasmInstruction::If(BlockType::Empty));
-    body.instruction(&WasmInstruction::LocalGet(KERNEL_POINTER_LOCAL));
     value(body);
     body.instruction(&WasmInstruction::F64Store(f64_mem(0)));
-    body.instruction(&WasmInstruction::End);
 }
 
 fn assignment_loop_depth(assignments: &[WasmAssignment]) -> WasmJitResult<usize> {

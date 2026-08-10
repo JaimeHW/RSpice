@@ -295,13 +295,15 @@ impl WasmJitExecutable {
         self.dispatch(&self.assignment_export, context).map(|_| ())
     }
 
-    /// Run the assignment pass and every stamp value in one dispatch.
+    /// Run the assignment pass and every stamp value in one dispatch, plus
+    /// every Jacobian entry when the caller supplies somewhere to put them.
     ///
-    /// Returns `Ok(false)` when this model cannot fuse, leaving the caller on
-    /// the per-entry path. `program_active` and, for the stamp driver, the
-    /// Jacobian output array come from the caller because they are per
+    /// Supplying `jacobians` is what selects the stamp driver over the
+    /// evaluation driver. Returns `Ok(false)` when this model cannot fuse,
+    /// leaving the caller on the per-entry path. Both the activation mirror
+    /// and the Jacobian array come from the caller because they are per
     /// instance rather than per model.
-    pub(crate) fn run_evaluation_kernel(
+    pub(crate) fn run_fused_kernel(
         &self,
         context: &mut crate::vm::VmContext,
         program_active: &[u8],
@@ -322,6 +324,10 @@ impl WasmJitExecutable {
 
     pub(crate) fn evaluation_kernel_is_eligible(&self) -> bool {
         self.evaluation_kernel_export.is_some()
+    }
+
+    pub(crate) fn stamp_kernel_is_eligible(&self) -> bool {
+        self.stamp_kernel_export.is_some()
     }
 
     pub(crate) fn run_post_assignments(

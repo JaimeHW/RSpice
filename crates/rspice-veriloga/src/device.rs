@@ -177,11 +177,25 @@ const NATIVE_COMPILE_CACHE_DEFAULT_MAX_BYTES: usize = 512 * 1024 * 1024;
 #[cfg(feature = "native")]
 const NATIVE_COMPILE_CACHE_MAX_BYTES_ENV: &str = "RSPICE_VERILOGA_NATIVE_CACHE_MAX_BYTES";
 
-/// Counts compilations that actually reached the backend, so tests can assert
-/// a cache hit rather than infer one from wall-clock time.
+/// Module names of the compilations that actually reached the backend, so
+/// tests can assert a cache hit rather than infer one from wall-clock time.
+///
+/// Recorded per model rather than as one counter: the test binary compiles
+/// models on several threads at once, so a single count sampled across a
+/// window observes whatever other tests happened to compile meanwhile.
 #[cfg(all(test, feature = "native"))]
-pub(crate) static NATIVE_COMPILE_COUNT: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
+static NATIVE_COMPILE_LOG: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// How many times `module` reached the backend.
+#[cfg(all(test, feature = "native"))]
+pub(crate) fn native_compile_count(module: &str) -> usize {
+    NATIVE_COMPILE_LOG
+        .lock()
+        .expect("native compile log")
+        .iter()
+        .filter(|name| name.as_str() == module)
+        .count()
+}
 
 #[cfg(feature = "native")]
 struct NativeCompileCacheEntry {
@@ -289,23 +303,21 @@ pub struct VerilogADevice {
     stamp_matrix_buffer: Vec<(usize, usize, f64)>,
     /// Preallocated transaction buffer for one RHS-stamp pass.
     stamp_rhs_buffer: Vec<(usize, f64)>,
+    /// Byte-addressable mirror of `program_active` for the fused drivers,
+    /// which read activation out of a raw array rather than a packed
+    /// `Vec<bool>`.
+    #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
+    fused_program_active: Vec<u8>,
+    /// Flat, model-order Jacobian output storage for the fused stamp driver.
+    #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
+    fused_stamp_jacobians: Vec<f64>,
     /// Native compiled model. In native mode this is required: construction
     /// fails if a complete native image cannot be produced.
     #[cfg(feature = "native")]
     native_model: std::sync::Arc<NativeModel>,
-    /// Byte-addressable mirror of `program_active` for the native stamp ABI.
-    #[cfg(feature = "native")]
-    native_program_active: Vec<u8>,
-    /// Flat, model-order Jacobian output storage for the fused stamp driver.
-    #[cfg(feature = "native")]
-    native_stamp_jacobians: Vec<f64>,
     /// Dense semantic export table for the worker-installed secondary module.
     #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
     wasm_jit_model: std::sync::Arc<WasmJitExecutable>,
-    /// Byte-addressable mirror of `program_active` for the fused browser
-    /// drivers, which read activation out of linear memory.
-    #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
-    wasm_program_active: Vec<u8>,
     /// $discontinuity level at the last accepted timestep (edge detector)
     prev_discontinuity: bool,
 }
@@ -359,9 +371,10 @@ impl VerilogADevice {
         }
     }
 
-    #[cfg(feature = "native")]
+    /// Audit one fused-driver result before any solver callback observes it.
+    #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
     #[inline]
-    fn finite_native_stamp_value(
+    fn finite_stamp_value(
         value: f64,
         stamp: usize,
         entry: Option<usize>,
@@ -502,8 +515,8 @@ impl VerilogADevice {
 
         let num_branch_unknowns = model.branch_sources.len();
         let num_stamp_programs = model.stamp_programs.len();
-        #[cfg(feature = "native")]
-        let native_jacobian_count = model
+        #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
+        let fused_jacobian_count = model
             .stamp_programs
             .iter()
             .map(|stamp| stamp.jacobian_programs.len())
@@ -521,16 +534,14 @@ impl VerilogADevice {
             matrix_indices: MatrixIndices::default(),
             stamp_matrix_buffer: Vec::new(),
             stamp_rhs_buffer: Vec::new(),
+            #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
+            fused_program_active: vec![1; num_stamp_programs],
+            #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
+            fused_stamp_jacobians: vec![0.0; fused_jacobian_count],
             #[cfg(feature = "native")]
             native_model,
-            #[cfg(feature = "native")]
-            native_program_active: vec![1; num_stamp_programs],
-            #[cfg(feature = "native")]
-            native_stamp_jacobians: vec![0.0; native_jacobian_count],
             #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
             wasm_jit_model,
-            #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
-            wasm_program_active: vec![1; num_stamp_programs],
             prev_discontinuity: false,
         };
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];
@@ -720,7 +731,10 @@ impl VerilogADevice {
         }
 
         #[cfg(test)]
-        NATIVE_COMPILE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        NATIVE_COMPILE_LOG
+            .lock()
+            .expect("native compile log")
+            .push(model.name.to_string());
 
         let compiled = match compile(model.as_ref()) {
             Ok(native) => {
@@ -1643,11 +1657,21 @@ impl VerilogADevice {
         }
 
         self.program_active = program_active;
-        self.native_program_active.clear();
-        self.native_program_active
-            .extend(self.program_active.iter().map(|active| u8::from(*active)));
+        self.sync_fused_program_active();
         self.branch_active = branch_active;
         Ok(())
+    }
+
+    /// Refresh the fused drivers' byte-addressable activation mirror.
+    ///
+    /// Static conditions are the only thing that deactivates a contribution,
+    /// so the mirror is rebuilt where they are evaluated rather than on every
+    /// dispatch.
+    #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
+    fn sync_fused_program_active(&mut self) {
+        self.fused_program_active.clear();
+        self.fused_program_active
+            .extend(self.program_active.iter().map(|active| u8::from(*active)));
     }
 
     #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
@@ -1698,6 +1722,7 @@ impl VerilogADevice {
             }
         }
         self.program_active = program_active;
+        self.sync_fused_program_active();
         self.branch_active = branch_active;
         Ok(())
     }
@@ -2321,13 +2346,10 @@ impl VerilogADevice {
         self.context.clear_timer_event_bound();
 
         let stamp_count = self.model.stamp_programs.len();
-        self.wasm_program_active.clear();
-        self.wasm_program_active
-            .extend(self.program_active.iter().map(|active| u8::from(*active)));
-        if self.wasm_program_active.len() != stamp_count {
+        if self.fused_program_active.len() != stamp_count {
             return Err(VmError::WasmJit(format!(
                 "browser fused-evaluation buffer does not match compiled model shape ({}/{stamp_count} active flags); no interpreter fallback",
-                self.wasm_program_active.len()
+                self.fused_program_active.len()
             )));
         }
 
@@ -2338,7 +2360,7 @@ impl VerilogADevice {
 
         let wasm = std::sync::Arc::clone(&self.wasm_jit_model);
         let fused = wasm
-            .run_evaluation_kernel(&mut self.context, &self.wasm_program_active, None)
+            .run_fused_kernel(&mut self.context, &self.fused_program_active, None)
             .map_err(VmError::WasmJit)?;
         if !fused {
             return Err(VmError::WasmJit(
@@ -2348,10 +2370,12 @@ impl VerilogADevice {
         }
 
         for program_idx in 0..stamp_count {
-            if self.wasm_program_active[program_idx] != 0 {
-                Self::finite_result(
+            if self.fused_program_active[program_idx] != 0 {
+                Self::finite_stamp_value(
                     self.context.currents[program_idx],
-                    format!("contribution {program_idx} during device evaluation"),
+                    program_idx,
+                    None,
+                    "contribution during device evaluation",
                 )?;
             }
         }
@@ -2374,10 +2398,10 @@ impl VerilogADevice {
         let model = &self.model;
         let native = self.native_model.as_ref();
         let stamp_count = model.stamp_programs.len();
-        if self.native_program_active.len() != stamp_count {
+        if self.fused_program_active.len() != stamp_count {
             return Err(VmError::NativeJit(format!(
                 "native fused-evaluation buffer does not match compiled model shape ({}/{stamp_count} active flags); no interpreter fallback",
-                self.native_program_active.len()
+                self.fused_program_active.len()
             )));
         }
 
@@ -2396,7 +2420,7 @@ impl VerilogADevice {
 
             let ctx = Self::eval_context_from(context);
             let io = NativeStampKernelIo {
-                program_active: self.native_program_active.as_ptr(),
+                program_active: self.fused_program_active.as_ptr(),
                 jacobians: std::ptr::null_mut(),
             };
             let vars = context.variables.as_mut_ptr();
@@ -2420,8 +2444,8 @@ impl VerilogADevice {
         }
 
         for program_idx in 0..stamp_count {
-            if self.native_program_active[program_idx] != 0 {
-                Self::finite_native_stamp_value(
+            if self.fused_program_active[program_idx] != 0 {
+                Self::finite_stamp_value(
                     self.context.currents[program_idx],
                     program_idx,
                     None,
@@ -3503,14 +3527,28 @@ impl VerilogADevice {
     {
         #[cfg(feature = "native")]
         if self.native_model.stamp_kernel_is_eligible() {
-            return self.try_stamp_native_kernel(circuit_voltages, matrix_add, rhs_add, mode);
+            return self.try_stamp_fused_kernel(circuit_voltages, matrix_add, rhs_add, mode);
+        }
+
+        #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+        if self.wasm_jit_model.stamp_kernel_is_eligible() {
+            return self.try_stamp_fused_kernel(circuit_voltages, matrix_add, rhs_add, mode);
         }
 
         self.try_stamp_scalar_with_mode(circuit_voltages, matrix_add, rhs_add, mode)
     }
 
-    #[cfg(feature = "native")]
-    fn try_stamp_native_kernel<M, R>(
+    /// Stamp through a fused whole-model driver.
+    ///
+    /// One dispatch evaluates the assignment pass, every contribution and
+    /// every Jacobian entry. Only the dispatch is backend-specific: both
+    /// backends publish contributions into the context and write the same
+    /// flat, model-order Jacobian array, so the algebra that decides what the
+    /// solver actually sees exists once. The backends already share their
+    /// fusion predicate; sharing this too is what keeps that agreement
+    /// meaningful.
+    #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
+    fn try_stamp_fused_kernel<M, R>(
         &mut self,
         circuit_voltages: &[f64],
         mut matrix_add: M,
@@ -3527,20 +3565,22 @@ impl VerilogADevice {
         self.stamp_rhs_buffer.clear();
 
         let model = &self.model;
-        let native = self.native_model.as_ref();
         let stamp_count = model.stamp_programs.len();
-        let expected_jacobians = native.plan_stats().jacobian_entry_points;
-        if self.native_program_active.len() != stamp_count
-            || self.native_stamp_jacobians.len() != expected_jacobians
-        {
-            return Err(VmError::NativeJit(format!(
-                "native fused-stamp buffers do not match compiled model shape ({}/{stamp_count} active flags, {}/{expected_jacobians} Jacobians); no interpreter fallback",
-                self.native_program_active.len(),
-                self.native_stamp_jacobians.len()
-            )));
-        }
 
+        #[cfg(feature = "native")]
         {
+            let native = self.native_model.as_ref();
+            let expected_jacobians = native.plan_stats().jacobian_entry_points;
+            if self.fused_program_active.len() != stamp_count
+                || self.fused_stamp_jacobians.len() != expected_jacobians
+            {
+                return Err(VmError::NativeJit(format!(
+                    "native fused-stamp buffers do not match compiled model shape ({}/{stamp_count} active flags, {}/{expected_jacobians} Jacobians); no interpreter fallback",
+                    self.fused_program_active.len(),
+                    self.fused_stamp_jacobians.len()
+                )));
+            }
+
             let context = &mut self.context;
             context.prepare_indexed_currents(stamp_count);
             if context.variables.len() < model.num_variables {
@@ -3550,14 +3590,13 @@ impl VerilogADevice {
             Self::validate_native_terminal_pair_table(context, native.num_terminals)?;
             Self::validate_native_prior_currents(context, native.assignment_prior_currents())?;
             Self::validate_native_branch_unknowns(context, native.assignment_branch_unknowns())?;
-
             Self::validate_native_branch_unknowns(context, native.stamp_kernel_branch_unknowns())?;
 
-            self.native_stamp_jacobians.fill(0.0);
+            self.fused_stamp_jacobians.fill(0.0);
             let ctx = Self::eval_context_from(context);
             let io = NativeStampKernelIo {
-                program_active: self.native_program_active.as_ptr(),
-                jacobians: self.native_stamp_jacobians.as_mut_ptr(),
+                program_active: self.fused_program_active.as_ptr(),
+                jacobians: self.fused_stamp_jacobians.as_mut_ptr(),
             };
             let vars = context.variables.as_mut_ptr();
             ctx.clear_runtime_error();
@@ -3572,12 +3611,51 @@ impl VerilogADevice {
             }
         }
 
-        // Validate every native result before any solver callback observes it,
+        #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+        {
+            let expected_jacobians = model
+                .stamp_programs
+                .iter()
+                .map(|stamp| stamp.jacobian_programs.len())
+                .sum::<usize>();
+            if self.fused_program_active.len() != stamp_count
+                || self.fused_stamp_jacobians.len() != expected_jacobians
+            {
+                return Err(VmError::WasmJit(format!(
+                    "browser fused-stamp buffers do not match compiled model shape ({}/{stamp_count} active flags, {}/{expected_jacobians} Jacobians); no interpreter fallback",
+                    self.fused_program_active.len(),
+                    self.fused_stamp_jacobians.len()
+                )));
+            }
+
+            self.context.prepare_indexed_currents(stamp_count);
+            if self.context.variables.len() < model.num_variables {
+                self.context.variables.resize(model.num_variables, 0.0);
+            }
+
+            self.fused_stamp_jacobians.fill(0.0);
+            let wasm = std::sync::Arc::clone(&self.wasm_jit_model);
+            let fused = wasm
+                .run_fused_kernel(
+                    &mut self.context,
+                    &self.fused_program_active,
+                    Some(&mut self.fused_stamp_jacobians),
+                )
+                .map_err(VmError::WasmJit)?;
+            if !fused {
+                return Err(VmError::WasmJit(
+                    "browser JIT module is missing its fused stamp entry; no interpreter fallback"
+                        .into(),
+                ));
+            }
+        }
+
+        // Validate every driver result before any solver callback observes it,
         // then publish contribution currents for later simulator APIs.
         let mut jacobian_base = 0usize;
         for (program_idx, program) in model.stamp_programs.iter().enumerate() {
-            if self.native_program_active[program_idx] != 0 {
-                let value = Self::finite_native_stamp_value(
+            if self.fused_program_active[program_idx] != 0 {
+                let value = Self::finite_stamp_value(
                     self.context.currents[program_idx],
                     program_idx,
                     None,
@@ -3590,8 +3668,8 @@ impl VerilogADevice {
                     self.context.set_branch_current(pos, neg, value);
                 }
                 for entry_idx in 0..program.jacobian_programs.len() {
-                    Self::finite_native_stamp_value(
-                        self.native_stamp_jacobians[jacobian_base + entry_idx],
+                    Self::finite_stamp_value(
+                        self.fused_stamp_jacobians[jacobian_base + entry_idx],
                         program_idx,
                         Some(entry_idx),
                         "Jacobian",
@@ -3602,7 +3680,10 @@ impl VerilogADevice {
         }
         {
             let mut vm = Vm::new(&mut self.context);
-            Self::run_post_assignment_pass(&mut vm, model, native)?;
+            #[cfg(feature = "native")]
+            Self::run_post_assignment_pass(&mut vm, model, self.native_model.as_ref())?;
+            #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+            Self::run_post_assignment_pass(&mut vm, model, self.wasm_jit_model.as_ref())?;
         }
 
         let m = self.context.multiplicity;
@@ -3618,7 +3699,7 @@ impl VerilogADevice {
 
         jacobian_base = 0;
         for (program_idx, program) in model.stamp_programs.iter().enumerate() {
-            if self.native_program_active[program_idx] == 0 {
+            if self.fused_program_active[program_idx] == 0 {
                 jacobian_base += program.jacobian_programs.len();
                 continue;
             }
@@ -3629,18 +3710,13 @@ impl VerilogADevice {
                 1.0
             };
             let value = self.context.currents[program_idx];
-            let mut eq_value = Self::finite_native_stamp_value(
-                value * scale,
-                program_idx,
-                None,
-                "scaled contribution",
-            )?;
+            let mut eq_value =
+                Self::finite_stamp_value(value * scale, program_idx, None, "scaled contribution")?;
 
             for jacobian_entry in &self.matrix_indices.jacobian[program_idx] {
                 let model_entry = &program.jacobian_programs[jacobian_entry.jacobian_idx];
-                let deriv = Self::finite_native_stamp_value(
-                    self.native_stamp_jacobians[jacobian_base + jacobian_entry.jacobian_idx]
-                        * scale,
+                let deriv = Self::finite_stamp_value(
+                    self.fused_stamp_jacobians[jacobian_base + jacobian_entry.jacobian_idx] * scale,
                     program_idx,
                     Some(jacobian_entry.jacobian_idx),
                     "Jacobian",
@@ -3665,7 +3741,7 @@ impl VerilogADevice {
                 }
             }
 
-            eq_value = Self::finite_native_stamp_value(
+            eq_value = Self::finite_stamp_value(
                 eq_value,
                 program_idx,
                 None,
@@ -4414,8 +4490,6 @@ mod tests {
     /// seconds there, so this is pinned on content identity.
     #[test]
     fn native_compilation_is_reused_across_distinct_model_allocations() {
-        use std::sync::atomic::Ordering::Relaxed;
-
         let source = r#"
 `include "disciplines.vams"
 module native_cache_identity(p, n);
@@ -4433,7 +4507,6 @@ endmodule
             .compile_canonical_ir(source)
             .expect("compile cache-identity canonical IR");
 
-        let before = NATIVE_COMPILE_COUNT.load(Relaxed);
         let first = Arc::new(model.clone());
         VerilogADevice::try_new_with_canonical_ir(
             "XCACHE1",
@@ -4442,9 +4515,8 @@ endmodule
             &[1, 0],
         )
         .expect("build first cache-identity device");
-        let after_first = NATIVE_COMPILE_COUNT.load(Relaxed);
         assert_eq!(
-            after_first - before,
+            native_compile_count("native_cache_identity"),
             1,
             "the first device must reach the backend exactly once"
         );
@@ -4459,8 +4531,8 @@ endmodule
         VerilogADevice::try_new_with_canonical_ir("XCACHE2", second, &artifact, &[1, 0])
             .expect("build second cache-identity device");
         assert_eq!(
-            NATIVE_COMPILE_COUNT.load(Relaxed),
-            after_first,
+            native_compile_count("native_cache_identity"),
+            1,
             "an identical model must not be recompiled for a new allocation"
         );
 
@@ -4470,8 +4542,8 @@ endmodule
         VerilogADevice::try_new_with_canonical_ir("XCACHE3", Arc::new(model), &artifact, &[1, 0])
             .expect("build third cache-identity device");
         assert_eq!(
-            NATIVE_COMPILE_COUNT.load(Relaxed),
-            after_first,
+            native_compile_count("native_cache_identity"),
+            1,
             "the cache must survive the last live model reference being dropped"
         );
     }
@@ -4558,8 +4630,8 @@ endmodule
                 jacobian_entry_points,
                 reactive_jacobian_entry_points,
             )),
-            native_program_active: vec![1; num_stamp_programs],
-            native_stamp_jacobians: vec![0.0; native_jacobian_count],
+            fused_program_active: vec![1; num_stamp_programs],
+            fused_stamp_jacobians: vec![0.0; native_jacobian_count],
             prev_discontinuity: false,
         };
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];

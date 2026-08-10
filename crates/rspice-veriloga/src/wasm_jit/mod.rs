@@ -1240,6 +1240,277 @@ endmodule
         );
     }
 
+    /// A model whose contributions have visibly different shapes: one
+    /// transcendental, one clamped, and one bilinear in two voltages. A driver
+    /// that permuted stamps or Jacobian output slots would then publish
+    /// obviously wrong numbers rather than plausible ones.
+    const FUSED_KERNEL_SOURCE: &str = r#"
+`include "disciplines.vams"
+module wasm_kernel_pair(p, n, c);
+  inout p, n, c;
+  electrical p, n, c;
+  parameter real conductance = 3.0;
+  real shaped;
+  analog begin
+    shaped = exp(V(p, n)) + conductance;
+    I(p, n) <+ shaped * conductance;
+    I(c, n) <+ max(V(c, n), 1.0e-30) * conductance;
+    I(p, c) <+ V(p, n) * V(c, n) * conductance;
+  end
+endmodule
+"#;
+
+    /// [`FUSED_KERNEL_SOURCE`] instantiated in an independent wasm engine, with
+    /// a frame and its arrays laid out in linear memory.
+    ///
+    /// Both fused drivers are checked against the per-entry exports through the
+    /// same frame, so the layout is written once here rather than per test.
+    struct FusedKernelHarness {
+        artifact: super::WasmJitModelArtifact,
+        executable: WasmJitExecutable,
+        store: wasmi::Store<()>,
+        memory: wasmi::Memory,
+        instance: wasmi::Instance,
+        frame: Vec<u8>,
+        /// Jacobian entry count per stamp, in model order.
+        stamp_jacobians: Vec<usize>,
+    }
+
+    impl FusedKernelHarness {
+        const PARAMETERS: u32 = 512;
+        const VOLTAGES: u32 = 640;
+        const VARIABLES: u32 = 768;
+        const PROGRAM_ACTIVE: u32 = 1024;
+        const SEQUENTIAL_CURRENTS: u32 = 1152;
+        const PAIR_CURRENTS: u32 = 1280;
+        const JACOBIANS: u32 = 1536;
+
+        fn new() -> Self {
+            use wasmi::{Engine, Linker, Memory, MemoryType, Module, Store};
+
+            use super::abi::{
+                FRAME_ABI_VERSION_OFFSET, FRAME_BYTE_LEN_OFFSET, FRAME_CURRENTS_LEN_OFFSET,
+                FRAME_CURRENTS_PTR_OFFSET, FRAME_JACOBIANS_LEN_OFFSET, FRAME_JACOBIANS_PTR_OFFSET,
+                FRAME_MAGIC_OFFSET, FRAME_PARAMETERS_LEN_OFFSET, FRAME_PARAMETERS_PTR_OFFSET,
+                FRAME_PRIOR_CURRENTS_LEN_OFFSET, FRAME_PRIOR_CURRENTS_PTR_OFFSET,
+                FRAME_PROGRAM_ACTIVE_LEN_OFFSET, FRAME_PROGRAM_ACTIVE_PTR_OFFSET,
+                FRAME_TERMINAL_VOLTAGES_LEN_OFFSET, FRAME_TERMINAL_VOLTAGES_PTR_OFFSET,
+                FRAME_VARIABLES_LEN_OFFSET, FRAME_VARIABLES_PTR_OFFSET,
+            };
+            use super::{
+                WASM_JIT_ABI_VERSION, WASM_JIT_EVAL_FRAME_BYTES, WASM_JIT_FRAME_MAGIC,
+                WASM_JIT_IMPORT_MODULE, WASM_JIT_MEMORY_IMPORT,
+            };
+
+            let report = VerilogACompiler::new(CompilerOptions::default())
+                .compile_runtime(FUSED_KERNEL_SOURCE, Some("wasm_kernel_pair"))
+                .expect("compile fused-kernel model");
+            let artifact = compile_model_value_module(&report.model, &report.canonical_ir)
+                .expect("compile fused-kernel module");
+            let executable = WasmJitExecutable::from_artifact(&report.model, &artifact)
+                .expect("authenticate fused-kernel entry table");
+            let stamp_jacobians = report
+                .model
+                .stamp_programs
+                .iter()
+                .map(|stamp| stamp.jacobian_programs.len())
+                .collect::<Vec<_>>();
+            let stamp_count = stamp_jacobians.len();
+            let jacobian_count = stamp_jacobians.iter().sum::<usize>();
+
+            let engine = Engine::default();
+            let module = Module::new(&engine, artifact.module().bytes())
+                .expect("compile fused-kernel module in independent engine");
+            let mut store = Store::new(&engine, ());
+            let memory = Memory::new(&mut store, MemoryType::new(1, None))
+                .expect("allocate imported primary memory");
+            let mut linker = Linker::new(&engine);
+            linker
+                .define(WASM_JIT_IMPORT_MODULE, WASM_JIT_MEMORY_IMPORT, memory)
+                .expect("define memory import");
+            linker
+                .func_wrap(
+                    WASM_JIT_IMPORT_MODULE,
+                    super::codegen::WASM_JIT_EVAL_HELPER_IMPORT,
+                    |_: i32,
+                     opcode: i32,
+                     aux0: i32,
+                     aux1: i32,
+                     aux2: i64,
+                     operand0: f64,
+                     operand1: f64,
+                     operand2: f64,
+                     operand3: f64,
+                     operand4: f64|
+                     -> f64 {
+                        super::runtime::evaluate_helper(
+                            opcode,
+                            aux0,
+                            aux1,
+                            aux2,
+                            [operand0, operand1, operand2, operand3, operand4],
+                            &[],
+                        )
+                        .expect("fused-kernel helper operation")
+                    },
+                )
+                .expect("define helper import");
+            super::codegen::define_test_math_imports(&mut linker);
+            let instance = linker
+                .instantiate_and_start(&mut store, &module)
+                .expect("instantiate fused-kernel module");
+
+            let pair_len = (report.model.num_terminals + 1) * (report.model.num_terminals + 1);
+            let mut frame = vec![0_u8; WASM_JIT_EVAL_FRAME_BYTES as usize];
+            {
+                let mut write = |offset: u64, value: u32| {
+                    let offset = offset as usize;
+                    frame[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+                };
+                write(FRAME_MAGIC_OFFSET, WASM_JIT_FRAME_MAGIC);
+                write(FRAME_ABI_VERSION_OFFSET, WASM_JIT_ABI_VERSION);
+                write(FRAME_BYTE_LEN_OFFSET, WASM_JIT_EVAL_FRAME_BYTES);
+                write(FRAME_PARAMETERS_PTR_OFFSET, Self::PARAMETERS);
+                write(FRAME_PARAMETERS_LEN_OFFSET, 1);
+                write(FRAME_TERMINAL_VOLTAGES_PTR_OFFSET, Self::VOLTAGES);
+                write(
+                    FRAME_TERMINAL_VOLTAGES_LEN_OFFSET,
+                    report.model.num_terminals as u32,
+                );
+                write(FRAME_VARIABLES_PTR_OFFSET, Self::VARIABLES);
+                write(
+                    FRAME_VARIABLES_LEN_OFFSET,
+                    report.model.num_variables as u32,
+                );
+                write(FRAME_PROGRAM_ACTIVE_PTR_OFFSET, Self::PROGRAM_ACTIVE);
+                write(FRAME_PROGRAM_ACTIVE_LEN_OFFSET, stamp_count as u32);
+                write(FRAME_PRIOR_CURRENTS_PTR_OFFSET, Self::SEQUENTIAL_CURRENTS);
+                write(FRAME_PRIOR_CURRENTS_LEN_OFFSET, stamp_count as u32);
+                write(FRAME_CURRENTS_PTR_OFFSET, Self::PAIR_CURRENTS);
+                write(FRAME_CURRENTS_LEN_OFFSET, pair_len as u32);
+                write(FRAME_JACOBIANS_PTR_OFFSET, Self::JACOBIANS);
+                write(FRAME_JACOBIANS_LEN_OFFSET, jacobian_count as u32);
+            }
+
+            Self {
+                artifact,
+                executable,
+                store,
+                memory,
+                instance,
+                frame,
+                stamp_jacobians,
+            }
+        }
+
+        fn stamp_count(&self) -> usize {
+            self.stamp_jacobians.len()
+        }
+
+        fn jacobian_count(&self) -> usize {
+            self.stamp_jacobians.iter().sum()
+        }
+
+        /// First flat Jacobian slot belonging to `stamp`, the same running base
+        /// the device uses to read the array back.
+        fn jacobian_base(&self, stamp: usize) -> usize {
+            self.stamp_jacobians[..stamp].iter().sum()
+        }
+
+        /// Restore the frame, the inputs, and every output array.
+        fn reset(&mut self) {
+            use std::mem::size_of;
+
+            let stamp_count = self.stamp_count();
+            let jacobian_count = self.jacobian_count();
+            self.memory
+                .write(&mut self.store, 0, &self.frame)
+                .expect("write frame");
+            self.write_f64(Self::PARAMETERS as usize, 3.0);
+            for (index, value) in [4.0_f64.ln(), 0.0, 0.75].into_iter().enumerate() {
+                self.write_f64(Self::VOLTAGES as usize + index * size_of::<f64>(), value);
+            }
+            self.memory
+                .write(
+                    &mut self.store,
+                    Self::PROGRAM_ACTIVE as usize,
+                    &vec![1_u8; stamp_count],
+                )
+                .expect("write activation");
+            self.memory
+                .write(
+                    &mut self.store,
+                    Self::SEQUENTIAL_CURRENTS as usize,
+                    &vec![0_u8; stamp_count * size_of::<f64>()],
+                )
+                .expect("clear contributions");
+            self.memory
+                .write(
+                    &mut self.store,
+                    Self::JACOBIANS as usize,
+                    &vec![0_u8; jacobian_count * size_of::<f64>()],
+                )
+                .expect("clear Jacobians");
+        }
+
+        fn deactivate_every_stamp(&mut self) {
+            let stamp_count = self.stamp_count();
+            self.memory
+                .write(
+                    &mut self.store,
+                    Self::PROGRAM_ACTIVE as usize,
+                    &vec![0_u8; stamp_count],
+                )
+                .expect("deactivate every stamp");
+        }
+
+        /// Overwrite one frame field in linear memory, after [`Self::reset`]
+        /// has written the frame there.
+        fn poke_frame_u32(&mut self, offset: u64, value: u32) {
+            self.memory
+                .write(&mut self.store, offset as usize, &value.to_le_bytes())
+                .expect("write frame field");
+        }
+
+        fn write_f64(&mut self, offset: usize, value: f64) {
+            self.memory
+                .write(&mut self.store, offset, &value.to_le_bytes())
+                .expect("write f64");
+        }
+
+        fn read_f64(&self, offset: usize) -> f64 {
+            let raw = self
+                .memory
+                .data(&self.store)
+                .get(offset..offset + std::mem::size_of::<f64>())
+                .expect("read f64");
+            f64::from_le_bytes(raw.try_into().unwrap())
+        }
+
+        /// Call an export with frame offset zero, returning its status.
+        fn call(&mut self, export: &str) -> i32 {
+            let entry = self
+                .instance
+                .get_typed_func::<i32, i32>(&self.store, export)
+                .expect("resolve export");
+            entry.call(&mut self.store, 0).expect("call export")
+        }
+
+        fn stamp_value_export(&self, stamp: usize) -> String {
+            self.executable
+                .export(WasmJitExecutableEntry::StampValue(stamp))
+                .expect("stamp value export")
+                .to_owned()
+        }
+
+        fn jacobian_export(&self, stamp: usize, entry: usize) -> String {
+            self.executable
+                .export(WasmJitExecutableEntry::Jacobian { stamp, entry })
+                .expect("Jacobian export")
+                .to_owned()
+        }
+    }
+
     /// The fused driver publishes exactly what the per-entry path produces.
     ///
     /// Fusing is the whole point of the browser backend's hot path -- one call
@@ -1251,194 +1522,34 @@ endmodule
     fn fused_evaluation_kernel_publishes_the_per_entry_results() {
         use std::mem::size_of;
 
-        use wasmi::{Engine, Linker, Memory, MemoryType, Module, Store};
+        use super::abi::FRAME_RESULT_OFFSET;
 
-        use super::abi::{
-            FRAME_ABI_VERSION_OFFSET, FRAME_BYTE_LEN_OFFSET, FRAME_CURRENTS_LEN_OFFSET,
-            FRAME_CURRENTS_PTR_OFFSET, FRAME_MAGIC_OFFSET, FRAME_PARAMETERS_LEN_OFFSET,
-            FRAME_PARAMETERS_PTR_OFFSET, FRAME_PRIOR_CURRENTS_LEN_OFFSET,
-            FRAME_PRIOR_CURRENTS_PTR_OFFSET, FRAME_PROGRAM_ACTIVE_LEN_OFFSET,
-            FRAME_PROGRAM_ACTIVE_PTR_OFFSET, FRAME_RESULT_OFFSET,
-            FRAME_TERMINAL_VOLTAGES_LEN_OFFSET, FRAME_TERMINAL_VOLTAGES_PTR_OFFSET,
-            FRAME_VARIABLES_LEN_OFFSET, FRAME_VARIABLES_PTR_OFFSET,
-        };
-        use super::{
-            WASM_JIT_ABI_VERSION, WASM_JIT_EVAL_FRAME_BYTES, WASM_JIT_FRAME_MAGIC,
-            WASM_JIT_IMPORT_MODULE, WASM_JIT_MEMORY_IMPORT,
-        };
-
-        let source = r#"
-`include "disciplines.vams"
-module wasm_kernel_pair(p, n, c);
-  inout p, n, c;
-  electrical p, n, c;
-  parameter real conductance = 3.0;
-  real shaped;
-  analog begin
-    shaped = exp(V(p, n)) + conductance;
-    I(p, n) <+ shaped * conductance;
-    I(c, n) <+ max(V(c, n), 1.0e-30) * conductance;
-  end
-endmodule
-"#;
-        let report = VerilogACompiler::new(CompilerOptions::default())
-            .compile_runtime(source, Some("wasm_kernel_pair"))
-            .expect("compile fused-kernel model");
-        let artifact = compile_model_value_module(&report.model, &report.canonical_ir)
-            .expect("compile fused-kernel module");
-        let kernel_export = artifact
+        let mut harness = FusedKernelHarness::new();
+        let kernel_export = harness
+            .artifact
             .evaluation_kernel_export()
             .expect("a model with no prior-current reads must fuse")
             .to_owned();
-        let executable = WasmJitExecutable::from_artifact(&report.model, &artifact)
-            .expect("authenticate fused-kernel entry table");
-        let stamp_count = report.model.stamp_programs.len();
-        assert!(stamp_count >= 2, "the model must exercise several stamps");
-
-        let engine = Engine::default();
-        let module = Module::new(&engine, artifact.module().bytes())
-            .expect("compile fused-kernel module in independent engine");
-        let mut store = Store::new(&engine, ());
-        let memory = Memory::new(&mut store, MemoryType::new(1, None))
-            .expect("allocate imported primary memory");
-        let mut linker = Linker::new(&engine);
-        linker
-            .define(WASM_JIT_IMPORT_MODULE, WASM_JIT_MEMORY_IMPORT, memory)
-            .expect("define memory import");
-        linker
-            .func_wrap(
-                WASM_JIT_IMPORT_MODULE,
-                super::codegen::WASM_JIT_EVAL_HELPER_IMPORT,
-                |_: i32,
-                 opcode: i32,
-                 aux0: i32,
-                 aux1: i32,
-                 aux2: i64,
-                 operand0: f64,
-                 operand1: f64,
-                 operand2: f64,
-                 operand3: f64,
-                 operand4: f64|
-                 -> f64 {
-                    super::runtime::evaluate_helper(
-                        opcode,
-                        aux0,
-                        aux1,
-                        aux2,
-                        [operand0, operand1, operand2, operand3, operand4],
-                        &[],
-                    )
-                    .expect("fused-kernel helper operation")
-                },
-            )
-            .expect("define helper import");
-        super::codegen::define_test_math_imports(&mut linker);
-        let instance = linker
-            .instantiate_and_start(&mut store, &module)
-            .expect("instantiate fused-kernel module");
-
-        const PARAMETERS: u32 = 512;
-        const VOLTAGES: u32 = 640;
-        const VARIABLES: u32 = 768;
-        const PROGRAM_ACTIVE: u32 = 1024;
-        const SEQUENTIAL_CURRENTS: u32 = 1152;
-        const PAIR_CURRENTS: u32 = 1280;
-        let pair_len = (report.model.num_terminals + 1) * (report.model.num_terminals + 1);
-
-        let mut frame = vec![0_u8; WASM_JIT_EVAL_FRAME_BYTES as usize];
-        {
-            let mut write = |offset: u64, value: u32| {
-                let offset = offset as usize;
-                frame[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
-            };
-            write(FRAME_MAGIC_OFFSET, WASM_JIT_FRAME_MAGIC);
-            write(FRAME_ABI_VERSION_OFFSET, WASM_JIT_ABI_VERSION);
-            write(FRAME_BYTE_LEN_OFFSET, WASM_JIT_EVAL_FRAME_BYTES);
-            write(FRAME_PARAMETERS_PTR_OFFSET, PARAMETERS);
-            write(FRAME_PARAMETERS_LEN_OFFSET, 1);
-            write(FRAME_TERMINAL_VOLTAGES_PTR_OFFSET, VOLTAGES);
-            write(
-                FRAME_TERMINAL_VOLTAGES_LEN_OFFSET,
-                report.model.num_terminals as u32,
-            );
-            write(FRAME_VARIABLES_PTR_OFFSET, VARIABLES);
-            write(
-                FRAME_VARIABLES_LEN_OFFSET,
-                report.model.num_variables as u32,
-            );
-            write(FRAME_PROGRAM_ACTIVE_PTR_OFFSET, PROGRAM_ACTIVE);
-            write(FRAME_PROGRAM_ACTIVE_LEN_OFFSET, stamp_count as u32);
-            write(FRAME_PRIOR_CURRENTS_PTR_OFFSET, SEQUENTIAL_CURRENTS);
-            write(FRAME_PRIOR_CURRENTS_LEN_OFFSET, stamp_count as u32);
-            write(FRAME_CURRENTS_PTR_OFFSET, PAIR_CURRENTS);
-            write(FRAME_CURRENTS_LEN_OFFSET, pair_len as u32);
-        }
-        let reset = |store: &mut Store<()>| {
-            memory.write(&mut *store, 0, &frame).expect("write frame");
-            memory
-                .write(&mut *store, PARAMETERS as usize, &3.0_f64.to_le_bytes())
-                .expect("write parameter");
-            for (index, value) in [4.0_f64.ln(), 0.0, 0.75].into_iter().enumerate() {
-                memory
-                    .write(
-                        &mut *store,
-                        VOLTAGES as usize + index * size_of::<f64>(),
-                        &value.to_le_bytes(),
-                    )
-                    .expect("write voltage");
-            }
-            memory
-                .write(
-                    &mut *store,
-                    PROGRAM_ACTIVE as usize,
-                    &vec![1_u8; stamp_count],
-                )
-                .expect("write activation");
-            memory
-                .write(
-                    &mut *store,
-                    SEQUENTIAL_CURRENTS as usize,
-                    &vec![0_u8; stamp_count * size_of::<f64>()],
-                )
-                .expect("clear contributions");
-        };
-        let read_f64 = |store: &Store<()>, offset: usize| -> f64 {
-            let raw = memory
-                .data(store)
-                .get(offset..offset + size_of::<f64>())
-                .expect("read f64");
-            f64::from_le_bytes(raw.try_into().unwrap())
-        };
+        let assignment_export = harness.artifact.assignment_export().to_owned();
+        let stamp_count = harness.stamp_count();
+        assert!(stamp_count >= 3, "the model must exercise several stamps");
 
         // Per-entry path: assignment kernel, then each stamp value export.
-        reset(&mut store);
-        let assign = instance
-            .get_typed_func::<i32, i32>(&store, artifact.assignment_export())
-            .expect("resolve assignment kernel");
-        assert_eq!(assign.call(&mut store, 0).expect("run assignments"), 0);
+        harness.reset();
+        assert_eq!(harness.call(&assignment_export), 0);
         let mut per_entry = Vec::with_capacity(stamp_count);
         for stamp in 0..stamp_count {
-            let export = executable
-                .export(WasmJitExecutableEntry::StampValue(stamp))
-                .expect("stamp value export");
-            let entry = instance
-                .get_typed_func::<i32, i32>(&store, export)
-                .expect("resolve stamp value export");
-            assert_eq!(entry.call(&mut store, 0).expect("run stamp value"), 0);
-            per_entry.push(read_f64(&store, FRAME_RESULT_OFFSET as usize));
+            let export = harness.stamp_value_export(stamp);
+            assert_eq!(harness.call(&export), 0);
+            per_entry.push(harness.read_f64(FRAME_RESULT_OFFSET as usize));
         }
 
         // Fused path: one call publishing every stamp.
-        reset(&mut store);
-        let kernel = instance
-            .get_typed_func::<i32, i32>(&store, &kernel_export)
-            .expect("resolve fused evaluation kernel");
-        assert_eq!(kernel.call(&mut store, 0).expect("run fused kernel"), 0);
-
+        harness.reset();
+        assert_eq!(harness.call(&kernel_export), 0);
         for (stamp, expected) in per_entry.iter().copied().enumerate() {
-            let published = read_f64(
-                &store,
-                SEQUENTIAL_CURRENTS as usize + stamp * size_of::<f64>(),
+            let published = harness.read_f64(
+                FusedKernelHarness::SEQUENTIAL_CURRENTS as usize + stamp * size_of::<f64>(),
             );
             assert_eq!(
                 published.to_bits(),
@@ -1452,25 +1563,118 @@ endmodule
         );
 
         // A deactivated stamp must be skipped, exactly as the native drivers do.
-        reset(&mut store);
-        memory
-            .write(
-                &mut store,
-                PROGRAM_ACTIVE as usize,
-                &vec![0_u8; stamp_count],
-            )
-            .expect("deactivate every stamp");
-        assert_eq!(kernel.call(&mut store, 0).expect("run inactive kernel"), 0);
+        harness.reset();
+        harness.deactivate_every_stamp();
+        assert_eq!(harness.call(&kernel_export), 0);
         for stamp in 0..stamp_count {
             assert_eq!(
-                read_f64(
-                    &store,
-                    SEQUENTIAL_CURRENTS as usize + stamp * size_of::<f64>()
+                harness.read_f64(
+                    FusedKernelHarness::SEQUENTIAL_CURRENTS as usize + stamp * size_of::<f64>()
                 ),
                 0.0,
                 "stamp {stamp} published a contribution while inactive"
             );
         }
+    }
+
+    /// The fused stamp driver writes each derivative to the slot the device
+    /// reads it back from.
+    ///
+    /// The device consumes one flat, model-order Jacobian array indexed by a
+    /// running per-stamp base. An error in the emitted output index would not
+    /// fail anything: it would attribute one contribution's derivative to
+    /// another and converge on a wrong answer. So the entries are compared
+    /// slot by slot against the per-entry exports, and the model is chosen so
+    /// the values differ.
+    #[test]
+    fn fused_stamp_kernel_publishes_the_per_entry_jacobians() {
+        use std::mem::size_of;
+
+        use super::abi::{FRAME_JACOBIANS_LEN_OFFSET, FRAME_RESULT_OFFSET};
+
+        let mut harness = FusedKernelHarness::new();
+        let kernel_export = harness
+            .artifact
+            .stamp_kernel_export()
+            .expect("a model whose Jacobians read no later contribution must fuse")
+            .to_owned();
+        let assignment_export = harness.artifact.assignment_export().to_owned();
+        let stamp_count = harness.stamp_count();
+        assert!(
+            harness.stamp_jacobians.iter().any(|entries| *entries >= 2),
+            "one stamp must carry several Jacobian entries, or the per-stamp \
+             output base is never exercised"
+        );
+
+        // Per-entry path, interleaved exactly as the driver runs it: a stamp's
+        // value publishes before its own derivatives are evaluated.
+        harness.reset();
+        assert_eq!(harness.call(&assignment_export), 0);
+        let mut per_entry = Vec::with_capacity(harness.jacobian_count());
+        for stamp in 0..stamp_count {
+            let export = harness.stamp_value_export(stamp);
+            assert_eq!(harness.call(&export), 0);
+            let value = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+            harness.write_f64(
+                FusedKernelHarness::SEQUENTIAL_CURRENTS as usize + stamp * size_of::<f64>(),
+                value,
+            );
+            for entry in 0..harness.stamp_jacobians[stamp] {
+                let export = harness.jacobian_export(stamp, entry);
+                assert_eq!(harness.call(&export), 0);
+                per_entry.push(harness.read_f64(FRAME_RESULT_OFFSET as usize));
+            }
+        }
+
+        // Fused path: one call publishing every contribution and derivative.
+        harness.reset();
+        assert_eq!(harness.call(&kernel_export), 0);
+        for stamp in 0..stamp_count {
+            let base = harness.jacobian_base(stamp);
+            for entry in 0..harness.stamp_jacobians[stamp] {
+                let slot = base + entry;
+                let published = harness
+                    .read_f64(FusedKernelHarness::JACOBIANS as usize + slot * size_of::<f64>());
+                let expected = per_entry[slot];
+                assert_eq!(
+                    published.to_bits(),
+                    expected.to_bits(),
+                    "stamp {stamp} entry {entry}: fused driver published {published}, \
+                     per-entry produced {expected}"
+                );
+            }
+        }
+        assert!(
+            per_entry.iter().filter(|value| **value != 0.0).count() >= 2,
+            "the comparison must exercise several non-trivial derivatives"
+        );
+        assert!(
+            per_entry.windows(2).any(|pair| pair[0] != pair[1]),
+            "the derivatives must differ, or a permuted output slot would go \
+             unnoticed"
+        );
+
+        // A deactivated stamp evaluates no derivative at all.
+        harness.reset();
+        harness.deactivate_every_stamp();
+        assert_eq!(harness.call(&kernel_export), 0);
+        for slot in 0..harness.jacobian_count() {
+            assert_eq!(
+                harness.read_f64(FusedKernelHarness::JACOBIANS as usize + slot * size_of::<f64>()),
+                0.0,
+                "Jacobian slot {slot} was written while its stamp was inactive"
+            );
+        }
+
+        // A frame that disagrees with the module about the model's shape fails
+        // the dispatch rather than leaving a stale zero to be stamped as a real
+        // derivative.
+        harness.reset();
+        harness.poke_frame_u32(FRAME_JACOBIANS_LEN_OFFSET, 0);
+        assert_eq!(
+            harness.call(&kernel_export),
+            super::WASM_JIT_STATUS_RUNTIME_ERROR
+        );
     }
 
     #[cfg(all(
