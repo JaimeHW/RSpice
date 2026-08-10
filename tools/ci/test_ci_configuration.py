@@ -580,9 +580,16 @@ class CiConfigurationTests(unittest.TestCase):
             self.assertIn(f"os: {runner}", workflow)
         self.assertIn("Test AArch64 encoder, runtime, unwind, and model JIT", workflow)
         self.assertIn("Test public host-native qualification report", workflow)
-        self.assertIn("Qualify full shipped device census through AArch64 JIT", workflow)
+        self.assertIn("Qualify full shipped device census through the AArch64 JIT", workflow)
         self.assertIn("Gate AArch64 native JIT performance", workflow)
-        self.assertIn("--test native_aarch64_shipped_models", workflow)
+        # The two machine backends encode, allocate, and verify independently,
+        # so the census qualifies only the architecture it runs on.
+        self.assertIn(
+            "Qualify full shipped device census through the x64 JIT (Linux x64)",
+            workflow,
+        )
+        self.assertEqual(workflow.count("--test native_shipped_models"), 2)
+        self.assertEqual(workflow.count('RUST_MIN_STACK: "67108864"'), 2)
         self.assertIn("--min-dense-speedup 1.50", aarch64_job)
         self.assertIn("--min-speedup 3.00", aarch64_job)
         self.assertIn("--min-full-stamp-speedup 2.00", aarch64_job)
@@ -605,7 +612,10 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("Test macOS hardened-runtime JIT entitlements", workflow)
         self.assertIn("Test Intel macOS hardened-runtime JIT entitlements", workflow)
         self.assertIn("--options runtime", workflow)
-        self.assertIn(str(entitlement_path.relative_to(ROOT)), workflow)
+        # Workflow paths are POSIX; formatting with the host separator makes
+        # this gate unrunnable on Windows, where it fails for a reason that has
+        # nothing to do with the entitlements it checks.
+        self.assertIn(entitlement_path.relative_to(ROOT).as_posix(), workflow)
         self.assertIn("codesign --verify --strict", workflow)
         self.assertIn(
             "registered_dwarf_cfi_unwinds_through_generated_helper_frame",
