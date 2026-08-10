@@ -56,6 +56,17 @@ pub fn linear_ticks(min: f64, max: f64, target: usize) -> Vec<(f64, String)> {
         } else {
             10.0
         };
+    // A span finer than its own ladder can resolve — a trace flat to within
+    // a few ulps — underflows `step` to zero. `min / 0.0` is then not a tick
+    // index but an infinity, and the range it spans is every integer there
+    // is: materialising that exhausts memory before it ever reaches a
+    // painter.
+    if !(step.is_finite() && step > 0.0) {
+        return Vec::new();
+    }
+    // Past that guard the indices always fit an i64: two distinct doubles
+    // differ by at least an ulp, so `step` is never smaller than about
+    // 1e-17 of the range's own magnitude.
     let first = (min / step).ceil() as i64;
     let last = (max / step).floor() as i64;
     (first..=last)
@@ -95,6 +106,36 @@ mod tests {
         assert!(ticks.len() >= 4 && ticks.len() <= 8);
         assert_eq!(ticks[0].1, "0");
         assert!(ticks.iter().any(|t| t.1 == "4µ"));
+    }
+
+    #[test]
+    fn a_span_finer_than_its_ladder_yields_no_ticks_rather_than_every_integer() {
+        // The step underflows to zero here. Before the guard, `min / step`
+        // was an infinity and the tick range covered the whole i64 grid,
+        // which asked the allocator for well over a hundred gigabytes.
+        assert!(linear_ticks(0.0, 5.0e-324, 6).is_empty());
+        assert!(linear_ticks(-5.0e-324, 5.0e-324, 6).is_empty());
+    }
+
+    #[test]
+    fn values_that_dwarf_their_own_span_still_ladder_across_the_window() {
+        // 1e300 zoomed to a 1e290-wide window. The ladder indices are ~5e10,
+        // far from zero, but they stay a handful of steps apart and inside
+        // the window — the axis describes the window, not the magnitude.
+        let (min, max) = (1.0e300, 1.0e300 + 1.0e290);
+        let ticks = linear_ticks(min, max, 6);
+        assert!(!ticks.is_empty());
+        assert!(ticks.len() <= 12, "{} ticks", ticks.len());
+        assert!(ticks.iter().all(|(value, _)| (min..=max).contains(value)));
+    }
+
+    #[test]
+    fn a_wide_but_ordinary_span_still_ladders() {
+        // The guards must not disturb the ranges the instrument actually
+        // draws, including a genuinely astronomical but well-formed one.
+        let ticks = linear_ticks(-1.16e300, 1.16e300, 6);
+        assert!(ticks.len() >= 3 && ticks.len() <= 9);
+        assert!(ticks.iter().all(|(value, _)| value.is_finite()));
     }
 
     #[test]
