@@ -35,6 +35,10 @@ pub(crate) const WASM_JIT_MATH2_IMPORT: &str = "math2_v1";
 pub(crate) const WASM_JIT_VALUE_EXPORT: &str = "rspice_wasm_jit_value";
 pub(crate) const WASM_JIT_ASSIGNMENT_EXPORT: &str = "rspice_wasm_jit_assign";
 pub(crate) const WASM_JIT_POST_ASSIGNMENT_EXPORT: &str = "rspice_wasm_jit_post_assign";
+/// Driver evaluating every stamp value in one call.
+pub(crate) const WASM_JIT_EVALUATION_KERNEL_EXPORT: &str = "rspice_wasm_jit_eval_kernel";
+/// Driver evaluating every stamp value and Jacobian entry in one call.
+pub(crate) const WASM_JIT_STAMP_KERNEL_EXPORT: &str = "rspice_wasm_jit_stamp_kernel";
 const MAX_RUNTIME_LOOP_ITERATIONS: i32 = 100_000;
 
 const ENTRY_TYPE_INDEX: u32 = 0;
@@ -138,6 +142,36 @@ pub(crate) struct WasmAssignmentKernel {
     pub(crate) assignments: Vec<WasmAssignment>,
 }
 
+/// One stamp's work inside a fused kernel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WasmKernelStamp {
+    /// Scalar entry producing the stamp's contribution value.
+    pub(crate) value_entry: u32,
+    /// Terminal-pair matrix slots the value publishes into, forward then
+    /// reverse. The reverse slot receives the negated value.
+    pub(crate) current_pair: Option<(u32, u32)>,
+    /// Scalar entries producing this stamp's Jacobian row, in output order.
+    pub(crate) jacobian_entries: Vec<u32>,
+    /// Offset of this stamp's first Jacobian output in the flattened array.
+    pub(crate) jacobian_output_base: u32,
+}
+
+/// A driver that evaluates a whole model in one call.
+///
+/// Without this, the browser pays a JavaScript round trip per scalar: one for
+/// every stamp value and every Jacobian entry, every Newton iteration, for
+/// every instance. The native backends have always fused the same work behind
+/// a single entry point, and this is the direct port of that driver.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WasmFusedKernel {
+    pub(crate) export_name: &'static str,
+    /// Index of the assignment kernel this driver runs first.
+    pub(crate) assignment_kernel: u32,
+    pub(crate) stamps: Vec<WasmKernelStamp>,
+    /// Whether the driver also evaluates and publishes Jacobian entries.
+    pub(crate) with_jacobians: bool,
+}
+
 #[cfg(test)]
 pub(crate) fn encode_value_program(program: &NativeProgram) -> WasmJitResult<Vec<u8>> {
     let mut module = Module::new();
@@ -176,7 +210,7 @@ pub(crate) fn encode_value_program(program: &NativeProgram) -> WasmJitResult<Vec
 pub(crate) fn emit_verified_value_program_set(
     programs: &[&NativeProgram],
 ) -> WasmJitResult<Vec<u8>> {
-    let bytes = encode_model_program_set(programs, &[])?;
+    let bytes = encode_model_program_set(programs, &[], &[])?;
     verify_value_program_set(&bytes, programs)?;
     Ok(bytes)
 }
@@ -184,9 +218,10 @@ pub(crate) fn emit_verified_value_program_set(
 pub(crate) fn emit_verified_model_module(
     programs: &[&NativeProgram],
     kernels: &[WasmAssignmentKernel],
+    fused: &[WasmFusedKernel],
 ) -> WasmJitResult<Vec<u8>> {
-    let bytes = encode_model_program_set(programs, kernels)?;
-    verify_model_module(&bytes, programs, kernels)?;
+    let bytes = encode_model_program_set(programs, kernels, fused)?;
+    verify_model_module(&bytes, programs, kernels, fused)?;
     Ok(bytes)
 }
 
@@ -203,7 +238,7 @@ pub(crate) fn verify_value_program_set(
     Validator::new()
         .validate_all(bytes)
         .map_err(|error| WasmJitError::BinaryValidation(error.to_string()))?;
-    if bytes != encode_model_program_set(expected_programs, &[])? {
+    if bytes != encode_model_program_set(expected_programs, &[], &[])? {
         return Err(WasmJitError::Contract(
             "model value-entry module does not match deterministic translation of its authenticated SSA"
                 .into(),
@@ -212,13 +247,14 @@ pub(crate) fn verify_value_program_set(
 
     let expected_count = u32::try_from(expected_programs.len())
         .map_err(|_| WasmJitError::Encoding("model entry count exceeds u32".into()))?;
-    verify_value_module_shape(bytes, expected_count, &[], false)
+    verify_value_module_shape(bytes, expected_count, &[], &[], false)
 }
 
 fn verify_model_module(
     bytes: &[u8],
     expected_programs: &[&NativeProgram],
     kernels: &[WasmAssignmentKernel],
+    fused: &[WasmFusedKernel],
 ) -> WasmJitResult<()> {
     if bytes.len() > super::SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES {
         return Err(WasmJitError::ArtifactTooLarge {
@@ -229,7 +265,7 @@ fn verify_model_module(
     Validator::new()
         .validate_all(bytes)
         .map_err(|error| WasmJitError::BinaryValidation(error.to_string()))?;
-    if bytes != encode_model_program_set(expected_programs, kernels)? {
+    if bytes != encode_model_program_set(expected_programs, kernels, fused)? {
         return Err(WasmJitError::Contract(
             "model module does not match deterministic translation of its authenticated plan"
                 .into(),
@@ -237,31 +273,41 @@ fn verify_model_module(
     }
     let scalar_count = u32::try_from(expected_programs.len())
         .map_err(|_| WasmJitError::Encoding("model entry count exceeds u32".into()))?;
-    let kernel_exports = kernels
+    let assignment_exports = kernels
         .iter()
         .map(|kernel| kernel.export_name)
         .collect::<Vec<_>>();
-    verify_value_module_shape(bytes, scalar_count, &kernel_exports, false)
+    let fused_exports = fused
+        .iter()
+        .map(|kernel| kernel.export_name)
+        .collect::<Vec<_>>();
+    verify_value_module_shape(
+        bytes,
+        scalar_count,
+        &assignment_exports,
+        &fused_exports,
+        false,
+    )
 }
 
 fn encode_model_program_set(
     programs: &[&NativeProgram],
     kernels: &[WasmAssignmentKernel],
+    fused: &[WasmFusedKernel],
 ) -> WasmJitResult<Vec<u8>> {
     let function_count = u32::try_from(programs.len())
         .map_err(|_| WasmJitError::Encoding("model entry count exceeds u32".into()))?;
     let kernel_count = u32::try_from(kernels.len())
         .map_err(|_| WasmJitError::Encoding("assignment kernel count exceeds u32".into()))?;
+    let fused_count = u32::try_from(fused.len())
+        .map_err(|_| WasmJitError::Encoding("fused kernel count exceeds u32".into()))?;
     let mut module = Module::new();
 
     encode_capability_types(&mut module);
     encode_capability_imports(&mut module);
 
     let mut functions = FunctionSection::new();
-    for _ in 0..function_count {
-        functions.function(ENTRY_TYPE_INDEX);
-    }
-    for _ in 0..kernel_count {
+    for _ in 0..function_count + kernel_count + fused_count {
         functions.function(ENTRY_TYPE_INDEX);
     }
     module.section(&functions);
@@ -283,14 +329,24 @@ fn encode_model_program_set(
             ENTRY_FUNCTION_INDEX + function_count + index,
         );
     }
+    for (index, kernel) in fused.iter().enumerate() {
+        let index = u32::try_from(index)
+            .map_err(|_| WasmJitError::Encoding("fused kernel index exceeds u32".into()))?;
+        exports.export(
+            kernel.export_name,
+            ExportKind::Func,
+            ENTRY_FUNCTION_INDEX + function_count + kernel_count + index,
+        );
+    }
     module.section(&exports);
 
-    let mut contract = Vec::with_capacity(20);
+    let mut contract = Vec::with_capacity(24);
     contract.extend_from_slice(&WASM_JIT_ABI_VERSION.to_le_bytes());
     contract.extend_from_slice(&WASM_JIT_EMITTER_VERSION.to_le_bytes());
     contract.extend_from_slice(&WASM_JIT_EVAL_FRAME_BYTES.to_le_bytes());
     contract.extend_from_slice(&function_count.to_le_bytes());
     contract.extend_from_slice(&kernel_count.to_le_bytes());
+    contract.extend_from_slice(&fused_count.to_le_bytes());
     module.section(&CustomSection {
         name: Cow::Borrowed(WASM_JIT_CONTRACT_SECTION),
         data: Cow::Owned(contract),
@@ -302,6 +358,9 @@ fn encode_model_program_set(
     }
     for kernel in kernels {
         code.function(&encode_assignment_kernel(kernel, function_count)?);
+    }
+    for kernel in fused {
+        code.function(&encode_fused_kernel(kernel, function_count, kernel_count)?);
     }
     module.section(&code);
     Ok(module.finish())
@@ -359,6 +418,194 @@ fn encode_assignment_kernel(
     body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_OK));
     body.instruction(&WasmInstruction::End);
     Ok(body)
+}
+
+/// Locals used by a fused kernel body. Local 0 is the frame-offset parameter,
+/// so declared locals begin at 1 and the f64 follows the two i32s.
+const KERNEL_STATUS_LOCAL: u32 = 1;
+const KERNEL_POINTER_LOCAL: u32 = 2;
+const KERNEL_VALUE_LOCAL: u32 = 3;
+const KERNEL_I32_LOCAL_COUNT: u32 = 2;
+
+/// Encode the driver that evaluates a whole model in one call.
+///
+/// The shape mirrors the native fused kernels exactly: run the assignment
+/// pass, then for each stamp skip it when the instance deactivated it,
+/// evaluate its value, reject a non-finite result, publish the value into the
+/// sequential contribution array and the terminal-pair matrix, and -- when the
+/// driver carries Jacobians -- evaluate and publish each Jacobian entry.
+fn encode_fused_kernel(
+    kernel: &WasmFusedKernel,
+    scalar_count: u32,
+    kernel_count: u32,
+) -> WasmJitResult<Function> {
+    if kernel.assignment_kernel >= kernel_count {
+        return Err(WasmJitError::Encoding(format!(
+            "fused kernel references assignment kernel {} outside count {kernel_count}",
+            kernel.assignment_kernel
+        )));
+    }
+    let mut body = Function::new([(KERNEL_I32_LOCAL_COUNT, ValType::I32), (1, ValType::F64)]);
+    debug_assert_eq!(KERNEL_VALUE_LOCAL, 1 + KERNEL_I32_LOCAL_COUNT);
+    emit_frame_guard(&mut body);
+    emit_clear_error_status(&mut body);
+
+    // The assignment kernels follow every scalar entry in the function index
+    // space, so the driver calls its own sibling rather than duplicating the
+    // assignment lowering.
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::Call(
+        ENTRY_FUNCTION_INDEX + scalar_count + kernel.assignment_kernel,
+    ));
+    body.instruction(&WasmInstruction::LocalTee(KERNEL_STATUS_LOCAL));
+    body.instruction(&WasmInstruction::If(BlockType::Empty));
+    body.instruction(&WasmInstruction::LocalGet(KERNEL_STATUS_LOCAL));
+    body.instruction(&WasmInstruction::Return);
+    body.instruction(&WasmInstruction::End);
+
+    for (stamp_index, stamp) in kernel.stamps.iter().enumerate() {
+        let stamp_index = u32::try_from(stamp_index)
+            .map_err(|_| WasmJitError::Encoding("fused kernel stamp index exceeds u32".into()))?;
+
+        // `block ... br_if 0` is the structured equivalent of the native
+        // backends' forward jump over an inactive stamp.
+        body.instruction(&WasmInstruction::Block(BlockType::Empty));
+        emit_program_active_load(&mut body, stamp_index);
+        body.instruction(&WasmInstruction::I32Eqz);
+        body.instruction(&WasmInstruction::BrIf(0));
+
+        emit_value_entry_call(&mut body, stamp.value_entry, scalar_count)?;
+        body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+        body.instruction(&WasmInstruction::F64Load(f64_mem(FRAME_RESULT_OFFSET)));
+        body.instruction(&WasmInstruction::LocalTee(KERNEL_VALUE_LOCAL));
+        emit_non_finite_guard(&mut body);
+
+        // The sequential contribution array the model reads back through
+        // `I(...)` probes, then the terminal-pair matrix.
+        const SEQUENTIAL_CURRENTS: (u64, u64) = (
+            FRAME_PRIOR_CURRENTS_PTR_OFFSET,
+            FRAME_PRIOR_CURRENTS_LEN_OFFSET,
+        );
+        const PAIR_CURRENTS: (u64, u64) = (FRAME_CURRENTS_PTR_OFFSET, FRAME_CURRENTS_LEN_OFFSET);
+        const JACOBIANS: (u64, u64) = (FRAME_JACOBIANS_PTR_OFFSET, FRAME_JACOBIANS_LEN_OFFSET);
+
+        emit_f64_array_store(&mut body, SEQUENTIAL_CURRENTS, stamp_index, &|body| {
+            body.instruction(&WasmInstruction::LocalGet(KERNEL_VALUE_LOCAL));
+        });
+        if let Some((forward, reverse)) = stamp.current_pair {
+            emit_f64_array_store(&mut body, PAIR_CURRENTS, forward, &|body| {
+                body.instruction(&WasmInstruction::LocalGet(KERNEL_VALUE_LOCAL));
+            });
+            if forward != reverse {
+                emit_f64_array_store(&mut body, PAIR_CURRENTS, reverse, &|body| {
+                    body.instruction(&WasmInstruction::LocalGet(KERNEL_VALUE_LOCAL));
+                    body.instruction(&WasmInstruction::F64Neg);
+                });
+            }
+        }
+
+        if kernel.with_jacobians {
+            for (output, entry) in stamp.jacobian_entries.iter().copied().enumerate() {
+                let output = u32::try_from(output)
+                    .ok()
+                    .and_then(|output| stamp.jacobian_output_base.checked_add(output))
+                    .ok_or_else(|| {
+                        WasmJitError::Encoding("fused kernel Jacobian output index overflow".into())
+                    })?;
+                emit_value_entry_call(&mut body, entry, scalar_count)?;
+                emit_f64_array_store(&mut body, JACOBIANS, output, &|body| {
+                    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+                    body.instruction(&WasmInstruction::F64Load(f64_mem(FRAME_RESULT_OFFSET)));
+                });
+            }
+        }
+
+        body.instruction(&WasmInstruction::End);
+    }
+
+    body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_OK));
+    body.instruction(&WasmInstruction::End);
+    Ok(body)
+}
+
+/// Push `program_active[index]` as an i32, or zero when the array is too short.
+///
+/// A short array deactivates the stamp rather than reading out of bounds: the
+/// device always sizes it to the stamp count, and failing closed keeps a
+/// malformed frame from publishing an unevaluated contribution.
+fn emit_program_active_load(body: &mut Function, index: u32) {
+    // A branch rather than a `select`, because `select` evaluates both arms:
+    // the byte load has to stay inside the range check or a malformed frame
+    // traps the whole module instead of deactivating one stamp.
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Load(i32_mem(
+        FRAME_PROGRAM_ACTIVE_LEN_OFFSET,
+    )));
+    body.instruction(&WasmInstruction::I32Const(index as i32));
+    body.instruction(&WasmInstruction::I32GtU);
+    body.instruction(&WasmInstruction::If(BlockType::Result(ValType::I32)));
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Load(i32_mem(
+        FRAME_PROGRAM_ACTIVE_PTR_OFFSET,
+    )));
+    body.instruction(&WasmInstruction::I32Const(index as i32));
+    body.instruction(&WasmInstruction::I32Add);
+    body.instruction(&WasmInstruction::I32Load8U(MemArg {
+        offset: 0,
+        align: 0,
+        memory_index: 0,
+    }));
+    body.instruction(&WasmInstruction::Else);
+    body.instruction(&WasmInstruction::I32Const(0));
+    body.instruction(&WasmInstruction::End);
+}
+
+/// Reject a non-finite contribution, matching the native kernels' guard.
+///
+/// Consumes the value from the stack. `!(|v| < inf)` is true for both NaN and
+/// either infinity, which is exactly the exponent-mask test the x64 driver
+/// emits.
+fn emit_non_finite_guard(body: &mut Function) {
+    body.instruction(&WasmInstruction::F64Abs);
+    body.instruction(&WasmInstruction::F64Const(f64::INFINITY.into()));
+    body.instruction(&WasmInstruction::F64Lt);
+    body.instruction(&WasmInstruction::I32Eqz);
+    body.instruction(&WasmInstruction::If(BlockType::Empty));
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_RUNTIME_ERROR));
+    body.instruction(&WasmInstruction::I32Store(i32_mem(
+        FRAME_ERROR_STATUS_OFFSET,
+    )));
+    body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_RUNTIME_ERROR));
+    body.instruction(&WasmInstruction::Return);
+    body.instruction(&WasmInstruction::End);
+}
+
+/// Store an f64 into a frame-addressed array, bounds-checked against the
+/// array's declared length. An out-of-range index is dropped rather than
+/// written, so a malformed frame cannot corrupt neighbouring memory.
+fn emit_f64_array_store(
+    body: &mut Function,
+    array: (u64, u64),
+    index: u32,
+    value: &dyn Fn(&mut Function),
+) {
+    let (pointer_offset, length_offset) = array;
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Load(i32_mem(pointer_offset)));
+    body.instruction(&WasmInstruction::I32Const((index as i32).wrapping_mul(8)));
+    body.instruction(&WasmInstruction::I32Add);
+    body.instruction(&WasmInstruction::LocalSet(KERNEL_POINTER_LOCAL));
+
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Load(i32_mem(length_offset)));
+    body.instruction(&WasmInstruction::I32Const(index as i32));
+    body.instruction(&WasmInstruction::I32GtU);
+    body.instruction(&WasmInstruction::If(BlockType::Empty));
+    body.instruction(&WasmInstruction::LocalGet(KERNEL_POINTER_LOCAL));
+    value(body);
+    body.instruction(&WasmInstruction::F64Store(f64_mem(0)));
+    body.instruction(&WasmInstruction::End);
 }
 
 fn assignment_loop_depth(assignments: &[WasmAssignment]) -> WasmJitResult<usize> {
@@ -567,19 +814,28 @@ pub(crate) fn verify_value_program(
         ));
     }
 
-    verify_value_module_shape(bytes, 1, &[], true)
+    verify_value_module_shape(bytes, 1, &[], &[], true)
 }
 
 fn verify_value_module_shape(
     bytes: &[u8],
     expected_scalar_count: u32,
-    kernel_exports: &[&str],
+    assignment_exports: &[&str],
+    fused_exports: &[&str],
     single_export: bool,
 ) -> WasmJitResult<()> {
-    let expected_kernel_count = u32::try_from(kernel_exports.len())
+    let expected_kernel_count = u32::try_from(assignment_exports.len())
         .map_err(|_| WasmJitError::Contract("assignment kernel count exceeds u32".into()))?;
+    let expected_fused_count = u32::try_from(fused_exports.len())
+        .map_err(|_| WasmJitError::Contract("fused kernel count exceeds u32".into()))?;
+    let kernel_exports = assignment_exports
+        .iter()
+        .chain(fused_exports)
+        .copied()
+        .collect::<Vec<_>>();
     let expected_count = expected_scalar_count
         .checked_add(expected_kernel_count)
+        .and_then(|count| count.checked_add(expected_fused_count))
         .ok_or_else(|| WasmJitError::Contract("model function count overflow".into()))?;
     let mut version = 0_u32;
     let mut types = 0_u32;
@@ -741,13 +997,14 @@ fn verify_value_module_shape(
                     ));
                 }
                 contracts += 1;
-                let mut expected = Vec::with_capacity(if single_export { 12 } else { 20 });
+                let mut expected = Vec::with_capacity(if single_export { 12 } else { 24 });
                 expected.extend_from_slice(&WASM_JIT_ABI_VERSION.to_le_bytes());
                 expected.extend_from_slice(&WASM_JIT_EMITTER_VERSION.to_le_bytes());
                 expected.extend_from_slice(&WASM_JIT_EVAL_FRAME_BYTES.to_le_bytes());
                 if !single_export {
                     expected.extend_from_slice(&expected_scalar_count.to_le_bytes());
                     expected.extend_from_slice(&expected_kernel_count.to_le_bytes());
+                    expected.extend_from_slice(&expected_fused_count.to_le_bytes());
                 }
                 if section.data() != expected {
                     return Err(WasmJitError::Contract(
@@ -1703,9 +1960,9 @@ mod tests {
                 },
             ],
         }];
-        let first = emit_verified_model_module(&programs, &kernels)
+        let first = emit_verified_model_module(&programs, &kernels, &[])
             .expect("encode complete assignment kernel");
-        let second = emit_verified_model_module(&programs, &kernels)
+        let second = emit_verified_model_module(&programs, &kernels, &[])
             .expect("re-encode complete assignment kernel");
         assert_eq!(first, second);
         Validator::new()
@@ -1755,7 +2012,7 @@ mod tests {
                 },
             ],
         }];
-        let bytes = emit_verified_model_module(&programs, &kernels)
+        let bytes = emit_verified_model_module(&programs, &kernels, &[])
             .expect("encode executable assignment module");
 
         let engine = Engine::default();

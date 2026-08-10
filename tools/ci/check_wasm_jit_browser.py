@@ -91,7 +91,7 @@ def main() -> None:
     evidence = completed.stdout
     required_evidence = (
         'data-rspice-wasm-jit-status="qualified"',
-        'data-rspice-wasm-jit-abi="3"',
+        'data-rspice-wasm-jit-abi="4"',
         'data-rspice-wasm-jit-solver-result="15"',
         "RSpice WASM JIT qualification passed.",
     )

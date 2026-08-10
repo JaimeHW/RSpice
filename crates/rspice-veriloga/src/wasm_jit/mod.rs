@@ -47,12 +47,12 @@ use wasmparser::{Encoding, ExternalKind, Imports, Operator, Parser, Payload, Typ
 
 /// Version of the linear-memory and helper-function contract understood by
 /// emitted modules and the browser worker.
-pub const WASM_JIT_ABI_VERSION: u32 = 3;
+pub const WASM_JIT_ABI_VERSION: u32 = 4;
 
 /// Version of the deterministic encoder. It participates in cache identity
 /// independently of the ABI because code layout may change without changing
 /// runtime frames.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 3;
+pub const WASM_JIT_EMITTER_VERSION: u32 = 4;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -171,6 +171,10 @@ pub struct WasmJitModelArtifact {
     entries: Vec<WasmJitValueEntry>,
     assignment_export: String,
     post_assignment_export: Option<String>,
+    /// Whole-model drivers, present when the shared contribution-ordering rule
+    /// allows fusing. Absent means the worker must use the per-entry exports.
+    evaluation_kernel_export: Option<String>,
+    stamp_kernel_export: Option<String>,
 }
 
 impl WasmJitModelArtifact {
@@ -192,6 +196,14 @@ impl WasmJitModelArtifact {
 
     pub fn post_assignment_export(&self) -> Option<&str> {
         self.post_assignment_export.as_deref()
+    }
+
+    pub fn evaluation_kernel_export(&self) -> Option<&str> {
+        self.evaluation_kernel_export.as_deref()
+    }
+
+    pub fn stamp_kernel_export(&self) -> Option<&str> {
+        self.stamp_kernel_export.as_deref()
     }
 
     pub fn into_module(self) -> WasmJitArtifact {
@@ -425,7 +437,12 @@ fn emit_model_value_module(
             });
         }
     }
+    // Scalar-entry indices of the stamp work, recorded while planning so the
+    // fused drivers can call the same functions the per-entry path exports.
+    let mut stamp_value_entries = Vec::with_capacity(plan.stamp_values.len());
+    let mut stamp_jacobian_entries = Vec::with_capacity(plan.jacobians.len());
     for (stamp_index, program) in plan.stamp_values.iter().enumerate() {
+        stamp_value_entries.push(u32_index(planned.len(), "scalar entry")?);
         planned.push(PlannedValue {
             program,
             role: WasmJitValueRole::StampValue {
@@ -434,7 +451,9 @@ fn emit_model_value_module(
         });
     }
     for (stamp_index, programs) in plan.jacobians.iter().enumerate() {
+        let mut entries = Vec::with_capacity(programs.len());
         for (entry_index, program) in programs.iter().enumerate() {
+            entries.push(u32_index(planned.len(), "scalar entry")?);
             planned.push(PlannedValue {
                 program,
                 role: WasmJitValueRole::Jacobian {
@@ -443,6 +462,7 @@ fn emit_model_value_module(
                 },
             });
         }
+        stamp_jacobian_entries.push(entries);
     }
     for (stamp_index, programs) in plan.reactive_jacobians.iter().enumerate() {
         for (entry_index, program) in programs.iter().enumerate() {
@@ -488,7 +508,64 @@ fn emit_model_value_module(
             assignments: post_assignment_kernel,
         });
     }
-    let bytes = codegen::emit_verified_model_module(&programs, &kernels)?;
+    // A driver that evaluates the whole model in one call, replacing one
+    // JavaScript round trip per stamp value and per Jacobian entry. Eligibility
+    // is the shared contribution-ordering rule the machine backends use, so the
+    // browser never fuses a model they would not.
+    let mut fused = Vec::new();
+    let mut evaluation_kernel_export = None;
+    let mut stamp_kernel_export = None;
+    if plan.current_dependencies.evaluation_kernel_order_safe() {
+        let mut stamps = Vec::with_capacity(stamp_value_entries.len());
+        let mut jacobian_output_base = 0_u32;
+        for (stamp_index, value_entry) in stamp_value_entries.iter().copied().enumerate() {
+            let jacobian_entries = stamp_jacobian_entries
+                .get(stamp_index)
+                .cloned()
+                .unwrap_or_default();
+            let current_pair = plan
+                .published_current_pairs
+                .get(stamp_index)
+                .copied()
+                .flatten()
+                .map(|(forward, reverse)| {
+                    Ok::<_, WasmJitError>((
+                        u32_index(forward, "current pair")?,
+                        u32_index(reverse, "current pair")?,
+                    ))
+                })
+                .transpose()?;
+            let entry_count = u32_index(jacobian_entries.len(), "Jacobian")?;
+            stamps.push(codegen::WasmKernelStamp {
+                value_entry,
+                current_pair,
+                jacobian_entries,
+                jacobian_output_base,
+            });
+            jacobian_output_base = jacobian_output_base
+                .checked_add(entry_count)
+                .ok_or_else(|| WasmJitError::Encoding("Jacobian output base overflow".into()))?;
+        }
+
+        evaluation_kernel_export = Some(codegen::WASM_JIT_EVALUATION_KERNEL_EXPORT.to_owned());
+        fused.push(codegen::WasmFusedKernel {
+            export_name: codegen::WASM_JIT_EVALUATION_KERNEL_EXPORT,
+            assignment_kernel: 0,
+            stamps: stamps.clone(),
+            with_jacobians: false,
+        });
+        if plan.current_dependencies.stamp_kernel_order_safe() {
+            stamp_kernel_export = Some(codegen::WASM_JIT_STAMP_KERNEL_EXPORT.to_owned());
+            fused.push(codegen::WasmFusedKernel {
+                export_name: codegen::WASM_JIT_STAMP_KERNEL_EXPORT,
+                assignment_kernel: 0,
+                stamps,
+                with_jacobians: true,
+            });
+        }
+    }
+
+    let bytes = codegen::emit_verified_model_module(&programs, &kernels, &fused)?;
     let entries = planned
         .into_iter()
         .enumerate()
@@ -510,6 +587,8 @@ fn emit_model_value_module(
         assignment_export: codegen::WASM_JIT_ASSIGNMENT_EXPORT.to_owned(),
         post_assignment_export: (kernels.len() == 2)
             .then(|| codegen::WASM_JIT_POST_ASSIGNMENT_EXPORT.to_owned()),
+        evaluation_kernel_export,
+        stamp_kernel_export,
     })
 }
 
@@ -1159,6 +1238,239 @@ endmodule
             executable.export(WasmJitExecutableEntry::NoiseExponent(0)),
             None
         );
+    }
+
+    /// The fused driver publishes exactly what the per-entry path produces.
+    ///
+    /// Fusing is the whole point of the browser backend's hot path -- one call
+    /// instead of one JavaScript round trip per stamp value -- so the risk it
+    /// carries is that the driver and the individual exports disagree. This
+    /// runs both against the same frame and compares the published
+    /// contribution array.
+    #[test]
+    fn fused_evaluation_kernel_publishes_the_per_entry_results() {
+        use std::mem::size_of;
+
+        use wasmi::{Engine, Linker, Memory, MemoryType, Module, Store};
+
+        use super::abi::{
+            FRAME_ABI_VERSION_OFFSET, FRAME_BYTE_LEN_OFFSET, FRAME_CURRENTS_LEN_OFFSET,
+            FRAME_CURRENTS_PTR_OFFSET, FRAME_MAGIC_OFFSET, FRAME_PARAMETERS_LEN_OFFSET,
+            FRAME_PARAMETERS_PTR_OFFSET, FRAME_PRIOR_CURRENTS_LEN_OFFSET,
+            FRAME_PRIOR_CURRENTS_PTR_OFFSET, FRAME_PROGRAM_ACTIVE_LEN_OFFSET,
+            FRAME_PROGRAM_ACTIVE_PTR_OFFSET, FRAME_RESULT_OFFSET,
+            FRAME_TERMINAL_VOLTAGES_LEN_OFFSET, FRAME_TERMINAL_VOLTAGES_PTR_OFFSET,
+            FRAME_VARIABLES_LEN_OFFSET, FRAME_VARIABLES_PTR_OFFSET,
+        };
+        use super::{
+            WASM_JIT_ABI_VERSION, WASM_JIT_EVAL_FRAME_BYTES, WASM_JIT_FRAME_MAGIC,
+            WASM_JIT_IMPORT_MODULE, WASM_JIT_MEMORY_IMPORT,
+        };
+
+        let source = r#"
+`include "disciplines.vams"
+module wasm_kernel_pair(p, n, c);
+  inout p, n, c;
+  electrical p, n, c;
+  parameter real conductance = 3.0;
+  real shaped;
+  analog begin
+    shaped = exp(V(p, n)) + conductance;
+    I(p, n) <+ shaped * conductance;
+    I(c, n) <+ max(V(c, n), 1.0e-30) * conductance;
+  end
+endmodule
+"#;
+        let report = VerilogACompiler::new(CompilerOptions::default())
+            .compile_runtime(source, Some("wasm_kernel_pair"))
+            .expect("compile fused-kernel model");
+        let artifact = compile_model_value_module(&report.model, &report.canonical_ir)
+            .expect("compile fused-kernel module");
+        let kernel_export = artifact
+            .evaluation_kernel_export()
+            .expect("a model with no prior-current reads must fuse")
+            .to_owned();
+        let executable = WasmJitExecutable::from_artifact(&report.model, &artifact)
+            .expect("authenticate fused-kernel entry table");
+        let stamp_count = report.model.stamp_programs.len();
+        assert!(stamp_count >= 2, "the model must exercise several stamps");
+
+        let engine = Engine::default();
+        let module = Module::new(&engine, artifact.module().bytes())
+            .expect("compile fused-kernel module in independent engine");
+        let mut store = Store::new(&engine, ());
+        let memory = Memory::new(&mut store, MemoryType::new(1, None))
+            .expect("allocate imported primary memory");
+        let mut linker = Linker::new(&engine);
+        linker
+            .define(WASM_JIT_IMPORT_MODULE, WASM_JIT_MEMORY_IMPORT, memory)
+            .expect("define memory import");
+        linker
+            .func_wrap(
+                WASM_JIT_IMPORT_MODULE,
+                super::codegen::WASM_JIT_EVAL_HELPER_IMPORT,
+                |_: i32,
+                 opcode: i32,
+                 aux0: i32,
+                 aux1: i32,
+                 aux2: i64,
+                 operand0: f64,
+                 operand1: f64,
+                 operand2: f64,
+                 operand3: f64,
+                 operand4: f64|
+                 -> f64 {
+                    super::runtime::evaluate_helper(
+                        opcode,
+                        aux0,
+                        aux1,
+                        aux2,
+                        [operand0, operand1, operand2, operand3, operand4],
+                        &[],
+                    )
+                    .expect("fused-kernel helper operation")
+                },
+            )
+            .expect("define helper import");
+        super::codegen::define_test_math_imports(&mut linker);
+        let instance = linker
+            .instantiate_and_start(&mut store, &module)
+            .expect("instantiate fused-kernel module");
+
+        const PARAMETERS: u32 = 512;
+        const VOLTAGES: u32 = 640;
+        const VARIABLES: u32 = 768;
+        const PROGRAM_ACTIVE: u32 = 1024;
+        const SEQUENTIAL_CURRENTS: u32 = 1152;
+        const PAIR_CURRENTS: u32 = 1280;
+        let pair_len = (report.model.num_terminals + 1) * (report.model.num_terminals + 1);
+
+        let mut frame = vec![0_u8; WASM_JIT_EVAL_FRAME_BYTES as usize];
+        {
+            let mut write = |offset: u64, value: u32| {
+                let offset = offset as usize;
+                frame[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+            };
+            write(FRAME_MAGIC_OFFSET, WASM_JIT_FRAME_MAGIC);
+            write(FRAME_ABI_VERSION_OFFSET, WASM_JIT_ABI_VERSION);
+            write(FRAME_BYTE_LEN_OFFSET, WASM_JIT_EVAL_FRAME_BYTES);
+            write(FRAME_PARAMETERS_PTR_OFFSET, PARAMETERS);
+            write(FRAME_PARAMETERS_LEN_OFFSET, 1);
+            write(FRAME_TERMINAL_VOLTAGES_PTR_OFFSET, VOLTAGES);
+            write(
+                FRAME_TERMINAL_VOLTAGES_LEN_OFFSET,
+                report.model.num_terminals as u32,
+            );
+            write(FRAME_VARIABLES_PTR_OFFSET, VARIABLES);
+            write(
+                FRAME_VARIABLES_LEN_OFFSET,
+                report.model.num_variables as u32,
+            );
+            write(FRAME_PROGRAM_ACTIVE_PTR_OFFSET, PROGRAM_ACTIVE);
+            write(FRAME_PROGRAM_ACTIVE_LEN_OFFSET, stamp_count as u32);
+            write(FRAME_PRIOR_CURRENTS_PTR_OFFSET, SEQUENTIAL_CURRENTS);
+            write(FRAME_PRIOR_CURRENTS_LEN_OFFSET, stamp_count as u32);
+            write(FRAME_CURRENTS_PTR_OFFSET, PAIR_CURRENTS);
+            write(FRAME_CURRENTS_LEN_OFFSET, pair_len as u32);
+        }
+        let reset = |store: &mut Store<()>| {
+            memory.write(&mut *store, 0, &frame).expect("write frame");
+            memory
+                .write(&mut *store, PARAMETERS as usize, &3.0_f64.to_le_bytes())
+                .expect("write parameter");
+            for (index, value) in [4.0_f64.ln(), 0.0, 0.75].into_iter().enumerate() {
+                memory
+                    .write(
+                        &mut *store,
+                        VOLTAGES as usize + index * size_of::<f64>(),
+                        &value.to_le_bytes(),
+                    )
+                    .expect("write voltage");
+            }
+            memory
+                .write(
+                    &mut *store,
+                    PROGRAM_ACTIVE as usize,
+                    &vec![1_u8; stamp_count],
+                )
+                .expect("write activation");
+            memory
+                .write(
+                    &mut *store,
+                    SEQUENTIAL_CURRENTS as usize,
+                    &vec![0_u8; stamp_count * size_of::<f64>()],
+                )
+                .expect("clear contributions");
+        };
+        let read_f64 = |store: &Store<()>, offset: usize| -> f64 {
+            let raw = memory
+                .data(store)
+                .get(offset..offset + size_of::<f64>())
+                .expect("read f64");
+            f64::from_le_bytes(raw.try_into().unwrap())
+        };
+
+        // Per-entry path: assignment kernel, then each stamp value export.
+        reset(&mut store);
+        let assign = instance
+            .get_typed_func::<i32, i32>(&store, artifact.assignment_export())
+            .expect("resolve assignment kernel");
+        assert_eq!(assign.call(&mut store, 0).expect("run assignments"), 0);
+        let mut per_entry = Vec::with_capacity(stamp_count);
+        for stamp in 0..stamp_count {
+            let export = executable
+                .export(WasmJitExecutableEntry::StampValue(stamp))
+                .expect("stamp value export");
+            let entry = instance
+                .get_typed_func::<i32, i32>(&store, export)
+                .expect("resolve stamp value export");
+            assert_eq!(entry.call(&mut store, 0).expect("run stamp value"), 0);
+            per_entry.push(read_f64(&store, FRAME_RESULT_OFFSET as usize));
+        }
+
+        // Fused path: one call publishing every stamp.
+        reset(&mut store);
+        let kernel = instance
+            .get_typed_func::<i32, i32>(&store, &kernel_export)
+            .expect("resolve fused evaluation kernel");
+        assert_eq!(kernel.call(&mut store, 0).expect("run fused kernel"), 0);
+
+        for (stamp, expected) in per_entry.iter().copied().enumerate() {
+            let published = read_f64(
+                &store,
+                SEQUENTIAL_CURRENTS as usize + stamp * size_of::<f64>(),
+            );
+            assert_eq!(
+                published.to_bits(),
+                expected.to_bits(),
+                "stamp {stamp}: fused kernel published {published}, per-entry produced {expected}"
+            );
+        }
+        assert!(
+            per_entry.iter().any(|value| *value != 0.0),
+            "the comparison must exercise non-trivial contributions"
+        );
+
+        // A deactivated stamp must be skipped, exactly as the native drivers do.
+        reset(&mut store);
+        memory
+            .write(
+                &mut store,
+                PROGRAM_ACTIVE as usize,
+                &vec![0_u8; stamp_count],
+            )
+            .expect("deactivate every stamp");
+        assert_eq!(kernel.call(&mut store, 0).expect("run inactive kernel"), 0);
+        for stamp in 0..stamp_count {
+            assert_eq!(
+                read_f64(
+                    &store,
+                    SEQUENTIAL_CURRENTS as usize + stamp * size_of::<f64>()
+                ),
+                0.0,
+                "stamp {stamp} published a contribution while inactive"
+            );
+        }
     }
 
     #[cfg(all(

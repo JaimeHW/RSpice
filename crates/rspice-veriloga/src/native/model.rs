@@ -358,25 +358,8 @@ impl NativeModel {
         stamp_kernel_branch_unknowns.sort_unstable();
         stamp_kernel_branch_unknowns.dedup();
         let evaluation_kernel_current_order_safe =
-            current_dependencies.assignment_prior_currents.is_empty()
-                && current_dependencies
-                    .stamp_value_prior_currents
-                    .iter()
-                    .enumerate()
-                    .all(|(stamp, dependencies)| {
-                        dependencies.iter().all(|dependency| *dependency < stamp)
-                    });
-        let stamp_kernel_current_order_safe = evaluation_kernel_current_order_safe
-            && current_dependencies
-                .jacobian_prior_currents
-                .iter()
-                .enumerate()
-                .all(|(stamp, entries)| {
-                    entries
-                        .iter()
-                        .flatten()
-                        .all(|dependency| *dependency <= stamp)
-                });
+            current_dependencies.evaluation_kernel_order_safe();
+        let stamp_kernel_current_order_safe = current_dependencies.stamp_kernel_order_safe();
         let stats = PlanStats {
             assignment_entry_points: 1 + usize::from(entries.post_assignment.is_some()),
             evaluation_kernel_entry_points: usize::from(entries.evaluation_kernel.is_some()),
