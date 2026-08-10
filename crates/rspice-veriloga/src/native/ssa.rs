@@ -770,6 +770,60 @@ pub(crate) fn plan_shared_outputs(programs: &[Program]) -> Vec<SharedOutputGroup
 pub(crate) const ALLOCATABLE_VALUE_REGISTERS: usize = 10;
 pub(crate) const LOGICAL_VALUE_REGISTER_COUNT: usize = 21;
 
+/// How one backend's logical register bank maps onto its ABI's preservation
+/// rules.
+///
+/// The allocator needs the second fact as much as the first. A value that is
+/// live across a helper call cannot stay in a caller-saved register, because
+/// the emitters preserve only the operand stack of the instruction making the
+/// call; anything else in a volatile register is gone when the helper returns.
+/// A callee-saved register is preserved by the helper itself, so parking the
+/// value there costs one prologue save that the whole function shares, instead
+/// of a store at the definition and a reload at every later use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RegisterBank {
+    count: usize,
+    callee_saved_base: usize,
+}
+
+impl RegisterBank {
+    /// A bank in which every value live across a call has to spill.
+    ///
+    /// This is AArch64, whose bank deliberately excludes the nonvolatile
+    /// D8-D15 so that leaf arithmetic needs no SIMD save area at all.
+    pub(crate) const fn all_caller_saved(count: usize) -> Self {
+        Self {
+            count,
+            callee_saved_base: count,
+        }
+    }
+
+    /// A bank whose logical registers at or above `callee_saved_base` map to
+    /// machine registers the ABI requires a callee to preserve.
+    ///
+    /// A base at or past the end of the bank means no register in it is
+    /// preserved, which is how System V x64 arrives here: it preserves no XMM
+    /// register, so its first nonvolatile index is past every allocatable one.
+    pub(crate) const fn with_callee_saved_from(count: usize, callee_saved_base: usize) -> Self {
+        Self {
+            count,
+            callee_saved_base: if callee_saved_base < count {
+                callee_saved_base
+            } else {
+                count
+            },
+        }
+    }
+
+    pub(crate) const fn count(&self) -> usize {
+        self.count
+    }
+
+    const fn is_callee_saved(&self, register: usize) -> bool {
+        register >= self.callee_saved_base
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ValueLocation {
     Register(usize),
@@ -808,48 +862,29 @@ pub(crate) struct RegisterAllocation {
 }
 
 impl RegisterAllocation {
-    pub(crate) fn build(program: &Program) -> JitResult<Self> {
-        Self::build_with_register_count_and_output_uses(program, ALLOCATABLE_VALUE_REGISTERS, &[])
+    pub(crate) fn build(program: &Program, bank: RegisterBank) -> JitResult<Self> {
+        Self::build_with_output_uses(program, bank, &[])
     }
 
-    #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
-    pub(crate) fn build_for_assignments(program: &AssignmentProgram) -> JitResult<Self> {
-        Self::build_for_assignments_with_register_count(program, ALLOCATABLE_VALUE_REGISTERS)
-    }
-
-    pub(crate) fn build_for_assignments_with_register_count(
+    pub(crate) fn build_for_assignments(
         program: &AssignmentProgram,
-        allocatable_register_count: usize,
+        bank: RegisterBank,
     ) -> JitResult<Self> {
         let output_uses = program
             .outputs()
             .iter()
             .map(|output| (output.instruction_end(), output.value()))
             .collect::<Vec<_>>();
-        Self::build_with_register_count_and_output_uses(
-            program.program(),
-            allocatable_register_count,
-            &output_uses,
-        )
+        Self::build_with_output_uses(program.program(), bank, &output_uses)
     }
 
-    /// Allocate SSA values from a target-selected prefix of the logical
-    /// register bank. This entry point is primarily an architecture bring-up
-    /// and qualification seam; production backends use the shared default so
-    /// allocation choices remain directly comparable across targets.
-    pub(crate) fn build_with_register_count(
+    fn build_with_output_uses(
         program: &Program,
-        allocatable_register_count: usize,
-    ) -> JitResult<Self> {
-        Self::build_with_register_count_and_output_uses(program, allocatable_register_count, &[])
-    }
-
-    fn build_with_register_count_and_output_uses(
-        program: &Program,
-        allocatable_register_count: usize,
+        bank: RegisterBank,
         output_uses: &[(usize, ValueId)],
     ) -> JitResult<Self> {
         program.validate()?;
+        let allocatable_register_count = bank.count();
         if !(1..=LOGICAL_VALUE_REGISTER_COUNT).contains(&allocatable_register_count) {
             return Err(JitError::RegisterAllocation {
                 model: MODEL.into(),
@@ -978,7 +1013,30 @@ impl RegisterAllocation {
                 });
 
             let result = if crosses_call(instruction_index) {
-                ValueLocation::Spill(allocate_spill_slot(&mut spill_owners, instruction.result))
+                // A caller-saved register does not survive the call this value
+                // is live across; a callee-saved one does, and costs the
+                // function one shared prologue save rather than a store here
+                // and a reload at every use. See [`RegisterBank`]. Reusing a
+                // dying operand's register is still preferable when that
+                // register is itself preserved.
+                reusable_first
+                    .filter(|register| bank.is_callee_saved(*register))
+                    .or_else(|| {
+                        register_owners
+                            .iter()
+                            .enumerate()
+                            .skip(bank.callee_saved_base)
+                            .find_map(|(register, owner)| owner.is_none().then_some(register))
+                    })
+                    .map_or_else(
+                        || {
+                            ValueLocation::Spill(allocate_spill_slot(
+                                &mut spill_owners,
+                                instruction.result,
+                            ))
+                        },
+                        ValueLocation::Register,
+                    )
             } else if let Some(register) = reusable_first {
                 ValueLocation::Register(register)
             } else if let Some(register) = register_owners.iter().position(Option::is_none) {
@@ -1358,11 +1416,19 @@ fn unary_math_uses_helper(op: UnaryMathOp) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AllocatedInstruction, AssignmentProgram, BasicBlock, BlockId, Effects, Instruction,
-        Program, RegisterAllocation, Terminator, ValueId, ValueLocation, ValueType,
-        plan_shared_outputs, required_register_count,
+        ALLOCATABLE_VALUE_REGISTERS, AllocatedInstruction, AssignmentProgram, BasicBlock, BlockId,
+        Effects, Instruction, Program, RegisterAllocation, RegisterBank, Terminator, ValueId,
+        ValueLocation, ValueType, plan_shared_outputs, required_register_count,
     };
     use crate::jit::expr::{NativeOp, NativeProgram, native_op_stack_effect};
+
+    /// The bank as a backend that preserves no floating-point register sees
+    /// it: AArch64 and System V x64.
+    const CALLER_SAVED_BANK: RegisterBank =
+        RegisterBank::all_caller_saved(ALLOCATABLE_VALUE_REGISTERS);
+    /// The same bank as Win64 sees it, where XMM6-XMM9 survive a helper call.
+    const WIN64_BANK: RegisterBank =
+        RegisterBank::with_callee_saved_from(ALLOCATABLE_VALUE_REGISTERS, 6);
 
     fn program(ops: Vec<NativeOp>, max_stack_depth: usize) -> NativeProgram {
         NativeProgram::from_ops_for_test(ops, max_stack_depth, Vec::new(), Vec::new())
@@ -1494,8 +1560,8 @@ mod tests {
         assert_eq!(batch.outputs()[0].instruction_end(), 2);
         assert_eq!(batch.outputs()[1].instruction_end(), 4);
 
-        let allocation =
-            RegisterAllocation::build_for_assignments(&batch).expect("batch allocation");
+        let allocation = RegisterAllocation::build_for_assignments(&batch, CALLER_SAVED_BANK)
+            .expect("batch allocation");
         let first_location = allocation
             .location(batch.outputs()[0].value())
             .expect("first output location");
@@ -1572,7 +1638,8 @@ mod tests {
             2,
         ))
         .expect("valid SSA");
-        let allocation = RegisterAllocation::build(&lowered).expect("register allocation");
+        let allocation =
+            RegisterAllocation::build(&lowered, CALLER_SAVED_BANK).expect("register allocation");
 
         assert_eq!(allocation.used_register_count(), 2);
         assert_eq!(allocation.spill_slot_count(), 0);
@@ -1623,7 +1690,8 @@ mod tests {
             instructions,
             maximum_stack_depth: 2,
         };
-        let allocation = RegisterAllocation::build(&shared).expect("register allocation");
+        let allocation =
+            RegisterAllocation::build(&shared, CALLER_SAVED_BANK).expect("register allocation");
 
         assert_ne!(
             allocation.instructions()[0].result(),
@@ -1639,56 +1707,130 @@ mod tests {
         );
     }
 
-    #[test]
-    fn liveness_allocation_spills_values_live_across_helper_calls() {
-        let instructions = vec![
-            Instruction {
-                result: ValueId(0),
+    /// `live` values defined before one `exp()` and folded in after it.
+    ///
+    /// This is the shape every compact model produces: bias-dependent terms
+    /// computed up front, a transcendental in the middle, and the terms
+    /// combined once it returns. The call's own operand is loaded last so that
+    /// it is consumed before the call rather than living across it.
+    fn program_with_values_live_across_a_call(live: usize) -> Program {
+        let value = |index: usize| ValueId(u32::try_from(index).expect("test value index"));
+        let mut instructions = Vec::new();
+        for index in 0..=live {
+            instructions.push(Instruction {
+                result: value(index),
                 value_type: ValueType::F64,
-                op: NativeOp::LoadVariable(0),
+                op: NativeOp::LoadVariable(index),
                 operands: Box::new([]),
-                effects: Effects::for_op(NativeOp::LoadVariable(0)),
-            },
-            Instruction {
-                result: ValueId(1),
-                value_type: ValueType::F64,
-                op: NativeOp::LoadVariable(1),
-                operands: Box::new([]),
-                effects: Effects::for_op(NativeOp::LoadVariable(1)),
-            },
-            Instruction {
-                result: ValueId(2),
-                value_type: ValueType::F64,
-                op: NativeOp::UnaryMath(crate::jit::expr::UnaryMathOp::Exp),
-                operands: Box::new([ValueId(1)]),
-                effects: Effects::for_op(NativeOp::UnaryMath(crate::jit::expr::UnaryMathOp::Exp)),
-            },
-            Instruction {
-                result: ValueId(3),
+                effects: Effects::for_op(NativeOp::LoadVariable(index)),
+            });
+        }
+        let exp = NativeOp::UnaryMath(crate::jit::expr::UnaryMathOp::Exp);
+        instructions.push(Instruction {
+            result: value(live + 1),
+            value_type: ValueType::F64,
+            op: exp,
+            operands: Box::new([value(live)]),
+            effects: Effects::for_op(exp),
+        });
+        let mut accumulator = value(live + 1);
+        for index in 0..live {
+            let sum = value(live + 2 + index);
+            instructions.push(Instruction {
+                result: sum,
                 value_type: ValueType::F64,
                 op: NativeOp::Add,
-                operands: Box::new([ValueId(0), ValueId(2)]),
+                operands: Box::new([accumulator, value(index)]),
                 effects: Effects::for_op(NativeOp::Add),
-            },
-        ];
-        let across_call = Program {
+            });
+            accumulator = sum;
+        }
+
+        Program {
             entry: BlockId(0),
             block: BasicBlock {
                 id: BlockId(0),
                 instruction_start: 0,
                 instruction_end: instructions.len(),
-                terminator: Terminator::Return(ValueId(3)),
+                terminator: Terminator::Return(accumulator),
             },
             instructions,
             maximum_stack_depth: 2,
-        };
-        let allocation = RegisterAllocation::build(&across_call).expect("register allocation");
+        }
+    }
+
+    #[test]
+    fn values_live_across_a_call_spill_when_the_bank_preserves_nothing() {
+        let across_call = program_with_values_live_across_a_call(1);
+        let allocation = RegisterAllocation::build(&across_call, CALLER_SAVED_BANK)
+            .expect("register allocation");
 
         assert!(matches!(
             allocation.instructions()[0].result(),
             ValueLocation::Spill(_)
         ));
         assert_eq!(allocation.spill_slot_count(), 1);
+    }
+
+    #[test]
+    fn values_live_across_a_call_take_a_preserved_register_when_the_bank_has_one() {
+        let across_call = program_with_values_live_across_a_call(1);
+        let allocation =
+            RegisterAllocation::build(&across_call, WIN64_BANK).expect("register allocation");
+
+        assert_eq!(
+            allocation.instructions()[0].result(),
+            ValueLocation::Register(6),
+            "the first preserved register is where a value live across the call belongs"
+        );
+        assert_eq!(allocation.spill_slot_count(), 0);
+        assert!(
+            allocation.required_register_count() > 6,
+            "reaching a preserved register has to oblige the prologue to save it"
+        );
+    }
+
+    #[test]
+    fn cross_call_values_spill_once_every_preserved_register_is_taken() {
+        let across_call = program_with_values_live_across_a_call(5);
+        let allocation =
+            RegisterAllocation::build(&across_call, WIN64_BANK).expect("register allocation");
+
+        let results: Vec<ValueLocation> = allocation.instructions()[..5]
+            .iter()
+            .map(AllocatedInstruction::result)
+            .collect();
+        assert_eq!(
+            results,
+            vec![
+                ValueLocation::Register(6),
+                ValueLocation::Register(7),
+                ValueLocation::Register(8),
+                ValueLocation::Register(9),
+                ValueLocation::Spill(0),
+            ],
+            "four values fit the preserved registers and the fifth still has to spill"
+        );
+        assert_eq!(allocation.spill_slot_count(), 1);
+    }
+
+    #[test]
+    fn a_bank_whose_preserved_registers_start_past_its_end_allocates_as_all_caller_saved() {
+        // System V x64 arrives here: it preserves no XMM register at all, so
+        // its first nonvolatile index sits past every allocatable one and the
+        // allocation it gets has to stay exactly what it was.
+        let system_v = RegisterBank::with_callee_saved_from(ALLOCATABLE_VALUE_REGISTERS, 16);
+        assert_eq!(
+            system_v,
+            RegisterBank::all_caller_saved(ALLOCATABLE_VALUE_REGISTERS)
+        );
+
+        let across_call = program_with_values_live_across_a_call(3);
+        assert_eq!(
+            RegisterAllocation::build(&across_call, system_v).expect("System V allocation"),
+            RegisterAllocation::build(&across_call, CALLER_SAVED_BANK)
+                .expect("caller-saved allocation"),
+        );
     }
 
     #[test]
