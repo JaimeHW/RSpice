@@ -1,6 +1,12 @@
+//! Release qualification of the shipped compact-model census through whichever
+//! machine backend the host provides.
+//!
+//! Both backends compile from the same canonical plan, but they encode,
+//! allocate, and verify independently, so a census that runs on only one of
+//! them qualifies only that one.
 #![cfg(all(
     feature = "native",
-    target_arch = "aarch64",
+    any(target_arch = "aarch64", target_arch = "x86_64"),
     any(target_os = "macos", target_os = "linux", windows)
 ))]
 
@@ -14,7 +20,7 @@ use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
 #[test]
 #[ignore = "release qualification for the shipped device census; run with --release --features native -- --ignored --nocapture"]
-fn shipped_models_compile_and_execute_through_public_aarch64_jit() {
+fn shipped_models_compile_and_execute_through_the_public_native_jit() {
     let cases = [
         (
             "juncap200",
@@ -151,7 +157,7 @@ fn qualify_shipped_model(name: &str, path: &Path, module: Option<&str>) {
     let terminal_nodes = (1..=model.num_terminals).collect::<Vec<_>>();
     let native_started = Instant::now();
     let mut device = VerilogADevice::try_new_with_canonical_ir(
-        format!("{name}_aarch64_qualification"),
+        format!("{name}_native_qualification"),
         Arc::clone(&model),
         &runtime.canonical_ir,
         &terminal_nodes,
@@ -161,7 +167,7 @@ fn qualify_shipped_model(name: &str, path: &Path, module: Option<&str>) {
     assert!(device.is_using_native(), "{name}: interpreter fallback");
     assert!(
         device.native_code_size_bytes() <= SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES,
-        "{name}: AArch64 native image is {} bytes, exceeding the shipped-model budget of {} bytes",
+        "{name}: native image is {} bytes, exceeding the shipped-model budget of {} bytes",
         device.native_code_size_bytes(),
         SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES,
     );
@@ -256,7 +262,7 @@ fn qualify_shipped_model(name: &str, path: &Path, module: Option<&str>) {
     assert!(reactive_entries > 0, "{name}: no reactive entries");
 
     eprintln!(
-        "native-aarch64-shipped model={name} frontend_ms={:.3} native_ms={:.3} code_bytes={} code_chunks={} currents={} matrix_entries={matrix_entries} rhs_entries={rhs_entries} reactive_entries={reactive_entries}",
+        "native-shipped model={name} frontend_ms={:.3} native_ms={:.3} code_bytes={} code_chunks={} currents={} matrix_entries={matrix_entries} rhs_entries={rhs_entries} reactive_entries={reactive_entries}",
         frontend_elapsed.as_secs_f64() * 1_000.0,
         native_elapsed.as_secs_f64() * 1_000.0,
         device.native_code_size_bytes(),
