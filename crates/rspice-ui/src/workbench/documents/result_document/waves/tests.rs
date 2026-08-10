@@ -1834,6 +1834,33 @@ fn the_instrument_survives_a_degenerate_run() {
 }
 
 #[test]
+fn a_long_run_that_diverges_partway_still_draws() {
+    // Enough samples to force the decimation path, which is where a real
+    // transient lives. The degenerate fixtures above are all short enough to
+    // stroke raw, so without this the min/max envelope — the code an actual
+    // diverged run goes through — would never be drawn at all.
+    let count = 20_000usize;
+    let x = (0..count).map(|i| i as f64 * 1.0e-7).collect::<Vec<_>>();
+    let y = (0..count)
+        .map(|i| {
+            if i < count * 3 / 5 {
+                (i as f64 * 1.0e-3).sin()
+            } else {
+                f64::NAN
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut state = AppState::default();
+    state.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![WaveformData::new("V(out)", x, y, "#0af")]),
+    );
+    arm_cursors(&mut state);
+
+    draw_and_tessellate(&mut state, show);
+}
+
+#[test]
 fn the_log_frequency_sheets_survive_a_non_positive_abscissa() {
     let mut state = AppState::default();
     let run = state.simulation.start_run();
