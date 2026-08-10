@@ -1124,8 +1124,9 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         // A narrowing of any kind puts the count in the mockup's two-number
         // form, so the reader can see how much of the dataset is hidden
         // rather than only how much survived.
-        let filtering =
-            !query.is_empty() || kind != ResultsBrowserKind::All || scope != ResultsBrowserScope::All;
+        let filtering = !query.is_empty()
+            || kind != ResultsBrowserKind::All
+            || scope != ResultsBrowserScope::All;
         let (shown, noun) = match tab {
             ResultsBrowserTab::Signals => (signal_count, "signals"),
             ResultsBrowserTab::Datasets => (runs.len(), "immutable datasets"),
