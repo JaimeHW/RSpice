@@ -2041,7 +2041,7 @@ fn cross_probe_trace_to_design(app: &mut RSpiceApp, signal: &str) -> Result<Stri
         .results
         .valid_selected_trace(&app.state.simulation)
         .ok_or_else(|| "No exact retained result trace is selected.".to_owned())?;
-    if let Some(reason) = schematic_cross_probe_unavailability(&app.state, &selected, signal) {
+    if let Some(reason) = schematic_cross_probe_unavailability(&app.state, selected, signal) {
         return Err(reason);
     }
     let net = crate::schematic::view::select_signal_conductor(&mut app.state, signal)

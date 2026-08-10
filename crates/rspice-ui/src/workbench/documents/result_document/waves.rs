@@ -2246,7 +2246,7 @@ fn recentered_shared_x_view(
 ) -> Option<(f64, f64)> {
     let (start, end) = shared_axis_viewport_fraction(scale, full, view);
     let width = end - start;
-    if !(width > 0.0 && width < 1.0) || !centre_fraction.is_finite() {
+    if !(width > 0.0 && width < 1.0 && centre_fraction.is_finite()) {
         return None;
     }
     let next_start = (centre_fraction.clamp(0.0, 1.0) - width * 0.5).clamp(0.0, 1.0 - width);
@@ -2594,7 +2594,7 @@ fn show_unit_pane_header(
 ) -> UnitPaneHeaderResponse {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let height = height.min(WAVE_PANE_HEADER_HEIGHT).max(0.0);
+    let height = height.clamp(0.0, WAVE_PANE_HEADER_HEIGHT);
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
         egui::Sense::hover(),
