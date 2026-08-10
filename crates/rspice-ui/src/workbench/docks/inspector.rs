@@ -1615,10 +1615,8 @@ fn result_qualification_gaps(ui: &mut Ui) {
 /// Whether a folded group is showing, for rows that belong to it but are
 /// drawn by a different owner.
 fn inspector_disclosure_open(ctx: &egui::Context, key: &str) -> bool {
-    ctx.data(|data| {
-        data.get_temp::<bool>(egui::Id::new(("workbench.inspector.disclosure", key)))
-    })
-    .unwrap_or(false)
+    ctx.data(|data| data.get_temp::<bool>(egui::Id::new(("workbench.inspector.disclosure", key))))
+        .unwrap_or(false)
 }
 
 /// A folded group of rows, named on the left and standing on the right.
@@ -1650,7 +1648,11 @@ fn inspector_disclosure(ui: &mut Ui, key: &str, title: &str, status: &str) -> bo
         painter.rect_filled(rect, 0.0, c.bg_hover);
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    let text = if response.hovered() { c.text } else { c.text_dim };
+    let text = if response.hovered() {
+        c.text
+    } else {
+        c.text_dim
+    };
     painter.text(
         Pos2::new(rect.left() + 10.0, rect.center().y),
         Align2::LEFT_CENTER,

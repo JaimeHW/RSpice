@@ -795,7 +795,13 @@ fn results_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         WorkbenchIcon::Folder,
         layout,
     );
-    toolbar_icon_command(ui, app, Command::ExportWaveformsCsv, WorkbenchIcon::Export, layout);
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::ExportWaveformsCsv,
+        WorkbenchIcon::Export,
+        layout,
+    );
     toolbar_icon_command(ui, app, Command::PrintHardcopy, WorkbenchIcon::File, layout);
 }
 

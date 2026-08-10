@@ -307,8 +307,14 @@ fn a_value_is_named_by_its_own_unit_not_the_strips() {
     assert_eq!(model.unit_panes().len(), 2);
     let volts = model.format_trace_value(&model.traces[0], 5.0, 6, quantity_policy);
     let amps = model.format_trace_value(&model.traces[1], 1.5e-3, 6, quantity_policy);
-    assert!(volts.ends_with(" V"), "a node voltage reads in volts: {volts}");
-    assert!(amps.ends_with(" mA"), "a supply current reads in amps: {amps}");
+    assert!(
+        volts.ends_with(" V"),
+        "a node voltage reads in volts: {volts}"
+    );
+    assert!(
+        amps.ends_with(" mA"),
+        "a supply current reads in amps: {amps}"
+    );
 }
 
 #[test]
@@ -1484,13 +1490,20 @@ fn inline_readout_finds_a_noise_strip_behind_earlier_analyses() {
     let t = Tokens::default();
     let mut state = AppState::default();
     let run = state.simulation.start_run();
-    run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(
-        vec![WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff")],
-    ));
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+        ]),
+    );
     run.add_analysis(AnalysisResult::new(2, AnalysisType::DcOp, "OP"));
-    run.add_analysis(AnalysisResult::new(3, AnalysisType::Ac, "AC").with_waveforms(vec![
-        WaveformData::new("V(in)", vec![1.0, 10.0], vec![1.0, 0.5], "#0af"),
-    ]));
+    run.add_analysis(
+        AnalysisResult::new(3, AnalysisType::Ac, "AC").with_waveforms(vec![WaveformData::new(
+            "V(in)",
+            vec![1.0, 10.0],
+            vec![1.0, 0.5],
+            "#0af",
+        )]),
+    );
     run.add_analysis(
         AnalysisResult::new(4, AnalysisType::Noise, "Noise").with_waveforms(vec![
             WaveformData::new("onoise", vec![1.0e3, 1.0e4], vec![1.0e-18, 4.0e-18], "#f80"),

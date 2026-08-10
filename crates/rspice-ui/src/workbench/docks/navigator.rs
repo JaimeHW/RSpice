@@ -1020,10 +1020,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .flat_map(|run| run.analyses.iter())
         .map(|analysis| analysis.signals.len())
         .sum::<usize>();
-    let tab = results_browser_tab_band(
-        ui,
-        [signal_count, runs.len(), expressions.len()],
-    );
+    let tab = results_browser_tab_band(ui, [signal_count, runs.len(), expressions.len()]);
     // The mockup's browser toolbar: kind and sort facets, present only on
     // the quantity-bearing tabs — the dataset manifest has no kinds.
     if tab != ResultsBrowserTab::Datasets {
@@ -1155,11 +1152,8 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             egui::vec2(ui.available_width(), 29.0),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
-                ui.painter().rect_filled(
-                    ui.available_rect_before_wrap(),
-                    0.0,
-                    t.color.accent_dim,
-                );
+                ui.painter()
+                    .rect_filled(ui.available_rect_before_wrap(), 0.0, t.color.accent_dim);
                 ui.add_space(8.0);
                 ui.label(
                     egui::RichText::new(format!("{} selected", checked.len()))
@@ -1555,11 +1549,7 @@ fn result_browser_group_expanded(ctx: &egui::Context, analysis_index: usize, act
     .unwrap_or(active)
 }
 
-fn set_result_browser_group_expanded(
-    ctx: &egui::Context,
-    analysis_index: usize,
-    expanded: bool,
-) {
+fn set_result_browser_group_expanded(ctx: &egui::Context, analysis_index: usize, expanded: bool) {
     ctx.data_mut(|data| {
         data.insert_temp(
             egui::Id::new(("workbench.results.browser-group", analysis_index)),
@@ -1583,10 +1573,8 @@ fn results_browser_tab_band(ui: &mut Ui, counts: [usize; 3]) -> ResultsBrowserTa
         (ResultsBrowserTab::Datasets, "Datasets", counts[1]),
         (ResultsBrowserTab::Expressions, "Expressions", counts[2]),
     ];
-    let (band, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 30.0),
-        egui::Sense::hover(),
-    );
+    let (band, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 30.0), egui::Sense::hover());
     let painter = ui.painter_at(band);
     let column_width = band.width() / tabs.len() as f32;
     for (index, (candidate, label, count)) in tabs.into_iter().enumerate() {
@@ -1643,10 +1631,7 @@ fn results_browser_tab_band(ui: &mut Ui, counts: [usize; 3]) -> ResultsBrowserTa
         painter.galley(count_pos, count_galley, count_color);
         if selected {
             painter.rect_filled(
-                egui::Rect::from_min_max(
-                    egui::pos2(cell.left(), cell.bottom() - 2.0),
-                    cell.max,
-                ),
+                egui::Rect::from_min_max(egui::pos2(cell.left(), cell.bottom() - 2.0), cell.max),
                 0.0,
                 t.color.accent,
             );
@@ -1930,7 +1915,11 @@ fn grouped_count(value: usize) -> String {
 /// per row so no row needs a repeated kind chip.
 fn result_quantity_kind_label(name: &str, unit: &'static str) -> &'static str {
     if crate::workbench::documents::result_document::browser_signal_is_current(name) {
-        return if unit == "°" { "Current phase" } else { "Current" };
+        return if unit == "°" {
+            "Current phase"
+        } else {
+            "Current"
+        };
     }
     match unit {
         "V" => "Voltage",
@@ -2015,7 +2004,10 @@ fn result_browser_manifest_row(
         });
         if galley.rows.len() == 1 {
             ui.painter().galley(
-                egui::pos2(rect.right() - 8.0 - galley.size().x, rect.center().y - galley.size().y / 2.0),
+                egui::pos2(
+                    rect.right() - 8.0 - galley.size().x,
+                    rect.center().y - galley.size().y / 2.0,
+                ),
                 galley,
                 c.text_faint,
             );
@@ -2115,8 +2107,11 @@ fn result_browser_analysis_head(
     );
     // `box-shadow: 0 1px var(--border)` — the head keeps its own hairline so
     // it reads as pinned chrome above the quantities it owns.
-    ui.painter()
-        .hline(rect.x_range(), rect.bottom() - 0.5, egui::Stroke::new(1.0, c.border));
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, c.border),
+    );
 
     // The disclosure caret: a group with many quantities is closed by
     // default, so the panel opens as an index of the run's analyses.
@@ -2311,8 +2306,10 @@ fn result_quantity_row(
         rect.left_top(),
         egui::pos2((rect.left() + 26.0).min(rect.right()), rect.bottom()),
     );
-    let selection_rect =
-        egui::Rect::from_min_max(egui::pos2(visibility_rect.right(), rect.top()), rect.right_bottom());
+    let selection_rect = egui::Rect::from_min_max(
+        egui::pos2(visibility_rect.right(), rect.top()),
+        rect.right_bottom(),
+    );
     // The checkbox marks the row for a batch action; plotting is the row's
     // own affordance in the action cluster, as the mockup separates them.
     let check = ui.interact(visibility_rect, id.with("check"), egui::Sense::click());
@@ -2345,7 +2342,10 @@ fn result_quantity_row(
     if selected {
         ui.painter().rect_filled(rect, 0.0, c.accent_dim);
         ui.painter().rect_filled(
-            egui::Rect::from_min_max(rect.left_top(), egui::pos2(rect.left() + 2.0, rect.bottom())),
+            egui::Rect::from_min_max(
+                rect.left_top(),
+                egui::pos2(rect.left() + 2.0, rect.bottom()),
+            ),
             0.0,
             c.accent,
         );
@@ -2363,12 +2363,16 @@ fn result_quantity_row(
             egui::Stroke::new(1.0, c.accent),
             egui::StrokeKind::Inside,
         );
-        ui.painter().rect_filled(box_rect.shrink(3.0), 1.0, c.accent);
+        ui.painter()
+            .rect_filled(box_rect.shrink(3.0), 1.0, c.accent);
     } else if visible {
-        ui.painter()
-            .rect_stroke(box_rect, 3.0, egui::Stroke::new(1.0, color), egui::StrokeKind::Inside);
-        ui.painter()
-            .rect_filled(box_rect.shrink(3.0), 1.0, color);
+        ui.painter().rect_stroke(
+            box_rect,
+            3.0,
+            egui::Stroke::new(1.0, color),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().rect_filled(box_rect.shrink(3.0), 1.0, color);
     } else {
         ui.painter().rect_filled(box_rect, 3.0, c.bg_panel);
         ui.painter().rect_stroke(

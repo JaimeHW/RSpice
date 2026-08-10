@@ -81,10 +81,10 @@ use crate::product::{AnalysisInstanceId, DatasetId};
 use crate::simulation::SimulationController;
 use crate::simulation::controller::DerivedViewerLoadState;
 use crate::state::{AnalysisResult, SharedWaveformValues, SimulationRun, WaveformData};
+use crate::ui::icons::Icon;
 use crate::ui::plot::{CursorPair, DecimationCache, InteractionMode};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::icons::Icon;
 use crate::ui::widgets::{IconButton, chip, docbar_at_height};
 use crate::workbench::app_state::ActiveViewer;
 use crate::workbench::design_system::WorkbenchIcon;
@@ -1321,7 +1321,6 @@ impl DerivedSeries {
             ))
         })
     }
-
 }
 
 // ---------------------------------------------------------------------------

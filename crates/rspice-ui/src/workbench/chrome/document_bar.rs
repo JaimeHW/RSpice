@@ -586,8 +586,7 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
             .iter()
             .position(|run| run.dataset_id == *dataset_id)
             .is_some_and(|index| {
-                state.simulation.active_run_idx == Some(index)
-                    || state.simulation.select_run(index)
+                state.simulation.active_run_idx == Some(index) || state.simulation.select_run(index)
             }),
         WorkspaceDocumentId::Project
         | WorkspaceDocumentId::SimulationPlan

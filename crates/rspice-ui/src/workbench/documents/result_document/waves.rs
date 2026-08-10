@@ -404,9 +404,7 @@ impl StripModel {
                 quantity_policy.format_angle(value.to_radians(), significant_digits)
             }
             TraceKind::PhaseRad => quantity_policy.format_angle(value, significant_digits),
-            TraceKind::NoiseDensity => {
-                fmt_si_significant(value, "nV/√Hz", significant_digits)
-            }
+            TraceKind::NoiseDensity => fmt_si_significant(value, "nV/√Hz", significant_digits),
         }
     }
 
@@ -2381,7 +2379,10 @@ pub(crate) struct SharedXStatus {
 /// coordinate segment states the view rather than triplicating the cursors —
 /// and its zoom chip reports this magnification instead of a canvas scale no
 /// waveform sheet has.
-pub(crate) fn active_shared_x_status(tokens: &Tokens, state: &mut AppState) -> Option<SharedXStatus> {
+pub(crate) fn active_shared_x_status(
+    tokens: &Tokens,
+    state: &mut AppState,
+) -> Option<SharedXStatus> {
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let digits = usize::from(presentation.displayed_significant_digits().get());
@@ -2449,8 +2450,7 @@ fn active_pane_viewports(
         return (None, None);
     };
     let x = x_range(model).map(|full| {
-        let (x0, x1) =
-            shared_x_view(&state.ui.results, key.analysis, panes.len()).unwrap_or(full);
+        let (x0, x1) = shared_x_view(&state.ui.results, key.analysis, panes.len()).unwrap_or(full);
         format!(
             "{} … {}",
             model.format_x(x0, digits, quantity_policy),
@@ -3148,7 +3148,9 @@ fn show_shared_x_axis(
                 let view_fraction = f64::from(
                     ((pointer.x - plot_left) / (plot_right - plot_left).max(1.0)).clamp(0.0, 1.0),
                 );
-                let x = model.x_scale.denormalize(view_fraction, current.0, current.1);
+                let x = model
+                    .x_scale
+                    .denormalize(view_fraction, current.0, current.1);
                 if !cursor_owner && !linked_cursor {
                     state.ui.results.clear_cursors();
                     state.ui.results.cursor_strip = Some(model.analysis_index);
@@ -3159,9 +3161,7 @@ fn show_shared_x_axis(
                         state.ui.results.cursor_a_anchor = None;
                     }
                     SharedXDrag::CursorB => state.ui.results.cursors.b = Some(x),
-                    SharedXDrag::Viewport
-                    | SharedXDrag::ResizeStart
-                    | SharedXDrag::ResizeEnd => {}
+                    SharedXDrag::Viewport | SharedXDrag::ResizeStart | SharedXDrag::ResizeEnd => {}
                 }
             }
         }
