@@ -55,6 +55,8 @@ pub enum AnalysisRunType {
     Envelope,
     /// Fourier analysis
     Fourier,
+    /// Harmonic spectrum of a converged periodic steady state
+    PssSpectrum,
     Qpss,
     Hbsp,
     Hbnoise,
@@ -95,6 +97,7 @@ impl AnalysisRunType {
             AnalysisRunType::SParameter => "S-Parameter",
             AnalysisRunType::Envelope => "Envelope",
             AnalysisRunType::Fourier => "Fourier",
+            AnalysisRunType::PssSpectrum => "PSS Spectrum",
             AnalysisRunType::Qpss => "QPSS",
             AnalysisRunType::Hbsp => "HBSP",
             AnalysisRunType::Hbnoise => "HBNOISE",

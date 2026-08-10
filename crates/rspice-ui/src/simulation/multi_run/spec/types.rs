@@ -285,6 +285,19 @@ pub enum AnalysisSpec {
         /// Numeric harmonic retention count. Zero retains no spectrum.
         num_harmonics: usize,
     },
+    /// Harmonic content of a converged periodic steady state.
+    ///
+    /// Retained as its own analysis rather than folded into the PSS result:
+    /// harmonics are indexed by frequency and the periodic waveform by time,
+    /// so one shared abscissa cannot describe both. It depends on the PSS
+    /// task's periodic state exactly as Fourier depends on a transient
+    /// trajectory, which is what gives it a prepared identity of its own
+    /// instead of an alias of the PSS task's.
+    PssSpectrum {
+        /// Harmonics to retain, matching the PSS request that produced the
+        /// periodic state this reads.
+        num_harmonics: usize,
+    },
     /// Harmonic balance
     HarmonicBalance {
         tones: Vec<HbToneSpec>,

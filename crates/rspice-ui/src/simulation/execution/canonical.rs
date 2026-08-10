@@ -778,6 +778,9 @@ fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
             writer.option(oscillator_node.as_ref(), |w, value| w.string(value));
             writer.usize(*num_harmonics);
         }
+        AnalysisSpec::PssSpectrum { num_harmonics } => {
+            writer.usize(*num_harmonics);
+        }
         AnalysisSpec::HarmonicBalance {
             tones,
             reltol,
@@ -1459,6 +1462,10 @@ pub(in crate::simulation) fn analysis_kind_tag(spec: &AnalysisSpec) -> u8 {
         AnalysisSpec::Qpxf { .. } => 32,
         AnalysisSpec::TransientNoise { .. } => 33,
         AnalysisSpec::DcMismatch { .. } => 34,
+        // Appended, never renumbered: these tags are part of the config
+        // digest, so reusing or reordering one would silently redefine every
+        // prepared snapshot already on disk.
+        AnalysisSpec::PssSpectrum { .. } => 35,
     }
 }
 
@@ -1538,6 +1545,45 @@ mod tests {
     use super::*;
     use crate::services::drc::{DrcLocation, DrcViolation};
     use crate::simulation::multi_run::{TfAccuracy, TfNormalization};
+
+    #[test]
+    fn analysis_kind_tags_are_append_only() {
+        // These tags are hashed into the config digest, so renumbering one
+        // silently redefines every prepared snapshot already on disk. Pin the
+        // boundary: PSS keeps 7, and the newest variant took the next free
+        // number rather than a gap.
+        assert_eq!(
+            analysis_kind_tag(&AnalysisSpec::PssSpectrum { num_harmonics: 20 }),
+            35
+        );
+        assert_eq!(analysis_kind_tag(&exact_pss_spec()), 7);
+    }
+
+    #[test]
+    fn a_pss_spectrum_digest_follows_its_harmonic_count() {
+        let twenty = AnalysisSpec::PssSpectrum { num_harmonics: 20 };
+        let nine = AnalysisSpec::PssSpectrum { num_harmonics: 9 };
+        let mut left = CanonicalWriter::new("test");
+        let mut right = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut left, &twenty);
+        encode_analysis_spec(&mut right, &nine);
+
+        assert_ne!(left.finish(), right.finish());
+    }
+
+    fn exact_pss_spec() -> AnalysisSpec {
+        AnalysisSpec::Pss {
+            method: crate::simulation::multi_run::PssMethod::Shooting,
+            fundamental_freq: 1.0e6,
+            tone_sources: vec!["VIN".to_owned()],
+            tstab_periods: 20,
+            points_per_period: 512,
+            tolerance: 1.0e-6,
+            oscillator_mode: false,
+            oscillator_node: None,
+            num_harmonics: 20,
+        }
+    }
 
     fn exact_noise_spec() -> AnalysisSpec {
         AnalysisSpec::Noise {

@@ -52,6 +52,9 @@ pub(super) fn run_periodic_spec(
                 "legacy HB-PSS mode is not executable; use a Harmonic Balance analysis".to_owned(),
             )),
         },
+        AnalysisSpec::PssSpectrum { num_harmonics } => {
+            run_pss_spectrum(num_harmonics, dependencies, abort)
+        }
         AnalysisSpec::HarmonicBalance {
             tones,
             reltol,
@@ -226,6 +229,84 @@ fn run_pss(
         // A shooting-PSS result is not produced by the transient driver, so
         // the driver's convergence metrics would not describe it.
         convergence: Default::default(),
+    })
+}
+
+/// The harmonic spectrum of a converged periodic steady state.
+///
+/// This reads the artifact the PSS task already produced rather than solving
+/// the period again, exactly as Fourier reads a transient trajectory. That is
+/// also why it is a task of its own: harmonics are indexed by frequency and
+/// the periodic waveform by time, and one analysis carries one abscissa.
+fn run_pss_spectrum(
+    num_harmonics: usize,
+    dependencies: &ResolvedExecutionDependencies,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let artifact = dependencies.periodic_state().map_err(|error| {
+        SimulationError::InvalidConfig(format!(
+            "PSS spectrum periodic-state dependency is unavailable: {error}"
+        ))
+    })?;
+    let periodic = artifact.operating_point().analysis();
+    let period = periodic.period;
+    if !period.is_finite() || period <= 0.0 {
+        return Err(SimulationError::InvalidConfig(
+            "PSS spectrum source state has no valid period".to_owned(),
+        ));
+    }
+    let fundamental = 1.0 / period;
+
+    let node_names = &periodic.result.node_names;
+    let mut waveforms = HashMap::new();
+    let mut frequencies = Vec::new();
+    for (index, waveform) in periodic.result.waveforms.iter().enumerate() {
+        super::ensure_not_aborted(abort)?;
+        let node_name = node_names
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| format!("n{}", index + 1));
+        if node_name == "0" || node_name.eq_ignore_ascii_case("gnd") {
+            continue;
+        }
+        let harmonics = svc_runner::compute_fft_harmonics_with_abort(
+            &waveform.values,
+            fundamental,
+            num_harmonics,
+            abort,
+        )
+        .map_err(|error| SimulationError::SolverError(error.to_string()))?;
+        if harmonics.is_empty() {
+            continue;
+        }
+        // Every node resolves the same harmonic grid, so the first one that
+        // produces a spectrum defines the shared abscissa.
+        if frequencies.is_empty() {
+            frequencies = harmonics.iter().map(|(freq, _, _)| *freq).collect();
+        }
+        let mut real = Vec::with_capacity(harmonics.len());
+        let mut imaginary = Vec::with_capacity(harmonics.len());
+        for (_, magnitude, phase_deg) in &harmonics {
+            let radians = phase_deg.to_radians();
+            real.push(magnitude * radians.cos());
+            imaginary.push(magnitude * radians.sin());
+        }
+        let name = format!("V({node_name})");
+        waveforms.insert(
+            name.clone(),
+            WaveformData::new_complex(
+                name,
+                harmonics.iter().map(|(freq, _, _)| *freq).collect(),
+                real,
+                imaginary,
+            ),
+        );
+    }
+
+    Ok(SimulationResult::Ac {
+        frequencies,
+        waveforms,
+        measurements: Vec::new(),
     })
 }
 

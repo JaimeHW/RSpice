@@ -469,6 +469,14 @@ fn initial_status_for_spec(
                 }
             }
         },
+        // The spectrum reads a state that already converged, so its progress
+        // is a frequency sweep over the retained harmonics, not a solve. The
+        // fundamental is not known until the artifact is opened; report the
+        // harmonic index range instead of inventing a frequency.
+        AnalysisSpec::PssSpectrum { num_harmonics } => SimulationStatus::AcAnalysis {
+            freq: 1.0,
+            stop_freq: (*num_harmonics).max(1) as f64,
+        },
         AnalysisSpec::HarmonicBalance { tones, .. } => SimulationStatus::AcAnalysis {
             freq: tones.first().map(|tone| tone.frequency).unwrap_or(1.0),
             stop_freq: tones

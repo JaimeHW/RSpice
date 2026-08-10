@@ -15,6 +15,7 @@ impl AnalysisSpec {
             AnalysisSpec::Transient { .. } => AnalysisRunType::Transient,
             AnalysisSpec::Noise { .. } => AnalysisRunType::Noise,
             AnalysisSpec::Pss { .. } => AnalysisRunType::Pss,
+            AnalysisSpec::PssSpectrum { .. } => AnalysisRunType::PssSpectrum,
             AnalysisSpec::HarmonicBalance { .. } => AnalysisRunType::HarmonicBalance,
             AnalysisSpec::Tf { .. } => AnalysisRunType::Tf,
             AnalysisSpec::Sensitivity { .. } => AnalysisRunType::Sensitivity,

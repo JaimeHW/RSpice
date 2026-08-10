@@ -67,7 +67,8 @@ pub use pnoise::{
     run_pnoise_analysis_from_pss_with_source_path_and_abort,
 };
 pub use pss::{
-    PssData, PssRunConfig, run_pss_analysis_with_dc_seed_and_source_path_and_abort,
+    PssData, PssRunConfig, compute_fft_harmonics_with_abort,
+    run_pss_analysis_with_dc_seed_and_source_path_and_abort,
     run_pss_analysis_with_source_path_and_abort,
 };
 pub use pstb::{PstbRunConfig, run_pstb_analysis_from_pss_with_source_path_and_abort};

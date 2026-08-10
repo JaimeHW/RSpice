@@ -60,6 +60,7 @@ pub(super) fn run_spec_request(
             device::run_device_spec(spec, netlist, source_path, abort_flag)
         }
         AnalysisSpec::Pss { .. }
+        | AnalysisSpec::PssSpectrum { .. }
         | AnalysisSpec::HarmonicBalance { .. }
         | AnalysisSpec::Envelope { .. }
         | AnalysisSpec::Fourier { .. }
@@ -184,6 +185,7 @@ fn spec_variant_name(spec: &AnalysisSpec) -> &'static str {
         AnalysisSpec::Optimization { .. } => "AnalysisSpec::Optimization",
         AnalysisSpec::Soa { .. } => "AnalysisSpec::Soa",
         AnalysisSpec::Pss { .. } => "AnalysisSpec::Pss",
+        AnalysisSpec::PssSpectrum { .. } => "AnalysisSpec::PssSpectrum",
         AnalysisSpec::HarmonicBalance { .. } => "AnalysisSpec::HarmonicBalance",
         AnalysisSpec::Envelope { .. } => "AnalysisSpec::Envelope",
         AnalysisSpec::Fourier { .. } => "AnalysisSpec::Fourier",

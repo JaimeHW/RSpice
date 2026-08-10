@@ -1024,6 +1024,10 @@ impl SimulationController {
             AnalysisRunType::SParameter => AnalysisType::SParameter,
             AnalysisRunType::Envelope => AnalysisType::Envelope,
             AnalysisRunType::Fourier => AnalysisType::Fourier,
+            // A retained coefficient spectrum is exactly what the harmonic
+            // balance viewer already draws, so the spectrum reuses that owner
+            // rather than introducing a second one that renders the same fact.
+            AnalysisRunType::PssSpectrum => AnalysisType::HarmonicBalance,
             AnalysisRunType::Qpss => AnalysisType::Qpss,
             AnalysisRunType::Hbsp => AnalysisType::Hbsp,
             AnalysisRunType::Hbnoise => AnalysisType::Hbnoise,

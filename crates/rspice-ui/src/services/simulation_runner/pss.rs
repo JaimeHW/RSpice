@@ -380,7 +380,13 @@ fn validate_pss_config(config: &PssRunConfig) -> Result<(), String> {
     Ok(())
 }
 
-fn compute_fft_harmonics_with_abort(
+/// Harmonic content of one periodic waveform: `(frequency, magnitude,
+/// phase in degrees)` per retained harmonic.
+///
+/// The spectrum analysis derived from a converged PSS state reads this too,
+/// so it stays the one owner of the transform rather than each caller
+/// growing its own.
+pub fn compute_fft_harmonics_with_abort(
     waveform: &[Value],
     fundamental_freq: Value,
     num_harmonics: usize,

@@ -292,6 +292,15 @@ impl AnalysisSpec {
                 }
                 Ok(())
             }
+            AnalysisSpec::PssSpectrum { num_harmonics } => {
+                // A spectrum of nothing is not a result. The PSS request that
+                // seeds this one already refuses a count its sample rate
+                // cannot resolve, so this only has to reject the empty ask.
+                if *num_harmonics == 0 {
+                    return Err("PSS spectrum must retain at least one harmonic".to_owned());
+                }
+                Ok(())
+            }
             AnalysisSpec::HarmonicBalance {
                 tones,
                 reltol,
@@ -1105,6 +1114,32 @@ mod tests {
                 .expect_err("TF must retain at least one scalar")
                 .contains("requires transfer gain")
         );
+    }
+
+    #[test]
+    fn a_pss_spectrum_must_retain_at_least_one_harmonic() {
+        assert!(
+            AnalysisSpec::PssSpectrum { num_harmonics: 0 }
+                .validate()
+                .is_err()
+        );
+        assert!(
+            AnalysisSpec::PssSpectrum { num_harmonics: 20 }
+                .validate()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_pss_spectrum_is_its_own_run_type_and_reads_as_a_coefficient_spectrum() {
+        use crate::simulation::multi_run::AnalysisRunType;
+
+        let spectrum = AnalysisSpec::PssSpectrum { num_harmonics: 20 };
+        // Its own run type, not the PSS one: the two are separate retained
+        // analyses and a shared type would collapse them in every label and
+        // availability check that keys off it.
+        assert_eq!(spectrum.run_type(), AnalysisRunType::PssSpectrum);
+        assert_eq!(spectrum.run_type().display_name(), "PSS Spectrum");
     }
 
     #[test]

@@ -1111,7 +1111,11 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 compute_thd: *compute_thd,
                 normalize: *normalize,
             }),
-            AnalysisSpec::Qpss { .. }
+            // Carried verbatim: the spectrum's whole payload is one harmonic
+            // count, so a dedicated wire shape would restate the spec without
+            // adding anything the worker can act on.
+            AnalysisSpec::PssSpectrum { .. }
+            | AnalysisSpec::Qpss { .. }
             | AnalysisSpec::Hbsp { .. }
             | AnalysisSpec::Hbnoise { .. }
             | AnalysisSpec::Psp { .. }

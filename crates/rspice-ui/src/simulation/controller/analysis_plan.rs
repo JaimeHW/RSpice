@@ -142,6 +142,25 @@ impl SimulationController {
                 }
             };
 
+            // A PSS request that asks to retain harmonics earns a second
+            // prepared task for them. It is a task in its own right, with its
+            // own identity and config digest, rather than a second result
+            // smuggled out of the PSS task: harmonics are indexed by frequency
+            // and the periodic waveform by time, so one analysis cannot carry
+            // both, and aliasing the PSS task's authored identity would make
+            // `find_analysis_by_source_instance` resolve the spectrum in its
+            // place for every dependent analysis and retained pane binding.
+            let spectrum_seed = match &spec {
+                AnalysisSpec::Pss { num_harmonics, .. } if *num_harmonics > 0 => Some((
+                    *num_harmonics,
+                    analysis_line.clone(),
+                    spec_options.clone(),
+                    instance.id(),
+                    instance.kind().label().to_owned(),
+                )),
+                _ => None,
+            };
+
             let task = if Self::executes_via_spec(&spec) {
                 QueuedAnalysis {
                     spec,
@@ -196,6 +215,23 @@ impl SimulationController {
                 }
             }
             queue.push(prepared);
+
+            if let Some((num_harmonics, analysis_line, spec_options, producer, label)) =
+                spectrum_seed
+            {
+                queue.push(PreparedTask::new(
+                    crate::product::AnalysisInstanceId::new(),
+                    plan.revision(),
+                    vec![producer],
+                    format!("{label} Spectrum"),
+                    QueuedAnalysis {
+                        spec: AnalysisSpec::PssSpectrum { num_harmonics },
+                        config: None,
+                        spec_options,
+                        analysis_line,
+                    },
+                ));
+            }
         }
 
         if !errors.is_empty() {
@@ -233,7 +269,11 @@ impl SimulationController {
                     AnalysisSpec::Pac
                     | AnalysisSpec::Pxf
                     | AnalysisSpec::Pnoise
-                    | AnalysisSpec::Pstb => {
+                    | AnalysisSpec::Pstb
+                    // The spectrum is a reading of a converged steady state,
+                    // so it binds the same artifact its small-signal siblings
+                    // do rather than re-solving the period.
+                    | AnalysisSpec::PssSpectrum { .. } => {
                         Some(crate::simulation::execution::ExecutionArtifactKind::PeriodicState)
                     }
                     _ => None,
@@ -297,6 +337,7 @@ impl SimulationController {
                 | AnalysisSpec::Parametric
                 | AnalysisSpec::Corner
                 | AnalysisSpec::Pss { .. }
+                | AnalysisSpec::PssSpectrum { .. }
                 | AnalysisSpec::HarmonicBalance { .. }
                 | AnalysisSpec::Pac
                 | AnalysisSpec::SParameter { .. }
