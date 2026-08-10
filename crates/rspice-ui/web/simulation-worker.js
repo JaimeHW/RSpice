@@ -97,13 +97,12 @@ async function qualifyWasmJitArchitecture(module, wasmExports) {
     "rspiceUiWasmJitProbeModule",
     "rspiceUiWasmJitAbiVersion",
     "rspiceUiWasmJitEmitterVersion",
-    "rspiceUiWasmJitEvalOpV1",
-    "rspiceUiWasmJitMath1V1",
-    "rspiceUiWasmJitMath2V1",
     "prepareRspiceUiWasmJitProbe",
     "finishRspiceUiWasmJitProbe",
     "rspiceUiWasmJitSolverProbeArtifact",
     "rspiceUiWasmJitRunSolverProbe",
+    "rspiceUiWasmJitKernelProbeArtifact",
+    "rspiceUiWasmJitRunKernelProbe",
   ];
   for (const name of requiredFunctions) {
     if (typeof module[name] !== "function") {
@@ -158,6 +157,16 @@ async function qualifyWasmJitArchitecture(module, wasmExports) {
     if (solverResult !== 15) {
       throw new Error(`WASM JIT solver probe produced ${solverResult}, expected 15.`);
     }
+    // A second model, installed the same way, whose contributions and
+    // derivatives are checked bit for bit inside the worker and whose stamp
+    // cost is timed. It carries the transcendentals, the extremum and the
+    // multi-entry Jacobian the solver probe above does not.
+    const kernelArtifact = module.rspiceUiWasmJitKernelProbeArtifact();
+    await installWasmJitArtifact(module, kernelArtifact);
+    const kernel = module.rspiceUiWasmJitRunKernelProbe();
+    if (!(kernel?.nanosecondsPerStamp > 0)) {
+      throw new Error("WASM JIT kernel probe reported no measurable stamp cost.");
+    }
     return {
       available: true,
       abiVersion: module.rspiceUiWasmJitAbiVersion(),
@@ -166,6 +175,7 @@ async function qualifyWasmJitArchitecture(module, wasmExports) {
       instantiateMs,
       result,
       solverResult,
+      kernel,
     };
   } catch (error) {
     return {

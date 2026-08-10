@@ -23,10 +23,20 @@ pub fn rspice_ui_wasm_jit_emitter_version() -> u32 {
     rspice_ui::rspice_ui_wasm_jit_emitter_version()
 }
 
+// Capability exports bound directly into every generated model module.
+//
+// These are `no_mangle` and not `wasm_bindgen`: the worker builds each
+// generated module's import object from `wasmExports.rspice_ui_wasm_jit_*`, so
+// the symbols have to exist as raw WebAssembly exports under exactly these
+// names. A `wasm_bindgen` export is reached only through the generated
+// JavaScript, which would put a JS frame -- and, for the `i64` argument below,
+// BigInt marshalling -- between a model's `exp()` and its implementation, on a
+// path that runs thousands of times per device evaluation.
+
 #[cfg(target_arch = "wasm32")]
-#[wasm_bindgen::prelude::wasm_bindgen(js_name = rspiceUiWasmJitEvalOpV1)]
+#[unsafe(no_mangle)]
 #[allow(clippy::too_many_arguments)]
-pub fn rspice_ui_wasm_jit_eval_op_v1(
+pub extern "C" fn rspice_ui_wasm_jit_eval_op_v1(
     frame_offset: u32,
     opcode: i32,
     aux0: i32,
@@ -52,21 +62,15 @@ pub fn rspice_ui_wasm_jit_eval_op_v1(
     )
 }
 
-/// Raw capability exports bound directly into generated modules.
-///
-/// The worker passes `wasmExports.rspice_ui_wasm_jit_math1_v1` rather than the
-/// generated JavaScript wrapper, so a model's `exp()` is a wasm-to-wasm import
-/// call. The `js_name` wrappers exist only so the worker can assert the
-/// symbols are present before it instantiates anything.
 #[cfg(target_arch = "wasm32")]
-#[wasm_bindgen::prelude::wasm_bindgen(js_name = rspiceUiWasmJitMath1V1)]
-pub fn rspice_ui_wasm_jit_math1_v1(opcode: i32, value: f64) -> f64 {
+#[unsafe(no_mangle)]
+pub extern "C" fn rspice_ui_wasm_jit_math1_v1(opcode: i32, value: f64) -> f64 {
     rspice_ui::rspice_ui_wasm_jit_math1_v1(opcode, value)
 }
 
 #[cfg(target_arch = "wasm32")]
-#[wasm_bindgen::prelude::wasm_bindgen(js_name = rspiceUiWasmJitMath2V1)]
-pub fn rspice_ui_wasm_jit_math2_v1(opcode: i32, left: f64, right: f64) -> f64 {
+#[unsafe(no_mangle)]
+pub extern "C" fn rspice_ui_wasm_jit_math2_v1(opcode: i32, left: f64, right: f64) -> f64 {
     rspice_ui::rspice_ui_wasm_jit_math2_v1(opcode, left, right)
 }
 
@@ -96,6 +100,20 @@ pub fn rspice_ui_wasm_jit_solver_probe_artifact()
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = rspiceUiWasmJitRunSolverProbe)]
 pub fn rspice_ui_wasm_jit_run_solver_probe() -> Result<f64, wasm_bindgen::JsValue> {
     rspice_ui::rspice_ui_wasm_jit_run_solver_probe().map_err(Into::into)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen(js_name = rspiceUiWasmJitKernelProbeArtifact)]
+pub fn rspice_ui_wasm_jit_kernel_probe_artifact()
+-> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    rspice_ui::rspice_ui_wasm_jit_kernel_probe_artifact()
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen(js_name = rspiceUiWasmJitRunKernelProbe)]
+pub fn rspice_ui_wasm_jit_run_kernel_probe() -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue>
+{
+    rspice_ui::rspice_ui_wasm_jit_run_kernel_probe().map_err(Into::into)
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -13,18 +13,54 @@
   const workerUrl = new URL("./simulation-worker.js", import.meta.url);
   workerUrl.searchParams.set("v", `qualification-${Date.now()}`);
   const worker = new Worker(workerUrl, { type: "module" });
-  const timeout = setTimeout(() => finish("timeout", "Worker qualification timed out."), 30000);
+  const timeout = setTimeout(() => finish("timeout", "Worker qualification timed out."), 60000);
+
+  // The verdict goes to the local qualification server as well as the DOM. The
+  // runner drives a real clock -- the stamp timing below is meaningless under
+  // a virtual one, and a virtual clock also races past this timeout -- so it
+  // needs a signal that the verdict exists rather than a fixed budget to wait
+  // out.
+  function report(result, message, capability) {
+    const beacon = new URL("./rspice-qualification", location.href);
+    beacon.searchParams.set("status", result);
+    beacon.searchParams.set("message", message);
+    if (capability) {
+      beacon.searchParams.set("abi", String(capability.abiVersion));
+      beacon.searchParams.set("solverResult", String(capability.solverResult));
+      if (capability.kernel) {
+        beacon.searchParams.set("contributions", String(capability.kernel.contributions));
+        beacon.searchParams.set("jacobians", String(capability.kernel.jacobianEntries));
+        beacon.searchParams.set("stamps", String(capability.kernel.stamps));
+        beacon.searchParams.set(
+          "nsPerStamp",
+          capability.kernel.nanosecondsPerStamp.toFixed(1),
+        );
+      }
+    }
+    void fetch(beacon, { keepalive: true }).catch(() => {});
+  }
 
   function finish(result, message, capability = null) {
     clearTimeout(timeout);
     root.setAttribute("data-rspice-wasm-jit-status", result);
     status.textContent = message;
+    report(result, message, capability);
     if (capability) {
       root.setAttribute("data-rspice-wasm-jit-abi", String(capability.abiVersion));
       root.setAttribute(
         "data-rspice-wasm-jit-solver-result",
         String(capability.solverResult),
       );
+      const kernel = capability.kernel;
+      if (kernel) {
+        root.setAttribute("data-rspice-wasm-jit-kernel-contributions", String(kernel.contributions));
+        root.setAttribute("data-rspice-wasm-jit-kernel-jacobians", String(kernel.jacobianEntries));
+        root.setAttribute("data-rspice-wasm-jit-kernel-stamps", String(kernel.stamps));
+        root.setAttribute(
+          "data-rspice-wasm-jit-kernel-ns-per-stamp",
+          kernel.nanosecondsPerStamp.toFixed(1),
+        );
+      }
     }
     worker.terminate();
   }
@@ -37,7 +73,9 @@
         capability.available === true &&
         capability.abiVersion === 4 &&
         capability.result === 42 &&
-        capability.solverResult === 15
+        capability.solverResult === 15 &&
+        capability.kernel?.contributions === 3 &&
+        capability.kernel?.jacobianEntries === 14
       ) {
         finish("qualified", "RSpice WASM JIT qualification passed.", capability);
       } else {
