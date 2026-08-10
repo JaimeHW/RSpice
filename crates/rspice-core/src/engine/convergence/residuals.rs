@@ -29,6 +29,15 @@ impl Engine {
         matrix: &mut StaticMatrix,
         solution: &[Value],
     ) -> Option<Vec<Value>> {
+        if self.config.spice_dialect == crate::engine::SpiceDialect::Xyce {
+            // The Xyce NOX contract returns the iterate accepted by its
+            // weighted-update and RHSTOL status tests.  Advancing that iterate
+            // through RSpice's native fixed-point polish changes observable DC
+            // results even though the Xyce solve has already converged.  Keep
+            // native polishing for the other dialects, where it is part of
+            // RSpice's higher-accuracy result contract.
+            return None;
+        }
         let size = circuit.matrix_size();
         if solution.len() != size || solution.iter().any(|value| !value.is_finite()) {
             return None;
