@@ -8213,10 +8213,18 @@ impl Engine {
                 .map_err(SimulationError::Circuit)?;
         }
 
-        circuit
+        let projection_result = circuit
             .voltage_sources
-            .finalize_constraint_projection(circuit.num_nodes())
-            .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+            .finalize_constraint_projection(circuit.num_nodes());
+        if let Err(error) = projection_result {
+            // Preserve SPICE's analysis-time singularity contract. Circuit
+            // construction records the invalid projection topology, while the
+            // matrix solve remains responsible for diagnosing non-unique ideal
+            // source branch currents in its analysis context. If a backend
+            // regularizes through that singularity, projection still returns
+            // this typed circuit error before publishing a candidate.
+            log::debug!("deferring voltage-source topology error to analysis: {error}");
+        }
 
         check_build_abort(abort)?;
         Ok(circuit)
