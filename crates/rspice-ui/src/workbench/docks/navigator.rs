@@ -1121,14 +1121,38 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     // right, with the provenance sentence riding its tooltip.
     {
         let t = Tokens::get(ui.ctx());
-        let filtering = !query.is_empty();
+        // A narrowing of any kind puts the count in the mockup's two-number
+        // form, so the reader can see how much of the dataset is hidden
+        // rather than only how much survived.
+        let filtering =
+            !query.is_empty() || kind != ResultsBrowserKind::All || scope != ResultsBrowserScope::All;
         let (shown, noun) = match tab {
             ResultsBrowserTab::Signals => (signal_count, "signals"),
             ResultsBrowserTab::Datasets => (runs.len(), "immutable datasets"),
             ResultsBrowserTab::Expressions => (expressions.len(), "expressions"),
         };
+        let loaded = match tab {
+            ResultsBrowserTab::Signals => app
+                .state
+                .simulation
+                .active_run()
+                .map(|run| {
+                    run.analyses
+                        .iter()
+                        .map(|analysis| analysis.waveforms.len())
+                        .sum::<usize>()
+                })
+                .unwrap_or(0),
+            ResultsBrowserTab::Datasets => app.state.simulation.runs.len(),
+            ResultsBrowserTab::Expressions => app
+                .state
+                .simulation
+                .active_analysis_idx
+                .and_then(|index| app.state.ui.results.exprs.get(&index))
+                .map_or(0, Vec::len),
+        };
         let count_copy = if filtering {
-            format!("{shown} matching")
+            format!("{shown} / {loaded}")
         } else if tab == ResultsBrowserTab::Signals {
             match scope {
                 ResultsBrowserScope::All => format!("{shown} {noun}"),
@@ -1371,6 +1395,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                 }
                             },
                         );
+                        results_browser_clear_filters(ui, app, kind, scope);
                     }
                 }
                 ResultsBrowserTab::Datasets => {
@@ -1619,6 +1644,40 @@ enum ResultsBrowserScope {
     Recent,
 }
 
+/// One way back when a narrowing has hidden everything.
+///
+/// A reader who filters to nothing has to be able to undo it without
+/// remembering which of the three controls did it. Nothing is offered when
+/// the emptiness is the dataset's own — there would be no filter to clear.
+fn results_browser_clear_filters(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    kind: ResultsBrowserKind,
+    scope: ResultsBrowserScope,
+) {
+    let filtering = !app.state.workbench.navigator_query.trim().is_empty()
+        || kind != ResultsBrowserKind::All
+        || scope != ResultsBrowserScope::All;
+    if !filtering {
+        return;
+    }
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.add_space(PANEL_SEARCH_MARGIN_X);
+        if ui
+            .small_button("Clear filters")
+            .on_hover_text("Reset the query, the kind facet, and the scope")
+            .clicked()
+        {
+            app.state.workbench.navigator_query.clear();
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(results_browser_kind_id(), ResultsBrowserKind::All);
+                data.insert_temp(results_browser_scope_id(), ResultsBrowserScope::All);
+            });
+        }
+    });
+}
+
 /// The data browser's own toolbar: the query, then the kind and sort facets.
 ///
 /// The mockup lays this out as one bordered block under the tab band — an
@@ -1677,32 +1736,40 @@ fn results_browser_toolbar(
         // query field's inset.
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.add_space(PANEL_SEARCH_MARGIN_X);
+        // The design system's select allocates exactly the width it is
+        // given, so the pair can be halved against the row. A raw combo box
+        // pads itself past the width it is asked for, which pushed the sort
+        // facet off the query's inset and clipped it at the panel edge.
         let row_width = ui.available_width() - PANEL_SEARCH_MARGIN_X;
         let facet_width = ((row_width - GUTTER) / 2.0).max(48.0);
-        let mut kind_now = kind;
-        egui::ComboBox::from_id_salt("workbench.results.browser-kind")
-            .width(facet_width)
-            .selected_text(kind_now.label())
-            .show_ui(ui, |ui| {
-                for value in ResultsBrowserKind::ALL {
-                    ui.selectable_value(&mut kind_now, value, value.label());
-                }
-            });
-        if kind_now != kind {
+        let kind_options = ResultsBrowserKind::ALL
+            .map(|value| value.label().to_owned())
+            .to_vec();
+        if let Some(picked) = crate::ui::widgets::select(
+            ui,
+            "workbench.results.browser-kind",
+            "Quantity kind",
+            kind.label(),
+            &kind_options,
+            facet_width,
+        ) {
+            let kind_now = ResultsBrowserKind::ALL[picked];
             ui.ctx()
                 .data_mut(|data| data.insert_temp(results_browser_kind_id(), kind_now));
         }
         ui.add_space(GUTTER);
-        let mut sort_now = sort;
-        egui::ComboBox::from_id_salt("workbench.results.browser-sort")
-            .width(facet_width)
-            .selected_text(sort_now.label())
-            .show_ui(ui, |ui| {
-                for value in ResultsBrowserSort::ALL {
-                    ui.selectable_value(&mut sort_now, value, value.label());
-                }
-            });
-        if sort_now != sort {
+        let sort_options = ResultsBrowserSort::ALL
+            .map(|value| value.label().to_owned())
+            .to_vec();
+        if let Some(picked) = crate::ui::widgets::select(
+            ui,
+            "workbench.results.browser-sort",
+            "Quantity sort",
+            sort.label(),
+            &sort_options,
+            facet_width,
+        ) {
+            let sort_now = ResultsBrowserSort::ALL[picked];
             ui.ctx()
                 .data_mut(|data| data.insert_temp(results_browser_sort_id(), sort_now));
         }
@@ -3990,6 +4057,7 @@ mod tests {
                 ));
             }
             if node.role() == egui::accesskit::Role::ComboBox
+                && matches!(node.label(), Some("Quantity kind" | "Quantity sort"))
                 && let Some(bounds) = node.bounds()
             {
                 facet_rects.push(egui::Rect::from_min_max(
