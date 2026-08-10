@@ -1599,6 +1599,33 @@ mod tests {
     }
 
     #[test]
+    fn instance_temp_is_absolute_and_outranks_dtemp_independent_of_parameter_order() {
+        let ambient = crate::constants::celsius_to_kelvin(15.0);
+        let expected = crate::constants::celsius_to_kelvin(25.0);
+        for params in [
+            vec![("TEMP".to_string(), 25.0), ("DTEMP".to_string(), 20.0)],
+            vec![("DTEMP".to_string(), 20.0), ("TEMP".to_string(), 25.0)],
+        ] {
+            let mut bjt = model_with(&[]);
+            bjt.set_temperature(ambient);
+            let bjt = bjt.with_instance_params(&params);
+            assert_eq!(bjt.requested_temperature().to_bits(), expected.to_bits());
+        }
+    }
+
+    #[test]
+    fn instance_dtemp_offsets_ambient_when_temp_is_absent() {
+        let ambient = crate::constants::celsius_to_kelvin(15.0);
+        let mut bjt = model_with(&[]);
+        bjt.set_temperature(ambient);
+        let bjt = bjt.with_instance_params(&[("DTEMP".to_string(), 20.0)]);
+        assert_eq!(
+            bjt.requested_temperature().to_bits(),
+            crate::constants::celsius_to_kelvin(35.0).to_bits()
+        );
+    }
+
+    #[test]
     fn substrate_topology_defaults_match_ngspice_bjt_setup() {
         let npn_default = Bjt::new_npn("q1".to_string(), 1, 2, 3).with_params(&HashMap::new());
         let pnp_default = Bjt::new_pnp("q1".to_string(), 1, 2, 3).with_params(&HashMap::new());

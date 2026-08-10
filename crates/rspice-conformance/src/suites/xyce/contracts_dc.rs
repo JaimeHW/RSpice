@@ -1200,6 +1200,13 @@ impl XyceTestRunner {
                 ));
             }
         }
+        if !Self::native_xyce_level2_diode_effective_temperature_is_valid(netlist, instance_params)
+        {
+            return Err(format!(
+                "native .STEP .PRINT TRAN comparison requires diode '{}' to have one non-conflicting TEMP or DTEMP whose effective temperature remains above absolute zero",
+                element_name
+            ));
+        }
 
         let model_def = Self::find_unique_model_in(&netlist.models, model).ok_or_else(|| {
             format!(

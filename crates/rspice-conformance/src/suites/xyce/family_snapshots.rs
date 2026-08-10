@@ -2778,6 +2778,326 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    pub(super) fn validate_level2_diode_dtemp_provenance(
+        &self,
+        contract: &XyceLevel2DiodeDtempContract,
+    ) -> Result<(), String> {
+        const LABEL: &str = "Level-2 diode TEMP/DTEMP family";
+        let parent = contract
+            .owner_path
+            .parent()
+            .ok_or_else(|| format!("{LABEL} owner has no parent directory"))?;
+        if contract.reference_path.parent() != Some(parent) {
+            return Err(format!("{LABEL} contract paths do not share one directory"));
+        }
+        let exclusions = self
+            .upstream_exclusions
+            .as_ref()
+            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
+        let entries = fs::read_dir(parent)
+            .map_err(|error| format!("failed to read {LABEL} directory: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("failed to enumerate {LABEL}: {error}"))?;
+
+        let mut candidate_paths = BTreeMap::<String, PathBuf>::new();
+        for entry in entries {
+            let path = entry.path();
+            let relative = self.relative_key(&path);
+            if XyceLevel2DiodeDtempRole::for_record(&relative).is_none() {
+                continue;
+            }
+            let metadata = fs::symlink_metadata(&path)
+                .map_err(|error| format!("failed to inspect {LABEL} candidate: {error}"))?;
+            if metadata.file_type().is_symlink()
+                || !metadata.file_type().is_file()
+                || metadata.len() == 0
+            {
+                return Err(format!(
+                    "{LABEL} candidate '{}' must be a nonempty regular non-symlink file",
+                    self.display_path(&path)
+                ));
+            }
+            let key = Self::normalize_manifest_key(&relative);
+            if candidate_paths.insert(key, path).is_some() {
+                return Err(format!(
+                    "{LABEL} candidate census contains a path collision"
+                ));
+            }
+        }
+
+        let owner_relative = self.relative_key(&contract.owner_path);
+        let reference_relative = self.relative_key(&contract.reference_path);
+        let owner_key = Self::normalize_manifest_key(&owner_relative);
+        let reference_key = Self::normalize_manifest_key(&reference_relative);
+        if owner_key != XYCE_LEVEL2_DIODE_DTEMP_OWNER_RECORD
+            || reference_key != XYCE_LEVEL2_DIODE_DTEMP_REFERENCE_RECORD
+            || !candidate_paths.contains_key(&owner_key)
+            || !candidate_paths.contains_key(&reference_key)
+            || XyceLevel2DiodeDtempRole::for_record(&owner_relative)
+                != Some(XyceLevel2DiodeDtempRole::Owner)
+            || XyceLevel2DiodeDtempRole::for_record(&reference_relative)
+                != Some(XyceLevel2DiodeDtempRole::Reference)
+        {
+            return Err(format!(
+                "requested {LABEL} deck or its exact relational sibling is outside the qualified census"
+            ));
+        }
+        if !self.requires_upstream_wrapper(&owner_relative) || exclusions.contains_key(&owner_key) {
+            return Err(format!(
+                "{LABEL} owner '{owner_relative}' lost its exclusive wrapper provenance"
+            ));
+        }
+        let exclusion = exclusions.get(&reference_key).ok_or_else(|| {
+            format!(
+                "{LABEL} reference '{reference_relative}' lost its historical exclusion provenance"
+            )
+        })?;
+        if !matches!(
+            &exclusion.disposition,
+            XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                expected_contract,
+            } if expected_contract == XYCE_LEVEL2_DIODE_DTEMP_REFERENCE_CONTRACT
+        ) || self.requires_upstream_wrapper(&reference_relative)
+        {
+            return Err(format!(
+                "{LABEL} reference '{reference_relative}' does not carry the exact independent qualification"
+            ));
+        }
+
+        let mut candidates = Vec::with_capacity(candidate_paths.len());
+        let mut candidate_content = Vec::with_capacity(candidate_paths.len());
+        for path in candidate_paths.values() {
+            let relative = self.relative_key(path);
+            let bytes = fs::read(path).map_err(|error| {
+                format!("failed to read {LABEL} candidate '{relative}': {error}")
+            })?;
+            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
+            candidates.push(relative.clone());
+            candidate_content.push(format!("{relative}\t{}", blake3::hash(&canonical).to_hex()));
+            self.reject_wrapper_output_artifacts(path)?;
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| format!("{LABEL} candidate filename is not UTF-8"))?;
+            for suffix in ["prn", "res", "prn.gs", "res.gs", "csv", "csd"] {
+                let sidecar = path.with_file_name(format!("{file_name}.{suffix}"));
+                match fs::symlink_metadata(&sidecar) {
+                    Ok(_) => {
+                        return Err(format!(
+                            "{LABEL} candidate must not have source-side output artifact '{}'",
+                            self.display_path(&sidecar)
+                        ));
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        return Err(format!(
+                            "failed to inspect {LABEL} sidecar '{}': {error}",
+                            self.display_path(&sidecar)
+                        ));
+                    }
+                }
+            }
+        }
+
+        candidates.sort();
+        candidate_content.sort();
+        let owner_manifest_rows = [format!(
+            "{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"
+        )];
+        let historical_exclusion_rows = [format!(
+            "{reference_relative}\t{}\tupstream_excluded",
+            exclusion.source
+        )];
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(candidate_content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let owner_hash = blake3::hash(owner_manifest_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let exclusion_hash = blake3::hash(historical_exclusion_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if candidates.len() != XYCE_LEVEL2_DIODE_DTEMP_CANDIDATE_COUNT
+            || candidate_hash != XYCE_LEVEL2_DIODE_DTEMP_CANDIDATE_BLAKE3
+            || content_hash != XYCE_LEVEL2_DIODE_DTEMP_CONTENT_BLAKE3
+            || owner_manifest_rows.len() != XYCE_LEVEL2_DIODE_DTEMP_OWNER_COUNT
+            || owner_hash != XYCE_LEVEL2_DIODE_DTEMP_OWNER_MANIFEST_BLAKE3
+            || historical_exclusion_rows.len() != XYCE_LEVEL2_DIODE_DTEMP_EXCLUSION_COUNT
+            || exclusion_hash != XYCE_LEVEL2_DIODE_DTEMP_HISTORICAL_EXCLUSION_BLAKE3
+        {
+            return Err(format!(
+                "{LABEL} provenance changed: candidates={}/{candidate_hash}/{content_hash}, owners={}/{owner_hash}, exclusions={}/{exclusion_hash}",
+                candidates.len(),
+                owner_manifest_rows.len(),
+                historical_exclusion_rows.len()
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn validate_capacitor_dtemp_provenance(
+        &self,
+        contract: &XyceCapacitorDtempContract,
+    ) -> Result<(), String> {
+        const LABEL: &str = "capacitor TEMP/DTEMP family";
+        let parent = contract
+            .owner_path
+            .parent()
+            .ok_or_else(|| format!("{LABEL} owner has no parent directory"))?;
+        if contract.reference_path.parent() != Some(parent) {
+            return Err(format!("{LABEL} contract paths do not share one directory"));
+        }
+        let exclusions = self
+            .upstream_exclusions
+            .as_ref()
+            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
+        let entries = fs::read_dir(parent)
+            .map_err(|error| format!("failed to read {LABEL} directory: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("failed to enumerate {LABEL}: {error}"))?;
+
+        let mut candidate_paths = BTreeMap::<String, PathBuf>::new();
+        for entry in entries {
+            let path = entry.path();
+            let relative = self.relative_key(&path);
+            if XyceCapacitorDtempRole::for_record(&relative).is_none() {
+                continue;
+            }
+            let metadata = fs::symlink_metadata(&path)
+                .map_err(|error| format!("failed to inspect {LABEL} candidate: {error}"))?;
+            if metadata.file_type().is_symlink()
+                || !metadata.file_type().is_file()
+                || metadata.len() == 0
+            {
+                return Err(format!(
+                    "{LABEL} candidate '{}' must be a nonempty regular non-symlink file",
+                    self.display_path(&path)
+                ));
+            }
+            let key = Self::normalize_manifest_key(&relative);
+            if candidate_paths.insert(key, path).is_some() {
+                return Err(format!(
+                    "{LABEL} candidate census contains a path collision"
+                ));
+            }
+        }
+
+        let owner_relative = self.relative_key(&contract.owner_path);
+        let reference_relative = self.relative_key(&contract.reference_path);
+        let owner_key = Self::normalize_manifest_key(&owner_relative);
+        let reference_key = Self::normalize_manifest_key(&reference_relative);
+        if owner_key != XYCE_CAPACITOR_DTEMP_OWNER_RECORD
+            || reference_key != XYCE_CAPACITOR_DTEMP_REFERENCE_RECORD
+            || !candidate_paths.contains_key(&owner_key)
+            || !candidate_paths.contains_key(&reference_key)
+            || XyceCapacitorDtempRole::for_record(&owner_relative)
+                != Some(XyceCapacitorDtempRole::Owner)
+            || XyceCapacitorDtempRole::for_record(&reference_relative)
+                != Some(XyceCapacitorDtempRole::Reference)
+        {
+            return Err(format!(
+                "requested {LABEL} deck or its exact relational sibling is outside the qualified census"
+            ));
+        }
+        if !self.requires_upstream_wrapper(&owner_relative) || exclusions.contains_key(&owner_key) {
+            return Err(format!(
+                "{LABEL} owner '{owner_relative}' lost its exclusive wrapper provenance"
+            ));
+        }
+        let exclusion = exclusions.get(&reference_key).ok_or_else(|| {
+            format!(
+                "{LABEL} reference '{reference_relative}' lost its historical exclusion provenance"
+            )
+        })?;
+        if !matches!(
+            &exclusion.disposition,
+            XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                expected_contract,
+            } if expected_contract == XYCE_CAPACITOR_DTEMP_REFERENCE_CONTRACT
+        ) || self.requires_upstream_wrapper(&reference_relative)
+        {
+            return Err(format!(
+                "{LABEL} reference '{reference_relative}' does not carry the exact independent qualification"
+            ));
+        }
+
+        let mut candidates = Vec::with_capacity(candidate_paths.len());
+        let mut candidate_content = Vec::with_capacity(candidate_paths.len());
+        for path in candidate_paths.values() {
+            let relative = self.relative_key(path);
+            let bytes = fs::read(path).map_err(|error| {
+                format!("failed to read {LABEL} candidate '{relative}': {error}")
+            })?;
+            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
+            candidates.push(relative.clone());
+            candidate_content.push(format!("{relative}\t{}", blake3::hash(&canonical).to_hex()));
+            self.reject_wrapper_output_artifacts(path)?;
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| format!("{LABEL} candidate filename is not UTF-8"))?;
+            for suffix in ["prn", "res", "prn.gs", "res.gs", "csv", "csd"] {
+                let sidecar = path.with_file_name(format!("{file_name}.{suffix}"));
+                match fs::symlink_metadata(&sidecar) {
+                    Ok(_) => {
+                        return Err(format!(
+                            "{LABEL} candidate must not have source-side output artifact '{}'",
+                            self.display_path(&sidecar)
+                        ));
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        return Err(format!(
+                            "failed to inspect {LABEL} sidecar '{}': {error}",
+                            self.display_path(&sidecar)
+                        ));
+                    }
+                }
+            }
+        }
+
+        candidates.sort();
+        candidate_content.sort();
+        let owner_manifest_rows = [format!(
+            "{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"
+        )];
+        let historical_exclusion_rows = [format!(
+            "{reference_relative}\t{}\tupstream_excluded",
+            exclusion.source
+        )];
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(candidate_content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let owner_hash = blake3::hash(owner_manifest_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let exclusion_hash = blake3::hash(historical_exclusion_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if candidates.len() != XYCE_CAPACITOR_DTEMP_CANDIDATE_COUNT
+            || candidate_hash != XYCE_CAPACITOR_DTEMP_CANDIDATE_BLAKE3
+            || content_hash != XYCE_CAPACITOR_DTEMP_CONTENT_BLAKE3
+            || owner_manifest_rows.len() != XYCE_CAPACITOR_DTEMP_OWNER_COUNT
+            || owner_hash != XYCE_CAPACITOR_DTEMP_OWNER_MANIFEST_BLAKE3
+            || historical_exclusion_rows.len() != XYCE_CAPACITOR_DTEMP_EXCLUSION_COUNT
+            || exclusion_hash != XYCE_CAPACITOR_DTEMP_HISTORICAL_EXCLUSION_BLAKE3
+        {
+            return Err(format!(
+                "{LABEL} provenance changed: candidates={}/{candidate_hash}/{content_hash}, owners={}/{owner_hash}, exclusions={}/{exclusion_hash}",
+                candidates.len(),
+                owner_manifest_rows.len(),
+                historical_exclusion_rows.len()
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn validate_nonlinear_core_model_step_provenance(
         &self,
         contract: &XyceNonlinearCoreModelStepReferenceContract,
@@ -8956,6 +9276,908 @@ impl XyceTestRunner {
         if mos_count != 1 {
             return Err(format!(
                 "{LABEL} materialization produced {mos_count} MOS instances instead of one"
+            ));
+        }
+        Ok(normalized)
+    }
+
+    pub(super) fn level2_diode_dtemp_snapshot(
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        role: XyceLevel2DiodeDtempRole,
+    ) -> Result<XyceLevel2DiodeDtempSnapshot, String> {
+        const LABEL: &str = "Level-2 diode TEMP/DTEMP family";
+        let expected_contract = match role {
+            XyceLevel2DiodeDtempRole::Owner => XyceStaticTranContract::WrapperStatic,
+            XyceLevel2DiodeDtempRole::Reference => XyceStaticTranContract::PlainStatic,
+        };
+        let print = plan
+            .print
+            .as_ref()
+            .ok_or_else(|| format!("{LABEL} requires one primary .PRINT TRAN output"))?;
+        if plan.contract != expected_contract
+            || !matches!(&plan.oracle, XyceStaticTranOracle::None)
+            || plan.output_override
+            || plan.timeint_conststep
+            || plan.wrapper_tolerance.is_some()
+            || !matches!(
+                plan.comparison_mode,
+                XyceStaticTranComparisonMode::Pointwise
+            )
+            || plan.steps.len() != 1
+            || print.probes.len() != 1
+        {
+            return Err(format!(
+                "{LABEL} requires one diagnostic-free LIST STEP, one pointwise transient plan, and one default indexed PRN output without an external oracle"
+            ));
+        }
+        let tran_count = netlist
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Tran { .. }))
+            .count();
+        let step_count = netlist
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Step(_)))
+            .count();
+        if netlist.analyses.len() != 2
+            || tran_count != 1
+            || step_count != 1
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || netlist.models.len() != 1
+            || netlist.elements.len() != 3
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_parameter_expressions().is_empty()
+            || !netlist.params.all_global_expressions().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(format!(
+                "{LABEL} admits only authored VIN/R1/DZR topology, one scalar diode model, one TRAN analysis, and one STEP analysis"
+            ));
+        }
+
+        let step = &plan.steps[0];
+        let StepSweep::List(step_values) = &step.sweep else {
+            return Err(format!("{LABEL} requires a three-value LIST sweep"));
+        };
+        let canonical_temperatures = [-55.0f64, 25.0, 72.0];
+        let effective_temperatures = match role {
+            XyceLevel2DiodeDtempRole::Owner => {
+                if step.target != StepTarget::Param
+                    || !step.name.eq_ignore_ascii_case("diodeDtemp")
+                    || step.param_name.is_some()
+                    || netlist.options.temp.map(Value::to_bits) != Some(27.0f64.to_bits())
+                    || step_values
+                        .iter()
+                        .map(|value| value.to_bits())
+                        .ne([-82.0f64, -2.0, 45.0].into_iter().map(Value::to_bits))
+                {
+                    return Err(format!(
+                        "{LABEL} owner must hold circuit TEMP=27 C and STEP diodeDtemp through -82, -2, 45 C"
+                    ));
+                }
+                step_values
+                    .iter()
+                    .map(|dtemp| 27.0 + dtemp)
+                    .collect::<Vec<_>>()
+            }
+            XyceLevel2DiodeDtempRole::Reference => {
+                if step.target != StepTarget::Temp
+                    || !step.name.eq_ignore_ascii_case("TEMP")
+                    || step.param_name.is_some()
+                    || netlist.options.temp.is_some()
+                    || step_values
+                        .iter()
+                        .map(|value| value.to_bits())
+                        .ne(canonical_temperatures.into_iter().map(Value::to_bits))
+                {
+                    return Err(format!(
+                        "{LABEL} reference must STEP global TEMP through -55, 25, 72 C without a fixed TEMP option"
+                    ));
+                }
+                step_values.clone()
+            }
+        };
+        if effective_temperatures
+            .iter()
+            .map(|value| value.to_bits())
+            .ne(canonical_temperatures.into_iter().map(Value::to_bits))
+        {
+            return Err(format!(
+                "{LABEL} TEMP and circuit-TEMP-plus-DTEMP grids are not identical"
+            ));
+        }
+
+        let explicit_params = netlist
+            .params
+            .all_params()
+            .into_iter()
+            .filter(|(name, _)| {
+                !matches!(name.to_ascii_uppercase().as_str(), "TEMP" | "TEMPER" | "VT")
+            })
+            .collect::<Vec<_>>();
+        match role {
+            XyceLevel2DiodeDtempRole::Owner
+                if explicit_params.len() == 1
+                    && explicit_params[0].0.eq_ignore_ascii_case("diodeDtemp")
+                    && explicit_params[0].1.to_bits() == (-82.0f64).to_bits() => {}
+            XyceLevel2DiodeDtempRole::Reference if explicit_params.is_empty() => {}
+            _ => {
+                return Err(format!(
+                    "{LABEL} admits only the owner's diodeDtemp=-82 parameter, got {explicit_params:?}"
+                ));
+            }
+        }
+
+        let model = &netlist.models[0];
+        if !model.name.eq_ignore_ascii_case("DZR")
+            || !matches!(
+                model.model_type.to_ascii_uppercase().as_str(),
+                "D" | "DIODE"
+            )
+            || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+            || !Self::model_is_native_xyce_level2_tbv_diode(model)
+        {
+            return Err(format!(
+                "{LABEL} requires the exact native scalar DZR LEVEL=2 diode model"
+            ));
+        }
+        let mut model_params = model
+            .params
+            .iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+            .collect::<Vec<_>>();
+        model_params.sort();
+        let spice_value = |literal: &str| {
+            rspice_core::netlist::lexer::parse_spice_value(literal)
+                .map(Value::to_bits)
+                .map_err(|error| {
+                    format!("{LABEL} internal model literal '{literal}' is invalid: {error}")
+                })
+        };
+        let mut expected_model_params = vec![
+            ("af".to_string(), spice_value("1")?),
+            ("bv".to_string(), spice_value("7.255")?),
+            ("cjo".to_string(), spice_value("1p")?),
+            ("eg".to_string(), spice_value("1.11")?),
+            ("fc".to_string(), spice_value(".5")?),
+            ("ibv".to_string(), spice_value(".001")?),
+            ("is".to_string(), spice_value("1e-14")?),
+            ("kf".to_string(), spice_value("0")?),
+            ("level".to_string(), spice_value("2")?),
+            ("m".to_string(), spice_value(".5")?),
+            ("n".to_string(), spice_value("1")?),
+            ("rs".to_string(), spice_value("0")?),
+            ("tbv1".to_string(), spice_value("0.00013")?),
+            ("tbv2".to_string(), spice_value("-5e-8")?),
+            ("tt".to_string(), spice_value("0")?),
+            ("vj".to_string(), spice_value("1")?),
+            ("xti".to_string(), spice_value("3")?),
+        ];
+        expected_model_params.sort();
+        if model_params != expected_model_params {
+            return Err(format!(
+                "{LABEL} model parameters changed: actual={model_params:?}, expected={expected_model_params:?}"
+            ));
+        }
+
+        let mut elements = BTreeMap::new();
+        for element in &netlist.elements {
+            if !matches!(element.provenance, ElementProvenance::Authored) {
+                return Err(format!(
+                    "{LABEL} element '{}' is not authored source topology",
+                    element.name
+                ));
+            }
+            let name = element.name.to_ascii_lowercase();
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| Self::canonical_param_expression_node_name(node))
+                .collect::<Vec<_>>();
+            let fingerprint = match &element.kind {
+                ElementKind::VoltageSource(spec) => {
+                    Self::transient_analysis_source_fingerprint(element, spec, nodes)?
+                }
+                ElementKind::Resistor {
+                    value,
+                    value_expr: None,
+                    model: None,
+                    instance_params,
+                    deferred_params,
+                } if value.is_finite()
+                    && *value > 0.0
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty()
+                    && nodes.len() == 2 =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::Diode {
+                    model: instance_model,
+                    instance_params,
+                    deferred_params,
+                } if deferred_params.is_empty() && nodes.len() == 2 => {
+                    if !instance_model.eq_ignore_ascii_case(&model.name) {
+                        return Err(format!("{LABEL} diode model reference changed"));
+                    }
+                    let mut ordinary_params = Vec::new();
+                    let mut temp = None;
+                    let mut dtemp = None;
+                    for (parameter, value) in instance_params {
+                        if parameter.eq_ignore_ascii_case("TEMP") {
+                            if temp.replace(*value).is_some() {
+                                return Err(format!("{LABEL} diode repeats TEMP"));
+                            }
+                        } else if parameter.eq_ignore_ascii_case("DTEMP") {
+                            if dtemp.replace(*value).is_some() {
+                                return Err(format!("{LABEL} diode repeats DTEMP"));
+                            }
+                        } else {
+                            ordinary_params.push((parameter.to_ascii_lowercase(), value.to_bits()));
+                        }
+                    }
+                    ordinary_params.sort();
+                    match role {
+                        XyceLevel2DiodeDtempRole::Owner
+                            if temp.is_none()
+                                && dtemp.map(Value::to_bits) == Some((-82.0f64).to_bits()) => {}
+                        XyceLevel2DiodeDtempRole::Reference
+                            if temp.is_none() && dtemp.is_none() => {}
+                        _ => {
+                            return Err(format!(
+                                "{LABEL} only the owner diode may carry DTEMP=diodeDtemp"
+                            ));
+                        }
+                    }
+                    if !ordinary_params.is_empty() {
+                        return Err(format!(
+                            "{LABEL} diode has unexpected instance parameters {ordinary_params:?}"
+                        ));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: "D".to_string(),
+                        nodes,
+                        numeric_bits: Vec::new(),
+                        text: vec![instance_model.to_ascii_lowercase()],
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} element '{}' is outside the exact VIN/R1/DZR envelope",
+                        element.name
+                    ));
+                }
+            };
+            if elements.insert(name.clone(), fingerprint).is_some() {
+                return Err(format!("{LABEL} repeats element name '{name}'"));
+            }
+        }
+        let expected_elements = BTreeMap::from([
+            (
+                "dzr".to_string(),
+                XyceRelationalElementFingerprint {
+                    kind: "D".to_string(),
+                    nodes: vec!["0".to_string(), "2".to_string()],
+                    numeric_bits: Vec::new(),
+                    text: vec!["dzr".to_string()],
+                },
+            ),
+            (
+                "r1".to_string(),
+                XyceRelationalElementFingerprint {
+                    kind: "R".to_string(),
+                    nodes: vec!["1".to_string(), "2".to_string()],
+                    numeric_bits: vec![spice_value("1k")?],
+                    text: Vec::new(),
+                },
+            ),
+            (
+                "vin".to_string(),
+                XyceRelationalElementFingerprint {
+                    kind: "V:PULSE".to_string(),
+                    nodes: vec!["1".to_string(), "0".to_string()],
+                    numeric_bits: vec![
+                        spice_value("7.5")?,
+                        spice_value("10")?,
+                        spice_value("1m")?,
+                        spice_value("1")?,
+                        spice_value("1")?,
+                        spice_value("3")?,
+                        spice_value("6")?,
+                        spice_value("0")?,
+                        0,
+                    ],
+                    text: Vec::new(),
+                },
+            ),
+        ]);
+        if elements != expected_elements {
+            return Err(format!(
+                "{LABEL} topology or source waveform changed: actual={elements:?}, expected={expected_elements:?}"
+            ));
+        }
+
+        let probes = print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        let expected_max_step = spice_value("100m")?;
+        if plan.tran.step.to_bits() != 0.0f64.to_bits()
+            || plan.tran.stop.to_bits() != 1.0f64.to_bits()
+            || plan.tran.start.map(Value::to_bits) != Some(0.0f64.to_bits())
+            || plan.tran.max_step.map(Value::to_bits) != Some(expected_max_step)
+            || plan.tran.uic
+            || probes != ["v(2)".to_string()]
+        {
+            return Err(format!(
+                "{LABEL} requires exact .TRAN 0 1 0 100m and ordered V(2) output"
+            ));
+        }
+
+        Ok(XyceLevel2DiodeDtempSnapshot {
+            elements,
+            model_name: model.name.to_ascii_lowercase(),
+            model_type: model.model_type.to_ascii_lowercase(),
+            model_params,
+            tran_step_bits: plan.tran.step.to_bits(),
+            tran_stop_bits: plan.tran.stop.to_bits(),
+            tran_start_bits: plan.tran.start.map(Value::to_bits),
+            tran_max_step_bits: plan.tran.max_step.map(Value::to_bits),
+            probes,
+            effective_temperature_bits: effective_temperatures
+                .into_iter()
+                .map(Value::to_bits)
+                .collect(),
+        })
+    }
+
+    pub(super) fn normalize_level2_diode_dtemp_materialization(
+        netlist: &Netlist,
+        role: XyceLevel2DiodeDtempRole,
+        expected_coordinate: Value,
+        expected_effective_temperature: Value,
+    ) -> Result<Netlist, String> {
+        const LABEL: &str = "Level-2 diode TEMP/DTEMP family";
+        if !expected_coordinate.is_finite() || !expected_effective_temperature.is_finite() {
+            return Err(format!("{LABEL} materialization coordinate is non-finite"));
+        }
+        let mut normalized = netlist.clone();
+        match role {
+            XyceLevel2DiodeDtempRole::Owner => {
+                if netlist.options.temp.map(Value::to_bits) != Some(27.0f64.to_bits())
+                    || netlist.params.get("diodeDtemp").map(Value::to_bits)
+                        != Some(expected_coordinate.to_bits())
+                    || (27.0 + expected_coordinate).to_bits()
+                        != expected_effective_temperature.to_bits()
+                {
+                    return Err(format!(
+                        "{LABEL} owner materialization lost its exact parameter coordinate or effective temperature"
+                    ));
+                }
+                normalized.params.set("diodeDtemp", -82.0);
+            }
+            XyceLevel2DiodeDtempRole::Reference => {
+                let expected_vt = rspice_core::constants::thermal_voltage(
+                    rspice_core::constants::celsius_to_kelvin(expected_coordinate),
+                );
+                if netlist.options.temp.map(Value::to_bits) != Some(expected_coordinate.to_bits())
+                    || netlist.params.get("TEMP").map(Value::to_bits)
+                        != Some(expected_coordinate.to_bits())
+                    || netlist.params.get("TEMPER").map(Value::to_bits)
+                        != Some(expected_coordinate.to_bits())
+                    || netlist.params.get("VT").map(Value::to_bits) != Some(expected_vt.to_bits())
+                    || expected_coordinate.to_bits() != expected_effective_temperature.to_bits()
+                {
+                    return Err(format!(
+                        "{LABEL} reference materialization lost its exact TEMP/TEMPER/VT coordinate"
+                    ));
+                }
+                normalized.options.temp = None;
+                let canonical_temp = 27.0;
+                let canonical_vt = rspice_core::constants::thermal_voltage(
+                    rspice_core::constants::celsius_to_kelvin(canonical_temp),
+                );
+                normalized.params.set("TEMP", canonical_temp);
+                normalized.params.set("TEMPER", canonical_temp);
+                normalized.params.set("VT", canonical_vt);
+            }
+        }
+
+        let mut diode_count = 0usize;
+        for element in &mut normalized.elements {
+            let ElementKind::Diode {
+                instance_params, ..
+            } = &mut element.kind
+            else {
+                continue;
+            };
+            diode_count += 1;
+            let mut temp_count = 0usize;
+            let mut dtemp_count = 0usize;
+            for (name, value) in instance_params {
+                if name.eq_ignore_ascii_case("TEMP") {
+                    temp_count += 1;
+                } else if name.eq_ignore_ascii_case("DTEMP") {
+                    dtemp_count += 1;
+                    if matches!(role, XyceLevel2DiodeDtempRole::Owner) {
+                        if value.to_bits() != expected_coordinate.to_bits() {
+                            return Err(format!(
+                                "{LABEL} materialized diode DTEMP differs from its STEP coordinate"
+                            ));
+                        }
+                        *value = -82.0;
+                    }
+                }
+            }
+            match role {
+                XyceLevel2DiodeDtempRole::Owner if temp_count == 0 && dtemp_count == 1 => {}
+                XyceLevel2DiodeDtempRole::Reference if temp_count == 0 && dtemp_count == 0 => {}
+                _ => {
+                    return Err(format!(
+                        "{LABEL} materialization introduced conflicting or repeated TEMP/DTEMP state"
+                    ));
+                }
+            }
+        }
+        if diode_count != 1 {
+            return Err(format!(
+                "{LABEL} materialization produced {diode_count} diode instances instead of one"
+            ));
+        }
+        Ok(normalized)
+    }
+
+    pub(super) fn capacitor_dtemp_snapshot(
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        role: XyceCapacitorDtempRole,
+    ) -> Result<XyceCapacitorDtempSnapshot, String> {
+        const LABEL: &str = "capacitor TEMP/DTEMP family";
+        let expected_contract = match role {
+            XyceCapacitorDtempRole::Owner => XyceStaticTranContract::WrapperStatic,
+            XyceCapacitorDtempRole::Reference => XyceStaticTranContract::PlainStatic,
+        };
+        let print = plan
+            .print
+            .as_ref()
+            .ok_or_else(|| format!("{LABEL} requires one primary .PRINT TRAN output"))?;
+        if plan.contract != expected_contract
+            || !matches!(&plan.oracle, XyceStaticTranOracle::None)
+            || plan.output_override
+            || plan.timeint_conststep
+            || plan.wrapper_tolerance.is_some()
+            || !matches!(
+                plan.comparison_mode,
+                XyceStaticTranComparisonMode::Pointwise
+            )
+            || plan.steps.len() != 1
+            || print.probes.len() != 1
+        {
+            return Err(format!(
+                "{LABEL} requires one LIST STEP, one pointwise transient plan, and one default indexed PRN output without an external oracle"
+            ));
+        }
+        let tran_count = netlist
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Tran { .. }))
+            .count();
+        let step_count = netlist
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Step(_)))
+            .count();
+        if netlist.analyses.len() != 2
+            || tran_count != 1
+            || step_count != 1
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || netlist.models.len() != 1
+            || netlist.elements.len() != 3
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_parameter_expressions().is_empty()
+            || !netlist.params.all_global_expressions().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(format!(
+                "{LABEL} admits only authored C1/R1/V1 topology, one scalar capacitor model, one TRAN analysis, and one STEP analysis"
+            ));
+        }
+
+        let step = &plan.steps[0];
+        let StepSweep::List(step_values) = &step.sweep else {
+            return Err(format!("{LABEL} requires a three-value LIST sweep"));
+        };
+        let canonical_temperatures = [627.0f64, 727.0, 827.0];
+        let effective_temperatures = match role {
+            XyceCapacitorDtempRole::Owner => {
+                if step.target != StepTarget::Param
+                    || !step.name.eq_ignore_ascii_case("dtempParam")
+                    || step.param_name.is_some()
+                    || netlist.options.temp.map(Value::to_bits) != Some(27.0f64.to_bits())
+                    || step_values
+                        .iter()
+                        .map(|value| value.to_bits())
+                        .ne([600.0f64, 700.0, 800.0].into_iter().map(Value::to_bits))
+                {
+                    return Err(format!(
+                        "{LABEL} owner must hold circuit TEMP=27 C and STEP dtempParam through 600, 700, 800 C"
+                    ));
+                }
+                step_values
+                    .iter()
+                    .map(|dtemp| 27.0 + dtemp)
+                    .collect::<Vec<_>>()
+            }
+            XyceCapacitorDtempRole::Reference => {
+                if step.target != StepTarget::Param
+                    || !step.name.eq_ignore_ascii_case("tempParam")
+                    || step.param_name.is_some()
+                    || netlist.options.temp.is_some()
+                    || step_values
+                        .iter()
+                        .map(|value| value.to_bits())
+                        .ne(canonical_temperatures.into_iter().map(Value::to_bits))
+                {
+                    return Err(format!(
+                        "{LABEL} reference must STEP instance tempParam through 627, 727, 827 C without a fixed circuit TEMP"
+                    ));
+                }
+                step_values.clone()
+            }
+        };
+        if effective_temperatures
+            .iter()
+            .map(|value| value.to_bits())
+            .ne(canonical_temperatures.into_iter().map(Value::to_bits))
+        {
+            return Err(format!(
+                "{LABEL} TEMP and circuit-TEMP-plus-DTEMP grids are not identical"
+            ));
+        }
+
+        let explicit_params = netlist
+            .params
+            .all_params()
+            .into_iter()
+            .filter(|(name, _)| {
+                !matches!(name.to_ascii_uppercase().as_str(), "TEMP" | "TEMPER" | "VT")
+            })
+            .collect::<Vec<_>>();
+        match role {
+            XyceCapacitorDtempRole::Owner
+                if explicit_params.len() == 1
+                    && explicit_params[0].0.eq_ignore_ascii_case("dtempParam")
+                    && explicit_params[0].1.to_bits() == 600.0f64.to_bits() => {}
+            XyceCapacitorDtempRole::Reference
+                if explicit_params.len() == 1
+                    && explicit_params[0].0.eq_ignore_ascii_case("tempParam")
+                    && explicit_params[0].1.to_bits() == 627.0f64.to_bits() => {}
+            _ => {
+                return Err(format!(
+                    "{LABEL} admits only its one temperature parameter, got {explicit_params:?}"
+                ));
+            }
+        }
+
+        let model = &netlist.models[0];
+        if !model.name.eq_ignore_ascii_case("CAP1")
+            || !matches!(model.model_type.to_ascii_uppercase().as_str(), "C" | "CAP")
+            || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires the exact native scalar CAP1 capacitor model"
+            ));
+        }
+        let mut model_params = model
+            .params
+            .iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+            .collect::<Vec<_>>();
+        model_params.sort();
+        let spice_value = |literal: &str| {
+            rspice_core::netlist::lexer::parse_spice_value(literal)
+                .map(Value::to_bits)
+                .map_err(|error| {
+                    format!("{LABEL} internal literal '{literal}' is invalid: {error}")
+                })
+        };
+        let mut expected_model_params = vec![
+            ("tc1".to_string(), spice_value("1.77m")?),
+            ("tc2".to_string(), spice_value("-0.63u")?),
+        ];
+        expected_model_params.sort();
+        if model_params != expected_model_params {
+            return Err(format!(
+                "{LABEL} model parameters changed: actual={model_params:?}, expected={expected_model_params:?}"
+            ));
+        }
+
+        let mut elements = BTreeMap::new();
+        for element in &netlist.elements {
+            if !matches!(element.provenance, ElementProvenance::Authored) {
+                return Err(format!(
+                    "{LABEL} element '{}' is not authored source topology",
+                    element.name
+                ));
+            }
+            let name = element.name.to_ascii_lowercase();
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| Self::canonical_param_expression_node_name(node))
+                .collect::<Vec<_>>();
+            let fingerprint = match &element.kind {
+                ElementKind::Capacitor {
+                    value,
+                    value_expr: None,
+                    initial_voltage: Some(initial_voltage),
+                    model: Some(instance_model),
+                    instance_params,
+                    deferred_params,
+                } if nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && initial_voltage.is_finite()
+                    && deferred_params.is_empty() =>
+                {
+                    if !instance_model.eq_ignore_ascii_case(&model.name) {
+                        return Err(format!("{LABEL} capacitor model reference changed"));
+                    }
+                    let mut ordinary_params = Vec::new();
+                    let mut temp = None;
+                    let mut dtemp = None;
+                    for (parameter, parameter_value) in instance_params {
+                        if parameter.eq_ignore_ascii_case("TEMP") {
+                            if temp.replace(*parameter_value).is_some() {
+                                return Err(format!("{LABEL} capacitor repeats TEMP"));
+                            }
+                        } else if parameter.eq_ignore_ascii_case("DTEMP") {
+                            if dtemp.replace(*parameter_value).is_some() {
+                                return Err(format!("{LABEL} capacitor repeats DTEMP"));
+                            }
+                        } else {
+                            ordinary_params
+                                .push((parameter.to_ascii_lowercase(), parameter_value.to_bits()));
+                        }
+                    }
+                    ordinary_params.sort();
+                    match role {
+                        XyceCapacitorDtempRole::Owner
+                            if temp.is_none()
+                                && dtemp.map(Value::to_bits) == Some(600.0f64.to_bits()) => {}
+                        XyceCapacitorDtempRole::Reference
+                            if dtemp.is_none()
+                                && temp.map(Value::to_bits) == Some(627.0f64.to_bits()) => {}
+                        _ => {
+                            return Err(format!(
+                                "{LABEL} owner must carry only DTEMP and reference only TEMP"
+                            ));
+                        }
+                    }
+                    if !ordinary_params.is_empty() {
+                        return Err(format!(
+                            "{LABEL} capacitor has unexpected instance parameters {ordinary_params:?}"
+                        ));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: "C:MODEL:IC".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits(), initial_voltage.to_bits()],
+                        text: vec![instance_model.to_ascii_lowercase()],
+                    }
+                }
+                ElementKind::Resistor {
+                    value,
+                    value_expr: None,
+                    model: None,
+                    instance_params,
+                    deferred_params,
+                } if nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::VoltageSource(spec) => {
+                    Self::transient_analysis_source_fingerprint(element, spec, nodes)?
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} element '{}' is outside the exact C1/R1/V1 envelope",
+                        element.name
+                    ));
+                }
+            };
+            if elements.insert(name.clone(), fingerprint).is_some() {
+                return Err(format!("{LABEL} repeats element name '{name}'"));
+            }
+        }
+        let expected_elements = BTreeMap::from([
+            (
+                "c1".to_string(),
+                XyceRelationalElementFingerprint {
+                    kind: "C:MODEL:IC".to_string(),
+                    nodes: vec!["1".to_string(), "0".to_string()],
+                    numeric_bits: vec![spice_value("1u")?, 1.0f64.to_bits()],
+                    text: vec!["cap1".to_string()],
+                },
+            ),
+            (
+                "r1".to_string(),
+                XyceRelationalElementFingerprint {
+                    kind: "R".to_string(),
+                    nodes: vec!["1".to_string(), "2".to_string()],
+                    numeric_bits: vec![spice_value("1k")?],
+                    text: Vec::new(),
+                },
+            ),
+            (
+                "v1".to_string(),
+                XyceRelationalElementFingerprint {
+                    kind: "V:DC".to_string(),
+                    nodes: vec!["2".to_string(), "0".to_string()],
+                    numeric_bits: vec![0.0f64.to_bits()],
+                    text: Vec::new(),
+                },
+            ),
+        ]);
+        if elements != expected_elements {
+            return Err(format!(
+                "{LABEL} topology changed: actual={elements:?}, expected={expected_elements:?}"
+            ));
+        }
+
+        let probes = print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        let expected_tolerance = spice_value("1e-6")?;
+        if plan.tran.step.to_bits() != 0.0f64.to_bits()
+            || plan.tran.stop.to_bits() != spice_value("5ms")?
+            || plan.tran.start.is_some()
+            || plan.tran.max_step.is_some()
+            || plan.tran.uic
+            || probes != ["v(1)".to_string()]
+            || netlist.options.timeint_reltol.map(Value::to_bits) != Some(expected_tolerance)
+            || netlist.options.timeint_abstol.map(Value::to_bits) != Some(expected_tolerance)
+        {
+            return Err(format!(
+                "{LABEL} requires exact .TRAN 0 5ms, ordered V(1) output, and TIMEINT RELTOL/ABSTOL=1e-6"
+            ));
+        }
+
+        Ok(XyceCapacitorDtempSnapshot {
+            elements,
+            model_name: model.name.to_ascii_lowercase(),
+            model_type: model.model_type.to_ascii_lowercase(),
+            model_params,
+            tran_step_bits: plan.tran.step.to_bits(),
+            tran_stop_bits: plan.tran.stop.to_bits(),
+            tran_start_bits: plan.tran.start.map(Value::to_bits),
+            tran_max_step_bits: plan.tran.max_step.map(Value::to_bits),
+            probes,
+            effective_temperature_bits: effective_temperatures
+                .into_iter()
+                .map(Value::to_bits)
+                .collect(),
+            timeint_reltol_bits: expected_tolerance,
+            timeint_abstol_bits: expected_tolerance,
+        })
+    }
+
+    pub(super) fn normalize_capacitor_dtemp_materialization(
+        netlist: &Netlist,
+        role: XyceCapacitorDtempRole,
+        expected_coordinate: Value,
+        expected_effective_temperature: Value,
+    ) -> Result<Netlist, String> {
+        const LABEL: &str = "capacitor TEMP/DTEMP family";
+        if !expected_coordinate.is_finite() || !expected_effective_temperature.is_finite() {
+            return Err(format!("{LABEL} materialization coordinate is non-finite"));
+        }
+        let (parameter_name, instance_parameter, canonical_initial, effective_temperature) =
+            match role {
+                XyceCapacitorDtempRole::Owner => (
+                    "dtempParam",
+                    "DTEMP",
+                    600.0,
+                    netlist.options.temp.unwrap_or(27.0) + expected_coordinate,
+                ),
+                XyceCapacitorDtempRole::Reference => {
+                    ("tempParam", "TEMP", 627.0, expected_coordinate)
+                }
+            };
+        if netlist.params.get(parameter_name).map(Value::to_bits)
+            != Some(expected_coordinate.to_bits())
+            || effective_temperature.to_bits() != expected_effective_temperature.to_bits()
+        {
+            return Err(format!(
+                "{LABEL} materialization lost its exact parameter coordinate or effective temperature"
+            ));
+        }
+
+        let mut normalized = netlist.clone();
+        normalized.params.set(parameter_name, canonical_initial);
+        let mut capacitor_count = 0usize;
+        for element in &mut normalized.elements {
+            let ElementKind::Capacitor {
+                instance_params, ..
+            } = &mut element.kind
+            else {
+                continue;
+            };
+            capacitor_count += 1;
+            let mut matching = 0usize;
+            for (name, value) in instance_params {
+                if name.eq_ignore_ascii_case(instance_parameter) {
+                    matching += 1;
+                    if value.to_bits() != expected_coordinate.to_bits() {
+                        return Err(format!(
+                            "{LABEL} materialized {instance_parameter} differs from its STEP coordinate"
+                        ));
+                    }
+                    *value = canonical_initial;
+                } else if (matches!(role, XyceCapacitorDtempRole::Owner)
+                    && name.eq_ignore_ascii_case("TEMP"))
+                    || (matches!(role, XyceCapacitorDtempRole::Reference)
+                        && name.eq_ignore_ascii_case("DTEMP"))
+                {
+                    return Err(format!(
+                        "{LABEL} materialization introduced conflicting TEMP/DTEMP state"
+                    ));
+                }
+            }
+            if matching != 1 {
+                return Err(format!(
+                    "{LABEL} materialized capacitor requires exactly one {instance_parameter} value"
+                ));
+            }
+        }
+        if capacitor_count != 1 {
+            return Err(format!(
+                "{LABEL} materialization produced {capacitor_count} capacitors instead of one"
             ));
         }
         Ok(normalized)

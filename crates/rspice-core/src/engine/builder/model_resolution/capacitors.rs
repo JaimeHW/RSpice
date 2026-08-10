@@ -266,6 +266,14 @@ mod tests {
     use super::*;
 
     fn resolve_capacitor_from_source(source: &str, name: &str) -> f64 {
+        resolve_capacitor_from_source_with_dialect(source, name, SpiceDialect::Ngspice)
+    }
+
+    fn resolve_capacitor_from_source_with_dialect(
+        source: &str,
+        name: &str,
+        spice_dialect: SpiceDialect,
+    ) -> f64 {
         let netlist = crate::netlist::Netlist::parse(source).expect("test netlist parses");
         let element = netlist
             .elements
@@ -290,7 +298,7 @@ mod tests {
             model.as_deref(),
             instance_params,
             crate::constants::TEMP_REFERENCE,
-            SpiceDialect::Ngspice,
+            spice_dialect,
         )
         .expect("capacitor resolves")
     }
@@ -350,6 +358,37 @@ mod tests {
             ((c - expected) / expected).abs() < 1e-12,
             "resolved {c}, expected {expected}"
         );
+    }
+
+    #[test]
+    fn xyce_capacitor_dtemp_grid_matches_absolute_temp_and_temp_outranks_dtemp() {
+        for (dtemp, temp, expected) in [
+            (600.0, 627.0, 1.8352e-6),
+            (700.0, 727.0, 1.9303e-6),
+            (800.0, 827.0, 2.0128e-6),
+        ] {
+            let owner = format!(
+                "owner\nC1 a 0 CAP1 1u DTEMP={dtemp}\n.model CAP1 C (TC1=1.77m TC2=-0.63u)\n.options temp=27\n.end\n"
+            );
+            let reference = format!(
+                "reference\nC1 a 0 CAP1 1u TEMP={temp}\n.model CAP1 C (TC1=1.77m TC2=-0.63u)\n.end\n"
+            );
+            let conflicting = format!(
+                "precedence\nC1 a 0 CAP1 1u TEMP={temp} DTEMP=100\n.model CAP1 C (TC1=1.77m TC2=-0.63u)\n.end\n"
+            );
+            let owner_value =
+                resolve_capacitor_from_source_with_dialect(&owner, "C1", SpiceDialect::Xyce);
+            let reference_value =
+                resolve_capacitor_from_source_with_dialect(&reference, "C1", SpiceDialect::Xyce);
+            let conflicting_value =
+                resolve_capacitor_from_source_with_dialect(&conflicting, "C1", SpiceDialect::Xyce);
+            assert_eq!(owner_value.to_bits(), reference_value.to_bits());
+            assert_eq!(reference_value.to_bits(), conflicting_value.to_bits());
+            assert!(
+                (owner_value - expected).abs() < 1e-18,
+                "DTEMP={dtemp}: resolved {owner_value}, expected {expected}"
+            );
+        }
     }
 
     #[test]

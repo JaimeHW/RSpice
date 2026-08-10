@@ -1333,8 +1333,9 @@ impl Bjt {
 
     #[inline]
     fn requested_temperature(&self) -> Value {
-        let base = self.instance_temp.unwrap_or(self.ambient_temperature);
-        (base + self.instance_dtemp).max(1.0)
+        self.instance_temp
+            .unwrap_or(self.ambient_temperature + self.instance_dtemp)
+            .max(1.0)
     }
 
     #[inline]

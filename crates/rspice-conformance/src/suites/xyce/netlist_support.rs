@@ -2843,6 +2843,14 @@ impl XyceTestRunner {
             && Self::netlist_element_is_native_xyce_level2_tbv_diode(netlist, element)
     }
 
+    pub(super) fn netlist_element_is_native_relational_level2_tbv_diode(
+        netlist: &Netlist,
+        element: &rspice_core::netlist::Element,
+    ) -> bool {
+        netlist.options.gmin.is_none()
+            && Self::netlist_element_is_native_xyce_level2_tbv_diode(netlist, element)
+    }
+
     pub(super) fn netlist_element_is_native_absolute_transient_minimum_diode(
         netlist: &Netlist,
         element: &rspice_core::netlist::Element,
@@ -3041,8 +3049,35 @@ impl XyceTestRunner {
             && instance_params
                 .iter()
                 .all(|(name, value)| Self::native_xyce_level2_diode_instance_param(name, *value))
+            && Self::native_xyce_level2_diode_effective_temperature_is_valid(
+                netlist,
+                instance_params,
+            )
             && Self::find_unique_model_in(&netlist.models, model)
                 .is_some_and(Self::model_is_native_xyce_level2_tbv_diode)
+    }
+
+    pub(super) fn native_xyce_level2_diode_effective_temperature_is_valid(
+        netlist: &Netlist,
+        instance_params: &[(String, Value)],
+    ) -> bool {
+        let mut temp = None;
+        let mut dtemp = None;
+        for (name, value) in instance_params {
+            if name.eq_ignore_ascii_case("TEMP") {
+                if temp.replace(*value).is_some() {
+                    return false;
+                }
+            } else if name.eq_ignore_ascii_case("DTEMP") && dtemp.replace(*value).is_some() {
+                return false;
+            }
+        }
+        if temp.is_some() && dtemp.is_some() {
+            return false;
+        }
+        let effective_temp =
+            temp.unwrap_or_else(|| netlist.options.temp.unwrap_or(27.0) + dtemp.unwrap_or(0.0));
+        effective_temp.is_finite() && effective_temp > -273.15
     }
 
     pub(super) fn model_is_native_xyce_level2_tbv_diode(
