@@ -149,23 +149,44 @@ impl std::fmt::Display for IdentityError {
     }
 }
 
+/// The transport the identity calls below are handed.
+///
+/// Native builds carry a configured `reqwest::Client`. Browser builds issue
+/// every identity request through [`browser_request`] instead, because
+/// reqwest's wasm backend cannot express `redirect: error` and this flow has
+/// to reject a redirect before a credential can be forwarded — so on that
+/// target there is no client to carry, and the type says so. Writing
+/// `reqwest::Client` into these shared signatures instead meant the browser
+/// built a client that every wasm arm went on to ignore, and that could fail
+/// the sign-in with "client construction failed" for a client nothing would
+/// have used.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) type IdentityHttpClient = reqwest::Client;
+#[cfg(target_arch = "wasm32")]
+pub(super) type IdentityHttpClient = BrowserIdentityTransport;
+
+/// The browser's identity transport, which holds nothing: the Fetch options
+/// this flow requires are set per request, not per client.
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug)]
+pub(super) struct BrowserIdentityTransport;
+
 /// HTTP client for identity traffic: no redirects, bounded time.
-pub(super) fn identity_http_client() -> Result<reqwest::Client, IdentityError> {
+pub(super) fn identity_http_client() -> Result<IdentityHttpClient, IdentityError> {
     #[cfg(not(target_arch = "wasm32"))]
-    let builder = reqwest::Client::builder()
+    return reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(30))
-        .user_agent(concat!("rspice/", env!("CARGO_PKG_VERSION")));
-    #[cfg(target_arch = "wasm32")]
-    let builder = reqwest::Client::builder();
-    builder
+        .user_agent(concat!("rspice/", env!("CARGO_PKG_VERSION")))
         .build()
-        .map_err(|_| IdentityError::Contract("client construction failed"))
+        .map_err(|_| IdentityError::Contract("client construction failed"));
+    #[cfg(target_arch = "wasm32")]
+    return Ok(BrowserIdentityTransport);
 }
 
 /// Fetch and validate `/.well-known/openid-configuration` for `issuer`.
 pub(super) async fn discover(
-    http: &reqwest::Client,
+    http: &IdentityHttpClient,
     issuer: &str,
     development: bool,
 ) -> Result<ProviderEndpoints, IdentityError> {
@@ -320,7 +341,7 @@ pub(super) fn authorization_url(
 
 /// Exchange an authorization code for tokens.
 pub(super) async fn exchange_code(
-    http: &reqwest::Client,
+    http: &IdentityHttpClient,
     endpoints: &ProviderEndpoints,
     client_id: &str,
     redirect_uri: &str,
@@ -343,7 +364,7 @@ pub(super) async fn exchange_code(
 
 /// Refresh the session with a stored refresh token.
 pub(super) async fn refresh_grant(
-    http: &reqwest::Client,
+    http: &IdentityHttpClient,
     endpoints: &ProviderEndpoints,
     client_id: &str,
     refresh_token: &str,
@@ -362,7 +383,7 @@ pub(super) async fn refresh_grant(
 
 /// Best-effort RFC 7009 revocation of the refresh token at sign-out.
 pub(super) async fn revoke_refresh_token(
-    http: &reqwest::Client,
+    http: &IdentityHttpClient,
     endpoints: &ProviderEndpoints,
     client_id: &str,
     refresh_token: &str,
@@ -411,7 +432,7 @@ fn form_body(pairs: &[(&str, &str)]) -> String {
 }
 
 async fn token_request(
-    http: &reqwest::Client,
+    http: &IdentityHttpClient,
     token_endpoint: &str,
     form: &[(&str, &str)],
 ) -> Result<TokenGrant, IdentityError> {

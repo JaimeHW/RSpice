@@ -147,8 +147,9 @@ tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"]
 
 # Cloud account boundary: the typed RSpice Cloud client, the OIDC token
 # transport the client crate deliberately does not own, and RFC 3339 stamps
-# for session freshness. Native-only until the hosted deployment carries the
-# browser sign-in callback page.
+# for session freshness. `reqwest` is the native identity transport only — the
+# browser fetches through web-sys, because reqwest's wasm backend cannot
+# express the `redirect: error` this flow depends on.
 getrandom = { workspace = true }
 reqwest = { workspace = true }
 rspice-cloud-client = { workspace = true }
@@ -202,8 +203,24 @@ serde-wasm-bindgen = "0.6"
 # uuid needs an explicit browser entropy source on wasm32-unknown-unknown
 uuid = { version = "1", features = ["v4", "v5", "v7", "js", "serde"] }
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent", "Document", "Element", "EventTarget", "BeforeUnloadEvent", "HtmlCanvasElement", "HtmlElement", "CanvasRenderingContext2d", "Node", "Blob", "BlobPropertyBag", "Url", "Performance", "Storage", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console"] }
+# The Request/Response/AbortController/ReadableStream group backs the browser
+# identity Fetch in `services::cloud_account::oidc`, WebSocket/CloseEvent the
+# live-session relay, and Crypto the PKCE verifier's entropy.
+web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent", "Document", "Element", "Event", "EventTarget", "BeforeUnloadEvent", "HtmlCanvasElement", "HtmlElement", "CanvasRenderingContext2d", "Node", "Blob", "BlobPropertyBag", "Url", "Performance", "Storage", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console", "AbortController", "AbortSignal", "BinaryType", "CloseEvent", "Crypto", "Headers", "ReadableStream", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "Response", "WebSocket"] }
 js-sys = "0.3"
+
+# Cloud account boundary, browser half. The typed client, `url` for callback
+# and relay routes, RFC 3339 stamps for session freshness, and the three
+# browser-only primitives the Fetch and socket pumps drive: timeouts, the
+# `select!`/`StreamExt` adapters, and the response-body stream. Every one of
+# these already reaches wasm32 through rspice-cloud-client, so declaring the
+# edges this crate uses directly adds nothing to the browser image.
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+gloo-timers = { workspace = true, features = ["futures"] }
+rspice-cloud-client = { workspace = true }
+time = { workspace = true }
+url = { workspace = true }
+wasm-streams = { workspace = true }
 
 [lints]
 workspace = true

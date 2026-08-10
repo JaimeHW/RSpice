@@ -211,7 +211,7 @@ struct RelayRuntime {
 
 struct Executor {
     configuration: CloudAccountConfig,
-    http: reqwest::Client,
+    http: oidc::IdentityHttpClient,
     cloud: CloudClient,
     endpoints: Option<oidc::ProviderEndpoints>,
     record: Option<store::CloudSessionRecord>,

@@ -127,7 +127,7 @@ struct LiveSessionRuntime {
 
 struct BrowserExecutor {
     configuration: CloudAccountConfig,
-    http: reqwest::Client,
+    http: oidc::IdentityHttpClient,
     cloud: CloudClient,
     endpoints: Option<oidc::ProviderEndpoints>,
     access: Option<AccessToken>,
