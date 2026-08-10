@@ -241,6 +241,14 @@ impl CalculatorPanel {
                 let mut any = false;
                 if let Some(run) = simulation.active_run() {
                     for analysis in &run.analyses {
+                        // The results workspace owns the name→unit mapping.
+                        // A local guess here labelled every unrecognised
+                        // signal — noise densities, decibel magnitudes,
+                        // S-parameters, powers — as volts.
+                        let analysis_unit =
+                            crate::workbench::documents::result_document::analysis_default_unit(
+                                analysis.analysis_type,
+                            );
                         let rows: Vec<SignalRow> = analysis
                             .waveforms
                             .iter()
@@ -249,7 +257,10 @@ impl CalculatorPanel {
                                 filter.is_empty() || w.name.to_lowercase().contains(&filter)
                             })
                             .map(|(index, w)| SignalRow {
-                                unit: signal_unit(&w.name),
+                                unit: crate::workbench::documents::result_document::browser_signal_unit(
+                                    &w.name,
+                                    analysis_unit,
+                                ),
                                 color: crate::workbench::documents::result_document::waveform_color(
                                     w, index, &t,
                                 ),
@@ -510,19 +521,6 @@ fn function_row(ui: &mut Ui, entry: &FunctionEntry) -> egui::Response {
     );
     theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
-}
-
-/// Display unit for a waveform name.
-fn signal_unit(name: &str) -> &'static str {
-    if name.starts_with("I(") || name.starts_with("i(") {
-        "A"
-    } else if name.starts_with('|') {
-        "mag"
-    } else if name.starts_with("phase(") {
-        "°"
-    } else {
-        "V"
-    }
 }
 
 /// Char index → byte index.
