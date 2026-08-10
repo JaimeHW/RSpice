@@ -58,15 +58,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 151;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 169;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "843e7b2ace619784e4d212d4e9a3abc2e262b00a0dbd0be81e7528e2d445cd2d";
+    "2b81ce023872cfa1db40a4aa7d4cc48918fefc28413ba115e34b7b6309b0191b";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "e613fb8076e88a8863b858835e96dcb8bca6026edcbab8862a3769b25ccd10ea";
+    "bab93133ddfbc0ce36e773ddb9b8b52c20843bdf1283a27143dd76259477df22";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "d6b949797367774edf4b23b61dc1ac86ec2a1c4216d61c9d4b950c20b2724008";
+    "2ad1292a3909cf75aa3ba6e3421651b8927bd22344f578347fc2b87ef79debdf";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -126,6 +126,21 @@ const XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE: f64 = 1.0e-12;
 const XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE: f64 = 1.0e-12;
 const XYCE_VERIFY_COMP_NO_PRINTED_PROBE: &str =
     "Xyce integrated-RMS *COMP contract has no directive for a printed probe";
+const XYCE_NONLINEAR_CORE_MODEL_STEP_WRAPPER_CONTRACT: &str =
+    "nonlinear_core_model_step_reference_wrapper";
+const XYCE_NONLINEAR_CORE_MODEL_STEP_BASELINE_CONTRACT: &str =
+    "nonlinear_core_model_step_reference_baseline";
+const XYCE_NONLINEAR_CORE_MODEL_STEP_CANDIDATE_COUNT: usize = 24;
+const XYCE_NONLINEAR_CORE_MODEL_STEP_CANDIDATE_BLAKE3: &str =
+    "a514fabac8dd61a804b137aa836f2592210bfadac040101e1d8463a93e878b11";
+const XYCE_NONLINEAR_CORE_MODEL_STEP_CANDIDATE_CONTENT_BLAKE3: &str =
+    "dfd1ff2e37507c06ddfe8d2df7d5a313eae667b728d698e947aea992a177aa9b";
+const XYCE_NONLINEAR_CORE_MODEL_STEP_OWNER_COUNT: usize = 6;
+const XYCE_NONLINEAR_CORE_MODEL_STEP_OWNER_MANIFEST_BLAKE3: &str =
+    "a015cf6b2395c9a5c62224b832bff244822c419b1cb199293f1e961bbd43e381";
+const XYCE_NONLINEAR_CORE_MODEL_STEP_EXCLUSION_COUNT: usize = 18;
+const XYCE_NONLINEAR_CORE_MODEL_STEP_HISTORICAL_EXCLUSION_BLAKE3: &str =
+    "a38a113c8f72fe3bb98a863de111674d446019c6fd0950d29f6f93da9b8ac65e";
 // The removed Release 7.10 sidecar emits `exp(-TIME/0.001)`. These constants
 // describe that generated oracle; the path-independent candidate detector does
 // not use them as deck-name or value allowlists.
@@ -5153,6 +5168,26 @@ struct XyceSteppedIcReferenceContract {
     owner_path: PathBuf,
     member_paths: Vec<PathBuf>,
     target_path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct XyceNonlinearCoreModelStepReferenceContract {
+    family: String,
+    owner_path: PathBuf,
+    member_paths: Vec<PathBuf>,
+    target_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceNonlinearCoreModelStepSnapshot {
+    title: String,
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    source_name: String,
+    inductor_names: [String; 2],
+    inductor_signal_nodes: [String; 2],
+    model_name: String,
+    model_level: u8,
+    model_numeric_bits: Vec<(String, u64)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

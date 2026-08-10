@@ -927,6 +927,54 @@ impl XyceTestRunner {
         )
     }
 
+    pub(super) fn validate_nonlinear_core_model_step_source_directives(
+        source: &str,
+        stepped_owner: bool,
+    ) -> Result<(), String> {
+        let mut model_count = 0usize;
+        let mut step_count = 0usize;
+        let mut tran_count = 0usize;
+        let mut print_count = 0usize;
+        let mut end_count = 0usize;
+        for (index, logical) in Self::logical_netlist_lines(source).into_iter().enumerate() {
+            if index == 0 {
+                continue;
+            }
+            let stripped = Self::strip_netlist_comment(&logical);
+            let fields = stripped.split_whitespace().collect::<Vec<_>>();
+            let Some(command) = fields.first() else {
+                continue;
+            };
+            if !command.starts_with('.') {
+                continue;
+            }
+            match command.to_ascii_lowercase().as_str() {
+                ".model" => model_count += 1,
+                ".step" => step_count += 1,
+                ".tran" => tran_count += 1,
+                ".print" => print_count += 1,
+                ".end" if fields.len() == 1 => end_count += 1,
+                other => {
+                    return Err(format!(
+                        "nonlinear CORE model-step family contains unqualified directive '{other}'"
+                    ));
+                }
+            }
+        }
+        let expected_steps = usize::from(stepped_owner);
+        if model_count != 1
+            || step_count != expected_steps
+            || tran_count != 1
+            || print_count != 1
+            || end_count != 1
+        {
+            return Err(format!(
+                "nonlinear CORE model-step directive census requires MODEL=1 STEP={expected_steps} TRAN=1 PRINT=1 END=1, found MODEL={model_count} STEP={step_count} TRAN={tran_count} PRINT={print_count} END={end_count}"
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn is_analytic_rc_wrapper_candidate(source: &str) -> bool {
         let lines = Self::logical_netlist_lines(source);
         let Some(title) = lines.first() else {

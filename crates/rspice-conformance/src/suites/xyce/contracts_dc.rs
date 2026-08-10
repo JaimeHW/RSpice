@@ -2883,6 +2883,186 @@ impl XyceTestRunner {
         })
     }
 
+    pub(super) fn nonlinear_core_model_step_reference_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceNonlinearCoreModelStepReferenceContract, String>> {
+        if deck.section != XyceDeckSection::Netlists {
+            return None;
+        }
+        let parent = deck.path.parent()?;
+        let exclusions = match &self.upstream_exclusions {
+            Ok(exclusions) => exclusions,
+            Err(error) => {
+                return Some(Err(format!(
+                    "nonlinear CORE model-step exclusion manifest is invalid: {error}"
+                )));
+            }
+        };
+        let entries = fs::read_dir(parent)
+            .ok()?
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
+        let mut claims = Vec::new();
+        for entry in &entries {
+            let owner_path = entry.path();
+            if !entry.file_type().ok()?.is_file()
+                || !owner_path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+                || !self.requires_upstream_wrapper(&self.relative_key(&owner_path))
+            {
+                continue;
+            }
+            let owner_stem = owner_path.file_stem()?.to_str()?.to_string();
+            let owner_stem_lower = owner_stem.to_ascii_lowercase();
+            let mut numbered = Vec::new();
+            for candidate in &entries {
+                let path = candidate.path();
+                if !candidate.file_type().ok()?.is_file()
+                    || !path
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+                    || Self::same_path(&path, &owner_path)
+                {
+                    continue;
+                }
+                let stem = path.file_stem()?.to_str()?.to_ascii_lowercase();
+                let Some(suffix) = stem.strip_prefix(&owner_stem_lower) else {
+                    continue;
+                };
+                let (underscored, digits) = suffix
+                    .strip_prefix('_')
+                    .map_or((false, suffix), |digits| (true, digits));
+                if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+                    continue;
+                }
+                numbered.push((underscored, digits.parse::<usize>().ok()?, path));
+            }
+            let candidate_shape = numbered.iter().any(|(_, _, path)| {
+                let relative = Self::normalize_manifest_key(&self.relative_key(path));
+                matches!(
+                    exclusions.get(&relative).map(|record| &record.disposition),
+                    Some(XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                        expected_contract,
+                    }) if expected_contract == XYCE_NONLINEAR_CORE_MODEL_STEP_BASELINE_CONTRACT
+                )
+            });
+            if candidate_shape
+                && (Self::same_path(&deck.path, &owner_path)
+                    || numbered
+                        .iter()
+                        .any(|(_, _, path)| Self::same_path(&deck.path, path)))
+            {
+                claims.push((owner_path, owner_stem, numbered));
+            }
+        }
+        let [(owner_path, family, numbered)] = claims.as_slice() else {
+            return if claims.is_empty() {
+                None
+            } else {
+                Some(Err(format!(
+                    "nonlinear CORE model-step record belongs to {} wrapper families",
+                    claims.len()
+                )))
+            };
+        };
+
+        Some((|| {
+            let owner_path = owner_path.clone();
+            let family = family.clone();
+            let mut numbered = numbered.clone();
+            numbered.sort_by_key(|(_, index, _)| *index);
+            if numbered.len() != 3
+                || numbered.iter().map(|(_, index, _)| *index).ne(1..=3)
+                || numbered
+                    .iter()
+                    .map(|(underscored, _, _)| *underscored)
+                    .collect::<BTreeSet<_>>()
+                    .len()
+                    != 1
+            {
+                return Err(format!(
+                    "nonlinear CORE model-step family '{family}' requires exactly one consistent contiguous 1/2/3 baseline sequence, found {numbered:?}"
+                ));
+            }
+            let member_paths = numbered
+                .into_iter()
+                .map(|(_, _, path)| path)
+                .collect::<Vec<_>>();
+            let mut all_paths = Vec::with_capacity(4);
+            all_paths.push(owner_path.clone());
+            all_paths.extend(member_paths.iter().cloned());
+            for (index, path) in all_paths.iter().enumerate() {
+                let metadata = fs::symlink_metadata(path).map_err(|error| {
+                    format!("nonlinear CORE model-step member metadata failed: {error}")
+                })?;
+                if !metadata.file_type().is_file()
+                    || metadata.file_type().is_symlink()
+                    || metadata.len() == 0
+                {
+                    return Err(format!(
+                        "nonlinear CORE model-step member '{}' must be a nonempty regular non-symlink file",
+                        self.display_path(path)
+                    ));
+                }
+                let relative = Self::normalize_manifest_key(&self.relative_key(path));
+                if (index == 0) != self.requires_upstream_wrapper(&relative) {
+                    return Err(format!(
+                        "nonlinear CORE model-step family '{family}' requires owner-only wrapper provenance"
+                    ));
+                }
+                self.reject_wrapper_output_artifacts(path)?;
+            }
+            let owner_relative = Self::normalize_manifest_key(&self.relative_key(&owner_path));
+            if exclusions.contains_key(&owner_relative) {
+                return Err(format!(
+                    "nonlinear CORE model-step owner '{}' must not be upstream-excluded",
+                    self.display_path(&owner_path)
+                ));
+            }
+            for path in &member_paths {
+                let relative = Self::normalize_manifest_key(&self.relative_key(path));
+                let exclusion = exclusions.get(&relative).ok_or_else(|| {
+                    format!(
+                        "independent nonlinear CORE baseline '{}' lost upstream exclusion provenance",
+                        self.display_path(path)
+                    )
+                })?;
+                if !matches!(
+                    &exclusion.disposition,
+                    XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified { expected_contract }
+                        if expected_contract == XYCE_NONLINEAR_CORE_MODEL_STEP_BASELINE_CONTRACT
+                ) {
+                    return Err(format!(
+                        "independent nonlinear CORE baseline '{}' is not promoted under contract '{}'",
+                        self.display_path(path),
+                        XYCE_NONLINEAR_CORE_MODEL_STEP_BASELINE_CONTRACT
+                    ));
+                }
+            }
+            if !all_paths
+                .iter()
+                .any(|path| Self::same_path(path, &deck.path))
+                || Self::normalize_manifest_key(&self.relative_key(&deck.path))
+                    != Self::normalize_manifest_key(&deck.relative_path)
+            {
+                return Err(
+                    "nonlinear CORE model-step request is not one canonical physical family member"
+                        .to_string(),
+                );
+            }
+            Ok(XyceNonlinearCoreModelStepReferenceContract {
+                family,
+                owner_path,
+                member_paths,
+                target_path: deck.path.clone(),
+            })
+        })())
+    }
+
     pub(super) fn analytic_integer_dc_wrapper_contract(
         &self,
         deck: &XyceDeck,

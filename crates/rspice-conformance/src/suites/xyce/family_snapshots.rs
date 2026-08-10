@@ -2366,6 +2366,532 @@ impl XyceTestRunner {
         })
     }
 
+    pub(super) fn validate_nonlinear_core_model_step_provenance(
+        &self,
+        contract: &XyceNonlinearCoreModelStepReferenceContract,
+    ) -> Result<(), String> {
+        let parent = contract
+            .owner_path
+            .parent()
+            .ok_or_else(|| "nonlinear CORE model-step owner has no parent directory".to_string())?;
+        let exclusions = self.upstream_exclusions.as_ref().map_err(|error| {
+            format!("nonlinear CORE model-step exclusion manifest is invalid: {error}")
+        })?;
+        let entries = fs::read_dir(parent)
+            .map_err(|error| format!("failed to read nonlinear CORE family directory: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("failed to enumerate nonlinear CORE family: {error}"))?;
+
+        let mut candidate_paths = BTreeMap::<String, PathBuf>::new();
+        let mut owner_manifest_rows = Vec::new();
+        let mut historical_exclusion_rows = Vec::new();
+        for entry in &entries {
+            let owner_path = entry.path();
+            if !entry
+                .file_type()
+                .map_err(|error| format!("failed to inspect nonlinear CORE owner: {error}"))?
+                .is_file()
+                || !owner_path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+                || !self.requires_upstream_wrapper(&self.relative_key(&owner_path))
+            {
+                continue;
+            }
+            let owner_stem = owner_path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .ok_or_else(|| "nonlinear CORE owner filename is not UTF-8".to_string())?;
+            let owner_stem_lower = owner_stem.to_ascii_lowercase();
+            let mut numbered = Vec::new();
+            for candidate in &entries {
+                let path = candidate.path();
+                if !candidate
+                    .file_type()
+                    .map_err(|error| format!("failed to inspect nonlinear CORE baseline: {error}"))?
+                    .is_file()
+                    || Self::same_path(&path, &owner_path)
+                    || !path
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+                {
+                    continue;
+                }
+                let stem = path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .ok_or_else(|| "nonlinear CORE baseline filename is not UTF-8".to_string())?
+                    .to_ascii_lowercase();
+                let Some(suffix) = stem.strip_prefix(&owner_stem_lower) else {
+                    continue;
+                };
+                let (underscored, digits) = suffix
+                    .strip_prefix('_')
+                    .map_or((false, suffix), |digits| (true, digits));
+                if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+                    continue;
+                }
+                numbered.push((
+                    underscored,
+                    digits.parse::<usize>().map_err(|error| {
+                        format!("invalid nonlinear CORE baseline index '{digits}': {error}")
+                    })?,
+                    path,
+                ));
+            }
+            let owns_promoted_baseline = numbered.iter().any(|(_, _, path)| {
+                let relative = Self::normalize_manifest_key(&self.relative_key(path));
+                matches!(
+                    exclusions.get(&relative).map(|record| &record.disposition),
+                    Some(XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                        expected_contract,
+                    }) if expected_contract == XYCE_NONLINEAR_CORE_MODEL_STEP_BASELINE_CONTRACT
+                )
+            });
+            if !owns_promoted_baseline {
+                continue;
+            }
+            numbered.sort_by_key(|(_, index, _)| *index);
+            if numbered.len() != 3
+                || numbered.iter().map(|(_, index, _)| *index).ne(1..=3)
+                || numbered
+                    .iter()
+                    .map(|(underscored, _, _)| *underscored)
+                    .collect::<BTreeSet<_>>()
+                    .len()
+                    != 1
+            {
+                return Err(format!(
+                    "nonlinear CORE owner '{}' lost its exact contiguous 1/2/3 control sequence",
+                    self.display_path(&owner_path)
+                ));
+            }
+
+            let owner_relative = self.relative_key(&owner_path);
+            owner_manifest_rows.push(format!(
+                "{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"
+            ));
+            let owner_key = Self::normalize_manifest_key(&owner_relative);
+            if candidate_paths
+                .insert(owner_key, owner_path.clone())
+                .is_some()
+            {
+                return Err("nonlinear CORE candidate census contains a path collision".to_string());
+            }
+            for (_, _, path) in numbered {
+                let relative = self.relative_key(&path);
+                let key = Self::normalize_manifest_key(&relative);
+                let exclusion = exclusions.get(&key).ok_or_else(|| {
+                    format!("nonlinear CORE control '{relative}' lost exclusion provenance")
+                })?;
+                if !matches!(
+                    &exclusion.disposition,
+                    XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                        expected_contract,
+                    } if expected_contract == XYCE_NONLINEAR_CORE_MODEL_STEP_BASELINE_CONTRACT
+                ) {
+                    return Err(format!(
+                        "nonlinear CORE control '{relative}' lost its exact promotion contract"
+                    ));
+                }
+                historical_exclusion_rows.push(format!(
+                    "{relative}\t{}\tupstream_excluded",
+                    exclusion.source
+                ));
+                if candidate_paths.insert(key, path).is_some() {
+                    return Err(
+                        "nonlinear CORE candidate census contains a path collision".to_string()
+                    );
+                }
+            }
+        }
+
+        let mut candidates = Vec::with_capacity(candidate_paths.len());
+        let mut candidate_content = Vec::with_capacity(candidate_paths.len());
+        for path in candidate_paths.values() {
+            let metadata = fs::symlink_metadata(path)
+                .map_err(|error| format!("failed to inspect nonlinear CORE candidate: {error}"))?;
+            if metadata.file_type().is_symlink()
+                || !metadata.file_type().is_file()
+                || metadata.len() == 0
+            {
+                return Err(format!(
+                    "nonlinear CORE candidate '{}' must be a nonempty regular non-symlink file",
+                    self.display_path(path)
+                ));
+            }
+            let relative = self.relative_key(path);
+            let bytes = fs::read(path).map_err(|error| {
+                format!("failed to read nonlinear CORE candidate '{relative}': {error}")
+            })?;
+            let canonical =
+                Self::canonical_lf_text_identity("nonlinear CORE model-step candidate", &bytes)?;
+            candidates.push(relative.clone());
+            candidate_content.push(format!("{relative}\t{}", blake3::hash(&canonical).to_hex()));
+            self.reject_wrapper_output_artifacts(path)?;
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| "nonlinear CORE candidate filename is not UTF-8".to_string())?;
+            for suffix in ["prn", "res", "prn.gs", "res.gs", "csv", "csd"] {
+                let sidecar = path.with_file_name(format!("{file_name}.{suffix}"));
+                match fs::symlink_metadata(&sidecar) {
+                    Ok(_) => {
+                        return Err(format!(
+                            "nonlinear CORE relational candidate must not have source-side output artifact '{}'",
+                            self.display_path(&sidecar)
+                        ));
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        return Err(format!(
+                            "failed to inspect nonlinear CORE sidecar '{}': {error}",
+                            self.display_path(&sidecar)
+                        ));
+                    }
+                }
+            }
+        }
+        candidates.sort();
+        candidate_content.sort();
+        owner_manifest_rows.sort();
+        historical_exclusion_rows.sort();
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(candidate_content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let owner_hash = blake3::hash(owner_manifest_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let exclusion_hash = blake3::hash(historical_exclusion_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if candidates.len() != XYCE_NONLINEAR_CORE_MODEL_STEP_CANDIDATE_COUNT
+            || candidate_hash != XYCE_NONLINEAR_CORE_MODEL_STEP_CANDIDATE_BLAKE3
+            || content_hash != XYCE_NONLINEAR_CORE_MODEL_STEP_CANDIDATE_CONTENT_BLAKE3
+            || owner_manifest_rows.len() != XYCE_NONLINEAR_CORE_MODEL_STEP_OWNER_COUNT
+            || owner_hash != XYCE_NONLINEAR_CORE_MODEL_STEP_OWNER_MANIFEST_BLAKE3
+            || historical_exclusion_rows.len() != XYCE_NONLINEAR_CORE_MODEL_STEP_EXCLUSION_COUNT
+            || exclusion_hash != XYCE_NONLINEAR_CORE_MODEL_STEP_HISTORICAL_EXCLUSION_BLAKE3
+        {
+            return Err(format!(
+                "nonlinear CORE model-step provenance changed: candidates={}/{candidate_hash}/{content_hash}, owners={}/{owner_hash}, exclusions={}/{exclusion_hash}",
+                candidates.len(),
+                owner_manifest_rows.len(),
+                historical_exclusion_rows.len()
+            ));
+        }
+        let requested = Self::normalize_manifest_key(&self.relative_key(&contract.target_path));
+        if !candidate_paths.contains_key(&requested) {
+            return Err(
+                "requested nonlinear CORE model-step deck is outside the exact candidate census"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
+    pub(super) fn nonlinear_core_model_step_snapshot(
+        netlist: &Netlist,
+    ) -> Result<XyceNonlinearCoreModelStepSnapshot, String> {
+        const LABEL: &str = "nonlinear CORE model-step relational family";
+        let tran_count = netlist
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Tran { .. }))
+            .count();
+        if netlist.title.trim().is_empty()
+            || netlist.title.trim_start().starts_with('.')
+            || tran_count != 1
+            || netlist.analyses.iter().any(|analysis| {
+                !matches!(
+                    analysis,
+                    AnalysisCommand::Tran { .. } | AnalysisCommand::Step(_)
+                )
+            })
+            || netlist.lin_analysis.is_some()
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.params.all_params().is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || netlist.device_initial_conditions.is_some()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || netlist.output_requests.len() != 1
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires one flat, parameter-free, diagnostic-free transient circuit with one output request and no auxiliary analyses or state"
+            ));
+        }
+        let [model] = netlist.models.as_slice() else {
+            return Err(format!(
+                "{LABEL} requires exactly one model, found {}",
+                netlist.models.len()
+            ));
+        };
+        if !model.model_type.eq_ignore_ascii_case("CORE")
+            || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return Err(format!("{LABEL} requires one scalar numeric CORE model"));
+        }
+        let mut numeric = BTreeMap::new();
+        for (name, value) in &model.params {
+            let name = name.trim().to_ascii_uppercase();
+            if name.is_empty() || numeric.insert(name.clone(), *value).is_some() {
+                return Err(format!(
+                    "{LABEL} CORE model has an empty or duplicate parameter"
+                ));
+            }
+            let valid = match name.as_str() {
+                "LEVEL" => value.is_finite() && (*value == 1.0 || *value == 2.0),
+                "AREA" | "PATH" => value.is_finite() && *value > 0.0,
+                "GAP" => value.is_finite() && *value >= 0.0,
+                _ => false,
+            };
+            if !valid {
+                return Err(format!(
+                    "{LABEL} CORE parameter {name}={value} is outside the qualified LEVEL/AREA/GAP/PATH envelope"
+                ));
+            }
+        }
+        let model_level = numeric
+            .remove("LEVEL")
+            .map_or(Ok(1u8), |level| match level {
+                1.0 => Ok(1),
+                2.0 => Ok(2),
+                _ => Err(format!("{LABEL} supports only CORE LEVEL 1 or 2")),
+            })?;
+        if numeric.is_empty() {
+            return Err(format!(
+                "{LABEL} CORE model must declare at least one geometry parameter"
+            ));
+        }
+        let model_numeric_bits = numeric
+            .iter()
+            .map(|(name, value)| (name.clone(), value.to_bits()))
+            .collect::<Vec<_>>();
+
+        let mut elements = BTreeMap::new();
+        let mut source = None;
+        let mut resistors = Vec::new();
+        let mut inductors = BTreeMap::new();
+        let mut coupling = None;
+        for element in &netlist.elements {
+            if element
+                .nodes
+                .iter()
+                .any(|node| Self::node_name_is_ground(node) && node.trim() != "0")
+            {
+                return Err(format!("{LABEL} requires literal node 0 for ground"));
+            }
+            let name = Self::normalize_device_instance_name(&element.name);
+            if name.is_empty() || name.eq_ignore_ascii_case(&model.name) {
+                return Err(format!(
+                    "{LABEL} has an empty element name or an element colliding with the CORE model name"
+                ));
+            }
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| node.trim().to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            let fingerprint = match &element.kind {
+                ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Sin {
+                    offset,
+                    amplitude,
+                    frequency,
+                    delay,
+                    damping,
+                    phase,
+                }) if nodes.len() == 2
+                    && [*offset, *amplitude, *frequency, *delay, *damping, *phase]
+                        .into_iter()
+                        .all(Value::is_finite)
+                    && *amplitude > 0.0
+                    && *frequency > 0.0
+                    && delay.to_bits() == 0.0f64.to_bits()
+                    && damping.to_bits() == 0.0f64.to_bits()
+                    && phase.to_bits() == 0.0f64.to_bits() =>
+                {
+                    if source.replace((name.clone(), nodes.clone())).is_some() {
+                        return Err(format!("{LABEL} contains more than one SIN source"));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: "V:SIN".to_string(),
+                        nodes,
+                        numeric_bits: [*offset, *amplitude, *frequency, *delay, *damping, *phase]
+                            .into_iter()
+                            .map(Value::to_bits)
+                            .collect(),
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } if nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    resistors.push(nodes.clone());
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::Inductor {
+                    value,
+                    value_expr,
+                    initial_current,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } if nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && initial_current.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    if inductors.insert(name.clone(), nodes.clone()).is_some() {
+                        return Err(format!("{LABEL} contains a duplicate inductor name"));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: "L:TURNS".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::Coupling {
+                    inductors: winding_names,
+                    coefficient,
+                    model: Some(core_model),
+                } if nodes.is_empty()
+                    && winding_names.len() == 2
+                    && coefficient.to_bits() == 1.0f64.to_bits()
+                    && core_model.eq_ignore_ascii_case(&model.name) =>
+                {
+                    if coupling
+                        .replace([
+                            winding_names[0].trim().to_ascii_lowercase(),
+                            winding_names[1].trim().to_ascii_lowercase(),
+                        ])
+                        .is_some()
+                    {
+                        return Err(format!("{LABEL} contains more than one CORE coupling"));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: "K:CORE".to_string(),
+                        nodes,
+                        numeric_bits: vec![coefficient.to_bits()],
+                        text: vec![
+                            winding_names[0].trim().to_ascii_lowercase(),
+                            winding_names[1].trim().to_ascii_lowercase(),
+                            core_model.trim().to_ascii_lowercase(),
+                        ],
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} contains unqualified element '{}'",
+                        element.name
+                    ));
+                }
+            };
+            if elements.insert(name, fingerprint).is_some() {
+                return Err(format!("{LABEL} contains a duplicate element name"));
+            }
+        }
+        if elements.len() != 6 || resistors.len() != 2 || inductors.len() != 2 {
+            return Err(format!(
+                "{LABEL} requires exactly one SIN source, two resistors, two winding inductors, and one CORE coupling"
+            ));
+        }
+        let (source_name, source_nodes) =
+            source.ok_or_else(|| format!("{LABEL} has no qualified SIN source"))?;
+        let inductor_names =
+            coupling.ok_or_else(|| format!("{LABEL} has no qualified CORE coupling"))?;
+        let first_nodes = inductors
+            .get(&inductor_names[0])
+            .ok_or_else(|| format!("{LABEL} coupling references an unknown first winding"))?;
+        let second_nodes = inductors
+            .get(&inductor_names[1])
+            .ok_or_else(|| format!("{LABEL} coupling references an unknown second winding"))?;
+        let [drive, source_ground] = source_nodes.as_slice() else {
+            unreachable!("qualified two-terminal source")
+        };
+        let [first_signal, first_ground] = first_nodes.as_slice() else {
+            unreachable!("qualified two-terminal first winding")
+        };
+        let [second_signal, second_ground] = second_nodes.as_slice() else {
+            unreachable!("qualified two-terminal second winding")
+        };
+        let pair_matches = |nodes: &[String], first: &str, second: &str| matches!(nodes, [left, right] if (left == first && right == second) || (left == second && right == first));
+        if source_ground != "0"
+            || first_ground != "0"
+            || second_ground != "0"
+            || [drive, first_signal, second_signal]
+                .into_iter()
+                .any(|node| node == "0" || node.is_empty())
+            || drive == first_signal
+            || drive == second_signal
+            || first_signal == second_signal
+            || resistors
+                .iter()
+                .filter(|nodes| pair_matches(nodes, drive, first_signal))
+                .count()
+                != 1
+            || resistors
+                .iter()
+                .filter(|nodes| pair_matches(nodes, second_signal, "0"))
+                .count()
+                != 1
+        {
+            return Err(format!(
+                "{LABEL} requires the grounded source/resistor/primary-winding drive and grounded secondary resistor/winding topology"
+            ));
+        }
+
+        Ok(XyceNonlinearCoreModelStepSnapshot {
+            title: netlist.title.trim().to_string(),
+            elements,
+            source_name,
+            inductor_names,
+            inductor_signal_nodes: [first_signal.clone(), second_signal.clone()],
+            model_name: model.name.trim().to_ascii_lowercase(),
+            model_level,
+            model_numeric_bits,
+        })
+    }
+
     pub(super) fn strict_ac_family_snapshot(
         kind: XyceBaselineFamilyKind,
         netlist: &Netlist,

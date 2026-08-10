@@ -11487,6 +11487,288 @@ VBIAS bias 0 0\n\
 }
 
 #[test]
+fn nonlinear_core_model_step_detection_is_promotion_and_sibling_driven() {
+    let root = tempfile::tempdir().expect("create nonlinear CORE family fixture");
+    let family_dir = root.path().join("Netlists/GENERIC_CORE_STEP");
+    fs::create_dir_all(&family_dir).expect("create nonlinear CORE family directory");
+    let owner_path = family_dir.join("geometry.cir");
+    let member_paths = [
+        family_dir.join("geometry1.cir"),
+        family_dir.join("geometry2.cir"),
+        family_dir.join("geometry3.cir"),
+    ];
+    fs::write(&owner_path, "generic owner\n.end\n").expect("write generic owner");
+    for path in &member_paths {
+        fs::write(path, "generic control\n.end\n").expect("write generic control");
+    }
+    let owner_relative = "Netlists/GENERIC_CORE_STEP/geometry.cir";
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write nonlinear CORE wrapper manifest");
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[
+            "Netlists/GENERIC_CORE_STEP/geometry1.cir\tNetlists/GENERIC_CORE_STEP/exclude\trspice_independently_qualified\tnonlinear_core_model_step_reference_baseline",
+            "Netlists/GENERIC_CORE_STEP/geometry2.cir\tNetlists/GENERIC_CORE_STEP/exclude\trspice_independently_qualified\tnonlinear_core_model_step_reference_baseline",
+            "Netlists/GENERIC_CORE_STEP/geometry3.cir\tNetlists/GENERIC_CORE_STEP/exclude\trspice_independently_qualified\tnonlinear_core_model_step_reference_baseline",
+        ]),
+    )
+    .expect("write nonlinear CORE promotion manifest");
+
+    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    for (path, relative) in std::iter::once((&owner_path, owner_relative)).chain(
+        member_paths.iter().enumerate().map(|(index, path)| {
+            (
+                path,
+                match index {
+                    0 => "Netlists/GENERIC_CORE_STEP/geometry1.cir",
+                    1 => "Netlists/GENERIC_CORE_STEP/geometry2.cir",
+                    _ => "Netlists/GENERIC_CORE_STEP/geometry3.cir",
+                },
+            )
+        }),
+    ) {
+        let deck = XyceDeck {
+            path: path.clone(),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let contract = runner
+            .nonlinear_core_model_step_reference_contract(&deck)
+            .expect("promoted numbered controls claim the generic family")
+            .expect("generic family discovery succeeds");
+        assert_eq!(contract.family, "geometry");
+        assert!(XyceTestRunner::same_path(&contract.owner_path, &owner_path));
+        assert_eq!(contract.member_paths, member_paths);
+        assert!(XyceTestRunner::same_path(&contract.target_path, path));
+    }
+
+    fs::remove_file(&member_paths[1]).expect("remove middle nonlinear CORE control");
+    let owner_deck = XyceDeck {
+        path: owner_path,
+        relative_path: owner_relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    assert!(
+        runner
+            .nonlinear_core_model_step_reference_contract(&owner_deck)
+            .is_some_and(|result| result.is_err()),
+        "a promoted control hole must remain claimed and fail closed"
+    );
+}
+
+fn nonlinear_core_model_step_source(area: Value, level: Option<u8>, stepped: bool) -> String {
+    format!(
+        "generic nonlinear CORE family\n\
+VS 1 0 SIN(0 169.7 60)\n\
+R1 1 2 1K\n\
+R2 3 0 1K\n\
+L1 2 0 200\n\
+L2 3 0 100\n\
+K1 L1 L2 1 nlcore\n\
+.model nlcore core {}gap=.1 path=1 area={area:.17e}\n\
+{}\
+.tran 100us 25ms\n\
+.print tran I(VS) {{V(2)+0.2}} {{V(3)+0.2}} I(L1) I(L2)\n\
+*COMP V(2) reltol=0.02\n\
+*COMP V(3) reltol=0.02\n\
+*COMP I(L2) offset=1e-3\n\
+.end\n",
+        level.map_or_else(String::new, |level| format!("level={level} ")),
+        if stepped {
+            ".step nlcore:area .05 .15 .05\n"
+        } else {
+            ""
+        }
+    )
+}
+
+#[test]
+fn nonlinear_core_model_step_snapshot_and_materialization_are_exact() {
+    let baseline_source = nonlinear_core_model_step_source(0.05, None, false);
+    let baseline = XyceTestRunner::parse_xyce_netlist(
+        &baseline_source,
+        Path::new("nonlinear_core_baseline.cir"),
+    )
+    .expect("nonlinear CORE baseline parses");
+    let baseline_snapshot = XyceTestRunner::nonlinear_core_model_step_snapshot(&baseline)
+        .expect("nonlinear CORE baseline snapshot qualifies");
+    assert_eq!(baseline_snapshot.model_level, 1);
+
+    let owner_source = nonlinear_core_model_step_source(0.01, None, true);
+    let owner =
+        XyceTestRunner::parse_xyce_netlist(&owner_source, Path::new("nonlinear_core_owner.cir"))
+            .expect("nonlinear CORE owner parses");
+    let steps = owner
+        .analyses
+        .iter()
+        .filter_map(|analysis| match analysis {
+            AnalysisCommand::Step(step) => Some(step.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let runs = XyceTestRunner::nested_step_runs_for_commands(
+        &Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        }),
+        &owner,
+        &steps,
+    )
+    .expect("nonlinear CORE STEP materializes");
+    assert_eq!(runs.len(), 3);
+    for (index, (run, expected)) in runs.iter().zip([0.05, 0.10, 0.15]).enumerate() {
+        assert_eq!(run.step_values, vec![expected]);
+        let snapshot = XyceTestRunner::nonlinear_core_model_step_snapshot(&run.netlist)
+            .expect("materialized nonlinear CORE snapshot qualifies");
+        let area_bits = snapshot
+            .model_numeric_bits
+            .iter()
+            .find(|(name, _)| name == "AREA")
+            .map(|(_, bits)| *bits)
+            .expect("materialized CORE retains AREA");
+        assert_eq!(area_bits, expected.to_bits());
+        let control_source = nonlinear_core_model_step_source(expected, None, false);
+        let control = XyceTestRunner::parse_xyce_netlist(
+            &control_source,
+            Path::new("nonlinear_core_control.cir"),
+        )
+        .expect("nonlinear CORE control parses");
+        let control_snapshot = XyceTestRunner::nonlinear_core_model_step_snapshot(&control)
+            .expect("nonlinear CORE control snapshot qualifies");
+        assert_eq!(
+            snapshot, control_snapshot,
+            "materialized run {index} must equal its independently parsed control"
+        );
+    }
+
+    for changed_source in [
+        baseline_source.replace("R1 1 2 1K", "R1 1 2 2K"),
+        baseline_source.replace("K1 L1 L2 1 nlcore", "K1 L1 L2 .9 nlcore"),
+        baseline_source.replace("core gap", "core ms=1 gap"),
+        nonlinear_core_model_step_source(0.05, Some(2), false),
+    ] {
+        let changed = XyceTestRunner::parse_xyce_netlist(
+            &changed_source,
+            Path::new("nonlinear_core_changed.cir"),
+        )
+        .expect("changed nonlinear CORE fixture parses");
+        if let Ok(snapshot) = XyceTestRunner::nonlinear_core_model_step_snapshot(&changed) {
+            assert_ne!(snapshot, baseline_snapshot);
+        }
+    }
+}
+
+#[test]
+fn nonlinear_core_model_step_comp_policy_preserves_unreferenced_voltage_entries() {
+    let source = nonlinear_core_model_step_source(0.05, None, true);
+    let probes = vec![
+        "I(VS)".to_string(),
+        "{V(2)+0.2}".to_string(),
+        "{V(3)+0.2}".to_string(),
+        "I(L1)".to_string(),
+        "I(L2)".to_string(),
+    ];
+    let tolerances = XyceTestRunner::xyce_verify_comp_tolerances(&source, &probes)
+        .expect("owner COMP policy parses");
+    let mut expected = vec![XyceVerifyTransientTolerance::release_7_10_default(); 5];
+    expected[4].offset = 1.0e-3;
+    assert_eq!(tolerances, expected);
+
+    let widened = source.replace("*COMP V(2) reltol=0.02", "*COMP {V(2)+0.2} reltol=0.02");
+    let widened_tolerances = XyceTestRunner::xyce_verify_comp_tolerances(&widened, &probes)
+        .expect("mutated printed-expression COMP policy parses");
+    assert_ne!(widened_tolerances, expected);
+
+    let controls = source.replace("*COMP I(L2) offset=1e-3\n", "");
+    assert_eq!(
+        XyceTestRunner::xyce_verify_comp_tolerances(&controls, &probes)
+            .expect_err("control voltage COMP entries are unreferenced"),
+        XYCE_VERIFY_COMP_NO_PRINTED_PROBE
+    );
+}
+
+#[test]
+fn nonlinear_core_model_step_provenance_rejects_semantic_source_mutation() {
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let fixture = tempfile::tempdir().expect("create nonlinear CORE provenance fixture");
+    let target_dir = fixture.path().join("Netlists/MINDUCTORS");
+    fs::create_dir_all(&target_dir).expect("create nonlinear CORE provenance directory");
+    let families = [
+        ("NLAreaStep", false),
+        ("NLAreaStepLv2", true),
+        ("NLGapStep", false),
+        ("NLGapStepLv2", true),
+        ("NLPathStep", false),
+        ("NLPathStepLv2", true),
+    ];
+    let mut wrapper_manifest = String::new();
+    let mut exclusion_manifest = upstream_exclusion_manifest(&[]);
+    for (stem, underscored_controls) in families {
+        let owner_name = format!("{stem}.cir");
+        fs::copy(
+            source_root.join("Netlists/MINDUCTORS").join(&owner_name),
+            target_dir.join(&owner_name),
+        )
+        .expect("copy nonlinear CORE owner");
+        wrapper_manifest.push_str(&format!(
+            "Netlists/MINDUCTORS/{owner_name}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        ));
+        for index in 1..=3 {
+            let separator = if underscored_controls { "_" } else { "" };
+            let control_name = format!("{stem}{separator}{index}.cir");
+            fs::copy(
+                source_root.join("Netlists/MINDUCTORS").join(&control_name),
+                target_dir.join(&control_name),
+            )
+            .expect("copy nonlinear CORE control");
+            exclusion_manifest.push_str(&format!(
+                "Netlists/MINDUCTORS/{control_name}\tNetlists/MINDUCTORS/exclude\trspice_independently_qualified\t{XYCE_NONLINEAR_CORE_MODEL_STEP_BASELINE_CONTRACT}\n"
+            ));
+        }
+    }
+    fs::write(fixture.path().join(HARNESS_MANIFEST_FILE), wrapper_manifest)
+        .expect("write nonlinear CORE provenance wrapper manifest");
+    fs::write(
+        fixture.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        exclusion_manifest,
+    )
+    .expect("write nonlinear CORE provenance exclusions");
+
+    let owner = target_dir.join("NLAreaStep.cir");
+    let runner = XyceTestRunner::new(fixture.path(), XyceRunnerConfig::default());
+    let passing = runner.run_test(&owner);
+    assert!(
+        passing.passed,
+        "exact provenance fixture must pass: {passing:?}"
+    );
+
+    let mutated_path = target_dir.join("NLAreaStep1.cir");
+    let mutated = fs::read_to_string(&mutated_path)
+        .expect("read nonlinear CORE control")
+        .replace("R1 1 2 1K", "R1 1 2 2K");
+    fs::write(&mutated_path, mutated).expect("mutate nonlinear CORE control");
+    let rejected = runner.run_test(&owner);
+    assert!(
+        !rejected.passed,
+        "semantic mutation must fail: {rejected:?}"
+    );
+    assert_eq!(
+        rejected.contract,
+        XYCE_NONLINEAR_CORE_MODEL_STEP_WRAPPER_CONTRACT
+    );
+    assert!(
+        rejected
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("provenance changed")),
+        "mutation failure must name the exact candidate provenance: {rejected:?}"
+    );
+}
+
+#[test]
 fn stepped_ic_snapshot_proves_initial_condition_and_named_circuit_identity() {
     let source = |capacitance: Value, initial_voltage: Value, resistor: Value| {
         format!(

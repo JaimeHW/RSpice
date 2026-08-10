@@ -551,6 +551,34 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.nonlinear_core_model_step_reference_contract(deck) {
+            let result = match contract {
+                Ok(contract) => {
+                    self.run_nonlinear_core_model_step_reference_contract(deck, contract, start)
+                }
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    if self.requires_upstream_wrapper(&deck.relative_path) {
+                        XYCE_NONLINEAR_CORE_MODEL_STEP_WRAPPER_CONTRACT
+                    } else {
+                        XYCE_NONLINEAR_CORE_MODEL_STEP_BASELINE_CONTRACT
+                    },
+                    format!("nonlinear CORE model-step family discovery failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.stepped_ic_reference_contract(deck) {
             let result = self.run_stepped_ic_reference_contract(deck, contract, start);
             if self.config.verbose {
@@ -6436,6 +6464,419 @@ impl XyceTestRunner {
                 RESULT_CONTRACT,
                 format!(
                     "{} analytic sinusoidal first-order RC xyce_verify mismatch(es)",
+                    mismatches.len()
+                ),
+                mismatches,
+            )
+        }
+    }
+
+    pub(super) fn run_nonlinear_core_model_step_reference_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceNonlinearCoreModelStepReferenceContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = if Self::same_path(&contract.target_path, &contract.owner_path) {
+            XYCE_NONLINEAR_CORE_MODEL_STEP_WRAPPER_CONTRACT
+        } else {
+            XYCE_NONLINEAR_CORE_MODEL_STEP_BASELINE_CONTRACT
+        };
+        let expansion_abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let qualification = (|| {
+            self.validate_nonlinear_core_model_step_provenance(&contract)?;
+            let owner_plan = self.static_tran_family_plan_for_path(
+                &contract.owner_path,
+                XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily,
+            )?;
+            if owner_plan.contract != XyceStaticTranContract::WrapperStatic
+                || !matches!(&owner_plan.oracle, XyceStaticTranOracle::None)
+                || owner_plan.output_override
+                || owner_plan.timeint_conststep
+                || owner_plan.wrapper_tolerance.is_some()
+            {
+                return Err(
+                    "nonlinear CORE model-step owner requires one ordinary default PRN transient without a file oracle or wrapper tolerance"
+                        .to_string(),
+                );
+            }
+            Self::validate_nonlinear_core_model_step_source_directives(&owner_plan.source, true)?;
+            if !owner_plan.tran.step.is_finite()
+                || owner_plan.tran.step <= 0.0
+                || !owner_plan.tran.stop.is_finite()
+                || owner_plan.tran.stop <= owner_plan.tran.step
+                || owner_plan.tran.start.is_some()
+                || owner_plan.tran.max_step.is_some()
+                || owner_plan.tran.uic
+            {
+                return Err(
+                    "nonlinear CORE model-step owner requires one finite positive two-argument .TRAN without TSTART, DTMAX, or UIC"
+                        .to_string(),
+                );
+            }
+            let owner_scale = Self::tran_print_time_scale_factor(&owner_plan.source)?;
+            if owner_scale.to_bits() != 1.0f64.to_bits() {
+                return Err(
+                    "nonlinear CORE model-step owner requires default transient output time units"
+                        .to_string(),
+                );
+            }
+            let owner_print = owner_plan.require_print("nonlinear CORE model-step owner")?;
+            if owner_print.probes.len() != 5 {
+                return Err(format!(
+                    "nonlinear CORE model-step owner requires five ordered probes, found {}",
+                    owner_print.probes.len()
+                ));
+            }
+            if Self::logical_comp_directives(&owner_plan.source).len() != 3 {
+                return Err(
+                    "nonlinear CORE model-step owner requires exactly three historical *COMP directives"
+                        .to_string(),
+                );
+            }
+            let tolerances =
+                Self::xyce_verify_comp_tolerances(&owner_plan.source, &owner_print.probes)?;
+            let mut expected_tolerances =
+                vec![XyceVerifyTransientTolerance::release_7_10_default(); 5];
+            expected_tolerances[4].offset = 1.0e-3;
+            if tolerances != expected_tolerances {
+                return Err(format!(
+                    "nonlinear CORE model-step owner changed the effective Release 7.10 *COMP policy: {tolerances:?}"
+                ));
+            }
+
+            let [step] = owner_plan.steps.as_slice() else {
+                return Err(format!(
+                    "nonlinear CORE model-step owner requires exactly one .STEP command, found {}",
+                    owner_plan.steps.len()
+                ));
+            };
+            let Some(step_param) = step.param_name.as_deref() else {
+                return Err(
+                    "nonlinear CORE model-step owner requires an explicit model parameter"
+                        .to_string(),
+                );
+            };
+            if step.target != StepTarget::Device
+                || !["area", "gap", "path"]
+                    .iter()
+                    .any(|name| step_param.eq_ignore_ascii_case(name))
+                || !matches!(
+                    step.sweep,
+                    StepSweep::Linear {
+                        start,
+                        stop,
+                        step,
+                    } if start.is_finite()
+                        && stop.is_finite()
+                        && step.is_finite()
+                        && start > 0.0
+                        && stop > start
+                        && step > 0.0
+                )
+            {
+                return Err(
+                    "nonlinear CORE model-step owner requires one finite positive linear AREA, GAP, or PATH device-target sweep"
+                        .to_string(),
+                );
+            }
+            let owner_netlist = Self::parse_xyce_netlist(&owner_plan.source, &owner_plan.deck_path)
+                .map_err(|error| format!("owner netlist parse failed: {error}"))?;
+            let owner_snapshot = Self::nonlinear_core_model_step_snapshot(&owner_netlist)?;
+            if !step.name.eq_ignore_ascii_case(&owner_snapshot.model_name)
+                || !owner_snapshot
+                    .model_numeric_bits
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case(step_param))
+            {
+                return Err(format!(
+                    "owner .STEP target '{}:{}' does not resolve to a declared geometry parameter on the unique CORE model '{}'",
+                    step.name, step_param, owner_snapshot.model_name
+                ));
+            }
+            let expected_probes = [
+                format!("i({})", owner_snapshot.source_name),
+                format!("{{v({})+0.2}}", owner_snapshot.inductor_signal_nodes[0]),
+                format!("{{v({})+0.2}}", owner_snapshot.inductor_signal_nodes[1]),
+                format!("i({})", owner_snapshot.inductor_names[0]),
+                format!("i({})", owner_snapshot.inductor_names[1]),
+            ]
+            .map(|probe| Self::normalize_probe(&probe));
+            let actual_probes = owner_print
+                .probes
+                .iter()
+                .map(|probe| Self::normalize_probe(probe))
+                .collect::<Vec<_>>();
+            if actual_probes.as_slice() != expected_probes.as_slice() {
+                return Err(format!(
+                    "nonlinear CORE model-step owner changed its ordered source/offset-voltage/winding-current probes: {actual_probes:?}"
+                ));
+            }
+
+            let step_runs = Self::nested_step_runs_for_commands_with_limits_and_abort(
+                &self.create_xyce_engine(),
+                &owner_netlist,
+                &owner_plan.steps,
+                xyce_step_plan_limits(),
+                &expansion_abort,
+            )
+            .map_err(|error| match error {
+                SimulationError::Aborted => format!(
+                    "owner .STEP expansion exceeded timeout ({}ms)",
+                    self.config.max_time_per_test_ms
+                ),
+                error => format!("owner .STEP expansion failed: {error}"),
+            })?;
+            if step_runs.len() != 3 || step_runs.len() != contract.member_paths.len() {
+                return Err(format!(
+                    "owner .STEP expands to {} run(s), but exactly three independent controls are required",
+                    step_runs.len()
+                ));
+            }
+
+            let mut members = Vec::with_capacity(contract.member_paths.len());
+            for (index, (member_path, step_run)) in contract
+                .member_paths
+                .iter()
+                .zip(step_runs.iter())
+                .enumerate()
+            {
+                let member_plan = self.static_tran_family_plan_for_path(
+                    member_path,
+                    XyceStaticTranPlanPurpose::RelationalFamily,
+                )?;
+                if member_plan.contract != XyceStaticTranContract::PlainStatic
+                    || !matches!(&member_plan.oracle, XyceStaticTranOracle::None)
+                    || !member_plan.steps.is_empty()
+                    || member_plan.output_override
+                    || member_plan.timeint_conststep
+                    || member_plan.wrapper_tolerance.is_some()
+                {
+                    return Err(format!(
+                        "independent control {} must be one ordinary non-stepped default PRN transient without a file oracle",
+                        self.display_path(member_path)
+                    ));
+                }
+                Self::validate_nonlinear_core_model_step_source_directives(
+                    &member_plan.source,
+                    false,
+                )?;
+                let member_print =
+                    member_plan.require_print("independent nonlinear CORE control")?;
+                if member_print.probes != owner_print.probes {
+                    return Err(format!(
+                        "independent control {} changes the ordered .PRINT TRAN probes",
+                        self.display_path(member_path)
+                    ));
+                }
+                if !Self::tran_analyses_match_exactly(&owner_plan.tran, &member_plan.tran) {
+                    return Err(format!(
+                        "independent control {} changes the .TRAN analysis tuple",
+                        self.display_path(member_path)
+                    ));
+                }
+                if Self::tran_print_time_scale_factor(&member_plan.source)?.to_bits()
+                    != owner_scale.to_bits()
+                {
+                    return Err(format!(
+                        "independent control {} changes transient output time units",
+                        self.display_path(member_path)
+                    ));
+                }
+                if Self::logical_comp_directives(&member_plan.source).len() != 2 {
+                    return Err(format!(
+                        "independent control {} must retain exactly two valid but unreferenced historical voltage *COMP directives",
+                        self.display_path(member_path)
+                    ));
+                }
+                let comp_result =
+                    Self::xyce_verify_comp_tolerances(&member_plan.source, &member_print.probes);
+                match comp_result {
+                    Err(error) if error == XYCE_VERIFY_COMP_NO_PRINTED_PROBE => {}
+                    Err(error) => {
+                        return Err(format!(
+                            "independent control {} has invalid historical *COMP directives: {error}",
+                            self.display_path(member_path)
+                        ));
+                    }
+                    Ok(_) => {
+                        return Err(format!(
+                            "independent control {} changed a historical voltage *COMP directive to target a printed probe",
+                            self.display_path(member_path)
+                        ));
+                    }
+                }
+
+                let member_netlist =
+                    Self::parse_xyce_netlist(&member_plan.source, &member_plan.deck_path).map_err(
+                        |error| {
+                            format!(
+                                "independent control {} parse failed: {error}",
+                                self.display_path(member_path)
+                            )
+                        },
+                    )?;
+                let stepped_snapshot = Self::nonlinear_core_model_step_snapshot(&step_run.netlist)?;
+                let member_snapshot = Self::nonlinear_core_model_step_snapshot(&member_netlist)?;
+                if stepped_snapshot != member_snapshot {
+                    return Err(format!(
+                        "owner step {index} is not structurally and numerically identical to independent control {}",
+                        self.display_path(member_path)
+                    ));
+                }
+                let [step_value] = step_run.step_values.as_slice() else {
+                    return Err(format!(
+                        "owner step {index} did not retain exactly one swept value"
+                    ));
+                };
+                let stepped_parameter_bits = stepped_snapshot
+                    .model_numeric_bits
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(step_param))
+                    .map(|(_, bits)| *bits)
+                    .ok_or_else(|| {
+                        format!("owner step {index} lost swept CORE parameter {step_param}")
+                    })?;
+                if stepped_parameter_bits != step_value.to_bits() {
+                    return Err(format!(
+                        "owner step {index} retained value {step_value}, but its materialized CORE parameter {step_param} has different bits"
+                    ));
+                }
+                members.push((member_plan, member_netlist));
+            }
+            Ok((owner_plan, step_runs, members, tolerances))
+        })();
+
+        let (owner_plan, step_runs, members, tolerances) = match qualification {
+            Ok(qualified) => qualified,
+            Err(reason) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!(
+                        "nonlinear CORE model-step family '{}' qualification failed: {reason}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let mut mismatches = Vec::new();
+        let mut row_offset = 0usize;
+        for (index, ((member_plan, member_netlist), step_run)) in
+            members.iter().zip(step_runs.iter()).enumerate()
+        {
+            let member_result = match self.run_transient_family_netlist(
+                member_plan,
+                member_netlist,
+                start,
+                None,
+                None,
+            ) {
+                Ok(result) => result,
+                Err(error) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!("independent control step {index} simulation failed: {error}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            let stepped_result = match self.run_transient_family_netlist(
+                &owner_plan,
+                &step_run.netlist,
+                start,
+                None,
+                None,
+            ) {
+                Ok(result) => result,
+                Err(error) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!("owner step {index} simulation failed: {error}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            let baseline_table = match Self::transient_family_result_to_prn_table(
+                member_plan,
+                member_netlist,
+                &member_result,
+            ) {
+                Ok(table) => table,
+                Err(error) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!("independent control step {index} output failed: {error}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            let stepped_table = match Self::transient_family_result_to_prn_table(
+                &owner_plan,
+                &step_run.netlist,
+                &stepped_result,
+            ) {
+                Ok(table) => table,
+                Err(error) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!("owner step {index} output failed: {error}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            let mut step_mismatches = match self
+                .compare_xyce_verify_transient_tables_with_probe_tolerances(
+                    &baseline_table,
+                    &stepped_table,
+                    &tolerances,
+                    XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+                ) {
+                Ok(found) => found,
+                Err(error) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!(
+                            "Release 7.10 xyce_verify comparison failed for step {index}: {error}"
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            for mismatch in &mut step_mismatches {
+                mismatch.row += row_offset;
+                mismatch.probe = format!("step {index}: {}", mismatch.probe);
+            }
+            row_offset += stepped_table.rows.len();
+            mismatches.extend(step_mismatches);
+            if mismatches.len() >= self.config.max_mismatches {
+                mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, result_contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!(
+                    "{} nonlinear CORE model-step Release 7.10 xyce_verify mismatch(es)",
                     mismatches.len()
                 ),
                 mismatches,

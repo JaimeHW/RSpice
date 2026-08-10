@@ -6608,6 +6608,62 @@ fn test_xyce_stepped_initial_condition_reference_family_runs() {
 }
 
 #[test]
+fn test_xyce_nonlinear_core_model_step_reference_families_run() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let families = [
+        ("NLAreaStep", false),
+        ("NLAreaStepLv2", true),
+        ("NLGapStep", false),
+        ("NLGapStepLv2", true),
+        ("NLPathStep", false),
+        ("NLPathStepLv2", true),
+    ];
+
+    for (stem, underscored_controls) in families {
+        let owner = format!("Netlists/MINDUCTORS/{stem}.cir");
+        assert!(
+            runner.requires_upstream_wrapper(&owner),
+            "{owner} lost removed-wrapper provenance"
+        );
+        let owner_result = runner.run_test(root.join(&owner));
+        assert!(
+            owner_result.passed && !owner_result.expected_unsupported,
+            "{owner} should pass its three independently simulated CORE controls: {owner_result:?}"
+        );
+        assert!(owner_result.mismatches.is_empty());
+        assert_eq!(
+            owner_result.contract,
+            "nonlinear_core_model_step_reference_wrapper"
+        );
+
+        for index in 1..=3 {
+            let separator = if underscored_controls { "_" } else { "" };
+            let control = format!("Netlists/MINDUCTORS/{stem}{separator}{index}.cir");
+            assert!(
+                !runner.requires_upstream_wrapper(&control),
+                "{control} must remain an ordinary independent control"
+            );
+            let control_result = runner.run_test(root.join(&control));
+            assert!(
+                control_result.passed && !control_result.expected_unsupported,
+                "{control} should pass the stepped-to-fixed CORE comparison: {control_result:?}"
+            );
+            assert!(control_result.mismatches.is_empty());
+            assert_eq!(
+                control_result.contract,
+                "nonlinear_core_model_step_reference_baseline"
+            );
+            assert_eq!(
+                control_result.upstream_exclusion_source.as_deref(),
+                Some("Netlists/MINDUCTORS/exclude")
+            );
+        }
+    }
+}
+
+#[test]
 fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
