@@ -249,6 +249,217 @@ impl XyceTestRunner {
         })
     }
 
+    pub(super) fn bug546_temperature_rc_specification(
+        netlist: &Netlist,
+        plan: &XyceStaticTranPlan,
+        snapshot: &XycePassiveTemperatureOverrideSnapshot,
+    ) -> Result<XyceAnalyticRcSpecification, String> {
+        const LABEL: &str = "BUG546 analytic passive-temperature RC";
+        if snapshot.device_kind != XycePassiveTemperatureDeviceKind::Capacitor
+            || snapshot.model_tnom_bits.is_none()
+            || snapshot.option_directives != [".options timeint reltol=1e-6 abstol=1e-6"]
+            || !plan.steps.is_empty()
+            || plan.tran.step.to_bits() != 0.0f64.to_bits()
+            || plan.tran.stop.to_bits() != 5.0e-3f64.to_bits()
+            || plan.tran.start.is_some()
+            || plan.tran.max_step.is_some()
+            || plan.tran.uic
+        {
+            return Err(format!(
+                "{LABEL} requires one capacitor, explicit TNOM, exact bounded TIMEINT options, and '.TRAN 0 5ms'"
+            ));
+        }
+        let print = plan.require_print(LABEL)?;
+        if !matches!(print.probes.as_slice(), [probe]
+            if Self::normalize_probe(probe) == "v(1)")
+        {
+            return Err(format!("{LABEL} requires exactly '.PRINT TRAN V(1)'"));
+        }
+        let print_directives = Self::logical_netlist_lines(&plan.source)
+            .into_iter()
+            .map(|line| Self::strip_netlist_comment(&line).trim().to_string())
+            .filter(|line| {
+                line.split_whitespace()
+                    .next()
+                    .is_some_and(|command| command.eq_ignore_ascii_case(".print"))
+            })
+            .map(|line| {
+                line.split_whitespace()
+                    .map(str::to_ascii_lowercase)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect::<Vec<_>>();
+        if print_directives != [".print tran v(1)"] {
+            return Err(format!(
+                "{LABEL} does not admit output formatting, scaling, or side-file controls"
+            ));
+        }
+
+        let mut capacitor = None;
+        let mut resistor = None;
+        let mut voltage_source = None;
+        for element in &netlist.elements {
+            match &element.kind {
+                ElementKind::Capacitor {
+                    value,
+                    value_expr: None,
+                    initial_voltage: Some(initial_voltage),
+                    model: Some(_),
+                    instance_params,
+                    deferred_params,
+                } if capacitor.is_none()
+                    && element.nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && initial_voltage.is_finite()
+                    && deferred_params.is_empty() =>
+                {
+                    let temperature = Self::instance_param(instance_params, &["TEMP"])
+                        .filter(|temperature| temperature.is_finite())
+                        .ok_or_else(|| format!("{LABEL} capacitor requires finite TEMP"))?;
+                    capacitor = Some((
+                        element.name.as_str(),
+                        element.nodes.as_slice(),
+                        *value,
+                        *initial_voltage,
+                        temperature,
+                    ));
+                }
+                ElementKind::Resistor {
+                    value,
+                    value_expr: None,
+                    model: None,
+                    instance_params,
+                    deferred_params,
+                } if resistor.is_none()
+                    && element.nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    resistor = Some((element.nodes.as_slice(), *value));
+                }
+                ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Dc(value))
+                    if voltage_source.is_none()
+                        && element.nodes.len() == 2
+                        && value.is_finite() =>
+                {
+                    voltage_source = Some((element.nodes.as_slice(), *value));
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} contains an element outside one direct modeled C, one direct R, and one DC V source: '{}'",
+                        element.name
+                    ));
+                }
+            }
+        }
+        let (capacitor_name, capacitor_nodes, base_capacitance, initial_voltage, temperature) =
+            capacitor.ok_or_else(|| format!("{LABEL} contains no qualified capacitor"))?;
+        let (resistor_nodes, resistance) =
+            resistor.ok_or_else(|| format!("{LABEL} contains no qualified resistor"))?;
+        let (source_nodes, source_value) = voltage_source
+            .ok_or_else(|| format!("{LABEL} contains no qualified voltage source"))?;
+
+        let canonical_nodes = |nodes: &[String]| {
+            nodes
+                .iter()
+                .map(|node| Self::canonical_passive_primary_node_name(node))
+                .collect::<Vec<_>>()
+        };
+        let capacitor_nodes = canonical_nodes(capacitor_nodes);
+        let resistor_nodes = canonical_nodes(resistor_nodes);
+        let source_nodes = canonical_nodes(source_nodes);
+        if capacitor_nodes != ["1", "0"]
+            || source_nodes != ["2", "0"]
+            || !matches!(resistor_nodes.as_slice(), [a, b]
+                if (a == "1" && b == "2") || (a == "2" && b == "1"))
+            || initial_voltage.to_bits() != 1.0f64.to_bits()
+            || source_value.to_bits() != 0.0f64.to_bits()
+            || resistance.to_bits() != 1_000.0f64.to_bits()
+        {
+            return Err(format!(
+                "{LABEL} requires C(1,0) IC=1, R(1,2)=1k, and V(2,0)=0"
+            ));
+        }
+
+        let tnom = Value::from_bits(
+            snapshot
+                .model_tnom_bits
+                .expect("explicit TNOM was required above"),
+        );
+        let [tc1, tc2] = snapshot.winning_tc_bits.map(Value::from_bits);
+        const EXPECTED_BASE_CAPACITANCE: Value = 1.0e-6;
+        const EXPECTED_TEMPERATURE: Value = 727.0;
+        const EXPECTED_TNOM: Value = 55.0;
+        const EXPECTED_TC1: Value = 1.77e-3;
+        const EXPECTED_TC2: Value = -0.63e-6;
+        if base_capacitance.to_bits() != EXPECTED_BASE_CAPACITANCE.to_bits()
+            || temperature.to_bits() != EXPECTED_TEMPERATURE.to_bits()
+            || tnom.to_bits() != EXPECTED_TNOM.to_bits()
+            || tc1.to_bits() != EXPECTED_TC1.to_bits()
+            || tc2.to_bits() != EXPECTED_TC2.to_bits()
+        {
+            return Err(format!(
+                "{LABEL} semantic tuple must remain C=1u, TEMP=727, TNOM=55, TC1=1.77m, TC2=-0.63u"
+            ));
+        }
+        let delta = temperature - tnom;
+        let factor = 1.0 + tc1 * delta + tc2 * delta * delta;
+        let analytic_capacitance = base_capacitance * factor;
+        let expected_delta = EXPECTED_TEMPERATURE - EXPECTED_TNOM;
+        let expected_factor =
+            1.0 + EXPECTED_TC1 * expected_delta + EXPECTED_TC2 * expected_delta * expected_delta;
+        let expected_capacitance = EXPECTED_BASE_CAPACITANCE * expected_factor;
+        if !tnom.is_finite()
+            || !tc1.is_finite()
+            || !tc2.is_finite()
+            || !delta.is_finite()
+            || !factor.is_finite()
+            || factor <= 0.0
+            || !analytic_capacitance.is_finite()
+            || analytic_capacitance <= 0.0
+            || factor.to_bits() != expected_factor.to_bits()
+            || analytic_capacitance.to_bits() != expected_capacitance.to_bits()
+        {
+            return Err(format!(
+                "{LABEL} temperature polynomial did not produce a finite positive capacitance"
+            ));
+        }
+        let engine_capacitance = Self::effective_capacitor_value(netlist, capacitor_name)
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .ok_or_else(|| format!("{LABEL} engine capacitance did not resolve"))?;
+        if engine_capacitance.to_bits() != analytic_capacitance.to_bits()
+            || snapshot.effective_primary_bits != analytic_capacitance.to_bits()
+        {
+            return Err(format!(
+                "{LABEL} independent source polynomial {analytic_capacitance} differs from engine/snapshot capacitance {engine_capacitance}"
+            ));
+        }
+        let time_constant = resistance * analytic_capacitance;
+        let expected_time_constant = 1_000.0 * expected_capacitance;
+        if !time_constant.is_finite()
+            || time_constant <= 0.0
+            || time_constant.to_bits() != expected_time_constant.to_bits()
+            || !(2.0..=4.0).contains(&(plan.tran.stop / time_constant))
+        {
+            return Err(format!(
+                "{LABEL} requires a finite positive RC constant exercised for two to four time constants"
+            ));
+        }
+
+        Ok(XyceAnalyticRcSpecification {
+            output_node: "1".to_string(),
+            source_value,
+            initial_voltage,
+            resistance,
+            capacitance: analytic_capacitance,
+            time_constant,
+        })
+    }
+
     pub(super) fn analytic_sinusoidal_rc_specification(
         netlist: &Netlist,
         plan: &XyceStaticTranPlan,

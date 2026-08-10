@@ -3080,7 +3080,7 @@ impl XyceTestRunner {
                 model.name
             ));
         }
-        let model_tc = Self::passive_temperature_coefficient_pair(&model.params, "model")?;
+        let (model_tc, model_tnom) = Self::passive_temperature_model_state(&model.params)?;
 
         let mut passive = None;
         let mut elements = BTreeMap::new();
@@ -3270,6 +3270,8 @@ impl XyceTestRunner {
             elements,
             model_name: model.name.trim().to_ascii_lowercase(),
             model_type: model.model_type.trim().to_ascii_lowercase(),
+            model_tc_bits: model_tc.map(Value::to_bits),
+            model_tnom_bits: model_tnom.map(Value::to_bits),
             winning_tc_bits: winning_tc.map(Value::to_bits),
             effective_primary_bits: effective_primary.to_bits(),
             option_directives,

@@ -3989,6 +3989,10 @@ impl XyceStaticTranPlan {
                         true,
                         XyceStaticTranContract::WrapperStatic
                     ) | (
+                        XyceStaticTranPlanPurpose::PassiveTemperatureAnalyticOracle,
+                        false,
+                        XyceStaticTranContract::PlainStatic
+                    ) | (
                         XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily,
                         true,
                         XyceStaticTranContract::WrapperStatic
@@ -4125,10 +4129,79 @@ struct XyceAnalyticRcSpecification {
     time_constant: Value,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAnalyticRcKind {
+    GeneratedWrapper,
+    PassiveTemperature,
+}
+
+impl XyceAnalyticRcKind {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::GeneratedWrapper => "analytic_first_order_rc_tran_wrapper",
+            Self::PassiveTemperature => "analytic_passive_temperature_rc_tran",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::GeneratedWrapper => "analytic first-order RC",
+            Self::PassiveTemperature => "analytic passive-temperature RC",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct XyceAnalyticRcContract {
     plan: XyceStaticTranPlan,
     specification: XyceAnalyticRcSpecification,
+    kind: XyceAnalyticRcKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBug546TemperatureRcMember {
+    Model,
+    ScalarInstance,
+    VectorInstance,
+}
+
+impl XyceBug546TemperatureRcMember {
+    const ALL: [Self; 3] = [Self::Model, Self::ScalarInstance, Self::VectorInstance];
+
+    fn for_record(relative_path: &str) -> Option<Self> {
+        let record = XyceTestRunner::normalize_manifest_key(relative_path);
+        Self::ALL
+            .into_iter()
+            .find(|member| member.record() == record)
+    }
+
+    fn record(self) -> &'static str {
+        match self {
+            Self::Model => "netlists/certification_tests/bug_546_son/tempcap.cir",
+            Self::ScalarInstance => "netlists/certification_tests/bug_546_son/tempcap_instance.cir",
+            Self::VectorInstance => {
+                "netlists/certification_tests/bug_546_son/tempcap_instance2.cir"
+            }
+        }
+    }
+
+    fn source_relative_path(self) -> &'static str {
+        match self {
+            Self::Model => "Netlists/Certification_Tests/BUG_546_SON/tempcap.cir",
+            Self::ScalarInstance => "Netlists/Certification_Tests/BUG_546_SON/tempcap_instance.cir",
+            Self::VectorInstance => {
+                "Netlists/Certification_Tests/BUG_546_SON/tempcap_instance2.cir"
+            }
+        }
+    }
+
+    fn representation(self) -> XycePassiveTemperatureRepresentation {
+        match self {
+            Self::Model => XycePassiveTemperatureRepresentation::Model,
+            Self::ScalarInstance => XycePassiveTemperatureRepresentation::ScalarInstance,
+            Self::VectorInstance => XycePassiveTemperatureRepresentation::VectorInstance,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4411,6 +4484,11 @@ enum XyceStaticTranPlanPurpose {
     /// dedicated analytic contract supplies the missing reference and proves
     /// the exact bounded circuit/source/options envelope separately.
     AnalyticOracle,
+    /// Execute one ordinary BUG546 passive-temperature RC member against an
+    /// independently derived first-order analytic waveform on the simulator's
+    /// own default-PRN grid. Admission is limited to the exact three-member
+    /// family and validates model/instance temperature precedence separately.
+    PassiveTemperatureAnalyticOracle,
 }
 
 impl XyceStaticTranPlanPurpose {
@@ -4424,7 +4502,10 @@ impl XyceStaticTranPlanPurpose {
     fn validates_absolute_device_contract(self) -> bool {
         matches!(
             self,
-            Self::AbsoluteOracle | Self::DefaultLevel9XyceVerifyOracle | Self::AnalyticOracle
+            Self::AbsoluteOracle
+                | Self::DefaultLevel9XyceVerifyOracle
+                | Self::AnalyticOracle
+                | Self::PassiveTemperatureAnalyticOracle
         )
     }
 
@@ -5192,6 +5273,8 @@ struct XycePassiveTemperatureOverrideSnapshot {
     elements: BTreeMap<String, XyceRelationalElementFingerprint>,
     model_name: String,
     model_type: String,
+    model_tc_bits: [u64; 2],
+    model_tnom_bits: Option<u64>,
     winning_tc_bits: [u64; 2],
     effective_primary_bits: u64,
     option_directives: Vec<String>,

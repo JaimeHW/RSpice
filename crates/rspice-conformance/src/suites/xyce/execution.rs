@@ -319,9 +319,33 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.bug546_temperature_rc_contract(deck) {
+            let result = match contract {
+                Ok(contract) => self.run_analytic_rc_contract(deck, contract, start),
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    XyceAnalyticRcKind::PassiveTemperature.result_contract(),
+                    format!(
+                        "BUG546 analytic passive-temperature RC qualification failed: {reason}"
+                    ),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.analytic_rc_wrapper_contract(deck) {
             let result = match contract {
-                Ok(contract) => self.run_analytic_rc_wrapper_contract(deck, contract, start),
+                Ok(contract) => self.run_analytic_rc_contract(deck, contract, start),
                 Err(reason) => self.failure_result(
                     deck,
                     start,
@@ -6202,13 +6226,14 @@ impl XyceTestRunner {
         }
     }
 
-    pub(super) fn run_analytic_rc_wrapper_contract(
+    pub(super) fn run_analytic_rc_contract(
         &self,
         deck: &XyceDeck,
         contract: XyceAnalyticRcContract,
         start: Instant,
     ) -> XyceTestResult {
-        const RESULT_CONTRACT: &str = "analytic_first_order_rc_tran_wrapper";
+        let result_contract = contract.kind.result_contract();
+        let label = contract.kind.label();
         let (netlist, result) =
             match self.run_transient_family_plan(&contract.plan, start, None, None) {
                 Ok(result) => result,
@@ -6216,10 +6241,10 @@ impl XyceTestRunner {
                     return self.failure_result(
                         deck,
                         start,
-                        RESULT_CONTRACT,
+                        result_contract,
                         format!(
-                            "analytic first-order RC execution exceeded timeout ({}ms)",
-                            self.config.max_time_per_test_ms
+                            "{label} execution exceeded timeout ({}ms)",
+                            self.config.max_time_per_test_ms,
                         ),
                         Vec::new(),
                     );
@@ -6228,8 +6253,8 @@ impl XyceTestRunner {
                     return self.failure_result(
                         deck,
                         start,
-                        RESULT_CONTRACT,
-                        format!("analytic first-order RC execution failed: {err}"),
+                        result_contract,
+                        format!("{label} execution failed: {err}"),
                         Vec::new(),
                     );
                 }
@@ -6241,8 +6266,8 @@ impl XyceTestRunner {
                     return self.failure_result(
                         deck,
                         start,
-                        RESULT_CONTRACT,
-                        format!("analytic first-order RC output conversion failed: {err}"),
+                        result_contract,
+                        format!("{label} output conversion failed: {err}"),
                         Vec::new(),
                     );
                 }
@@ -6253,8 +6278,8 @@ impl XyceTestRunner {
             return self.failure_result(
                 deck,
                 start,
-                RESULT_CONTRACT,
-                format!("analytic first-order RC initial-condition validation failed: {err}"),
+                result_contract,
+                format!("{label} initial-condition validation failed: {err}"),
                 Vec::new(),
             );
         }
@@ -6264,8 +6289,8 @@ impl XyceTestRunner {
             return self.failure_result(
                 deck,
                 start,
-                RESULT_CONTRACT,
-                format!("analytic first-order RC output-domain validation failed: {err}"),
+                result_contract,
+                format!("{label} output-domain validation failed: {err}"),
                 Vec::new(),
             );
         }
@@ -6275,8 +6300,8 @@ impl XyceTestRunner {
                 return self.failure_result(
                     deck,
                     start,
-                    RESULT_CONTRACT,
-                    format!("analytic first-order RC reference generation failed: {err}"),
+                    result_contract,
+                    format!("{label} reference generation failed: {err}"),
                     Vec::new(),
                 );
             }
@@ -6287,23 +6312,20 @@ impl XyceTestRunner {
                 return self.failure_result(
                     deck,
                     start,
-                    RESULT_CONTRACT,
-                    format!("analytic first-order RC xyce_verify comparison failed: {err}"),
+                    result_contract,
+                    format!("{label} xyce_verify comparison failed: {err}"),
                     Vec::new(),
                 );
             }
         };
         if mismatches.is_empty() {
-            self.passed_result(deck, start, RESULT_CONTRACT)
+            self.passed_result(deck, start, result_contract)
         } else {
             self.failure_result(
                 deck,
                 start,
-                RESULT_CONTRACT,
-                format!(
-                    "{} analytic first-order RC xyce_verify mismatch(es)",
-                    mismatches.len()
-                ),
+                result_contract,
+                format!("{} {label} xyce_verify mismatch(es)", mismatches.len(),),
                 mismatches,
             )
         }

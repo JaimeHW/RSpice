@@ -229,11 +229,19 @@ impl XyceTestRunner {
     ) -> Result<XyceStaticTranPlan, String> {
         let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
         let analytic_wrapper = purpose == XyceStaticTranPlanPurpose::AnalyticOracle;
+        let analytic_passive_temperature =
+            purpose == XyceStaticTranPlanPurpose::PassiveTemperatureAnalyticOracle;
         let generated_reference_wrapper =
             purpose == XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily;
         if analytic_wrapper && !requires_wrapper {
             return Err(
                 "analytic transient oracle purpose requires wrapper provenance".to_string(),
+            );
+        }
+        if analytic_passive_temperature && requires_wrapper {
+            return Err(
+                "passive-temperature analytic purpose requires an ordinary non-wrapper deck"
+                    .to_string(),
             );
         }
         if generated_reference_wrapper && !requires_wrapper {
@@ -290,6 +298,7 @@ impl XyceTestRunner {
             && !output_override
             && !noindex_header_wrapper
             && !analytic_wrapper
+            && !analytic_passive_temperature
             && !generated_reference_wrapper
         {
             self.measurement_reference_paths(&deck.path, "mt")?
@@ -303,6 +312,7 @@ impl XyceTestRunner {
             && !output_override
             && !noindex_header_wrapper
             && !analytic_wrapper
+            && !analytic_passive_temperature
             && !generated_reference_wrapper;
         if requires_wrapper
             && !output_override
@@ -311,6 +321,7 @@ impl XyceTestRunner {
             && !has_scalar_measurement_oracle
             && !Self::source_may_have_pwl_repeat_option(&source)
             && !analytic_wrapper
+            && !analytic_passive_temperature
             && !generated_reference_wrapper
         {
             return Err(Self::upstream_wrapper_required_reason().to_string());
@@ -362,29 +373,31 @@ impl XyceTestRunner {
                 XyceStaticTranContract::WrapperStatic.reference_extension(),
             )
             .is_some_and(|path| path.is_file());
-        let native_static_prn_wrapper = if analytic_wrapper || scalar_measurement_only {
-            None
-        } else if requires_wrapper {
-            if output_override {
-                Self::native_output_override_prn_tran_wrapper_contract(&source)
-                    .map(Some)
-                    .map_err(|_| Self::upstream_wrapper_required_reason().to_string())?
+        let native_static_prn_wrapper =
+            if analytic_wrapper || analytic_passive_temperature || scalar_measurement_only {
+                None
+            } else if requires_wrapper {
+                if output_override {
+                    Self::native_output_override_prn_tran_wrapper_contract(&source)
+                        .map(Some)
+                        .map_err(|_| Self::upstream_wrapper_required_reason().to_string())?
+                } else {
+                    Self::native_static_prn_tran_wrapper_contract(
+                        &deck.path,
+                        &deck.relative_path,
+                        &source,
+                        has_prn_oracle,
+                    )
+                }
             } else {
-                Self::native_static_prn_tran_wrapper_contract(
-                    &deck.path,
-                    &deck.relative_path,
-                    &source,
-                    has_prn_oracle,
-                )
-            }
-        } else {
-            None
-        };
+                None
+            };
         if steps.is_empty()
             && requires_wrapper
             && native_static_prn_wrapper.is_none()
             && !scalar_measurement_only
             && !analytic_wrapper
+            && !analytic_passive_temperature
             && !generated_reference_wrapper
         {
             return Err(Self::upstream_wrapper_required_reason().to_string());
