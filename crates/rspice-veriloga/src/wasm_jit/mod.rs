@@ -1260,11 +1260,26 @@ module wasm_kernel_pair(p, n, c);
 endmodule
 "#;
 
-    /// [`FUSED_KERNEL_SOURCE`] instantiated in an independent wasm engine, with
+    /// A model whose second contribution overflows to infinity at the
+    /// harness's operating point: `V(p, n)` is ln 4, so the exponential's
+    /// argument runs far past the largest one `exp` can represent.
+    const FUSED_KERNEL_OVERFLOW_SOURCE: &str = r#"
+`include "disciplines.vams"
+module wasm_kernel_overflow(p, n, c);
+  inout p, n, c;
+  electrical p, n, c;
+  analog begin
+    I(p, n) <+ V(p, n);
+    I(c, n) <+ exp(V(p, n) * 1000.0);
+  end
+endmodule
+"#;
+
+    /// A three-terminal model instantiated in an independent wasm engine, with
     /// a frame and its arrays laid out in linear memory.
     ///
-    /// Both fused drivers are checked against the per-entry exports through the
-    /// same frame, so the layout is written once here rather than per test.
+    /// Every fused-driver test runs against the same frame the per-entry
+    /// exports do, so the layout is written once here rather than per test.
     struct FusedKernelHarness {
         artifact: super::WasmJitModelArtifact,
         executable: WasmJitExecutable,
@@ -1274,6 +1289,7 @@ endmodule
         frame: Vec<u8>,
         /// Jacobian entry count per stamp, in model order.
         stamp_jacobians: Vec<usize>,
+        parameters: usize,
     }
 
     impl FusedKernelHarness {
@@ -1286,6 +1302,10 @@ endmodule
         const JACOBIANS: u32 = 1536;
 
         fn new() -> Self {
+            Self::for_source(FUSED_KERNEL_SOURCE, "wasm_kernel_pair")
+        }
+
+        fn for_source(source: &str, module_name: &str) -> Self {
             use wasmi::{Engine, Linker, Memory, MemoryType, Module, Store};
 
             use super::abi::{
@@ -1303,7 +1323,7 @@ endmodule
             };
 
             let report = VerilogACompiler::new(CompilerOptions::default())
-                .compile_runtime(FUSED_KERNEL_SOURCE, Some("wasm_kernel_pair"))
+                .compile_runtime(source, Some(module_name))
                 .expect("compile fused-kernel model");
             let artifact = compile_model_value_module(&report.model, &report.canonical_ir)
                 .expect("compile fused-kernel module");
@@ -1317,6 +1337,7 @@ endmodule
                 .collect::<Vec<_>>();
             let stamp_count = stamp_jacobians.len();
             let jacobian_count = stamp_jacobians.iter().sum::<usize>();
+            let parameters = report.model.parameters.len();
 
             let engine = Engine::default();
             let module = Module::new(&engine, artifact.module().bytes())
@@ -1371,7 +1392,7 @@ endmodule
                 write(FRAME_ABI_VERSION_OFFSET, WASM_JIT_ABI_VERSION);
                 write(FRAME_BYTE_LEN_OFFSET, WASM_JIT_EVAL_FRAME_BYTES);
                 write(FRAME_PARAMETERS_PTR_OFFSET, Self::PARAMETERS);
-                write(FRAME_PARAMETERS_LEN_OFFSET, 1);
+                write(FRAME_PARAMETERS_LEN_OFFSET, parameters as u32);
                 write(FRAME_TERMINAL_VOLTAGES_PTR_OFFSET, Self::VOLTAGES);
                 write(
                     FRAME_TERMINAL_VOLTAGES_LEN_OFFSET,
@@ -1400,6 +1421,7 @@ endmodule
                 instance,
                 frame,
                 stamp_jacobians,
+                parameters,
             }
         }
 
@@ -1426,7 +1448,9 @@ endmodule
             self.memory
                 .write(&mut self.store, 0, &self.frame)
                 .expect("write frame");
-            self.write_f64(Self::PARAMETERS as usize, 3.0);
+            for index in 0..self.parameters {
+                self.write_f64(Self::PARAMETERS as usize + index * size_of::<f64>(), 3.0);
+            }
             for (index, value) in [4.0_f64.ln(), 0.0, 0.75].into_iter().enumerate() {
                 self.write_f64(Self::VOLTAGES as usize + index * size_of::<f64>(), value);
             }
@@ -1476,6 +1500,15 @@ endmodule
             self.memory
                 .write(&mut self.store, offset, &value.to_le_bytes())
                 .expect("write f64");
+        }
+
+        fn read_i32(&self, offset: usize) -> i32 {
+            let raw = self
+                .memory
+                .data(&self.store)
+                .get(offset..offset + std::mem::size_of::<i32>())
+                .expect("read i32");
+            i32::from_le_bytes(raw.try_into().unwrap())
         }
 
         fn read_f64(&self, offset: usize) -> f64 {
@@ -1674,6 +1707,53 @@ endmodule
         assert_eq!(
             harness.call(&kernel_export),
             super::WASM_JIT_STATUS_RUNTIME_ERROR
+        );
+    }
+
+    /// A non-finite contribution stops the driver before it is published.
+    ///
+    /// On the per-entry path the device audits each value as it comes back, so
+    /// an infinity never reaches the solver. A fused driver publishes into the
+    /// context itself, so the audit has to be inside the generated code -- and
+    /// it has to run before the store, not after, or the contribution the
+    /// device reads back is already wrong.
+    #[test]
+    fn a_non_finite_contribution_fails_the_fused_driver_before_publishing_it() {
+        use std::mem::size_of;
+
+        use super::abi::FRAME_ERROR_STATUS_OFFSET;
+
+        let mut harness =
+            FusedKernelHarness::for_source(FUSED_KERNEL_OVERFLOW_SOURCE, "wasm_kernel_overflow");
+        let kernel_export = harness
+            .artifact
+            .evaluation_kernel_export()
+            .expect("a model with no prior-current reads must fuse")
+            .to_owned();
+        assert_eq!(harness.stamp_count(), 2);
+
+        harness.reset();
+        assert_eq!(
+            harness.call(&kernel_export),
+            super::WASM_JIT_STATUS_RUNTIME_ERROR,
+            "an overflowing contribution must fail the dispatch"
+        );
+        assert_eq!(
+            harness.read_i32(FRAME_ERROR_STATUS_OFFSET as usize),
+            super::WASM_JIT_STATUS_RUNTIME_ERROR,
+            "the frame must record why, not only that the status was non-zero"
+        );
+
+        let published = harness.read_f64(FusedKernelHarness::SEQUENTIAL_CURRENTS as usize);
+        assert_eq!(
+            published,
+            4.0_f64.ln(),
+            "the driver must keep the contributions it evaluated before the bad one"
+        );
+        assert_eq!(
+            harness.read_f64(FusedKernelHarness::SEQUENTIAL_CURRENTS as usize + size_of::<f64>()),
+            0.0,
+            "the infinity must never be stored where the device reads contributions"
         );
     }
 

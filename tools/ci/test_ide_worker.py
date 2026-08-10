@@ -225,11 +225,19 @@ class IdeWorkerRoutingTests(unittest.TestCase):
 
     def test_worker_installs_verified_wasm_jit_models_with_bounded_cache(self) -> None:
         worker = (IDE_DIRS[0] / "simulation-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"rspiceUiWasmJitEvalOpV1"', worker)
         self.assertIn('"rspiceUiWasmJitEmitterVersion"', worker)
+        # The capabilities are raw WebAssembly exports, not wasm-bindgen ones,
+        # so they are checked on wasmExports and must not be looked for among
+        # the generated JavaScript functions.
+        self.assertNotIn("rspiceUiWasmJitEvalOpV1", worker)
+        self.assertNotIn("rspiceUiWasmJitMath1V1", worker)
         self.assertIn('"rspiceUiWasmJitSolverProbeArtifact"', worker)
         self.assertIn('"rspiceUiWasmJitRunSolverProbe"', worker)
+        self.assertIn('"rspiceUiWasmJitKernelProbeArtifact"', worker)
+        self.assertIn('"rspiceUiWasmJitRunKernelProbe"', worker)
         self.assertIn("await installWasmJitArtifact(module, solverArtifact)", worker)
+        self.assertIn("await installWasmJitArtifact(module, kernelArtifact)", worker)
+        self.assertIn("module.rspiceUiWasmJitRunKernelProbe()", worker)
         self.assertIn("async function installWasmJitModel(module, response)", worker)
         self.assertIn("async function installWasmJitArtifact(module, artifact)", worker)
         self.assertIn("async function prepareWasmJitSimulationRequest(module, request)", worker)
@@ -239,8 +247,19 @@ class IdeWorkerRoutingTests(unittest.TestCase):
         self.assertIn("function dispatchWasmJitEntry(cacheKey, exportName, frameOffset)", worker)
         self.assertIn("module.installRspiceUiWasmJitDispatcher(dispatchWasmJitEntry)", worker)
         self.assertIn("WebAssembly.compile(bytes)", worker)
-        self.assertIn("memory: primaryWasmExports.memory", worker)
-        self.assertIn("eval_op_v1: module.rspiceUiWasmJitEvalOpV1", worker)
+        # Every generated module must be instantiated against the primary
+        # module's raw exports. Binding the wasm-bindgen wrappers instead puts
+        # a JavaScript frame between a model's exp() and its implementation on
+        # a path that runs thousands of times per device evaluation, and the
+        # answers stay correct, so nothing else here would notice.
+        self.assertIn("rspice_jit: wasmJitImports(primaryWasmExports)", worker)
+        self.assertIn("memory: wasmExports.memory", worker)
+        for capability in ("eval_op_v1", "math1_v1", "math2_v1"):
+            self.assertIn(
+                f"{capability}: wasmExports.rspice_ui_wasm_jit_{capability}",
+                worker,
+            )
+        self.assertNotIn("eval_op_v1: module.rspiceUiWasmJit", worker)
         self.assertIn("artifact.valueExports", worker)
         self.assertIn("instance.exports[artifact.assignmentExport]", worker)
         self.assertIn("instance.exports[artifact.postAssignmentExport]", worker)
@@ -273,6 +292,9 @@ class IdeWorkerRoutingTests(unittest.TestCase):
         )
         self.assertIn('data-rspice-wasm-jit-status="pending"', qualification)
         self.assertIn("capability.solverResult === 15", qualification)
+        self.assertIn("capability.kernel?.contributions === 3", qualification)
+        self.assertIn("capability.kernel?.jacobianEntries === 14", qualification)
+        self.assertIn("data-rspice-wasm-jit-kernel-ns-per-stamp", qualification)
         self.assertIn('finish("qualified"', qualification)
         self.assertRegex(
             worker,

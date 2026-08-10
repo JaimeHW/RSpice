@@ -359,6 +359,164 @@ module rspice_wasm_solver_probe(p, n);
 endmodule
 "#;
 
+/// A model reaching the parts of the browser backend the solver probe leaves
+/// untouched: several contributions published by one fused dispatch, a square
+/// root and an exponential through the frame-free math capability, an inlined
+/// extremum, and a contribution carrying several Jacobian entries.
+///
+/// Every expected result is exact in binary floating point, so the browser is
+/// compared bit for bit against the machine backends rather than within a
+/// tolerance.
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+const WASM_JIT_KERNEL_PROBE_SOURCE: &str = r#"
+`include "disciplines.vams"
+module rspice_wasm_kernel_probe(a, b, c);
+  inout a, b, c;
+  electrical a, b, c;
+  parameter real scale = 2.0;
+  real shaped;
+  analog begin
+    shaped = sqrt(V(a, b)) + exp(0.0);
+    I(a, b) <+ shaped * scale;
+    I(c, b) <+ max(V(c, b), 3.0) * scale;
+    I(a, c) <+ V(a, b) * V(c, b);
+  end
+endmodule
+"#;
+
+/// Solver-node voltages, ground excluded: `V(a, b)` is 4 so its square root is
+/// exact, and `V(c, b)` is 5 so the extremum selects its variable arm and
+/// carries a derivative.
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+const WASM_JIT_KERNEL_PROBE_VOLTAGES: [f64; 2] = [4.0, 5.0];
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+const WASM_JIT_KERNEL_PROBE_CURRENTS: [f64; 3] = [6.0, 10.0, 20.0];
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+const WASM_JIT_KERNEL_PROBE_JACOBIAN: [f64; 14] = [
+    0.5, -0.5, -0.5, 0.5, -2.0, 2.0, 2.0, -2.0, 5.0, -5.0, -9.0, 9.0, 4.0, -4.0,
+];
+
+/// Enough stamps that the browser's millisecond clock resolves the per-stamp
+/// cost, without making the gate a long-running job.
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+const WASM_JIT_KERNEL_PROBE_STAMPS: u32 = 20_000;
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+fn compile_wasm_jit_kernel_probe() -> Result<rspice_veriloga::RuntimeCompileReport, String> {
+    rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions::default())
+        .compile_runtime(
+            WASM_JIT_KERNEL_PROBE_SOURCE,
+            Some("rspice_wasm_kernel_probe"),
+        )
+        .map_err(|error| format!("WASM JIT kernel probe compilation failed: {error}"))
+}
+
+/// Emit the fused-driver probe's model module for the worker to install.
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub fn rspice_ui_wasm_jit_kernel_probe_artifact()
+-> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    let report =
+        compile_wasm_jit_kernel_probe().map_err(|error| wasm_bindgen::JsValue::from_str(&error))?;
+    let artifact =
+        rspice_veriloga::wasm_jit::compile_model_value_module(&report.model, &report.canonical_ir)
+            .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))?;
+    let artifact = simulation::veriloga::WasmJitWorkerArtifact::from_compiled(&artifact);
+    serde_wasm_bindgen::to_value(&artifact)
+        .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))
+}
+
+/// What the browser engine produced, and how long a fused stamp costs there.
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WasmJitKernelProbeReport {
+    pub contributions: usize,
+    pub jacobian_entries: usize,
+    pub stamps: u32,
+    pub elapsed_ms: f64,
+    pub nanoseconds_per_stamp: f64,
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+fn expect_exact_probe_values(what: &str, actual: &[f64], expected: &[f64]) -> Result<(), String> {
+    if actual.len() != expected.len()
+        || actual
+            .iter()
+            .zip(expected)
+            .any(|(actual, expected)| actual.to_bits() != expected.to_bits())
+    {
+        return Err(format!(
+            "WASM JIT kernel probe {what} mismatch: {actual:?}, expected {expected:?}"
+        ));
+    }
+    Ok(())
+}
+
+/// Evaluate and stamp a multi-contribution model in the browser engine,
+/// checking every result bit for bit and timing the fused stamp driver.
+///
+/// The three checks reach three different paths: the contributions come from
+/// the fused evaluation driver, the derivatives from the per-entry Jacobian
+/// exports, and the timing from the fused stamp driver. The timing is the only
+/// evidence that catches a capability bound to a JavaScript wrapper rather
+/// than a raw export, because such a build still computes the right answer.
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub fn rspice_ui_wasm_jit_run_kernel_probe() -> Result<wasm_bindgen::JsValue, String> {
+    let report = compile_wasm_jit_kernel_probe()?;
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "WASMJITKERNEL1",
+        std::sync::Arc::new(report.model),
+        &report.canonical_ir,
+        &[1, 0, 2],
+    )
+    .map_err(|error| error.to_string())?;
+    if !device.fused_stamp_driver_is_active() {
+        return Err(
+            "WASM JIT kernel probe model did not qualify for the fused stamp driver".to_owned(),
+        );
+    }
+    device
+        .try_update_all_voltages(&WASM_JIT_KERNEL_PROBE_VOLTAGES)
+        .map_err(|error| error.to_string())?;
+
+    let currents = device.try_evaluate().map_err(|error| error.to_string())?;
+    expect_exact_probe_values("contribution", &currents, &WASM_JIT_KERNEL_PROBE_CURRENTS)?;
+    let jacobian = device
+        .try_compute_jacobian()
+        .map_err(|error| error.to_string())?;
+    let entries = jacobian
+        .iter()
+        .map(|entry| entry.value)
+        .collect::<Vec<f64>>();
+    expect_exact_probe_values("Jacobian", &entries, &WASM_JIT_KERNEL_PROBE_JACOBIAN)?;
+
+    // Nudging one voltage per pass keeps the device from being handed the same
+    // operating point twice, by less than the extremum's margin so the arm the
+    // checked values came from stays selected.
+    let started = crate::time_compat::Instant::now();
+    for step in 0..WASM_JIT_KERNEL_PROBE_STAMPS {
+        let voltages = [
+            WASM_JIT_KERNEL_PROBE_VOLTAGES[0],
+            WASM_JIT_KERNEL_PROBE_VOLTAGES[1] + f64::from(step) * f64::EPSILON,
+        ];
+        device
+            .try_stamp(&voltages, |_, _, _| {}, |_, _| {})
+            .map_err(|error| error.to_string())?;
+    }
+    let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+    let report = WasmJitKernelProbeReport {
+        contributions: currents.len(),
+        jacobian_entries: entries.len(),
+        stamps: WASM_JIT_KERNEL_PROBE_STAMPS,
+        elapsed_ms,
+        nanoseconds_per_stamp: elapsed_ms * 1.0e6 / f64::from(WASM_JIT_KERNEL_PROBE_STAMPS),
+    };
+    serde_wasm_bindgen::to_value(&report).map_err(|error| error.to_string())
+}
+
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 fn compile_wasm_jit_solver_probe() -> Result<rspice_veriloga::RuntimeCompileReport, String> {
     rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions::default())

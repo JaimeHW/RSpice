@@ -3525,17 +3525,36 @@ impl VerilogADevice {
         M: FnMut(usize, usize, f64),
         R: FnMut(usize, f64),
     {
-        #[cfg(feature = "native")]
-        if self.native_model.stamp_kernel_is_eligible() {
-            return self.try_stamp_fused_kernel(circuit_voltages, matrix_add, rhs_add, mode);
-        }
-
-        #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
-        if self.wasm_jit_model.stamp_kernel_is_eligible() {
+        #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
+        if self.fused_stamp_driver_is_active() {
             return self.try_stamp_fused_kernel(circuit_voltages, matrix_add, rhs_add, mode);
         }
 
         self.try_stamp_scalar_with_mode(circuit_voltages, matrix_add, rhs_add, mode)
+    }
+
+    /// Whether stamping dispatches the fused whole-model driver rather than
+    /// one call per contribution and per derivative.
+    ///
+    /// Public because the browser qualification gate asserts it: a probe that
+    /// quietly fell back to the per-entry path would still produce the right
+    /// numbers, and would report a fused dispatch it never made.
+    pub fn fused_stamp_driver_is_active(&self) -> bool {
+        #[cfg(feature = "native")]
+        {
+            self.native_model.stamp_kernel_is_eligible()
+        }
+        #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+        {
+            self.wasm_jit_model.stamp_kernel_is_eligible()
+        }
+        #[cfg(all(
+            not(feature = "native"),
+            not(all(feature = "wasm-jit", target_arch = "wasm32"))
+        ))]
+        {
+            false
+        }
     }
 
     /// Stamp through a fused whole-model driver.
