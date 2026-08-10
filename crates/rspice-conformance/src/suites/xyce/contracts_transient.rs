@@ -2075,10 +2075,12 @@ impl XyceTestRunner {
             || plan.tran.step < 0.0
             || plan.tran.stop <= 0.0
             || plan.tran.step > plan.tran.stop
+            || plan.tran.start.is_some()
+            || plan.tran.max_step.is_some()
             || plan.tran.uic
         {
             return Err(format!(
-                "{LABEL} requires a finite ordinary transient tuple with 0 <= step <= stop, positive stop, and no UIC"
+                "{LABEL} requires a finite '.TRAN step stop' tuple with 0 <= step <= stop, positive stop, and no START, MAXSTEP, or UIC"
             ));
         }
         if plan
@@ -3188,7 +3190,8 @@ impl XyceTestRunner {
                 _ => {
                     return Err(match purpose {
                         XyceStaticTranPlanPurpose::AbsoluteOracle
-                        | XyceStaticTranPlanPurpose::AnalyticOracle => format!(
+                        | XyceStaticTranPlanPurpose::AnalyticOracle
+                        | XyceStaticTranPlanPurpose::PassiveTemperatureAnalyticOracle => format!(
                             "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN and extended Level-1 NPN IRB/RBM, EKV26, generated BSIM-SOI 4.6.1 LEVEL=70, validated native VDMOS LEVEL=18 integrated-RMS, bounded native classic MOSFET LEVEL=1/2/3 models, exact IS-only, validated legacy, Level=2 TBV, and validated MINRES/MINCAP legacy-diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
                             element.name
                         ),
