@@ -64,7 +64,7 @@ fn commit_validated_options(setup: &mut SimSetupState, options: &SimulationOptio
     setup.options_errors.clear();
 }
 
-fn commit_options_transaction(
+pub(in crate::workbench) fn commit_options_transaction(
     app: &mut RSpiceApp,
     options: &SimulationOptions,
     close_dialog: bool,

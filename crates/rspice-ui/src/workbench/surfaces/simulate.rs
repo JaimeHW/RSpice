@@ -3,6 +3,15 @@
 mod analysis_form;
 mod catalog;
 mod lifecycle;
+mod page_kit;
+mod page_models;
+mod page_outputs;
+mod page_runset;
+mod page_save;
+mod page_solver;
+mod page_specs;
+mod page_variables;
+mod pages;
 mod setup_tables;
 mod workflows;
 
@@ -247,8 +256,13 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 let surface_width = ui.available_width();
                 ui.spacing_mut().item_spacing.y = 0.0;
                 ui.set_width(surface_width);
-                workspace_title_row(ui, |ui| plan_heading(ui, app, surface_width));
-                analysis_workspace(ui, app, surface_width, scroll_content_origin_y);
+                let page = app.state.workbench.simulation_page;
+                if page == crate::workbench::state::SimulationPage::Analyses {
+                    workspace_title_row(ui, |ui| plan_heading(ui, app, surface_width));
+                    analysis_workspace(ui, app, surface_width, scroll_content_origin_y);
+                } else {
+                    pages::show(ui, app, page);
+                }
             });
         let pending_delta = std::mem::take(
             &mut app
@@ -2048,5 +2062,7 @@ fn format_plan_issue(issue: &AnalysisPlanIssue) -> String {
     }
 }
 
+#[cfg(test)]
+mod page_tests;
 #[cfg(test)]
 mod tests;

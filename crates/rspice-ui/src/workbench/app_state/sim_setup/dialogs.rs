@@ -5,4 +5,4 @@
 
 use crate::workbench::app::RSpiceApp;
 
-mod options_dialog;
+pub(in crate::workbench) mod options_dialog;

@@ -21,7 +21,7 @@ use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
     PANEL_HEADER_H, StatusMark, WorkbenchIcon, paint_status_mark, property_row, section_header,
 };
-use super::super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
+use super::super::state::{ModelsPage, ProjectPage, SimulationPage, VerificationPage, Workspace};
 
 const EXPRESSION_HEADER_HEIGHT: f32 = 28.0;
 const SIGNAL_ROW_HEIGHT: f32 = 30.0;
@@ -38,6 +38,10 @@ const SCHEMATIC_NAV_META_SIZE: f32 = 10.0;
 // Mirrors the mockup's `.section-body { padding-inline: 10px; }` contract so
 // run-set values remain visually contained beside the analysis-stack divider.
 const NAV_PROPERTY_PADDING_X: f32 = 10.0;
+// The creator needs clearance from the last tree row above it while staying
+// flush to the panel's sides and to the block's bottom.
+const SIMULATION_CREATOR_GAP: f32 = 6.0;
+const SIMULATION_CREATOR_EXTRA_HEIGHT: f32 = 8.0;
 const EMPTY_HINT_PADDING_X: i8 = 12;
 const EMPTY_HINT_PADDING_Y: i8 = 20;
 // The mock's 49 px is a minimum. Its three grid rows resolve to 63 px at the
@@ -712,10 +716,30 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     ScrollArea::vertical()
         .id_salt("workbench.simulation.navigator")
         .show(ui, |ui| {
-            if query.is_empty() || "analyses".contains(&query) {
-                let meta = format!("{total} active · {enabled} enabled");
-                let _ = nav_row(ui, WorkbenchIcon::Results, "Analyses", true, Some(&meta));
+            let active = app.state.workbench.simulation_page;
+            let analyses_meta = format!("{total} active · {enabled} enabled");
+            let mut requested = None;
+            for page in SimulationPage::NAVIGATION {
+                let label = page.label();
+                if !query.is_empty() && !label.to_lowercase().contains(&query) {
+                    continue;
+                }
+                let meta = simulate_nav_meta(app, page, &analyses_meta);
+                if nav_row(
+                    ui,
+                    simulate_nav_icon(page),
+                    label,
+                    active == page,
+                    meta.as_deref(),
+                ) {
+                    requested = Some(page);
+                }
             }
+            if let Some(page) = requested {
+                app.state.workbench.simulation_page = page;
+                app.state.workbench.close_drawer();
+            }
+            simulation_plan_creator(ui, app);
             section_header(ui, "Run set", Some("Reference point"));
             nav_property(
                 ui,
@@ -743,30 +767,79 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
                     "disabled"
                 },
             );
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.add_space(8.0);
-                if Button::new("Add analysis…")
-                    .accent()
-                    .min_width((ui.available_width() - 16.0).max(1.0))
-                    .show(ui)
-                    .clicked()
-                {
-                    // On tablet and phone this action is hosted by the
-                    // navigator drawer. Close that transient layer before
-                    // opening the catalog so the modal is never obscured by
-                    // its invoker.
-                    app.state.workbench.close_drawer();
-                    app.state.sim_setup.palette_open = true;
-                    app.state.sim_setup.palette_query.clear();
-                    app.state.sim_setup.palette_active = 0;
-                    app.state.sim_setup.palette_scroll_to_active = true;
-                }
-            });
             ui.add_space(8.0);
             section_header(ui, "Capability policy", None);
             capability_policy_banner(ui);
         });
+}
+
+/// The panel's one creating action, at the foot of the tree it adds to.
+///
+/// Full-bleed and square rather than an inset pill: it reads as the last row
+/// of the tree rather than a control floating inside the panel, and it carries
+/// the filled accent so it is the obvious way into an empty plan.
+fn simulation_plan_creator(ui: &mut Ui, app: &mut RSpiceApp) {
+    ui.add_space(SIMULATION_CREATOR_GAP);
+    let width = ui.available_width();
+    if Button::new("Add analysis or workflow…")
+        .accent()
+        .min_width(width)
+        .min_height(Tokens::get(ui.ctx()).metrics.row_h + SIMULATION_CREATOR_EXTRA_HEIGHT)
+        .square()
+        .show(ui)
+        .clicked()
+    {
+        // On tablet and phone this action is hosted by the navigator drawer.
+        // Close that transient layer before opening the catalog so the modal
+        // is never obscured by its invoker.
+        app.state.workbench.close_drawer();
+        app.state.sim_setup.palette_open = true;
+        app.state.sim_setup.palette_query.clear();
+        app.state.sim_setup.palette_active = 0;
+        app.state.sim_setup.palette_scroll_to_active = true;
+    }
+}
+
+const fn simulate_nav_icon(page: SimulationPage) -> WorkbenchIcon {
+    match page {
+        SimulationPage::Analyses => WorkbenchIcon::Results,
+        SimulationPage::Variables => WorkbenchIcon::Sliders,
+        SimulationPage::Outputs => WorkbenchIcon::Probe,
+        SimulationPage::Specifications => WorkbenchIcon::Target,
+        SimulationPage::RunSet => WorkbenchIcon::Grid,
+        SimulationPage::Models => WorkbenchIcon::Models,
+        SimulationPage::Solver => WorkbenchIcon::Settings,
+        SimulationPage::Save => WorkbenchIcon::Save,
+    }
+}
+
+/// Row meta is a count of what the page owns, read from the same state the
+/// page edits. A page whose owner is empty shows nothing rather than a zero,
+/// so the column does not fill with noise before a plan has been authored.
+fn simulate_nav_meta(app: &RSpiceApp, page: SimulationPage, analyses: &str) -> Option<String> {
+    let payload = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .map(|plan| plan.id())
+        .and_then(|plan_id| app.state.workspace.active_plan_data(plan_id));
+    let count = |value: usize| (value > 0).then(|| value.to_string());
+    match page {
+        SimulationPage::Analyses => Some(analyses.to_owned()),
+        SimulationPage::Variables => count(payload.map_or(0, |data| data.design_variables.len())),
+        SimulationPage::Outputs | SimulationPage::Save => {
+            count(payload.map_or(0, |data| data.saved_outputs.len()))
+        }
+        SimulationPage::Specifications => count(payload.map_or(0, |data| data.specs.len())),
+        SimulationPage::RunSet => app
+            .state
+            .sim_setup
+            .run_set_point_count()
+            .map(|points| format!("{points} pt")),
+        SimulationPage::Models => count(app.state.model_library_manager.libraries_sorted().len()),
+        SimulationPage::Solver => None,
+    }
 }
 
 fn capability_policy_banner(ui: &mut Ui) {

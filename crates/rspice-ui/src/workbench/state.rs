@@ -762,6 +762,101 @@ impl VerificationPage {
     }
 }
 
+/// Simulation Studio setup route.
+///
+/// The analyses page owns the ordered plan and its per-analysis forms; the
+/// remaining pages own one plan-scoped concern each. Every route is backed by
+/// state the run actually consumes, so a page can never present a control that
+/// does not reach the engine.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum SimulationPage {
+    #[default]
+    Analyses,
+    Variables,
+    Outputs,
+    Specifications,
+    RunSet,
+    Models,
+    Solver,
+    Save,
+}
+
+impl SimulationPage {
+    /// Navigation order, matching the order a plan is authored in: the
+    /// analyses first, then what they are parameterized by, what they produce,
+    /// what judges them, what they are swept over, what they are bound
+    /// against, how they are solved, and what is kept.
+    pub const NAVIGATION: [Self; 8] = [
+        Self::Analyses,
+        Self::Variables,
+        Self::Outputs,
+        Self::Specifications,
+        Self::RunSet,
+        Self::Models,
+        Self::Solver,
+        Self::Save,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Analyses => "Analyses",
+            Self::Variables => "Design variables",
+            Self::Outputs => "Outputs & expressions",
+            Self::Specifications => "Requirements & specs",
+            Self::RunSet => "PVT, sweeps & variation",
+            Self::Models => "Models & sections",
+            Self::Solver => "Solver & convergence",
+            Self::Save => "Save & streaming policy",
+        }
+    }
+
+    /// Page heading. Longer than the navigation label where the page owns more
+    /// than its label implies.
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Analyses => "Analyses",
+            Self::Variables => "Design variables",
+            Self::Outputs => "Outputs & expressions",
+            Self::Specifications => "Requirements & specifications",
+            Self::RunSet => "PVT, sweeps & variation",
+            Self::Models => "Models & sections",
+            Self::Solver => "Solver, convergence & per-analysis overrides",
+            Self::Save => "Save, streaming & retention policy",
+        }
+    }
+
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::Analyses => {
+                "Order the plan, configure each analysis, and resolve every dependency before dispatch."
+            }
+            Self::Variables => {
+                "Own the typed parameters the plan resolves, their bounds, and what a change invalidates."
+            }
+            Self::Outputs => {
+                "Own the expressions the run saves and the semantic status each one resolves to."
+            }
+            Self::Specifications => {
+                "Own the limits a result is judged against and how a missing measurement is treated."
+            }
+            Self::RunSet => {
+                "Compose the run space from process, temperature and variation, and see exactly how many points it resolves to."
+            }
+            Self::Models => {
+                "Own the ordered model closure this plan binds against and the section each library resolves to."
+            }
+            Self::Solver => {
+                "Own what counts as converged, how the solve recovers when it is not, and how time and the matrix are handled."
+            }
+            Self::Save => {
+                "Own what is stored, how it is streamed while solving, and how long it is retained."
+            }
+        }
+    }
+}
+
 /// Documents another live-session participant currently holds the write
 /// lease on, projected each frame by the live-session engine. Runtime-only:
 /// empty whenever no live session is attached. The netlist entry doubles as
@@ -935,6 +1030,9 @@ pub struct WorkbenchState {
     pub library_cellview_page: LibraryCellviewPage,
     #[serde(default)]
     pub verification_page: VerificationPage,
+    /// Selected Simulation Studio setup route.
+    #[serde(default)]
+    pub simulation_page: SimulationPage,
     #[serde(default)]
     pub verification: VerificationSessionState,
     #[serde(default)]
@@ -997,6 +1095,14 @@ pub struct WorkbenchState {
     /// Selected specification row in the verification matrix.
     #[serde(default)]
     pub selected_spec: Option<usize>,
+    /// Selected design-variable row on the Simulation Studio variables page,
+    /// by exact name. Names are unique within a plan, and a name survives the
+    /// registry being reordered where a row index would not.
+    #[serde(default)]
+    pub selected_design_variable: Option<String>,
+    /// Selected saved-output row on the outputs page, by exact name.
+    #[serde(default)]
+    pub selected_saved_output: Option<String>,
     /// Selected model name within the currently selected model library.
     #[serde(default)]
     pub selected_model: Option<String>,
@@ -1141,6 +1247,7 @@ impl Default for WorkbenchState {
             project_checkpoint_selection: None,
             library_cellview_page: LibraryCellviewPage::Libraries,
             verification_page: VerificationPage::Yield,
+            simulation_page: SimulationPage::Analyses,
             verification: VerificationSessionState::default(),
             models_page: ModelsPage::Models,
             model_catalog_detach_pack: None,
@@ -1160,6 +1267,8 @@ impl Default for WorkbenchState {
                 .to_owned(),
             simulation_workflow: None,
             selected_spec: None,
+            selected_design_variable: None,
+            selected_saved_output: None,
             selected_model: None,
             analysis_query: String::new(),
             navigator_query: String::new(),
