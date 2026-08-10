@@ -1,23 +1,31 @@
 //! Revision-bound search and atomic replacement across a project source bundle.
 
+#[cfg(test)]
 use std::borrow::Cow;
 
 use sha2::{Digest as _, Sha256};
 
+#[cfg(test)]
 use crate::diagnostics::ConsoleMessage;
 use crate::product::ContentDigest;
+#[cfg(test)]
 use crate::state::{
-    BoundedFindMatches, FindDirection, FindOptions, ProjectSourceBundle, ProjectSourceLanguage,
-    ProjectSourceOwner, find_all_in_source_bounded, replace_source_ranges,
+    BoundedFindMatches, FindDirection, FindOptions, ProjectSourceBundle,
+    find_all_in_source_bounded, replace_source_ranges,
 };
+use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
 use crate::workbench::RSpiceApp;
 
 use super::{CodeSourceSearchScope, CodeSourceSearchState};
 
+#[cfg(test)]
 pub(crate) const SOURCE_SEARCH_RESULT_LIMIT: usize = 500;
+#[cfg(test)]
 pub(crate) const SOURCE_SEARCH_STREAM_LIMIT: usize = 50_000;
+#[cfg(test)]
 pub(crate) const GENERATED_REFERENCE_PATH: &str = "rspice://generated/top-deck";
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CodeSourceSearchResult {
     pub logical_path: String,
@@ -29,6 +37,7 @@ pub(crate) struct CodeSourceSearchResult {
     pub editable: bool,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct CodeSourceSearchResults {
     pub matches: Vec<CodeSourceSearchResult>,
@@ -138,6 +147,7 @@ pub(crate) fn open_source_search_in_bundle(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn open_active_source_search(app: &mut RSpiceApp) -> Result<(), String> {
     match app.state.ui.code_workspace.page {
         super::CodeWorkspacePage::Netlist => {
@@ -179,6 +189,7 @@ pub(crate) fn open_active_source_search(app: &mut RSpiceApp) -> Result<(), Strin
     }
 }
 
+#[cfg(test)]
 pub(crate) fn source_search_results(
     app: &RSpiceApp,
     search: &CodeSourceSearchState,
@@ -245,6 +256,7 @@ pub(crate) fn source_search_results(
     Ok(output)
 }
 
+#[cfg(test)]
 pub(crate) fn commit_source_search_replace(app: &mut RSpiceApp) -> Result<String, String> {
     let search = app
         .state
@@ -363,6 +375,7 @@ pub(crate) fn commit_source_search_replace(app: &mut RSpiceApp) -> Result<String
     Ok(message)
 }
 
+#[cfg(test)]
 fn current_bundle<'a>(
     app: &'a RSpiceApp,
     search: &CodeSourceSearchState,
@@ -399,6 +412,7 @@ fn current_bundle<'a>(
     Ok(bundle)
 }
 
+#[cfg(test)]
 fn bundle_documents(bundle: &ProjectSourceBundle) -> impl Iterator<Item = (&str, &str)> {
     std::iter::once((bundle.root().logical_path(), bundle.root().content())).chain(
         bundle
@@ -408,6 +422,7 @@ fn bundle_documents(bundle: &ProjectSourceBundle) -> impl Iterator<Item = (&str,
     )
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy)]
 struct SearchDocument<'a> {
     logical_path: &'a str,
@@ -417,6 +432,7 @@ struct SearchDocument<'a> {
     editable: bool,
 }
 
+#[cfg(test)]
 fn search_documents<'a>(
     app: &'a RSpiceApp,
     bundle: &'a ProjectSourceBundle,
@@ -483,6 +499,7 @@ fn search_documents<'a>(
     }])
 }
 
+#[cfg(test)]
 fn searchable_document_source<'a>(
     document: &SearchDocument<'a>,
     search: &CodeSourceSearchState,
@@ -505,6 +522,7 @@ fn searchable_document_source<'a>(
     Ok(Cow::Owned(selected.to_owned()))
 }
 
+#[cfg(test)]
 fn mask_source_comments(
     source: &str,
     language: ProjectSourceLanguage,
@@ -528,6 +546,7 @@ fn mask_source_comments(
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HashSyntax {
     Python,
@@ -535,6 +554,7 @@ enum HashSyntax {
     Toml,
 }
 
+#[cfg(test)]
 fn mask_hash_comments(source: &str, syntax: HashSyntax) -> Result<String, String> {
     let bytes = source.as_bytes();
     let mut output = bytes.to_vec();
@@ -611,6 +631,7 @@ fn mask_hash_comments(source: &str, syntax: HashSyntax) -> Result<String, String
         .map_err(|_| "Source-search comment masking produced invalid UTF-8.".to_owned())
 }
 
+#[cfg(test)]
 fn yaml_block_scalar_ranges(source: &str) -> Vec<std::ops::Range<usize>> {
     let mut ranges = Vec::new();
     let mut block_indent = None;
@@ -647,6 +668,7 @@ fn yaml_block_scalar_ranges(source: &str) -> Vec<std::ops::Range<usize>> {
     ranges
 }
 
+#[cfg(test)]
 fn mask_verilog_comments(source: &str) -> Result<String, String> {
     let bytes = source.as_bytes();
     let mut output = bytes.to_vec();
@@ -701,6 +723,7 @@ fn mask_verilog_comments(source: &str) -> Result<String, String> {
         .map_err(|_| "Verilog-A source-search masking produced invalid UTF-8.".to_owned())
 }
 
+#[cfg(test)]
 fn mask_spice_comments(source: &str) -> Result<String, String> {
     let mut output = source.as_bytes().to_vec();
     let mut offset = 0_usize;
@@ -745,6 +768,7 @@ fn mask_spice_comments(source: &str) -> Result<String, String> {
         .map_err(|_| "Netlist source-search masking produced invalid UTF-8.".to_owned())
 }
 
+#[cfg(test)]
 fn char_to_byte(source: &str, char_index: usize) -> usize {
     source
         .char_indices()
@@ -752,6 +776,7 @@ fn char_to_byte(source: &str, char_index: usize) -> usize {
         .map_or(source.len(), |(byte, _)| byte)
 }
 
+#[cfg(test)]
 fn line_column_at_byte(source: &str, byte: usize) -> (usize, usize) {
     let byte = byte.min(source.len());
     let prefix = &source[..byte];
@@ -761,6 +786,7 @@ fn line_column_at_byte(source: &str, byte: usize) -> (usize, usize) {
     (line, column)
 }
 
+#[cfg(test)]
 fn search_options(search: &CodeSourceSearchState) -> FindOptions {
     FindOptions {
         direction: FindDirection::Forward,
@@ -770,6 +796,7 @@ fn search_options(search: &CodeSourceSearchState) -> FindOptions {
     }
 }
 
+#[cfg(test)]
 fn source_line_preview(source: &str, one_based_line: usize) -> String {
     source
         .lines()
@@ -781,6 +808,7 @@ fn source_line_preview(source: &str, one_based_line: usize) -> String {
         .collect()
 }
 
+#[cfg(test)]
 const fn plural(count: usize) -> &'static str {
     if count == 1 { "" } else { "es" }
 }

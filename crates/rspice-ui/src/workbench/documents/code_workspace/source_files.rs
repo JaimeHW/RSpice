@@ -6,11 +6,12 @@ use crate::state::{
     ProjectSourceOwner, ProjectSourceRole, ProjectSourceRoleBinding,
 };
 use crate::workbench::RSpiceApp;
-use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 
+use super::CodeSourceImportState;
+#[cfg(test)]
 use super::{
     CodeSourceEditorBufferIdentity, CodeSourceFileAction, CodeSourceFileDialogState,
-    CodeSourceHistoryState, CodeSourceImportState, VerilogAFileSelection,
+    CodeSourceHistoryState, VerilogAFileSelection,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -99,6 +100,7 @@ pub(crate) fn open_source_workspace_dialog(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn commit_source_workspace_dialog(app: &mut RSpiceApp) -> Result<String, String> {
     let draft = app
         .state
@@ -163,6 +165,7 @@ pub(crate) fn commit_source_workspace_dialog(app: &mut RSpiceApp) -> Result<Stri
     Ok(message)
 }
 
+#[cfg(test)]
 fn new_veriloga_workspace_bundle(
     root_path: &str,
     build_profile_path: &str,
@@ -216,13 +219,14 @@ pub(super) fn new_imported_veriloga_workspace_bundle(
     .map_err(|error| error.to_string())
 }
 
+#[cfg(test)]
 fn new_veriloga_workspace_bundle_with_source(
     root_path: &str,
     source: String,
     build_profile_path: &str,
     module: &str,
 ) -> Result<ProjectSourceBundle, String> {
-    let profile = super::veriloga_profile::VerilogABuildProfile::starter(&module)
+    let profile = super::veriloga_profile::VerilogABuildProfile::starter(module)
         .to_toml()
         .map_err(|error| error.to_string())?;
     ProjectSourceBundle::try_new_with_roles(
@@ -273,6 +277,7 @@ pub(super) fn verilog_a_module_name_for_profile(root_path: &str) -> String {
     verilog_a_module_name(root_path)
 }
 
+#[cfg(test)]
 fn new_automation_workspace_bundle(
     draft: &super::CodeSourceWorkspaceDialogState,
 ) -> Result<ProjectSourceBundle, String> {
@@ -415,6 +420,7 @@ fn new_automation_workspace_bundle(
     .map_err(|error| error.to_string())
 }
 
+#[cfg(test)]
 pub(crate) fn assign_automation_source_role(
     app: &mut RSpiceApp,
     logical_path: &str,
@@ -526,6 +532,7 @@ pub(crate) fn source_bundle_contains_document(
 /// revision, closure, path, and edit authority that produced it are still
 /// current. Presentation code must not call the registry mutation API
 /// directly because safe-mode and governed-role policy live above it.
+#[cfg(test)]
 pub(crate) fn replace_automation_editor_file(
     app: &mut RSpiceApp,
     expected: &CodeSourceEditorBufferIdentity,
@@ -603,6 +610,7 @@ pub(crate) fn open_source_file_dialog(
     open_source_file_dialog_in_bundle(app, language, bundle_id, action, source_path, importer_path)
 }
 
+#[cfg(test)]
 pub(crate) fn open_source_file_dialog_in_bundle(
     app: &mut RSpiceApp,
     language: ProjectSourceLanguage,
@@ -678,6 +686,7 @@ pub(crate) fn open_source_file_dialog_in_bundle(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn commit_source_file_dialog(app: &mut RSpiceApp) -> Result<String, String> {
     let draft = app
         .state
@@ -829,6 +838,7 @@ pub(crate) fn open_source_history(
     open_source_history_in_bundle(app, language, bundle_id, source_path)
 }
 
+#[cfg(test)]
 pub(crate) fn open_source_history_in_bundle(
     app: &mut RSpiceApp,
     language: ProjectSourceLanguage,
@@ -867,57 +877,7 @@ pub(crate) fn open_source_history_in_bundle(
     Ok(())
 }
 
-pub(crate) fn export_source_copy_in_bundle(
-    app: &mut RSpiceApp,
-    language: ProjectSourceLanguage,
-    bundle_id: crate::state::ProjectSourceId,
-    source_path: &str,
-) -> Result<String, String> {
-    if !source_bundle_contains_document(app, language, bundle_id, source_path) {
-        return Err(format!(
-            "The selected source file '{source_path}' no longer belongs to this project source bundle."
-        ));
-    }
-    let bundle = app
-        .state
-        .workspace
-        .project_sources
-        .get_bundle(bundle_id)
-        .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
-    let source = bundle
-        .file_content(source_path)
-        .ok_or_else(|| format!("The selected source file '{source_path}' no longer exists."))?
-        .to_owned();
-    let default_name = source_path.rsplit('/').next().unwrap_or(source_path);
-    let extensions: &[&str] = match language {
-        ProjectSourceLanguage::VerilogA => &["va", "vams"],
-        ProjectSourceLanguage::RSpiceAutomation => &["py", "yaml", "yml", "toml", "lock"],
-    };
-    let Some(path) = app.export_workflow_io.show_save_dialog(SaveDialogConfig {
-        title: "Save project source copy",
-        default_name,
-        filter_name: language.label(),
-        filter_extensions: extensions,
-    })?
-    else {
-        return Ok("Source copy cancelled; no file was written.".to_owned());
-    };
-    let destination = app.export_workflow_io.observe_destination(&path)?;
-    app.export_workflow_io
-        .write_text_file_observed(&destination, &source)?;
-    let message = if app.export_workflow_io.saved_paths_are_reopenable() {
-        format!(
-            "Saved an exact copy of '{source_path}' to {}.",
-            path.display()
-        )
-    } else {
-        format!("Downloaded an exact copy of '{source_path}'.")
-    };
-    app.state
-        .push_user_message(ConsoleMessage::info(message.clone()));
-    Ok(message)
-}
-
+#[cfg(test)]
 pub(crate) fn request_automation_source_import(
     app: &mut RSpiceApp,
     importer_path: &str,
@@ -957,8 +917,8 @@ pub(crate) fn request_automation_source_import(
     Ok(())
 }
 
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn poll_automation_source_import(app: &mut RSpiceApp) {
-    #[cfg(target_arch = "wasm32")]
     poll_browser_automation_import_completion(app);
 
     let Some(request) = app.state.ui.code_workspace.source_import.as_mut() else {
@@ -978,62 +938,6 @@ pub(crate) fn poll_automation_source_import(app: &mut RSpiceApp) {
         return;
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let Some(request) = app.state.ui.code_workspace.source_import.take() else {
-            return;
-        };
-        let Some(path) = rfd::FileDialog::new()
-            .add_filter(
-                "Automation source",
-                &["py", "yaml", "yml", "toml", "lock", "json", "csv"],
-            )
-            .set_title("Import project-owned Automation source")
-            .pick_file()
-        else {
-            return;
-        };
-        let result = (|| {
-            let metadata = std::fs::metadata(&path).map_err(|error| error.to_string())?;
-            if metadata.len() > crate::state::MAX_PROJECT_CODE_SOURCE_BYTES as u64 {
-                return Err(format!(
-                    "Selected source exceeds the supported {}-byte limit",
-                    crate::state::MAX_PROJECT_CODE_SOURCE_BYTES
-                ));
-            }
-            let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
-            if bytes.len() > crate::state::MAX_PROJECT_CODE_SOURCE_BYTES {
-                return Err(format!(
-                    "Selected source exceeds the supported {}-byte limit",
-                    crate::state::MAX_PROJECT_CODE_SOURCE_BYTES
-                ));
-            }
-            let contents = String::from_utf8(bytes)
-                .map_err(|error| format!("Selected source is not valid UTF-8: {error}"))?;
-            let file_name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .filter(|name| !name.trim().is_empty())
-                .ok_or_else(|| "Selected source has no valid UTF-8 file name".to_owned())?;
-            Ok((file_name.to_owned(), contents))
-        })();
-        match result {
-            Ok((file_name, contents)) => {
-                if let Err(error) =
-                    apply_automation_source_import(app, request, file_name, contents)
-                {
-                    app.state.push_user_message(ConsoleMessage::error(format!(
-                        "Automation source import failed: {error}"
-                    )));
-                }
-            }
-            Err(error) => app.state.push_user_message(ConsoleMessage::error(format!(
-                "Automation source import failed: {error}"
-            ))),
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
     {
         let token = match crate::workbench::browser::file_import::try_begin_text_import(
             crate::workbench::browser::file_import::BrowserTextImportKind::Automation,
@@ -1188,6 +1092,7 @@ pub(crate) fn import_dropped_automation_source(
     apply_automation_source_import(app, request, file_name, contents)
 }
 
+#[cfg(test)]
 pub(crate) fn commit_source_history_restore(app: &mut RSpiceApp) -> Result<String, String> {
     let draft = app
         .state
@@ -1276,6 +1181,7 @@ pub(crate) fn commit_source_history_restore(app: &mut RSpiceApp) -> Result<Strin
     Ok(message)
 }
 
+#[cfg(test)]
 fn default_file_name(language: ProjectSourceLanguage) -> &'static str {
     match language {
         ProjectSourceLanguage::VerilogA => "untitled.va",
@@ -1283,6 +1189,7 @@ fn default_file_name(language: ProjectSourceLanguage) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn duplicate_file_name(path: &str) -> String {
     let (directory, file) = path
         .rsplit_once('/')
@@ -1337,6 +1244,7 @@ fn unique_suggestion(
     format!("{requested}.new")
 }
 
+#[cfg(test)]
 fn new_file_template(language: ProjectSourceLanguage, path: &str) -> String {
     match language {
         ProjectSourceLanguage::VerilogA if path.to_ascii_lowercase().ends_with(".vams") => {
@@ -2003,7 +1911,7 @@ mod tests {
             .unwrap();
         let bundle_id = bundle.id();
         let importer = bundle.root().logical_path().to_owned();
-        let logical_path = unique_suggestion(bundle, &importer, "analysis_helpers.py".to_owned());
+        let logical_path = unique_suggestion(bundle, &importer, "analysis_helpers.py");
 
         request_automation_source_import(&mut app, &importer).unwrap();
         let request = app.state.ui.code_workspace.source_import.take().unwrap();
