@@ -43,7 +43,7 @@ pub use crate::bsimsoi__bsimsoi__e2aff994;
 #[cfg(feature = "veriloga-model-bsimsoi-va")]
 pub use crate::bsimsoi__bsimsoi_va__3b1f6b5e;
 #[cfg(feature = "veriloga-model-ekv-va")]
-pub use crate::ekv26_sdext_verilog_a__ekv_va__0adf5df4;
+pub use crate::ekv26_sdext_verilog_a__ekv_va__0f1ec77e;
 #[cfg(feature = "veriloga-model-hicuml0va")]
 pub use crate::hicuml0_v2p1p0__hicuml0va__91cb3377;
 #[cfg(feature = "veriloga-model-hicuml2va")]
@@ -130,7 +130,7 @@ pub enum GeneratedBuiltinKind {
     #[cfg(feature = "veriloga-model-bsimsoi-va")]
     Device20(Box<bsimsoi__bsimsoi_va__3b1f6b5e::Instance>),
     #[cfg(feature = "veriloga-model-ekv-va")]
-    Device21(Box<ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance>),
+    Device21(Box<ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance>),
     #[cfg(feature = "veriloga-model-hicuml0va")]
     Device22(Box<hicuml0_v2p1p0__hicuml0va__91cb3377::Instance>),
     #[cfg(feature = "veriloga-model-hicuml2va")]
@@ -221,7 +221,7 @@ impl GeneratedBuiltinKind {
             #[cfg(feature = "veriloga-model-bsimsoi-va")]
             Self::Device20(_) => bsimsoi__bsimsoi_va__3b1f6b5e::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-ekv-va")]
-            Self::Device21(_) => ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device21(_) => ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-hicuml0va")]
             Self::Device22(_) => hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-hicuml2va")]
@@ -492,7 +492,7 @@ impl GeneratedBuiltinKind {
             #[cfg(feature = "veriloga-model-bsimsoi-va")]
             Self::Device20(_) => bsimsoi__bsimsoi_va__3b1f6b5e::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-ekv-va")]
-            Self::Device21(_) => ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device21(_) => ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-hicuml0va")]
             Self::Device22(_) => hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-hicuml2va")]
@@ -944,7 +944,7 @@ impl GeneratedBuiltinKind {
             #[cfg(all(feature = "veriloga-model-bsimsoi-va", feature = "veriloga-builtins-noise"))]
             Self::Device20(_) => &bsimsoi__bsimsoi_va__3b1f6b5e::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-ekv-va", feature = "veriloga-builtins-noise"))]
-            Self::Device21(_) => &ekv26_sdext_verilog_a__ekv_va__0adf5df4::NOISE_SOURCES,
+            Self::Device21(_) => &ekv26_sdext_verilog_a__ekv_va__0f1ec77e::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-hicuml0va", feature = "veriloga-builtins-noise"))]
             Self::Device22(_) => &hicuml0_v2p1p0__hicuml0va__91cb3377::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-hicuml2va", feature = "veriloga-builtins-noise"))]
@@ -1588,7 +1588,7 @@ pub const BUILTIN_DESCRIPTORS: &[super::GeneratedVerilogAModelDescriptor] = &[
     #[cfg(feature = "veriloga-model-bsimsoi-va")]
     super::GeneratedVerilogAModelDescriptor { abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: "bsimsoi_va", module_name: "bsimsoi_va", source_digest: "3b1f6b5e08b3dece", checkpoint_identity: bsimsoi__bsimsoi_va__3b1f6b5e::Instance::CHECKPOINT_MODEL_IDENTITY, terminals: &bsimsoi__bsimsoi_va__3b1f6b5e::Instance::TERMINALS, parameters: &bsimsoi__bsimsoi_va__3b1f6b5e::Instance::PARAMETER_DESCRIPTORS, total_node_count: bsimsoi__bsimsoi_va__3b1f6b5e::Instance::NODE_COUNT, internal_node_names: &bsimsoi__bsimsoi_va__3b1f6b5e::Instance::INTERNAL_NODE_NAMES, branch_count: bsimsoi__bsimsoi_va__3b1f6b5e::Instance::BRANCH_COUNT },
     #[cfg(feature = "veriloga-model-ekv-va")]
-    super::GeneratedVerilogAModelDescriptor { abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: "ekv_va", module_name: "ekv_va", source_digest: "0adf5df42838f477", checkpoint_identity: ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::CHECKPOINT_MODEL_IDENTITY, terminals: &ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::TERMINALS, parameters: &ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::PARAMETER_DESCRIPTORS, total_node_count: ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::NODE_COUNT, internal_node_names: &ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::INTERNAL_NODE_NAMES, branch_count: ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::BRANCH_COUNT },
+    super::GeneratedVerilogAModelDescriptor { abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: "ekv_va", module_name: "ekv_va", source_digest: "0f1ec77e926f0fd3", checkpoint_identity: ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::CHECKPOINT_MODEL_IDENTITY, terminals: &ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::TERMINALS, parameters: &ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::PARAMETER_DESCRIPTORS, total_node_count: ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::NODE_COUNT, internal_node_names: &ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::INTERNAL_NODE_NAMES, branch_count: ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::BRANCH_COUNT },
     #[cfg(feature = "veriloga-model-hicuml0va")]
     super::GeneratedVerilogAModelDescriptor { abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: "hicumL0va", module_name: "hicumL0va", source_digest: "91cb3377bb712b36", checkpoint_identity: hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::CHECKPOINT_MODEL_IDENTITY, terminals: &hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::TERMINALS, parameters: &hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::PARAMETER_DESCRIPTORS, total_node_count: hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::NODE_COUNT, internal_node_names: &hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::INTERNAL_NODE_NAMES, branch_count: hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::BRANCH_COUNT },
     #[cfg(feature = "veriloga-model-hicuml2va")]
@@ -2201,12 +2201,12 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
         }
         #[cfg(feature = "veriloga-model-ekv-va")]
         "EKV_VA" => {
-            let mut instance = Box::new(ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::new(nodes));
+            let mut instance = Box::new(ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::new(nodes));
             instance.set_branch_indices(branches);
             let mut device_params = Vec::with_capacity(params.len());
             let mut multiplicity = None;
             for assignment in params {
-                if assignment.name.eq_ignore_ascii_case("m") && !ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::has_parameter(assignment.name) {
+                if assignment.name.eq_ignore_ascii_case("m") && !ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::has_parameter(assignment.name) {
                     if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
                         return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }

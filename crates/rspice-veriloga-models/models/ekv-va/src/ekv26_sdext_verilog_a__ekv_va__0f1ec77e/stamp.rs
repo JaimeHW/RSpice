@@ -5,8 +5,9 @@ use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
 use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 45] = [2, 25, 40, 33, 69, 32, 70, 71, 72, 0, 1, 3, 7, 73, 4, 74, 5, 75, 6, 76, 8, 77, 10, 19, 18, 15, 16, 27, 29, 78, 36, 38, 39, 44, 79, 80, 81, 82, 45, 46, 47, 50, 58, 59, 83];
-pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 39] = [28, 17, 20, 35, 30, 14, 48, 11, 26, 24, 42, 43, 22, 23, 31, 12, 9, 13, 21, 34, 37, 41, 64, 66, 68, 63, 65, 67, 56, 54, 57, 49, 52, 51, 53, 55, 61, 60, 62];
+pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 28] = [2, 32, 20, 21, 48, 40, 13, 78, 39, 79, 80, 81, 0, 1, 82, 4, 83, 6, 84, 8, 85, 11, 86, 87, 46, 53, 54, 92];
+pub(super) const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 26] = [3, 10, 5, 7, 9, 12, 15, 26, 25, 22, 23, 34, 36, 43, 45, 47, 52, 88, 89, 90, 91, 55, 56, 59, 67, 68];
+pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 39] = [35, 24, 27, 42, 37, 19, 57, 16, 33, 31, 50, 51, 29, 30, 38, 17, 14, 18, 28, 41, 44, 49, 73, 75, 77, 72, 74, 76, 65, 63, 66, 58, 61, 60, 62, 64, 70, 69, 71];
 
 pub(super) fn canonical_model_preprocess(
     parameters: &[f64],
@@ -15,7 +16,7 @@ pub(super) fn canonical_model_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
-) -> [f64; 45] {
+) -> [f64; 28] {
 		let A = 1.0359399871014713e-10f64;
 		let B = parameters[13];
 		let H = parameters[35];
@@ -27,26 +28,20 @@ pub(super) fn canonical_model_preprocess(
 		let S = parameters[3];
 		let V = parameters[4];
 		let X = 298.15f64;
-		let AC = parameters[27];
-		let AG = parameters[38];
-		let AH = 1e-6f64;
-		let AK = parameters[39];
-		let AP = parameters[40];
-		let AR = parameters[17];
-		let AV = parameters[8];
-		let BK = parameters[37];
-		let BN = parameters[1];
-		let BO = 0f64;
-		let BQ = parameters[9];
-		let BV = parameters[11];
-		let BZ = parameters[10];
-		let CD = parameters[12];
+		let AB = parameters[38];
+		let AC = 1e-6f64;
+		let AF = parameters[39];
+		let AK = parameters[40];
+		let AP = parameters[37];
+		let AR = parameters[1];
+		let AS = 0f64;
 	    let mut oU = 0.0;
-	    let mut oAI = false;
-	    let mut oAJ = false;
+	    let mut oAD = false;
+	    let mut oAE = false;
+	    let mut oAH = 0.0;
+	    let mut oAI = 0.0;
+	    let mut oAJ = 0.0;
 	    let mut oAM = 0.0;
-	    let mut oAN = 0.0;
-	    let mut oAO = 0.0;
 		let C = A / B;
 		let D = (C * parameters[14]).sqrt();
 		let E = D * parameters[25];
@@ -74,95 +69,145 @@ pub(super) fn canonical_model_preprocess(
 			Y
 		};
 		let AA = 1.16f64 - (((7.02e-4f64 * Z) * Z) / (Z + 1108f64));
-		let AB = parameters[5] + parameters[26];
-		let AD = parameters[6] + AC;
-		let AE = AD * AB;
-		let AF = 1f64 / (AE.sqrt());
 		if O {
-			let AI = AG != AH;
-			oAI = AI;
-			if AI {
-				let AM = AF * (AG - AH);
-				oAM = AM;
+			let AD = AB != AC;
+			oAD = AD;
+			if AD {
+				let AH = AB - AC;
+				oAH = AH;
 			}
 		} else {
-			let AJ = AG != AH;
-			oAJ = AJ;
-			if AJ {
-				let AN = AF * (AH - AG);
-				oAN = AN;
+			let AE = AB != AC;
+			oAE = AE;
+			if AE {
+				let AI = AC - AB;
+				oAI = AI;
 			}
 		}
-		let AL = AK != AH;
-		if AL {
-			let AO = 1f64 + ((AK - AH) * AF);
-			oAO = AO;
+		let AG = AF != AC;
+		if AG {
+			let AJ = AF - AC;
+			oAJ = AJ;
 		}
-		let AQ = AP != AH;
-		let AT = if AQ {
-			let AS = AR + ((AP - AH) * AF);
+		let AL = AK != AC;
+		if AL {
+			let AM = AK - AC;
+			oAM = AM;
+		}
+		let AN = M == N;
+		let AO = J == N;
+		let AQ = parameters[36] * AP;
+		let AT = if AR != 0.0 {
 			AS
 		} else {
-			AR
-		};
-		let AU = M == N;
-		let AZ = if AU {
 			N
+		};
+		let AU = AP > N;
+		let AV = AA / (Z * 8.617333262e-5f64);
+    [D, E, F, G, I, K, M, O as u8 as f64, R, T as u8 as f64, oU, W as u8 as f64, Z, AA, oAD as u8 as f64, oAH, oAE as u8 as f64, oAI, AG as u8 as f64, oAJ, AL as u8 as f64, oAM, AN as u8 as f64, AO as u8 as f64, AQ, AU as u8 as f64, AV, AT]
+}
+
+pub(super) fn canonical_instance_preprocess(
+    parameters: &[f64],
+    parameter_given: &[bool],
+    multiplicity: f64,
+    staged: &[f64],
+    temperature: f64,
+    thermal_voltage: f64,
+) -> [f64; 26] {
+		let A = staged[78] != 0.0;
+		let C = parameters[27];
+		let G = staged[82] != 0.0;
+		let H = staged[83] != 0.0;
+		let I = staged[84] != 0.0;
+		let M = staged[85] != 0.0;
+		let N = parameters[17];
+		let Q = staged[86] != 0.0;
+		let R = 0f64;
+		let S = parameters[8];
+		let AI = parameters[9];
+		let AJ = staged[53] != 0.0;
+		let AL = parameters[37];
+		let AO = parameters[11];
+		let AS = parameters[10];
+		let AW = parameters[12];
+	    let mut oJ = 0.0;
+	    let mut oK = 0.0;
+	    let mut oL = 0.0;
+		let B = parameters[5] + parameters[26];
+		let D = parameters[6] + C;
+		let E = D * B;
+		let F = 1f64 / (E.sqrt());
+		if A {
+			if G {
+				let J = F * staged[4];
+				oJ = J;
+			}
 		} else {
-			let AW = 0.28f64 * ((AB / (parameters[31] * AV)) - 0.1f64);
-			let AX = 1f64 / (1f64 + (P * (AW + (((AW * AW) + 0.001936f64).sqrt()))));
-			let AY = (M * AX) * AX;
+			if H {
+				let K = F * staged[6];
+				oK = K;
+			}
+		}
+		if I {
+			let L = 1f64 + (staged[8] * F);
+			oL = L;
+		}
+		let P = if M {
+			let O = N + (staged[11] * F);
+			O
+		} else {
+			N
+		};
+		let W = if Q {
+			R
+		} else {
+			let T = 0.28f64 * ((B / (parameters[31] * S)) - 0.1f64);
+			let U = 1f64 / (1f64 + (0.5f64 * (T + (((T * T) + 0.001936f64).sqrt()))));
+			let V = (staged[13] * U) * U;
+			V
+		};
+		let X = (staged[20] * parameters[7]) / D;
+		let Y = (staged[21] * S) / B;
+		let Z = (0.25f64 * P) * P;
+		let AA = 0.5f64 * P;
+		let AB = 0.1f64 * B;
+		let AC = AB * AB;
+		let AD = -0.5f64 * P;
+		let AE = -Y;
+		let AF = -P;
+		let AG = staged[46] / (D - C);
+		let AH = E * parameters[13];
+		let AK = (AI == R) && AJ;
+		let AN = if AK {
+			let AM = (2f64 * AL) * D;
+			AM
+		} else {
+			AI
+		};
+		let AP = (AO == R) && AJ;
+		let AR = if AP {
+			let AQ = (4f64 * AL) + D;
+			AQ
+		} else {
+			AO
+		};
+		let AT = (AS == R) && AJ;
+		let AV = if AT {
+			let AU = (2f64 * AL) * D;
+			AU
+		} else {
+			AS
+		};
+		let AX = (AW == R) && AJ;
+		let AZ = if AX {
+			let AY = (4f64 * AL) + D;
 			AY
-		};
-		let BA = (F * parameters[7]) / AD;
-		let BB = (G * AV) / AB;
-		let BC = (0.25f64 * AT) * AT;
-		let BD = P * AT;
-		let BE = 0.1f64 * AB;
-		let BF = BE * BE;
-		let BG = -0.5f64 * AT;
-		let BH = J == N;
-		let BI = -BB;
-		let BJ = -AT;
-		let BL = (parameters[36] * BK) / (AD - AC);
-		let BM = AE * B;
-		let BP = if BN != 0.0 {
-			BO
 		} else {
-			N
+			AW
 		};
-		let BR = BK > N;
-		let BS = (BQ == N) && BR;
-		let BU = if BS {
-			let BT = (2f64 * BK) * AD;
-			BT
-		} else {
-			BQ
-		};
-		let BW = (BV == N) && BR;
-		let BY = if BW {
-			let BX = (4f64 * BK) + AD;
-			BX
-		} else {
-			BV
-		};
-		let CA = (BZ == N) && BR;
-		let CC = if CA {
-			let CB = (2f64 * BK) * AD;
-			CB
-		} else {
-			BZ
-		};
-		let CE = (CD == N) && BR;
-		let CG = if CE {
-			let CF = (4f64 * BK) + AD;
-			CF
-		} else {
-			CD
-		};
-		let CH = AA / (Z * 8.617333262e-5f64);
-		let CI = -AD;
-    [D, E, I, K, O as u8 as f64, R, T as u8 as f64, oU, W as u8 as f64, Z, AA, AB, AD, oAI as u8 as f64, oAM, oAJ as u8 as f64, oAN, AL as u8 as f64, oAO, AQ as u8 as f64, AT, AU as u8 as f64, AZ, BA, BB, BC, BD, BF, BG, BH as u8 as f64, BI, BJ, BL, BM, BS as u8 as f64, BW as u8 as f64, CA as u8 as f64, CE as u8 as f64, CH, CC, CG, CI, BU, BY, BP]
+		let BA = -D;
+    [B, D, oJ, oK, oL, P, W, X, Y, Z, AA, AC, AD, AE, AF, AG, AH, AK as u8 as f64, AP as u8 as f64, AT as u8 as f64, AX as u8 as f64, AV, AZ, BA, AN, AR]
 }
 
 pub(super) fn canonical_temperature_preprocess(
@@ -173,17 +218,17 @@ pub(super) fn canonical_temperature_preprocess(
     temperature: f64,
     thermal_voltage: f64,
 ) -> [f64; 39] {
-		let A = staged[69] != 0.0;
-		let B = staged[70] != 0.0;
-		let D = staged[71];
+		let A = staged[78] != 0.0;
+		let B = staged[79] != 0.0;
+		let D = staged[80];
 		let H = 1f64;
 		let P = staged[0];
 		let AB = staged[2];
-		let AH = staged[73] != 0.0;
-		let AI = staged[74] != 0.0;
-		let AK = staged[75] != 0.0;
-		let AS = staged[7];
-		let AX = staged[78] != 0.0;
+		let AH = staged[82] != 0.0;
+		let AI = staged[83] != 0.0;
+		let AK = staged[84] != 0.0;
+		let AS = staged[10];
+		let AX = staged[87] != 0.0;
 		let BB = parameters[43];
 	    let mut oAZ = 0.0;
 		let E = if B {
@@ -220,7 +265,7 @@ pub(super) fn canonical_temperature_preprocess(
 		let AJ;
 		if A {
 			let AM = if AH {
-				let AL = staged[4] + S;
+				let AL = staged[5] + S;
 				AL
 			} else {
 				S
@@ -228,7 +273,7 @@ pub(super) fn canonical_temperature_preprocess(
 			AJ = AM;
 		} else {
 			let AP = if AI {
-				let AN = staged[5] - S;
+				let AN = staged[7] - S;
 				AN
 			} else {
 				let AO = -S;
@@ -237,22 +282,22 @@ pub(super) fn canonical_temperature_preprocess(
 			AJ = AP;
 		}
 		let AR = if AK {
-			let AQ = T * staged[6];
+			let AQ = T * staged[9];
 			AQ
 		} else {
 			T
 		};
 		let AT = AS * AR;
-		let AU = staged[8] * Z;
+		let AU = staged[12] * Z;
 		let AV = 2f64 * N;
 		let AW = F / AF;
 		if !AX {
-			let AZ = AT * (H + (staged[33] * AU));
+			let AZ = AT * (H + (staged[40] * AU));
 			oAZ = AZ;
 		}
 		let AY = (K + K) * parameters[25];
 		let BA = AE > 0f64;
-		let BC = (((staged[45] - (O / F)) + (parameters[65] * W)) / BB).exp();
+		let BC = (((staged[54] - (O / F)) + (parameters[65] * W)) / BB).exp();
 		let BD = parameters[44] * BC;
 		let BE = parameters[45] * BC;
 		let BF = parameters[46] * BC;
@@ -266,17 +311,17 @@ pub(super) fn canonical_temperature_preprocess(
 		let BN = parameters[59] * (H + (BM * parameters[72]));
 		let BO = parameters[60] * (H + (BM * parameters[73]));
 		let BP = parameters[61] * (H + (BM * parameters[74]));
-		let BQ = BD * staged[46];
-		let BR = BE * staged[47];
+		let BQ = BD * staged[55];
+		let BR = BE * staged[56];
 		let BS = BF * AS;
 		let BT = (BQ + BR) + BS;
 		let BU = F * BB;
-		let BV = staged[50] * BF;
+		let BV = staged[59] * BF;
 		let BW = F * BP;
 		let BX = F * BO;
 		let BY = F * BN;
-		let BZ = BD * staged[58];
-		let CA = BE * staged[59];
+		let BZ = BD * staged[67];
+		let CA = BE * staged[68];
 		let CB = (BZ + CA) + BS;
     [F, G, I, K, M, N, R, Y, AA, AC, AD, AE, AF, AG, AT, AU, AJ, AV, AW, oAZ, AY, BA as u8 as f64, BG, BH, BI, BJ, BK, BL, BQ, BR, BT, BU, BV, BW, BX, BY, BZ, CA, CB]
 }
@@ -316,7 +361,7 @@ fn canonical_model_cache_intern(
 
 impl Instance {
     fn canonical_model_key(&self) -> Box<[u64]> {
-        let mut key = Vec::with_capacity(150);
+        let mut key = Vec::with_capacity(134);
         for index in 0..Self::PARAMETER_COUNT {
             if PARAMETER_MODEL_FLAGS[index] {
                 key.push(self.params.values[index].to_bits());
@@ -352,6 +397,22 @@ impl Instance {
         self.canonical_install_model_values(values);
     }
 
+    fn canonical_instance_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
+        if self.canonical_instance_valid {
+            return;
+        }
+        let produced = canonical_instance_preprocess(
+            &self.params.values,
+            &self.param_given[..],
+            self.multiplicity,
+            &self.canonical_staged[..],
+            ctx.temperature(),
+            ctx.thermal_voltage(),
+        );
+        install_generated_stage_values(&mut self.canonical_staged[..], &produced, &CANONICAL_INSTANCE_STAGE_SLOTS);
+        self.canonical_instance_valid = true;
+    }
+
     fn canonical_temperature_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
         let temperature = ctx.temperature();
         let thermal_voltage = ctx.thermal_voltage();
@@ -385,6 +446,7 @@ impl Instance {
 
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         self.canonical_model_stage(ctx);
+        self.canonical_instance_stage(ctx);
         self.canonical_temperature_stage(ctx);
         self.canonical_timestep_stage(ctx);
         let parameters = &self.params.values;
@@ -423,83 +485,83 @@ impl Instance {
 			let K = 0f64;
 			let M = -1f64;
 			let N = 1f64;
-			let T = staged[11];
+			let T = staged[16];
 			let X = 2f64;
 			let Y = 1f64;
 			let Z = 0.5f64;
-			let AE = staged[14];
-			let AR = staged[8];
-			let AS = staged[17];
-			let AU = staged[18];
+			let AE = staged[19];
+			let AR = staged[12];
+			let AS = staged[24];
+			let AU = staged[25];
 			let AV = -1f64;
-			let AX = staged[19];
+			let AX = staged[26];
 			let BG = 0.25f64;
-			let BP = staged[20];
+			let BP = staged[27];
 			let BV = 2f64;
-			let CN = staged[21];
-			let CQ = staged[22];
+			let CN = staged[28];
+			let CQ = staged[29];
 			let CX = parameters[25];
 			let ET = 1e-64f64;
-			let FP = staged[24];
-			let FR = staged[25];
-			let FS = staged[26];
-			let IM = staged[28];
-			let IT = staged[29];
-			let IW = staged[78] != 0.0;
-			let JU = staged[30];
+			let FP = staged[31];
+			let FR = staged[32];
+			let FS = staged[33];
+			let IM = staged[35];
+			let IT = staged[36];
+			let IW = staged[87] != 0.0;
+			let JU = staged[37];
 			let JZ = parameters[21];
 			let KF = 0f64;
 			let KG = L4([0f64; 4]);
-			let KH = staged[32];
-			let LL = staged[36];
+			let KH = staged[39];
+			let LL = staged[43];
 			let MI = 4f64;
-			let MU = staged[37];
-			let QL = staged[33];
-			let RY = staged[39];
-			let SE = staged[40];
-			let SY = staged[44];
+			let MU = staged[44];
+			let QL = staged[40];
+			let RY = staged[47];
+			let SE = staged[48];
+			let SY = staged[52];
 			let TD = 0.266666666f64;
 			let UB = ddt_scale();
 			let UG = -35f64;
-			let UK = staged[43];
-			let WI = staged[48];
-			let WJ = staged[49];
+			let UK = staged[51];
+			let WI = staged[57];
+			let WJ = staged[58];
 			let WN = -40f64;
 			let WO = L2([0f64; 2]);
 			let WR = parameters[58];
 			let WV = parameters[57];
-			let XC = staged[51];
+			let XC = staged[60];
 			let XD = parameters[64];
 			let XF = 1e-3f64;
-			let XJ = staged[52];
-			let XK = staged[53];
+			let XJ = staged[61];
+			let XK = staged[62];
 			let XL = parameters[63];
-			let XQ = staged[54];
-			let XS = staged[55];
+			let XQ = staged[63];
+			let XS = staged[64];
 			let XT = parameters[62];
-			let XY = staged[56];
-			let YA = staged[57];
+			let XY = staged[65];
+			let YA = staged[66];
 			let YC = parameters[56];
 			let YE = parameters[7];
 			let YL = -40f64;
 			let YM = L2([0f64; 2]);
-			let ZG = staged[60];
-			let ZM = staged[61];
-			let ZO = staged[62];
-			let ZU = staged[63];
-			let ZV = staged[46];
+			let ZG = staged[69];
+			let ZM = staged[70];
+			let ZO = staged[71];
+			let ZU = staged[72];
+			let ZV = staged[55];
 			let ZX = parameters[47];
-			let ZZ = staged[64];
-			let AAE = staged[65];
-			let AAF = staged[47];
+			let ZZ = staged[73];
+			let AAE = staged[74];
+			let AAF = staged[56];
 			let AAH = parameters[48];
-			let AAJ = staged[66];
-			let AAO = staged[67];
-			let AAP = staged[7];
+			let AAJ = staged[75];
+			let AAO = staged[76];
+			let AAP = staged[10];
 			let AAR = parameters[49];
-			let AAT = staged[68];
-			let ABV = staged[58];
-			let ACC = staged[59];
+			let AAT = staged[77];
+			let ABV = staged[67];
+			let ACC = staged[68];
 			let C = B * (node_potentials[1] - A);
 			let D = (L2([1f64, 0.0]) - L2([0.0, 1f64])) * B;
 			let E = B * (node_potentials[2] - A);
@@ -527,9 +589,9 @@ impl Instance {
 				R = J;
 				S = I;
 			}
-			let U = (((C - staged[9]) - staged[10]) + T) + staged[12];
+			let U = (((C - staged[14]) - staged[15]) + T) + staged[17];
 			let V = D * U;
-			let W = ((U * U) + staged[13]).sqrt();
+			let W = ((U * U) + staged[18]).sqrt();
 			let AA = Z * (U + W);
 			let AB = (D + ((V + V) * (Y / (X * W)))) * Z;
 			let AC = T + O;
@@ -544,9 +606,9 @@ impl Instance {
 			let AM = (AK + AK) * (Y / (X * AL));
 			let AN = (Z * (AJ + AL)).sqrt();
 			let AO = ((S + AM) * Z) * (Y / (X * AN));
-			let AP = (AA + staged[15]).sqrt();
+			let AP = (AA + staged[22]).sqrt();
 			let AQ = AA - T;
-			let AT = (((AQ - (AR * (AP - staged[16]))) + T) + AS).sqrt();
+			let AT = (((AQ - (AR * (AP - staged[23]))) + T) + AS).sqrt();
 			let AW = ((AI + AO) * AU) * AV;
 			let AY = ((AB - ((AB * (Y / (X * AP))) * AR)) * (Y / (X * AT))) * AX;
 			let AZ = (AR - (AU * (AH + AN))) + (AX * AT);
@@ -653,7 +715,7 @@ impl Instance {
 			let DL = (BG + ((CL - (0.75f64 * (CJ.ln()))) * CN)).sqrt();
 			let DM = ((CM - ((CK * (Y / CJ)) * 0.75f64)) * CN) * (Y / (X * DL));
 			let DN = DM * CQ;
-			let DO = (CQ * (DL - Z)) + staged[23];
+			let DO = (CQ * (DL - Z)) + staged[30];
 			let DP = CV - DO;
 			let DQ = DE - DN;
 			let DR = DN * DO;
@@ -730,7 +792,7 @@ impl Instance {
 			let FT = (staged[3] - (FR * (FQ.ln()))) + ((CV + DJ) * FS);
 			let FU = ((((FO / FP) * (Y / FQ)) * FR) * AV) + ((DE + DK) * FS);
 			let FV = FU * FT;
-			let FW = ((FT * FT) + staged[27]).sqrt();
+			let FW = ((FT * FT) + staged[34]).sqrt();
 			let FX = (FV + FV) * (Y / (X * FW));
 			let FY = Z * (FT + FW);
 			let FZ = (FU + FX) * Z;
@@ -846,7 +908,7 @@ impl Instance {
 				let KA = JY * JZ;
 				let KB = N + (JZ * JX);
 				let KC = FY * KB;
-				let KD = staged[31] / KC;
+				let KD = staged[38] / KC;
 				let KE = ((((FZ * KB) + (KA * FY)) * KD) * AV) / KC;
 				KL = KD;
 				KM = JX;
@@ -876,7 +938,7 @@ impl Instance {
 					QR = QP;
 				}
 				let QS = FY * QQ;
-				let QT = staged[34] / QS;
+				let QT = staged[41] / QS;
 				let QU = ((((FZ * QQ) + (QR * FY)) * QT) * AV) / QS;
 				KL = QT;
 				KM = K;
@@ -889,7 +951,7 @@ impl Instance {
 				KT = KG;
 				KU = QR;
 			}
-			let KV = IA + staged[35];
+			let KV = IA + staged[42];
 			let KW = KV.sqrt();
 			let KX = BN * (Y / (X * KW));
 			let KY = BV * KW;
@@ -1065,7 +1127,7 @@ impl Instance {
 			let RO = MI * LB;
 			let RP = RO * KW;
 			let RQ = RP * KV;
-			let RR = staged[38] / RQ;
+			let RR = staged[45] / RQ;
 			let RS = (((((((LA * MI) * KW) + (KX * RO)) * KV) + (BN * RP)) * RR) * AV) / RQ;
 			let RT = (RR * LX) + RK;
 			let RU = ((RT * LC) + MD) - OG;
@@ -1079,12 +1141,12 @@ impl Instance {
 			let SD = (LI * SB) + ((((SA * SB) * AV) / RZ) * LH);
 			let SF = CT - (SE * CR);
 			let SG = L4([CU[0], 0.0, CU[1], CU[2]]) - (CS * SE);
-			let SH = (SF > K) && (staged[41] != 0.0);
+			let SH = (SF > K) && (staged[49] != 0.0);
 			let SN;
 			let SO;
 			if SH {
 				let SI = N / SF;
-				let SJ = -staged[42];
+				let SJ = -staged[50];
 				let SK = SJ * SI;
 				let SL = (((SG * SI) * AV) / SF) * SJ;
 				let SM = SK < -35f64;
@@ -1588,7 +1650,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(2),
-            multiplicity * (staged[83]),
+            multiplicity * (staged[92]),
             [],
             [],
             [],
@@ -1663,7 +1725,7 @@ impl Instance {
         self.canonical_reactive[25] = AFQ;
         self.canonical_reactive[26] = AFR;
         self.canonical_reactive[27] = AFS;
-        self.canonical_reactive[28] = staged[83];
+        self.canonical_reactive[28] = staged[92];
         self.canonical_reactive[29] = YF;
         self.canonical_reactive[30] = ZR;
         self.canonical_reactive[31] = ABS;

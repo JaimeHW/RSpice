@@ -5,7 +5,7 @@ use super::state::Instance;
 use rspice_veriloga_runtime::GeneratedEvalContext;
 pub use rspice_veriloga_runtime::{GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseKind, GeneratedNoiseVisitor};
 
-use super::stamp::{canonical_model_preprocess, CANONICAL_MODEL_STAGE_SLOTS, canonical_temperature_preprocess, CANONICAL_TEMPERATURE_STAGE_SLOTS};
+use super::stamp::{canonical_model_preprocess, CANONICAL_MODEL_STAGE_SLOTS, canonical_instance_preprocess, CANONICAL_INSTANCE_STAGE_SLOTS, canonical_temperature_preprocess, CANONICAL_TEMPERATURE_STAGE_SLOTS};
 use rspice_veriloga_runtime::install_generated_stage_values;
 pub static NOISE_SOURCES: [GeneratedNoiseDescriptor; 2] = [
     GeneratedNoiseDescriptor { mechanism: "WHITE_D_S_THERMAL", label: Some("thermal"), kind: GeneratedNoiseKind::White, equation: 8, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(0), name: "d", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(2), name: "s", is_internal: false }, table_len: 0, table_log_interp: false },
@@ -17,7 +17,7 @@ impl Instance {
         if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
             return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });
         }
-        let mut prepared = [0.0; 84];
+        let mut prepared = [0.0; 93];
         let produced = canonical_model_preprocess(
             &self.params.values,
             &self.param_given[..],
@@ -27,6 +27,15 @@ impl Instance {
             ctx.thermal_voltage(),
         );
         install_generated_stage_values(&mut prepared[..], &produced, &CANONICAL_MODEL_STAGE_SLOTS);
+        let produced = canonical_instance_preprocess(
+            &self.params.values,
+            &self.param_given[..],
+            self.multiplicity,
+            &prepared[..],
+            ctx.temperature(),
+            ctx.thermal_voltage(),
+        );
+        install_generated_stage_values(&mut prepared[..], &produced, &CANONICAL_INSTANCE_STAGE_SLOTS);
         let produced = canonical_temperature_preprocess(
             &self.params.values,
             &self.param_given[..],
@@ -41,32 +50,32 @@ impl Instance {
         let staged = &prepared[..];
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3])];
 			let A = 0f64;
-			let B = staged[25];
-			let C = staged[33];
+			let B = staged[32];
+			let C = staged[40];
 			let D = parameters[0];
 			let E = 0.5f64;
-			let F = staged[32];
-			let G = staged[70] != 0.0;
-			let I = staged[71];
-			let K = staged[28];
-			let L = staged[17];
+			let F = staged[39];
+			let G = staged[79] != 0.0;
+			let I = staged[80];
+			let K = staged[35];
+			let L = staged[24];
 			let M = 1f64;
-			let N = staged[20];
-			let O = staged[30];
-			let P = staged[14];
-			let Q = staged[11];
-			let R = staged[26];
-			let S = staged[24];
+			let N = staged[27];
+			let O = staged[37];
+			let P = staged[19];
+			let Q = staged[16];
+			let R = staged[33];
+			let S = staged[31];
 			let T = staged[3];
-			let U = staged[22];
-			let V = staged[8];
+			let U = staged[29];
+			let V = staged[12];
 			let W = node_potentials[3];
 			let AC = 2f64;
-			let AJ = staged[19];
+			let AJ = staged[26];
 			let AK = 0.25f64;
 			let BH = 1e-64f64;
-			let BO = staged[21];
-			let ED = staged[78] != 0.0;
+			let BO = staged[28];
+			let ED = staged[87] != 0.0;
 			let EG = parameters[21];
 			let FN = 0f64;
 			let FR = parameters[1];
@@ -90,16 +99,16 @@ impl Instance {
 				AF = Y;
 				AH = Z;
 			}
-			let AB = (((X - staged[9]) - staged[10]) + Q) + staged[12];
-			let AD = ((AB * AB) + staged[13]).sqrt();
+			let AB = (((X - staged[14]) - staged[15]) + Q) + staged[17];
+			let AD = ((AB * AB) + staged[18]).sqrt();
 			let AE = E * (AB + AD);
 			let AG = Q + AF;
 			let AI = Q + AH;
-			let AL = (AE + staged[15]).sqrt();
+			let AL = (AE + staged[22]).sqrt();
 			let AM = AE - Q;
-			let AN = AL - staged[16];
+			let AN = AL - staged[23];
 			let AO = (((AM - (V * AN)) + Q) + L).sqrt();
-			let AP = (V - (staged[18] * (((E * (AG + (((AG * AG) + P).sqrt()))).sqrt()) + ((E * (AI + (((AI * AI) + P).sqrt()))).sqrt())))) + (AJ * AO);
+			let AP = (V - (staged[25] * (((E * (AG + (((AG * AG) + P).sqrt()))).sqrt()) + ((E * (AI + (((AI * AI) + P).sqrt()))).sqrt())))) + (AJ * AO);
 			let AQ = ((AP * AP) + L).sqrt();
 			let AR = E * (AP + AQ);
 			let AS = (AE + ((AK * AR) * AR)).sqrt();
@@ -146,7 +155,7 @@ impl Instance {
 			let BV = ((BU * BU) + BS).sqrt();
 			let BW = BT - BV;
 			let BX = (AK + ((BN - (0.75f64 * (BM.ln()))) * BO)).sqrt();
-			let BY = (U * (BX - E)) + staged[23];
+			let BY = (U * (BX - E)) + staged[30];
 			let BZ = BR - BY;
 			let CA = ((BY * BY) + BS).sqrt();
 			let CB = ((BZ * BZ) + BS).sqrt();
@@ -183,7 +192,7 @@ impl Instance {
 			}
 			let CT = CQ * (M + CQ);
 			let CU = (T - (B * ((M + ((BR - BW) / S)).ln()))) + ((BR + BW) * R);
-			let CV = ((CU * CU) + staged[27]).sqrt();
+			let CV = ((CU * CU) + staged[34]).sqrt();
 			let CW = E * (CU + CV);
 			let CX = (AT - AH) * N;
 			let CY = CX > -0.35f64;
@@ -230,7 +239,7 @@ impl Instance {
 			let DZ = M + DX;
 			let EA = (-DZ) * K;
 			let EB = EA * (((1.33333332f64 * ((DP + (DR * DQ)) + DO)) / DS) - M);
-			let EC = (staged[29] * DW) - (DY * EB);
+			let EC = (staged[36] * DW) - (DY * EB);
 			let ET;
 			let FI;
 			let FJ;
@@ -240,7 +249,7 @@ impl Instance {
 				let EE = ((AT * AT) + O).sqrt();
 				let EF = E * (AT + EE);
 				let EH = M + (EG * EF);
-				let EI = staged[31] / (CW * EH);
+				let EI = staged[38] / (CW * EH);
 				ET = EI;
 				FI = EF;
 				FJ = EH;
@@ -256,14 +265,14 @@ impl Instance {
 					let EM = M - (C * EJ);
 					EM
 				};
-				let EO = staged[34] / (CW * EN);
+				let EO = staged[41] / (CW * EN);
 				ET = EO;
 				FI = A;
 				FJ = A;
 				FK = A;
 				FM = EN;
 			}
-			let EP = DU + staged[35];
+			let EP = DU + staged[42];
 			let EQ = EP.sqrt();
 			let ER = M + (V / (AC * EQ));
 			let ES = BM - CT;
@@ -273,7 +282,7 @@ impl Instance {
 			let EX = ((-(DU / AS)) * ((((AJ * (AR / (AQ + AQ))) * AN) / (AL * AO)) * EW)) + ((M - (AR / (AS + AS))) * EW);
 			let EY = (BJ * N) * EX;
 			let EZ = (K / ((4f64 * BP) * BN)) * EY;
-			let FA = staged[37] * ((EY * (K / (BN + BN))) - EZ);
+			let FA = staged[44] * ((EY * (K / (BN + BN))) - EZ);
 			let FB = (((BQ * EZ) + FA) * (M / BT)) - (((BU * (-EZ)) + FA) * (M / BV));
 			let FC = ((K * (BN - 1.5f64)) / ((4f64 * BX) * BM)) * EY;
 			let FD = (CQ * N) * ((EX - (((BY * FC) + FA) * (M / CA))) + (((BZ * (-FC)) + FA) * (M / CB)));
@@ -288,7 +297,7 @@ impl Instance {
 				let FO = (-FE) + ((C / FM) * (FH + (F * FG)));
 				FO
 			};
-			let FQ = EU * ((((((staged[38] / (((4f64 * ER) * EQ) * EP)) * EX) + FP) * ES) + EY) - FD);
+			let FQ = EU * ((((((staged[45] / (((4f64 * ER) * EQ) * EP)) * EX) + FP) * ES) + EY) - FD);
 			let FV;
 			let FW;
 			let FX;
@@ -296,7 +305,7 @@ impl Instance {
 			let FZ;
 			if FR != 0.0 {
 				let FS = (5.5224904e-23f64 * J) * EV;
-				let FT = ((parameters[42] * FQ) * FQ) / (((staged[7] * parameters[8]) * T) * parameters[13]);
+				let FT = ((parameters[42] * FQ) * FQ) / (((staged[10] * parameters[8]) * T) * parameters[13]);
 				FV = M;
 				FW = FS;
 				FX = M;

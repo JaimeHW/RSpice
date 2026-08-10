@@ -171,13 +171,13 @@ const PARAMETER_LOOKUP_INDICES: [u16; 75] = [
 ];
 
 pub(crate) const PARAMETER_MODEL_FLAGS: [bool; 75] = [
-	true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+	true, true, true, true, true, false, false, false, false, false, false, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
 	true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
 	true, true, true, true, true, true, true, true, true, true, true,
 ];
 
 const PARAMETER_DUAL_SCOPE_FLAGS: [bool; 75] = [
-	false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false,
+	false, false, false, false, false, true, true, true, true, true, true, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false,
 	false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false,
 	false, false, false, false, false, false, false, false, false, false, false,
 ];
@@ -326,7 +326,7 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 	}
 }
 
-pub(crate) type CanonicalModelValues = [f64; 45];
+pub(crate) type CanonicalModelValues = [f64; 28];
 pub struct Instance {
 	pub nodes: [usize; 4],
 	pub branches: [usize; 0],
@@ -341,7 +341,7 @@ pub struct Instance {
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
 	pub(crate) canonical_reactive: Box<[f64; 37]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
-	pub(crate) canonical_staged: Box<[f64; 84]>,
+	pub(crate) canonical_staged: Box<[f64; 93]>,
 	pub(crate) canonical_instance_valid: bool,
 	pub(crate) canonical_temperature_valid: bool,
 	pub(crate) canonical_temperature: f64,
@@ -383,14 +383,14 @@ impl Instance {
 		P::model("Trise", Some(0.0)),
 		P::model("TEMP", Some(1e21)).minimum(B::inclusive(273.15)),
 		P::model("TNOM", Some(1e21)),
-		P::model("L", Some(1e-5)).minimum(B::inclusive(0.0)),
-		P::model("W", Some(1e-5)).minimum(B::inclusive(0.0)),
-		P::model("M", Some(1.0)).minimum(B::inclusive(0.0)),
-		P::model("NS", Some(1.0)).minimum(B::inclusive(0.0)),
-		P::model("AS", Some(0.0)).minimum(B::inclusive(0.0)),
-		P::model("AD", Some(0.0)).minimum(B::inclusive(0.0)),
-		P::model("PS", Some(0.0)).minimum(B::inclusive(0.0)),
-		P::model("PD", Some(0.0)).minimum(B::inclusive(0.0)),
+		P::dual("L", Some(1e-5)).minimum(B::inclusive(0.0)),
+		P::dual("W", Some(1e-5)).minimum(B::inclusive(0.0)),
+		P::dual("M", Some(1.0)).minimum(B::inclusive(0.0)),
+		P::dual("NS", Some(1.0)).minimum(B::inclusive(0.0)),
+		P::dual("AS", Some(0.0)).minimum(B::inclusive(0.0)),
+		P::dual("AD", Some(0.0)).minimum(B::inclusive(0.0)),
+		P::dual("PS", Some(0.0)).minimum(B::inclusive(0.0)),
+		P::dual("PD", Some(0.0)).minimum(B::inclusive(0.0)),
 		P::model("COX", Some(0.002)).minimum(B::inclusive(0.0)),
 		P::model("XJ", Some(3e-7)).minimum(B::inclusive(0.0)),
 		P::model("VTO", Some(0.5)),
@@ -464,7 +464,7 @@ impl Instance {
 	pub const DDT_STATE_COUNT: usize = 5;
 	pub const IDT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "8fae79b287ab08a60fb62e2df5a0ad21c416bebacef5f41aa2cee7a65716e8d3";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "6767e4d60588be739ef57a27363adedafe6a5ddee386d71a335ece382dc53837";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 	pub const DDT_EPSILON: f64 = 1.0e-20;
 

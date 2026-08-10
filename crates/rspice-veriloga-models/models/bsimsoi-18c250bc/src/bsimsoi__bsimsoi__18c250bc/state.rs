@@ -2706,7 +2706,7 @@ impl Instance {
 	pub const DDT_STATE_COUNT: usize = 22;
 	pub const IDT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "6cf2a3e727e133adcc7e71e4e1ab6fdd4cd7cf1d887746c4eb202c740d1db875";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "ebbb9699bd6b18e349ff215b992e4f154f09b837e3e0b0f9de55d019c98867de";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 	pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -2950,6 +2950,30 @@ impl Instance {
 	}
 
 	fn finalize_parameter_vector(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
+		Self::finalize_parameter_vector_chunk_0(params, param_given, model_storage)?;
+		Self::finalize_parameter_vector_chunk_1(params, param_given, model_storage)?;
+		Self::finalize_parameter_vector_chunk_2(params, param_given, model_storage)?;
+		Self::finalize_parameter_vector_chunk_3(params, param_given, model_storage)?;
+		Self::finalize_parameter_vector_chunk_4(params, param_given, model_storage)?;
+		Self::finalize_parameter_vector_chunk_5(params, param_given, model_storage)?;
+		Self::finalize_parameter_vector_chunk_6(params, param_given, model_storage)?;
+		Self::finalize_parameter_vector_chunk_7(params, param_given, model_storage)?;
+		Self::finalize_parameter_vector_chunk_8(params, param_given, model_storage)?;
+		Self::finalize_parameter_vector_chunk_9(params, param_given, model_storage)?;
+		Self::finalize_parameter_vector_chunk_10(params, param_given, model_storage)?;
+		Self::finalize_parameter_vector_chunk_11(params, param_given, model_storage)?;
+		Self::finalize_parameter_vector_chunk_12(params, param_given, model_storage)?;
+		Self::finalize_parameter_vector_chunk_13(params, param_given, model_storage)?;
+		Self::finalize_parameter_vector_chunk_14(params, param_given, model_storage)?;
+		Self::finalize_parameter_vector_chunk_15(params, param_given, model_storage)?;
+		Self::finalize_parameter_vector_chunk_16(params, param_given, model_storage)?;
+		Self::finalize_parameter_vector_chunk_17(params, param_given, model_storage)?;
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_0(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[28] || PARAMETER_DUAL_SCOPE_FLAGS[28] } else { !PARAMETER_MODEL_FLAGS[28] }) && !param_given[28] {
 			let value = {
 				params[26]
@@ -3006,6 +3030,12 @@ impl Instance {
 			validate_parameter_scalar_metadata(108, value)?;
 			params.values[108] = value;
 		}
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_1(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[114] || PARAMETER_DUAL_SCOPE_FLAGS[114] } else { !PARAMETER_MODEL_FLAGS[114] }) && !param_given[114] {
 			let value = {
 				if (params[62] == 3.0) { (-0.0465) } else { (-4.65e-11) }
@@ -3062,6 +3092,12 @@ impl Instance {
 			validate_parameter_scalar_metadata(157, value)?;
 			params.values[157] = value;
 		}
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_2(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[165] || PARAMETER_DUAL_SCOPE_FLAGS[165] } else { !PARAMETER_MODEL_FLAGS[165] }) && !param_given[165] {
 			let value = {
 				params[158]
@@ -3118,6 +3154,12 @@ impl Instance {
 			validate_parameter_scalar_metadata(173, value)?;
 			params.values[173] = value;
 		}
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_3(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[175] || PARAMETER_DUAL_SCOPE_FLAGS[175] } else { !PARAMETER_MODEL_FLAGS[175] }) && !param_given[175] {
 			let value = {
 				params[174]
@@ -3174,6 +3216,12 @@ impl Instance {
 			validate_parameter_scalar_metadata(216, value)?;
 			params.values[216] = value;
 		}
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_4(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[217] || PARAMETER_DUAL_SCOPE_FLAGS[217] } else { !PARAMETER_MODEL_FLAGS[217] }) && !param_given[217] {
 			let value = {
 				params[187]
@@ -3230,6 +3278,12 @@ impl Instance {
 			validate_parameter_scalar_metadata(327, value)?;
 			params.values[327] = value;
 		}
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_5(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[329] || PARAMETER_DUAL_SCOPE_FLAGS[329] } else { !PARAMETER_MODEL_FLAGS[329] }) && !param_given[329] {
 			let value = {
 				params[328]
@@ -3286,6 +3340,12 @@ impl Instance {
 			validate_parameter_scalar_metadata(364, value)?;
 			params.values[364] = value;
 		}
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_6(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[365] || PARAMETER_DUAL_SCOPE_FLAGS[365] } else { !PARAMETER_MODEL_FLAGS[365] }) && !param_given[365] {
 			let value = {
 				params[363]
@@ -3342,6 +3402,12 @@ impl Instance {
 			validate_parameter_scalar_metadata(404, value)?;
 			params.values[404] = value;
 		}
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_7(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[405] || PARAMETER_DUAL_SCOPE_FLAGS[405] } else { !PARAMETER_MODEL_FLAGS[405] }) && !param_given[405] {
 			let value = {
 				if (params[37] == 1.0) { 0.075 } else { 0.03 }
@@ -3398,6 +3464,12 @@ impl Instance {
 			validate_parameter_scalar_metadata(541, value)?;
 			params.values[541] = value;
 		}
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_8(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[578] || PARAMETER_DUAL_SCOPE_FLAGS[578] } else { !PARAMETER_MODEL_FLAGS[578] }) && !param_given[578] {
 			let value = {
 				params[571]
@@ -3454,6 +3526,12 @@ impl Instance {
 			validate_parameter_scalar_metadata(586, value)?;
 			params.values[586] = value;
 		}
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_9(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[588] || PARAMETER_DUAL_SCOPE_FLAGS[588] } else { !PARAMETER_MODEL_FLAGS[588] }) && !param_given[588] {
 			let value = {
 				params[587]
@@ -3510,6 +3588,12 @@ impl Instance {
 			validate_parameter_scalar_metadata(602, value)?;
 			params.values[602] = value;
 		}
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_10(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[604] || PARAMETER_DUAL_SCOPE_FLAGS[604] } else { !PARAMETER_MODEL_FLAGS[604] }) && !param_given[604] {
 			let value = {
 				params[603]
@@ -3566,6 +3650,12 @@ impl Instance {
 			validate_parameter_scalar_metadata(731, value)?;
 			params.values[731] = value;
 		}
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_11(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[768] || PARAMETER_DUAL_SCOPE_FLAGS[768] } else { !PARAMETER_MODEL_FLAGS[768] }) && !param_given[768] {
 			let value = {
 				params[761]
@@ -3622,6 +3712,12 @@ impl Instance {
 			validate_parameter_scalar_metadata(776, value)?;
 			params.values[776] = value;
 		}
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_12(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[778] || PARAMETER_DUAL_SCOPE_FLAGS[778] } else { !PARAMETER_MODEL_FLAGS[778] }) && !param_given[778] {
 			let value = {
 				params[777]
@@ -3678,6 +3774,12 @@ impl Instance {
 			validate_parameter_scalar_metadata(792, value)?;
 			params.values[792] = value;
 		}
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_13(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[794] || PARAMETER_DUAL_SCOPE_FLAGS[794] } else { !PARAMETER_MODEL_FLAGS[794] }) && !param_given[794] {
 			let value = {
 				params[793]
@@ -3734,6 +3836,12 @@ impl Instance {
 			validate_parameter_scalar_metadata(921, value)?;
 			params.values[921] = value;
 		}
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_14(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[958] || PARAMETER_DUAL_SCOPE_FLAGS[958] } else { !PARAMETER_MODEL_FLAGS[958] }) && !param_given[958] {
 			let value = {
 				params[951]
@@ -3790,6 +3898,12 @@ impl Instance {
 			validate_parameter_scalar_metadata(966, value)?;
 			params.values[966] = value;
 		}
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_15(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[968] || PARAMETER_DUAL_SCOPE_FLAGS[968] } else { !PARAMETER_MODEL_FLAGS[968] }) && !param_given[968] {
 			let value = {
 				params[967]
@@ -3846,6 +3960,12 @@ impl Instance {
 			validate_parameter_scalar_metadata(982, value)?;
 			params.values[982] = value;
 		}
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_16(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[984] || PARAMETER_DUAL_SCOPE_FLAGS[984] } else { !PARAMETER_MODEL_FLAGS[984] }) && !param_given[984] {
 			let value = {
 				params[983]
@@ -3902,6 +4022,12 @@ impl Instance {
 			validate_parameter_scalar_metadata(1025, value)?;
 			params.values[1025] = value;
 		}
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_17(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[1026] || PARAMETER_DUAL_SCOPE_FLAGS[1026] } else { !PARAMETER_MODEL_FLAGS[1026] }) && !param_given[1026] {
 			let value = {
 				params[1025]

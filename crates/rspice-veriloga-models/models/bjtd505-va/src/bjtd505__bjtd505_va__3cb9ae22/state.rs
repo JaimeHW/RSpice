@@ -614,7 +614,7 @@ impl Instance {
 	pub const DDT_STATE_COUNT: usize = 9;
 	pub const IDT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "fd74293e9c8320d3fccfa6ee967bd95bee8ae89c0c6de67e3bd5a6c81475c02d";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "60177f40c1c5a2cd85073869fb551c80c707db3c687978c2a5b0aea980d47229";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 	pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -864,6 +864,13 @@ impl Instance {
 	}
 
 	fn finalize_parameter_vector(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
+		Self::finalize_parameter_vector_chunk_0(params, param_given, model_storage)?;
+		Ok(())
+	}
+
+	// Keep debug-build stack use bounded on small-stack desktop, browser, and mobile threads.
+	#[inline(never)]
+	fn finalize_parameter_vector_chunk_0(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[137] || PARAMETER_DUAL_SCOPE_FLAGS[137] } else { !PARAMETER_MODEL_FLAGS[137] }) && !param_given[137] {
 			let value = {
 				0.001

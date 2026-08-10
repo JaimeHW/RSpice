@@ -41,7 +41,7 @@ pub use rspice_veriloga_model_bsimsoi_va::bsimsoi__bsimsoi_va__3b1f6b5e;
 #[cfg(feature = "veriloga-model-diode-cmc")]
 pub use rspice_veriloga_model_diode_cmc::diode_cmc__diode_cmc__cdfab304;
 #[cfg(feature = "veriloga-model-ekv-va")]
-pub use rspice_veriloga_model_ekv_va::ekv26_sdext_verilog_a__ekv_va__0adf5df4;
+pub use rspice_veriloga_model_ekv_va::ekv26_sdext_verilog_a__ekv_va__0f1ec77e;
 #[cfg(feature = "veriloga-model-epfl-hemt-10a")]
 pub use rspice_veriloga_model_epfl_hemt_10a::epfl_hemt__epfl_hemt_10a__671606cd;
 #[cfg(feature = "veriloga-model-hicuml0va")]
