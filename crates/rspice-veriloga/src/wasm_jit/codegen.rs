@@ -974,8 +974,147 @@ fn emit_instruction(body: &mut Function, instruction: &Instruction) -> WasmJitRe
             emit_operand(body, operands, 0)?;
             body.instruction(&WasmInstruction::F64Ceil);
         }
+        NativeOp::Extremum(kind) => emit_extremum(
+            body,
+            kind,
+            &|body| emit_operand(body, operands, 0),
+            &|body| emit_operand(body, operands, 1),
+        )?,
+        NativeOp::ExtremumConst(kind, value) => emit_extremum(
+            body,
+            kind,
+            &|body| emit_operand(body, operands, 0),
+            &|body| {
+                body.instruction(&WasmInstruction::F64Const(value.into()));
+                Ok(())
+            },
+        )?,
+        NativeOp::ExtremumConstLhs(kind, value) => emit_extremum(
+            body,
+            kind,
+            &|body| {
+                body.instruction(&WasmInstruction::F64Const(value.into()));
+                Ok(())
+            },
+            &|body| emit_operand(body, operands, 0),
+        )?,
+        NativeOp::IntegerCast => {
+            emit_operand(body, operands, 0)?;
+            emit_saturating_i64_round_trip(body);
+        }
+        NativeOp::IntegerBinary(kind) if integer_bitwise_instruction(kind).is_some() => {
+            emit_operand(body, operands, 0)?;
+            body.instruction(&WasmInstruction::I64TruncSatF64S);
+            emit_operand(body, operands, 1)?;
+            body.instruction(&WasmInstruction::I64TruncSatF64S);
+            emit_integer_bitwise(body, kind)?;
+        }
+        NativeOp::IntegerBinaryConst(kind, value)
+            if integer_bitwise_instruction(kind).is_some() =>
+        {
+            emit_operand(body, operands, 0)?;
+            body.instruction(&WasmInstruction::I64TruncSatF64S);
+            body.instruction(&WasmInstruction::I64Const(value));
+            emit_integer_bitwise(body, kind)?;
+        }
         _ => emit_helper_call(body, op, operands, instruction.result())?,
     };
+    Ok(())
+}
+
+/// Lower `min`/`max` to match the reference `constant_extremum`.
+///
+/// This cannot be `f64.min`/`f64.max` alone. WebAssembly returns a NaN when
+/// either operand is NaN, and returns the negatively-signed zero when the
+/// operands are zeros of opposite sign. Rust's `f64::min`/`f64::max` -- which
+/// the bytecode VM and both native backends evaluate -- return the non-NaN
+/// operand instead, and the x64 backend's NaN/zero fixup settles the
+/// equal-magnitude zero case by returning the left operand. Compact models
+/// guard divisions with `max(x, 1e-30)` constantly, so this has to agree
+/// exactly, not merely on ordinary values.
+///
+/// Emitted as two `select`s rather than branches: both arms are values that
+/// are already available, and the operands are re-read from their locals
+/// rather than spilled to scratch.
+fn emit_extremum(
+    body: &mut Function,
+    kind: ExtremumOp,
+    left: &dyn Fn(&mut Function) -> WasmJitResult<()>,
+    right: &dyn Fn(&mut Function) -> WasmJitResult<()>,
+) -> WasmJitResult<()> {
+    // Outer select's "condition true" arm: the left operand is NaN, so the
+    // result is whatever the right operand is (NaN included).
+    right(body)?;
+
+    // Inner select's "condition true" arm: return the left operand.
+    left(body)?;
+
+    // Inner select's "condition false" arm: both operands are ordinary, where
+    // WebAssembly and the reference agree.
+    left(body)?;
+    right(body)?;
+    body.instruction(&match kind {
+        ExtremumOp::Min => WasmInstruction::F64Min,
+        ExtremumOp::Max => WasmInstruction::F64Max,
+    });
+
+    // Inner condition: the right operand is NaN, or both operands are zero.
+    right(body)?;
+    right(body)?;
+    body.instruction(&WasmInstruction::F64Ne);
+    emit_is_zero_magnitude(body, left)?;
+    emit_is_zero_magnitude(body, right)?;
+    body.instruction(&WasmInstruction::I32And);
+    body.instruction(&WasmInstruction::I32Or);
+    body.instruction(&WasmInstruction::Select);
+
+    // Outer condition: the left operand is NaN.
+    left(body)?;
+    left(body)?;
+    body.instruction(&WasmInstruction::F64Ne);
+    body.instruction(&WasmInstruction::Select);
+    Ok(())
+}
+
+fn emit_is_zero_magnitude(
+    body: &mut Function,
+    operand: &dyn Fn(&mut Function) -> WasmJitResult<()>,
+) -> WasmJitResult<()> {
+    operand(body)?;
+    body.instruction(&WasmInstruction::F64Abs);
+    body.instruction(&WasmInstruction::F64Const(0.0.into()));
+    body.instruction(&WasmInstruction::F64Eq);
+    Ok(())
+}
+
+/// Truncate to `i64` and convert back, matching Rust's saturating `as` cast:
+/// NaN becomes zero and out-of-range magnitudes clamp to the `i64` bounds,
+/// which is exactly `i64.trunc_sat_f64_s`.
+fn emit_saturating_i64_round_trip(body: &mut Function) {
+    body.instruction(&WasmInstruction::I64TruncSatF64S);
+    body.instruction(&WasmInstruction::F64ConvertI64S);
+}
+
+/// The bitwise integer operations, which cannot fail.
+///
+/// Shifts are deliberately absent: `constant_integer_binary` rejects a shift
+/// count outside `0..64` as a runtime error, and that trap belongs on the
+/// descriptor path that already knows how to publish one.
+fn integer_bitwise_instruction(op: IntegerBinaryOp) -> Option<WasmInstruction<'static>> {
+    match op {
+        IntegerBinaryOp::BitAnd => Some(WasmInstruction::I64And),
+        IntegerBinaryOp::BitOr => Some(WasmInstruction::I64Or),
+        IntegerBinaryOp::BitXor => Some(WasmInstruction::I64Xor),
+        IntegerBinaryOp::Shl | IntegerBinaryOp::Shr => None,
+    }
+}
+
+fn emit_integer_bitwise(body: &mut Function, op: IntegerBinaryOp) -> WasmJitResult<()> {
+    let instruction = integer_bitwise_instruction(op).ok_or_else(|| {
+        WasmJitError::Encoding("integer shifts are not part of the bitwise fast path".into())
+    })?;
+    body.instruction(&instruction);
+    body.instruction(&WasmInstruction::F64ConvertI64S);
     Ok(())
 }
 
@@ -1938,6 +2077,194 @@ mod tests {
             input.ln().exp().powf(1.0),
             "the capability must be bit-identical to the shared constant-math semantics"
         );
+    }
+
+    /// The inlined operations agree with the reference bit for bit, including
+    /// the corners where WebAssembly's own instructions disagree with it.
+    ///
+    /// `f64.min`/`f64.max` return a NaN when either operand is NaN and prefer
+    /// the negative zero for equal-magnitude zeros; the reference returns the
+    /// non-NaN operand and settles zeros on the left operand. Comparing raw
+    /// bits rather than values is what makes the zero-sign case meaningful.
+    #[test]
+    fn inlined_extremum_and_integer_ops_match_the_reference_bitwise() {
+        const CORNERS: [f64; 9] = [
+            f64::NAN,
+            0.0,
+            -0.0,
+            1.0,
+            -1.0,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            1.0e-30,
+            -3.5,
+        ];
+
+        let engine = Engine::default();
+        for kind in [ExtremumOp::Min, ExtremumOp::Max] {
+            let program = program(
+                vec![
+                    NativeOp::LoadParam(0),
+                    NativeOp::LoadParam(1),
+                    NativeOp::Extremum(kind),
+                ],
+                2,
+            );
+            let bytes = emit_verified_value_program(&program).expect("encode extremum module");
+            let (mut store, memory, instance) = instantiate_value_module(&engine, &bytes);
+
+            for left in CORNERS {
+                for right in CORNERS {
+                    let actual = call_value_entry(&mut store, &memory, &instance, &[left, right]);
+                    let expected = crate::jit::expr::constant_extremum(kind, left, right);
+                    assert_eq!(
+                        actual.to_bits(),
+                        expected.to_bits(),
+                        "{kind:?}({left}, {right}) produced {actual}, reference is {expected}"
+                    );
+                }
+            }
+        }
+
+        for op in [
+            IntegerBinaryOp::BitAnd,
+            IntegerBinaryOp::BitOr,
+            IntegerBinaryOp::BitXor,
+        ] {
+            let program = program(
+                vec![
+                    NativeOp::LoadParam(0),
+                    NativeOp::LoadParam(1),
+                    NativeOp::IntegerBinary(op),
+                ],
+                2,
+            );
+            let bytes = emit_verified_value_program(&program).expect("encode bitwise module");
+            let (mut store, memory, instance) = instantiate_value_module(&engine, &bytes);
+
+            for left in [0.0, 6.0, -6.0, 255.0, f64::NAN, 1.0e30] {
+                for right in [0.0, 3.0, -3.0, 15.0, f64::NAN, -1.0e30] {
+                    let actual = call_value_entry(&mut store, &memory, &instance, &[left, right]);
+                    let expected = crate::jit::expr::constant_integer_binary(op, left, right)
+                        .expect("bitwise operations are total");
+                    assert_eq!(
+                        actual.to_bits(),
+                        expected.to_bits(),
+                        "{op:?}({left}, {right}) produced {actual}, reference is {expected}"
+                    );
+                }
+            }
+        }
+
+        let program = program(vec![NativeOp::LoadParam(0), NativeOp::IntegerCast], 1);
+        let bytes = emit_verified_value_program(&program).expect("encode integer-cast module");
+        let (mut store, memory, instance) = instantiate_value_module(&engine, &bytes);
+        for value in [
+            0.0,
+            -0.0,
+            2.5,
+            -2.5,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            1.0e30,
+            -1.0e30,
+        ] {
+            let actual = call_value_entry(&mut store, &memory, &instance, &[value]);
+            let expected = (value as i64) as f64;
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "integer cast of {value} produced {actual}, reference is {expected}"
+            );
+        }
+    }
+
+    /// Instantiate a single-entry value module with every capability bound and
+    /// the frame-carrying helper wired to a trap, so an operation that is meant
+    /// to be inlined fails loudly if it regresses onto the descriptor path.
+    fn instantiate_value_module(
+        engine: &Engine,
+        bytes: &[u8],
+    ) -> (Store<()>, Memory, wasmi::Instance) {
+        let module = Module::new(engine, bytes).expect("compile module in wasmi");
+        let mut store = Store::new(engine, ());
+        let memory = Memory::new(&mut store, MemoryType::new(1, None))
+            .expect("allocate imported primary memory");
+        let mut linker = Linker::new(engine);
+        linker
+            .define(WASM_JIT_IMPORT_MODULE, WASM_JIT_MEMORY_IMPORT, memory)
+            .expect("define primary memory import");
+        linker
+            .func_wrap(
+                WASM_JIT_IMPORT_MODULE,
+                WASM_JIT_EVAL_HELPER_IMPORT,
+                |_: i32,
+                 _: i32,
+                 _: i32,
+                 _: i32,
+                 _: i64,
+                 _: f64,
+                 _: f64,
+                 _: f64,
+                 _: f64,
+                 _: f64|
+                 -> f64 {
+                    panic!("inlined operations must not reach the descriptor helper")
+                },
+            )
+            .expect("define trap helper import");
+        define_test_math_imports(&mut linker);
+        let instance = linker
+            .instantiate_and_start(&mut store, &module)
+            .expect("instantiate value module");
+        (store, memory, instance)
+    }
+
+    /// Write `parameters` into a fresh frame and run the module's sole entry.
+    fn call_value_entry(
+        store: &mut Store<()>,
+        memory: &Memory,
+        instance: &wasmi::Instance,
+        parameters: &[f64],
+    ) -> f64 {
+        const PARAMETERS_OFFSET: u32 = 256;
+        let mut frame = vec![0_u8; WASM_JIT_EVAL_FRAME_BYTES as usize];
+        let mut write_u32 = |offset: u64, value: u32| {
+            let offset = offset as usize;
+            frame[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        };
+        write_u32(FRAME_MAGIC_OFFSET, WASM_JIT_FRAME_MAGIC);
+        write_u32(FRAME_ABI_VERSION_OFFSET, WASM_JIT_ABI_VERSION);
+        write_u32(FRAME_BYTE_LEN_OFFSET, WASM_JIT_EVAL_FRAME_BYTES);
+        write_u32(FRAME_PARAMETERS_PTR_OFFSET, PARAMETERS_OFFSET);
+        write_u32(
+            FRAME_PARAMETERS_LEN_OFFSET,
+            u32::try_from(parameters.len()).expect("parameter count fits"),
+        );
+        memory.write(&mut *store, 0, &frame).expect("write frame");
+        for (index, value) in parameters.iter().enumerate() {
+            memory
+                .write(
+                    &mut *store,
+                    PARAMETERS_OFFSET as usize + index * size_of::<f64>(),
+                    &value.to_le_bytes(),
+                )
+                .expect("write parameter");
+        }
+
+        let entry = instance
+            .get_typed_func::<i32, i32>(&*store, WASM_JIT_VALUE_EXPORT)
+            .expect("resolve value export");
+        assert_eq!(
+            entry.call(&mut *store, 0).expect("execute value entry"),
+            WASM_JIT_STATUS_OK
+        );
+        let raw = memory
+            .data(&*store)
+            .get(FRAME_RESULT_OFFSET as usize..FRAME_RESULT_OFFSET as usize + 8)
+            .expect("read result bytes");
+        f64::from_le_bytes(raw.try_into().unwrap())
     }
 
     #[test]
