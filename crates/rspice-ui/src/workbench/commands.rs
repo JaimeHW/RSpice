@@ -1595,7 +1595,13 @@ impl Command {
             Self::JobsManager => crate::workbench::tools::jobs_manager::open(app),
             Self::PreflightChecks => super::preflight::run(app),
             Self::SimulationOptions => {
-                crate::workbench::menu_bar::open_simulation_options(&mut app.state)
+                // The workspace owns a Solver & convergence page that edits the
+                // same options and more; send the command there rather than to
+                // a second, smaller editor of the same state.
+                crate::workbench::menu_bar::open_simulation_options(&mut app.state);
+                app.state.workbench.simulation_page =
+                    crate::workbench::state::SimulationPage::Solver;
+                activate_workspace(app, Workspace::Simulate);
             }
             Self::GenerateNetlist => {
                 crate::workbench::menu_bar::action_view_netlist(&mut app.state);

@@ -548,6 +548,11 @@ pub enum SimulationConfigurationError {
         plan_id: SimulationPlanId,
         name: String,
     },
+    #[error("simulation plan {plan_id} has no saved output with identity {output_id}")]
+    SavedOutputNotFound {
+        plan_id: SimulationPlanId,
+        output_id: SavedOutputId,
+    },
     #[error("simulation plan {plan_id} has no configuration payload")]
     PlanPayloadMissing { plan_id: SimulationPlanId },
     #[error("simulation plan {plan_id} already has a configuration payload")]

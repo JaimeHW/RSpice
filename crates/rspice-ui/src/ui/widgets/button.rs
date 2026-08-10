@@ -28,6 +28,7 @@ pub struct Button<'a> {
     min_width: f32,
     min_height: f32,
     max_width: Option<f32>,
+    square: bool,
     accessible_label: Option<&'a str>,
 }
 
@@ -44,6 +45,7 @@ impl<'a> Button<'a> {
             min_width: 0.0,
             min_height: 0.0,
             max_width: None,
+            square: false,
             accessible_label: None,
         }
     }
@@ -99,6 +101,16 @@ impl<'a> Button<'a> {
     }
 
     /// Supply a contextual accessible name without changing visible copy.
+    /// Drop the corner radius.
+    ///
+    /// For a full-bleed button that sits flush against a panel edge: a rounded
+    /// corner there reads as a control floating inside the panel rather than
+    /// as the panel's own last row.
+    pub fn square(mut self) -> Self {
+        self.square = true;
+        self
+    }
+
     pub fn accessible_label(mut self, accessible_label: &'a str) -> Self {
         self.accessible_label = Some(accessible_label);
         self
@@ -216,7 +228,11 @@ impl<'a> Button<'a> {
         let painter = ui.painter();
         painter.rect(
             rect,
-            t.radius,
+            if self.square {
+                egui::CornerRadius::ZERO
+            } else {
+                t.radius.into()
+            },
             fill.gamma_multiply(opacity),
             Stroke::new(1.0, stroke_color.gamma_multiply(opacity)),
             egui::StrokeKind::Inside,

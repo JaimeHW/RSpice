@@ -6,6 +6,12 @@ use super::{
 };
 
 /// UI state for options dialog (string buffers for text editing).
+///
+/// Every field of [`SimulationOptions`] that a surface can edit has a buffer
+/// here. A field that had no buffer was silently reset to a literal on the
+/// next commit, so a value the user set never survived a round trip — the
+/// matrix pivot thresholds, the DC-sweep iteration budget, and arc-length
+/// continuation all behaved that way before they were given buffers.
 #[derive(Debug, Clone)]
 pub struct OptionsDialogState {
     /// Active tab (0=Accuracy, 1=Convergence, 2=Algorithm, 3=Limits, 4=Advanced)
@@ -17,11 +23,15 @@ pub struct OptionsDialogState {
     pub iabstol: String,
     pub chgtol: String,
     pub itl1: String,
+    pub itl2: String,
     pub itl4: String,
     pub gmin: String,
+    pub pivrel: String,
+    pub pivtol: String,
     pub gmin_stepping: bool,
     pub source_stepping: bool,
     pub pseudo_transient: bool,
+    pub arc_length: bool,
     pub damping: usize,
     pub method: usize,
     pub solver: usize,
@@ -55,11 +65,15 @@ impl OptionsDialogState {
             iabstol: format_si_value(opts.iabstol),
             chgtol: format_si_value(opts.chgtol),
             itl1: opts.itl1.to_string(),
+            itl2: opts.itl2.to_string(),
             itl4: opts.itl4.to_string(),
             gmin: format_si_value(opts.gmin),
+            pivrel: format_si_value(opts.pivrel),
+            pivtol: format_si_value(opts.pivtol),
             gmin_stepping: opts.gmin_stepping,
             source_stepping: opts.source_stepping,
             pseudo_transient: opts.pseudo_transient,
+            arc_length: opts.arc_length,
             damping: DampingStrategy::all()
                 .iter()
                 .position(|d| *d == opts.damping)
@@ -101,8 +115,11 @@ impl OptionsDialogState {
         let max_timestep = parse_field(&self.max_timestep, "max_timestep", 1e-3, &mut errors);
         let bypass_reltol = parse_field(&self.bypass_reltol, "bypass_reltol", 1e-3, &mut errors);
         let bypass_abstol = parse_field(&self.bypass_abstol, "bypass_abstol", 1e-6, &mut errors);
+        let pivrel = parse_field(&self.pivrel, "pivrel", 1e-3, &mut errors);
+        let pivtol = parse_field(&self.pivtol, "pivtol", 1e-13, &mut errors);
 
         let itl1 = parse_usize_field(&self.itl1, "itl1", 50, &mut errors);
+        let itl2 = parse_usize_field(&self.itl2, "itl2", 100, &mut errors);
         let itl4 = parse_usize_field(&self.itl4, "itl4", 6, &mut errors);
         let timestep_factor =
             parse_float_field(&self.timestep_factor, "timestep_factor", 8.0, &mut errors);
@@ -120,15 +137,15 @@ impl OptionsDialogState {
             vntol,
             iabstol,
             chgtol,
-            pivrel: 1e-3,
-            pivtol: 1e-13,
+            pivrel,
+            pivtol,
             itl1,
-            itl2: 100,
+            itl2,
             itl4,
             gmin_stepping: self.gmin_stepping,
             source_stepping: self.source_stepping,
             pseudo_transient: self.pseudo_transient,
-            arc_length: false,
+            arc_length: self.arc_length,
             gmin,
             damping: DampingStrategy::all()[self.damping.min(DampingStrategy::all().len() - 1)],
             method: IntegrationMethod::all()[self.method.min(IntegrationMethod::all().len() - 1)],

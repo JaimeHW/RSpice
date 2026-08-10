@@ -3,12 +3,20 @@
 mod analysis_form;
 mod catalog;
 mod lifecycle;
-mod setup_tables;
+mod output_evidence;
+mod page_kit;
+mod page_models;
+mod page_outputs;
+mod page_runset;
+mod page_save;
+mod page_solver;
+mod page_specs;
+mod page_variables;
+mod pages;
 mod workflows;
 
 use catalog::*;
 use lifecycle::*;
-use setup_tables::*;
 use workflows::*;
 
 use std::collections::HashSet;
@@ -26,7 +34,7 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, IconButton, mono_input, select,
+    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, mono_input, select,
 };
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::{
@@ -57,8 +65,6 @@ const ANALYSIS_EDITOR_TABLET_MIN_WIDTH: f32 = 330.0;
 const ANALYSIS_EDITOR_DESKTOP_MIN_WIDTH: f32 = 360.0;
 const PREFLIGHT_CELL_HEIGHT: f32 = 42.0;
 const STACKED_WORKSPACE_GAP: f32 = 9.0;
-const SETUP_CARD_HEADER_HEIGHT: f32 = 37.0;
-const SETUP_TABLE_HEADER_HEIGHT: f32 = 27.0;
 const ANALYSIS_CATALOG_GROUP_HEIGHT: f32 = 29.0;
 const ANALYSIS_CATALOG_ROW_HEIGHT: f32 = 57.0;
 const ANALYSIS_CATALOG_READINESS_WIDTH: f32 = 142.0;
@@ -221,13 +227,6 @@ enum StackAction {
     Insert(AnalysisKind),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SetupCardBorder {
-    All,
-    SplitLeft,
-    SplitRight,
-}
-
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Err(error) = resolve_active_analysis_instance(app) {
         record_failure(app, "Analysis selection", &error);
@@ -247,8 +246,13 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 let surface_width = ui.available_width();
                 ui.spacing_mut().item_spacing.y = 0.0;
                 ui.set_width(surface_width);
-                workspace_title_row(ui, |ui| plan_heading(ui, app, surface_width));
-                analysis_workspace(ui, app, surface_width, scroll_content_origin_y);
+                let page = app.state.workbench.simulation_page;
+                if page == crate::workbench::state::SimulationPage::Analyses {
+                    workspace_title_row(ui, |ui| plan_heading(ui, app, surface_width));
+                    analysis_workspace(ui, app, surface_width, scroll_content_origin_y);
+                } else {
+                    pages::show(ui, app, page);
+                }
             });
         let pending_delta = std::mem::take(
             &mut app
@@ -893,7 +897,6 @@ fn analysis_editor(
             });
             lifecycle_receipt_strip(ui, app);
             preflight_strip(ui, app);
-            setup_tables(ui, app);
             return;
         }
         Err(error) => {
@@ -905,7 +908,6 @@ fn analysis_editor(
             });
             lifecycle_receipt_strip(ui, app);
             preflight_strip(ui, app);
-            setup_tables(ui, app);
             return;
         }
     };
@@ -988,7 +990,6 @@ fn analysis_editor(
     }
     lifecycle_receipt_strip(ui, app);
     preflight_strip(ui, app);
-    setup_tables(ui, app);
 }
 
 fn editor_anchor_scroll_delta(anchor_y: f32, current_y: f32) -> f32 {
@@ -2048,5 +2049,7 @@ fn format_plan_issue(issue: &AnalysisPlanIssue) -> String {
     }
 }
 
+#[cfg(test)]
+mod page_tests;
 #[cfg(test)]
 mod tests;

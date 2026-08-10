@@ -401,6 +401,49 @@ impl SimSetupState {
         Ok(())
     }
 
+    /// The run space this plan resolves to, exactly.
+    ///
+    /// A plan without an enabled corner analysis runs once, at the reference
+    /// point. With one enabled, the corner configuration owns the point set
+    /// and this reports what that configuration actually expands to — a
+    /// configuration that does not parse contributes no points rather than a
+    /// guessed count.
+    pub fn run_set_point_count(&self) -> Option<usize> {
+        if !self.has_enabled_analysis_kind(crate::simulation::plan::AnalysisKind::Corner) {
+            return Some(1);
+        }
+        self.corner
+            .to_config()
+            .ok()
+            .map(|config| config.num_corners())
+    }
+
+    /// Named points of the resolved run space, in execution order.
+    ///
+    /// `None` when the corner configuration does not parse: the caller must
+    /// show the configuration error rather than an invented point list.
+    pub fn run_set_point_names(&self) -> Option<Vec<String>> {
+        if !self.has_enabled_analysis_kind(crate::simulation::plan::AnalysisKind::Corner) {
+            return Some(vec![format!(
+                "{} · {} °C",
+                self.reference_pvt.process.short_name(),
+                format_temperature(self.reference_pvt.temperature_celsius)
+            )]);
+        }
+        self.corner
+            .to_config()
+            .ok()
+            .map(|config| config.corner_names())
+    }
+
+    /// Why the run space could not be resolved, if it could not be.
+    pub fn run_set_error(&self) -> Option<String> {
+        if !self.has_enabled_analysis_kind(crate::simulation::plan::AnalysisKind::Corner) {
+            return None;
+        }
+        self.corner.to_config().err()
+    }
+
     /// Commit globally validated options while keeping the workbench reference
     /// point and OP editor aligned with the temperature the solver will use.
     pub fn commit_options(&mut self, options: &crate::simulation::dialog::SimulationOptions) {

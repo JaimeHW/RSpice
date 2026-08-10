@@ -371,6 +371,33 @@ impl ProjectWorkspace {
         Ok(())
     }
 
+    /// Remove one plan-owned saved output by its stable identity.
+    ///
+    /// Atomic with respect to validation: the removal is applied to a
+    /// candidate and only adopted once the whole configuration still
+    /// validates, so a removal that would leave the plan inconsistent — a
+    /// specification bound to the output, say — leaves the plan untouched.
+    pub fn remove_saved_output(
+        &mut self,
+        plan_id: SimulationPlanId,
+        output_id: SavedOutputId,
+    ) -> Result<SavedOutput, SimulationConfigurationError> {
+        let mut candidate = self.clone();
+        let payload = candidate
+            .active_plan_data_mut(plan_id)
+            .ok_or(SimulationConfigurationError::PlanPayloadMissing { plan_id })?;
+        let index = payload
+            .saved_outputs
+            .iter()
+            .position(|output| output.id == output_id)
+            .ok_or(SimulationConfigurationError::SavedOutputNotFound { plan_id, output_id })?;
+        let removed = payload.saved_outputs.remove(index);
+        candidate.validate_simulation_configuration()?;
+
+        *self = candidate;
+        Ok(removed)
+    }
+
     /// Copy or initialize the payload for a newly cloned plan. The insertion
     /// is atomic with respect to validation: no target record is created on
     /// any error.
