@@ -379,7 +379,9 @@ fn reference_point(ui: &mut Ui, app: &mut RSpiceApp) {
                     if let Err(error) = app.state.sim_setup.set_reference_pvt(process, celsius) {
                         app.state.workbench.analysis_lifecycle_status = error;
                     } else {
-                        app.invalidate_simulation_preflight();
+                        // The reference point sets the solver TEMP option, so
+                        // it is a plan-configuration change like any axis edit.
+                        commit_run_space(app, "Updated the reference point.");
                     }
                 }
             });
