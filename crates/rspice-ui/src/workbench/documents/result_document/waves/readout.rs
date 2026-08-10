@@ -528,6 +528,7 @@ pub(super) fn marker_section(ui: &mut Ui, state: &mut AppState) {
     }
 
     let mut remove: Option<u32> = None;
+    let mut edit: Option<u32> = None;
     for (index, id) in shown.iter().copied().enumerate() {
         let top = rect.top() + index as f32 * MARKER_ROW_H;
         let row = egui::Rect::from_min_max(
@@ -591,12 +592,26 @@ pub(super) fn marker_section(ui: &mut Ui, state: &mut AppState) {
                 .font(theme::mono(tokens::FS_0, FontWeight::Medium))
                 .color(color),
         );
-        if chip(&mut row_ui, kind.label(), false)
-            .on_hover_text("Cycle marker kind: note → peak → spec")
+        // The kind is stated, not cycled: a click that silently reclassifies
+        // what a marker asserts is a decision made by accident.
+        row_ui.label(
+            egui::RichText::new(kind.label())
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .color(color),
+        );
+        if row_ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new("\u{270e}")
+                        .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                        .color(c.text_dim),
+                )
+                .frame(false),
+            )
+            .on_hover_text("Edit this marker's label and kind")
             .clicked()
-            && let Some(marker) = state.ui.results.marker_mut(id)
         {
-            marker.kind = kind.next();
+            edit = Some(id);
         }
         if row_ui
             .add(
@@ -633,33 +648,37 @@ pub(super) fn marker_section(ui: &mut Ui, state: &mut AppState) {
                     .color(c.text),
             );
         }
-        // The note field takes what is left of the row.
-        let note_width = row_ui.available_width().max(60.0);
-        let mut note = state
+        // The note takes what is left of the row. It reads as text here and
+        // is edited in the marker dialog, so a stray keystroke over the strip
+        // cannot rewrite what a marker says.
+        let note = state
             .ui
             .results
             .markers
             .iter()
             .find(|m| m.id == id)
             .map_or_else(String::new, |m| m.note.clone());
-        let response = row_ui.add(
-            egui::TextEdit::singleline(&mut note)
-                .desired_width(note_width)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .hint_text("note…"),
-        );
-        if state.ui.results.editing_marker == Some(id) {
-            response.request_focus();
-            state.ui.results.editing_marker = None;
-        }
-        if response.changed()
-            && let Some(marker) = state.ui.results.marker_mut(id)
-        {
-            marker.note = note;
+        if note.is_empty() {
+            row_ui.label(
+                egui::RichText::new("no label")
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(c.text_faint),
+            );
+        } else {
+            row_ui
+                .label(
+                    egui::RichText::new(&note)
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(c.text_dim),
+                )
+                .on_hover_text(&note);
         }
     }
     if let Some(id) = remove {
         state.ui.results.remove_marker(id);
+    }
+    if let Some(id) = edit {
+        super::marker_dialog::open(state, id);
     }
 }
 

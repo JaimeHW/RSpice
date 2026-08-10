@@ -226,6 +226,13 @@ pub struct ProjectFile {
     pub libraries: LibraryManager,
     #[serde(default, skip_serializing_if = "ProjectSimulationResults::is_empty")]
     pub simulation_results: ProjectSimulationResults,
+    /// Markers the reader placed on the result plots.
+    ///
+    /// They are annotations *about* the retained datasets, not part of them,
+    /// so they live beside the result document rather than inside it: a
+    /// marker must never alter a result's provenance digest.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub result_markers: Vec<ProjectResultMarker>,
     /// Authoritative execution inputs. Absent only in projects written before
     /// project-owned simulation plans were introduced.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -233,6 +240,14 @@ pub struct ProjectFile {
     #[serde(skip)]
     pub simulation_results_warning: Option<String>,
 }
+
+/// One retained result marker, as written to the project.
+///
+/// The identities are the workspace's own dataset-bound presentation keys, so
+/// a marker re-attaches to the same analysis and trace after a reload however
+/// the retained analyses were reordered — and silently drops if the dataset
+/// it annotated is no longer in the project.
+pub type ProjectResultMarker = crate::workbench::documents::result_document::ResultMarker;
 
 impl ProjectFile {
     #[cfg(test)]
@@ -242,6 +257,7 @@ impl ProjectFile {
             workspace,
             libraries,
             simulation_results: ProjectSimulationResults::default(),
+            result_markers: Vec::new(),
             execution_context: None,
             simulation_results_warning: None,
         }
@@ -258,6 +274,7 @@ impl ProjectFile {
             workspace,
             libraries,
             simulation_results,
+            result_markers: Vec::new(),
             execution_context: None,
             simulation_results_warning: None,
         }
@@ -280,9 +297,17 @@ impl ProjectFile {
             workspace,
             libraries,
             simulation_results,
+            result_markers: Vec::new(),
             execution_context: Some(execution_context),
             simulation_results_warning: None,
         }
+    }
+
+    /// Attach the reader's plot markers to a snapshot.
+    #[must_use]
+    pub fn with_result_markers(mut self, markers: Vec<ProjectResultMarker>) -> Self {
+        self.result_markers = markers;
+        self
     }
 
     pub fn validate(&self) -> Result<(), ProjectIoError> {

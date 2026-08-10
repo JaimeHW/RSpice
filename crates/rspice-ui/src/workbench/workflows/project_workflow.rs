@@ -1036,6 +1036,7 @@ fn apply_loaded_project_authorized(
     let mut accepted_baseline = project.clone();
     accepted_baseline.execution_context = accepted_execution_context;
     let simulation_results = project.simulation_results;
+    let result_markers = project.result_markers;
     let mut simulation_results_warning = project.simulation_results_warning;
     state.clear_design_execution_context();
     state.library_manager = project.libraries;
@@ -1057,6 +1058,10 @@ fn apply_loaded_project_authorized(
             "Simulation results were not restored because their persisted data is invalid: {error}"
         ));
     }
+    // Markers are restored after the datasets they annotate, and only those
+    // that still find their analysis: a marker pointing at a dataset this
+    // project no longer retains would draw on nothing.
+    crate::workbench::documents::result_document::restore_markers(state, result_markers);
     if let Some(path) = origin.recent_path() {
         state.remember_recent_file(crate::workbench::app_state::RecentKind::Project, path);
     }
@@ -2439,6 +2444,80 @@ mod tests {
             loaded.simulation_results.runs[0].analyses[0].waveforms[0].name,
             "V(out)"
         );
+    }
+
+    /// Markers are the reader's own annotation of a result. Losing them on
+    /// close is data loss, so they are written beside the retained datasets
+    /// and re-attach to the analysis they named.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn save_project_to_path_round_trips_result_markers() {
+        use crate::workbench::documents::result_document::AnalysisPresentationKey;
+
+        let mut state = AppState::default();
+        let waveform = crate::state::WaveformData::new(
+            "V(out)",
+            vec![0.0, 1.0, 2.0],
+            vec![0.0, 1.5, 3.0],
+            "#00aaff",
+        );
+        let mut run = crate::state::SimulationRun::new(11);
+        run.add_analysis(
+            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
+                .with_waveforms(vec![waveform]),
+        );
+        seal_legacy_unattributed(&mut run);
+        state.simulation.runs = vec![run];
+        state.simulation.next_run_id = 11;
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+
+        let active = state.simulation.active_run().expect("active retained run");
+        let analysis = AnalysisPresentationKey::new(active.dataset_id, &active.analyses[0]);
+        let anchor = state
+            .ui
+            .results
+            .markers
+            .first()
+            .map(|marker| marker.anchor.clone());
+        assert!(anchor.is_none(), "a fresh workspace carries no markers");
+        let id = {
+            let waveform_anchor =
+                crate::workbench::documents::result_document::marker_anchor_for(analysis, "V(out)");
+            state
+                .ui
+                .results
+                .add_marker(analysis, waveform_anchor, "V(out)".to_owned(), 1.0)
+        };
+        if let Some(marker) = state.ui.results.marker_mut(id) {
+            marker.note = "settling point".to_owned();
+        }
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "rspice-save-project-markers-{}-{unique}.rspiceproj",
+            std::process::id()
+        ));
+
+        let saved = save_project_to_path(&mut state, &path);
+        let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(saved);
+        assert_eq!(loaded.result_markers.len(), 1);
+        assert_eq!(loaded.result_markers[0].note, "settling point");
+
+        let mut reopened = AppState::default();
+        reopened.simulation = state.simulation.clone();
+        crate::workbench::documents::result_document::restore_markers(
+            &mut reopened,
+            loaded.result_markers,
+        );
+        assert_eq!(reopened.ui.results.markers.len(), 1);
+        assert_eq!(reopened.ui.results.markers[0].note, "settling point");
     }
 
     #[cfg(not(target_arch = "wasm32"))]

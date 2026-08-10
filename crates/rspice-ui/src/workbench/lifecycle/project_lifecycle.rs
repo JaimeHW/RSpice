@@ -284,7 +284,8 @@ pub(crate) fn snapshot(state: &AppState) -> Result<ProjectFile, ProjectLifecycle
         libraries,
         simulation_results,
         execution_context,
-    );
+    )
+    .with_result_markers(state.ui.results.markers.clone());
     project
         .validate()
         .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
@@ -307,6 +308,9 @@ pub(crate) fn generated_netlist_input_digest(
 ) -> Result<crate::product::ContentDigest, ProjectLifecycleError> {
     let mut project = snapshot(state)?;
     project.simulation_results = ProjectSimulationResults::default();
+    // Annotating a plot must never change what the netlist generator is
+    // asked to produce.
+    project.result_markers = Vec::new();
     project.workspace.netlist_source = None;
     project.workspace.netlist_source_path = None;
     project.workspace.netlist_document = None;

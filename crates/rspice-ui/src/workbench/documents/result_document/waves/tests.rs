@@ -702,19 +702,23 @@ fn markers_outlive_the_tool_that_placed_them() {
 }
 
 #[test]
-fn removing_a_marker_takes_its_open_note_editor_with_it() {
+fn removing_a_marker_takes_its_open_edit_with_it() {
     let mut state = marker_fixture();
     let (analysis, waveform) = marker_identity(&state);
     let first = state
         .ui
         .results
         .add_marker(analysis, waveform.clone(), "V(out)".to_owned(), 0.5);
-    state.ui.results.editing_marker = Some(first);
+    marker_dialog::open(&mut state, first);
+    assert!(state.ui.results.marker_edit.is_some());
 
     state.ui.results.remove_marker(first);
 
     assert!(state.ui.results.markers.is_empty());
-    assert_eq!(state.ui.results.editing_marker, None);
+    assert!(
+        state.ui.results.marker_edit.is_none(),
+        "an edit of a marker that no longer exists has nothing to apply to"
+    );
 
     // Ids are not recycled: M1 must not come back meaning something else.
     let second = state
@@ -722,6 +726,29 @@ fn removing_a_marker_takes_its_open_note_editor_with_it() {
         .results
         .add_marker(analysis, waveform, "V(out)".to_owned(), 0.9);
     assert_ne!(first, second);
+}
+
+/// Placing a marker opens its purpose dialog seeded from the marker itself,
+/// so the label and kind are chosen once rather than cycled into place.
+#[test]
+fn opening_a_marker_edit_seeds_the_draft_from_the_marker() {
+    let mut state = marker_fixture();
+    let (analysis, waveform) = marker_identity(&state);
+    let id = state
+        .ui
+        .results
+        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5);
+    if let Some(marker) = state.ui.results.marker_mut(id) {
+        marker.note = "overshoot".to_owned();
+        marker.kind = MarkerKind::Peak;
+    }
+
+    marker_dialog::open(&mut state, id);
+
+    let draft = state.ui.results.marker_edit.clone().expect("draft opened");
+    assert_eq!(draft.id, id);
+    assert_eq!(draft.note, "overshoot");
+    assert_eq!(draft.kind, MarkerKind::Peak);
 }
 
 #[test]
@@ -733,11 +760,17 @@ fn only_a_spec_marker_declines_to_report_a_trace_value() {
         "a spec constrains the axis position, not one curve"
     );
 
-    let mut kind = MarkerKind::Note;
-    for _ in 0..MarkerKind::ALL.len() {
-        kind = kind.next();
+    // Every kind the dialog offers says what choosing it asserts, and the
+    // renderer draws all of them: the dialog can never offer a marker the
+    // canvas could not produce.
+    for kind in MarkerKind::ALL {
+        assert!(
+            kind.dialog_label()
+                .starts_with(&kind.label()[..1].to_uppercase()),
+            "{} must name itself in the dialog",
+            kind.label()
+        );
     }
-    assert_eq!(kind, MarkerKind::Note, "the kind control cycles");
 }
 
 #[test]
