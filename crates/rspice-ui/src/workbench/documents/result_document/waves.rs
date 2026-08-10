@@ -46,7 +46,24 @@ use super::{
     waveform_color, well_hint,
 };
 
-const WAVE_SHARED_X_HEIGHT: f32 = 50.0;
+const WAVE_SHARED_X_HEIGHT: f32 = 57.0;
+
+/// The shared-X strip's three bands, offset from the strip's top edge.
+///
+/// They are ordered by what each one describes. Tick labels and the A/B
+/// flags both read the panes' zoomed viewport, so they sit directly against
+/// the panes; the full-range overview lane is the outermost band, and
+/// nothing viewport-scaled is ever drawn across it.
+const SHARED_X_LABEL_TOP: f32 = 3.0;
+const SHARED_X_FLAG_TOP: f32 = 17.0;
+const SHARED_X_FLAG_HEIGHT: f32 = 13.0;
+const SHARED_X_LANE_TOP: f32 = 35.0;
+const SHARED_X_LANE_HEIGHT: f32 = 14.0;
+
+/// The narrowest viewport an overview-handle drag can produce, as a fraction
+/// of the full retained sweep. It is the reciprocal of the zoom ceiling, so
+/// dragging a handle cannot reach a magnification the zoom controls refuse.
+const SHARED_X_MIN_WINDOW: f64 = 1.0 / 200.0;
 // Mockup gutter geometry: a 64 px left gutter carries the Y ticks and the
 // X-strip's band labels; the right edge keeps only a 14 px breathing strip
 // now that no pane owns a secondary axis.
@@ -376,7 +393,9 @@ impl StripModel {
         quantity_policy: crate::quantity::QuantityPresentationPolicy,
     ) -> String {
         match trace.kind {
-            TraceKind::Value => fmt_si_significant(value, self.y_unit, significant_digits),
+            TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
+                fmt_si_significant(value, self.y_unit, significant_digits)
+            }
             TraceKind::MagnitudeDb => fmt_significant(value, significant_digits, " dB"),
             TraceKind::PhaseDeg => {
                 quantity_policy.format_angle(value.to_radians(), significant_digits)
@@ -384,9 +403,6 @@ impl StripModel {
             TraceKind::PhaseRad => quantity_policy.format_angle(value, significant_digits),
             TraceKind::NoiseDensity => {
                 fmt_si_significant(value, "nV/√Hz", significant_digits)
-            }
-            TraceKind::Real | TraceKind::Imaginary => {
-                fmt_si_significant(value, self.y_unit, significant_digits)
             }
         }
     }
@@ -2158,6 +2174,54 @@ fn zoomed_shared_x_view(
     ))
 }
 
+/// Resize the shared viewport by dragging one edge of the overview window.
+///
+/// The dragged edge follows the pointer and the opposite edge stays fixed,
+/// so the gesture zooms and pans in one motion the way pulling a scrollbar
+/// handle does.
+fn resized_shared_x_view(
+    scale: XScale,
+    full: (f64, f64),
+    view: (f64, f64),
+    move_start: bool,
+    edge_fraction: f64,
+) -> Option<(f64, f64)> {
+    if !edge_fraction.is_finite() {
+        return None;
+    }
+    let (start, end) = shared_axis_viewport_fraction(scale, full, view);
+    let edge = edge_fraction.clamp(0.0, 1.0);
+    let (next_start, next_end) = if move_start {
+        (edge.min(end - SHARED_X_MIN_WINDOW), end)
+    } else {
+        (start, edge.max(start + SHARED_X_MIN_WINDOW))
+    };
+    let next_start = next_start.clamp(0.0, 1.0 - SHARED_X_MIN_WINDOW);
+    let next_end = next_end.clamp(next_start + SHARED_X_MIN_WINDOW, 1.0);
+    Some((
+        scale.denormalize(next_start, full.0, full.1),
+        scale.denormalize(next_end, full.0, full.1),
+    ))
+}
+
+/// The name the strip prints into the panes' left gutter beside the tick
+/// values, following the mockup's axis vocabulary.
+///
+/// The tick values themselves are SI-prefixed bare numbers, so the gutter is
+/// where the axis states its unit — once, for the whole row.
+fn shared_x_gutter_label(unit: &str) -> String {
+    let name = match unit {
+        "s" => "TIME",
+        "Hz" => "FREQ",
+        _ => "X",
+    };
+    if unit.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{name} · {unit}")
+    }
+}
+
 fn recentered_shared_x_view(
     scale: XScale,
     full: (f64, f64),
@@ -2178,15 +2242,37 @@ fn recentered_shared_x_view(
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct WaveStackGeometry {
-    pane_height: f32,
+    /// Height of one weight unit, before a pane's own weight is applied.
+    pane_unit_height: f32,
+    total_weight: f32,
     shared_x_height: f32,
     seam_height: f32,
+}
+
+/// The mockup's pane weights: the sheet's primary quantity takes three parts
+/// and every companion pane two, so a supply-current or phase pane reads as
+/// the secondary evidence it is instead of splitting the stack evenly.
+fn pane_weight(ordinal: usize, pane_count: usize) -> f32 {
+    if pane_count <= 1 {
+        1.0
+    } else if ordinal == 0 {
+        3.0
+    } else {
+        2.0
+    }
+}
+
+impl WaveStackGeometry {
+    fn pane_height(&self, ordinal: usize, pane_count: usize) -> f32 {
+        (self.pane_unit_height * pane_weight(ordinal, pane_count)).max(0.0)
+    }
 }
 
 fn wave_stack_geometry(available_height: f32, pane_count: usize) -> WaveStackGeometry {
     if pane_count == 0 || !available_height.is_finite() {
         return WaveStackGeometry {
-            pane_height: 0.0,
+            pane_unit_height: 0.0,
+            total_weight: 1.0,
             shared_x_height: 0.0,
             seam_height: 0.0,
         };
@@ -2203,9 +2289,13 @@ fn wave_stack_geometry(available_height: f32, pane_count: usize) -> WaveStackGeo
     // proportionally in constrained multi-pane/multi-strip arrangements.
     // The sum is exact: this function never asks the parent to grow.
     let shared_x_height = (content * 0.28).min(WAVE_SHARED_X_HEIGHT);
-    let pane_height = ((content - shared_x_height) / pane_count as f32).max(0.0);
+    let total_weight: f32 = (0..pane_count)
+        .map(|ordinal| pane_weight(ordinal, pane_count))
+        .sum();
+    let pane_unit_height = ((content - shared_x_height) / total_weight).max(0.0);
     WaveStackGeometry {
-        pane_height,
+        pane_unit_height,
+        total_weight,
         shared_x_height,
         seam_height,
     }
@@ -2214,6 +2304,8 @@ fn wave_stack_geometry(available_height: f32, pane_count: usize) -> WaveStackGeo
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SharedXDrag {
     Viewport,
+    ResizeStart,
+    ResizeEnd,
     CursorA,
     CursorB,
 }
@@ -2270,6 +2362,55 @@ pub(crate) fn active_pane_facts(
         x_viewport,
         y_viewport,
     }
+}
+
+/// What the status bar reports about the sheet on the Results workspace.
+pub(crate) struct SharedXStatus {
+    /// The X interval the panes are showing.
+    pub span: String,
+    /// How far that interval is magnified from the full retained sweep.
+    pub zoom: f64,
+}
+
+/// The visible X interval and its magnification.
+///
+/// The instrument bar owns the A/B cursor readout, so the status bar's
+/// coordinate segment states the view rather than triplicating the cursors —
+/// and its zoom chip reports this magnification instead of a canvas scale no
+/// waveform sheet has.
+pub(crate) fn active_shared_x_status(tokens: &Tokens, state: &mut AppState) -> Option<SharedXStatus> {
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let digits = usize::from(presentation.displayed_significant_digits().get());
+    let active = state
+        .ui
+        .results
+        .active_wave_pane
+        .as_ref()
+        .map(|key| key.analysis);
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        tokens,
+    );
+    let model = match active {
+        Some(key) => models.iter().find(|model| model.analysis_key == key),
+        None => models.first(),
+    }?;
+    let full = x_range(model)?;
+    let panes = model.unit_panes().len();
+    let view = shared_x_view(&state.ui.results, model.analysis_key, panes).unwrap_or(full);
+    let (start, end) = shared_axis_viewport_fraction(model.x_scale, full, view);
+    let width = end - start;
+    Some(SharedXStatus {
+        span: format!(
+            "{} … {}",
+            model.format_x(view.0, digits, quantity_policy),
+            model.format_x(view.1, digits, quantity_policy)
+        ),
+        zoom: if width > 0.0 { 1.0 / width } else { 1.0 },
+    })
 }
 
 /// The active pane's X and Y intervals, formatted through the strip's own
@@ -2716,18 +2857,29 @@ fn show_shared_x_axis(
         node.set_label(accessibility_label.clone());
     });
     let painter = ui.painter().with_clip_rect(rect);
-    painter.rect_filled(rect, 0.0, c.canvas_bg);
+    painter.rect_filled(rect, 0.0, c.bg_panel);
     painter.hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, c.border));
 
     let plot_left = (rect.left() + wave_left_margin(&state.ui.results)).min(rect.right());
     let plot_right = (rect.right() - WAVE_SHARED_RIGHT_MARGIN).max(plot_left);
+    let label_top = rect.top() + SHARED_X_LABEL_TOP;
+    let flag_top = rect.top() + SHARED_X_FLAG_TOP;
+    let flag_bottom = flag_top + SHARED_X_FLAG_HEIGHT;
+    // The lane spans exactly the panes' plot area, so the overview sits
+    // under the traces it mirrors and its viewport window maps 1:1 to what
+    // the panes show. Both rows name themselves into the panes' own left
+    // gutter, which states the thing two stacked X scales otherwise hide:
+    // the ticks are the zoomed viewport, the bar below is the full sweep.
     let track = egui::Rect::from_min_max(
-        egui::pos2(plot_left, rect.top() + 5.0),
-        egui::pos2(plot_right, (rect.top() + 17.0).min(rect.bottom())),
+        egui::pos2(plot_left, rect.top() + SHARED_X_LANE_TOP),
+        egui::pos2(
+            plot_right,
+            (rect.top() + SHARED_X_LANE_TOP + SHARED_X_LANE_HEIGHT).min(rect.bottom()),
+        ),
     );
     let mut viewport = egui::Rect::NOTHING;
     if track.width() > 1.0 {
-        painter.rect_filled(track, 0.0, c.bg_panel);
+        painter.rect_filled(track, 0.0, c.canvas_bg);
         painter.rect_stroke(
             track,
             0.0,
@@ -2780,36 +2932,45 @@ fn show_shared_x_axis(
         }
 
         let (start, end) = shared_axis_viewport_fraction(model.x_scale, full_domain, current);
+        let window_left = track.left() + track.width() * start as f32;
         viewport = egui::Rect::from_min_max(
-            egui::pos2(track.left() + track.width() * start as f32, track.top()),
-            egui::pos2(track.left() + track.width() * end as f32, track.bottom()),
+            egui::pos2(window_left, track.top()),
+            egui::pos2(
+                (track.left() + track.width() * end as f32).max(window_left + 6.0),
+                track.bottom(),
+            ),
         );
-        painter.rect_filled(viewport, 0.0, c.accent.gamma_multiply(0.16));
+        painter.rect_filled(viewport, 0.0, c.accent.gamma_multiply(0.14));
         painter.rect_stroke(
             viewport,
             0.0,
             egui::Stroke::new(1.0, c.accent),
             egui::StrokeKind::Inside,
         );
+        // Grab handles at both edges are the always-visible affordance for
+        // resizing the visible span in place: drag an edge in from the full
+        // range to zoom, and the opposite edge holds.
+        for edge_x in [viewport.left(), viewport.right()] {
+            painter.rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(edge_x - 3.0, track.top() - 1.0),
+                    egui::pos2(edge_x + 3.0, track.bottom() + 1.0),
+                ),
+                2.0,
+                c.accent,
+            );
+            painter.vline(
+                edge_x,
+                egui::Rangef::new(track.top() + 3.0, track.bottom() - 3.0),
+                egui::Stroke::new(1.0, c.canvas_bg),
+            );
+        }
     }
 
-    let baseline_y = rect.bottom() - 20.0;
-    painter.hline(
-        egui::Rangef::new(plot_left, plot_right),
-        baseline_y,
-        egui::Stroke::new(1.0, c.border_strong),
-    );
+    // Tick values for the zoomed viewport sit at the top of the strip, right
+    // against the panes they describe, and their stubs point up toward the
+    // plot.
     let font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let end_label = axis.end_label();
-    let end_label_width = if end_label.is_empty() {
-        0.0
-    } else {
-        painter
-            .layout_no_wrap(end_label.clone(), font.clone(), c.text_dim)
-            .size()
-            .x
-    };
-    let labels_right = plot_right - end_label_width - 8.0;
     let mut last_right = f32::NEG_INFINITY;
     for (value, label) in &axis.ticks {
         let fraction = model.x_scale.normalize(*value, axis.min, axis.max);
@@ -2819,92 +2980,123 @@ fn show_shared_x_axis(
         let x = plot_left + (plot_right - plot_left) * fraction as f32;
         painter.vline(
             x,
-            egui::Rangef::new(baseline_y, baseline_y + 4.0),
+            egui::Rangef::new(rect.top(), rect.top() + 3.0),
             egui::Stroke::new(1.0, c.border_strong),
         );
         let galley = painter.layout_no_wrap(label.clone(), font.clone(), c.text_dim);
-        let left = x - galley.size().x * 0.5;
-        if left >= last_right + 6.0 && left + galley.size().x <= labels_right {
+        // The stub marks the true position; the label itself is held inside
+        // the plot area so an edge value never reaches into the gutter
+        // column and collides with the row's own name.
+        let half = galley.size().x * 0.5 + 2.0;
+        let centre = x.clamp(plot_left + half, (plot_right - half).max(plot_left + half));
+        let left = centre - galley.size().x * 0.5;
+        if left >= last_right + 6.0 {
             last_right = left + galley.size().x;
-            painter.galley(egui::pos2(left, baseline_y + 5.0), galley, c.text_dim);
+            painter.galley(egui::pos2(left, label_top), galley, c.text_dim);
         }
     }
-    if !end_label.is_empty() {
-        painter.text(
-            egui::pos2(plot_right, baseline_y + 5.0),
-            egui::Align2::RIGHT_TOP,
-            end_label,
-            font,
-            c.text_dim,
-        );
-    }
+    let gutter_font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
+    painter.text(
+        egui::pos2(plot_left - 8.0, label_top + font.size * 0.5),
+        egui::Align2::RIGHT_CENTER,
+        &shared_x_gutter_label(&model.x_unit),
+        gutter_font.clone(),
+        c.text_faint,
+    );
+    painter.text(
+        egui::pos2(plot_left - 8.0, track.center().y),
+        egui::Align2::RIGHT_CENTER,
+        "FULL",
+        gutter_font,
+        c.text_faint,
+    );
 
-    let flag_top = track.bottom() + 2.0;
-    let flag_bottom = (flag_top + 13.0).min(baseline_y + 1.0);
-    let cursor_rect = |x: f64| {
-        let fraction = model.x_scale.normalize(x, full_domain.0, full_domain.1);
-        let px = track.left() + track.width() * fraction.clamp(0.0, 1.0) as f32;
-        egui::Rect::from_min_max(
-            egui::pos2(px - 8.0, flag_top),
-            egui::pos2(px + 8.0, flag_bottom),
-        )
+    let flag_centre = |value: f64| {
+        // Flags track the viewport like the pane cursor lines above them,
+        // so a cursor zoomed past simply leaves the strip.
+        let fraction = model.x_scale.normalize(value, current.0, current.1);
+        (fraction.is_finite() && (-0.001..=1.001).contains(&fraction))
+            .then(|| plot_left + (plot_right - plot_left) * fraction.clamp(0.0, 1.0) as f32)
     };
     if let Some(cursors) = cursor_values {
         for (label, value, color) in [("A", cursors.a, c.traces[1]), ("B", cursors.b, c.accent)] {
             let Some(value) = value else { continue };
-            let flag = cursor_rect(value);
-            painter.vline(
-                flag.center().x,
-                egui::Rangef::new(track.top(), flag.bottom()),
-                egui::Stroke::new(1.0, color),
-            );
-            painter.rect_filled(flag, 2.0, color);
-            painter.text(
-                flag.center(),
-                egui::Align2::CENTER_CENTER,
-                label,
-                theme::mono(tokens::FS_0, FontWeight::SemiBold),
-                c.canvas_bg,
-            );
+            if let Some(px) = flag_centre(value) {
+                let flag = egui::Rect::from_min_max(
+                    egui::pos2(px - 8.0, flag_top),
+                    egui::pos2(px + 8.0, flag_bottom),
+                );
+                painter.vline(
+                    px,
+                    egui::Rangef::new(rect.top(), flag_top),
+                    egui::Stroke::new(1.0, color),
+                );
+                painter.rect_filled(flag, 2.0, color);
+                painter.text(
+                    flag.center(),
+                    egui::Align2::CENTER_CENTER,
+                    label,
+                    theme::mono(tokens::FS_0, FontWeight::SemiBold),
+                    c.canvas_bg,
+                );
+            }
+            // The overview keeps its own notch at the cursor's absolute
+            // source position, so it still locates a cursor the viewport has
+            // left behind.
+            if track.width() > 1.0 {
+                let fraction = model.x_scale.normalize(value, full_domain.0, full_domain.1);
+                if fraction.is_finite() {
+                    let notch = track.left() + track.width() * fraction.clamp(0.0, 1.0) as f32;
+                    painter.vline(
+                        notch,
+                        egui::Rangef::new(track.top() + 1.0, track.top() + 5.0),
+                        egui::Stroke::new(2.0, color),
+                    );
+                }
+            }
         }
     }
-
-    let fit_rect = egui::Rect::from_min_size(
-        egui::pos2((rect.right() - 42.0).max(rect.left()), rect.top() + 2.0),
-        egui::vec2(36.0, 18.0),
-    );
-    let fit = ui.interact(fit_rect, response.id.with("fit"), egui::Sense::click());
-    fit.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Fit shared X to full range")
-    });
-    painter.text(
-        fit_rect.center(),
-        egui::Align2::CENTER_CENTER,
-        "FIT",
-        theme::mono(tokens::FS_0, FontWeight::SemiBold),
-        if fit.hovered() { c.text } else { c.text_dim },
-    );
 
     if response.clicked() {
         response.request_focus();
     }
+    // The lane band owns the overview gestures and everything above it
+    // belongs to the flags, so a flag grab never fights a resize handle.
+    let lane_band = egui::Rangef::new(track.top() - 4.0, track.bottom() + 4.0);
+    let handle_at = |pointer: egui::Pos2| {
+        if track.width() <= 1.0 || !lane_band.contains(pointer.y) {
+            return None;
+        }
+        if (pointer.x - viewport.left()).abs() <= 5.0 {
+            Some(SharedXDrag::ResizeStart)
+        } else if (pointer.x - viewport.right()).abs() <= 5.0 {
+            Some(SharedXDrag::ResizeEnd)
+        } else {
+            None
+        }
+    };
+    let flag_at = |pointer: egui::Pos2| {
+        if pointer.y >= track.top() - 4.0 {
+            return None;
+        }
+        let cursors = cursor_values?;
+        [
+            (SharedXDrag::CursorA, cursors.a),
+            (SharedXDrag::CursorB, cursors.b),
+        ]
+        .into_iter()
+        .find_map(|(drag, value)| {
+            let px = flag_centre(value?)?;
+            ((pointer.x - px).abs() <= 9.0).then_some(drag)
+        })
+    };
     let drag_id = shared_x_drag_id(model);
     if response.drag_started()
         && let Some(pointer) = response.interact_pointer_pos()
     {
-        let drag = if cursor_values
-            .and_then(|cursors| cursors.a)
-            .is_some_and(|x| cursor_rect(x).expand(3.0).contains(pointer))
-        {
-            SharedXDrag::CursorA
-        } else if cursor_values
-            .and_then(|cursors| cursors.b)
-            .is_some_and(|x| cursor_rect(x).expand(3.0).contains(pointer))
-        {
-            SharedXDrag::CursorB
-        } else {
-            SharedXDrag::Viewport
-        };
+        let drag = handle_at(pointer)
+            .or_else(|| flag_at(pointer))
+            .unwrap_or(SharedXDrag::Viewport);
         ui.memory_mut(|memory| memory.data.insert_temp(drag_id, drag));
     }
     let drag = ui.memory(|memory| memory.data.get_temp::<SharedXDrag>(drag_id));
@@ -2931,10 +3123,29 @@ fn show_shared_x_axis(
                     );
                 }
             }
+            SharedXDrag::ResizeStart | SharedXDrag::ResizeEnd => {
+                if let Some(range) = resized_shared_x_view(
+                    model.x_scale,
+                    full_domain,
+                    current,
+                    drag == SharedXDrag::ResizeStart,
+                    fraction,
+                ) {
+                    set_shared_x_view(
+                        &mut state.ui.results,
+                        model.analysis_key,
+                        pane_count,
+                        Some(range),
+                    );
+                }
+            }
             SharedXDrag::CursorA | SharedXDrag::CursorB => {
-                let x = model
-                    .x_scale
-                    .denormalize(fraction, full_domain.0, full_domain.1);
+                // A flag is anchored to what the panes show, so its drag
+                // converts through the viewport rather than the full sweep.
+                let view_fraction = f64::from(
+                    ((pointer.x - plot_left) / (plot_right - plot_left).max(1.0)).clamp(0.0, 1.0),
+                );
+                let x = model.x_scale.denormalize(view_fraction, current.0, current.1);
                 if !cursor_owner && !linked_cursor {
                     state.ui.results.clear_cursors();
                     state.ui.results.cursor_strip = Some(model.analysis_index);
@@ -2945,7 +3156,9 @@ fn show_shared_x_axis(
                         state.ui.results.cursor_a_anchor = None;
                     }
                     SharedXDrag::CursorB => state.ui.results.cursors.b = Some(x),
-                    SharedXDrag::Viewport => {}
+                    SharedXDrag::Viewport
+                    | SharedXDrag::ResizeStart
+                    | SharedXDrag::ResizeEnd => {}
                 }
             }
         }
@@ -2954,8 +3167,21 @@ fn show_shared_x_axis(
         ui.memory_mut(|memory| memory.data.remove::<SharedXDrag>(drag_id));
     }
 
+    if response.hovered()
+        && let Some(pointer) = response.hover_pos()
+    {
+        ui.ctx().set_cursor_icon(
+            if handle_at(pointer).is_some() || flag_at(pointer).is_some() {
+                egui::CursorIcon::ResizeHorizontal
+            } else if lane_band.contains(pointer.y) {
+                egui::CursorIcon::Grab
+            } else {
+                egui::CursorIcon::Default
+            },
+        );
+    }
+
     if response.clicked()
-        && !fit.clicked()
         && let Some(pointer) = response.interact_pointer_pos()
         && track.contains(pointer)
         && !viewport.contains(pointer)
@@ -3042,11 +3268,11 @@ fn show_shared_x_axis(
         }
     }
 
-    if fit.clicked() || response.double_clicked() {
+    if response.double_clicked() {
         set_shared_x_view(&mut state.ui.results, model.analysis_key, pane_count, None);
     }
     response.on_hover_text(
-        "Shared X overview — drag the viewport, click to recenter, wheel to zoom, drag A/B, F to fit",
+        "Shared X overview — drag the window or its edges, click to recenter, wheel to zoom, drag A/B, F to fit",
     );
 }
 
@@ -3086,11 +3312,12 @@ fn show_strip_plot(
             );
             ui.painter().rect_filled(seam, 0.0, t.color.canvas_grid);
         }
+        let pane_height = geometry.pane_height(ordinal, count);
         ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), geometry.pane_height),
+            egui::vec2(ui.available_width(), pane_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                ui.set_height(geometry.pane_height);
+                ui.set_height(pane_height);
                 show_unit_pane(
                     ui,
                     state,

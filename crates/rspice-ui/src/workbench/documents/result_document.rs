@@ -64,7 +64,10 @@ pub(crate) fn open_create_document(app: &mut RSpiceApp) {
 mod strip;
 mod waves;
 pub(crate) use waves::copy_cursor_text;
-pub(crate) use waves::{active_pane_facts, browser_signal_is_current, browser_signal_unit};
+pub(crate) use waves::{
+    SharedXStatus, active_pane_facts, active_shared_x_status, browser_signal_is_current,
+    browser_signal_unit,
+};
 
 pub(crate) use waves::toggle_visibility;
 
@@ -267,7 +270,7 @@ impl ResultViewer {
     const DATASET_NATIVE: [ResultViewer; 1] = [ResultViewer::Manifest];
 
     /// Human-readable document-tab label from the upgraded Results mockup.
-    const fn tab_label(self) -> &'static str {
+    pub(crate) const fn tab_label(self) -> &'static str {
         match self {
             ResultViewer::Waves => "Waves",
             ResultViewer::DcSweep => "DC Sweep",
@@ -2256,24 +2259,25 @@ fn show_wave_instrument(ui: &mut Ui, state: &mut AppState) {
                                 state.ui.results.plot_tool = ResultPlotTool::HorizontalCursor;
                             }
 
+                            // Box zoom and pan are gestures, so they carry
+                            // glyphs; the lettered controls on this bar are
+                            // the named modes beside them.
                             instrument_separator(ui);
-                            if instrument_control(
-                                ui,
-                                "BOX",
-                                state.ui.results.plot_tool == ResultPlotTool::BoxZoom,
-                                "Box zoom - drag a region",
-                            )
-                            .clicked()
+                            if IconButton::new(Icon::BoxZoom)
+                                .side(RESULT_INSTRUMENT_CONTROL_HEIGHT)
+                                .on(state.ui.results.plot_tool == ResultPlotTool::BoxZoom)
+                                .tooltip("Box zoom - drag a region")
+                                .show(ui)
+                                .clicked()
                             {
                                 state.ui.results.plot_tool = ResultPlotTool::BoxZoom;
                             }
-                            if instrument_control(
-                                ui,
-                                "PAN",
-                                state.ui.results.plot_tool == ResultPlotTool::Pan,
-                                "Pan viewport - drag the plot",
-                            )
-                            .clicked()
+                            if IconButton::new(Icon::Pan)
+                                .side(RESULT_INSTRUMENT_CONTROL_HEIGHT)
+                                .on(state.ui.results.plot_tool == ResultPlotTool::Pan)
+                                .tooltip("Pan viewport - drag the plot")
+                                .show(ui)
+                                .clicked()
                             {
                                 state.ui.results.plot_tool = ResultPlotTool::Pan;
                             }

@@ -29,7 +29,18 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             let bar_width = ui.available_width();
             let height = ui.available_height();
             let check = check_summary(app);
-            let engineering = engineering_context_summary(app);
+            // The Results workspace reports the view its instrument shows:
+            // the visible X interval in the coordinate segment, and that
+            // interval's magnification in the zoom chip beside it.
+            let results_view = (app.state.workbench.workspace == Workspace::Results)
+                .then(|| {
+                    crate::workbench::documents::result_document::active_shared_x_status(
+                        &t,
+                        &mut app.state,
+                    )
+                })
+                .flatten();
+            let engineering = engineering_context_summary(app, results_view.as_ref());
             let selection = selection_summary(app);
             let revision = revision_status_summary(
                 app.state.project_lifecycle.project_open,
@@ -42,7 +53,16 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             } else {
                 Command::ZoomOneToOne
             };
-            let zoom = format!("{}%", (zoom_factor(app) * 100.0).round());
+            let zoom = if let Some(view) = results_view.as_ref() {
+                format_plot_zoom(view.zoom)
+            } else if app.state.workbench.workspace == Workspace::Results {
+                // A result sheet with nothing plotted still reports in the
+                // instrument's unit rather than flipping the chip to a
+                // canvas percentage it never uses.
+                format_plot_zoom(1.0)
+            } else {
+                format!("{}%", (zoom_factor(app) * 100.0).round())
+            };
             let (engine, engine_color) = if app.state.simulation.is_running {
                 (
                     format!(
@@ -345,7 +365,20 @@ fn empty_schematic_cursor_summary(state: &crate::workbench::app_state::AppState)
     format!("x — · y — {}", unit.suffix())
 }
 
-fn engineering_context_summary(app: &RSpiceApp) -> String {
+/// The zoom chip's waveform form: whole numbers once the magnification is
+/// deep, one decimal while it is shallow enough for the fraction to matter.
+fn format_plot_zoom(zoom: f64) -> String {
+    if zoom >= 10.0 {
+        return format!("{zoom:.0}×");
+    }
+    let text = format!("{zoom:.1}");
+    format!("{}×", text.strip_suffix(".0").unwrap_or(text.as_str()))
+}
+
+fn engineering_context_summary(
+    app: &RSpiceApp,
+    results_view: Option<&crate::workbench::documents::result_document::SharedXStatus>,
+) -> String {
     if !app.state.project_lifecycle.project_open {
         return "No project loaded".to_owned();
     }
@@ -389,7 +422,7 @@ fn engineering_context_summary(app: &RSpiceApp) -> String {
                 },
             )
         }
-        Workspace::Results => results_cursor_summary(app),
+        Workspace::Results => results_view_summary(app, results_view),
         Workspace::Project
         | Workspace::Simulate
         | Workspace::Verify
@@ -400,26 +433,26 @@ fn engineering_context_summary(app: &RSpiceApp) -> String {
     }
 }
 
-fn results_cursor_summary(app: &RSpiceApp) -> String {
-    let cursors = app.state.ui.results.cursors;
-    match (cursors.a, cursors.b) {
-        (Some(a), Some(b)) => format!(
-            "A {} · B {} · Δ {}",
-            crate::ui::plot::fmt_si(a, "", 3),
-            crate::ui::plot::fmt_si(b, "", 3),
-            crate::ui::plot::fmt_si(b - a, "", 3)
-        ),
-        (Some(a), None) => format!("A {} · B —", crate::ui::plot::fmt_si(a, "", 3)),
-        (None, _) => app
-            .state
-            .simulation
-            .active_run_idx
-            .and_then(|index| app.state.simulation.runs.get(index))
-            .map_or_else(
-                || "No result dataset selected".to_owned(),
-                |run| format!("{} · immutable dataset", run.label),
-            ),
+/// The Results coordinate segment.
+///
+/// The instrument bar already carries the A/B cursor readout, so this states
+/// the interval the panes are showing. Sheets with no plotted interval — a
+/// table, or a run that has not been opened yet — name the dataset instead.
+fn results_view_summary(
+    app: &RSpiceApp,
+    results_view: Option<&crate::workbench::documents::result_document::SharedXStatus>,
+) -> String {
+    if let Some(view) = results_view {
+        return view.span.clone();
     }
+    app.state
+        .simulation
+        .active_run_idx
+        .and_then(|index| app.state.simulation.runs.get(index))
+        .map_or_else(
+            || "No result dataset selected".to_owned(),
+            |run| format!("{} · immutable dataset", run.label),
+        )
 }
 
 fn selection_summary(app: &RSpiceApp) -> String {
@@ -467,10 +500,10 @@ fn selection_summary(app: &RSpiceApp) -> String {
     }
 }
 
+/// The canvas zoom behind the percentage chip. The Results workspace never
+/// reaches here — its chip reports plot magnification instead.
 fn zoom_factor(app: &RSpiceApp) -> f64 {
-    if app.state.workbench.workspace == Workspace::Results {
-        1.0
-    } else if app.state.workbench.workspace == Workspace::Design
+    if app.state.workbench.workspace == Workspace::Design
         && app.state.workspace.active_view_type() == crate::state::ViewType::Symbol
     {
         f64::from(app.state.ui.symbol.zoom)
@@ -748,6 +781,15 @@ fn platform_label() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_zoom_chip_drops_the_decimal_only_once_magnification_is_deep() {
+        assert_eq!(format_plot_zoom(1.0), "1×");
+        assert_eq!(format_plot_zoom(2.5), "2.5×");
+        assert_eq!(format_plot_zoom(9.94), "9.9×");
+        assert_eq!(format_plot_zoom(10.0), "10×");
+        assert_eq!(format_plot_zoom(137.4), "137×");
+    }
 
     #[test]
     fn dense_status_metadata_follows_the_mockup_nine_hundred_pixel_cutoff() {

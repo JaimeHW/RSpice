@@ -47,6 +47,10 @@ pub enum Icon {
     ZoomOut,
     /// Zoom to fit.
     ZoomFit,
+    /// Box-zoom tool: drag a region to magnify it.
+    BoxZoom,
+    /// Pan tool: drag the viewport.
+    Pan,
     /// Grid toggle (line grid / generic grid).
     Grid,
     /// Refresh or replace the current identity.
@@ -107,6 +111,8 @@ impl Icon {
             Self::ZoomIn => "Zoom in",
             Self::ZoomOut => "Zoom out",
             Self::ZoomFit => "Zoom to fit",
+            Self::BoxZoom => "Box zoom",
+            Self::Pan => "Pan viewport",
             Self::Grid => "Grid",
             Self::Refresh => "Refresh",
             Self::Check => "Run checks",
@@ -178,6 +184,21 @@ impl Icon {
                 Line(&[[20.0, 9.0], [20.0, 4.0], [15.0, 4.0]]),
                 Line(&[[4.0, 15.0], [4.0, 20.0], [9.0, 20.0]]),
                 Line(&[[20.0, 15.0], [20.0, 20.0], [15.0, 20.0]]),
+            ],
+            // A marquee holding the region it captured: the outline is the
+            // rubber band, the solid block the span it magnifies to.
+            Icon::BoxZoom => &[
+                Poly(&[[4.0, 5.0], [20.0, 5.0], [20.0, 19.0], [4.0, 19.0]]),
+                Fill(&[[8.5, 9.0], [15.5, 9.0], [15.5, 15.0], [8.5, 15.0]]),
+            ],
+            // The four-way move cross.
+            Icon::Pan => &[
+                Line(&[[12.0, 3.5], [12.0, 20.5]]),
+                Line(&[[3.5, 12.0], [20.5, 12.0]]),
+                Line(&[[9.0, 6.5], [12.0, 3.5], [15.0, 6.5]]),
+                Line(&[[9.0, 17.5], [12.0, 20.5], [15.0, 17.5]]),
+                Line(&[[6.5, 9.0], [3.5, 12.0], [6.5, 15.0]]),
+                Line(&[[17.5, 9.0], [20.5, 12.0], [17.5, 15.0]]),
             ],
             Icon::Grid => &[
                 Line(&[[4.0, 9.0], [20.0, 9.0]]),
@@ -355,6 +376,8 @@ mod tests {
             Icon::ZoomIn,
             Icon::ZoomOut,
             Icon::ZoomFit,
+            Icon::BoxZoom,
+            Icon::Pan,
             Icon::Grid,
             Icon::Refresh,
             Icon::Check,
