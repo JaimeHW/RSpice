@@ -37,12 +37,11 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     handle_veriloga_file_drop(ui.ctx(), app);
     crate::workbench::documents::code_workspace::poll_veriloga_import(app);
     crate::workbench::documents::code_workspace::poll_veriloga_compile(app);
-    if std::mem::take(&mut app.state.ui.code_workspace.veriloga.compile_requested) {
-        if let Err(error) =
+    if std::mem::take(&mut app.state.ui.code_workspace.veriloga.compile_requested)
+        && let Err(error) =
             crate::workbench::documents::code_workspace::open_veriloga_compile_dialog(app)
-        {
-            app.state.push_user_message(ConsoleMessage::error(error));
-        }
+    {
+        app.state.push_user_message(ConsoleMessage::error(error));
     }
     compile_dialog_window(ui.ctx(), app);
     let t = Tokens::get(ui.ctx());
@@ -81,21 +80,19 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                         if Button::new(&messages.text(MessageId::CodeSourceCreateWorkspace))
                             .show(ui)
                             .clicked()
-                        {
-                            if let Err(error) = crate::workbench::documents::code_workspace::open_source_workspace_dialog(
+                            && let Err(error) = crate::workbench::documents::code_workspace::open_source_workspace_dialog(
                                 app,
                                 crate::state::ProjectSourceLanguage::VerilogA,
-                            ) {
-                                app.state.push_user_message(ConsoleMessage::error(error));
-                            }
+                            )
+                        {
+                            app.state.push_user_message(ConsoleMessage::error(error));
                         }
                         if Button::new(&messages.text(MessageId::CodeSourceImportRoot))
                             .show(ui)
                             .clicked()
+                            && let Err(error) = crate::workbench::documents::code_workspace::request_veriloga_root_import(app)
                         {
-                            if let Err(error) = crate::workbench::documents::code_workspace::request_veriloga_root_import(app) {
-                                app.state.push_user_message(ConsoleMessage::error(error));
-                            }
+                            app.state.push_user_message(ConsoleMessage::error(error));
                         }
                     },
                 );
@@ -239,7 +236,7 @@ fn compile_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                         compile_review_row(
                             ui,
                             messages.text(MessageId::VerilogACompileReviewPackage),
-                            &format!("{} {}", draft.package_name, draft.package_version),
+                            format!("{} {}", draft.package_name, draft.package_version),
                         );
                         let entry_module = if draft.selected_module.is_empty() {
                             messages.text(MessageId::VerilogACompileReviewAutomaticModule)
@@ -259,17 +256,17 @@ fn compile_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                         compile_review_row(
                             ui,
                             messages.text(MessageId::VerilogACompileReviewRevision),
-                            &draft.bundle_revision.to_string(),
+                            draft.bundle_revision.to_string(),
                         );
                         compile_review_row(
                             ui,
                             messages.text(MessageId::VerilogACompileReviewClosureDigest),
-                            &draft.closure_digest.to_string(),
+                            draft.closure_digest.to_string(),
                         );
                         compile_review_row(
                             ui,
                             messages.text(MessageId::VerilogACompileReviewProfileDigest),
-                            &draft.profile_digest.to_string(),
+                            draft.profile_digest.to_string(),
                         );
                     },
                 );
@@ -300,7 +297,7 @@ fn compile_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                             compile_review_row(
                                 ui,
                                 messages.text(MessageId::VerilogACompileReviewDefine),
-                                &format!("{name}={value}"),
+                                format!("{name}={value}"),
                             );
                         }
                         for name in &draft.undefinitions {
@@ -434,10 +431,9 @@ fn compile_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                     app,
                     ctx.clone(),
                 )
+                && let Some(dialog) = app.state.ui.code_workspace.veriloga.compile_dialog.as_mut()
             {
-                if let Some(dialog) = app.state.ui.code_workspace.veriloga.compile_dialog.as_mut() {
-                    dialog.error = Some(error);
-                }
+                dialog.error = Some(error);
             }
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => {

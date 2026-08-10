@@ -37,7 +37,7 @@ struct ActiveRuntimeLimits {
 
 enum RuntimeDiscovery {
     Pending(Receiver<Result<VerifiedRuntime, String>>),
-    Available(VerifiedRuntime),
+    Available(Box<VerifiedRuntime>),
     Unavailable(String),
 }
 
@@ -116,7 +116,7 @@ impl NativeAutomationRuntime {
             return;
         };
         let update = match receiver.try_recv() {
-            Ok(Ok(runtime)) => Some(RuntimeDiscovery::Available(runtime)),
+            Ok(Ok(runtime)) => Some(RuntimeDiscovery::Available(Box::new(runtime))),
             Ok(Err(error)) => Some(RuntimeDiscovery::Unavailable(error)),
             Err(TryRecvError::Disconnected) => Some(RuntimeDiscovery::Unavailable(
                 "managed-runtime verification ended without a result".to_owned(),
@@ -322,15 +322,14 @@ impl NativeAutomationRuntime {
                                     break;
                                 }
                             }
-                            rspice_automation_protocol::RuntimeEvent::State { state, .. }
-                                if matches!(
-                                    state,
+                            rspice_automation_protocol::RuntimeEvent::State {
+                                state:
                                     rspice_automation_protocol::RuntimeState::Cancelled
-                                        | rspice_automation_protocol::RuntimeState::Completed
-                                        | rspice_automation_protocol::RuntimeState::Failed
-                                        | rspice_automation_protocol::RuntimeState::Terminated
-                                ) =>
-                            {
+                                    | rspice_automation_protocol::RuntimeState::Completed
+                                    | rspice_automation_protocol::RuntimeState::Failed
+                                    | rspice_automation_protocol::RuntimeState::Terminated,
+                                ..
+                            } => {
                                 worker.clear_wall_time_limit();
                                 self.active_limits = None;
                             }

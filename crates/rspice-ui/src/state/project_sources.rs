@@ -1116,7 +1116,6 @@ impl ProjectSourceBundle {
         Ok(sequence)
     }
 
-    #[must_use]
     pub fn paths_for_role(&self, role: ProjectSourceRole) -> impl Iterator<Item = &str> {
         self.roles
             .iter()

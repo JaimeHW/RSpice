@@ -142,17 +142,16 @@ pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
         .clone()
     {
         if app.state.simulation.is_running || app.state.simulation.trigger_simulation {
-            if let Some(session_id) = pending.session_id {
-                if let Err(error) = app
+            if let Some(session_id) = pending.session_id
+                && let Err(error) = app
                     .automation_runtime
                     .send_request(rspice_automation_protocol::RuntimeRequest::Cancel { session_id })
-                {
-                    runtime_protocol_failure(
-                        app,
-                        &format!("Could not cancel the managed Python session: {error}"),
-                    );
-                    return;
-                }
+            {
+                runtime_protocol_failure(
+                    app,
+                    &format!("Could not cancel the managed Python session: {error}"),
+                );
+                return;
             }
         } else {
             let _ = app.automation_runtime.terminate();
@@ -1342,10 +1341,11 @@ fn begin_managed_python_execution(
         );
         return;
     }
-    let breakpoints = mode
-        .is_debug()
-        .then(|| runtime_breakpoints(app, &snapshot))
-        .unwrap_or_default();
+    let breakpoints = if mode.is_debug() {
+        runtime_breakpoints(app, &snapshot)
+    } else {
+        Vec::new()
+    };
     let exception_policy = if mode.is_debug() {
         runtime_exception_policy(app)
     } else {
@@ -1467,10 +1467,11 @@ fn begin_managed_python_execution(
         );
         return;
     }
-    let breakpoints = mode
-        .is_debug()
-        .then(|| runtime_breakpoints(app, &snapshot))
-        .unwrap_or_default();
+    let breakpoints = if mode.is_debug() {
+        runtime_breakpoints(app, &snapshot)
+    } else {
+        Vec::new()
+    };
     let exception_policy = if mode.is_debug() {
         runtime_exception_policy(app)
     } else {
@@ -2451,11 +2452,9 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
             "none" | "nominal"
         )
     });
-    if corners_enabled {
-        if let Err(error) = require_corner_matrix(app) {
-            fail(app, &error);
-            return;
-        }
+    if corners_enabled && let Err(error) = require_corner_matrix(app) {
+        fail(app, &error);
+        return;
     }
     let baseline_run = match baseline_run(app, plan_id) {
         Ok(run) => run,

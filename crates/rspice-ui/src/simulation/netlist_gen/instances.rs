@@ -857,11 +857,14 @@ impl<'a> NetlistGenerator<'a> {
                 | ComponentType::VoltageSourceExp
                 | ComponentType::VoltageSourceSffm
         );
-        let noise_suffix = params
+        let noise_suffix = if params
             .get("isnoisy")
             .is_some_and(|value| source_boolean_is_false(value))
-            .then_some(" NOISY=0")
-            .unwrap_or("");
+        {
+            " NOISY=0"
+        } else {
+            ""
+        };
 
         let mut positive_node = node_names[0].as_str();
         let internal_node;

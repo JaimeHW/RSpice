@@ -38,153 +38,149 @@ fn failure_case(id: &str, deck: &str, parameters: Vec<Parameter>, code: &'static
 }
 
 pub fn drafts() -> Vec<CaseDraft> {
-    let mut drafts = Vec::new();
-
-    // Malformed netlists must fail as parse errors, never as solver noise.
-    // (A resistor line with NO value at all is deliberately absent here:
-    // the parser currently accepts it and simulates a substituted value,
-    // an engine leniency defect tracked separately. These decks are
-    // malformed in ways no reading can accept.)
-    drafts.push(failure_case(
-        "fail.parse.001",
-        "* unterminated source function\n\
-         v1 in 0 pulse(0 5\n\
-         r1 in 0 1k\n\
-         .op\n\
-         .end\n",
-        ohm_parameter(1e3),
-        "netlist.parse_error",
-    ));
-    // An undefined model reference resolves at circuit construction, not
-    // in the grammar, so its classification is the circuit-error code.
-    drafts.push(failure_case(
-        "fail.model.001",
-        "* resistor bound to a model that is never defined\n\
-         v1 in 0 dc 5\n\
-         r1 in out banana\n\
-         .op\n\
-         .end\n",
-        ohm_parameter(0.0),
-        "engine.circuit_error",
-    ));
-    drafts.push(failure_case(
-        "fail.parse.003",
-        "* voltage source with a missing node\n\
-         v1 in\n\
-         r1 in 0 2.2k\n\
-         .op\n\
-         .end\n",
-        ohm_parameter(2.2e3),
-        "netlist.parse_error",
-    ));
-
-    // A deck whose directives do not include the requested class.
-    drafts.push(failure_case(
-        "fail.directive.001",
-        "* transient-only deck submitted for an operating point\n\
-         v1 in 0 dc 5\n\
-         r1 in 0 3.3k\n\
-         .tran 1u 10u\n\
-         .end\n",
-        ohm_parameter(3.3e3),
-        "analysis.directive_missing",
-    ));
-    drafts.push(failure_case(
-        "fail.directive.002",
-        "* ac-only deck submitted for an operating point\n\
-         v1 in 0 dc 0 ac 1\n\
-         r1 in 0 4.7k\n\
-         .ac dec 10 10 1k\n\
-         .end\n",
-        ohm_parameter(4.7e3),
-        "analysis.directive_missing",
-    ));
-    drafts.push(failure_case(
-        "fail.directive.003",
-        "* deck with no analysis directive at all\n\
-         v1 in 0 dc 5\n\
-         r1 in 0 5.6k\n\
-         .end\n",
-        ohm_parameter(5.6e3),
-        "analysis.directive_missing",
-    ));
-
-    drafts.push(failure_case(
-        "fail.directive.004",
-        "* noise-only deck submitted for an operating point\n\
-         v1 in 0 dc 0 ac 1\n\
-         r1 in out 9.1k\n\
-         r2 out 0 9.1k\n\
-         .noise v(out) v1 lin 3 100 10000\n\
-         .end\n",
-        ohm_parameter(9.1e3),
-        "analysis.directive_missing",
-    ));
-
-    // Structurally unsolvable circuits: the classification must stay a
-    // bounded engine code, not a crash or a fabricated result.
-    //
-    // This first one is the subtlest of the family. Nothing about it is
-    // malformed and it converges immediately; the node simply has no DC path
-    // to ground, so its voltage is whatever the solver's conditioning shunt
-    // makes it -- a teravolt, at the shunt sizes in use. A run that reports
-    // that number as an operating point is indistinguishable, downstream,
-    // from one that measured something real, which is why the engine has to
-    // refuse it rather than converge on it.
-    drafts.push(failure_case(
-        "fail.singular.001",
-        "* current source into a node with no dc path to ground\n\
-         i1 0 out dc 1m\n\
-         c1 out 0 1u\n\
-         .op\n\
-         .end\n",
-        vec![Parameter {
-            name: "i1",
-            unit: "A",
-            value: 1e-3,
-        }],
-        "engine.circuit_error",
-    ));
-    drafts.push(failure_case(
-        "fail.singular.002",
-        "* two voltage sources forcing different values on one node\n\
-         v1 a 0 dc 5\n\
-         v2 a 0 dc 3\n\
-         r1 a 0 6.8k\n\
-         .op\n\
-         .end\n",
-        ohm_parameter(6.8e3),
-        "engine.circuit_error",
-    ));
-    drafts.push(failure_case(
-        "fail.singular.003",
-        "* inductor shorting a voltage source at dc\n\
-         v1 in 0 dc 5\n\
-         l1 in 0 10m\n\
-         .op\n\
-         .end\n",
-        vec![Parameter {
-            name: "l1",
-            unit: "H",
-            value: 1e-2,
-        }],
-        "engine.circuit_error",
-    ));
-
-    // A voltage loop whose potentials cannot close: five volts around one
-    // side, seven around the other.
-    drafts.push(failure_case(
-        "fail.singular.004",
-        "* inconsistent voltage-source loop\n\
-         v1 a 0 dc 5\n\
-         v2 a b dc 3\n\
-         v3 b 0 dc 4\n\
-         r1 a 0 8.2k\n\
-         .op\n\
-         .end\n",
-        ohm_parameter(8.2e3),
-        "engine.circuit_error",
-    ));
+    let mut drafts = vec![
+        // Malformed netlists must fail as parse errors, never as solver noise.
+        // (A resistor line with NO value at all is deliberately absent here:
+        // the parser currently accepts it and simulates a substituted value,
+        // an engine leniency defect tracked separately. These decks are
+        // malformed in ways no reading can accept.)
+        failure_case(
+            "fail.parse.001",
+            "* unterminated source function\n\
+             v1 in 0 pulse(0 5\n\
+             r1 in 0 1k\n\
+             .op\n\
+             .end\n",
+            ohm_parameter(1e3),
+            "netlist.parse_error",
+        ),
+        // An undefined model reference resolves at circuit construction, not
+        // in the grammar, so its classification is the circuit-error code.
+        failure_case(
+            "fail.model.001",
+            "* resistor bound to a model that is never defined\n\
+             v1 in 0 dc 5\n\
+             r1 in out banana\n\
+             .op\n\
+             .end\n",
+            ohm_parameter(0.0),
+            "engine.circuit_error",
+        ),
+        failure_case(
+            "fail.parse.003",
+            "* voltage source with a missing node\n\
+             v1 in\n\
+             r1 in 0 2.2k\n\
+             .op\n\
+             .end\n",
+            ohm_parameter(2.2e3),
+            "netlist.parse_error",
+        ),
+        // A deck whose directives do not include the requested class.
+        failure_case(
+            "fail.directive.001",
+            "* transient-only deck submitted for an operating point\n\
+             v1 in 0 dc 5\n\
+             r1 in 0 3.3k\n\
+             .tran 1u 10u\n\
+             .end\n",
+            ohm_parameter(3.3e3),
+            "analysis.directive_missing",
+        ),
+        failure_case(
+            "fail.directive.002",
+            "* ac-only deck submitted for an operating point\n\
+             v1 in 0 dc 0 ac 1\n\
+             r1 in 0 4.7k\n\
+             .ac dec 10 10 1k\n\
+             .end\n",
+            ohm_parameter(4.7e3),
+            "analysis.directive_missing",
+        ),
+        failure_case(
+            "fail.directive.003",
+            "* deck with no analysis directive at all\n\
+             v1 in 0 dc 5\n\
+             r1 in 0 5.6k\n\
+             .end\n",
+            ohm_parameter(5.6e3),
+            "analysis.directive_missing",
+        ),
+        failure_case(
+            "fail.directive.004",
+            "* noise-only deck submitted for an operating point\n\
+             v1 in 0 dc 0 ac 1\n\
+             r1 in out 9.1k\n\
+             r2 out 0 9.1k\n\
+             .noise v(out) v1 lin 3 100 10000\n\
+             .end\n",
+            ohm_parameter(9.1e3),
+            "analysis.directive_missing",
+        ),
+        // Structurally unsolvable circuits: the classification must stay a
+        // bounded engine code, not a crash or a fabricated result.
+        //
+        // This first one is the subtlest of the family. Nothing about it is
+        // malformed and it converges immediately; the node simply has no DC path
+        // to ground, so its voltage is whatever the solver's conditioning shunt
+        // makes it -- a teravolt, at the shunt sizes in use. A run that reports
+        // that number as an operating point is indistinguishable, downstream,
+        // from one that measured something real, which is why the engine has to
+        // refuse it rather than converge on it.
+        failure_case(
+            "fail.singular.001",
+            "* current source into a node with no dc path to ground\n\
+             i1 0 out dc 1m\n\
+             c1 out 0 1u\n\
+             .op\n\
+             .end\n",
+            vec![Parameter {
+                name: "i1",
+                unit: "A",
+                value: 1e-3,
+            }],
+            "engine.circuit_error",
+        ),
+        failure_case(
+            "fail.singular.002",
+            "* two voltage sources forcing different values on one node\n\
+             v1 a 0 dc 5\n\
+             v2 a 0 dc 3\n\
+             r1 a 0 6.8k\n\
+             .op\n\
+             .end\n",
+            ohm_parameter(6.8e3),
+            "engine.circuit_error",
+        ),
+        failure_case(
+            "fail.singular.003",
+            "* inductor shorting a voltage source at dc\n\
+             v1 in 0 dc 5\n\
+             l1 in 0 10m\n\
+             .op\n\
+             .end\n",
+            vec![Parameter {
+                name: "l1",
+                unit: "H",
+                value: 1e-2,
+            }],
+            "engine.circuit_error",
+        ),
+        // A voltage loop whose potentials cannot close: five volts around one
+        // side, seven around the other.
+        failure_case(
+            "fail.singular.004",
+            "* inconsistent voltage-source loop\n\
+             v1 a 0 dc 5\n\
+             v2 a b dc 3\n\
+             v3 b 0 dc 4\n\
+             r1 a 0 8.2k\n\
+             .op\n\
+             .end\n",
+            ohm_parameter(8.2e3),
+            "engine.circuit_error",
+        ),
+    ];
 
     // Over-budget transient runs: stop/tmax puts the accepted-sample count
     // past the two-million ceiling whatever the step controller does.

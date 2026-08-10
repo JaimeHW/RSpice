@@ -491,7 +491,7 @@ fn format_builtin_xspice_port(
             nodes.len()
         ));
     }
-    if nodes.len() % element_width != 0 {
+    if !nodes.len().is_multiple_of(element_width) {
         return Err(format!(
             "requires terminal groups of {element_width}, got {}",
             nodes.len()

@@ -3762,13 +3762,12 @@ mod tests {
         assert!(review.dialect_qualification().is_err());
         assert!(!review.can_commit());
 
-        for dialect in [NetlistSourceDialect::Unknown] {
-            let review = state.ui.netlist.import_review.as_mut().unwrap();
-            review.selected_dialect = dialect;
-            review.compatibility_accepted = true;
-            assert!(review.dialect_qualification().is_err(), "{dialect:?}");
-            assert!(!review.can_commit(), "{dialect:?}");
-        }
+        let dialect = NetlistSourceDialect::Unknown;
+        let review = state.ui.netlist.import_review.as_mut().unwrap();
+        review.selected_dialect = dialect;
+        review.compatibility_accepted = true;
+        assert!(review.dialect_qualification().is_err(), "{dialect:?}");
+        assert!(!review.can_commit(), "{dialect:?}");
 
         let review = state.ui.netlist.import_review.as_mut().unwrap();
         review.selected_dialect = NetlistSourceDialect::Pspice;

@@ -355,6 +355,10 @@ mod tests {
                 let port = listener.local_addr().expect("address").port();
                 port_sender.send(port).expect("port");
                 let (stream, _) = listener.accept().await.expect("accept");
+                #[expect(
+                    clippy::result_large_err,
+                    reason = "tungstenite's handshake Callback fixes the Err type as ErrorResponse"
+                )]
                 let callback = |request: &ServerRequest, mut response: ServerResponse| {
                     let offer = request
                         .headers()
