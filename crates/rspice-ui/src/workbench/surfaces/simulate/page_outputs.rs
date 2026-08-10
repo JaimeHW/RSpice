@@ -14,7 +14,7 @@ use crate::state::{
     SavedOutput, SavedOutputCompatibility, SavedOutputPolicy, SavedOutputPrecision,
     SavedOutputStreaming,
 };
-use crate::ui::widgets::{Button, select};
+use crate::ui::widgets::{Button, mono_input, select};
 use crate::workbench::RSpiceApp;
 
 use super::page_kit::{
@@ -142,6 +142,12 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
         app.state.workbench.selected_saved_output = None;
     }
     if let Some(name) = pick {
+        // A draft belongs to the row it was typed into. Selecting another row
+        // must not carry a half-typed name or expression onto it.
+        if app.state.workbench.selected_saved_output.as_deref() != Some(name.as_str()) {
+            app.state.workbench.saved_output_name_draft = None;
+            app.state.workbench.saved_output_expression_draft = None;
+        }
         app.state.workbench.selected_saved_output = Some(name);
     }
 }
@@ -208,16 +214,44 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     let current_scope = scope_label(&output.compatible_analyses, &scopes);
     let scope_labels: Vec<String> = scopes.iter().map(|(label, _)| label.clone()).collect();
 
+    let mut name = app
+        .state
+        .workbench
+        .saved_output_name_draft
+        .clone()
+        .unwrap_or_else(|| output.name.clone());
+    let mut expression = app
+        .state
+        .workbench
+        .saved_output_expression_draft
+        .clone()
+        .unwrap_or_else(|| output.source_expression.clone());
+
     // One `Cell` rather than four mutable captures: `field_pair` holds two
     // controls at once, and two closures cannot borrow the same slot mutably.
     let edit: std::cell::Cell<Option<OutputEdit>> = std::cell::Cell::new(None);
+    let released = std::cell::Cell::new(false);
     card(
         ui,
         &title,
         Some((output.kind.label(), Tone::Neutral)),
         |ui| {
             card_body(ui, |ui| {
-                rule_row(ui, "Expression", &output.source_expression);
+                // A mistyped node name is the most common thing wrong with a
+                // saved output, and re-authoring the whole contract to fix one
+                // character is not an edit path.
+                field_pair(
+                    ui,
+                    ("Name", &mut |ui: &mut Ui, width: f32| {
+                        released
+                            .set(released.get() | mono_input(ui, &mut name, width).lost_focus());
+                    }),
+                    Some(("Expression", &mut |ui: &mut Ui, width: f32| {
+                        released.set(
+                            released.get() | mono_input(ui, &mut expression, width).lost_focus(),
+                        );
+                    })),
+                );
                 field_pair(
                     ui,
                     ("Applies to", &mut |ui: &mut Ui, width: f32| {
@@ -288,6 +322,40 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     if let Some(edit) = edit.take() {
         let detail = edit.detail(&output.name, &scopes);
         replace_output(app, output.id, &detail, |target| edit.apply(target));
+        return;
+    }
+    if released.get() {
+        let renamed = name.trim() != output.name;
+        let rewritten = expression.trim() != output.source_expression;
+        if renamed || rewritten {
+            let detail = if renamed {
+                format!("Renamed saved output {} to {}.", output.name, name.trim())
+            } else {
+                format!(
+                    "Rewrote saved output {} as {}.",
+                    output.name,
+                    expression.trim()
+                )
+            };
+            let committed = replace_output(app, output.id, &detail, |target| {
+                target.name = name.trim().to_owned();
+                target.source_expression = expression.trim().to_owned();
+            });
+            // The registry selects by name, so a rename has to carry the
+            // selection with it or the record would deselect itself.
+            if committed && renamed {
+                app.state.workbench.selected_saved_output = Some(name.trim().to_owned());
+            }
+        }
+        app.state.workbench.saved_output_name_draft = None;
+        app.state.workbench.saved_output_expression_draft = None;
+        return;
+    }
+    if name != output.name {
+        app.state.workbench.saved_output_name_draft = Some(name);
+    }
+    if expression != output.source_expression {
+        app.state.workbench.saved_output_expression_draft = Some(expression);
     }
 }
 
@@ -353,14 +421,19 @@ fn compatibility_options(app: &RSpiceApp) -> Vec<(String, SavedOutputCompatibili
         ),
     ];
     if let Ok(plan) = app.state.sim_setup.stable_analysis_plan() {
-        options.extend(plan.instances().iter().enumerate().map(|(index, instance)| {
-            (
-                format!("Only #{} · {}", index + 1, instance.kind().code()),
-                SavedOutputCompatibility::SelectedAnalysis {
-                    analysis_id: instance.id(),
-                },
-            )
-        }));
+        options.extend(
+            plan.instances()
+                .iter()
+                .enumerate()
+                .map(|(index, instance)| {
+                    (
+                        format!("Only #{} · {}", index + 1, instance.kind().code()),
+                        SavedOutputCompatibility::SelectedAnalysis {
+                            analysis_id: instance.id(),
+                        },
+                    )
+                }),
+        );
     }
     options
 }
@@ -383,19 +456,23 @@ fn scope_label(
 }
 
 /// Replace one saved output as a single plan-configuration transaction.
+///
+/// Reports whether the change was adopted, so a caller that has to follow the
+/// record — a rename moving the registry selection — only does so when the
+/// plan actually took the edit.
 fn replace_output(
     app: &mut RSpiceApp,
     output_id: crate::product::SavedOutputId,
     detail: &str,
     apply: impl FnOnce(&mut SavedOutput),
-) {
+) -> bool {
     let Ok(plan_id) = app
         .state
         .sim_setup
         .stable_analysis_plan()
         .map(|plan| plan.id())
     else {
-        return;
+        return false;
     };
     let Some(mut replacement) = app
         .state
@@ -409,7 +486,7 @@ fn replace_output(
                 .cloned()
         })
     else {
-        return;
+        return false;
     };
     apply(&mut replacement);
 
@@ -429,8 +506,12 @@ fn replace_output(
             app.state.sim_setup = setup;
             app.invalidate_simulation_preflight();
             app.state.workbench.analysis_lifecycle_status = receipt.status_line();
+            true
         }
-        Err(error) => app.state.workbench.analysis_lifecycle_status = error,
+        Err(error) => {
+            app.state.workbench.analysis_lifecycle_status = error;
+            false
+        }
     }
 }
 
