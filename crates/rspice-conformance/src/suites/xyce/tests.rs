@@ -7202,6 +7202,52 @@ fn resistor_dtemp_fixture(
     (root, owner, reference, runner)
 }
 
+fn level2_diode_dtemp_fixture(
+    label: &str,
+    owner_source: &str,
+    reference_source: &str,
+) -> (PathBuf, XyceDeck, XyceDeck, XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-level2-diode-dtemp-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = root.join("Netlists/DTEMP");
+    fs::create_dir_all(&family).expect("create Level-2 diode DTEMP fixture directory");
+    let owner_path = family.join("Level2_Diode_DTEMP.cir");
+    let reference_path = family.join("Level2_Diode_Ref.cir");
+    fs::write(&owner_path, owner_source).expect("write Level-2 diode DTEMP owner fixture");
+    fs::write(&reference_path, reference_source)
+        .expect("write Level-2 diode TEMP reference fixture");
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        "Netlists/DTEMP/Level2_Diode_DTEMP.cir\trequires_upstream_wrapper\n",
+    )
+    .expect("write Level-2 diode DTEMP wrapper provenance");
+    fs::write(
+        root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[&format!(
+            "Netlists/DTEMP/Level2_Diode_Ref.cir\tNetlists/DTEMP/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_LEVEL2_DIODE_DTEMP_REFERENCE_CONTRACT}"
+        )]),
+    )
+    .expect("write Level-2 diode DTEMP exclusion provenance");
+    let owner = XyceDeck {
+        path: owner_path,
+        relative_path: "Netlists/DTEMP/Level2_Diode_DTEMP.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let reference = XyceDeck {
+        path: reference_path,
+        relative_path: "Netlists/DTEMP/Level2_Diode_Ref.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    (root, owner, reference, runner)
+}
+
 #[test]
 fn bug647_resistor_pair_is_manifest_owned_and_structurally_qualified() {
     let (root, owner, reference, runner) = bug647_resistor_fixture(
@@ -9184,6 +9230,270 @@ fn classic_mos_dtemp_provenance_rejects_candidate_mutation() {
             .is_err(),
         "any source mutation must fail the exact candidate-content census"
     );
+}
+
+#[test]
+fn level2_diode_dtemp_candidate_census_is_an_exact_manifest_bijection() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_root = workspace_root.join("tests/xyce");
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    let selected = runner
+        .discover_tests()
+        .iter()
+        .filter_map(|deck| {
+            runner
+                .level2_diode_dtemp_relational_contract(deck)
+                .map(|contract| {
+                    contract.unwrap_or_else(|error| {
+                        panic!("Level-2 diode DTEMP candidate failed qualification: {error}")
+                    });
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                })
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        selected,
+        BTreeSet::from([
+            XYCE_LEVEL2_DIODE_DTEMP_OWNER_RECORD.to_string(),
+            XYCE_LEVEL2_DIODE_DTEMP_REFERENCE_RECORD.to_string(),
+        ])
+    );
+    assert_eq!(selected.len(), XYCE_LEVEL2_DIODE_DTEMP_CANDIDATE_COUNT);
+}
+
+#[test]
+fn level2_diode_dtemp_snapshots_reject_semantic_mutations() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let owner = fs::read_to_string(corpus.join("Netlists/DTEMP/Level2_Diode_DTEMP.cir"))
+        .expect("read Level-2 diode DTEMP owner");
+    let reference = fs::read_to_string(corpus.join("Netlists/DTEMP/Level2_Diode_Ref.cir"))
+        .expect("read Level-2 diode TEMP reference");
+    let mutations = [
+        (
+            owner.replace("level=2", "level=1"),
+            reference.clone(),
+            XyceLevel2DiodeDtempRole::Owner,
+            "explicit model level",
+        ),
+        (
+            owner.replace("list -82 -2 45", "list -82 -1 45"),
+            reference.clone(),
+            XyceLevel2DiodeDtempRole::Owner,
+            "effective-temperature grid",
+        ),
+        (
+            owner.replace(".print tran V(2)", ".print tran V(1)"),
+            reference.clone(),
+            XyceLevel2DiodeDtempRole::Owner,
+            "ordered probe set",
+        ),
+        (
+            owner.replace("DTEMP=diodeDtemp", "TEMP=diodeDtemp"),
+            reference.clone(),
+            XyceLevel2DiodeDtempRole::Owner,
+            "TEMP-versus-DTEMP ownership",
+        ),
+        (
+            owner.clone(),
+            reference.replace(".tran 0 1 0 100m", ".tran 0 2 0 100m"),
+            XyceLevel2DiodeDtempRole::Reference,
+            "transient analysis domain",
+        ),
+    ];
+    for (mutated_owner, mutated_reference, role, reason) in mutations {
+        let (root, owner_deck, reference_deck, runner) =
+            level2_diode_dtemp_fixture(reason, &mutated_owner, &mutated_reference);
+        let (deck, purpose) = match role {
+            XyceLevel2DiodeDtempRole::Owner => (
+                owner_deck,
+                XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily,
+            ),
+            XyceLevel2DiodeDtempRole::Reference => {
+                (reference_deck, XyceStaticTranPlanPurpose::RelationalFamily)
+            }
+        };
+        let rejected = match runner.static_tran_plan_for_path_with_purpose(&deck.path, purpose) {
+            Err(_) => true,
+            Ok(plan) => match XyceTestRunner::parse_xyce_netlist(&plan.source, &deck.path) {
+                Err(_) => true,
+                Ok(netlist) => {
+                    XyceTestRunner::level2_diode_dtemp_snapshot(&plan, &netlist, role).is_err()
+                }
+            },
+        };
+        assert!(rejected, "{reason} mutation must fail closed");
+        fs::remove_dir_all(root).expect("remove Level-2 diode mutation fixture");
+    }
+}
+
+#[test]
+fn level2_diode_relational_admission_is_netlist_aware_and_fail_closed() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let path = corpus.join("Netlists/DTEMP/Level2_Diode_DTEMP.cir");
+    let owner = fs::read_to_string(&path).expect("read Level-2 diode DTEMP owner");
+    let admitted = |source: &str| {
+        let Ok(netlist) = XyceTestRunner::parse_xyce_netlist(source, &path) else {
+            return false;
+        };
+        let Some(diode) = netlist
+            .elements
+            .iter()
+            .find(|element| matches!(element.kind, ElementKind::Diode { .. }))
+        else {
+            return false;
+        };
+        XyceTestRunner::netlist_element_is_native_relational_level2_tbv_diode(&netlist, diode)
+    };
+
+    assert!(
+        admitted(&owner),
+        "the exact finite DTEMP owner must be admitted"
+    );
+    assert!(
+        admitted(
+            &owner
+                .replace("temp = 27.0", "temp = 100.0")
+                .replace("-82", "-300")
+        ),
+        "DTEMP=-300 C is a valid offset when circuit TEMP=100 C keeps the effective temperature at -200 C"
+    );
+    assert!(
+        admitted(&owner.replace("DTEMP=diodeDtemp", "TEMP=25")),
+        "one physically valid explicit TEMP remains in the native Level-2 envelope"
+    );
+    assert!(
+        !admitted(&owner.replace("DTEMP=diodeDtemp", "DTEMP=diodeDtemp TEMP=25")),
+        "simultaneous TEMP and DTEMP must fail closed"
+    );
+    assert!(
+        !admitted(&owner.replace("DTEMP=diodeDtemp", "DTEMP=diodeDtemp DTEMP=diodeDtemp")),
+        "repeated DTEMP must fail closed"
+    );
+    assert!(
+        !admitted(&owner.replace(
+            ".options device temp = 27.0",
+            ".options device temp = 27.0\n.options gmin=1e-12"
+        )),
+        "explicit GMIN remains outside the relational Level-2 envelope"
+    );
+    assert!(
+        !admitted(&owner.replace("temp = 27.0", "temp = -200.0")),
+        "circuit TEMP plus DTEMP below absolute zero must fail closed"
+    );
+}
+
+#[test]
+fn level2_diode_reference_materialization_restores_canonical_temperature_scalars() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let path = corpus.join("Netlists/DTEMP/Level2_Diode_Ref.cir");
+    let runner = XyceTestRunner::new(&corpus, XyceRunnerConfig::default());
+    let plan = runner
+        .static_tran_plan_for_path_with_purpose(&path, XyceStaticTranPlanPurpose::RelationalFamily)
+        .expect("plan Level-2 diode TEMP reference");
+    let netlist = XyceTestRunner::parse_xyce_netlist(&plan.source, &path)
+        .expect("parse Level-2 diode TEMP reference");
+    let engine = runner.create_dc_engine();
+    let runs = XyceTestRunner::nested_step_runs_for_commands(&engine, &netlist, &plan.steps)
+        .expect("materialize Level-2 diode TEMP reference");
+    let normalized = XyceTestRunner::normalize_level2_diode_dtemp_materialization(
+        &runs[0].netlist,
+        XyceLevel2DiodeDtempRole::Reference,
+        -55.0,
+        -55.0,
+    )
+    .expect("normalize reference materialization");
+    let canonical_temp = 27.0f64;
+    let canonical_vt = rspice_core::constants::thermal_voltage(
+        rspice_core::constants::celsius_to_kelvin(canonical_temp),
+    );
+    assert!(normalized.options.temp.is_none());
+    assert_eq!(
+        normalized.params.get("TEMP").map(Value::to_bits),
+        Some(canonical_temp.to_bits())
+    );
+    assert_eq!(
+        normalized.params.get("TEMPER").map(Value::to_bits),
+        Some(canonical_temp.to_bits())
+    );
+    assert_eq!(
+        normalized.params.get("VT").map(Value::to_bits),
+        Some(canonical_vt.to_bits())
+    );
+}
+
+#[test]
+fn level2_diode_dtemp_causality_uses_one_shared_physical_time() {
+    let table = |middle_time: Value, middle_value: Value, final_value: Value| XycePrnTable {
+        columns: vec!["Index".into(), "TIME".into(), "V(2)".into()],
+        rows: vec![
+            vec![0.0, 0.0, 7.0],
+            vec![1.0, middle_time, middle_value],
+            vec![2.0, 1.0, final_value],
+        ],
+    };
+    let grid_only_differences = vec![
+        table(0.20, 7.1, 7.5),
+        table(0.35, 7.2, 7.5),
+        table(0.80, 7.4, 7.5),
+    ];
+    assert!(
+        !XyceTestRunner::level2_diode_dtemp_tables_are_temperature_causal(
+            &grid_only_differences,
+            1.0,
+        )
+        .expect("well-formed shared-tstop tables"),
+        "different adaptive grids and intermediate voltages must not prove temperature causality"
+    );
+
+    let temperature_dependent = vec![
+        table(0.20, 7.1, 7.45),
+        table(0.35, 7.2, 7.50),
+        table(0.80, 7.4, 7.55),
+    ];
+    assert!(
+        XyceTestRunner::level2_diode_dtemp_tables_are_temperature_causal(
+            &temperature_dependent,
+            1.0,
+        )
+        .expect("well-formed shared-tstop tables"),
+        "different V(2) values at the common tstop must prove temperature causality"
+    );
+
+    let mut missing_tstop = temperature_dependent;
+    missing_tstop[2].rows[2][1] = 0.99;
+    assert!(
+        XyceTestRunner::level2_diode_dtemp_tables_are_temperature_causal(&missing_tstop, 1.0)
+            .is_err(),
+        "causality must fail closed when any adaptive table lacks the common tstop"
+    );
+}
+
+#[test]
+fn level2_diode_dtemp_provenance_rejects_candidate_mutation() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let owner = fs::read_to_string(corpus.join("Netlists/DTEMP/Level2_Diode_DTEMP.cir"))
+        .expect("read Level-2 diode DTEMP owner");
+    let reference = fs::read_to_string(corpus.join("Netlists/DTEMP/Level2_Diode_Ref.cir"))
+        .expect("read Level-2 diode TEMP reference");
+    let (root, owner_deck, _, runner) =
+        level2_diode_dtemp_fixture("provenance", &owner, &reference);
+    let contract = runner
+        .level2_diode_dtemp_relational_contract(&owner_deck)
+        .expect("Level-2 diode DTEMP fixture is selected")
+        .expect("unmodified Level-2 diode DTEMP provenance qualifies");
+    let mutation = owner.replace("BV = 7.255", "BV = 7.256");
+    fs::write(&owner_deck.path, mutation).expect("write Level-2 diode DTEMP mutation");
+    assert!(
+        runner
+            .validate_level2_diode_dtemp_provenance(&contract)
+            .is_err(),
+        "any source mutation must fail the exact candidate-content census"
+    );
+    fs::remove_dir_all(root).expect("remove Level-2 diode provenance fixture");
 }
 
 #[test]

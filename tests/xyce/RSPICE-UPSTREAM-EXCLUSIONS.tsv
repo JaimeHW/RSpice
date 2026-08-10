@@ -496,7 +496,7 @@ Netlists/Certification_Tests/ISSUE_609/issue609_devbalRef.cir	Netlists/Certifica
 Netlists/Certification_Tests/trans_line/TL1X.cir	Netlists/Certification_Tests/trans_line/exclude	upstream_excluded
 Netlists/Certification_Tests/trans_line/TL1X_mpi.cir	Netlists/Certification_Tests/trans_line/exclude	upstream_excluded
 Netlists/CommandLine/bad_command_line.cir	Netlists/CommandLine/exclude	upstream_excluded
-Netlists/DTEMP/Level2_Diode_Ref.cir	Netlists/DTEMP/exclude	upstream_excluded
+Netlists/DTEMP/Level2_Diode_Ref.cir	Netlists/DTEMP/exclude	rspice_independently_qualified	level2_diode_dtemp_relational_wrapper_reference
 Netlists/DTEMP/b3soi_nmos_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/b3soi_pmos_ref.cir	Netlists/DTEMP/exclude	upstream_excluded
 Netlists/DTEMP/bsim3_comparator_ref.cir	Netlists/DTEMP/exclude	upstream_excluded

@@ -3206,6 +3206,14 @@ impl XyceTestRunner {
                         purpose,
                         XyceStaticTranPlanPurpose::RelationalFamily
                             | XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily
+                    ) && Self::netlist_element_is_native_relational_level2_tbv_diode(
+                        netlist, element,
+                    ) => {}
+                ElementKind::Diode { .. }
+                    if matches!(
+                        purpose,
+                        XyceStaticTranPlanPurpose::RelationalFamily
+                            | XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily
                     ) && Self::netlist_device_is_native_relational_legacy_diode(
                         netlist,
                         &element.name,
@@ -3225,7 +3233,7 @@ impl XyceTestRunner {
                         XyceStaticTranPlanPurpose::RelationalFamily
                         | XyceStaticTranPlanPurpose::AgeCapRelationalFamily
                         | XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily => format!(
-                            "native relational .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, native B3SOI, native classic JFET, and validated native MOS3 and legacy-diode subsets; element '{}' requires a broader relational runtime contract",
+                            "native relational .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, native B3SOI, native classic JFET, and validated native MOS3, Level=2 TBV, and legacy-diode subsets; element '{}' requires a broader relational runtime contract",
                             element.name
                         ),
                         XyceStaticTranPlanPurpose::ScopedModelRelationalFamily => format!(

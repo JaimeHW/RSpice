@@ -462,6 +462,32 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.level2_diode_dtemp_relational_contract(deck) {
+            let role = XyceLevel2DiodeDtempRole::for_record(&deck.relative_path)
+                .expect("Level-2 diode DTEMP detector selected a recognized record");
+            let result = match contract {
+                Ok(contract) => {
+                    self.run_level2_diode_dtemp_relational_contract(deck, contract, start)
+                }
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    role.result_contract(),
+                    format!("Level-2 diode DTEMP relational qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.bug647_resistor_relational_contract(deck) {
             let result = match contract {
                 Ok(contract) => self.run_bug647_resistor_relational_contract(deck, contract, start),
@@ -6262,6 +6288,314 @@ impl XyceTestRunner {
                         ),
                         Vec::new(),
                     );
+                }
+            };
+            for mismatch in &mut step_mismatches {
+                mismatch.row += row_offset;
+                mismatch.probe = format!("step {index}: {}", mismatch.probe);
+            }
+            row_offset += owner.rows.len();
+            mismatches.extend(step_mismatches);
+            if mismatches.len() >= self.config.max_mismatches {
+                mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, result_contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!(
+                    "{} {LABEL} exact serialized PRN mismatch(es)",
+                    mismatches.len()
+                ),
+                mismatches,
+            )
+        }
+    }
+
+    pub(super) fn level2_diode_dtemp_tables_are_temperature_causal(
+        tables: &[XycePrnTable],
+        stop: Value,
+    ) -> Result<bool, String> {
+        const LABEL: &str = "Level-2 diode TEMP/DTEMP family";
+        if tables.len() != 3 {
+            return Err(format!(
+                "{LABEL} causality requires exactly three temperature tables, got {}",
+                tables.len()
+            ));
+        }
+        let expected_stop = Self::xyce_default_prn_text(stop)?;
+        let mut final_values = Vec::with_capacity(tables.len());
+        for (index, table) in tables.iter().enumerate() {
+            if table.columns != ["Index", "TIME", "V(2)"] {
+                return Err(format!(
+                    "{LABEL} causal table {index} lost its Index/TIME/V(2) schema"
+                ));
+            }
+            let final_row = table.rows.last().ok_or_else(|| {
+                format!("{LABEL} causal table {index} has no final transient row")
+            })?;
+            if final_row.len() != table.columns.len() {
+                return Err(format!(
+                    "{LABEL} causal table {index} final row has the wrong width"
+                ));
+            }
+            let final_time = Self::xyce_default_prn_text(final_row[1])?;
+            if final_time != expected_stop {
+                return Err(format!(
+                    "{LABEL} causal table {index} ends at serialized TIME={final_time}, expected tstop={expected_stop}"
+                ));
+            }
+            final_values.push(Self::xyce_default_prn_text(final_row[2])?);
+        }
+        Ok(final_values.windows(2).any(|pair| pair[0] != pair[1]))
+    }
+
+    pub(super) fn run_level2_diode_dtemp_relational_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceLevel2DiodeDtempContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        const LABEL: &str = "Level-2 diode TEMP/DTEMP family";
+        let result_contract = contract.role.result_contract();
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let qualification = (|| {
+            self.validate_level2_diode_dtemp_provenance(&contract)?;
+            let owner_netlist = Self::parse_xyce_netlist(
+                &contract.owner_plan.source,
+                &contract.owner_plan.deck_path,
+            )
+            .map_err(|error| format!("{LABEL} owner parse failed: {error}"))?;
+            let reference_netlist = Self::parse_xyce_netlist(
+                &contract.reference_plan.source,
+                &contract.reference_plan.deck_path,
+            )
+            .map_err(|error| format!("{LABEL} reference parse failed: {error}"))?;
+            let owner_snapshot = Self::level2_diode_dtemp_snapshot(
+                &contract.owner_plan,
+                &owner_netlist,
+                XyceLevel2DiodeDtempRole::Owner,
+            )?;
+            let reference_snapshot = Self::level2_diode_dtemp_snapshot(
+                &contract.reference_plan,
+                &reference_netlist,
+                XyceLevel2DiodeDtempRole::Reference,
+            )?;
+            if owner_snapshot != reference_snapshot {
+                return Err(format!(
+                    "{LABEL} base owner/reference topology or analysis semantics differ"
+                ));
+            }
+
+            let expansion_engine = self.create_dc_engine();
+            let owner_runs = Self::nested_step_runs_for_commands_with_limits_and_abort(
+                &expansion_engine,
+                &owner_netlist,
+                &contract.owner_plan.steps,
+                xyce_step_plan_limits(),
+                &abort,
+            )
+            .map_err(|error| format!("{LABEL} owner STEP expansion failed: {error}"))?;
+            let reference_runs = Self::nested_step_runs_for_commands_with_limits_and_abort(
+                &expansion_engine,
+                &reference_netlist,
+                &contract.reference_plan.steps,
+                xyce_step_plan_limits(),
+                &abort,
+            )
+            .map_err(|error| format!("{LABEL} reference STEP expansion failed: {error}"))?;
+            let owner_coordinates: [Value; 3] = [-82.0, -2.0, 45.0];
+            let reference_coordinates: [Value; 3] = [-55.0, 25.0, 72.0];
+            if owner_runs.len() != owner_coordinates.len()
+                || reference_runs.len() != reference_coordinates.len()
+            {
+                return Err(format!(
+                    "{LABEL} requires three owner and three reference materializations, found {}/{}",
+                    owner_runs.len(),
+                    reference_runs.len()
+                ));
+            }
+            for (index, (((owner_run, reference_run), owner_coordinate), reference_coordinate)) in
+                owner_runs
+                    .iter()
+                    .zip(&reference_runs)
+                    .zip(owner_coordinates)
+                    .zip(reference_coordinates)
+                    .enumerate()
+            {
+                let [owner_step_value] = owner_run.step_values.as_slice() else {
+                    return Err(format!(
+                        "{LABEL} owner materialization {index} lost its one STEP coordinate"
+                    ));
+                };
+                let [reference_step_value] = reference_run.step_values.as_slice() else {
+                    return Err(format!(
+                        "{LABEL} reference materialization {index} lost its one STEP coordinate"
+                    ));
+                };
+                if owner_step_value.to_bits() != owner_coordinate.to_bits()
+                    || reference_step_value.to_bits() != reference_coordinate.to_bits()
+                {
+                    return Err(format!(
+                        "{LABEL} materialization {index} changed its ordered STEP coordinates"
+                    ));
+                }
+                let normalized_owner = Self::normalize_level2_diode_dtemp_materialization(
+                    &owner_run.netlist,
+                    XyceLevel2DiodeDtempRole::Owner,
+                    owner_coordinate,
+                    reference_coordinate,
+                )?;
+                let normalized_reference = Self::normalize_level2_diode_dtemp_materialization(
+                    &reference_run.netlist,
+                    XyceLevel2DiodeDtempRole::Reference,
+                    reference_coordinate,
+                    reference_coordinate,
+                )?;
+                let materialized_owner_snapshot = Self::level2_diode_dtemp_snapshot(
+                    &contract.owner_plan,
+                    &normalized_owner,
+                    XyceLevel2DiodeDtempRole::Owner,
+                )?;
+                let materialized_reference_snapshot = Self::level2_diode_dtemp_snapshot(
+                    &contract.reference_plan,
+                    &normalized_reference,
+                    XyceLevel2DiodeDtempRole::Reference,
+                )?;
+                if materialized_owner_snapshot != owner_snapshot
+                    || materialized_reference_snapshot != reference_snapshot
+                    || materialized_owner_snapshot != materialized_reference_snapshot
+                {
+                    return Err(format!(
+                        "{LABEL} materialization {index} changed non-temperature topology or analysis semantics"
+                    ));
+                }
+            }
+            Ok((owner_runs, reference_runs))
+        })();
+        let (owner_runs, reference_runs) = match qualification {
+            Ok(runs) => runs,
+            Err(reason) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("{LABEL} qualification failed: {reason}"),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let simulate = |plan: &XyceStaticTranPlan,
+                        runs: &[XyceStepRun],
+                        role: &str|
+         -> Result<Vec<XycePrnTable>, String> {
+            let mut tables = Vec::with_capacity(runs.len());
+            for (index, run) in runs.iter().enumerate() {
+                let result = self
+                    .run_transient_family_netlist(plan, &run.netlist, start, None, None)
+                    .map_err(|error| {
+                        format!("{LABEL} {role} step {index} simulation failed: {error}")
+                    })?;
+                let table = Self::transient_family_result_to_prn_table(plan, &run.netlist, &result)
+                    .map_err(|error| {
+                        format!("{LABEL} {role} step {index} output failed: {error}")
+                    })?;
+                if table.columns != ["Index", "TIME", "V(2)"]
+                    || table.rows.len() < 2
+                    || table.rows.first().is_none_or(|row| {
+                        row.len() != table.columns.len()
+                            || row[1].to_bits() != plan.tran.start.unwrap_or(0.0).to_bits()
+                    })
+                    || table.rows.last().is_none_or(|row| {
+                        row.len() != table.columns.len()
+                            || row[1].to_bits() != plan.tran.stop.to_bits()
+                    })
+                    || table.rows.iter().enumerate().any(|(row, values)| {
+                        values.len() != table.columns.len()
+                            || values[0].to_bits() != (row as Value).to_bits()
+                            || values.iter().any(|value| !value.is_finite())
+                            || values[1] < 0.0
+                            || values[1] > 1.0
+                    })
+                    || table.rows.windows(2).any(|pair| pair[0][1] >= pair[1][1])
+                {
+                    return Err(format!(
+                        "{LABEL} {role} step {index} did not produce a finite, time-ordered indexed Index/TIME/V(2) PRN batch spanning exact tstart through tstop"
+                    ));
+                }
+                tables.push(table);
+            }
+            Ok(tables)
+        };
+
+        // Preserve the historical wrapper order: the live reference deck
+        // runs to completion before the DTEMP owner deck.
+        let reference_tables =
+            match simulate(&contract.reference_plan, &reference_runs, "reference") {
+                Ok(tables) => tables,
+                Err(reason) => {
+                    return self.failure_result(deck, start, result_contract, reason, Vec::new());
+                }
+            };
+        let owner_tables = match simulate(&contract.owner_plan, &owner_runs, "owner") {
+            Ok(tables) => tables,
+            Err(reason) => {
+                return self.failure_result(deck, start, result_contract, reason, Vec::new());
+            }
+        };
+
+        // This gate proves that the paired TEMP/DTEMP controls are not both
+        // ignored. It does not claim an independent absolute waveform oracle
+        // for every temperature law on the locked model; the native diode's
+        // TBV1/TBV2 formula and breakdown matching have direct device tests.
+        let causal = match Self::level2_diode_dtemp_tables_are_temperature_causal(
+            &owner_tables,
+            contract.owner_plan.tran.stop,
+        ) {
+            Ok(causal) => causal,
+            Err(reason) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("{LABEL} causal output validation failed: {reason}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if !causal {
+            return self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("{LABEL} is temperature-invariant at default PRN precision"),
+                Vec::new(),
+            );
+        }
+
+        let mut mismatches = Vec::new();
+        let mut row_offset = 0usize;
+        for (index, (reference, owner)) in reference_tables.iter().zip(&owner_tables).enumerate() {
+            let mut step_mismatches = match self
+                .compare_serialized_default_prn_tables(reference, owner)
+            {
+                Ok(found) => found,
+                Err(reason) => {
+                    return self.failure_result(
+                            deck,
+                            start,
+                            result_contract,
+                            format!(
+                                "{LABEL} exact historical diff adapter failed for step {index}: {reason}"
+                            ),
+                            Vec::new(),
+                        );
                 }
             };
             for mismatch in &mut step_mismatches {

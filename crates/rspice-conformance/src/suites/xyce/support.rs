@@ -3880,7 +3880,11 @@ impl XyceTestRunner {
             && match name.to_ascii_uppercase().as_str() {
                 "AREA" | "M" | "MULT" => value > 0.0,
                 "PJ" => value >= 0.0,
-                "TEMP" | "DTEMP" => value > -273.15,
+                "TEMP" => value > -273.15,
+                // DTEMP is an offset, not an absolute Celsius temperature.
+                // Its physical bound depends on circuit TEMP and is checked
+                // by the netlist-aware Level-2 diode admission predicate.
+                "DTEMP" => true,
                 _ => false,
             }
     }
