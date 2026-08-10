@@ -3069,7 +3069,7 @@ fn show_shared_x_axis(
     painter.text(
         egui::pos2(plot_left - 8.0, label_top + font.size * 0.5),
         egui::Align2::RIGHT_CENTER,
-        &shared_x_gutter_label(&model.x_unit),
+        shared_x_gutter_label(&model.x_unit),
         gutter_font.clone(),
         c.text_faint,
     );
