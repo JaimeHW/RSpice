@@ -113,7 +113,7 @@ ttf-parser = "0.25.1"
 rfd = { version = "0.17", features = ["file-handle-inner"] }
 
 # Cross-platform config directories
-dirs = "5.0"
+dirs = "6.0"
 
 # License-key signature verification (internal license-key spec) - pure
 # Rust, works on wasm32. Signing lives in the `services::license` test module,
