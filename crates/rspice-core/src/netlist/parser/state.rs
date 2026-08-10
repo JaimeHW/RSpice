@@ -165,6 +165,9 @@ impl ParseState {
 
         validate_mutual_inductor_semantic_records_with_abort(&self.mutual_inductor_records, abort)?;
 
+        let mut analyses = self.analyses;
+        resolve_implicit_step_targets(&mut analyses, &params);
+
         let mut options = self.options;
         if options.replace_ground == Some(false) {
             // FALSE is the semantic default; explicit spelling must not split
@@ -174,7 +177,7 @@ impl ParseState {
         let mut netlist = Netlist {
             title,
             elements: self.elements,
-            analyses: self.analyses,
+            analyses,
             lin_analysis: self.lin_analysis,
             fft_analyses: self.fft_analyses,
             data_tables: self.data_tables,
@@ -239,6 +242,27 @@ impl ParseState {
             detected_at,
             boundary,
         }))
+    }
+}
+
+/// Resolve an unqualified `.STEP name ...` after the full deck is known.
+///
+/// Xyce records the authored name and resolves it at execution time. Global
+/// parameters precede natural device/model parameters in that lookup. RSpice
+/// keeps an explicit target in the AST, so it defers only the ambiguous bare
+/// name until all `.PARAM` declarations have been parsed. Explicit `PARAM`,
+/// `MODEL`, `TEMP`, and `device:param` spellings are already unambiguous.
+fn resolve_implicit_step_targets(analyses: &mut [AnalysisCommand], params: &ParamContext) {
+    for analysis in analyses {
+        let AnalysisCommand::Step(command) = analysis else {
+            continue;
+        };
+        if command.target != StepTarget::Device || command.param_name.is_some() {
+            continue;
+        }
+        if params.has_any_parameter_binding(&command.name) {
+            command.target = StepTarget::Param;
+        }
     }
 }
 

@@ -212,9 +212,6 @@ pub(super) fn parse_step_command(
                     (Some(first_upper), target_upper, name)
                 }
                 "TEMP" => (Some(first_upper), target_upper, "TEMP".to_string()),
-                _ if params.get(&target).is_some() => {
-                    (Some(first_upper), "PARAM".to_string(), target)
-                }
                 _ => (Some(first_upper), "DEVICE".to_string(), target),
             }
         }
@@ -223,9 +220,10 @@ pub(super) fn parse_step_command(
             (None, first_upper, name)
         }
         "TEMP" => (None, first_upper, "TEMP".to_string()),
-        _ if params.get(&first).is_some() => (None, "PARAM".to_string(), first),
         _ => {
-            // Assume device parameter: .STEP R1(value) or .STEP R1 start stop step
+            // Keep an unqualified name unresolved until the complete deck has
+            // been parsed. A later .PARAM makes it a global sweep; otherwise
+            // the name remains eligible for a natural device/model target.
             (None, "DEVICE".to_string(), first)
         }
     };
@@ -505,7 +503,19 @@ mod four_command_tests {
 
 #[cfg(test)]
 mod step_command_tests {
-    use crate::netlist::{AnalysisCommand, Netlist, StepSweep};
+    use crate::config::ExpressionDialect;
+    use crate::netlist::{AnalysisCommand, Netlist, NetlistParseOptions, StepSweep, StepTarget};
+
+    fn parse_xyce(source: &str) -> Netlist {
+        Netlist::parse_with_options(
+            source,
+            NetlistParseOptions {
+                expression_dialect: ExpressionDialect::Xyce,
+                ..NetlistParseOptions::default()
+            },
+        )
+        .expect("Xyce .STEP deck parses")
+    }
 
     #[test]
     fn step_list_accepts_signed_values_without_leading_zero() {
@@ -521,6 +531,7 @@ mod step_command_tests {
             panic!("expected one .STEP analysis, got {:?}", netlist.analyses);
         };
         assert_eq!(command.name, "V1");
+        assert_eq!(command.target, StepTarget::Device);
         assert!(matches!(
             &command.sweep,
             StepSweep::List(values)
@@ -529,6 +540,89 @@ mod step_command_tests {
                     .zip([-0.05, 0.5, -1.0])
                     .all(|(actual, expected)| (actual - expected).abs() < 1e-15)
         ));
+    }
+
+    #[test]
+    fn xyce_bare_step_parameter_resolution_is_independent_of_declaration_order() {
+        for (source, expected_name) in [
+            (
+                "late parameter\nV1 out 0 0\n.step dtempParam list -10 0 10\n.param dtempParam=10\n.end\n",
+                "dtempParam",
+            ),
+            (
+                "early parameter\nV1 out 0 0\n.param dtempParam=10\n.step dtempParam list -10 0 10\n.end\n",
+                "dtempParam",
+            ),
+            (
+                "late global parameter\nV1 out 0 0\n.step LIN scale 1 3 1\n.global_param scale=1\n.end\n",
+                "scale",
+            ),
+            (
+                "early global parameter\nV1 out 0 0\n.global_param scale=1\n.step LIN scale 1 3 1\n.end\n",
+                "scale",
+            ),
+        ] {
+            let netlist = parse_xyce(source);
+            let [AnalysisCommand::Step(command)] = netlist.analyses.as_slice() else {
+                panic!("expected one .STEP analysis, got {:?}", netlist.analyses);
+            };
+            assert_eq!(command.target, StepTarget::Param);
+            assert!(command.name.eq_ignore_ascii_case(expected_name));
+            assert!(command.param_name.is_none());
+        }
+    }
+
+    #[test]
+    fn xyce_bare_step_name_prefers_a_global_over_a_natural_device_parameter() {
+        let netlist = parse_xyce(
+            "device and parameter collision\n\
+             .param R1=9k\n\
+             R1 out 0 1k\n\
+             .step R1 list 1k 2k\n\
+             .end\n",
+        );
+        let [AnalysisCommand::Step(command)] = netlist.analyses.as_slice() else {
+            panic!("expected one .STEP analysis, got {:?}", netlist.analyses);
+        };
+        assert_eq!(command.target, StepTarget::Param);
+        assert_eq!(command.name, "R1");
+        assert!(command.param_name.is_none());
+    }
+
+    #[test]
+    fn explicit_step_param_remains_global_when_a_device_has_the_same_name() {
+        let netlist = parse_xyce(
+            "explicit parameter target\n\
+             .param R1=9k\n\
+             R1 out 0 1k\n\
+             .step PARAM R1 list 1k 2k\n\
+             .end\n",
+        );
+        let [AnalysisCommand::Step(command)] = netlist.analyses.as_slice() else {
+            panic!("expected one .STEP analysis, got {:?}", netlist.analyses);
+        };
+        assert_eq!(command.target, StepTarget::Param);
+        assert_eq!(command.name, "R1");
+        assert!(command.param_name.is_none());
+    }
+
+    #[test]
+    fn explicit_step_device_parameter_remains_device_when_a_global_has_the_same_name() {
+        for target in ["R1:R", "R1(R)"] {
+            let netlist = parse_xyce(&format!(
+                "explicit device target\n\
+                 .param R1=9k\n\
+                 R1 out 0 1k\n\
+                 .step {target} list 1k 2k\n\
+                 .end\n"
+            ));
+            let [AnalysisCommand::Step(command)] = netlist.analyses.as_slice() else {
+                panic!("expected one .STEP analysis, got {:?}", netlist.analyses);
+            };
+            assert_eq!(command.target, StepTarget::Device);
+            assert_eq!(command.name, "R1");
+            assert_eq!(command.param_name.as_deref(), Some("R"));
+        }
     }
 }
 

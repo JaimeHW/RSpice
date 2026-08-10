@@ -382,6 +382,13 @@ impl ParamContext {
             || self.parameter_expressions.contains_key(&key)
     }
 
+    /// Whether either the ordinary `.PARAM` namespace or the
+    /// `.GLOBAL_PARAM` namespace contains this name in any value class.
+    pub fn has_any_parameter_binding(&self, name: &str) -> bool {
+        let key = name.to_uppercase();
+        self.has_parameter_binding(&key) || self.has_global_binding_key(&key)
+    }
+
     fn has_global_binding_key(&self, key: &str) -> bool {
         self.global_params.contains_key(key)
             || self.global_complex_params.contains_key(key)
@@ -406,7 +413,7 @@ impl ParamContext {
     /// Get a parameter value
     pub fn get(&self, name: &str) -> Option<Value> {
         let key = name.to_uppercase();
-        if self.has_parameter_binding(&key) || self.has_global_binding_key(&key) {
+        if self.has_any_parameter_binding(&key) {
             return self.effective_numeric_without_builtin(&key);
         }
 
