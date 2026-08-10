@@ -19,6 +19,7 @@ use sha2::Digest as _;
 const MAX_DISCOVERY_BYTES: usize = 64 * 1024;
 const MAX_TOKEN_RESPONSE_BYTES: usize = 32 * 1024;
 const MAX_TOKEN_BYTES: usize = 16 * 1024;
+#[cfg(any(target_arch = "wasm32", test))]
 const MAX_CALLBACK_PARAMETERS_BYTES: usize = 8 * 1024;
 const MIN_ACCESS_TOKEN_LIFETIME_SECONDS: u64 = 10;
 const MAX_ACCESS_TOKEN_LIFETIME_SECONDS: u64 = 24 * 60 * 60;
@@ -79,6 +80,7 @@ pub(super) enum IdentityError {
 /// Bounded classification of parameters on the registered browser callback.
 /// Unknown route parameters are ignored; known OAuth parameters make the URL
 /// credential-bearing and therefore subject to immediate history cleanup.
+#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Default, Eq, PartialEq)]
 pub(super) struct AuthorizationCallbackParameters {
     pub code: Option<String>,
@@ -88,6 +90,7 @@ pub(super) struct AuthorizationCallbackParameters {
     pub has_duplicate: bool,
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
 pub(super) fn parse_authorization_callback_parameters(
     encoded: Option<&str>,
 ) -> Result<AuthorizationCallbackParameters, ()> {
@@ -127,6 +130,7 @@ pub(super) fn parse_authorization_callback_parameters(
     Ok(parsed)
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
 pub(super) fn is_exact_browser_callback_route(current: &url::Url, redirect: &url::Url) -> bool {
     current.scheme() == redirect.scheme()
         && current.host_str() == redirect.host_str()

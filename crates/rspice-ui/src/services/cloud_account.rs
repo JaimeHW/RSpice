@@ -49,6 +49,14 @@ pub(crate) enum CloudAccountAvailability {
     Native,
     /// Browser build with release-pinned endpoints and callback URI. Account
     /// state is online-only and tokens live only in WebAssembly memory.
+    ///
+    /// Only a browser build ever constructs this, but every target matches on
+    /// it: the availability tables answer what each host offers, and a desktop
+    /// build still has to say that web publishing is the desktop's job.
+    #[cfg_attr(
+        not(target_arch = "wasm32"),
+        expect(dead_code, reason = "constructed only by browser builds")
+    )]
     Browser,
     /// This build was produced without pinned cloud endpoints, so every cloud
     /// account surface reports the boundary instead of offering actions.

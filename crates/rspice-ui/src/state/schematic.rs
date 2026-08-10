@@ -122,9 +122,13 @@ pub use rotation::Rotation;
 pub use selection::{JunctionSelection, SchematicSelectionFilter, Selection};
 pub use snap::{SnapEngine, SnapResult, SnapTarget, SnapTargetType};
 pub use state::{MoveSelectionMode, SchematicState, StretchOrthogonalPolicy, StretchTarget};
+/// Reachable only from the drawing tests; production callers inside the
+/// schematic state reach the constant through its defining module.
+#[cfg(test)]
+pub use symbol_gen::GENERATED_WIDTH;
 pub use symbol_gen::{
-    GENERATED_PIN_LABEL_SIZE, GENERATED_WIDTH, fit_pin_name, generate_symbol, inward_step,
-    lead_inner, pin_label_anchor,
+    GENERATED_PIN_LABEL_SIZE, fit_pin_name, generate_symbol, inward_step, lead_inner,
+    pin_label_anchor,
 };
 pub use tool::Tool;
 pub use undo_history::SchematicSnapshot;
