@@ -18,6 +18,7 @@ use egui::Ui;
 use crate::simulation::dialog::{
     DampingStrategy, IntegrationMethod, MatrixSolver, OptionsDialogState, SimulationOptions,
 };
+use crate::simulation::plan::AnalysisKind;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, mono_input, select};
@@ -838,7 +839,27 @@ const LEDGER_COLUMNS: [f32; 4] = [0.26, 0.24, 0.24, 0.26];
 
 fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
     let options = &app.state.sim_setup.options;
-    let rows: Vec<(String, String, String, &'static str)> = vec![
+    // Which analyses the plan actually holds. A row scoped to transient
+    // integration is a claim about a run, so it is only shown when a transient
+    // is enabled — the alternative states a policy for a solve that will never
+    // happen.
+    let kinds: Vec<AnalysisKind> = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .map(|plan| {
+            plan.instances()
+                .iter()
+                .filter(|instance| instance.enabled())
+                .map(|instance| instance.kind())
+                .collect()
+        })
+        .unwrap_or_default();
+    let has = |kind: AnalysisKind| kinds.contains(&kind);
+    let time_stepped =
+        has(AnalysisKind::Transient) || has(AnalysisKind::Pss) || has(AnalysisKind::MonteCarlo);
+
+    let mut rows: Vec<(String, String, String, &'static str)> = vec![
         (
             "Every analysis".to_owned(),
             "Update bound · RELTOL".to_owned(),
@@ -857,24 +878,30 @@ fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
             options.itl1.to_string(),
             "plan preset",
         ),
-        (
-            "Transient".to_owned(),
-            "Integration method".to_owned(),
-            options.method.spice_name().to_owned(),
-            "plan preset",
-        ),
-        (
-            "Transient".to_owned(),
-            "Iterations per step · ITL4".to_owned(),
-            options.itl4.to_string(),
-            "plan preset",
-        ),
-        (
-            "Transient".to_owned(),
-            "Step ceiling".to_owned(),
-            format_value(options.max_timestep),
-            "plan preset",
-        ),
+    ];
+    if time_stepped {
+        rows.extend([
+            (
+                "Time stepped".to_owned(),
+                "Integration method".to_owned(),
+                options.method.spice_name().to_owned(),
+                "plan preset",
+            ),
+            (
+                "Time stepped".to_owned(),
+                "Iterations per step · ITL4".to_owned(),
+                options.itl4.to_string(),
+                "plan preset",
+            ),
+            (
+                "Time stepped".to_owned(),
+                "Step ceiling".to_owned(),
+                format_value(options.max_timestep),
+                "plan preset",
+            ),
+        ]);
+    }
+    rows.extend([
         (
             "Every analysis".to_owned(),
             "Factorization".to_owned(),
@@ -887,7 +914,11 @@ fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
             format!("{:.1} °C", options.temp),
             "run set",
         ),
-    ];
+    ]);
+    // The overrides the page's own title promises. An analysis that carries
+    // its own accuracy tier does not resolve to the plan preset, and the
+    // ledger is the only place that difference is visible.
+    rows.extend(analysis_overrides(app));
     card(
         ui,
         "Resolved policy",
@@ -919,6 +950,45 @@ fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
             );
         },
     );
+}
+
+/// The analyses that carry their own accuracy tier instead of resolving to the
+/// plan preset.
+///
+/// Only a tier that differs from the default is reported: listing every
+/// analysis at its default would bury the ones that actually diverge, which is
+/// the only thing this section of the ledger exists to show.
+fn analysis_overrides(app: &RSpiceApp) -> Vec<(String, String, String, &'static str)> {
+    use crate::simulation::dialog::{OpAccuracy, XfAccuracy};
+    use crate::simulation::plan::AnalysisDraft;
+
+    let Ok(plan) = app.state.sim_setup.stable_analysis_plan() else {
+        return Vec::new();
+    };
+    plan.instances()
+        .iter()
+        .enumerate()
+        .filter(|(_, instance)| instance.enabled())
+        .filter_map(|(index, instance)| {
+            let tier = match instance.draft() {
+                AnalysisDraft::OperatingPoint(setup) => OpAccuracy::ALL
+                    .get(setup.accuracy_idx)
+                    .filter(|accuracy| **accuracy != OpAccuracy::default())
+                    .map(|accuracy| accuracy.display_name()),
+                AnalysisDraft::TransferFunction(setup) => XfAccuracy::ALL
+                    .get(setup.accuracy_idx)
+                    .filter(|accuracy| **accuracy != XfAccuracy::default())
+                    .map(|accuracy| accuracy.display_name()),
+                _ => None,
+            }?;
+            Some((
+                format!("#{} · {}", index + 1, instance.kind().code()),
+                "Accuracy tier".to_owned(),
+                tier.to_owned(),
+                "analysis override",
+            ))
+        })
+        .collect()
 }
 
 fn format_value(value: f64) -> String {
