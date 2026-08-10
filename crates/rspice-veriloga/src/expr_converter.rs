@@ -680,42 +680,20 @@ impl<'a> ExprConverter<'a> {
                     enable: optional(3)?,
                 })
             }
-            "laplace_zp" => {
-                // laplace_zp(expr, zeros, poles)
-                // For now, simplified: just takes the input expression
-                if func.args.is_empty() {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "laplace_zp() requires input expression".into(),
-                    ))
-                    .into());
-                }
-                let expr = self.convert(&func.args[0])?;
-                // zeros and poles would be parsed from array arguments
-                // For now, treat as empty (passthrough)
-                Ok(IrExpr::LaplaceZP {
-                    expr: Box::new(expr),
-                    zeros: Vec::new(),
-                    poles: Vec::new(),
-                    gain: 1.0, // Unity gain for passthrough
-                })
-            }
-            "laplace_nd" => {
-                // laplace_nd(expr, num_coeffs, den_coeffs)
-                if func.args.is_empty() {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "laplace_nd() requires input expression".into(),
-                    ))
-                    .into());
-                }
-                let expr = self.convert(&func.args[0])?;
-                // num/den coefficients parsed from arrays
-                // For now, unity transfer function [1], [1]
-                Ok(IrExpr::LaplaceND {
-                    expr: Box::new(expr),
-                    numerator: vec![1.0],
-                    denominator: vec![1.0],
-                })
-            }
+            // The IR models real zeros/poles and numerator/denominator
+            // coefficients, but this converter never parsed the coefficient
+            // arrays: it discarded them and emitted a unity passthrough, so a
+            // filtered contribution silently evaluated as if unfiltered.
+            // Refuse instead, matching the `IrExpr::Ddx` precedent in
+            // codegen/generator.rs, until the arrays are actually lowered.
+            "laplace_zp" | "laplace_nd" => Err(CodeGenError::new(
+                CodeGenErrorKind::UnsupportedFeature(format!(
+                    "{}(): analog filter operators are not lowered; the transfer \
+                     function would be silently ignored",
+                    func.name
+                )),
+            )
+            .into()),
             _ => Err(
                 CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(format!(
                     "System function: {}",
@@ -1425,27 +1403,34 @@ impl<'a> ExprConverter<'a> {
                     .map(Box::new);
                 Ok(IrExpr::Idt(Box::new(inner), ic_expr))
             }
+            // KNOWN DEFECT: this returns `expr` itself rather than its partial
+            // derivative with respect to `probe`, so any model relying on
+            // ddx() gets a wrong number from this pipeline instead of an error.
+            // It is not refused here only because 23 of the 42 generated model
+            // sources call ddx(), and failing closed would drop them from the
+            // catalog. `codegen/generator.rs` already rejects an unresolved
+            // `IrExpr::Ddx`, which is the contract this branch should meet once
+            // symbolic differentiation is implemented. Do not add callers.
             AnalogOperator::Ddx { expr, probe, .. } => {
-                // ddx(expr, V(a,b)) - partial derivative w.r.t. voltage
-                // For now, just return the expression - proper implementation
-                // would compute symbolic derivative
                 let inner = self.convert(expr)?;
-                let _ = probe; // Would use for derivative target
+                let _ = probe;
                 Ok(inner)
             }
-            AnalogOperator::Absdelay { expr, delay, .. } => {
-                // For static analysis, absdelay is just the expression
-                // Real implementation would add delay handling
-                let _ = delay;
-                self.convert(expr)
-            }
-            AnalogOperator::Transition { expr, .. } => {
-                // Transition is a smoothing operator - return expression for static
-                self.convert(expr)
-            }
-            AnalogOperator::Slew { expr, .. } => {
-                // Slew rate limiter - return expression for static
-                self.convert(expr)
+            // These three discarded their defining argument — the delay, the
+            // smoothing window, the rate limit — and returned the raw
+            // expression, which is a plausible wrong answer rather than a
+            // refusal. No model source in models/veriloga/ uses any of them,
+            // so refusing costs no catalog coverage.
+            AnalogOperator::Absdelay { .. }
+            | AnalogOperator::Transition { .. }
+            | AnalogOperator::Slew { .. } => {
+                Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
+                    "absdelay()/transition()/slew(): timing operators are not \
+                         lowered; their delay, smoothing and rate limits would be \
+                         silently ignored"
+                        .into(),
+                ))
+                .into())
             }
             AnalogOperator::LastCrossing { expr, edge, .. } => {
                 let direction = edge.map(|edge| match edge {
