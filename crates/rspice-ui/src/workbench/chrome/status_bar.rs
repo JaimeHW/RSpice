@@ -459,7 +459,11 @@ fn results_view_summary(
         .active_run_idx
         .and_then(|index| app.state.simulation.runs.get(index))
         .map_or_else(
-            || "No result dataset selected".to_owned(),
+            // The selection segment beside this one already reports that no
+            // dataset is chosen. This segment answers a different question —
+            // what interval am I reading — and has to say so in its own
+            // words, or the bar prints the same sentence twice.
+            || "No plotted interval".to_owned(),
             |run| format!("{} · immutable dataset", run.label),
         )
 }
@@ -790,6 +794,26 @@ fn platform_label() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The coordinate and selection segments sit side by side. They answer
+    /// different questions, so neither may borrow the other's sentence — with
+    /// no dataset open the bar used to print "No result dataset selected"
+    /// twice in a row.
+    #[test]
+    fn adjacent_result_segments_never_print_the_same_sentence() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.activate(Workspace::Results);
+        app.state.project_lifecycle.project_open = true;
+
+        let coordinates = results_view_summary(&app, None);
+        let selection = selection_summary(&app);
+        assert_ne!(
+            coordinates, selection,
+            "two segments cannot report the same fact in the same words"
+        );
+        assert_eq!(coordinates, "No plotted interval");
+        assert_eq!(selection, "No result dataset selected");
+    }
 
     #[test]
     fn the_zoom_chip_drops_the_decimal_only_once_magnification_is_deep() {
