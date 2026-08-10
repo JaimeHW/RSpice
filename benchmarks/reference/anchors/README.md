@@ -1,8 +1,10 @@
 # Hand-written compact-model anchors
 
-The Verilog-A backend gate in `design/VERILOGA_BACKEND_PLAN.md` is stated against
-hand-written C: *corpus median at or below 1.00x ngspice C, no model above 1.50x*.
-This directory is what makes that number reproducible instead of remembered.
+The Verilog-A backend gate is stated against hand-written C: *corpus median at
+or below 1.00x ngspice C, no model above 1.50x*. This directory is what makes
+that number reproducible instead of remembered. (The plan document that first
+stated the gate is working notes, excluded by `.gitignore`, so the threshold is
+restated here rather than linked.)
 
 ## What is measured
 
