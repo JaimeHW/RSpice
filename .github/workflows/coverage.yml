@@ -21,6 +21,14 @@ on:
 permissions:
   contents: read
 
+# Pushes to main land minutes apart, and every one matching the path filter
+# queues another two-hour instrumented build. Serialize per ref: on main the
+# running report finishes and GitHub keeps only the newest push pending; on
+# pull requests a superseded report is cancelled outright.
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
@@ -32,6 +40,14 @@ jobs:
     name: Rust coverage report
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    env:
+      # Source-based coverage reads the __llvm_covmap section, not DWARF, so
+      # debug info buys nothing here — and emitting it is what crashes the
+      # build: rustc 1.94's LLVM overflows its stack in
+      # DwarfCompileUnit::createAndAddScopeChildren on the deeply scoped
+      # generated Verilog-A model crates once -C instrument-coverage is added.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
