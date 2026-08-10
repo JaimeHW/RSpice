@@ -437,8 +437,10 @@ impl Bjt {
         let delta_t = temp - tnom;
         let beta_scale = ratio.powf(self.beta_exp);
         let legacy_model = self.charge_model == BjtChargeModel::LegacyGummelPoon;
+        // Classic SPICE/Xyce BJT scaling is parameterized by the model's EG
+        // bandgap. EA is a distinct VBIC activation-energy parameter.
         let legacy_factlog =
-            ((ratio - 1.0) * self.ea / vt.max(1e-18) + self.xis * ratio.ln()).clamp(-80.0, 80.0);
+            ((ratio - 1.0) * self.eg / vt.max(1e-18) + self.xis * ratio.ln()).clamp(-80.0, 80.0);
         let legacy_is_factor = legacy_factlog.exp();
         let is_temp = if legacy_model {
             self.is_nominal * legacy_is_factor
@@ -1623,6 +1625,29 @@ mod tests {
             bjt.requested_temperature().to_bits(),
             crate::constants::celsius_to_kelvin(35.0).to_bits()
         );
+    }
+
+    #[test]
+    fn legacy_temperature_scaling_uses_energy_gap_not_vbic_activation_energy() {
+        let mut bjt = model_with(&[("IS", 1.0e-16)]);
+        assert_eq!(bjt.charge_model, BjtChargeModel::LegacyGummelPoon);
+        bjt.xyce_compatibility = true;
+        bjt.eg = 1.07;
+        bjt.ea = 1.93;
+
+        let temp = crate::constants::celsius_to_kelvin(35.0);
+        let tnom = bjt.tnom;
+        let ratio = temp / tnom;
+        let vt = bjt.thermal_voltage_at(temp);
+        let expected = bjt.is_nominal
+            * (((ratio - 1.0) * bjt.eg / vt + bjt.xis * ratio.ln()).clamp(-80.0, 80.0)).exp();
+        let wrong_vbic_activation_energy = bjt.is_nominal
+            * (((ratio - 1.0) * bjt.ea / vt + bjt.xis * ratio.ln()).clamp(-80.0, 80.0)).exp();
+
+        bjt.set_temperature(temp);
+
+        assert_eq!(bjt.is.to_bits(), expected.to_bits());
+        assert_ne!(bjt.is.to_bits(), wrong_vbic_activation_energy.to_bits());
     }
 
     #[test]
