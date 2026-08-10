@@ -413,6 +413,11 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
                     messages.text(MessageId::CodeInspectorAutomationTitle)
                 }
             },
+            // A result sheet's context panel is named by the sheet it is
+            // reading, the way every other workspace names its subject.
+            Workspace::Results => {
+                format!("{} details", app.state.ui.results.viewer.tab_label())
+            }
             _ => app.state.workbench.workspace.inspector_title().to_owned(),
         }
     };
@@ -1444,7 +1449,10 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         return;
     };
 
-    if let Some(index) = app.state.simulation.active_analysis_idx
+    // The analysis's own provenance belongs to the same folded record as the
+    // dataset's, even though a different owner draws it.
+    if inspector_disclosure_open(ui.ctx(), "result-provenance")
+        && let Some(index) = app.state.simulation.active_analysis_idx
         && let Some(analysis) = run.analyses.get(index)
     {
         section_header(ui, "Active analysis provenance", None);
@@ -1500,15 +1508,23 @@ fn result_dataset_authority(
         .filter(|analysis| analysis.success)
         .count();
 
-    section_header(ui, "Dataset identity", None);
+    // Identity leads with what a reader uses to tell one dataset from
+    // another; the identifiers that only prove it are provenance, and fold
+    // away with the rest of the authority record below.
+    section_header(ui, "Dataset identity", Some("current"));
     property_row(ui, "Dataset", &manifest.run_label);
-    property_row(ui, "Dataset ID", &manifest.dataset_id);
-    property_row(ui, "Dataset digest", &manifest.dataset_digest);
-    property_row(ui, "Run ID", &manifest.run_id);
     property_row(ui, "Run sequence", &manifest.run_sequence);
     property_row(ui, "Lifecycle", &manifest.lifecycle);
     property_row(ui, "Duration", &manifest.elapsed_time);
     property_row(ui, "Execution target", &manifest.execution_target);
+
+    if !inspector_disclosure(ui, "result-provenance", "Run provenance", "immutable") {
+        return;
+    }
+
+    property_row(ui, "Dataset ID", &manifest.dataset_id);
+    property_row(ui, "Dataset digest", &manifest.dataset_digest);
+    property_row(ui, "Run ID", &manifest.run_id);
     property_row(
         ui,
         "Job ID",
@@ -1594,6 +1610,69 @@ fn result_qualification_gaps(ui: &mut Ui) {
     for (label, value) in RESULT_QUALIFICATION_GAPS {
         property_row(ui, label, value);
     }
+}
+
+/// Whether a folded group is showing, for rows that belong to it but are
+/// drawn by a different owner.
+fn inspector_disclosure_open(ctx: &egui::Context, key: &str) -> bool {
+    ctx.data(|data| {
+        data.get_temp::<bool>(egui::Id::new(("workbench.inspector.disclosure", key)))
+    })
+    .unwrap_or(false)
+}
+
+/// A folded group of rows, named on the left and standing on the right.
+///
+/// A result's provenance runs to dozens of digests and is rarely the thing a
+/// reader came for. Folding it behind one row keeps every fact reachable
+/// without pushing the pane and trace readouts off the panel.
+fn inspector_disclosure(ui: &mut Ui, key: &str, title: &str, status: &str) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let c = &t.color;
+    let memory = egui::Id::new(("workbench.inspector.disclosure", key));
+    let open = inspector_disclosure_open(ui.ctx(), key);
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), PANEL_SECTION_H),
+        Sense::click(),
+    );
+    let label = format!(
+        "{title}, {status}, {}",
+        if open { "expanded" } else { "collapsed" }
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label.clone())
+    });
+    if response.clicked() {
+        ui.ctx().data_mut(|data| data.insert_temp(memory, !open));
+    }
+    let painter = ui.painter();
+    if response.hovered() {
+        painter.rect_filled(rect, 0.0, c.bg_hover);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let text = if response.hovered() { c.text } else { c.text_dim };
+    painter.text(
+        Pos2::new(rect.left() + 10.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        if open { "\u{2304}" } else { "\u{203a}" },
+        theme::mono(tokens::FS_1, FontWeight::Regular),
+        text,
+    );
+    painter.text(
+        Pos2::new(rect.left() + 22.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        title,
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        text,
+    );
+    painter.text(
+        Pos2::new(rect.right() - 10.0, rect.center().y),
+        Align2::RIGHT_CENTER,
+        status,
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        c.ok,
+    );
+    open
 }
 
 fn selected_result_trace(
