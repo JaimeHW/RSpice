@@ -553,12 +553,20 @@ impl Command {
             Self::ZoomFit => {
                 active_symbol_editor(app)
                     || active_schematic_editor(app)
-                    || state.workbench.workspace == Workspace::Results
+                    || (state.workbench.workspace == Workspace::Results
+                        && crate::workbench::documents::result_document::fit_gesture_available(state))
             }
             Self::FitSchematicContent | Self::DrawingSheetLayers => active_schematic_editor(app),
-            Self::ZoomIn | Self::ZoomOut | Self::ZoomOneToOne => {
-                active_symbol_editor(app) || active_schematic_editor(app)
+            // Magnifying a result viewport needs the sheet's own extents, so
+            // it is offered on the unit-pane stack and nowhere it could not
+            // be carried out.
+            Self::ZoomIn | Self::ZoomOut => {
+                active_symbol_editor(app)
+                    || active_schematic_editor(app)
+                    || (state.workbench.workspace == Workspace::Results
+                        && crate::workbench::documents::result_document::zoom_gesture_available(state))
             }
+            Self::ZoomOneToOne => active_symbol_editor(app) || active_schematic_editor(app),
             Self::ResetActiveView => reset_active_view_available(state.workbench.workspace),
             Self::EngineeringTableView => active_schematic_editor(app),
             Self::NewApplicationWindow
@@ -840,6 +848,7 @@ impl Command {
                     && (surface == super::SurfaceId::VisualizationStudio
                         || state.simulation.has_results())
             }
+            Self::ExpressionDiagnostics => state.simulation.has_results(),
             Self::ExportWaveformsCsv => state.simulation.has_results(),
             Self::VerificationPage(page) if !page.is_operational() => false,
             Self::ClearConsole => {
@@ -1077,7 +1086,12 @@ impl Command {
                 }
             }
             Self::ZoomIn => {
-                if active_symbol_editor(app) {
+                if app.state.workbench.workspace == Workspace::Results {
+                    crate::workbench::documents::result_document::request_view_gesture(
+                        &mut app.state,
+                        crate::workbench::documents::result_document::ViewGesture::ZoomIn,
+                    );
+                } else if active_symbol_editor(app) {
                     app.state.ui.symbol.zoom =
                         (app.state.ui.symbol.zoom * COMMAND_ZOOM_FACTOR as f32).min(16.0);
                 } else {
@@ -1086,7 +1100,12 @@ impl Command {
                 }
             }
             Self::ZoomOut => {
-                if active_symbol_editor(app) {
+                if app.state.workbench.workspace == Workspace::Results {
+                    crate::workbench::documents::result_document::request_view_gesture(
+                        &mut app.state,
+                        crate::workbench::documents::result_document::ViewGesture::ZoomOut,
+                    );
+                } else if active_symbol_editor(app) {
                     app.state.ui.symbol.zoom =
                         (app.state.ui.symbol.zoom / COMMAND_ZOOM_FACTOR as f32).max(0.1);
                 } else {
@@ -1096,8 +1115,12 @@ impl Command {
             }
             Self::ZoomFit => {
                 if app.state.workbench.workspace == Workspace::Results {
-                    let viewer = app.state.ui.results.viewer;
-                    app.state.ui.results.reset_plot_view(viewer, 0);
+                    // The waveform sheets key their viewports by analysis, so
+                    // fitting them is not a write to the plot-ordinal store.
+                    crate::workbench::documents::result_document::request_view_gesture(
+                        &mut app.state,
+                        crate::workbench::documents::result_document::ViewGesture::Fit,
+                    );
                 } else if active_symbol_editor(app) {
                     app.state.ui.symbol.needs_fit = true;
                 } else {
@@ -1646,6 +1669,9 @@ impl Command {
                 crate::workbench::documents::result_document::open_create_document(app);
             }
             Self::WaveformCalculator => app.state.dialogs.waveform_calculator_dialog = true,
+            Self::ExpressionDiagnostics => {
+                app.state.dialogs.expression_diagnostics_dialog = true;
+            }
             Self::CompareResultDatasets => {
                 crate::workbench::documents::visualization_studio::open_results_comparison(app);
             }
@@ -1827,39 +1853,27 @@ impl Command {
             }
             Self::AddVisualizationPane => crate::workbench::documents::visualization_studio::open_add_pane(app),
             Self::VisualizationTraceManager => {
-                if app.state.workbench.current_route().surface_id() == super::SurfaceId::Results {
-                    crate::workbench::documents::visualization_studio::open(app);
-                }
+                open_studio_tool(app, "Trace and family manager");
                 crate::workbench::documents::visualization_studio::open_trace_manager(app);
             }
             Self::VisualizationCursorManager => {
-                if app.state.workbench.current_route().surface_id() == super::SurfaceId::Results {
-                    crate::workbench::documents::visualization_studio::open(app);
-                }
+                open_studio_tool(app, "Cursor groups and links");
                 crate::workbench::documents::visualization_studio::open_cursor_manager(app);
             }
             Self::ReviewNotes => {
-                if app.state.workbench.current_route().surface_id() == super::SurfaceId::Results {
-                    crate::workbench::documents::visualization_studio::open(app);
-                }
+                open_studio_tool(app, "Review notes");
                 crate::workbench::documents::visualization_studio::open_annotation_editor(app);
             }
             Self::MeasurementLibrary => {
-                if app.state.workbench.current_route().surface_id() == super::SurfaceId::Results {
-                    crate::workbench::documents::visualization_studio::open(app);
-                }
+                open_studio_tool(app, "Measurement library");
                 crate::workbench::documents::visualization_studio::open_measurement_editor(app);
             }
             Self::FamilySlicing => {
-                if app.state.workbench.current_route().surface_id() == super::SurfaceId::Results {
-                    crate::workbench::documents::visualization_studio::open(app);
-                }
+                open_studio_tool(app, "Family slicing and pivot");
                 crate::workbench::documents::visualization_studio::open_family_slicing(app);
             }
             Self::VisualizationDocumentProperties => {
-                if app.state.workbench.current_route().surface_id() == super::SurfaceId::Results {
-                    crate::workbench::documents::visualization_studio::open(app);
-                }
+                open_studio_tool(app, "Plot document properties");
                 crate::workbench::documents::visualization_studio::open_document_properties(app);
             }
             Self::ExportVisualizationDocument => {
@@ -1934,6 +1948,26 @@ fn activate_workspace(app: &mut RSpiceApp, workspace: Workspace) {
 
 const fn workspace_available(project_open: bool, workspace: Workspace) -> bool {
     project_open || matches!(workspace, Workspace::Project)
+}
+
+/// Open a Visualization Studio tool, and say so when that means leaving the
+/// result view behind.
+///
+/// These tools operate across visualization documents, so the Studio is
+/// genuinely their home — but a menu item that silently swaps the surface
+/// under the reader is a surprise. Announcing the move in the console leaves
+/// a record of what happened and why the plot went away.
+fn open_studio_tool(app: &mut RSpiceApp, tool: &str) {
+    if app.state.workbench.current_route().surface_id() != super::SurfaceId::Results {
+        return;
+    }
+    crate::workbench::documents::visualization_studio::open(app);
+    if app.state.workbench.current_route().surface_id() == super::SurfaceId::VisualizationStudio {
+        app.state
+            .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
+                "{tool} opened in Visualization Studio, which owns tools that span visualization documents. The result view is one Back away."
+            )));
+    }
 }
 
 fn active_symbol_editor(app: &RSpiceApp) -> bool {

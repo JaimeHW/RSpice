@@ -1826,19 +1826,6 @@ fn active_result_pane(
         .iter()
         .filter(|waveform| waveform.visible)
         .count();
-    let plot_index = if viewer == crate::workbench::documents::result_document::ResultViewer::Waves
-    {
-        analysis_index
-    } else {
-        0
-    };
-    let view = app.state.ui.results.plot_view(viewer, plot_index);
-    let view_label = if view.is_zoomed() {
-        "manual range"
-    } else {
-        "automatic fit"
-    };
-
     // The unit names the pane in a unit-scoped stack; the viewer name is
     // already on the sheet tab above.
     let tokens = Tokens::get(ui.ctx());
@@ -1847,6 +1834,22 @@ fn active_result_pane(
         &tokens,
         &mut app.state,
     );
+    // The waveform stack keys its viewports by analysis; only the
+    // single-canvas viewers keep one under a plot ordinal. Reading the wrong
+    // store here reported "automatic fit" over a pinned pane and left the fit
+    // button permanently disabled.
+    let wave_stack = crate::workbench::documents::result_document::viewer_uses_wave_stack(viewer);
+    let view = app.state.ui.results.plot_view(viewer, 0);
+    let pinned = if wave_stack {
+        facts.pinned.unwrap_or(false)
+    } else {
+        view.is_zoomed()
+    };
+    let view_label = if pinned {
+        "manual range"
+    } else {
+        "automatic fit"
+    };
     section_header(
         ui,
         "Active pane",
@@ -1880,33 +1883,45 @@ fn active_result_pane(
         };
         property_row(ui, "Composition", &composition);
     }
-    if let Some((minimum, maximum)) = view.x {
-        property_row(
-            ui,
-            "X range",
-            &format!(
-                "{} – {}",
-                format_result_scalar(minimum),
-                format_result_scalar(maximum)
-            ),
-        );
+    // A unit-pane stack already states its interval in the viewport rows
+    // above; only a single-canvas viewer needs its pinned range spelled out.
+    if !wave_stack {
+        if let Some((minimum, maximum)) = view.x {
+            property_row(
+                ui,
+                "X range",
+                &format!(
+                    "{} – {}",
+                    format_result_scalar(minimum),
+                    format_result_scalar(maximum)
+                ),
+            );
+        }
+        if let Some((minimum, maximum)) = view.y {
+            property_row(
+                ui,
+                "Y range",
+                &format!(
+                    "{} – {}",
+                    format_result_scalar(minimum),
+                    format_result_scalar(maximum)
+                ),
+            );
+        }
     }
-    if let Some((minimum, maximum)) = view.y {
-        property_row(
-            ui,
-            "Y range",
-            &format!(
-                "{} – {}",
-                format_result_scalar(minimum),
-                format_result_scalar(maximum)
-            ),
-        );
-    }
+    let fit_label = if wave_stack {
+        "Fit active strip"
+    } else {
+        "Fit active pane"
+    };
     if ui
-        .add_enabled(view.is_zoomed(), egui::Button::new("Fit active pane"))
+        .add_enabled(pinned, egui::Button::new(fit_label))
         .clicked()
     {
-        app.state.ui.results.reset_plot_view(viewer, plot_index);
+        crate::workbench::documents::result_document::request_view_gesture(
+            &mut app.state,
+            crate::workbench::documents::result_document::ViewGesture::Fit,
+        );
     }
 }
 

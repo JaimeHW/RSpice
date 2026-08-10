@@ -65,8 +65,8 @@ mod strip;
 mod waves;
 pub(crate) use waves::copy_cursor_text;
 pub(crate) use waves::{
-    SharedXStatus, active_pane_facts, active_shared_x_status, browser_signal_is_current,
-    browser_signal_unit,
+    SharedXStatus, active_pane_facts, active_shared_x_status, analysis_default_unit,
+    browser_signal_is_current, browser_signal_unit,
 };
 
 pub(crate) use waves::toggle_visibility;
@@ -342,6 +342,83 @@ impl ResultPlotTool {
     }
 }
 
+/// A viewport gesture on the active sheet, as asked for by a command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ViewGesture {
+    /// Drop every pinned viewport on the active plot.
+    Fit,
+    /// Halve the visible interval about its centre.
+    ZoomIn,
+    /// Double the visible interval about its centre.
+    ZoomOut,
+}
+
+/// Whether a viewer draws through the shared unit-pane waveform stack.
+///
+/// Those sheets key their viewports by analysis; every other viewer is a
+/// single canvas keyed by plot ordinal. A gesture that does not ask this
+/// question first will write to a store the sheet never reads.
+pub(crate) const fn viewer_uses_wave_stack(viewer: ResultViewer) -> bool {
+    matches!(
+        viewer,
+        ResultViewer::Waves
+            | ResultViewer::DcSweep
+            | ResultViewer::Bode
+            | ResultViewer::NoiseContrib
+    )
+}
+
+/// Queue a viewport gesture for the active result sheet.
+pub(crate) fn request_view_gesture(state: &mut AppState, gesture: ViewGesture) {
+    state.ui.results.pending_view_gesture = Some(gesture);
+}
+
+/// Whether the active sheet has a viewport that fitting can release.
+///
+/// Every plot sheet does; the structured documents (OP, specs, table, XF,
+/// manifest) have no viewport at all and must not offer the gesture.
+pub(crate) fn fit_gesture_available(state: &AppState) -> bool {
+    state.simulation.has_results()
+        && !matches!(
+            state.ui.results.viewer,
+            ResultViewer::Op
+                | ResultViewer::Specs
+                | ResultViewer::Table
+                | ResultViewer::TransferFunction
+                | ResultViewer::Manifest
+        )
+}
+
+/// Whether the active sheet can be magnified about its centre.
+///
+/// Only the unit-pane stack exposes the retained extents a zoom step has to
+/// be computed against; the single-canvas viewers own their own gestures.
+pub(crate) fn zoom_gesture_available(state: &AppState) -> bool {
+    state.simulation.has_results() && viewer_uses_wave_stack(state.ui.results.viewer)
+}
+
+/// Apply any queued viewport gesture, now that the sheet's models and theme
+/// tokens exist.
+fn apply_pending_view_gesture(ui: &Ui, state: &mut AppState) {
+    let Some(gesture) = state.ui.results.pending_view_gesture.take() else {
+        return;
+    };
+    let viewer = state.ui.results.viewer;
+    if !viewer_uses_wave_stack(viewer) {
+        // Single-canvas viewers keep their one view under the plot ordinal,
+        // and only fit is expressible without their renderer's own extents.
+        if gesture == ViewGesture::Fit {
+            state.ui.results.reset_plot_view(viewer, 0);
+        }
+        return;
+    }
+    match gesture {
+        ViewGesture::Fit => waves::fit_active_strip(state),
+        ViewGesture::ZoomIn => waves::zoom_active_pane(state, &Tokens::get(ui.ctx()), 0.5),
+        ViewGesture::ZoomOut => waves::zoom_active_pane(state, &Tokens::get(ui.ctx()), 2.0),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ViewerAvailability {
     available: bool,
@@ -432,8 +509,7 @@ pub enum MarkerKind {
 }
 
 impl MarkerKind {
-    /// Every kind, in cycle order.
-    #[cfg(test)]
+    /// Every kind a marker may be given.
     pub const ALL: [MarkerKind; 3] = [MarkerKind::Note, MarkerKind::Peak, MarkerKind::Spec];
 
     /// Short label used on the chip and in the marker list.
@@ -445,12 +521,12 @@ impl MarkerKind {
         }
     }
 
-    /// The next kind in the cycle (the marker row's kind control).
-    pub const fn next(self) -> Self {
+    /// What choosing this kind asserts, spelled out in the edit dialog.
+    pub const fn dialog_label(self) -> &'static str {
         match self {
-            MarkerKind::Note => MarkerKind::Peak,
-            MarkerKind::Peak => MarkerKind::Spec,
-            MarkerKind::Spec => MarkerKind::Note,
+            MarkerKind::Note => "Note — a remark about this point on the curve",
+            MarkerKind::Peak => "Peak — a called-out extremum or feature",
+            MarkerKind::Spec => "Spec — a limit line the design is measured against",
         }
     }
 
@@ -461,6 +537,50 @@ impl MarkerKind {
     }
 }
 
+/// An uncommitted edit of one marker's purpose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct MarkerEditDraft {
+    pub id: u32,
+    pub note: String,
+    pub kind: MarkerKind,
+}
+
+/// A marker anchor naming one retained signal's plain value projection.
+///
+/// Production anchors come from the drawn trace, which carries the family
+/// discriminator this cannot know; this exists so persistence tests can name
+/// a signal without standing up a whole strip.
+#[cfg(test)]
+pub(crate) fn marker_anchor_for(
+    analysis: AnalysisPresentationKey,
+    source_name: &str,
+) -> WaveformPresentationKey {
+    WaveformPresentationKey {
+        analysis,
+        trace: TracePresentationKey {
+            source_name: source_name.to_owned(),
+            kind: 0,
+            family_group: 0,
+        },
+    }
+}
+
+/// Restore the markers a project retained, dropping any whose analysis is not
+/// in the reopened datasets.
+pub(crate) fn restore_markers(state: &mut AppState, markers: Vec<ResultMarker>) {
+    let retained: Vec<ResultMarker> = markers
+        .into_iter()
+        .filter(|marker| {
+            state
+                .simulation
+                .runs
+                .iter()
+                .any(|run| marker.analysis.resolve(run).is_some())
+        })
+        .collect();
+    state.ui.results.adopt_markers(retained);
+}
+
 /// A user-placed marker on a waveform strip.
 ///
 /// The anchor is a *signal*, not one solve of it: `y` is resampled from the
@@ -468,7 +588,7 @@ impl MarkerKind {
 /// reordering without drifting onto a different dataset or curve.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResultMarker {
-    /// Stable per-session id. Renders as `M{id}`.
+    /// Stable per-project id. Renders as `M{id}`.
     pub id: u32,
     /// Dataset-bound identity of the strip this marker lives on.
     pub analysis: AnalysisPresentationKey,
@@ -550,11 +670,15 @@ pub struct ResultsState {
     /// Quantities check-marked in the browser for a batch action. Session
     /// state like the marks above it; the immutable dataset never sees it.
     pub(crate) checked_signals: std::collections::BTreeSet<String>,
-    /// Id allocator for `markers`. Monotonic within a session so a marker
-    /// label never silently changes meaning after a deletion.
+    /// Id allocator for `markers`. Monotonic within a project so a marker
+    /// label never silently changes meaning after a deletion or a reload.
     next_marker_id: u32,
-    /// Marker whose note is being edited in the readout strip, if any.
-    pub editing_marker: Option<u32>,
+    /// The open marker-purpose dialog's uncommitted edit, if any.
+    ///
+    /// Editing is transactional: nothing reaches the marker until Apply, so
+    /// a half-typed label can always be abandoned. Reclassifying a marker is
+    /// a decision, not a side effect of clicking its kind.
+    pub(super) marker_edit: Option<MarkerEditDraft>,
     /// Whether the stage-level cursor/marker dock is collapsed. Session-only
     /// presentation state; retained result documents never serialize it.
     pub readout_collapsed: bool,
@@ -608,6 +732,14 @@ pub struct ResultsState {
     /// re-runs on purpose — keeping the zoomed window across parameter
     /// tweaks is how engineers compare iterations.
     pub views: std::collections::HashMap<(ResultViewer, PlotPresentationKey, usize), PlotView>,
+    /// A viewport gesture asked for from outside the drawing pass.
+    ///
+    /// Menus, the command palette and shortcuts all reach the workspace
+    /// without an `egui::Context`, and resolving which pane a gesture applies
+    /// to needs the sheet's built models and theme tokens. Queueing here and
+    /// applying inside the viewer well keeps one owner for the gesture
+    /// instead of a second, token-free approximation of pane resolution.
+    pending_view_gesture: Option<ViewGesture>,
     /// User expression traces per dataset-bound waves strip, evaluated by
     /// the calculator against that analysis' waveforms.
     /// Compatibility projection for integrations that still address the
@@ -812,9 +944,6 @@ impl ResultsState {
     /// document content, not a transient readout like the A/B pair.
     pub fn toggle_marker_tool(&mut self) {
         self.marker_tool = MarkerTool(!self.marker_tool.is_armed());
-        if !self.marker_tool.is_armed() {
-            self.editing_marker = None;
-        }
     }
 
     /// Place a marker and return its id.
@@ -843,12 +972,29 @@ impl ResultsState {
         self.markers.iter_mut().find(|marker| marker.id == id)
     }
 
-    /// Remove one marker, and with it any note edit it owned.
+    /// Remove one marker, and with it any open edit of it.
     pub fn remove_marker(&mut self, id: u32) {
         self.markers.retain(|marker| marker.id != id);
-        if self.editing_marker == Some(id) {
-            self.editing_marker = None;
+        if self
+            .marker_edit
+            .as_ref()
+            .is_some_and(|draft| draft.id == id)
+        {
+            self.marker_edit = None;
         }
+    }
+
+    /// Adopt markers restored from a project, keeping the id allocator ahead
+    /// of every label already in use.
+    pub(crate) fn adopt_markers(&mut self, markers: Vec<ResultMarker>) {
+        self.next_marker_id = markers
+            .iter()
+            .map(|marker| marker.id)
+            .max()
+            .unwrap_or(0)
+            .max(self.next_marker_id);
+        self.markers = markers;
+        self.marker_edit = None;
     }
 
     /// Markers on one strip, in placement order.
@@ -1099,6 +1245,13 @@ impl ResultsState {
         analysis: AnalysisPresentationKey,
     ) {
         self.reset_plot_view_for(viewer, PlotPresentationKey::Analysis(analysis));
+    }
+
+    /// Drop every analysis-keyed viewport override of one viewer.
+    pub(super) fn reset_all_analysis_plot_views(&mut self, viewer: ResultViewer) {
+        self.views.retain(|(key_viewer, key_plot, _), _| {
+            *key_viewer != viewer || !matches!(key_plot, PlotPresentationKey::Analysis(_))
+        });
     }
 
     pub(super) fn reset_analysis_plot_view_pane(
@@ -1585,8 +1738,175 @@ pub fn well_hint(ui: &mut Ui, text: &str) {
 
 /// Render the Results workspace center view (docbar + active viewer).
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    results_keymap(ui, app);
     show_with_chrome(ui, app, ResultChrome::Full);
+    waves::marker_dialog::show(ui.ctx(), &mut app.state);
     create_document::show(ui.ctx(), app);
+}
+
+/// The workspace's own single-key gestures, as the mockup's results keymap
+/// defines them: fit, zoom, grid, cursor tool, drop a trace, nudge a cursor.
+///
+/// Two kinds of key meet here. Fit, zoom and grid are commands, and they are
+/// claimed through the chord the user's own profile shows for them — their
+/// registry context is the engineering canvas, which never becomes active on
+/// this workspace, so the resolver would never fire them here. The rest are
+/// view gestures no menu carries and no command names.
+///
+/// Everything is a bare key, so the map stands down whenever a widget wants
+/// the keyboard or a modifier is held: nothing here may fire while the reader
+/// is typing into a filter, an expression, or a marker label.
+fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
+    let ctx = ui.ctx();
+    // A focused widget owns the keyboard: a filter, an expression, or a
+    // marker label must never have a letter stolen from it by this map.
+    if ctx.memory(|memory| memory.focused().is_some()) {
+        return;
+    }
+    // Nor may the map fire underneath a dialog.
+    if app.state.ui.results.marker_edit.is_some() {
+        return;
+    }
+    if !app.state.simulation.has_results() {
+        return;
+    }
+    let plain = ctx
+        .input(|input| !input.modifiers.command && !input.modifiers.alt && !input.modifiers.ctrl);
+    if !plain {
+        return;
+    }
+
+    // Actions that already exist as commands keep the chord the rest of the
+    // product shows for them, read from the user's own profile, so rebinding
+    // one in preferences rebinds it here. Their registry context is the
+    // engineering canvas and never becomes active on this workspace, which is
+    // why the keystroke has to be claimed here rather than left to the
+    // resolver.
+    for (command, gesture) in [
+        (
+            crate::workbench::commands::vocabulary::Command::ZoomFit,
+            ViewGesture::Fit,
+        ),
+        (
+            crate::workbench::commands::vocabulary::Command::ZoomIn,
+            ViewGesture::ZoomIn,
+        ),
+        (
+            crate::workbench::commands::vocabulary::Command::ZoomOut,
+            ViewGesture::ZoomOut,
+        ),
+    ] {
+        let permitted = match gesture {
+            ViewGesture::Fit => fit_gesture_available(&app.state),
+            ViewGesture::ZoomIn | ViewGesture::ZoomOut => zoom_gesture_available(&app.state),
+        };
+        if permitted && consume_command_key(ctx, &app.state, command) {
+            request_view_gesture(&mut app.state, gesture);
+        }
+    }
+    if viewer_uses_wave_stack(app.state.ui.results.viewer)
+        && consume_command_key(
+            ctx,
+            &app.state,
+            crate::workbench::commands::vocabulary::Command::CycleGrid,
+        )
+    {
+        app.state.ui.results.show_minor_grid = !app.state.ui.results.show_minor_grid;
+    }
+
+    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::C)) {
+        app.state.ui.results.toggle_cursor_tool();
+    }
+    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
+        hide_selected_trace(&mut app.state);
+    }
+    // Arrow nudging is a cursor gesture, so it only exists while cursors do.
+    if app.state.ui.results.cursor_readout_active() {
+        let shift = ctx.input(|input| input.modifiers.shift);
+        let modifiers = if shift {
+            egui::Modifiers::SHIFT
+        } else {
+            egui::Modifiers::NONE
+        };
+        let steps = if ctx.input_mut(|input| input.consume_key(modifiers, egui::Key::ArrowRight)) {
+            1.0
+        } else if ctx.input_mut(|input| input.consume_key(modifiers, egui::Key::ArrowLeft)) {
+            -1.0
+        } else {
+            0.0
+        };
+        if steps != 0.0 {
+            let t = Tokens::get(ctx);
+            waves::nudge_cursor(&mut app.state, &t, shift, steps);
+        }
+    }
+}
+
+/// Claim the modifier-free keystroke the profile binds to `command`.
+///
+/// Only bare or shift-only chords are claimed: these are viewport gestures
+/// pressed with one hand over the plot. A profile that moves the command onto
+/// a modifier chord simply leaves this workspace without a key for it — the
+/// menu entry is still the way in, and no key is silently invented.
+fn consume_command_key(
+    ctx: &egui::Context,
+    state: &AppState,
+    command: crate::workbench::commands::vocabulary::Command,
+) -> bool {
+    let platform = crate::workbench::app_state::runtime_command_platform(ctx);
+    state
+        .ui
+        .preferences
+        .shortcuts()
+        .effective_bindings(command)
+        .iter()
+        .filter(|binding| binding.supports(platform))
+        .filter_map(|binding| {
+            let strokes = binding.sequence().strokes();
+            let [stroke] = strokes else { return None };
+            (!stroke.primary() && !stroke.alt()).then_some((stroke.key(), stroke.shift()))
+        })
+        .any(|(key, shift)| {
+            let modifiers = if shift {
+                egui::Modifiers::SHIFT
+            } else {
+                egui::Modifiers::NONE
+            };
+            ctx.input_mut(|input| input.consume_key(modifiers, key))
+        })
+}
+
+/// Take the selected trace off the sheet, the way the mockup's Delete does.
+///
+/// Hiding is the reversible form of removal here: the retained dataset is
+/// immutable, so a trace leaves the plot by losing visibility and comes back
+/// from the pane's add-signal menu.
+fn hide_selected_trace(state: &mut AppState) {
+    let Some(selected) = state.ui.results.valid_selected_trace(&state.simulation) else {
+        return;
+    };
+    let analysis_key = selected.analysis_key();
+    let source_name = selected.source_name().to_owned();
+    let Some(run) = state.simulation.active_run() else {
+        return;
+    };
+    let located = run
+        .analyses
+        .iter()
+        .enumerate()
+        .find_map(|(index, analysis)| {
+            (AnalysisPresentationKey::new(run.dataset_id, analysis) == analysis_key).then(|| {
+                analysis
+                    .waveforms
+                    .iter()
+                    .position(|waveform| waveform.name == source_name)
+                    .map(|waveform_index| (index, waveform_index))
+            })?
+        });
+    if let Some((analysis_index, waveform_index)) = located {
+        waves::toggle_visibility(state, analysis_index, waveform_index);
+        state.ui.results.selected_trace = None;
+    }
 }
 
 /// Render one project-owned result document selected by its stable identity.
@@ -1599,7 +1919,11 @@ pub(crate) fn show_persistent_document(
     app: &mut RSpiceApp,
     document_id: crate::product::ResultDocumentId,
 ) {
+    // A project-owned document is the same workspace with a retained page
+    // layout, so it answers the same keys and owns the same marker dialog.
+    results_keymap(ui, app);
     persistent_document::show(ui, app, document_id);
+    waves::marker_dialog::show(ui.ctx(), &mut app.state);
     create_document::show(ui.ctx(), app);
 }
 
@@ -1776,6 +2100,7 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
 }
 
 fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
+    apply_pending_view_gesture(ui, &mut app.state);
     let t = Tokens::get(ui.ctx());
     // The document well backdrop; viewers paint on top. The rect doubles
     // as the crop window for viewer PNG export.
@@ -3563,5 +3888,201 @@ mod availability_tests {
         assert!(name > 0.0);
         assert!(value > name);
         assert!((name + value + 24.0 + 8.0 - width).abs() < f32::EPSILON * width);
+    }
+
+    fn transient_state() -> AppState {
+        state_with_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
+            ]),
+        )
+    }
+
+    fn active_analysis_key(state: &AppState) -> AnalysisPresentationKey {
+        let run = state.simulation.active_run().expect("active retained run");
+        AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
+    }
+
+    /// The defect this pins: the waveform sheets key their viewports by
+    /// analysis, so a fit written against the plot-ordinal store cleared
+    /// nothing. The pin writes through the production path deliberately —
+    /// a test that writes the ordinal store proves only that the store works.
+    #[test]
+    fn fitting_the_wave_stack_clears_the_viewport_the_sheet_actually_reads() {
+        let mut state = transient_state();
+        let key = active_analysis_key(&state);
+        state
+            .ui
+            .results
+            .analysis_plot_view_pane_mut(ResultViewer::Waves, key, 0)
+            .y = Some((0.0, 1.0));
+        state
+            .ui
+            .results
+            .analysis_plot_view_pane_mut(ResultViewer::Waves, key, 1)
+            .x = Some((0.0, 0.5));
+        state.ui.results.active_wave_pane = Some(WavePanePresentationKey {
+            analysis: key,
+            unit: "V".to_owned(),
+        });
+
+        waves::fit_active_strip(&mut state);
+
+        for ordinal in 0..2 {
+            assert!(
+                !state
+                    .ui
+                    .results
+                    .analysis_plot_view_pane(ResultViewer::Waves, key, ordinal)
+                    .is_zoomed(),
+                "pane {ordinal} kept a pinned viewport after the strip was fitted"
+            );
+        }
+    }
+
+    #[test]
+    fn fitting_without_an_active_pane_releases_every_strip() {
+        let mut state = transient_state();
+        let key = active_analysis_key(&state);
+        state
+            .ui
+            .results
+            .analysis_plot_view_pane_mut(ResultViewer::Waves, key, 0)
+            .y = Some((0.0, 1.0));
+        state.ui.results.active_wave_pane = None;
+
+        waves::fit_active_strip(&mut state);
+
+        assert!(
+            !state
+                .ui
+                .results
+                .analysis_plot_view_pane(ResultViewer::Waves, key, 0)
+                .is_zoomed()
+        );
+    }
+
+    /// Magnifying needs the sheet's retained extents, which only the unit-pane
+    /// stack exposes. Offering it elsewhere would be an enabled control that
+    /// cannot act.
+    #[test]
+    fn zoom_is_offered_only_where_it_can_be_carried_out() {
+        let mut state = transient_state();
+        state.ui.results.viewer = ResultViewer::Waves;
+        assert!(zoom_gesture_available(&state));
+        assert!(fit_gesture_available(&state));
+
+        state.ui.results.viewer = ResultViewer::Fft;
+        assert!(!zoom_gesture_available(&state));
+        assert!(
+            fit_gesture_available(&state),
+            "a single-canvas plot still has a viewport to release"
+        );
+
+        state.ui.results.viewer = ResultViewer::Table;
+        assert!(!fit_gesture_available(&state));
+        assert!(!zoom_gesture_available(&state));
+    }
+
+    /// A signal whose name declares no accessor reads in its analysis' own
+    /// quantity. The calculator used to call every such signal a voltage.
+    #[test]
+    fn an_unqualified_signal_reads_in_its_analysis_quantity() {
+        assert_eq!(analysis_default_unit(AnalysisType::Noise), "V^2/Hz");
+        assert_eq!(analysis_default_unit(AnalysisType::Ac), "dB");
+        assert_eq!(analysis_default_unit(AnalysisType::Transient), "V");
+        assert_eq!(
+            browser_signal_unit(
+                "onoise_spectrum",
+                analysis_default_unit(AnalysisType::Noise)
+            ),
+            "V^2/Hz"
+        );
+        assert_eq!(
+            browser_signal_unit("I(VDD)", analysis_default_unit(AnalysisType::Noise)),
+            "A",
+            "an explicit accessor still wins over the analysis default"
+        );
+    }
+
+    #[test]
+    fn restored_markers_keep_their_labels_and_advance_the_id_allocator() {
+        let mut state = transient_state();
+        let key = active_analysis_key(&state);
+        let anchor = WaveformPresentationKey {
+            analysis: key,
+            trace: TracePresentationKey {
+                source_name: "V(out)".to_owned(),
+                kind: 0,
+                family_group: 0,
+            },
+        };
+        let marker = ResultMarker {
+            id: 7,
+            analysis: key,
+            anchor,
+            trace_name: "V(out)".to_owned(),
+            x: 0.5,
+            kind: MarkerKind::Peak,
+            note: "settling".to_owned(),
+        };
+
+        restore_markers(&mut state, vec![marker]);
+
+        assert_eq!(state.ui.results.markers.len(), 1);
+        assert_eq!(state.ui.results.markers[0].note, "settling");
+        let next = state.ui.results.add_marker(
+            key,
+            state.ui.results.markers[0].anchor.clone(),
+            "V(out)".to_owned(),
+            0.75,
+        );
+        assert!(
+            next > 7,
+            "a restored label must not be handed out a second time"
+        );
+    }
+
+    /// A marker naming a dataset the reopened project no longer retains has
+    /// nothing to draw on, and must not be adopted as if it did.
+    #[test]
+    fn markers_for_absent_datasets_are_dropped_on_restore() {
+        let mut state = transient_state();
+        let key = active_analysis_key(&state);
+        let foreign = AnalysisPresentationKey::new(
+            crate::product::DatasetId::new(),
+            &AnalysisResult::new(9, AnalysisType::Transient, "TRAN"),
+        );
+        let anchor = WaveformPresentationKey {
+            analysis: foreign,
+            trace: TracePresentationKey {
+                source_name: "V(gone)".to_owned(),
+                kind: 0,
+                family_group: 0,
+            },
+        };
+        let kept = ResultMarker {
+            id: 1,
+            analysis: key,
+            anchor: anchor.clone(),
+            trace_name: "V(out)".to_owned(),
+            x: 0.1,
+            kind: MarkerKind::Note,
+            note: String::new(),
+        };
+        let dropped = ResultMarker {
+            id: 2,
+            analysis: foreign,
+            anchor,
+            trace_name: "V(gone)".to_owned(),
+            x: 0.1,
+            kind: MarkerKind::Note,
+            note: String::new(),
+        };
+
+        restore_markers(&mut state, vec![kept, dropped]);
+
+        assert_eq!(state.ui.results.markers.len(), 1);
+        assert_eq!(state.ui.results.markers[0].id, 1);
     }
 }

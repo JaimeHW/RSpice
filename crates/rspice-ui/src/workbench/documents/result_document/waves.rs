@@ -7,6 +7,7 @@
 //! measurements render in the right panel.
 
 mod expressions;
+pub(super) mod marker_dialog;
 mod readout;
 
 pub(crate) use expressions::*;
@@ -41,9 +42,9 @@ use crate::workbench::{
 use super::strip::{LegendChip, StripHeader};
 use super::{
     AnalysisPresentationKey, DerivedSeries, ExprEditor, ExprSeries, ExprTrace,
-    HorizontalWaveCursor, MarkerKind, ResultMarker, ResultsState, SelectedResultTrace,
-    TracePresentationKey, WavePanePresentationKey, WaveformPresentationKey, WaveformSeriesResult,
-    waveform_color, well_hint,
+    HorizontalWaveCursor, MarkerEditDraft, MarkerKind, ResultMarker, ResultsState,
+    SelectedResultTrace, TracePresentationKey, WavePanePresentationKey, WaveformPresentationKey,
+    WaveformSeriesResult, waveform_color, well_hint,
 };
 
 const WAVE_SHARED_X_HEIGHT: f32 = 57.0;
@@ -826,19 +827,23 @@ pub(super) fn build_models(
         let sample_selection = selection.filter(|selection| {
             selection.dataset_id == run.dataset_id && selection.analysis_sequence == analysis.id
         });
-        let (mut x_scale, mut x_dimension_key, mut x_label, mut x_unit, y_unit) =
-            match analysis.analysis_type {
-                AnalysisType::Ac if displays_cartesian_complex => {
-                    (XScale::Log10, "frequency", "f", "Hz", "")
-                }
-                AnalysisType::Ac => (XScale::Log10, "frequency", "f", "Hz", "dB"),
-                AnalysisType::Noise | AnalysisType::Pnoise => {
-                    (XScale::Log10, "frequency", "f", "Hz", "V^2/Hz")
-                }
-                AnalysisType::Transient => (XScale::Linear, "time", "t", "s", "V"),
-                AnalysisType::DcSweep => (XScale::Linear, "dc-sweep", "x", "V", "V"),
-                _ => (XScale::Linear, "x", "x", "", "V"),
-            };
+        let (mut x_scale, mut x_dimension_key, mut x_label, mut x_unit) = match analysis
+            .analysis_type
+        {
+            AnalysisType::Ac => (XScale::Log10, "frequency", "f", "Hz"),
+            AnalysisType::Noise | AnalysisType::Pnoise => (XScale::Log10, "frequency", "f", "Hz"),
+            AnalysisType::Transient => (XScale::Linear, "time", "t", "s"),
+            AnalysisType::DcSweep => (XScale::Linear, "dc-sweep", "x", "V"),
+            _ => (XScale::Linear, "x", "x", ""),
+        };
+        // Cartesian complex parts carry the source quantity, not the
+        // magnitude projection's decibels, so that one case overrides the
+        // analysis default.
+        let y_unit = if displays_cartesian_complex {
+            ""
+        } else {
+            analysis_default_unit(analysis.analysis_type)
+        };
         if let Some(axis) = sample_selection
             .and_then(SourceSampleSelection::family_render_plan)
             .map(FamilyRenderPlan::x_axis)
@@ -1243,6 +1248,21 @@ fn signal_unit(name: &str, kind: TraceKind, analysis_unit: &'static str) -> &'st
                 analysis_unit
             }
         }
+    }
+}
+
+/// The unit a retained waveform reads in when its own name declares no
+/// accessor — the analysis' own quantity.
+///
+/// This is the one owner of that mapping. Every surface that labels a raw
+/// dataset signal reads it through [`browser_signal_unit`]; a surface that
+/// guesses instead will label a noise density or a decibel magnitude as
+/// volts.
+pub(crate) const fn analysis_default_unit(analysis_type: AnalysisType) -> &'static str {
+    match analysis_type {
+        AnalysisType::Ac => "dB",
+        AnalysisType::Noise | AnalysisType::Pnoise => "V^2/Hz",
+        _ => "V",
     }
 }
 
@@ -1686,7 +1706,9 @@ pub(super) fn drop_marker_at_cursor_a(state: &mut AppState, t: &Tokens) {
         return;
     };
     let marker = state.ui.results.add_marker(analysis, anchor, trace_name, x);
-    state.ui.results.editing_marker = Some(marker);
+    // Placing a marker is normally the first half of saying what it means, so
+    // the purpose dialog opens on the one just placed.
+    marker_dialog::open(state, marker);
 }
 
 fn scaled_range(range: (f64, f64), factor: f64, logarithmic: bool) -> Option<(f64, f64)> {
@@ -1767,6 +1789,100 @@ pub(super) fn fit_active_pane(state: &mut AppState, t: &Tokens) {
         model.analysis_key,
         ordinal,
     );
+}
+
+/// Drop every pinned viewport on the strip the active pane belongs to.
+///
+/// The instrument bar's fit button fits one pane; the workspace-level Fit
+/// gesture fits the whole strip, because the panes of a strip share one X
+/// domain and leaving the others pinned would make them disagree about the
+/// window they show. With no active pane — nothing has been clicked yet —
+/// every strip of the sheet fits, which is what "fit" means before the user
+/// has singled one out.
+pub(super) fn fit_active_strip(state: &mut AppState) {
+    let viewer = super::ResultViewer::Waves;
+    match state.ui.results.active_wave_pane.as_ref() {
+        Some(key) => {
+            let analysis = key.analysis;
+            state.ui.results.reset_analysis_plot_view(viewer, analysis);
+        }
+        None => state.ui.results.reset_all_analysis_plot_views(viewer),
+    }
+}
+
+/// Whether the active pane is showing a viewport the user pinned rather than
+/// the retained data's own extent.
+///
+/// The waveform stack keys its viewports by analysis, not by the legacy
+/// `Global` plot index, so this is the only honest reading for these sheets.
+fn active_pane_is_pinned(tokens: &Tokens, state: &mut AppState) -> bool {
+    let Some(key) = state.ui.results.active_wave_pane.clone() else {
+        return false;
+    };
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        tokens,
+    );
+    let Some(model) = models
+        .iter()
+        .find(|model| model.analysis_key == key.analysis)
+    else {
+        return false;
+    };
+    let panes = model.unit_panes();
+    (0..panes.len()).any(|ordinal| {
+        state
+            .ui
+            .results
+            .analysis_plot_view_pane(super::ResultViewer::Waves, key.analysis, ordinal)
+            .is_zoomed()
+    })
+}
+
+/// Move a placed cursor by a fraction of the visible X interval.
+///
+/// The nudge is expressed in the window the reader is looking at, not the
+/// full retained sweep, so one keypress moves the same visible distance
+/// however far the sheet is zoomed in.
+pub(super) fn nudge_cursor(state: &mut AppState, tokens: &Tokens, cursor_b: bool, steps: f64) {
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        tokens,
+    );
+    let Some(strip) = state.ui.results.cursor_strip else {
+        return;
+    };
+    let Some(model) = models.iter().find(|model| model.analysis_index == strip) else {
+        return;
+    };
+    let Some(full) = x_range(model) else {
+        return;
+    };
+    let panes = model.unit_panes().len();
+    let (x0, x1) = shared_x_view(&state.ui.results, model.analysis_key, panes).unwrap_or(full);
+    let cursor = if cursor_b {
+        &mut state.ui.results.cursors.b
+    } else {
+        &mut state.ui.results.cursors.a
+    };
+    let Some(position) = cursor else {
+        return;
+    };
+    let moved = if model.x_scale == XScale::Log10 && *position > 0.0 && x0 > 0.0 && x1 > x0 {
+        let decades = (x1.log10() - x0.log10()) * 0.01 * steps;
+        10.0_f64.powf(position.log10() + decades)
+    } else {
+        *position + (x1 - x0) * 0.01 * steps
+    };
+    if moved.is_finite() {
+        *position = moved.clamp(full.0.min(full.1), full.0.max(full.1));
+    }
 }
 
 const fn cursor_interpolation(policy: CursorInterpolation) -> SampleInterpolation {
@@ -2361,6 +2477,9 @@ pub(crate) struct ActivePaneFacts {
     pub limit_mask: &'static str,
     pub x_viewport: Option<String>,
     pub y_viewport: Option<String>,
+    /// Whether any pane of the active strip is showing a pinned viewport.
+    /// `None` when this sheet has no unit-pane stack to report on.
+    pub pinned: Option<bool>,
 }
 
 pub(crate) fn active_pane_facts(
@@ -2373,6 +2492,12 @@ pub(crate) fn active_pane_facts(
     // either way: "automatic" alone does not tell a reader what they see.
     let (x_viewport, y_viewport) = active_pane_viewports(tokens, state);
     let (analysis, traces, runs) = active_pane_identity(tokens, state);
+    let pinned = state
+        .ui
+        .results
+        .active_wave_pane
+        .is_some()
+        .then(|| active_pane_is_pinned(tokens, state));
     let key = state.ui.results.active_wave_pane.as_ref();
     let scale = key.map(|key| {
         let log = ctx
@@ -2399,6 +2524,7 @@ pub(crate) fn active_pane_facts(
         },
         x_viewport,
         y_viewport,
+        pinned,
     }
 }
 
@@ -3763,9 +3889,8 @@ fn show_unit_pane(
                 .ui
                 .results
                 .add_marker(model.analysis_key, anchor, name, clicked_x);
-            // Focus the new marker's note field: placing one is normally the
-            // first half of saying what it means.
-            state.ui.results.editing_marker = Some(id);
+            // Placing one is normally the first half of saying what it means.
+            marker_dialog::open(state, id);
         }
     } else if let Some(clicked_x) = response.clicked_x
         && state.ui.results.cursor_placement_enabled()
