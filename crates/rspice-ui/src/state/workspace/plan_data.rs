@@ -371,6 +371,73 @@ impl ProjectWorkspace {
         Ok(())
     }
 
+    /// Replace every user-editable field of one plan-owned saved output as a
+    /// single validated workspace transaction.
+    ///
+    /// Identity and revision belong to the existing record, so the
+    /// replacement's own values for those are ignored. A semantic no-op
+    /// returns the current revision without advancing it; an actual change
+    /// advances exactly once. Validation runs against a cloned workspace, so a
+    /// malformed expression, a name that collides with another output, or any
+    /// project-level invariant failure leaves the source workspace intact.
+    pub fn replace_saved_output(
+        &mut self,
+        plan_id: SimulationPlanId,
+        output_id: SavedOutputId,
+        mut replacement: SavedOutput,
+    ) -> Result<ObjectRevision, SimulationConfigurationError> {
+        let mut candidate = self.clone();
+        let payload = candidate
+            .active_plan_data_mut(plan_id)
+            .ok_or(SimulationConfigurationError::PlanPayloadMissing { plan_id })?;
+        let index = payload
+            .saved_outputs
+            .iter()
+            .position(|output| output.id == output_id)
+            .ok_or(SimulationConfigurationError::SavedOutputNotFound { plan_id, output_id })?;
+        if payload
+            .saved_outputs
+            .iter()
+            .enumerate()
+            .any(|(other_index, output)| {
+                other_index != index && output.name.eq_ignore_ascii_case(&replacement.name)
+            })
+        {
+            return Err(SimulationConfigurationError::SavedOutputNameConflict {
+                plan_id,
+                name: replacement.name,
+            });
+        }
+
+        let current_revision = payload.saved_outputs[index].revision;
+        replacement.id = output_id;
+        replacement.revision = current_revision;
+        replacement.validate().map_err(|message| {
+            SimulationConfigurationError::InvalidSavedOutput {
+                plan_id,
+                index,
+                message,
+            }
+        })?;
+        if replacement == payload.saved_outputs[index] {
+            return Ok(current_revision);
+        }
+
+        let next_revision = current_revision.next().map_err(|source| {
+            SimulationConfigurationError::SavedOutputRevision {
+                plan_id,
+                output_id,
+                source,
+            }
+        })?;
+        replacement.revision = next_revision;
+        payload.saved_outputs[index] = replacement;
+        candidate.validate_simulation_configuration()?;
+
+        *self = candidate;
+        Ok(next_revision)
+    }
+
     /// Remove one plan-owned saved output by its stable identity.
     ///
     /// Atomic with respect to validation: the removal is applied to a

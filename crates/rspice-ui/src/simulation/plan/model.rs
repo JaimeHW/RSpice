@@ -309,6 +309,22 @@ impl SimulationPlanConfigurationReceipt {
     pub fn detail(&self) -> &str {
         &self.detail
     }
+
+    /// The receipt as a single status line.
+    ///
+    /// Every surface that commits a configuration change reports it the same
+    /// way, so the wording lives with the receipt rather than being restated
+    /// at each call site.
+    #[must_use]
+    pub fn status_line(&self) -> String {
+        format!(
+            "Configuration receipt #{} · revision {} to {} · {}",
+            self.sequence(),
+            self.source_revision().get(),
+            self.committed_revision().get(),
+            self.detail()
+        )
+    }
 }
 
 /// One stable analysis identity in presentation and execution order.

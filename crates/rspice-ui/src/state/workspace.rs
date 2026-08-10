@@ -553,6 +553,15 @@ pub enum SimulationConfigurationError {
         plan_id: SimulationPlanId,
         output_id: SavedOutputId,
     },
+    #[error(
+        "saved output {output_id} in simulation plan {plan_id} could not advance its revision: {source}"
+    )]
+    SavedOutputRevision {
+        plan_id: SimulationPlanId,
+        output_id: SavedOutputId,
+        #[source]
+        source: RevisionError,
+    },
     #[error("simulation plan {plan_id} has no configuration payload")]
     PlanPayloadMissing { plan_id: SimulationPlanId },
     #[error("simulation plan {plan_id} already has a configuration payload")]

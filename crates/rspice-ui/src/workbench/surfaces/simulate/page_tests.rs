@@ -15,6 +15,15 @@ use crate::workbench::state::SimulationPage;
 
 /// Render one page and collect the text it painted.
 fn render(page: SimulationPage, width: f32) -> String {
+    render_with(page, width, |_| {})
+}
+
+/// Render one page over an app the caller has seeded first.
+///
+/// A registry page shows its record editor only once something is selected, so
+/// a test that wants to see those controls has to put a record in the plan and
+/// select it before the frame runs.
+fn render_with(page: SimulationPage, width: f32, seed: impl FnOnce(&mut RSpiceApp)) -> String {
     fn collect(shape: &egui::epaint::Shape, rendered: &mut String) {
         match shape {
             egui::epaint::Shape::Text(text) => {
@@ -34,6 +43,7 @@ fn render(page: SimulationPage, width: f32) -> String {
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.simulation_page = page;
+    seed(&mut app);
     let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width, 1400.0))),
@@ -52,6 +62,99 @@ fn render(page: SimulationPage, width: f32) -> String {
         collect(&clipped.shape, &mut rendered);
     }
     rendered
+}
+
+/// The active plan's identity, for tests that seed plan-owned records.
+fn plan_id(app: &RSpiceApp) -> crate::product::SimulationPlanId {
+    app.state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the test instance has a stable plan")
+        .id()
+}
+
+/// Every field the record editors expose has to reach the screen as a control,
+/// not just exist in the model. These two pages are the only place an authored
+/// record's contract can be changed, so a field that silently stopped painting
+/// would take its capability with it.
+#[test]
+fn a_selected_record_paints_every_field_of_its_contract() {
+    use crate::state::{
+        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
+        DesignVariableSweepEligibility, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
+        SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+    };
+
+    let rendered = render_with(SimulationPage::Outputs, 1200.0, |app| {
+        let id = plan_id(app);
+        let output = SavedOutput::new(
+            SavedOutputKind::RawVoltageOrCurrent,
+            "vout",
+            "V(out)",
+            SavedOutputCompatibility::AllCompatibleAnalyses,
+            SavedOutputPolicy::EveryAcceptedPoint,
+            SavedOutputPrecision::FullSourcePrecision,
+            SavedOutputStreaming::StoreOnly,
+        )
+        .expect("valid saved output");
+        app.state
+            .workspace
+            .add_saved_output(id, output)
+            .expect("the plan accepts it");
+        app.state.workbench.selected_saved_output = Some("vout".to_owned());
+    });
+    for field in [
+        "Name",
+        "Expression",
+        "Applies to",
+        "Save policy",
+        "Stored precision",
+        "Streaming",
+    ] {
+        assert!(
+            rendered.contains(field),
+            "the selected output's {field} control did not reach the screen:\n{rendered}"
+        );
+    }
+
+    let rendered = render_with(SimulationPage::Variables, 1200.0, |app| {
+        let id = plan_id(app);
+        let variable = DesignVariable::new(
+            "rload",
+            "1kohm",
+            DesignVariableQuantity::Resistance,
+            DesignVariableScope::Testbench,
+            "load resistance",
+            None,
+            DesignVariableSweepEligibility::FixedParameter,
+            DesignVariableOverridePolicy::InheritOwnerOnly,
+        )
+        .expect("valid design variable");
+        app.state
+            .workspace
+            .add_design_variable(id, variable)
+            .expect("the plan accepts it");
+        app.state.workbench.selected_design_variable = Some("rload".to_owned());
+    });
+    for field in [
+        "Expression",
+        "Quantity",
+        "Scope",
+        "Sweep role",
+        "Override policy",
+        "Minimum",
+        "Maximum",
+    ] {
+        assert!(
+            rendered.contains(field),
+            "the selected variable's {field} control did not reach the screen:\n{rendered}"
+        );
+    }
+    assert!(
+        rendered.contains("unbounded"),
+        "an unbounded variable must say that preflight cannot reject an out-of-range value:\n\
+         {rendered}"
+    );
 }
 
 #[test]
@@ -247,6 +350,186 @@ fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
     );
 }
 
+/// A capture policy an engineer can read but not change is a report, not a
+/// control. The Save & streaming page totals these exact fields, so each one
+/// has to be editable through a validated transaction that moves the plan
+/// revision.
+#[test]
+fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
+    use crate::state::{
+        SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
+        SavedOutputPrecision, SavedOutputStreaming,
+    };
+
+    let mut app = RSpiceApp::test_instance();
+    let plan_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("test instance has a stable plan")
+        .id();
+    let output = SavedOutput::new(
+        SavedOutputKind::RawVoltageOrCurrent,
+        "vout",
+        "V(out)",
+        SavedOutputCompatibility::AllCompatibleAnalyses,
+        SavedOutputPolicy::EveryAcceptedPoint,
+        SavedOutputPrecision::FullSourcePrecision,
+        SavedOutputStreaming::StoreOnly,
+    )
+    .expect("valid saved output");
+    let output_id = output.id;
+    let original_revision = output.revision;
+    app.state
+        .workspace
+        .add_saved_output(plan_id, output.clone())
+        .expect("the plan accepts a valid output");
+
+    let mut replacement = output.clone();
+    replacement.save_policy = SavedOutputPolicy::FailureDiagnosticsOnly;
+    replacement.stored_precision = SavedOutputPrecision::DisplayCacheWithFullSourcePrecision;
+    replacement.streaming = SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation;
+    let revision = app
+        .state
+        .workspace
+        .replace_saved_output(plan_id, output_id, replacement)
+        .expect("a valid capture contract is accepted");
+    assert_ne!(
+        revision, original_revision,
+        "an accepted edit must advance the output's own revision"
+    );
+    let stored = app
+        .state
+        .workspace
+        .active_plan_data(plan_id)
+        .expect("payload")
+        .saved_outputs
+        .iter()
+        .find(|candidate| candidate.id == output_id)
+        .expect("the output survives the edit")
+        .clone();
+    assert_eq!(
+        stored.save_policy,
+        SavedOutputPolicy::FailureDiagnosticsOnly
+    );
+    assert_eq!(
+        stored.stored_precision,
+        SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
+    );
+    assert_eq!(
+        stored.streaming,
+        SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
+    );
+    assert_eq!(
+        stored.name, "vout",
+        "editing the capture policy must not rename the output"
+    );
+
+    // Re-committing the same contract is a semantic no-op: it must not spend a
+    // revision, or every repaint that re-selects the same option would.
+    let unchanged = app
+        .state
+        .workspace
+        .replace_saved_output(plan_id, output_id, stored.clone())
+        .expect("an unchanged contract is accepted");
+    assert_eq!(
+        unchanged, revision,
+        "re-committing an identical contract must not advance the revision"
+    );
+
+    // An edit that collides with another output's name is refused whole.
+    let other = SavedOutput::new(
+        SavedOutputKind::RawVoltageOrCurrent,
+        "vin",
+        "V(in)",
+        SavedOutputCompatibility::AllCompatibleAnalyses,
+        SavedOutputPolicy::EveryAcceptedPoint,
+        SavedOutputPrecision::FullSourcePrecision,
+        SavedOutputStreaming::StoreOnly,
+    )
+    .expect("valid saved output");
+    app.state
+        .workspace
+        .add_saved_output(plan_id, other)
+        .expect("the plan accepts a second output");
+    let mut collision = stored;
+    collision.name = "VIN".to_owned();
+    assert!(
+        app.state
+            .workspace
+            .replace_saved_output(plan_id, output_id, collision)
+            .is_err(),
+        "a name that collides case-insensitively with another output must be refused"
+    );
+    assert_eq!(
+        app.state
+            .workspace
+            .active_plan_data(plan_id)
+            .expect("payload")
+            .saved_outputs
+            .iter()
+            .find(|candidate| candidate.id == output_id)
+            .expect("the output is untouched by the refused edit")
+            .name,
+        "vout"
+    );
+}
+
+/// An output's name and expression are the two things most likely to be wrong
+/// after authoring — a typo'd node, a signal renamed in the schematic. Both
+/// have to be fixable without deleting and re-authoring the contract.
+#[test]
+fn a_saved_output_can_be_renamed_and_its_expression_rewritten() {
+    use crate::state::{
+        SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
+        SavedOutputPrecision, SavedOutputStreaming,
+    };
+
+    let mut app = RSpiceApp::test_instance();
+    let plan_id = plan_id(&app);
+    let output = SavedOutput::new(
+        SavedOutputKind::RawVoltageOrCurrent,
+        "vout",
+        "V(otu)",
+        SavedOutputCompatibility::AllCompatibleAnalyses,
+        SavedOutputPolicy::EveryAcceptedPoint,
+        SavedOutputPrecision::FullSourcePrecision,
+        SavedOutputStreaming::StoreOnly,
+    )
+    .expect("valid saved output");
+    let output_id = output.id;
+    app.state
+        .workspace
+        .add_saved_output(plan_id, output.clone())
+        .expect("the plan accepts it");
+
+    let mut corrected = output;
+    corrected.name = "v_out".to_owned();
+    corrected.source_expression = "V(out)".to_owned();
+    app.state
+        .workspace
+        .replace_saved_output(plan_id, output_id, corrected)
+        .expect("a corrected contract is accepted");
+
+    let stored = app
+        .state
+        .workspace
+        .active_plan_data(plan_id)
+        .expect("payload")
+        .saved_outputs
+        .iter()
+        .find(|candidate| candidate.id == output_id)
+        .expect("the output keeps its identity across a rename")
+        .clone();
+    assert_eq!(stored.name, "v_out");
+    assert_eq!(stored.source_expression, "V(out)");
+    assert_eq!(
+        stored.save_policy,
+        SavedOutputPolicy::EveryAcceptedPoint,
+        "correcting the expression must not disturb the capture policy"
+    );
+}
+
 /// The composed run space decides how many points a dispatch executes, so a
 /// change to it has to move the plan revision. Otherwise an authorized
 /// preflight could be followed by a sweep change and a dispatch that ran a
@@ -332,6 +615,112 @@ fn a_design_variable_expression_can_be_edited_in_place() {
     assert_eq!(
         stored.name, "rload",
         "editing the expression must not rename the variable"
+    );
+}
+
+/// A variable's typed contract — quantity, scope, sweep role, override policy
+/// and bounds — decides what a sweep may do with it and what preflight may
+/// reject. All of it has to be reachable after authoring, and an unbounded
+/// variable has to be able to become bounded.
+#[test]
+fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() {
+    use crate::state::{
+        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange,
+        DesignVariableScope, DesignVariableSweepEligibility,
+    };
+
+    let mut app = RSpiceApp::test_instance();
+    let plan_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("stable plan")
+        .id();
+    let variable = DesignVariable::new(
+        "rload",
+        "1kohm",
+        DesignVariableQuantity::Resistance,
+        DesignVariableScope::Testbench,
+        "load resistance",
+        None,
+        DesignVariableSweepEligibility::FixedParameter,
+        DesignVariableOverridePolicy::InheritOwnerOnly,
+    )
+    .expect("valid design variable");
+    let variable_id = variable.id;
+    app.state
+        .workspace
+        .add_design_variable(plan_id, variable.clone())
+        .expect("the plan accepts a valid variable");
+    assert!(
+        variable.allowed_range.is_none(),
+        "the variable starts unbounded"
+    );
+
+    let mut replacement = variable.clone();
+    replacement.sweep_eligibility = DesignVariableSweepEligibility::NestedSweepAndOptimization;
+    replacement.override_policy = DesignVariableOverridePolicy::ExplicitTestLocalOverride;
+    replacement.scope = DesignVariableScope::Project;
+    replacement.allowed_range = Some(DesignVariableRange {
+        minimum: "500ohm".to_owned(),
+        maximum: "2kohm".to_owned(),
+    });
+    app.state
+        .workspace
+        .replace_design_variable(plan_id, variable_id, replacement)
+        .expect("a valid contract is accepted");
+
+    let stored = app
+        .state
+        .workspace
+        .active_plan_data(plan_id)
+        .expect("payload")
+        .design_variables
+        .iter()
+        .find(|candidate| candidate.id == variable_id)
+        .expect("the variable survives the edit")
+        .clone();
+    assert_eq!(
+        stored.sweep_eligibility,
+        DesignVariableSweepEligibility::NestedSweepAndOptimization
+    );
+    assert_eq!(
+        stored.override_policy,
+        DesignVariableOverridePolicy::ExplicitTestLocalOverride
+    );
+    assert_eq!(stored.scope, DesignVariableScope::Project);
+    assert_eq!(
+        stored
+            .allowed_range
+            .as_ref()
+            .map(|range| (range.minimum.as_str(), range.maximum.as_str())),
+        Some(("500ohm", "2kohm")),
+        "a variable that was authored unbounded must be able to gain a bound"
+    );
+    assert_eq!(
+        stored.expression, "1kohm",
+        "retyping the contract must not disturb the expression"
+    );
+
+    // Clearing both bounds is a real choice: it makes the variable unbounded
+    // again rather than leaving a half-open range preflight cannot check.
+    let mut unbounded = stored;
+    unbounded.allowed_range = None;
+    app.state
+        .workspace
+        .replace_design_variable(plan_id, variable_id, unbounded)
+        .expect("removing the bound is accepted");
+    assert!(
+        app.state
+            .workspace
+            .active_plan_data(plan_id)
+            .expect("payload")
+            .design_variables
+            .iter()
+            .find(|candidate| candidate.id == variable_id)
+            .expect("the variable survives")
+            .allowed_range
+            .is_none()
     );
 }
 

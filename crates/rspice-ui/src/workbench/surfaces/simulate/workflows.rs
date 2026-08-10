@@ -511,13 +511,7 @@ pub(super) fn commit_design_variable(
     app.state.sim_setup = setup;
     app.state.workspace = workspace;
     app.invalidate_simulation_preflight();
-    app.state.workbench.analysis_lifecycle_status = format!(
-        "Configuration receipt #{} · revision {} to {} · {}",
-        receipt.sequence(),
-        receipt.source_revision().get(),
-        receipt.committed_revision().get(),
-        receipt.detail()
-    );
+    app.state.workbench.analysis_lifecycle_status = receipt.status_line();
     Ok(format!(
         "Created design variable {variable_name} in plan {}.",
         app.state.sim_setup.active_plan_name()
@@ -615,13 +609,7 @@ pub(super) fn commit_saved_output(
     app.state.sim_setup = setup;
     app.state.workspace = workspace;
     app.invalidate_simulation_preflight();
-    app.state.workbench.analysis_lifecycle_status = format!(
-        "Configuration receipt #{} · revision {} to {} · {}",
-        receipt.sequence(),
-        receipt.source_revision().get(),
-        receipt.committed_revision().get(),
-        receipt.detail()
-    );
+    app.state.workbench.analysis_lifecycle_status = receipt.status_line();
     Ok(format!(
         "Added saved output {output_name} to plan {}.",
         app.state.sim_setup.active_plan_name()

@@ -9,10 +9,14 @@ use egui::Ui;
 
 use crate::product::{DesignVariableId, SimulationPlanId};
 use crate::state::workspace::SimulationPlanPayload;
+use crate::state::{
+    DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
+    DesignVariableSweepEligibility,
+};
 use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
 
-use crate::ui::widgets::mono_input;
+use crate::ui::widgets::{mono_input, select};
 
 use super::page_kit::{
     Tone, card, card_body, card_head_row, card_note, card_row, field_pair, ledger_head, ledger_row,
@@ -157,6 +161,12 @@ fn registry(
     );
 
     if let Some(name) = pick {
+        // A draft belongs to the row it was typed into. Selecting another row
+        // must not carry a half-typed expression or bound onto it.
+        if app.state.workbench.selected_design_variable.as_deref() != Some(name.as_str()) {
+            app.state.workbench.design_variable_expression_draft = None;
+            app.state.workbench.design_variable_bounds_draft = None;
+        }
         app.state.workbench.selected_design_variable = Some(name);
     }
     if let Some(index) = selected_index {
@@ -233,6 +243,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         );
         return;
     };
+    let variable = variable.clone();
     let title = format!("Selected variable · {}", variable.name);
     let variable_id = variable.id;
     let revision = variable.revision.get();
@@ -242,7 +253,36 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         .design_variable_expression_draft
         .clone()
         .unwrap_or_else(|| variable.expression.clone());
-    let mut committed = false;
+    let stored_bounds = variable.allowed_range.as_ref().map_or_else(
+        || (String::new(), String::new()),
+        |range| (range.minimum.clone(), range.maximum.clone()),
+    );
+    let mut bounds = app
+        .state
+        .workbench
+        .design_variable_bounds_draft
+        .clone()
+        .unwrap_or_else(|| stored_bounds.clone());
+    let quantities: Vec<String> = DesignVariableQuantity::ALL
+        .iter()
+        .map(|quantity| quantity.label().to_owned())
+        .collect();
+    let sweep_roles: Vec<String> = DesignVariableSweepEligibility::ALL
+        .iter()
+        .map(|role| role.label().to_owned())
+        .collect();
+    let override_policies: Vec<String> = DesignVariableOverridePolicy::ALL
+        .iter()
+        .map(|policy| policy.label().to_owned())
+        .collect();
+    let scopes = scope_options(app, &variable.scope);
+    let scope_labels: Vec<String> = scopes.iter().map(|(label, _)| label.clone()).collect();
+    let current_scope = scope_label(&variable.scope, &scopes);
+
+    // One slot for the whole card: `field_pair` holds two controls at once,
+    // and two closures cannot borrow the same variable mutably.
+    let edit: std::cell::Cell<Option<VariableEdit>> = std::cell::Cell::new(None);
+    let released = std::cell::Cell::new(false);
     let status = format!("revision {revision}");
     card(ui, &title, Some((status.as_str(), Tone::Ok)), |ui| {
         card_body(ui, |ui| {
@@ -253,35 +293,302 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
             field_pair(
                 ui,
                 ("Expression", &mut |ui: &mut Ui, width: f32| {
-                    committed = mono_input(ui, &mut draft, width).lost_focus();
+                    released.set(released.get() | mono_input(ui, &mut draft, width).lost_focus());
+                }),
+                Some(("Quantity", &mut |ui: &mut Ui, width: f32| {
+                    if let Some(index) = select(
+                        ui,
+                        "simulation.variables.quantity",
+                        "Quantity",
+                        variable.quantity.label(),
+                        &quantities,
+                        width,
+                    ) {
+                        edit.set(Some(VariableEdit::Quantity(
+                            DesignVariableQuantity::ALL[index],
+                        )));
+                    }
+                })),
+            );
+            field_pair(
+                ui,
+                ("Scope", &mut |ui: &mut Ui, width: f32| {
+                    if let Some(index) = select(
+                        ui,
+                        "simulation.variables.scope",
+                        "Scope",
+                        &current_scope,
+                        &scope_labels,
+                        width,
+                    ) {
+                        edit.set(Some(VariableEdit::Scope(scopes[index].1.clone())));
+                    }
+                }),
+                Some(("Sweep role", &mut |ui: &mut Ui, width: f32| {
+                    if let Some(index) = select(
+                        ui,
+                        "simulation.variables.sweep",
+                        "Sweep role",
+                        variable.sweep_eligibility.label(),
+                        &sweep_roles,
+                        width,
+                    ) {
+                        edit.set(Some(VariableEdit::SweepRole(
+                            DesignVariableSweepEligibility::ALL[index],
+                        )));
+                    }
+                })),
+            );
+            field_pair(
+                ui,
+                ("Override policy", &mut |ui: &mut Ui, width: f32| {
+                    if let Some(index) = select(
+                        ui,
+                        "simulation.variables.override",
+                        "Override policy",
+                        variable.override_policy.label(),
+                        &override_policies,
+                        width,
+                    ) {
+                        edit.set(Some(VariableEdit::OverridePolicy(
+                            DesignVariableOverridePolicy::ALL[index],
+                        )));
+                    }
                 }),
                 None,
             );
-            rule_row(ui, "Quantity", variable.quantity.label());
-            rule_row(ui, "Scope", variable.scope.label());
-            rule_row(ui, "Sweep role", variable.sweep_eligibility.label());
-            rule_row(ui, "Override policy", variable.override_policy.label());
-            rule_row(
+            // Bounds are expressions, not numbers, so suffixes and owner
+            // variables survive the round trip. Clearing both makes the
+            // variable unbounded, which is a real choice rather than a
+            // missing value.
+            field_pair(
                 ui,
-                "Bounds",
-                &variable.allowed_range.as_ref().map_or_else(
-                    || "unbounded · preflight cannot reject an out-of-range value".to_owned(),
-                    |range| format!("{} … {}", range.minimum, range.maximum),
-                ),
+                ("Minimum", &mut |ui: &mut Ui, width: f32| {
+                    released
+                        .set(released.get() | mono_input(ui, &mut bounds.0, width).lost_focus());
+                }),
+                Some(("Maximum", &mut |ui: &mut Ui, width: f32| {
+                    released
+                        .set(released.get() | mono_input(ui, &mut bounds.1, width).lost_focus());
+                })),
             );
+            if variable.allowed_range.is_none() {
+                card_note(
+                    ui,
+                    "This variable is unbounded, so preflight cannot reject an out-of-range \
+                     value. Give it both a minimum and a maximum to have the bound enforced.",
+                );
+            }
             if !variable.description.trim().is_empty() {
                 rule_row(ui, "Description", &variable.description);
             }
         });
     });
 
-    if committed {
+    if let Some(edit) = edit.take() {
+        let detail = edit.detail(&variable.name, &scopes);
+        replace_variable(app, variable_id, &detail, |target| edit.apply(target));
+        return;
+    }
+    if released.get() {
         if draft.trim() != variable.expression.trim() {
             commit_expression(app, variable_id, &draft, &variable.name);
         }
+        if bounds != stored_bounds {
+            commit_bounds(app, variable_id, &bounds, &variable.name);
+        }
         app.state.workbench.design_variable_expression_draft = None;
-    } else if draft != variable.expression {
+        app.state.workbench.design_variable_bounds_draft = None;
+        return;
+    }
+    if draft != variable.expression {
         app.state.workbench.design_variable_expression_draft = Some(draft);
+    }
+    if bounds != stored_bounds {
+        app.state.workbench.design_variable_bounds_draft = Some(bounds);
+    }
+}
+
+/// One accepted change to a design variable's typed contract.
+enum VariableEdit {
+    Quantity(DesignVariableQuantity),
+    Scope(DesignVariableScope),
+    SweepRole(DesignVariableSweepEligibility),
+    OverridePolicy(DesignVariableOverridePolicy),
+}
+
+impl VariableEdit {
+    fn apply(self, target: &mut crate::state::DesignVariable) {
+        match self {
+            Self::Quantity(quantity) => target.quantity = quantity,
+            Self::Scope(scope) => target.scope = scope,
+            Self::SweepRole(role) => target.sweep_eligibility = role,
+            Self::OverridePolicy(policy) => target.override_policy = policy,
+        }
+    }
+
+    fn detail(&self, name: &str, scopes: &[(String, DesignVariableScope)]) -> String {
+        match self {
+            Self::Quantity(quantity) => format!(
+                "Typed design variable {name} as {}.",
+                quantity.label().to_lowercase()
+            ),
+            Self::Scope(scope) => format!(
+                "Scoped design variable {name} to {}.",
+                scope_label(scope, scopes)
+            ),
+            Self::SweepRole(role) => format!(
+                "Set design variable {name} to {}.",
+                role.label().to_lowercase()
+            ),
+            Self::OverridePolicy(policy) => format!(
+                "Set design variable {name} to {}.",
+                policy.label().to_lowercase()
+            ),
+        }
+    }
+}
+
+/// The scopes a variable may take: the two project-wide ones, one entry per
+/// analysis the plan owns, and — when it already holds one — the cell scope it
+/// was authored with, so selecting nothing else preserves it.
+fn scope_options(
+    app: &RSpiceApp,
+    current: &DesignVariableScope,
+) -> Vec<(String, DesignVariableScope)> {
+    let mut options = vec![
+        (
+            DesignVariableScope::Project.label().to_owned(),
+            DesignVariableScope::Project,
+        ),
+        (
+            DesignVariableScope::Testbench.label().to_owned(),
+            DesignVariableScope::Testbench,
+        ),
+    ];
+    if let DesignVariableScope::SelectedCell { cell } = current {
+        options.push((
+            format!("Only cell {}", cell.cell),
+            DesignVariableScope::SelectedCell { cell: cell.clone() },
+        ));
+    }
+    if let Ok(plan) = app.state.sim_setup.stable_analysis_plan() {
+        options.extend(
+            plan.instances()
+                .iter()
+                .enumerate()
+                .map(|(index, instance)| {
+                    (
+                        format!("Only #{} · {}", index + 1, instance.kind().code()),
+                        DesignVariableScope::SelectedAnalysis {
+                            analysis_id: instance.id(),
+                        },
+                    )
+                }),
+        );
+    }
+    options
+}
+
+/// The label for a stored scope, resolved against the offered options. A scope
+/// bound to an analysis the plan no longer owns says so rather than silently
+/// reading as one of the offered choices.
+fn scope_label(scope: &DesignVariableScope, options: &[(String, DesignVariableScope)]) -> String {
+    options
+        .iter()
+        .find(|(_, candidate)| candidate == scope)
+        .map_or_else(
+            || "Selected analysis · no longer in the plan".to_owned(),
+            |(label, _)| label.clone(),
+        )
+}
+
+/// Replace one variable's typed contract as a single validated transaction.
+fn replace_variable(
+    app: &mut RSpiceApp,
+    variable_id: DesignVariableId,
+    detail: &str,
+    apply: impl FnOnce(&mut crate::state::DesignVariable),
+) {
+    let Ok(plan_id) = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .map(|plan| plan.id())
+    else {
+        return;
+    };
+    let Some(mut replacement) = app
+        .state
+        .workspace
+        .active_plan_data(plan_id)
+        .and_then(|payload| {
+            payload
+                .design_variables
+                .iter()
+                .find(|variable| variable.id == variable_id)
+                .cloned()
+        })
+    else {
+        return;
+    };
+    apply(&mut replacement);
+    commit_replacement(app, plan_id, variable_id, replacement, detail);
+}
+
+/// Replace one variable's inclusive bounds. Clearing both fields removes the
+/// range outright, which is what makes the variable unbounded again.
+fn commit_bounds(
+    app: &mut RSpiceApp,
+    variable_id: DesignVariableId,
+    bounds: &(String, String),
+    name: &str,
+) {
+    let range = (!bounds.0.trim().is_empty() || !bounds.1.trim().is_empty()).then(|| {
+        crate::state::DesignVariableRange {
+            minimum: bounds.0.trim().to_owned(),
+            maximum: bounds.1.trim().to_owned(),
+        }
+    });
+    let detail = range.as_ref().map_or_else(
+        || format!("Removed the bounds on design variable {name}."),
+        |range| {
+            format!(
+                "Bounded design variable {name} to {} … {}.",
+                range.minimum, range.maximum
+            )
+        },
+    );
+    replace_variable(app, variable_id, &detail, |target| {
+        target.allowed_range = range;
+    });
+}
+
+fn commit_replacement(
+    app: &mut RSpiceApp,
+    plan_id: SimulationPlanId,
+    variable_id: DesignVariableId,
+    replacement: crate::state::DesignVariable,
+    detail: &str,
+) {
+    let mut workspace = app.state.workspace.clone();
+    let mut setup = app.state.sim_setup.clone();
+    let outcome = workspace
+        .replace_design_variable(plan_id, variable_id, replacement)
+        .map_err(|error| error.to_string())
+        .and_then(|_| {
+            setup
+                .commit_active_plan_configuration_change(detail.to_owned())
+                .map_err(|error| error.to_string())
+        });
+    match outcome {
+        Ok(receipt) => {
+            app.state.workspace = workspace;
+            app.state.sim_setup = setup;
+            app.invalidate_simulation_preflight();
+            app.state.workbench.analysis_lifecycle_status = receipt.status_line();
+        }
+        Err(error) => app.state.workbench.analysis_lifecycle_status = error,
     }
 }
 
@@ -316,13 +623,7 @@ fn commit_expression(
             app.state.workspace = workspace;
             app.state.sim_setup = setup;
             app.invalidate_simulation_preflight();
-            app.state.workbench.analysis_lifecycle_status = format!(
-                "Configuration receipt #{} · revision {} to {} · {}",
-                receipt.sequence(),
-                receipt.source_revision().get(),
-                receipt.committed_revision().get(),
-                receipt.detail()
-            );
+            app.state.workbench.analysis_lifecycle_status = receipt.status_line();
         }
         Err(error) => app.state.workbench.analysis_lifecycle_status = error,
     }
@@ -413,13 +714,7 @@ fn mutate(
             app.state.workspace = workspace;
             app.state.sim_setup = setup;
             app.invalidate_simulation_preflight();
-            app.state.workbench.analysis_lifecycle_status = format!(
-                "Configuration receipt #{} · revision {} to {} · {}",
-                receipt.sequence(),
-                receipt.source_revision().get(),
-                receipt.committed_revision().get(),
-                receipt.detail()
-            );
+            app.state.workbench.analysis_lifecycle_status = receipt.status_line();
         }
         Err(error) => {
             app.state.workbench.analysis_lifecycle_status = error;

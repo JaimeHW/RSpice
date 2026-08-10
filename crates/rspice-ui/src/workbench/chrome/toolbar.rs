@@ -1752,13 +1752,7 @@ pub(in crate::workbench) fn commit_reference_pvt(
         .map_err(|error| error.to_string())?;
     app.state.sim_setup = setup;
     app.invalidate_simulation_preflight();
-    app.state.workbench.analysis_lifecycle_status = format!(
-        "Configuration receipt #{} · revision {} to {} · {}",
-        receipt.sequence(),
-        receipt.source_revision().get(),
-        receipt.committed_revision().get(),
-        receipt.detail()
-    );
+    app.state.workbench.analysis_lifecycle_status = receipt.status_line();
     Ok(true)
 }
 

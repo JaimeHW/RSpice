@@ -523,13 +523,7 @@ fn commit_run_space(app: &mut RSpiceApp, detail: &str) {
     {
         Ok(receipt) => {
             app.invalidate_simulation_preflight();
-            app.state.workbench.analysis_lifecycle_status = format!(
-                "Configuration receipt #{} · revision {} to {} · {}",
-                receipt.sequence(),
-                receipt.source_revision().get(),
-                receipt.committed_revision().get(),
-                receipt.detail()
-            );
+            app.state.workbench.analysis_lifecycle_status = receipt.status_line();
         }
         Err(error) => {
             app.state.workbench.analysis_lifecycle_status = error.to_string();

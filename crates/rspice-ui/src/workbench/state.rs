@@ -1108,6 +1108,18 @@ pub struct WorkbenchState {
     /// authoritative plan data.
     #[serde(skip)]
     pub design_variable_expression_draft: Option<String>,
+    /// In-progress edit of the selected design variable's inclusive bounds, as
+    /// `(minimum, maximum)`. Runtime-only for the same reason as the
+    /// expression draft: a half-typed bound is not a bound.
+    #[serde(skip)]
+    pub design_variable_bounds_draft: Option<(String, String)>,
+    /// In-progress edit of the selected saved output's name. Runtime-only: a
+    /// half-typed name must never be restored as the record's identity.
+    #[serde(skip)]
+    pub saved_output_name_draft: Option<String>,
+    /// In-progress edit of the selected saved output's source expression.
+    #[serde(skip)]
+    pub saved_output_expression_draft: Option<String>,
     /// Selected model name within the currently selected model library.
     #[serde(default)]
     pub selected_model: Option<String>,
@@ -1275,6 +1287,9 @@ impl Default for WorkbenchState {
             selected_design_variable: None,
             selected_saved_output: None,
             design_variable_expression_draft: None,
+            design_variable_bounds_draft: None,
+            saved_output_name_draft: None,
+            saved_output_expression_draft: None,
             selected_model: None,
             analysis_query: String::new(),
             navigator_query: String::new(),
