@@ -57,34 +57,19 @@ impl Evidence {
     }
 }
 
+/// Resolve one specification against the active dataset.
+///
+/// The dataset join itself is owned by [`super::output_evidence`]; this only
+/// applies the specification's own bound to the value it found.
 fn evidence_for(app: &RSpiceApp, spec: &SpecEntry) -> Evidence {
-    let Some(run) = app.state.simulation.active_run() else {
+    let Some(run) = super::output_evidence::selected_output_dataset(&app.state.simulation) else {
         return Evidence::None;
     };
-    let found = run
-        .analyses
-        .iter()
-        .rev()
-        .filter(|analysis| analysis.success && analysis.provenance.is_some())
-        .find_map(|analysis| {
-            analysis
-                .measurements
-                .iter()
-                .rev()
-                .find(|measurement| measurement.name.eq_ignore_ascii_case(&spec.measurement))
-        });
-    match found {
+    match super::output_evidence::measurement_in_output_dataset(run, &spec.measurement) {
         None => Evidence::None,
-        Some(measurement) => {
-            if !measurement.passed || measurement.error.is_some() {
-                return Evidence::MeasurementFailed;
-            }
-            match measurement.value.filter(|value| value.is_finite()) {
-                None => Evidence::MeasurementFailed,
-                Some(value) if spec.passes(value) => Evidence::Pass(value),
-                Some(value) => Evidence::Fail(value),
-            }
-        }
+        Some(evidence) if !evidence.measurement_passed => Evidence::MeasurementFailed,
+        Some(evidence) if spec.passes(evidence.value) => Evidence::Pass(evidence.value),
+        Some(evidence) => Evidence::Fail(evidence.value),
     }
 }
 
@@ -158,7 +143,10 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                     &[
                         (spec.measurement.as_str(), Tone::Accent),
                         (definition.as_str(), Tone::Neutral),
-                        (limit_label(spec).as_str(), Tone::Neutral),
+                        (
+                            super::output_evidence::specification_limit(spec).as_str(),
+                            Tone::Neutral,
+                        ),
                         (result.as_str(), *result_tone),
                         (margin.as_str(), *result_tone),
                     ],
@@ -179,17 +167,6 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     );
     if let Some(index) = pick {
         app.state.workbench.selected_spec = Some(index);
-    }
-}
-
-fn limit_label(spec: &SpecEntry) -> String {
-    match (spec.min, spec.max) {
-        (Some(minimum), Some(maximum)) => {
-            format!("{minimum:.6} … {maximum:.6} {}", spec.unit)
-        }
-        (Some(minimum), None) => format!("≥ {minimum:.6} {}", spec.unit),
-        (None, Some(maximum)) => format!("≤ {maximum:.6} {}", spec.unit),
-        (None, None) => "waveform · no scalar bound".to_owned(),
     }
 }
 
@@ -237,7 +214,11 @@ fn selected_record(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload
     let (result, tone) = evidence_for(app, spec).cell(spec);
     card(ui, &title, Some((result.as_str(), tone)), |ui| {
         card_body(ui, |ui| {
-            rule_row(ui, "Limit", &limit_label(spec));
+            rule_row(
+                ui,
+                "Limit",
+                &super::output_evidence::specification_limit(spec),
+            );
             rule_row(
                 ui,
                 "Measurement definition",

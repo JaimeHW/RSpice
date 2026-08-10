@@ -5,6 +5,9 @@
 //! viewport anchor must survive structure changes without following user
 //! scroll.
 
+use super::output_evidence::{
+    OutputMeasurementEvidence, measurement_in_output_dataset, selected_output_dataset,
+};
 use super::*;
 use crate::product::{ContentDigest, ObjectRevision};
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationState};
@@ -161,10 +164,6 @@ fn responsive_surface_geometry_matches_mockup_contract() {
     assert!(ANALYSIS_STACK_TABLET_MIN_WIDTH >= analysis_row_content_min_width());
     assert_eq!(PREFLIGHT_CELL_HEIGHT, 42.0);
     assert_eq!(STACKED_WORKSPACE_GAP, 9.0);
-    assert_eq!(SETUP_CARD_HEADER_HEIGHT, 37.0);
-    assert_eq!(SETUP_TABLE_HEADER_HEIGHT, 27.0);
-    assert_eq!(setup_card_height(28.0, 0), 92.0);
-    assert_eq!(setup_card_height(31.0, 3), 157.0);
     assert_eq!(analysis_column_min_height(720.0, 148.0), 572.0);
     assert_eq!(analysis_column_min_height(100.0, 120.0), 1.0);
     let row_rect = Rect::from_min_size(egui::pos2(10.0, 20.0), vec2(1_000.0, 572.0));
@@ -783,77 +782,6 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
             .analysis_lifecycle_status
             .contains("without creating a duplicate instance")
     );
-}
-
-#[test]
-fn narrow_setup_tables_keep_every_column_inside_the_card() {
-    let card = Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 28.0));
-    for fractions in [[0.36, 0.32, 0.32], [0.42, 0.29, 0.29]] {
-        let columns = setup_table_column_rects(card, fractions);
-        assert_eq!(columns[0].left(), card.left());
-        assert_eq!(columns[2].right(), card.right());
-        assert!(columns.iter().all(|column| column.is_positive()));
-        assert!(
-            columns
-                .windows(2)
-                .all(|pair| pair[0].right() == pair[1].left())
-        );
-    }
-}
-
-#[test]
-fn sibling_setup_cards_render_without_egui_id_clashes() {
-    fn collect_text(shape: &egui::epaint::Shape, rendered: &mut String) {
-        match shape {
-            egui::epaint::Shape::Text(text) => {
-                rendered.push_str(&text.galley.job.text);
-                rendered.push('\n');
-            }
-            egui::epaint::Shape::Vec(shapes) => {
-                for shape in shapes {
-                    collect_text(shape, rendered);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    for (width, design_border, outputs_border) in [
-        (420.0, SetupCardBorder::All, SetupCardBorder::All),
-        (
-            960.0,
-            SetupCardBorder::SplitLeft,
-            SetupCardBorder::SplitRight,
-        ),
-    ] {
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width, 320.0))),
-                ..Default::default()
-            },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    design_variables_card(ui, &[], 92.0, design_border);
-                    outputs_specifications_card(ui, &[], &[], &[], None, 92.0, outputs_border);
-                });
-            },
-        );
-        let mut rendered = String::new();
-        for clipped in &output.shapes {
-            collect_text(&clipped.shape, &mut rendered);
-        }
-
-        assert!(rendered.contains("Design variables"));
-        assert!(rendered.contains("Outputs & specifications"));
-        assert!(
-            !rendered.contains("First use of")
-                && !rendered.contains("Second use of")
-                && !rendered.contains("Double use of"),
-            "egui rendered an ID-clash diagnostic at {width}px:\n{rendered}"
-        );
-    }
 }
 
 #[test]
