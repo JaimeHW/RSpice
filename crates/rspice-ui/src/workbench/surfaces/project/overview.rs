@@ -99,13 +99,12 @@ impl OverviewIntent {
                     .runs
                     .get(index)
                     .is_some_and(|run| !run.analyses.is_empty());
+                let destination = run_destination(
+                    has_retained_dataset,
+                    app.state.is_netlist_first_without_schematic(),
+                );
                 if app.state.simulation.select_run(index) {
-                    Command::OpenWorkspace(if has_retained_dataset {
-                        Workspace::Results
-                    } else {
-                        Workspace::Simulate
-                    })
-                    .execute(app);
+                    Command::OpenWorkspace(destination).execute(app);
                 }
             }
         }
@@ -205,8 +204,27 @@ struct OverviewSnapshot {
     problem: ProblemSnapshot,
     open_documents: Vec<OpenDocumentSnapshot>,
     operations: Vec<OperationSnapshot>,
+    /// Every retained operation the project holds, counted from the records
+    /// rather than from the truncated list above: reporting the shown count as
+    /// the retained count would claim a project with thirty runs has five.
+    operation_total: usize,
     run_plan_name: String,
     execution_target: String,
+}
+
+/// Where the "Latest run" affordances lead.
+///
+/// A retained dataset always opens in Results. Without one the destination is
+/// wherever the project is actually runnable, and for a netlist-first project
+/// that is the SPICE source workspace, not Simulate: the run preflight reads the
+/// schematic, which such a project deliberately leaves pristine, so Simulate
+/// would offer a Run button it can never enable.
+pub(super) const fn run_destination(has_retained_dataset: bool, netlist_first: bool) -> Workspace {
+    match (has_retained_dataset, netlist_first) {
+        (true, _) => Workspace::Results,
+        (false, true) => Workspace::Netlist,
+        (false, false) => Workspace::Simulate,
+    }
 }
 
 fn command_gate(app: &RSpiceApp, command: Command) -> (bool, Option<&'static str>) {
@@ -386,13 +404,21 @@ impl OverviewSnapshot {
 
         let latest_run_status = state.simulation.runs.first().map_or_else(
             || {
-                let command = Command::OpenWorkspace(Workspace::Simulate);
+                let command = Command::OpenWorkspace(run_destination(false, netlist_first));
                 let (enabled, disabled_reason) = command_gate(app, command);
                 StatusSnapshot {
                     area: "Latest run",
                     state: "No retained run".to_owned(),
-                    detail: "Run the active plan to create immutable result evidence".to_owned(),
-                    action: "Open analyses",
+                    detail: if netlist_first {
+                        "Run the retained deck to create immutable result evidence".to_owned()
+                    } else {
+                        "Run the active plan to create immutable result evidence".to_owned()
+                    },
+                    action: if netlist_first {
+                        "Open deck"
+                    } else {
+                        "Open analyses"
+                    },
                     tone: Tone::Neutral,
                     intent: OverviewIntent::Command(command),
                     enabled,
@@ -406,11 +432,7 @@ impl OverviewSnapshot {
                     .map(|analysis| analysis.measurements.len())
                     .sum();
                 let has_dataset = !run.analyses.is_empty();
-                let destination = if has_dataset {
-                    Workspace::Results
-                } else {
-                    Workspace::Simulate
-                };
+                let destination = run_destination(has_dataset, netlist_first);
                 let (enabled, disabled_reason) =
                     command_gate(app, Command::OpenWorkspace(destination));
                 StatusSnapshot {
@@ -430,10 +452,10 @@ impl OverviewSnapshot {
                             |target| target.label().to_owned(),
                         )
                     ),
-                    action: if has_dataset {
-                        "Open results"
-                    } else {
-                        "Open analyses"
+                    action: match (has_dataset, netlist_first) {
+                        (true, _) => "Open results",
+                        (false, true) => "Open deck",
+                        (false, false) => "Open analyses",
                     },
                     tone: lifecycle_tone(run.lifecycle, run.success),
                     intent: OverviewIntent::OpenRun(0),
@@ -612,7 +634,54 @@ impl OverviewSnapshot {
                 ));
             }
         }
+        // Published library snapshots are the third class of retained project
+        // operation that carries its own creation time. The hash-chained library
+        // *mutation* receipts beside them are deliberately absent: they record a
+        // sequence and no timestamp, so this time-ordered register could only
+        // show them by inventing a `when` for them.
+        for publication in state
+            .workspace
+            .project
+            .library_publications()
+            .iter()
+            .rev()
+            .take(8)
+        {
+            // A retained receipt cannot carry a zero creation time; the draft
+            // validation rejects one before the receipt is ever chained.
+            let created_unix_ms = publication.created_unix_ms();
+            operations.push((
+                created_unix_ms,
+                OperationSnapshot {
+                    when: relative_time(created_unix_ms, now_ms),
+                    event: format!("Library published · {}", publication.label()),
+                    detail: format!(
+                        "#{:04} · library revision {} · {} · {}",
+                        publication.sequence(),
+                        publication.library_revision(),
+                        publication.reason(),
+                        publication.actor_id()
+                    ),
+                    tone: Tone::Ok,
+                    intent: Some(OverviewIntent::Command(Command::ProjectPage(
+                        ProjectPage::Library,
+                    ))),
+                },
+            ));
+        }
         operations.sort_by(|left, right| right.0.cmp(&left.0));
+        // Counted from the retained records themselves, not from what the loops
+        // above collected: each of those is capped, so reporting their length
+        // would describe the cap rather than the project.
+        let retained_revision_total = std::iter::once(&state.schematic)
+            .chain(state.workspace.schematic_buffers.values())
+            .flat_map(|schematic| schematic.validated_revisions.records().iter())
+            .map(|revision| revision.id().as_uuid())
+            .collect::<BTreeSet<_>>()
+            .len();
+        let operation_total = state.simulation.runs.len()
+            + retained_revision_total
+            + state.workspace.project.library_publications().len();
         let operations = operations
             .into_iter()
             .take(5)
@@ -652,6 +721,7 @@ impl OverviewSnapshot {
             problem,
             open_documents,
             operations,
+            operation_total,
             run_plan_name: state.sim_setup.active_plan_name().as_str().to_owned(),
             execution_target: crate::state::ExecutionTarget::current().label().to_owned(),
         }
@@ -713,7 +783,7 @@ pub(super) fn overview(ui: &mut Ui, app: &mut RSpiceApp) {
                     retain_first_intent(
                         &mut intent,
                         overview_single_panel(ui, SECOND_ROW_MIN_HEIGHT, |ui| {
-                            project_and_document_registers(ui, app, &snapshot)
+                            project_register(ui, app, &snapshot)
                         }),
                     );
                     stacked_divider(ui);
@@ -745,7 +815,7 @@ pub(super) fn overview(ui: &mut Ui, app: &mut RSpiceApp) {
                     ui,
                     "design-operations",
                     second_row_height,
-                    |ui| project_and_document_registers(ui, app, &snapshot),
+                    |ui| project_register(ui, app, &snapshot),
                     |ui| run_register(ui, &snapshot),
                 ),
             );
@@ -865,6 +935,28 @@ fn overview_panel_pair(
     left_intent.or(right_intent)
 }
 
+/// Summarise the status register beside the project name.
+///
+/// The count is of *status areas* that need attention, not of findings. Naming
+/// it "advisories" put a finding word on an area count directly above a register
+/// whose first row reports genuine advisory counts, so two unrelated numbers
+/// read as the same one. The denominator keeps the area reading unambiguous.
+fn project_status_summary(statuses: &[StatusSnapshot], tone: Tone) -> String {
+    let total = statuses.len();
+    let flagged = statuses
+        .iter()
+        .filter(|status| matches!(status.tone, Tone::Warn | Tone::Error))
+        .count();
+    match tone {
+        Tone::Error => format!("blocked · {flagged} of {total} areas"),
+        Tone::Warn => format!("review · {flagged} of {total} areas"),
+        _ => format!(
+            "current · {total} {}",
+            singular_or_plural(total, "area", "areas")
+        ),
+    }
+}
+
 fn overview_header(
     ui: &mut Ui,
     app: &RSpiceApp,
@@ -907,24 +999,7 @@ fn overview_header(
     } else {
         Tone::Ok
     };
-    let advisory_count = snapshot
-        .statuses
-        .iter()
-        .filter(|status| matches!(status.tone, Tone::Warn | Tone::Error))
-        .count();
-    let project_status = match project_tone {
-        Tone::Error => format!(
-            "blocked · {} {}",
-            advisory_count,
-            singular_or_plural(advisory_count, "issue", "issues")
-        ),
-        Tone::Warn => format!(
-            "ready · {} {}",
-            advisory_count,
-            singular_or_plural(advisory_count, "advisory", "advisories")
-        ),
-        _ => "current".to_owned(),
-    };
+    let project_status = project_status_summary(&snapshot.statuses, project_tone);
     let status_font = theme::mono(tokens::FS_0, FontWeight::Medium);
     let status_width = ui
         .painter()
@@ -1425,14 +1500,6 @@ fn engineering_status_register(
     requested
 }
 
-fn project_and_document_registers(
-    ui: &mut Ui,
-    app: &RSpiceApp,
-    snapshot: &OverviewSnapshot,
-) -> Option<OverviewIntent> {
-    project_register(ui, app, snapshot)
-}
-
 fn project_register(
     ui: &mut Ui,
     app: &RSpiceApp,
@@ -1469,7 +1536,6 @@ fn project_register(
             &object.detail,
             object.tone,
             if object.top { 0.0 } else { 16.0 },
-            false,
         );
         if index + 1 < objects.len() {
             ui.add_space(5.0);
@@ -1713,29 +1779,15 @@ fn design_objects(snapshot: &OverviewSnapshot) -> Vec<DesignObjectSnapshot> {
     rows
 }
 
-fn design_summary_row(
-    ui: &mut Ui,
-    name: &str,
-    kind: &str,
-    detail: &str,
-    tone: Tone,
-    indent: f32,
-    interactive: bool,
-) -> egui::Response {
+/// One row of the design register.
+///
+/// The reference surface reads this register rather than navigating from it —
+/// the destinations it names are reached from the actions below it — so the row
+/// is an annotation, not a control.
+fn design_summary_row(ui: &mut Ui, name: &str, kind: &str, detail: &str, tone: Tone, indent: f32) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let (rect, response) = ui.allocate_exact_size(
-        vec2(width, REGISTER_ROW_HEIGHT),
-        if interactive {
-            Sense::click()
-        } else {
-            Sense::hover()
-        },
-    );
-    if interactive && (response.hovered() || response.has_focus()) {
-        ui.painter()
-            .rect_filled(rect.shrink2(vec2(8.0, 1.0)), 3.0, t.color.bg_hover);
-    }
+    let (rect, response) = ui.allocate_exact_size(vec2(width, REGISTER_ROW_HEIGHT), Sense::hover());
     let name_width = (width * 0.30).max(110.0);
     let kind_width = (width * 0.28).max(96.0);
     paint_elided(
@@ -1805,29 +1857,30 @@ fn design_summary_row(
         detail_color,
         (width - name_width - kind_width - 10.0).max(1.0),
     );
-    theme::paint_focus_ring_outset(ui, &response, rect);
     // The row paints its three columns straight to the painter, so the label
     // has to be assembled here or a screen reader announces nothing.
     let row_label = format!("{name}, {kind}, {detail}");
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            if interactive {
-                egui::WidgetType::Button
-            } else {
-                egui::WidgetType::Label
-            },
-            ui.is_enabled(),
-            row_label.clone(),
-        )
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), row_label.clone())
     });
-    response.on_hover_text(format!("{name}\n{kind}\n{detail}"))
+    response.on_hover_text(format!("{name}\n{kind}\n{detail}"));
+}
+
+/// Describe the operations register without letting its own limit pass for the
+/// project's history: five newest rows out of thirty is never "5 retained".
+fn operations_meta(shown: usize, total: usize) -> String {
+    if total > shown {
+        format!("{shown} of {total} retained")
+    } else {
+        format!("{total} retained")
+    }
 }
 
 fn run_register(ui: &mut Ui, snapshot: &OverviewSnapshot) -> Option<OverviewIntent> {
     section_header(
         ui,
         "Recent operations",
-        &format!("{} retained", snapshot.operations.len()),
+        &operations_meta(snapshot.operations.len(), snapshot.operation_total),
         Tone::Neutral,
     );
     ui.add_space(6.0);
@@ -1884,7 +1937,7 @@ fn activity_row(
     time: &str,
     event: &str,
     detail: &str,
-    _tone: Tone,
+    tone: Tone,
     interactive: bool,
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
@@ -1910,12 +1963,20 @@ fn activity_row(
         t.color.text_faint,
         (time_width - 14.0).max(1.0),
     );
+    // A run that failed carries the same words as one that succeeded until the
+    // reader gets to "with failures" at the end of the line. Only a genuine
+    // warning or error keeps its tone, so it is the exception that stands out —
+    // the same rule the design register applies to its detail column.
+    let event_color = match tone {
+        Tone::Warn | Tone::Error => tone.color(&t),
+        _ => t.color.text,
+    };
     paint_elided(
         ui,
         pos2(rect.left() + time_width + 14.0, rect.top() + 2.0),
         event,
         theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text,
+        event_color,
         (width - time_width - 24.0).max(1.0),
     );
     paint_elided(
@@ -2450,6 +2511,94 @@ mod tests {
     }
 
     #[test]
+    fn project_status_counts_areas_and_never_borrows_the_advisory_word() {
+        let status = |tone| StatusSnapshot {
+            area: "Area",
+            state: String::new(),
+            detail: String::new(),
+            action: "",
+            tone,
+            intent: OverviewIntent::OpenProjectRoot,
+            enabled: true,
+            disabled_reason: None,
+        };
+        let statuses = [
+            status(Tone::Ok),
+            status(Tone::Warn),
+            status(Tone::Warn),
+            status(Tone::Error),
+        ];
+
+        assert_eq!(
+            project_status_summary(&statuses, Tone::Error),
+            "blocked · 3 of 4 areas"
+        );
+        assert_eq!(
+            project_status_summary(&statuses[..3], Tone::Warn),
+            "review · 2 of 3 areas"
+        );
+        assert_eq!(
+            project_status_summary(&statuses[..1], Tone::Ok),
+            "current · 1 area"
+        );
+        // "advisory" belongs to finding counts, which this summary never counts.
+        for tone in [Tone::Error, Tone::Warn, Tone::Ok] {
+            assert!(!project_status_summary(&statuses, tone).contains("advisor"));
+        }
+    }
+
+    #[test]
+    fn operations_meta_never_reports_the_display_limit_as_the_history() {
+        assert_eq!(operations_meta(5, 23), "5 of 23 retained");
+        assert_eq!(operations_meta(3, 3), "3 retained");
+        assert_eq!(operations_meta(0, 0), "0 retained");
+    }
+
+    #[test]
+    fn published_library_snapshots_are_retained_project_operations() {
+        let mut app = RSpiceApp::test_instance();
+        assert!(
+            OverviewSnapshot::capture(&app)
+                .operations
+                .iter()
+                .all(|operation| !operation.event.contains("Library published")),
+            "a project with no publication must not claim one"
+        );
+
+        let candidate = app
+            .prepare_project_library_publication(
+                "analog-core-1.0.0",
+                "release-engineer@example.test",
+                "organization-release-authority",
+                "Qualified library handoff",
+            )
+            .expect("publication prepares");
+        app.commit_project_library_publication(candidate)
+            .expect("durably accepted publication commits");
+
+        let snapshot = OverviewSnapshot::capture(&app);
+        let published = snapshot
+            .operations
+            .iter()
+            .find(|operation| operation.event.starts_with("Library published"))
+            .expect("the committed publication reaches the operations register");
+        assert_eq!(published.event, "Library published · analog-core-1.0.0");
+        assert!(published.detail.contains("Qualified library handoff"));
+        assert!(published.detail.contains("release-engineer@example.test"));
+        assert_ne!(published.when, "time n/a");
+        assert_eq!(
+            published.intent,
+            Some(OverviewIntent::Command(Command::ProjectPage(
+                ProjectPage::Library
+            )))
+        );
+        assert!(
+            snapshot.operation_total >= snapshot.operations.len(),
+            "the retained total can never be smaller than the rows shown"
+        );
+    }
+
+    #[test]
     fn completed_failure_is_not_rendered_as_success() {
         assert_eq!(
             lifecycle_label(SimulationRunLifecycle::Completed, false),
@@ -2507,6 +2656,46 @@ mod tests {
         app.state.workbench.workspace = Workspace::Project;
 
         assert!(Command::RevisionHistory.is_enabled(&app));
+    }
+
+    #[test]
+    fn netlist_first_latest_run_leads_to_the_deck_rather_than_a_blocked_simulate() {
+        let mut app = RSpiceApp::test_instance();
+        assert!(
+            crate::workbench::workflows::netlist_workflow::apply_imported_netlist(
+                &mut app.state,
+                "V1 out 0 1\n.op\n.end\n".to_owned(),
+                None,
+                "front_end.sp",
+            )
+        );
+        app.state.workbench.workspace = Workspace::Project;
+
+        let snapshot = OverviewSnapshot::capture(&app);
+        let latest_run = snapshot
+            .statuses
+            .iter()
+            .find(|status| status.area == "Latest run")
+            .expect("the register always reports the latest run");
+        assert_eq!(latest_run.action, "Open deck");
+        assert_eq!(
+            latest_run.intent,
+            OverviewIntent::Command(Command::OpenWorkspace(Workspace::Netlist))
+        );
+
+        // Simulate's run preflight reads the schematic a netlist-first project
+        // leaves pristine, so routing there would strand the reader.
+        assert!(!app.state.can_run_simulation());
+        latest_run.intent.clone().execute(&mut app);
+        assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
+    }
+
+    #[test]
+    fn run_destination_only_leaves_simulate_for_schematic_projects() {
+        assert_eq!(run_destination(true, false), Workspace::Results);
+        assert_eq!(run_destination(true, true), Workspace::Results);
+        assert_eq!(run_destination(false, false), Workspace::Simulate);
+        assert_eq!(run_destination(false, true), Workspace::Netlist);
     }
 
     #[test]

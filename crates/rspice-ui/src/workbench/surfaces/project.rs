@@ -474,14 +474,17 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
             true,
         )
         .clicked()
-            && app.state.simulation.select_run(index)
         {
-            Command::OpenWorkspace(if has_dataset {
-                Workspace::Results
-            } else {
-                Workspace::Simulate
-            })
-            .execute(app);
+            // A run with no retained dataset sends the reader to wherever the
+            // project can actually be run again, which for a netlist-first
+            // project is the deck, not Simulate.
+            let destination = overview::run_destination(
+                has_dataset,
+                app.state.is_netlist_first_without_schematic(),
+            );
+            if app.state.simulation.select_run(index) {
+                Command::OpenWorkspace(destination).execute(app);
+            }
         }
     } else {
         project_status_chip(
