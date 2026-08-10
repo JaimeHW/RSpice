@@ -1218,6 +1218,9 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         | Command::CompareResultDatasets
         | Command::MeasurementLibrary
         | Command::FamilySlicing => WorkbenchIcon::Results,
+        // The diagnostics tool exists to surface broken expressions, so it
+        // wears the mark of the thing it reports rather than the workspace.
+        Command::ExpressionDiagnostics => WorkbenchIcon::Warning,
         Command::OpenWorkspace(Workspace::Verify)
         | Command::VerificationPage(_)
         | Command::EditSpecifications
@@ -1557,6 +1560,7 @@ fn results_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item(ui, app, Command::VisualizationCursorManager);
     command_item(ui, app, Command::ReviewNotes);
     command_item(ui, app, Command::WaveformCalculator);
+    command_item(ui, app, Command::ExpressionDiagnostics);
     command_item(ui, app, Command::MeasurementLibrary);
     command_item(ui, app, Command::FamilySlicing);
     command_item(ui, app, Command::VisualizationDocumentProperties);

@@ -193,6 +193,7 @@ pub enum Command {
     DatasetManifestBrowser,
     CreateResultDocument,
     WaveformCalculator,
+    ExpressionDiagnostics,
     CompareResultDatasets,
     ReviewNotes,
     MeasurementLibrary,
@@ -629,6 +630,11 @@ impl Command {
                 "Results",
             ),
             Self::WaveformCalculator => spec("calculator", "Calculator…", "Results"),
+            Self::ExpressionDiagnostics => spec(
+                "expression-diagnostics",
+                "Expression and unit diagnostics…",
+                "Results",
+            ),
             Self::CompareResultDatasets => {
                 spec("compare-datasets", "Add result comparison…", "Results")
             }
@@ -1050,6 +1056,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::DatasetManifestBrowser,
     Command::CreateResultDocument,
     Command::WaveformCalculator,
+    Command::ExpressionDiagnostics,
     Command::CompareResultDatasets,
     Command::ReviewNotes,
     Command::MeasurementLibrary,

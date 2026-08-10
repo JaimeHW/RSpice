@@ -2231,6 +2231,8 @@ pub struct DialogState {
 
     /// Waveform calculator dialog open
     pub waveform_calculator_dialog: bool,
+    /// The expression and unit diagnostics tool.
+    pub expression_diagnostics_dialog: bool,
 
     /// Preferences dialog open
     pub preferences_open: bool,

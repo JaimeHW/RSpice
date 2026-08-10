@@ -772,6 +772,7 @@ impl RSpiceApp {
         // The calculator is a modeless tool, not a modal: it renders beside
         // the dialog stack so the workspace stays live beneath it.
         crate::workbench::tools::calculator_tool::show(ctx, self);
+        crate::workbench::tools::expression_diagnostics::show(ctx, self);
         self.render_shortcuts_help_dialog(ctx);
         self.process_model_browser_dialog(ctx);
         self.process_new_cell_dialog(ctx);

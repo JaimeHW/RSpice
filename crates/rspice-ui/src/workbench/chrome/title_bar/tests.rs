@@ -650,6 +650,7 @@ fn results_menu_exposes_only_truthful_completed_result_workflows() {
             "Cursor groups and links…",
             "Review notes…",
             "Calculator…",
+            "Expression and unit diagnostics…",
             "Measurement library…",
             "Family slicing and pivot…",
             "Plot document properties…",
