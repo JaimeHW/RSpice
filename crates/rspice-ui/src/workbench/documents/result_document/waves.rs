@@ -2907,7 +2907,7 @@ fn show_shared_x_axis(
         },
     );
     let accessibility_label = format!(
-        "Shared {} axis. Current range {} to {}. Full retained range {} to {}. {}. Drag the viewport to pan, click the overview to recenter, use the wheel to zoom at the pointer, drag A or B to move a cursor, and press F to fit.",
+        "Shared {} axis. Current range {} to {}. Full retained range {} to {}. {}. Drag the viewport window to pan or either of its edge handles to resize it, click the overview to recenter, use the wheel to zoom at the pointer, drag A or B to move a cursor, and press F to fit.",
         model.x_label(),
         axis.format_display_value(current.0),
         axis.format_display_value(current.1),
