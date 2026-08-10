@@ -2405,7 +2405,8 @@ impl XyceTestRunner {
     pub(super) fn passive_temperature_instance_state(
         params: &[(String, Value)],
         model_tc: [Value; 2],
-    ) -> Result<(XycePassiveTemperatureRepresentation, [Value; 2], Value), String> {
+        representation: XycePassiveTemperatureRepresentation,
+    ) -> Result<([Value; 2], Value), String> {
         let temperature_values = params
             .iter()
             .filter(|(name, _)| name.eq_ignore_ascii_case("TEMP"))
@@ -2430,25 +2431,189 @@ impl XyceTestRunner {
             })
             .cloned()
             .collect::<Vec<_>>();
-        if params.len() == 1 && tc_params.is_empty() {
-            return Ok((
-                XycePassiveTemperatureRepresentation::ModelCoefficients,
-                model_tc,
-                *temperature,
-            ));
+        if representation == XycePassiveTemperatureRepresentation::ModelCoefficients
+            && params.len() == 1
+            && tc_params.is_empty()
+        {
+            return Ok((model_tc, *temperature));
         }
-        if params.len() == 3 && tc_params.len() == 2 {
+        if matches!(
+            representation,
+            XycePassiveTemperatureRepresentation::ScalarInstanceCoefficients
+                | XycePassiveTemperatureRepresentation::VectorInstanceCoefficients
+        ) && params.len() == 3
+            && tc_params.len() == 2
+        {
             let instance_tc = Self::passive_temperature_coefficient_pair(&tc_params, "instance")?;
-            return Ok((
-                XycePassiveTemperatureRepresentation::InstanceCoefficients,
-                instance_tc,
-                *temperature,
-            ));
+            return Ok((instance_tc, *temperature));
         }
-        Err(
-            "passive temperature-coefficient override instance admits only TEMP or TEMP plus scalar TC1 and TC2"
-                .to_string(),
-        )
+        Err(format!(
+            "passive temperature-coefficient override source representation {representation:?} does not match canonical TEMP/TC1/TC2 AST state"
+        ))
+    }
+
+    fn passive_temperature_vector_source_value_is_pair(value: &str) -> bool {
+        let mut quote = None;
+        let mut escaped = false;
+        let mut braces = 0usize;
+        let mut parentheses = 0usize;
+        let mut separators = Vec::new();
+        for (offset, ch) in value.char_indices() {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if ch == '\\' && quote.is_some() {
+                escaped = true;
+                continue;
+            }
+            if matches!(ch, '\'' | '"') {
+                if quote == Some(ch) {
+                    quote = None;
+                } else if quote.is_none() {
+                    quote = Some(ch);
+                }
+                continue;
+            }
+            if quote.is_some() {
+                continue;
+            }
+            match ch {
+                '{' => braces += 1,
+                '}' => {
+                    let Some(next) = braces.checked_sub(1) else {
+                        return false;
+                    };
+                    braces = next;
+                }
+                '(' => parentheses += 1,
+                ')' => {
+                    let Some(next) = parentheses.checked_sub(1) else {
+                        return false;
+                    };
+                    parentheses = next;
+                }
+                ',' if braces == 0 && parentheses == 0 => separators.push(offset),
+                _ => {}
+            }
+        }
+        quote.is_none()
+            && !escaped
+            && braces == 0
+            && parentheses == 0
+            && matches!(separators.as_slice(), [separator]
+                if !value[..*separator].trim().is_empty()
+                    && !value[*separator + 1..].trim().is_empty())
+    }
+
+    pub(super) fn passive_temperature_source_representation(
+        source: &str,
+        element_name: &str,
+    ) -> Result<XycePassiveTemperatureRepresentation, String> {
+        const LABEL: &str = "passive temperature-coefficient override parity";
+        let mut matching_fields = Vec::new();
+        for line in Self::logical_netlist_lines(source) {
+            let stripped = Self::strip_netlist_comment(&line).trim().to_string();
+            if stripped.is_empty() {
+                continue;
+            }
+            let fields = Self::split_grouped_whitespace_fields(&stripped, LABEL)?;
+            if fields
+                .first()
+                .is_some_and(|field| field.eq_ignore_ascii_case(element_name))
+            {
+                matching_fields.push(fields);
+            }
+        }
+        let [fields] = matching_fields.as_slice() else {
+            return Err(format!(
+                "{LABEL} requires exactly one authored source statement for passive '{element_name}', found {}",
+                matching_fields.len()
+            ));
+        };
+
+        let mut assignments = Vec::new();
+        let mut index = 1usize;
+        while index < fields.len() {
+            let field = fields[index].trim();
+            let (candidate, inline_value) = field
+                .split_once('=')
+                .map_or((field, None), |(name, value)| (name.trim(), Some(value)));
+            let canonical_name = if candidate.eq_ignore_ascii_case("TC") {
+                Some("TC")
+            } else if candidate.eq_ignore_ascii_case("TC1") {
+                Some("TC1")
+            } else if candidate.eq_ignore_ascii_case("TC2") {
+                Some("TC2")
+            } else {
+                None
+            };
+            let Some(canonical_name) = canonical_name else {
+                index += 1;
+                continue;
+            };
+
+            let mut value = inline_value.unwrap_or_default().trim().to_string();
+            if inline_value.is_none() {
+                index += 1;
+                if fields.get(index).is_some_and(|field| field.trim() == "=") {
+                    index += 1;
+                }
+                value = fields
+                    .get(index)
+                    .map(|field| field.trim().to_string())
+                    .unwrap_or_default();
+            } else if value.is_empty() {
+                index += 1;
+                value = fields
+                    .get(index)
+                    .map(|field| field.trim().to_string())
+                    .unwrap_or_default();
+            }
+            if canonical_name == "TC" && value.trim_end().ends_with(',') {
+                index += 1;
+                let continuation = fields.get(index).map(|field| field.trim()).unwrap_or("");
+                value.push_str(continuation);
+            }
+            assignments.push((canonical_name, value));
+            index += 1;
+        }
+
+        let vectors = assignments
+            .iter()
+            .filter(|(name, _)| *name == "TC")
+            .map(|(_, value)| value.trim())
+            .collect::<Vec<_>>();
+        let tc1 = assignments
+            .iter()
+            .filter(|(name, _)| *name == "TC1")
+            .map(|(_, value)| value.trim())
+            .collect::<Vec<_>>();
+        let tc2 = assignments
+            .iter()
+            .filter(|(name, _)| *name == "TC2")
+            .map(|(_, value)| value.trim())
+            .collect::<Vec<_>>();
+
+        if vectors.is_empty() && tc1.is_empty() && tc2.is_empty() {
+            return Ok(XycePassiveTemperatureRepresentation::ModelCoefficients);
+        }
+        if vectors.is_empty()
+            && matches!(tc1.as_slice(), [value] if !value.is_empty() && !value.contains(','))
+            && matches!(tc2.as_slice(), [value] if !value.is_empty() && !value.contains(','))
+        {
+            return Ok(XycePassiveTemperatureRepresentation::ScalarInstanceCoefficients);
+        }
+        if tc1.is_empty()
+            && tc2.is_empty()
+            && matches!(vectors.as_slice(), [value]
+                if Self::passive_temperature_vector_source_value_is_pair(value))
+        {
+            return Ok(XycePassiveTemperatureRepresentation::VectorInstanceCoefficients);
+        }
+        Err(format!(
+            "{LABEL} passive '{element_name}' must author exactly no instance TC, scalar TC1+TC2, or one two-component TC vector; found {assignments:?}"
+        ))
     }
 
     pub(super) fn delimited_expression_token(

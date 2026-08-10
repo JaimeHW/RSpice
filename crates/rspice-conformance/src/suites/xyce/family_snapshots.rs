@@ -3132,8 +3132,13 @@ impl XyceTestRunner {
                         .ok_or_else(|| {
                             format!("{LABEL} could not resolve capacitor '{}'", element.name)
                         })?;
-                    let (representation, winning_tc, temperature) =
-                        Self::passive_temperature_instance_state(instance_params, model_tc)?;
+                    let representation =
+                        Self::passive_temperature_source_representation(source, &element.name)?;
+                    let (winning_tc, temperature) = Self::passive_temperature_instance_state(
+                        instance_params,
+                        model_tc,
+                        representation,
+                    )?;
                     Self::validate_passive_temperature_model_binding(
                         element_model.as_deref(),
                         model,
@@ -3190,8 +3195,13 @@ impl XyceTestRunner {
                         .ok_or_else(|| {
                             format!("{LABEL} could not resolve inductor '{}'", element.name)
                         })?;
-                    let (representation, winning_tc, temperature) =
-                        Self::passive_temperature_instance_state(instance_params, model_tc)?;
+                    let representation =
+                        Self::passive_temperature_source_representation(source, &element.name)?;
+                    let (winning_tc, temperature) = Self::passive_temperature_instance_state(
+                        instance_params,
+                        model_tc,
+                        representation,
+                    )?;
                     Self::validate_passive_temperature_model_binding(
                         element_model.as_deref(),
                         model,
@@ -3226,8 +3236,11 @@ impl XyceTestRunner {
         let Some((device_kind, representation, winning_tc, effective_primary)) = passive else {
             return Err(format!("{LABEL} contains no qualified passive device"));
         };
-        if representation == XycePassiveTemperatureRepresentation::InstanceCoefficients
-            && model_tc == winning_tc
+        if matches!(
+            representation,
+            XycePassiveTemperatureRepresentation::ScalarInstanceCoefficients
+                | XycePassiveTemperatureRepresentation::VectorInstanceCoefficients
+        ) && model_tc == winning_tc
         {
             return Err(format!(
                 "{LABEL} instance representation must shadow a different model TC1/TC2 pair"

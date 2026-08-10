@@ -5381,7 +5381,8 @@ enum XycePassiveTemperatureDeviceKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XycePassiveTemperatureRepresentation {
     ModelCoefficients,
-    InstanceCoefficients,
+    ScalarInstanceCoefficients,
+    VectorInstanceCoefficients,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

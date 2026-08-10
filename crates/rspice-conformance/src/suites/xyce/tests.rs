@@ -12878,7 +12878,7 @@ fn passive_temperature_override_detection_is_structural_and_fail_closed() {
     let vector_path = family_dir.join("generic_temp_instance2.cir");
     let oracle_path = output_dir.join("generic_temp.cir.prn");
     let member = "generic passive temperature member\n.end\n";
-    for path in [&baseline_path, &target_path] {
+    for path in [&baseline_path, &target_path, &vector_path] {
         fs::write(path, member).expect("write generic family member");
     }
     fs::write(
@@ -12895,7 +12895,7 @@ fn passive_temperature_override_detection_is_structural_and_fail_closed() {
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let contract = runner
         .passive_temperature_override_family_contract(&deck)
-        .expect("generic baseline/scalar pair with one baseline oracle qualifies");
+        .expect("generic baseline/scalar/vector family with one baseline oracle qualifies");
     assert_eq!(
         contract.kind,
         XyceBaselineFamilyKind::PassiveTemperatureOverride
@@ -12905,19 +12905,21 @@ fn passive_temperature_override_detection_is_structural_and_fail_closed() {
         &contract.baseline_path,
         &baseline_path
     ));
-    assert_eq!(contract.member_paths.len(), 2);
+    assert_eq!(contract.member_paths.len(), 3);
+    assert_eq!(contract.target_path.as_deref(), Some(target_path.as_path()));
 
-    fs::write(&vector_path, member).expect("write unrelated vector-form sibling");
     let vector_deck = XyceDeck {
         path: vector_path.clone(),
         relative_path: "Netlists/GENERIC_PASSIVES/generic_temp_instance2.cir".to_string(),
         section: XyceDeckSection::Netlists,
     };
-    assert!(
-        runner
-            .passive_temperature_override_family_contract(&vector_deck)
-            .is_none(),
-        "vector TC syntax is a different, not-yet-qualified representation"
+    let vector_contract = runner
+        .passive_temperature_override_family_contract(&vector_deck)
+        .expect("vector target shares the strict checked-gold-anchored family");
+    assert_eq!(vector_contract.member_paths.len(), 3);
+    assert_eq!(
+        vector_contract.target_path.as_deref(),
+        Some(vector_path.as_path())
     );
 
     let extra_path = family_dir.join("generic_temp_extra.cir");
@@ -12959,7 +12961,7 @@ fn passive_temperature_override_detection_is_structural_and_fail_closed() {
 }
 
 #[test]
-fn passive_temperature_override_snapshot_proves_scalar_precedence_and_identity() {
+fn passive_temperature_override_snapshot_proves_instance_precedence_and_identity() {
     let print = XycePrintRequest {
         probes: vec!["V(out)".to_string()],
     };
@@ -12977,6 +12979,9 @@ V1 bias 0 0
     let target_source = baseline_source
         .replace("TEMP=100", "TEMP=100 TC1=1m TC2=2u")
         .replace("(TC1=1m TC2=2u)", "(TC1=-1m TC2=-2u)");
+    let vector_source = baseline_source
+        .replace("TEMP=100", "TEMP=100 TC=1m,2u")
+        .replace("(TC1=1m TC2=2u)", "(TC1=-1m TC2=-2u)");
     let snapshot = |source: &str| {
         let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("member.cir"))
             .expect("passive temperature snapshot fixture parses");
@@ -12984,20 +12989,39 @@ V1 bias 0 0
     };
     let baseline = snapshot(baseline_source).expect("model-coefficient baseline qualifies");
     let target = snapshot(&target_source).expect("scalar instance target qualifies");
+    let vector = snapshot(&vector_source).expect("vector instance target qualifies");
     XyceTestRunner::compare_passive_temperature_override_snapshots(&baseline, &target)
         .expect("only the location of the winning scalar TC pair differs");
+    XyceTestRunner::compare_passive_temperature_override_snapshots(&baseline, &vector)
+        .expect("the canonicalized vector TC pair has the same effective semantics");
     assert_eq!(
         baseline.representation,
         XycePassiveTemperatureRepresentation::ModelCoefficients
     );
     assert_eq!(
         target.representation,
-        XycePassiveTemperatureRepresentation::InstanceCoefficients
+        XycePassiveTemperatureRepresentation::ScalarInstanceCoefficients
     );
+    assert_eq!(
+        vector.representation,
+        XycePassiveTemperatureRepresentation::VectorInstanceCoefficients
+    );
+    for spelling in ["TC 1m,2u", "TC = 1m,2u", "TC=1m, 2u"] {
+        let variant_source = vector_source.replace("TC=1m,2u", spelling);
+        let variant = snapshot(&variant_source)
+            .unwrap_or_else(|error| panic!("vector spelling '{spelling}' failed: {error}"));
+        assert_eq!(
+            variant.representation,
+            XycePassiveTemperatureRepresentation::VectorInstanceCoefficients
+        );
+        XyceTestRunner::compare_passive_temperature_override_snapshots(&baseline, &variant)
+            .unwrap_or_else(|error| panic!("vector spelling '{spelling}' differs: {error}"));
+    }
 
     for invalid in [
         target_source.replace(" TC2=2u", ""),
-        target_source.replace("TC1=1m TC2=2u", "TC=1m,2u"),
+        vector_source.replace("TC=1m,2u", "TC=1m"),
+        vector_source.replace("TC=1m,2u", "TC=1m,2u TC1=1m"),
         target_source.replace("TC1=-1m TC2=-2u", "TC1=1m TC2=2u"),
         target_source.replace("TC1=-1m TC2=-2u", "TC1=-1m TC2=-2u TNOM=27"),
         target_source.replace(".MODEL CM C", ".MODEL CM R"),
@@ -13005,7 +13029,7 @@ V1 bias 0 0
     ] {
         assert!(
             snapshot(&invalid).is_err(),
-            "missing/vector/unexercised/extra/wrong-model/auxiliary state must fail closed: {invalid}"
+            "missing/mixed/unexercised/extra/wrong-model/auxiliary state must fail closed: {invalid}"
         );
     }
 
@@ -13039,6 +13063,9 @@ L1 out 0 LM 10m TEMP=90
     let inductor_target = inductor_baseline
         .replace("TEMP=90", "TEMP=90 TC1=.01 TC2=.0001")
         .replace("(TC1=.01 TC2=.0001)", "(TC1=-.01 TC2=-.0001)");
+    let inductor_vector = inductor_baseline
+        .replace("TEMP=90", "TEMP=90 TC=.01,.0001")
+        .replace("(TC1=.01 TC2=.0001)", "(TC1=-.01 TC2=-.0001)");
     let inductor_print = XycePrintRequest {
         probes: vec!["I(VMON)".to_string(), "V(out)".to_string()],
     };
@@ -13053,6 +13080,11 @@ L1 out 0 LM 10m TEMP=90
         &inductor_snapshot(&inductor_target),
     )
     .expect("inductor scalar TC1/TC2 precedence has the same strict family semantics");
+    XyceTestRunner::compare_passive_temperature_override_snapshots(
+        &inductor_snapshot(inductor_baseline),
+        &inductor_snapshot(&inductor_vector),
+    )
+    .expect("inductor vector TC precedence has the same strict family semantics");
 }
 
 #[test]

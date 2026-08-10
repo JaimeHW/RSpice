@@ -1789,10 +1789,14 @@ impl XyceTestRunner {
         target: &XycePassiveTemperatureOverrideSnapshot,
     ) -> Result<(), String> {
         if baseline.representation != XycePassiveTemperatureRepresentation::ModelCoefficients
-            || target.representation != XycePassiveTemperatureRepresentation::InstanceCoefficients
+            || !matches!(
+                target.representation,
+                XycePassiveTemperatureRepresentation::ScalarInstanceCoefficients
+                    | XycePassiveTemperatureRepresentation::VectorInstanceCoefficients
+            )
         {
             return Err(
-                "family must compare model TC1/TC2 with scalar instance TC1/TC2 precedence"
+                "family must compare model TC1/TC2 with scalar or vector instance precedence"
                     .to_string(),
             );
         }
@@ -1809,7 +1813,7 @@ impl XyceTestRunner {
             );
         }
         if baseline.winning_tc_bits != target.winning_tc_bits {
-            return Err("winning scalar TC1/TC2 coefficients differ".to_string());
+            return Err("winning TC1/TC2 coefficients differ".to_string());
         }
         if baseline.effective_primary_bits != target.effective_primary_bits {
             return Err("effective temperature-scaled passive values differ".to_string());

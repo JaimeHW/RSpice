@@ -6271,7 +6271,7 @@ impl XyceTestRunner {
             params.sort();
             let mut expected_params = vec![
                 ("r".to_string(), 50.0f64.to_bits()),
-                ("tc".to_string(), 0.0f64.to_bits()),
+                ("tc1".to_string(), 0.0f64.to_bits()),
                 ("tc2".to_string(), 0.0f64.to_bits()),
             ];
             expected_params.sort();
@@ -6848,14 +6848,15 @@ impl XyceTestRunner {
 
         let parent = deck.path.parent()?;
         let target_stem = deck.path.file_stem()?.to_str()?;
-        const TARGET_SUFFIX: &str = "_instance";
-        if target_stem.len() <= TARGET_SUFFIX.len()
-            || !target_stem[target_stem.len() - TARGET_SUFFIX.len()..]
-                .eq_ignore_ascii_case(TARGET_SUFFIX)
-        {
+        let target_stem_lower = target_stem.to_ascii_lowercase();
+        let target_suffix = if target_stem_lower.ends_with("_instance2") {
+            "_instance2"
+        } else if target_stem_lower.ends_with("_instance") {
+            "_instance"
+        } else {
             return None;
-        }
-        let family = &target_stem[..target_stem.len() - TARGET_SUFFIX.len()];
+        };
+        let family = &target_stem[..target_stem.len().checked_sub(target_suffix.len())?];
         if family.is_empty()
             || !family
                 .chars()
@@ -6865,9 +6866,20 @@ impl XyceTestRunner {
         }
 
         let baseline_path = parent.join(format!("{family}.cir"));
-        let target_path = parent.join(format!("{family}_instance.cir"));
+        let scalar_path = parent.join(format!("{family}_instance.cir"));
+        let vector_path = parent.join(format!("{family}_instance2.cir"));
+        let target_path = if target_suffix == "_instance2" {
+            vector_path.clone()
+        } else {
+            scalar_path.clone()
+        };
+        let member_paths = [
+            baseline_path.clone(),
+            scalar_path.clone(),
+            vector_path.clone(),
+        ];
         if !Self::same_path(&deck.path, &target_path)
-            || [&baseline_path, &target_path].iter().any(|path| {
+            || member_paths.iter().any(|path| {
                 fs::metadata(path)
                     .ok()
                     .is_none_or(|metadata| !metadata.is_file() || metadata.len() == 0)
@@ -6876,14 +6888,19 @@ impl XyceTestRunner {
             return None;
         }
 
-        let baseline_relative = self.relative_key(&baseline_path);
-        if self.requires_upstream_wrapper(&baseline_relative)
+        if member_paths
+            .iter()
+            .map(|path| self.relative_key(path))
+            .any(|relative| self.requires_upstream_wrapper(&relative))
             || self
                 .static_prn_reference_path(&baseline_path)
                 .is_none_or(|path| !path.is_file())
-            || self
-                .static_prn_reference_path(&target_path)
-                .is_some_and(|path| path.is_file())
+            || [scalar_path.as_path(), vector_path.as_path()]
+                .iter()
+                .any(|path| {
+                    self.static_prn_reference_path(path)
+                        .is_some_and(|reference| reference.is_file())
+                })
         {
             return None;
         }
@@ -6893,7 +6910,7 @@ impl XyceTestRunner {
             comparison: XyceBaselineFamilyComparison::Exact,
             family: family.to_string(),
             baseline_path: baseline_path.clone(),
-            member_paths: vec![baseline_path, target_path.clone()],
+            member_paths: member_paths.into(),
             target_path: Some(target_path),
         })
     }

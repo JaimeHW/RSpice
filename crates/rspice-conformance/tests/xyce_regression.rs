@@ -8639,7 +8639,7 @@ fn test_xyce_initial_condition_inverter_waveform_oracle() {
 }
 
 #[test]
-fn test_xyce_scalar_passive_temperature_coefficient_override_oracles() {
+fn test_xyce_passive_temperature_coefficient_override_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
@@ -8679,10 +8679,14 @@ fn test_xyce_scalar_passive_temperature_coefficient_override_oracles() {
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(
-            result.passed && result.expected_unsupported,
-            "{relative} vector TC syntax must remain outside the scalar override contract, got {result:?}"
+            result.passed && !result.expected_unsupported,
+            "{relative} should prove vector instance TC precedence against its independently checked baseline, got {result:?}"
         );
-        assert_eq!(result.contract, "unsupported_xyce_contract");
+        assert_eq!(
+            result.contract, "passive_temperature_override_family_wrapper",
+            "{relative} should report the strict relational contract"
+        );
+        assert!(result.mismatches.is_empty());
     }
 }
 
