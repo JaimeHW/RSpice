@@ -1329,6 +1329,17 @@ impl SimulationController {
                             &current_label,
                         )
                     };
+                    // Point results are one analysis solved at several
+                    // conditions, so the analysis name alone repeats across
+                    // every sibling. The point is what tells them apart.
+                    if let Some(point) = self
+                        .current_provenance
+                        .as_ref()
+                        .and_then(AnalysisResultProvenance::pvt_point)
+                    {
+                        analysis_result.label =
+                            format!("{} \u{00b7} {}", analysis_result.label, point.label());
+                    }
                     self.retain_periodic_noise_result_metadata(&mut analysis_result);
                     if let Some(AnalysisResultPayload::OperatingPoint {
                         effective_source_content_digest,

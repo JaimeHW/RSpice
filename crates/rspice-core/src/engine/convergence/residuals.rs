@@ -3,6 +3,212 @@
 use super::*;
 
 impl Engine {
+    /// Reconstruct the accepted DC equations both with and without the
+    /// simulator's final global nodal-conditioning diagonal.
+    ///
+    /// This is the authoritative post-solve floating-bias check. It evaluates
+    /// the installed circuit—not syntax heuristics—so generated devices,
+    /// XSPICE, controlled and behavioral sources, MOS gate isolation, and
+    /// dialect-specific capacitor-IC constraints all participate through
+    /// their ordinary DC stamps. An authored RSHUNT remains in the physical
+    /// system. A row is reported only when removing nodal GMIN moves that same
+    /// electrical KCL equation from accepted to rejected; reconstruction
+    /// mismatch therefore cannot be misclassified as topology. Device trial
+    /// state is restored after the probe.
+    pub(in crate::engine) fn physical_dc_kcl_violation_nodes(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+    ) -> Result<Vec<String>, SimulationError> {
+        if solution.len() != circuit.matrix_size()
+            || solution.iter().any(|value| !value.is_finite())
+        {
+            return Err(SimulationError::Circuit(
+                "accepted DC solution is incompatible with the assembled circuit".to_string(),
+            ));
+        }
+
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
+        if gmin_floor == 0.0 {
+            return Ok(Vec::new());
+        }
+
+        let snapshot = circuit.nonlinear_state_snapshot();
+        let result = matrix.with_probe_values(|probe, rhs| {
+            circuit.stamp_dc_direct(probe, rhs);
+            self.try_stamp_static_probe_nonlinear_devices_for_dc(circuit, probe, rhs, solution)?;
+            self.conditioning_dependent_kcl_violation_nodes_from_probe(
+                circuit, probe, rhs, solution, gmin_floor,
+            )
+        });
+        circuit.restore_nonlinear_state(snapshot);
+        result
+    }
+
+    /// Audit the exact t=0 transient operating-point equation family that
+    /// accepted `solution`. Recovery seeds have no accepted contract and are
+    /// intentionally never routed here.
+    pub(in crate::engine) fn physical_transient_operating_point_kcl_violation_nodes(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+        time: Value,
+        contract: AcceptedTransientOperatingPointContract,
+    ) -> Result<Vec<String>, SimulationError> {
+        if solution.len() != circuit.matrix_size()
+            || solution.iter().any(|value| !value.is_finite())
+        {
+            return Err(SimulationError::Circuit(
+                "accepted transient operating-point solution is incompatible with the assembled circuit"
+                    .to_string(),
+            ));
+        }
+        if !contract.nodal_gmin.is_finite() || contract.nodal_gmin < 0.0 {
+            return Err(SimulationError::Circuit(
+                "accepted transient operating-point contract has an invalid nodal GMIN".to_string(),
+            ));
+        }
+        if contract.nodal_gmin == 0.0 {
+            return Ok(Vec::new());
+        }
+
+        let snapshot = circuit.nonlinear_state_snapshot();
+        let result = matrix.with_probe_values(|probe, rhs| {
+            if let Some(junction_gmin) = contract.junction_gmin {
+                if !junction_gmin.is_finite() || junction_gmin < 0.0 {
+                    return Err(SimulationError::Circuit(
+                        "accepted transient operating-point contract has an invalid junction GMIN"
+                            .to_string(),
+                    ));
+                }
+                circuit.refresh_jiles_atherton_inductances(solution);
+                match contract.linear_system {
+                    TransientOperatingPointLinearSystem::IdealInductorShorts => {
+                        Self::stamp_transient_operating_point_linear(
+                            circuit, probe, rhs, time, 0.0, false,
+                        );
+                    }
+                    TransientOperatingPointLinearSystem::CurrentSeededInductors => {
+                        Self::stamp_transient_current_seed_linear(
+                            circuit, probe, rhs, time, 0.0, false,
+                        );
+                    }
+                }
+                self.try_stamp_static_probe_nonlinear_devices_for_operating_point(
+                    circuit,
+                    probe,
+                    rhs,
+                    solution,
+                    time,
+                    crate::xspice::AnalysisType::Transient,
+                    junction_gmin,
+                )?;
+            } else {
+                Self::stamp_linear_transient_operating_point_system(
+                    circuit,
+                    probe,
+                    rhs,
+                    time,
+                    0.0,
+                    contract.linear_system,
+                );
+            }
+
+            self.conditioning_dependent_kcl_violation_nodes_from_probe(
+                circuit,
+                probe,
+                rhs,
+                solution,
+                contract.nodal_gmin,
+            )
+        });
+        circuit.restore_nonlinear_state(snapshot);
+        result
+    }
+
+    fn conditioning_dependent_kcl_violation_nodes_from_probe(
+        &self,
+        circuit: &CircuitData,
+        probe: &mut StaticMatrix,
+        rhs: &[Value],
+        solution: &[Value],
+        gmin_floor: Value,
+    ) -> Result<Vec<String>, SimulationError> {
+        let node_count = circuit.num_nodes().min(solution.len());
+        let physical = probe
+            .scaled_residual_norms_by_row_prefix(
+                solution,
+                rhs,
+                self.residual_reltol(),
+                node_count,
+                |_| self.current_abstol(),
+            )
+            .map_err(SimulationError::Solver)?;
+
+        let mut singular_components = Vec::new();
+        for (row, normalized_residual) in physical.iter().copied().enumerate() {
+            if normalized_residual <= 1.0 || circuit.is_non_electrical_state_matrix_index(row) {
+                continue;
+            }
+            let Some(component) = circuit.dc_floating_component_for_matrix_row(row) else {
+                continue;
+            };
+            if singular_components
+                .iter()
+                .any(|candidate| *candidate == component)
+            {
+                continue;
+            }
+
+            let component_rows = circuit.dc_floating_component_matrix_rows(component);
+            if probe
+                .principal_submatrix_is_singular(&component_rows)
+                .unwrap_or(false)
+            {
+                singular_components.push(component);
+            }
+        }
+
+        Self::stamp_nodal_gmin(circuit, probe, gmin_floor);
+        let conditioned = probe
+            .scaled_residual_norms_by_row_prefix(
+                solution,
+                rhs,
+                self.residual_reltol(),
+                node_count,
+                |_| self.current_abstol(),
+            )
+            .map_err(SimulationError::Solver)?;
+
+        let names = circuit.node_names_sorted();
+        Ok(physical
+            .iter()
+            .zip(conditioned.iter())
+            .enumerate()
+            .filter(|(row, (physical, conditioned))| {
+                !circuit.is_non_electrical_state_matrix_index(*row)
+                    && **physical > 1.0
+                    && **conditioned <= 1.0
+            })
+            .filter_map(|(row, _)| {
+                let component = circuit.dc_floating_component_for_matrix_row(row)?;
+                if !singular_components
+                    .iter()
+                    .any(|candidate| *candidate == component)
+                {
+                    return None;
+                }
+                let name = names
+                    .get(row)
+                    .map(|name| name.to_ascii_uppercase())
+                    .unwrap_or_else(|| format!("<node #{}>", row + 1));
+                Some(name)
+            })
+            .collect())
+    }
+
     fn nonlinear_probe_residual_converged(
         &self,
         circuit: &CircuitData,

@@ -1018,10 +1018,11 @@ impl XyceTestRunner {
             } else {
                 self.create_xyce_engine()
             };
-            let result = match engine.run_tran_with_abort(
+            let result = match engine.run_tran_with_startup_mode_and_abort(
                 &run.netlist,
                 plan.tran.stop,
                 max_step,
+                rspice_core::engine::TransientStartupMode::from_uic(plan.tran.uic),
                 abort,
             ) {
                 Ok(result) => result,

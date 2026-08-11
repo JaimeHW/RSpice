@@ -957,7 +957,10 @@ fn budgets(ui: &mut Ui, app: &mut RSpiceApp) {
                         }
                         Ok(_) => {}
                         Err(error) => {
-                            app.state.workbench.analysis_lifecycle_status = error;
+                            app.state
+                                .workbench
+                                .analysis_lifecycle_status
+                                .record_refusal(error);
                             app.state.workbench.run_set_budget_drafts = Some(drafts_from(&current));
                         }
                     }
@@ -1343,7 +1346,12 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
     );
 
     if !transaction.was_adopted() {
-        app.state.workbench.analysis_lifecycle_status = transaction.receipt.status_line();
+        // `was_adopted` is exactly `status == Completed`, so a transaction that
+        // reaches here was blocked and its receipt states the reason.
+        app.state
+            .workbench
+            .analysis_lifecycle_status
+            .record_refusal(transaction.receipt.status_line());
         return;
     }
     if previewing {
@@ -1354,7 +1362,7 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
             .validation
             .as_ref()
             .map(|validation| validation.forecast);
-        app.state.workbench.analysis_lifecycle_status = match forecast {
+        let line = match forecast {
             Some(forecast) => format!(
                 "Run-set preview · {} point{} · {} task{} · {} · receipt {}",
                 forecast.point_count,
@@ -1366,6 +1374,10 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
             ),
             None => transaction.receipt.status_line(),
         };
+        app.state
+            .workbench
+            .analysis_lifecycle_status
+            .record_receipt(line);
         return;
     }
 
@@ -1378,10 +1390,16 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
         )) {
         Ok(receipt) => {
             app.invalidate_simulation_preflight();
-            app.state.workbench.analysis_lifecycle_status = receipt.status_line();
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .record_receipt(receipt.status_line());
         }
         Err(error) => {
-            app.state.workbench.analysis_lifecycle_status = error.to_string();
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .record_refusal(error.to_string());
         }
     }
 }

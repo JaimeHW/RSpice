@@ -382,6 +382,17 @@ impl SimulationConfig {
             });
         }
         validate_finite("ramptime", self.ramptime)?;
+        if let Some(rshunt) = self.rshunt {
+            validate_positive("rshunt", rshunt)?;
+            let conductance = 1.0 / rshunt;
+            if !conductance.is_finite() || conductance <= 0.0 {
+                return Err(SimulationConfigError::InvalidValue {
+                    field: "rshunt",
+                    value: rshunt,
+                    requirement: "a positive finite resistance with a positive finite reciprocal",
+                });
+            }
+        }
         if let Some(delay_type) = self.digital_delay_type
             && !(0..=3).contains(&delay_type)
         {

@@ -1032,6 +1032,7 @@ impl Engine {
             0.0,
             endpoint,
             &circuit,
+            crate::engine::TransientStartupMode::OperatingPoint,
             Some(&lte_estimator),
         );
 
@@ -1311,13 +1312,16 @@ impl Engine {
         // basis check happens only after full circuit elaboration and matrix
         // construction, so stale or structurally tampered states fail closed.
         // No fresh DC solve is performed on this path.
+        self.ensure_dc_paths_to_ground(&circuit)?;
         let dc_solution = match dc_seed {
             Some(seed) => {
                 seed.validate_for_circuit(&circuit)?;
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                seed.solution.clone()
+                let solution = seed.solution.clone();
+                self.ensure_solved_dc_paths_to_ground(&mut circuit, &mut matrix, &solution)?;
+                solution
             }
             None => {
                 self.solve_dc_operating_point_with_abort(netlist, &mut circuit, &mut matrix, abort)?

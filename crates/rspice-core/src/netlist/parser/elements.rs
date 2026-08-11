@@ -5561,6 +5561,14 @@ enum ControlledSourceForm {
     Freq,
 }
 
+/// Semantic result of parsing an E/G source. The caller uses this to retain
+/// authored-card metadata independently from parse-time synthesis artifacts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum VoltageControlledSourceParseKind {
+    Ordinary,
+    PspiceChebyshev,
+}
+
 /// Detect (and consume) an extended controlled-source keyword.
 ///
 /// Handles both token shapes the lexer can produce: `POLY ( 2 )` as separate
@@ -5621,9 +5629,11 @@ fn try_controlled_source_form(
         "FREQ" => Some(ControlledSourceForm::Freq),
         _ => None,
     };
-    if form.is_some() {
+    if let Some(form) = &form {
         stream.advance();
-        stream.consume(&TokenKind::Equals);
+        if !matches!(form, ControlledSourceForm::Chebyshev) {
+            stream.consume(&TokenKind::Equals);
+        }
     }
     Ok(form)
 }
@@ -5730,6 +5740,53 @@ fn collect_expression_argument(
     Ok(expression)
 }
 
+/// Collect a CHEBYSHEV input expression. Cadence PSpice accepts both
+/// `CHEBYSHEV {input} = LP ...` and the canonical no-equals form
+/// `CHEBYSHEV {input} LP ...`. For an unbraced expression, the filter-family
+/// keyword is the unambiguous top-level terminator.
+fn collect_chebyshev_input_expression(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<String, ParseError> {
+    if let TokenKind::Expression(inner) = &stream.peek().kind {
+        let inner = inner.clone();
+        stream.advance();
+        return Ok(inner);
+    }
+
+    let mut expression = String::new();
+    let mut parenthesis_depth = 0usize;
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        let at_filter_kind = parenthesis_depth == 0
+            && matches!(
+                &stream.peek().kind,
+                TokenKind::Ident(kind)
+                    if ["LP", "HP", "BP", "BR"]
+                        .iter()
+                        .any(|candidate| kind.eq_ignore_ascii_case(candidate))
+            );
+        if parenthesis_depth == 0 && (stream.check(&TokenKind::Equals) || at_filter_kind) {
+            break;
+        }
+        match stream.peek().kind {
+            TokenKind::LParen => parenthesis_depth += 1,
+            TokenKind::RParen => parenthesis_depth = parenthesis_depth.saturating_sub(1),
+            _ => {}
+        }
+        append_behavioral_expr_token(&mut expression, &stream.peek().kind);
+        stream.advance();
+    }
+
+    let expression = expression.trim().to_string();
+    if expression.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "CHEBYSHEV source requires a non-empty input expression".to_string(),
+        });
+    }
+    Ok(expression)
+}
+
 /// Reconstruct a controlled-source expression while leaving a trailing
 /// current-source `M=` assignment for the typed instance-parameter parser.
 fn collect_source_expression_argument(
@@ -5766,45 +5823,6 @@ fn collect_source_expression_argument(
         });
     }
     Ok(expression)
-}
-
-/// Collect the rest of the line as the words the author actually wrote.
-///
-/// [`collect_source_expression_argument`] renders tokens back from their parsed
-/// values, which is right for an expression and wrong for a contract written in
-/// units. The lexer resolves `1.2kHz` to a number, hands back `800Hz` whole as
-/// an identifier, and splits `.1dB` in two -- so only the original spelling
-/// distinguishes `800Hz` from `800frogs`.
-///
-/// Words break on source whitespace, on commas, and on parentheses. Tokens the
-/// lexer split but the author wrote together rejoin by their spans.
-fn collect_raw_words(stream: &mut TokenStream) -> Vec<String> {
-    let mut words: Vec<String> = Vec::new();
-    let mut previous_end = None;
-    let mut previous_was_paren = false;
-
-    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if source_multiplicity_assignment(stream) {
-            break;
-        }
-        let token = stream.peek();
-        if matches!(token.kind, TokenKind::Comma) {
-            previous_end = None;
-            stream.advance();
-            continue;
-        }
-        let paren = matches!(token.kind, TokenKind::LParen | TokenKind::RParen);
-        let joins = previous_end == Some(token.span.start) && !paren && !previous_was_paren;
-        let lexeme = token.lexeme.clone();
-        previous_end = Some(token.span.end);
-        previous_was_paren = paren;
-        match words.last_mut() {
-            Some(last) if joins => last.push_str(&lexeme),
-            _ => words.push(lexeme),
-        }
-        stream.advance();
-    }
-    words
 }
 
 fn source_multiplicity_assignment(stream: &TokenStream) -> bool {
@@ -6090,6 +6108,277 @@ fn parse_source_multiplicity_tail(
     Ok(multiplicity)
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ChebyshevValueDimension {
+    FrequencyHz,
+    Decibels,
+}
+
+impl ChebyshevValueDimension {
+    const fn suffix(self) -> &'static str {
+        match self {
+            Self::FrequencyHz => "HZ",
+            Self::Decibels => "DB",
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::FrequencyHz => "frequency in Hz",
+            Self::Decibels => "level in dB",
+        }
+    }
+}
+
+/// Parse one CHEBYSHEV dimensioned scalar without accepting a numeric prefix
+/// followed by arbitrary text. General SPICE value parsing is intentionally
+/// permissive in several legacy contexts, while the PSpice filter grammar has
+/// exact `Hz` and `dB` unit tokens and must reject misspellings.
+fn expect_chebyshev_value(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    dimension: ChebyshevValueDimension,
+    defer_scoped_values: bool,
+) -> Result<ParametricValue, ParseError> {
+    skip_commas(stream);
+    let sign = match &stream.peek().kind {
+        TokenKind::Plus => {
+            stream.advance();
+            1.0
+        }
+        TokenKind::Minus => {
+            stream.advance();
+            -1.0
+        }
+        _ => 1.0,
+    };
+
+    let invalid_literal = |raw: &str| ParseError::Syntax {
+        line: line_num,
+        message: format!("CHEBYSHEV expected {}, found '{raw}'", dimension.label()),
+    };
+    let parse_literal = |raw: &str| -> Result<Value, ParseError> {
+        let upper = raw.to_ascii_uppercase();
+        let (numeric, explicit_dimension_unit) = upper
+            .strip_suffix(dimension.suffix())
+            .map_or((upper.as_str(), false), |numeric| (numeric, true));
+        let scales = [
+            ("MEG", 1.0e6),
+            ("MIL", 25.4e-6),
+            ("T", 1.0e12),
+            ("G", 1.0e9),
+            ("K", 1.0e3),
+            ("M", 1.0e-3),
+            ("U", 1.0e-6),
+            ("N", 1.0e-9),
+            ("P", 1.0e-12),
+            ("F", 1.0e-15),
+            ("X", 1.0e6),
+            ("", 1.0),
+        ];
+        for (suffix, mut scale) in scales {
+            let Some(mantissa) = numeric.strip_suffix(suffix) else {
+                continue;
+            };
+            let Ok(mantissa) = mantissa.parse::<Value>() else {
+                continue;
+            };
+            if explicit_dimension_unit
+                && matches!(dimension, ChebyshevValueDimension::FrequencyHz)
+                && suffix == "M"
+            {
+                // In a frequency unit, `MHz` is unambiguously megahertz even
+                // though a bare case-insensitive SPICE `M` means milli.
+                scale = 1.0e6;
+            }
+            return Ok(mantissa * scale);
+        }
+        Err(invalid_literal(raw))
+    };
+
+    let value = match &stream.peek().kind {
+        TokenKind::Number(_) => {
+            let raw = stream.peek().lexeme.clone();
+            stream.advance();
+            ParametricValue::Resolved(parse_literal(&raw)?)
+        }
+        TokenKind::Expression(expression) => {
+            let expression = expression.clone();
+            stream.advance();
+            if defer_scoped_values {
+                ParametricValue::Expression(expression)
+            } else {
+                match eval_expression(&expression, params) {
+                    Ok(value) => ParametricValue::Resolved(value),
+                    Err(_) => ParametricValue::Expression(expression),
+                }
+            }
+        }
+        TokenKind::Ident(raw) => {
+            let raw = raw.clone();
+            stream.advance();
+            if defer_scoped_values && params.get(&raw).is_some() {
+                ParametricValue::Expression(raw)
+            } else if !defer_scoped_values && let Some(value) = params.get(&raw) {
+                ParametricValue::Resolved(value)
+            } else if raw
+                .starts_with(|character: char| character.is_ascii_digit() || character == '.')
+            {
+                ParametricValue::Resolved(parse_literal(&raw)?)
+            } else if defer_scoped_values {
+                ParametricValue::Expression(raw)
+            } else {
+                // A bare identifier may be a forward top-level `.PARAM`.
+                // End-of-parse resolution distinguishes that legal case from
+                // a typo once the complete root parameter scope is known.
+                ParametricValue::Expression(raw)
+            }
+        }
+        other => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("CHEBYSHEV expected {}, found {other:?}", dimension.label()),
+            });
+        }
+    };
+
+    if matches!(
+        &stream.peek().kind,
+        TokenKind::Ident(unit) if unit.eq_ignore_ascii_case(dimension.suffix())
+    ) {
+        stream.advance();
+    }
+    Ok(match value {
+        ParametricValue::Resolved(value) => ParametricValue::Resolved(sign * value),
+        ParametricValue::Expression(expression) if sign < 0.0 => {
+            ParametricValue::Expression(format!("-({expression})"))
+        }
+        value => value,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct ParsedChebyshevSpec {
+    kind: PspiceChebyshevKind,
+    frequencies_hz: Vec<ParametricValue>,
+    ripple_db: ParametricValue,
+    stop_db: ParametricValue,
+}
+
+impl ParsedChebyshevSpec {
+    fn is_resolved(&self) -> bool {
+        self.frequencies_hz
+            .iter()
+            .chain([&self.ripple_db, &self.stop_db])
+            .all(|value| matches!(value, ParametricValue::Resolved(_)))
+    }
+
+    fn into_resolved(self, line_num: usize) -> Result<ChebyshevSpec, ParseError> {
+        let resolved = |value: ParametricValue| match value {
+            ParametricValue::Resolved(value) => Ok(value),
+            ParametricValue::Expression(expression) => Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "CHEBYSHEV parameter expression '{expression}' was not resolved at top level"
+                ),
+            }),
+            ParametricValue::String(value) | ParametricValue::StringExpression(value) => {
+                Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("CHEBYSHEV parameter '{value}' must be numeric"),
+                })
+            }
+        };
+        Ok(ChebyshevSpec {
+            kind: self.kind,
+            frequencies_hz: self
+                .frequencies_hz
+                .into_iter()
+                .map(resolved)
+                .collect::<Result<Vec<_>, _>>()?,
+            ripple_db: resolved(self.ripple_db)?,
+            stop_db: resolved(self.stop_db)?,
+        })
+    }
+}
+
+fn parse_chebyshev_spec(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    defer_scoped_values: bool,
+) -> Result<ParsedChebyshevSpec, ParseError> {
+    let kind = match &stream.peek().kind {
+        TokenKind::Ident(kind) if kind.eq_ignore_ascii_case("LP") => PspiceChebyshevKind::LowPass,
+        TokenKind::Ident(kind) if kind.eq_ignore_ascii_case("HP") => PspiceChebyshevKind::HighPass,
+        TokenKind::Ident(kind) if kind.eq_ignore_ascii_case("BP") => PspiceChebyshevKind::BandPass,
+        TokenKind::Ident(kind) if kind.eq_ignore_ascii_case("BR") => {
+            PspiceChebyshevKind::BandReject
+        }
+        TokenKind::Ident(kind) => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "CHEBYSHEV filter kind '{kind}' is unsupported; expected LP, HP, BP, or BR"
+                ),
+            });
+        }
+        other => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "CHEBYSHEV expected filter kind LP, HP, BP, or BR, found {other:?}"
+                ),
+            });
+        }
+    };
+    stream.advance();
+
+    let parenthesized = stream.consume(&TokenKind::LParen);
+    let mut frequencies_hz = Vec::with_capacity(kind.frequency_count());
+    for _ in 0..kind.frequency_count() {
+        frequencies_hz.push(expect_chebyshev_value(
+            stream,
+            line_num,
+            params,
+            ChebyshevValueDimension::FrequencyHz,
+            defer_scoped_values,
+        )?);
+    }
+    if parenthesized && !stream.consume(&TokenKind::RParen) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "CHEBYSHEV {} frequency list requires exactly {} values and a closing ')'",
+                kind.label(),
+                kind.frequency_count()
+            ),
+        });
+    }
+
+    let ripple_db = expect_chebyshev_value(
+        stream,
+        line_num,
+        params,
+        ChebyshevValueDimension::Decibels,
+        defer_scoped_values,
+    )?;
+    let stop_db = expect_chebyshev_value(
+        stream,
+        line_num,
+        params,
+        ChebyshevValueDimension::Decibels,
+        defer_scoped_values,
+    )?;
+    Ok(ParsedChebyshevSpec {
+        kind,
+        frequencies_hz,
+        ripple_db,
+        stop_db,
+    })
+}
+
 fn validate_resolved_source_multiplicity(
     multiplicity: &SourceMultiplicity,
     dialect: crate::config::ExpressionDialect,
@@ -6122,7 +6411,7 @@ fn parse_voltage_controlled_source(
     params: &ParamContext,
     is_voltage_output: bool,
     defer_simple_param_refs: bool,
-) -> Result<(), ParseError> {
+) -> Result<VoltageControlledSourceParseKind, ParseError> {
     let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
@@ -6171,7 +6460,7 @@ fn parse_voltage_controlled_source(
             nodes: vec![node_pos, node_neg],
             provenance: crate::netlist::ElementProvenance::Authored,
         });
-        return Ok(());
+        return Ok(VoltageControlledSourceParseKind::Ordinary);
     }
 
     match try_controlled_source_form(stream, line_num)? {
@@ -6300,14 +6589,9 @@ fn parse_voltage_controlled_source(
             elements.extend(synthesized);
         }
         Some(ControlledSourceForm::Chebyshev) => {
-            // CHEBYSHEV {input} = FAMILY (edges) ripple stop — the filter is
-            // designed exactly from its requirements at parse time and lowered
-            // through the same realization LAPLACE uses, so no analysis has to
-            // know that a filter specification was ever involved.
-            let input_expr =
-                collect_expression_argument(stream, line_num, Some(&TokenKind::Equals))?;
+            let input_expr = collect_chebyshev_input_expression(stream, line_num)?;
             stream.consume(&TokenKind::Equals);
-            let words = collect_raw_words(stream);
+            let spec = parse_chebyshev_spec(stream, line_num, params, defer_simple_param_refs)?;
             let multiplicity = parse_source_multiplicity_tail(
                 stream,
                 line_num,
@@ -6316,38 +6600,51 @@ fn parse_voltage_controlled_source(
                 element_label,
                 !is_voltage_output,
             )?;
-            let spec =
-                parse_chebyshev_spec(&words, &mut |name| params.get(name)).map_err(|message| {
-                    ParseError::Syntax {
-                        line: line_num,
-                        message: format!("CHEBYSHEV source '{name}': {message}"),
-                    }
-                })?;
-            let mut synthesized = synthesize_chebyshev(
-                &name,
-                &node_pos,
-                &node_neg,
-                &input_expr,
-                &spec,
-                is_voltage_output,
-                line_num,
-            )?;
-            for element in &mut synthesized {
-                if element.name.eq_ignore_ascii_case(&name) {
-                    match &mut element.kind {
-                        ElementKind::BehavioralVoltage {
-                            multiplicity: target,
-                            ..
+            if defer_simple_param_refs || !spec.is_resolved() || multiplicity.value_expr.is_some() {
+                elements.push(Element {
+                    name,
+                    kind: ElementKind::PspiceChebyshev {
+                        source_line: line_num,
+                        input_expression: input_expr,
+                        filter_kind: spec.kind,
+                        frequencies_hz: spec.frequencies_hz,
+                        ripple_db: spec.ripple_db,
+                        stop_db: spec.stop_db,
+                        voltage_output: is_voltage_output,
+                        multiplicity,
+                    },
+                    nodes: vec![node_pos, node_neg],
+                    provenance: crate::netlist::ElementProvenance::Authored,
+                });
+            } else {
+                let resolved = spec.into_resolved(line_num)?;
+                let mut synthesized = synthesize_chebyshev(
+                    &name,
+                    &node_pos,
+                    &node_neg,
+                    &input_expr,
+                    &resolved,
+                    is_voltage_output,
+                    line_num,
+                )?;
+                for element in &mut synthesized {
+                    if element.name.eq_ignore_ascii_case(&name) {
+                        match &mut element.kind {
+                            ElementKind::BehavioralVoltage {
+                                multiplicity: target,
+                                ..
+                            }
+                            | ElementKind::BehavioralCurrent {
+                                multiplicity: target,
+                                ..
+                            } => *target = multiplicity.clone(),
+                            _ => {}
                         }
-                        | ElementKind::BehavioralCurrent {
-                            multiplicity: target,
-                            ..
-                        } => *target = multiplicity.clone(),
-                        _ => {}
                     }
                 }
+                elements.extend(synthesized);
             }
-            elements.extend(synthesized);
+            return Ok(VoltageControlledSourceParseKind::PspiceChebyshev);
         }
         Some(ControlledSourceForm::Freq) => {
             return Err(unsupported_form_error(line_num, element_label, "FREQ"));
@@ -6359,7 +6656,7 @@ fn parse_voltage_controlled_source(
                 )?
             {
                 elements.push(element);
-                return Ok(());
+                return Ok(VoltageControlledSourceParseKind::Ordinary);
             }
 
             let ctrl_pos = expect_node(stream, line_num)?;
@@ -6402,7 +6699,7 @@ fn parse_voltage_controlled_source(
         }
     }
 
-    Ok(())
+    Ok(VoltageControlledSourceParseKind::Ordinary)
 }
 
 fn try_parse_multi_input_vcvs(
@@ -6662,7 +6959,7 @@ pub(super) fn parse_vcvs(
     elements: &mut Vec<Element>,
     params: &ParamContext,
     defer_simple_param_refs: bool,
-) -> Result<(), ParseError> {
+) -> Result<VoltageControlledSourceParseKind, ParseError> {
     parse_voltage_controlled_source(
         stream,
         line_num,
@@ -6696,7 +6993,7 @@ pub(super) fn parse_vccs(
     elements: &mut Vec<Element>,
     params: &ParamContext,
     defer_simple_param_refs: bool,
-) -> Result<(), ParseError> {
+) -> Result<VoltageControlledSourceParseKind, ParseError> {
     parse_voltage_controlled_source(
         stream,
         line_num,

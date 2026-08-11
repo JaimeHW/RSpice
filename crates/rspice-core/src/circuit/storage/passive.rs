@@ -211,6 +211,11 @@ pub struct Resistors {
     pub stamps: Vec<TwoTerminalStamp>,
     /// Conductance values (1/R)
     pub conductances: Vec<Value>,
+    /// Raw/base instance resistance exposed by the device-parameter `R`
+    /// probe. This remains distinct from the electrically effective
+    /// resistance after model multipliers, temperature correction, `SCALE`,
+    /// and multiplicity have been applied to the branch conductance.
+    pub reported_resistances: Vec<Value>,
     /// Small-signal conductances used by AC/PZ/noise analyses.
     pub small_signal_conductances: Vec<Value>,
     /// Per-instance thermal-noise temperature offsets in kelvin (ngspice
@@ -245,9 +250,32 @@ impl Resistors {
         resistance: Value,
         small_signal_resistance: Value,
     ) {
+        self.add_with_small_signal_and_reported(
+            name,
+            node_pos,
+            node_neg,
+            resistance,
+            small_signal_resistance,
+            resistance,
+        );
+    }
+
+    /// Add a resistor whose electrical and reportable resistance values are
+    /// intentionally distinct. Native resistor construction uses this path
+    /// so parameter observation never has to reconstruct `R` from `1/G`.
+    pub fn add_with_small_signal_and_reported(
+        &mut self,
+        name: String,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        resistance: Value,
+        small_signal_resistance: Value,
+        reported_resistance: Value,
+    ) {
         self.names.push(name);
         self.stamps.push(TwoTerminalStamp::new(node_pos, node_neg));
         self.conductances.push(1.0 / resistance);
+        self.reported_resistances.push(reported_resistance);
         self.small_signal_conductances
             .push(1.0 / small_signal_resistance);
         self.noise_temperature_offsets.push(0.0);
@@ -392,8 +420,13 @@ pub struct ResistorBranches {
     pub node_pos: Vec<NodeId>,
     pub node_neg: Vec<NodeId>,
     pub branch_indices: Vec<NodeId>,
+    /// Electrically effective DC resistance stamped into the branch row.
     pub resistances: Vec<Value>,
     pub small_signal_resistances: Vec<Value>,
+    /// Raw/base instance resistance exposed by the device-parameter `R`
+    /// probe, aligned with `names` and retained without a reciprocal
+    /// round-trip through the electrical branch value.
+    pub reported_resistances: Vec<Value>,
     /// Pre-baked CSC indices: [br->np, np->br, br->nn, nn->br, br->br].
     csc_indices: Vec<[Option<CscIndex>; 5]>,
 }
@@ -412,12 +445,34 @@ impl ResistorBranches {
         resistance: Value,
         small_signal_resistance: Value,
     ) {
+        self.add_with_reported(
+            name,
+            node_pos,
+            node_neg,
+            branch_idx,
+            resistance,
+            small_signal_resistance,
+            resistance,
+        );
+    }
+
+    pub fn add_with_reported(
+        &mut self,
+        name: String,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        branch_idx: NodeId,
+        resistance: Value,
+        small_signal_resistance: Value,
+        reported_resistance: Value,
+    ) {
         self.names.push(name);
         self.node_pos.push(node_pos);
         self.node_neg.push(node_neg);
         self.branch_indices.push(branch_idx);
         self.resistances.push(resistance);
         self.small_signal_resistances.push(small_signal_resistance);
+        self.reported_resistances.push(reported_resistance);
         self.csc_indices.push([None; 5]);
     }
 

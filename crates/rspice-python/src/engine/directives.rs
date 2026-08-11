@@ -225,11 +225,18 @@ fn execute(
             stop,
             start,
             max_step,
-            uic: _,
+            uic,
         } => {
             let tstart = start.unwrap_or(0.0);
             let resolved = resolve_tran_max_step(*step, *stop, tstart, *max_step);
-            let result = py_engine.tran_impl(py, netlist, *stop, resolved, tstart)?;
+            let result = py_engine.tran_impl(
+                py,
+                netlist,
+                *stop,
+                resolved,
+                tstart,
+                Some(rspice_core::engine::TransientStartupMode::from_uic(*uic)),
+            )?;
             let handle = Py::new(py, result)?;
             out.tran.push_with(handle, |handle| handle.clone_ref(py));
             let mut detail = format!(".tran {step} {stop}");

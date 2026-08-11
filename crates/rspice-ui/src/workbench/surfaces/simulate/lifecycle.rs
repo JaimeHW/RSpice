@@ -299,20 +299,20 @@ pub(super) fn insert_analysis_instance(app: &mut RSpiceApp, kind: AnalysisKind) 
                         || "Dependencies are explicitly bound.".to_owned(),
                         |issue| format!("Preflight remains blocked: {issue}"),
                     );
-                    app.state.workbench.analysis_lifecycle_status = format!(
+                    app.state.workbench.analysis_lifecycle_status.record_receipt(format!(
                         "Receipts #{} and #{} committed for instance {id}. {} {} {readiness} Prior datasets remain immutable.",
                         insert_receipt.sequence(),
                         bind_receipt.sequence(),
                         insert_receipt.detail(),
                         bind_receipt.detail(),
-                    );
+                    ));
                 }
                 Some(Err(error)) => {
-                    app.state.workbench.analysis_lifecycle_status = format!(
+                    app.state.workbench.analysis_lifecycle_status.record_refusal(format!(
                         "Receipt #{} committed for instance {id}. {} Automatic dependency binding was rejected fail-closed: {error}. The inserted instance remains selected and preflight blocked; prior datasets remain immutable.",
                         insert_receipt.sequence(),
                         insert_receipt.detail(),
-                    );
+                    ));
                 }
             }
         }
@@ -400,7 +400,7 @@ pub(super) fn apply_analysis_action(
             match result {
                 Ok((repair, receipt)) => {
                     refresh_analysis_projections(app);
-                    app.state.workbench.analysis_lifecycle_status = format!(
+                    app.state.workbench.analysis_lifecycle_status.record_receipt(format!(
                         "Receipt #{} committed for instance {id}. Prerequisite repair completed atomically: {} added, {} enabled, {} moved earlier, {} exact bindings updated, and {} invalid bindings removed. Prior datasets remain immutable.",
                         receipt.sequence(),
                         repair.inserted().len(),
@@ -408,7 +408,7 @@ pub(super) fn apply_analysis_action(
                         repair.moved().len(),
                         repair.bound().len(),
                         repair.removed().len(),
-                    );
+                    ));
                 }
                 Err(error) => record_failure(app, "Repair prerequisites", &error),
             }
@@ -422,9 +422,9 @@ pub(super) fn apply_analysis_action(
                 .and_then(|plan| prepared_autonomous_pss_id(plan, id));
             if let Some(pss_id) = existing {
                 app.state.workbench.active_analysis_instance = Some(pss_id);
-                app.state.workbench.analysis_lifecycle_status = format!(
+                app.state.workbench.analysis_lifecycle_status.record_receipt(format!(
                     "Existing autonomous PSS prerequisite {pss_id} was selected for phase-noise analysis {id}. Complete its oscillator node and remaining controls, enable it, then run dependency repair to bind the exact prerequisite without creating a duplicate instance."
-                );
+                ));
                 return;
             }
             let pss = PssDialogState {
@@ -449,10 +449,10 @@ pub(super) fn apply_analysis_action(
                 Ok((pss_id, receipt)) => {
                     refresh_analysis_projections(app);
                     app.state.workbench.active_analysis_instance = Some(pss_id);
-                    app.state.workbench.analysis_lifecycle_status = format!(
+                    app.state.workbench.analysis_lifecycle_status.record_receipt(format!(
                         "Receipt #{} committed. Autonomous PSS prerequisite {pss_id} and its inferable dependency chain are prepared before phase-noise analysis {id}. Enter the exact oscillator node, review the remaining PSS controls, then enable it; dependency repair will reuse and bind it while preflight remains fail-closed until configuration is complete.",
                         receipt.sequence(),
-                    );
+                    ));
                 }
                 Err(error) => record_failure(app, "Configure PSS prerequisite", &error),
             }
@@ -512,10 +512,10 @@ pub(super) fn validate_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstan
 
     match result {
         Ok(kind) => {
-            app.state.workbench.analysis_lifecycle_status = format!(
+            app.state.workbench.analysis_lifecycle_status.record_receipt(format!(
                 "Validation passed for {} instance {id}. Dependency identity, order, and enabled state are valid for this instance.",
                 kind.label()
-            );
+            ));
         }
         Err(error) => record_failure(app, "Validate", &error),
     }
@@ -652,7 +652,7 @@ pub(super) fn record_receipt(app: &mut RSpiceApp, receipt: &AnalysisLifecycleRec
     let related = receipt
         .related_instance_id()
         .map_or_else(String::new, |id| format!(" · related instance {id}"));
-    app.state.workbench.analysis_lifecycle_status = format!(
+    app.state.workbench.analysis_lifecycle_status.record_receipt(format!(
         "Receipt #{} · {} committed for instance {}{related} · revision {} to {} · outcome {}. {} Prior datasets remain immutable.",
         receipt.sequence(),
         lifecycle_command_label(receipt.command()),
@@ -661,13 +661,13 @@ pub(super) fn record_receipt(app: &mut RSpiceApp, receipt: &AnalysisLifecycleRec
         receipt.committed_revision().get(),
         receipt.outcome(),
         receipt.detail(),
-    );
+    ));
 }
 
 pub(super) fn record_failure(app: &mut RSpiceApp, action: &str, error: &str) {
-    app.state.workbench.analysis_lifecycle_status = format!(
+    app.state.workbench.analysis_lifecycle_status.record_refusal(format!(
         "{action} rejected fail-closed: {error}. The stable plan is unchanged and prior datasets remain immutable."
-    );
+    ));
 }
 
 pub(super) const fn lifecycle_command_label(command: AnalysisLifecycleCommand) -> &'static str {

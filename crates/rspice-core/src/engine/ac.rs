@@ -1956,6 +1956,13 @@ impl Engine {
                 ac_matrix.add_real(stamp.nn.row - 1, stamp.nn.col - 1, g);
             }
         }
+        if circuit.global_shunt_conductance != 0.0 {
+            for index in 0..circuit.num_nodes() {
+                if !circuit.is_non_electrical_state_matrix_index(index) {
+                    ac_matrix.add_real(index, index, circuit.global_shunt_conductance);
+                }
+            }
+        }
 
         // Stamp transmission lines. Native LTRA/TXL lines carry branch
         // unknowns whose rows only the branch-form loads can fill -- the

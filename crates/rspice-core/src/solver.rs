@@ -39,7 +39,7 @@ pub struct SimulationResult {
     pub branch_names: Vec<String>,
     /// Named real-valued operating-point observables evaluated from the
     /// converged circuit state. Keys use their canonical SPICE probe form
-    /// (for example `I(R1)`, `P(R1)`, or `N(V1_BRANCH)`).
+    /// (for example `I(R1)`, `P(R1)`, `R1:R`, or `N(V1_BRANCH)`).
     ///
     /// Unlike reconstructing a device quantity from the source netlist,
     /// these values preserve the actual per-point circuit configuration for

@@ -489,6 +489,7 @@ impl Engine {
             0.0,
             solutions.last().expect("latest HB solution exists"),
             &circuit,
+            crate::engine::TransientStartupMode::OperatingPoint,
             Some(&lte_estimator),
         );
         Ok((checkpoint, history_step))

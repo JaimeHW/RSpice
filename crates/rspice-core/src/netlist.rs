@@ -73,8 +73,10 @@ pub use param_scope::{ParamResolver, ParamScope, ScopedParam};
 pub use parser::*;
 pub use source_map::*;
 pub use startup::{validate_startup_directives, validate_startup_directives_with_abort};
+pub(crate) use topology::analyze_dc_ground_paths_with_capacitor_ic_mode;
 pub use topology::{
-    ConnectivityAnalysisError, ConnectivityDiagnostics, DcGroundPathDiagnostics, TopologyReduction,
+    CapacitorIcDcMode, ConnectivityAnalysisError, ConnectivityDiagnostics, DcGroundPathDiagnostics,
+    DcGroundPathNodeDiagnostic, DcGroundPathSeverity, TopologyReduction,
     XYCE_DEFAULT_ZERO_RESISTANCE_TOL, analyze_dc_ground_paths, analyze_xyce_connectivity,
     reduce_supernode_topology,
 };
@@ -689,6 +691,9 @@ pub struct Netlist {
     /// Non-fatal parser diagnostics for constructs that were accepted but not
     /// fully acted on. Callers should surface these to users before simulation.
     pub diagnostics: Vec<ParseDiagnostic>,
+    /// Authored PSpice E/G CHEBYSHEV card count retained independently from
+    /// the variable-size synthesized element realization.
+    pub(crate) pspice_chebyshev_source_count: usize,
     /// Optional original netlist text used to build this AST.
     /// Stored to support parameter re-application workflows (e.g., sensitivity).
     pub source_text: Option<String>,
@@ -698,6 +703,15 @@ pub struct Netlist {
 }
 
 impl Netlist {
+    /// Return the number of authored PSpice E/G CHEBYSHEV source cards that
+    /// were accepted while parsing this netlist and its expanded includes.
+    ///
+    /// Each card counts once even when its exact filter realization requires
+    /// several dynamic helper elements.
+    pub fn pspice_chebyshev_source_count(&self) -> usize {
+        self.pspice_chebyshev_source_count
+    }
+
     /// Resolve a named `.DATA` table into validated frequency-axis rows.
     ///
     /// AC and noise table-driven analyses share this semantic contract.  The
@@ -715,29 +729,6 @@ impl Netlist {
                 table_name: table_name.to_string(),
             })?;
         table.frequency_points()
-    }
-
-    /// How many PSpice `CHEBYSHEV` controlled sources the deck authored.
-    ///
-    /// Counted from the realizations they lowered to, because once parsing is
-    /// done a designed filter is the same behavioral sources and capacitors as
-    /// any hand-written one. A cascade names its intermediate sections
-    /// `{source}.__F{n}` and gives the last one the authored name, so counting
-    /// the distinct owners that are not sections counts authored sources.
-    #[must_use]
-    pub fn pspice_chebyshev_source_count(&self) -> usize {
-        self.elements
-            .iter()
-            .filter_map(|element| match &element.provenance {
-                ElementProvenance::SynthesizedTransferState {
-                    owner,
-                    form: SynthesizedTransferForm::Chebyshev,
-                } => Some(owner.as_str()),
-                _ => None,
-            })
-            .filter(|owner| !owner.contains(".__F"))
-            .collect::<std::collections::BTreeSet<_>>()
-            .len()
     }
 
     fn enforce_root_source_limits_with_abort(
@@ -2467,6 +2458,7 @@ impl Default for Netlist {
             veriloga_includes: Vec::new(),
             spef_includes: Vec::new(),
             diagnostics: Vec::new(),
+            pspice_chebyshev_source_count: 0,
             source_text: None,
             source_path: None,
         }

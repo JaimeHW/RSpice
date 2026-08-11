@@ -582,7 +582,7 @@ impl PyEngine {
             )));
         }
         let max_step = max_step.unwrap_or((stop_time - start_time) / 50.0);
-        self.tran_impl(py, netlist, stop_time, max_step, start_time)
+        self.tran_impl(py, netlist, stop_time, max_step, start_time, None)
     }
 
     /// Run transient analysis with error-bounded voltage waveform compression.
