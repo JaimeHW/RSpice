@@ -167,6 +167,10 @@ pub(super) struct StripModel {
     analysis_type: AnalysisType,
     kind_tag: String,
     subtitle: String,
+    /// Why this strip's analysis is less than a complete run, if it is.
+    /// Carried on the model rather than re-derived at paint time so the
+    /// strip and the sheet bar cannot disagree about the same run.
+    incomplete: Option<&'static str>,
     x_scale: XScale,
     x_dimension_key: String,
     x_label: String,
@@ -1122,6 +1126,7 @@ pub(super) fn build_models(
             analysis_type: analysis.analysis_type,
             kind_tag: analysis.analysis_type.short_label().to_uppercase(),
             subtitle,
+            incomplete: super::incomplete_evidence_reason(analysis),
             x_scale,
             x_dimension_key: x_dimension_key.to_owned(),
             x_label: x_label.to_owned(),
@@ -2044,6 +2049,7 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
                             model.analysis_key,
                         );
                         let header = StripHeader::new(&model.kind_tag, &model.subtitle, &legend)
+                            .incomplete(model.incomplete)
                             .maximized(maximized)
                             .closable(pane_chrome && !maximized && n > 1)
                             .zoomed(zoomed)
@@ -3810,10 +3816,16 @@ fn show_unit_pane(
     } else {
         y_axis
     };
+    // The plot's own description is where the caution has to live as words.
+    // The kind tag carries it as colour and a glyph, and neither of those
+    // reaches a reader who cannot see the strip.
     let mut spec = PlotSpec::new(x_axis, model.x_scale, y_axis)
         .accessible_name("Waveform plot")
         .without_x_axis_chrome()
         .with_right_margin(WAVE_SHARED_RIGHT_MARGIN);
+    if let Some(reason) = model.incomplete {
+        spec = spec.accessible_detail(reason);
+    }
     spec.left_margin = wave_left_margin(&state.ui.results);
     if log_y {
         spec = spec.with_log_y();

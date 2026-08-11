@@ -185,6 +185,7 @@ pub struct StripHeader<'a> {
     expr_action: bool,
     removable_from: usize,
     pane_actions: bool,
+    incomplete: Option<&'a str>,
 }
 
 impl<'a> StripHeader<'a> {
@@ -200,7 +201,20 @@ impl<'a> StripHeader<'a> {
             expr_action: false,
             removable_from: usize::MAX,
             pane_actions: true,
+            incomplete: None,
         }
+    }
+
+    /// Mark this strip's evidence as less than a complete run, with the
+    /// reason a reader needs before trusting the curve.
+    ///
+    /// The mark rides on the kind tag rather than adding a chip: it is a
+    /// statement about the analysis the tag already names, and a tag that
+    /// grows a glyph is measured through the same path as one that does not,
+    /// so the legend and action budgets stay exact.
+    pub fn incomplete(mut self, reason: Option<&'a str>) -> Self {
+        self.incomplete = reason;
+        self
     }
 
     /// Show the maximize action in its active (restore) state.
@@ -294,11 +308,26 @@ impl<'a> StripHeader<'a> {
             0.0,
             egui::TextFormat {
                 font_id: theme::mono(tokens::FS_0, FontWeight::Medium),
-                color: c.text,
+                color: if self.incomplete.is_some() {
+                    c.warn
+                } else {
+                    c.text
+                },
                 extra_letter_spacing: 0.08 * tokens::FS_0,
                 ..Default::default()
             },
         );
+        if self.incomplete.is_some() {
+            job.append(
+                " \u{26a0}",
+                0.0,
+                egui::TextFormat {
+                    font_id: theme::mono(tokens::FS_0, FontWeight::Medium),
+                    color: c.warn,
+                    ..Default::default()
+                },
+            );
+        }
         let kind_natural_width = ui.fonts_mut(|fonts| fonts.layout_job(job.clone()).size().x);
         let subtitle_font = theme::sans(tokens::FS_0, FontWeight::Regular);
         let subtitle_natural_width = if self.subtitle.is_empty() {
@@ -327,11 +356,17 @@ impl<'a> StripHeader<'a> {
                 egui::pos2(content_rect.left() + span.end(), content_rect.bottom()),
             )
         };
+        // Colour alone would not carry this, so the hover — and the
+        // accessibility text behind it — states the reason in words.
+        let kind_hover = match self.incomplete {
+            Some(reason) => format!("{} · {reason}", self.kind),
+            None => self.kind.to_owned(),
+        };
         truncated_label(
             ui,
             span_rect(layout.kind),
             Label::new(job).truncate(),
-            self.kind,
+            &kind_hover,
         );
         if layout.subtitle.width > 0.0 {
             truncated_label(

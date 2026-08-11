@@ -3266,10 +3266,43 @@ fn instrument_separator(ui: &mut Ui) {
     );
 }
 
+/// Why one analysis' retained evidence is less than a complete run, if it is.
+///
+/// The typed-evidence sheets all refuse to draw an unsuccessful analysis, so
+/// their reader is never misled. The waveform sheets deliberately do draw
+/// one — where a transient stopped converging is exactly what an engineer
+/// opens the plot to find out — and for a long time they drew it identically
+/// to a run that finished. A curve that ends early is not visibly different
+/// from a sweep that was specified to end there.
+pub(crate) fn incomplete_evidence_reason(analysis: &AnalysisResult) -> Option<&'static str> {
+    if !analysis.success {
+        return Some("the run did not complete — these samples stop where it failed");
+    }
+    if analysis.validate_retained_evidence().is_err() {
+        return Some("the retained evidence failed validation");
+    }
+    None
+}
+
+/// The same question for whichever analysis the active sheet is speaking for.
+fn active_incomplete_evidence_reason(state: &AppState) -> Option<&'static str> {
+    let run = state.simulation.active_run()?;
+    if viewer_uses_wave_stack(state.ui.results.viewer) {
+        // The stack draws every analysis of the run at once, so the bar
+        // speaks for the run: one failed strip makes the sheet's evidence
+        // incomplete even when the strip beside it converged.
+        return run.analyses.iter().find_map(incomplete_evidence_reason);
+    }
+    incomplete_evidence_reason(state.simulation.active_analysis()?)
+}
+
 fn sheet_purpose(state: &AppState) -> String {
     let viewer = state.ui.results.viewer;
     let detail = viewer_availability(state, viewer).reason;
-    format!("{} · {detail}", viewer.tab_label())
+    match active_incomplete_evidence_reason(state) {
+        Some(caution) => format!("{} · {detail} · {caution}", viewer.tab_label()),
+        None => format!("{} · {detail}", viewer.tab_label()),
+    }
 }
 
 fn export_menu(ui: &mut Ui, state: &mut AppState) {
@@ -5256,6 +5289,71 @@ mod availability_tests {
                  for the small one — it is still laying out rows it cannot show"
             );
         }
+    }
+
+    /// A run that stopped early must not draw like one that finished.
+    ///
+    /// The waveform sheets deliberately still plot it — where a transient
+    /// stopped converging is what the plot is for — but for a long time they
+    /// plotted it with no mark at all, while every typed-evidence sheet
+    /// refused outright. A curve that ends early is indistinguishable from a
+    /// sweep specified to end there.
+    #[test]
+    fn a_run_that_did_not_complete_says_so_on_the_sheet_that_draws_it() {
+        let mut app = app_showing(ResultViewer::Waves);
+        assert_eq!(
+            active_incomplete_evidence_reason(&app.state),
+            None,
+            "a converged fixture must not claim a caution"
+        );
+        let clean_purpose = sheet_purpose(&app.state);
+
+        app.state.simulation.runs[0].analyses[0].success = false;
+
+        // Still drawable: refusing the partial samples would take away the
+        // one view that answers "where did it go wrong?".
+        assert!(
+            viewer_availability(&app.state, ResultViewer::Waves).available,
+            "partial transient samples must stay drawable"
+        );
+        let purpose = sheet_purpose(&app.state);
+        assert_ne!(purpose, clean_purpose);
+        assert!(
+            purpose.contains("did not complete"),
+            "the sheet bar has to say it in words: {purpose}"
+        );
+
+        // And the strip that draws it carries the mark, so a stack whose
+        // other analyses converged cannot pass the failed one off as clean.
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_680.0, 1_020.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| waves::show(ui, &mut app.state));
+            },
+        );
+        let labels: Vec<String> = output
+            .platform_output
+            .accesskit_update
+            .expect("the waveform stack publishes an accessibility tree")
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.label().map(str::to_owned))
+            .collect();
+        assert!(
+            labels
+                .iter()
+                .any(|label| label.contains("stop where it failed")),
+            "no pane published the incomplete-evidence reason: {labels:?}"
+        );
     }
 
     #[test]
