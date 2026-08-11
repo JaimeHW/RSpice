@@ -8,6 +8,411 @@ use super::*;
 use rspice_core::netlist::OutputRequest;
 
 impl XyceTestRunner {
+    pub(super) fn analytic_int_floor_ceil_tran_wrapper_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceAnalyticIntFloorCeilTranContract, String>> {
+        if Self::normalize_manifest_key(&deck.relative_path)
+            != XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_RECORD
+        {
+            return None;
+        }
+        Some((|| {
+            self.validate_analytic_int_floor_ceil_tran_provenance(deck)?;
+            let plan = self.static_tran_plan_for_path_with_purpose(
+                &deck.path,
+                XyceStaticTranPlanPurpose::AnalyticOracle,
+            )?;
+            let netlist =
+                Self::parse_xyce_netlist(&plan.source, &plan.deck_path).map_err(|error| {
+                    format!(
+                        "netlist parser rejected analytic INT/FLOOR/CEIL transient deck: {error}"
+                    )
+                })?;
+            Self::validate_analytic_int_floor_ceil_tran_plan(&plan, &netlist)?;
+            Ok(XyceAnalyticIntFloorCeilTranContract { plan })
+        })())
+    }
+
+    pub(super) fn analytic_int_floor_ceil_historical_provenance_records() -> Vec<String> {
+        let mut records = [
+            (
+                "Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil.cir",
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_SOURCE_BYTES,
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_SOURCE_BLOB,
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_SOURCE_SHA256,
+            ),
+            (
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_WRAPPER_PATH,
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_WRAPPER_BYTES,
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_WRAPPER_BLOB,
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_WRAPPER_SHA256,
+            ),
+            (
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_MANIFEST_PATH,
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_MANIFEST_BYTES,
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_MANIFEST_BLOB,
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_MANIFEST_SHA256,
+            ),
+            (
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TAGS_PATH,
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TAGS_BYTES,
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TAGS_BLOB,
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TAGS_SHA256,
+            ),
+            (
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TOOLS_PATH,
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TOOLS_BYTES,
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TOOLS_BLOB,
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TOOLS_SHA256,
+            ),
+        ]
+        .map(|(path, bytes, blob, sha256)| {
+            format!(
+                "{XYCE_ANALYTIC_INT_FLOOR_CEIL_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_ANALYTIC_INT_FLOOR_CEIL_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{blob}\t{sha256}"
+            )
+        })
+        .to_vec();
+        records.sort();
+        records
+    }
+
+    pub(super) fn validate_analytic_int_floor_ceil_historical_provenance_records(
+        records: &[String],
+    ) -> Result<(), String> {
+        let digest = blake3::hash(records.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if records.len() != XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_RECORD_COUNT
+            || digest != XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_BLAKE3
+        {
+            return Err(format!(
+                "INT/FLOOR/CEIL Release-7.10 source/wrapper/manifest/tags/Tools provenance changed: records={}/{digest}",
+                records.len()
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn validate_analytic_int_floor_ceil_historical_provenance() -> Result<(), String> {
+        Self::validate_analytic_int_floor_ceil_historical_provenance_records(
+            &Self::analytic_int_floor_ceil_historical_provenance_records(),
+        )
+    }
+
+    pub(super) fn validate_analytic_int_floor_ceil_tran_provenance(
+        &self,
+        deck: &XyceDeck,
+    ) -> Result<(), String> {
+        const LABEL: &str = "analytic INT/FLOOR/CEIL transient wrapper";
+        if deck.section != XyceDeckSection::Netlists
+            || Self::normalize_manifest_key(&deck.relative_path)
+                != XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_RECORD
+            || !self.requires_upstream_wrapper(&deck.relative_path)
+        {
+            return Err(format!(
+                "{LABEL} requires its exact Netlists selector and wrapper-manifest ownership"
+            ));
+        }
+
+        let expected_path = self
+            .root
+            .join("Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil.cir");
+        let requested_metadata = fs::symlink_metadata(&deck.path)
+            .map_err(|error| format!("failed to inspect {LABEL} requested path: {error}"))?;
+        if !requested_metadata.file_type().is_file() || requested_metadata.file_type().is_symlink()
+        {
+            return Err(format!(
+                "{LABEL} requested path must be a regular non-symlink file"
+            ));
+        }
+        let canonical_deck = deck
+            .path
+            .canonicalize()
+            .map_err(|error| format!("{LABEL} path cannot be canonicalized: {error}"))?;
+        let canonical_expected = expected_path
+            .canonicalize()
+            .map_err(|error| format!("{LABEL} canonical source is missing: {error}"))?;
+        if canonical_deck != canonical_expected {
+            return Err(format!(
+                "{LABEL} resolved outside its canonical corpus path"
+            ));
+        }
+        let family = canonical_expected
+            .parent()
+            .ok_or_else(|| format!("{LABEL} has no family directory"))?;
+        let family_metadata = fs::symlink_metadata(family)
+            .map_err(|error| format!("failed to inspect {LABEL} family: {error}"))?;
+        if !family_metadata.file_type().is_dir() || family_metadata.file_type().is_symlink() {
+            return Err(format!(
+                "{LABEL} family must be a regular non-symlink directory"
+            ));
+        }
+
+        let mut names = BTreeSet::new();
+        let mut content = BTreeSet::new();
+        for entry in fs::read_dir(family)
+            .map_err(|error| format!("failed to read {LABEL} family: {error}"))?
+        {
+            let entry =
+                entry.map_err(|error| format!("failed to inspect {LABEL} member: {error}"))?;
+            let metadata = fs::symlink_metadata(entry.path()).map_err(|error| {
+                format!(
+                    "failed to inspect {LABEL} member {}: {error}",
+                    entry.path().display()
+                )
+            })?;
+            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "{LABEL} member {} must be a regular non-symlink file",
+                    entry.path().display()
+                ));
+            }
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or_else(|| format!("{LABEL} family filename is not UTF-8"))?
+                .to_ascii_lowercase();
+            if !names.insert(name.clone()) {
+                return Err(format!("{LABEL} family has case-colliding name {name:?}"));
+            }
+            let bytes = fs::read(entry.path())
+                .map_err(|error| format!("failed to read {LABEL} member: {error}"))?;
+            let canonical = Self::canonical_lf_text_identity(
+                &format!("{LABEL} member {}", entry.path().display()),
+                &bytes,
+            )?;
+            content.insert(format!("{name}\0{}", blake3::hash(&canonical).to_hex()));
+        }
+        let names = names.into_iter().collect::<Vec<_>>();
+        let content = content.into_iter().collect::<Vec<_>>();
+        let names_hash = blake3::hash(names.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if names.len() != XYCE_ANALYTIC_INT_FLOOR_CEIL_FAMILY_COUNT
+            || names_hash != XYCE_ANALYTIC_INT_FLOOR_CEIL_FAMILY_NAMES_BLAKE3
+            || content.len() != XYCE_ANALYTIC_INT_FLOOR_CEIL_FAMILY_COUNT
+            || content_hash != XYCE_ANALYTIC_INT_FLOOR_CEIL_FAMILY_CONTENT_BLAKE3
+        {
+            return Err(format!(
+                "{LABEL} family census changed: names={}/{names_hash}, content={}/{content_hash}",
+                names.len(),
+                content.len()
+            ));
+        }
+
+        let expected_manifest = [
+            XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_RECORD.to_string(),
+            XYCE_ANALYTIC_INT_FLOOR_CEIL_DC_RECORD.to_string(),
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+        let manifest = self
+            .upstream_wrapper_decks
+            .iter()
+            .filter(|record| record.starts_with(XYCE_ANALYTIC_INT_FLOOR_CEIL_FAMILY_PREFIX))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let manifest_rows = manifest.iter().cloned().collect::<Vec<_>>();
+        let manifest_hash = blake3::hash(manifest_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if manifest != expected_manifest
+            || manifest_hash != XYCE_ANALYTIC_INT_FLOOR_CEIL_MANIFEST_BLAKE3
+        {
+            return Err(format!(
+                "{LABEL} manifest/family bijection changed: manifest={}/{manifest_hash}",
+                manifest.len()
+            ));
+        }
+
+        let source_bytes = fs::read(&canonical_expected)
+            .map_err(|error| format!("failed to read {LABEL} source: {error}"))?;
+        let canonical_source = Self::canonical_lf_text_identity(LABEL, &source_bytes)?;
+        let source_hash = blake3::hash(&canonical_source).to_hex().to_string();
+        if canonical_source.len() != XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_SOURCE_BYTES
+            || source_hash != XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_SOURCE_BLAKE3
+        {
+            return Err(format!(
+                "{LABEL} canonical source identity changed: bytes={}/{source_hash}",
+                canonical_source.len()
+            ));
+        }
+        self.reject_wrapper_output_artifacts(&canonical_expected)?;
+        Self::validate_analytic_int_floor_ceil_historical_provenance()
+    }
+
+    pub(super) fn validate_analytic_int_floor_ceil_tran_plan(
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+    ) -> Result<(), String> {
+        const LABEL: &str = "analytic INT/FLOOR/CEIL transient wrapper";
+        if plan.contract != XyceStaticTranContract::WrapperStatic
+            || !matches!(plan.oracle, XyceStaticTranOracle::None)
+            || !plan.steps.is_empty()
+            || plan.output_override
+            || plan.timeint_conststep
+            || plan.wrapper_tolerance.is_some()
+            || plan.comparison_mode != XyceStaticTranComparisonMode::Pointwise
+            || plan.tran.step.to_bits() != 1.0e-9f64.to_bits()
+            || plan.tran.stop.to_bits() != 5.0e-3f64.to_bits()
+            || plan.tran.start.is_some()
+            || plan.tran.max_step.is_some()
+            || plan.tran.uic
+        {
+            return Err(format!(
+                "{LABEL} requires exact unstepped default-PRN '.TRAN 1n 5m' execution"
+            ));
+        }
+        Self::validate_analytic_int_floor_ceil_tran_statement_envelope(&plan.source)?;
+        let probes = plan
+            .require_print(LABEL)?
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        if probes != ["v(1)", "{int(v(1))}", "{floor(v(1))}", "{ceil(v(1))}"] {
+            return Err(format!(
+                "{LABEL} requires ordered V(1), INT, FLOOR, and CEIL print expressions"
+            ));
+        }
+        if Self::tran_print_time_scale_factor(&plan.source)?.to_bits() != 1.0f64.to_bits()
+            || netlist.analyses.len() != 1
+            || !matches!(netlist.analyses[0], AnalysisCommand::Tran { .. })
+            || netlist.output_requests.len() != 1
+            || netlist.elements.len() != 2
+            || !netlist.measurements.is_empty()
+            || !netlist.models.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || netlist.device_initial_conditions.is_some()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || !netlist.params.all_params().is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+            || netlist.options.replace_ground.is_some()
+            || netlist.options.remove_unused.is_some()
+            || netlist.options.add_resistors.is_some()
+        {
+            return Err(format!(
+                "{LABEL} acquired unrelated analysis, output, model, hierarchy, parameter, startup, preprocessing, or diagnostic state"
+            ));
+        }
+        Self::validate_analytic_int_floor_ceil_tran_topology(netlist)
+    }
+
+    pub(super) fn validate_analytic_int_floor_ceil_tran_statement_envelope(
+        source: &str,
+    ) -> Result<(), String> {
+        let mut counts = BTreeMap::<char, usize>::new();
+        let body = source.split_once('\n').map_or("", |(_, body)| body);
+        for line in Self::logical_netlist_lines(body) {
+            let statement = Self::strip_netlist_comment(&line).trim();
+            if statement.is_empty() {
+                continue;
+            }
+            let key = if statement.starts_with('.') {
+                match statement
+                    .split_ascii_whitespace()
+                    .next()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+                    .as_str()
+                {
+                    ".print" => 'p',
+                    ".tran" => 't',
+                    ".end" => 'e',
+                    directive => {
+                        return Err(format!(
+                            "unrelated directive '{directive}' is outside the analytic INT/FLOOR/CEIL transient envelope"
+                        ));
+                    }
+                }
+            } else {
+                match statement.as_bytes().first().map(u8::to_ascii_lowercase) {
+                    Some(b'r') => 'r',
+                    Some(b'v') => 'v',
+                    _ => {
+                        return Err(format!(
+                            "unrelated element '{statement}' is outside the analytic INT/FLOOR/CEIL transient envelope"
+                        ));
+                    }
+                }
+            };
+            *counts.entry(key).or_default() += 1;
+        }
+        for (key, expected) in [('r', 1), ('v', 1), ('p', 1), ('t', 1), ('e', 1)] {
+            if counts.remove(&key) != Some(expected) {
+                return Err(format!(
+                    "analytic INT/FLOOR/CEIL transient statement count for '{key}' must be {expected}"
+                ));
+            }
+        }
+        if !counts.is_empty() {
+            return Err(
+                "analytic INT/FLOOR/CEIL transient source contains extra statements".into(),
+            );
+        }
+        Ok(())
+    }
+
+    pub(super) fn validate_analytic_int_floor_ceil_tran_topology(
+        netlist: &Netlist,
+    ) -> Result<(), String> {
+        const LABEL: &str = "analytic INT/FLOOR/CEIL transient wrapper";
+        let source = netlist
+            .elements
+            .iter()
+            .find(|element| matches!(element.kind, ElementKind::VoltageSource(_)))
+            .ok_or_else(|| format!("{LABEL} has no independent voltage source"))?;
+        let resistor = netlist
+            .elements
+            .iter()
+            .find(|element| matches!(element.kind, ElementKind::Resistor { .. }))
+            .ok_or_else(|| format!("{LABEL} has no resistor"))?;
+        let expected_nodes = ["1".to_string(), "0".to_string()];
+        let source_nodes = source
+            .nodes
+            .iter()
+            .map(|node| Self::canonical_param_expression_node_name(node))
+            .collect::<Vec<_>>();
+        let ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Sin {
+            offset,
+            amplitude,
+            frequency,
+            delay,
+            damping,
+            phase,
+        }) = &source.kind
+        else {
+            return Err(format!("{LABEL} voltage source must be direct SIN"));
+        };
+        if !source.name.eq_ignore_ascii_case("V1")
+            || !resistor.name.eq_ignore_ascii_case("R1")
+            || source_nodes != expected_nodes
+            || !Self::plain_unit_resistor_on_nodes(resistor, &expected_nodes)
+            || offset.to_bits() != 0.0f64.to_bits()
+            || amplitude.to_bits() != 5.0f64.to_bits()
+            || frequency.to_bits() != 1.0e3f64.to_bits()
+            || delay.to_bits() != 0.0f64.to_bits()
+            || damping.to_bits() != 0.0f64.to_bits()
+            || phase.to_bits() != 0.0f64.to_bits()
+        {
+            return Err(format!(
+                "{LABEL} requires R1(1,0)=1 and V1(1,0)=SIN(0,5,1k) with default optional arguments"
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn validate_source_multiplicity_transient_plan(
         plan: &XyceStaticTranPlan,
     ) -> Result<(), String> {

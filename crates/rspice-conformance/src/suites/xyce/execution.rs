@@ -389,6 +389,30 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.analytic_int_floor_ceil_tran_wrapper_contract(deck) {
+            let result = match contract {
+                Ok(contract) => {
+                    self.run_analytic_int_floor_ceil_tran_wrapper_contract(deck, contract, start)
+                }
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    "analytic_int_floor_ceil_tran_wrapper",
+                    format!("analytic INT/FLOOR/CEIL transient qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.analytic_integer_dc_wrapper_contract(deck) {
             let result = match contract {
                 Ok(contract) => {
@@ -6105,7 +6129,7 @@ impl XyceTestRunner {
         contract: XyceAnalyticIntegerDcContract,
         start: Instant,
     ) -> XyceTestResult {
-        let result_contract = contract.kind.result_contract();
+        let result_contract = contract.kind.dc_result_contract();
         let (netlist, results) = match self.run_static_dc_results(&contract.plan, start) {
             Ok(run) => run,
             Err(SimulationError::Aborted) => {
@@ -6162,6 +6186,81 @@ impl XyceTestRunner {
                 start,
                 result_contract,
                 format!("{} analytic integer DC mismatch(es)", mismatches.len()),
+                mismatches,
+            )
+        }
+    }
+
+    pub(super) fn run_analytic_int_floor_ceil_tran_wrapper_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceAnalyticIntFloorCeilTranContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        const RESULT_CONTRACT: &str = "analytic_int_floor_ceil_tran_wrapper";
+        let (netlist, result) =
+            match self.run_transient_family_plan(&contract.plan, start, None, None) {
+                Ok(run) => run,
+                Err(SimulationError::Aborted) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        RESULT_CONTRACT,
+                        format!(
+                            "analytic INT/FLOOR/CEIL transient execution exceeded timeout ({}ms)",
+                            self.config.max_time_per_test_ms
+                        ),
+                        Vec::new(),
+                    );
+                }
+                Err(error) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        RESULT_CONTRACT,
+                        format!("analytic INT/FLOOR/CEIL transient execution failed: {error}"),
+                        Vec::new(),
+                    );
+                }
+            };
+        let actual =
+            match Self::transient_family_result_to_prn_table(&contract.plan, &netlist, &result) {
+                Ok(table) => table,
+                Err(error) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        RESULT_CONTRACT,
+                        format!(
+                            "analytic INT/FLOOR/CEIL transient output conversion failed: {error}"
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+        let mismatches = match self.compare_analytic_int_floor_ceil_tran_table(&actual) {
+            Ok(mismatches) => mismatches,
+            Err(error) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    RESULT_CONTRACT,
+                    format!("analytic INT/FLOOR/CEIL transient exact comparison failed: {error}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, RESULT_CONTRACT)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                RESULT_CONTRACT,
+                format!(
+                    "{} analytic INT/FLOOR/CEIL transient mismatch(es)",
+                    mismatches.len()
+                ),
                 mismatches,
             )
         }
