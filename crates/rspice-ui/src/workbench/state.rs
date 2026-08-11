@@ -1092,9 +1092,17 @@ pub struct WorkbenchState {
     /// committed atomically by the dialog's primary action.
     #[serde(skip)]
     pub simulation_workflow: Option<SimulationWorkflowDialog>,
-    /// Selected specification row in the verification matrix.
+    /// Selected specification row in the verification matrix, by exact
+    /// measurement name. That name is the specification's identity — it is the
+    /// key the limit is joined to a result by, and it is unique within a plan.
+    /// A row index would silently re-point at a different requirement when the
+    /// specification editor, which owns authoring, removes or reorders one.
+    ///
+    /// The field name differs from the older `selected_spec` deliberately: that
+    /// key held an index, and leaving it unread is what makes an older project
+    /// start with no selection instead of resolving one to the wrong row.
     #[serde(default)]
-    pub selected_spec: Option<usize>,
+    pub selected_specification: Option<String>,
     /// Selected design-variable row on the Simulation Studio variables page,
     /// by exact name. Names are unique within a plan, and a name survives the
     /// registry being reordered where a row index would not.
@@ -1283,7 +1291,7 @@ impl Default for WorkbenchState {
             analysis_lifecycle_status: "No lifecycle command has been committed this session."
                 .to_owned(),
             simulation_workflow: None,
-            selected_spec: None,
+            selected_specification: None,
             selected_design_variable: None,
             selected_saved_output: None,
             design_variable_expression_draft: None,

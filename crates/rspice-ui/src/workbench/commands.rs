@@ -2157,7 +2157,7 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
                 .reset_transient_view();
         }
         Workspace::Verify => {
-            app.state.workbench.selected_spec = None;
+            app.state.workbench.selected_specification = None;
         }
         Workspace::Models => {
             app.state.workbench.selected_model = None;

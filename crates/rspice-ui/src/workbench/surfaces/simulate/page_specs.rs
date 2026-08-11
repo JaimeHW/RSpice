@@ -101,7 +101,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     } else {
         Tone::Ok
     };
-    let selected = app.state.workbench.selected_spec;
+    let selected = app.state.workbench.selected_specification.clone();
     let mut pick = None;
     let mut author = false;
     card_with_head(
@@ -142,7 +142,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                     false,
                 );
             }
-            for (index, (spec, (result, result_tone))) in specs.iter().zip(&rows).enumerate() {
+            for (spec, (result, result_tone)) in specs.iter().zip(&rows) {
                 let definition = if spec.expression.trim().is_empty() {
                     "not retained · imported before source was kept".to_owned()
                 } else {
@@ -162,26 +162,27 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                         (result.as_str(), *result_tone),
                         (margin.as_str(), *result_tone),
                     ],
-                    selected == Some(index),
+                    selected.as_deref() == Some(spec.measurement.as_str()),
                 )
                 .clicked()
                 {
-                    pick = Some(index);
+                    pick = Some(spec.measurement.clone());
                 }
             }
             card_note(
                 ui,
                 "A limit is evaluated against the active dataset's measurement of the same name. \
                  A specification with no matching measurement is reported as being without \
-                 evidence — it is never treated as passing. Authoring lives in the                  specification editor, which owns the limits this page reads.",
+                 evidence — it is never treated as passing. Authoring lives in the \
+                 specification editor, which owns the limits this page reads.",
             );
         },
     );
     if author {
         open_specification_editor(app);
     }
-    if let Some(index) = pick {
-        app.state.workbench.selected_spec = Some(index);
+    if let Some(measurement) = pick {
+        app.state.workbench.selected_specification = Some(measurement);
     }
 }
 
@@ -218,11 +219,21 @@ fn margin_label(app: &RSpiceApp, spec: &SpecEntry) -> String {
 }
 
 fn selected_record(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) {
+    // Resolved case-insensitively, which is how a measurement name is matched
+    // everywhere else: a specification whose case changed is still the same
+    // requirement, and one that was deleted resolves to nothing rather than to
+    // whichever requirement now sits in its place.
     let selected = app
         .state
         .workbench
-        .selected_spec
-        .and_then(|index| payload.specs.get(index));
+        .selected_specification
+        .as_deref()
+        .and_then(|measurement| {
+            payload
+                .specs
+                .iter()
+                .find(|spec| spec.measurement.eq_ignore_ascii_case(measurement))
+        });
     let Some(spec) = selected else {
         card(
             ui,

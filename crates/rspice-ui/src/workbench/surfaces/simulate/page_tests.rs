@@ -463,6 +463,57 @@ fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
     );
 }
 
+/// Authoring belongs to the specification editor in Results, so this page's
+/// selection has to survive that list being edited underneath it. Keyed by row
+/// index it could not: removing one requirement re-points the selection at
+/// whichever one moved into its place, and reporting the wrong requirement's
+/// margin is the exact failure this page exists to prevent.
+#[test]
+fn a_selected_specification_is_identified_by_its_measurement_not_its_row() {
+    use crate::state::SpecEntry;
+
+    fn spec(measurement: &str) -> SpecEntry {
+        SpecEntry {
+            measurement: measurement.to_owned(),
+            expression: format!("meas {measurement}"),
+            min: Some(0.0),
+            max: Some(1.0),
+            unit: "V".to_owned(),
+        }
+    }
+
+    // The selected requirement outlives the removal of an earlier row.
+    let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
+        let id = plan_id(app);
+        app.state.workbench.selected_specification = Some("bandwidth".to_owned());
+        app.state
+            .workspace
+            .replace_active_specs(id, vec![spec("bandwidth")]);
+    });
+    assert!(
+        rendered.contains("Selected specification · bandwidth"),
+        "the selection still names the requirement it was made on: {rendered}"
+    );
+
+    // The selected requirement is gone, so nothing is selected — the row that
+    // took its place must not inherit the selection.
+    let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
+        let id = plan_id(app);
+        app.state.workbench.selected_specification = Some("gain".to_owned());
+        app.state
+            .workspace
+            .replace_active_specs(id, vec![spec("bandwidth")]);
+    });
+    assert!(
+        !rendered.contains("Selected specification · bandwidth"),
+        "a removed requirement must never hand its selection to another row: {rendered}"
+    );
+    assert!(
+        rendered.contains("none selected"),
+        "the record card reports that nothing resolves: {rendered}"
+    );
+}
+
 /// A capture policy an engineer can read but not change is a report, not a
 /// control. The Save & streaming page totals these exact fields, so each one
 /// has to be editable through a validated transaction that moves the plan
