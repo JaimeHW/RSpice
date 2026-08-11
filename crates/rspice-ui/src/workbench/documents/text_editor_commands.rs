@@ -381,6 +381,23 @@ pub(crate) fn queue_go_to_line(context: &egui::Context, editor_id: Id) {
     context.data_mut(|data| data.insert_temp(state_id, state));
 }
 
+/// Ask the editor to place its caret at an exact character index next frame.
+///
+/// A completion splices into the document buffer, so the edit reaches the
+/// editor the same way typing does — through the source it synchronizes
+/// against. The caret cannot be moved directly for the same reason, hence a
+/// request that is applied after that synchronization rather than before it.
+pub(crate) fn queue_caret_char_index(context: &egui::Context, editor_id: Id, char_index: usize) {
+    context.data_mut(|data| data.insert_temp(editor_id.with("caret-char-index"), char_index));
+}
+
+pub(crate) fn take_queued_caret_char_index(
+    context: &egui::Context,
+    editor_id: Id,
+) -> Option<usize> {
+    context.data_mut(|data| data.remove_temp::<usize>(editor_id.with("caret-char-index")))
+}
+
 /// A single command menu shared by SPICE, Verilog-A, Python, YAML, and TOML.
 pub(crate) fn editor_command_menu(
     ui: &mut Ui,

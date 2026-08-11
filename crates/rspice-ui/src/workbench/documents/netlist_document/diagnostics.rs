@@ -257,20 +257,8 @@ impl NetlistDiagnosticCollection {
         self.severity_by_line.clear();
     }
 
-    pub fn len(&self) -> usize {
-        self.records.len()
-    }
-
     pub fn iter(&self) -> std::slice::Iter<'_, Diagnostic> {
         self.records.iter()
-    }
-
-    pub fn get(&self, index: usize) -> Option<&Diagnostic> {
-        self.records.get(index)
-    }
-
-    pub fn as_slice(&self) -> &[Diagnostic] {
-        &self.records
     }
 
     pub fn severity_for_line(&self, zero_based_line: usize) -> Option<DiagnosticSeverity> {
@@ -638,7 +626,7 @@ mod tests {
             "a\nb\nc\nd\n",
         )
         .unwrap();
-        assert_eq!(diagnostics.len(), 3);
+        assert_eq!(diagnostics.iter().count(), 3);
         assert_eq!(
             diagnostics.severity_for_line(3),
             Some(DiagnosticSeverity::Error)
@@ -665,8 +653,9 @@ mod tests {
             "",
         )
         .unwrap();
-        let first = diagnostics.get(0).unwrap();
-        let second = diagnostics.get(1).unwrap();
+        let mut records = diagnostics.iter();
+        let first = records.next().unwrap();
+        let second = records.next().unwrap();
 
         assert!(Arc::ptr_eq(
             &first.canonical.source,

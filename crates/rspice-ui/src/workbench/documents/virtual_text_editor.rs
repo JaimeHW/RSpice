@@ -17,8 +17,8 @@ use egui::{Color32, FontId, Key, Modifiers, Response, Sense, Stroke, Ui, Vec2};
 use super::text_document_model::{TextDocumentModel, TextSelection};
 use super::text_editor_commands::{
     ByteSelection, EditorSyntax, EditorViewCommand, StandardCommand, StructuralCommand,
-    apply_structural_command, take_queued_standard_command, take_queued_structural_command,
-    take_queued_view_command,
+    apply_structural_command, take_queued_caret_char_index, take_queued_standard_command,
+    take_queued_structural_command, take_queued_view_command,
 };
 
 const ROW_OVERSCAN: usize = 4;
@@ -106,6 +106,12 @@ pub(crate) struct VirtualEditorOutput {
     pub cursor_char_index: usize,
     pub selected_char_range: Option<(usize, usize)>,
     pub breakpoint_toggled: Option<usize>,
+    /// Screen position just below the primary caret, for a popover that has to
+    /// point at what is being typed. `None` when the caret's line is scrolled
+    /// out of the viewport or folded away — an anchor is only offered when
+    /// there is something on screen to anchor to, so a caller never has to
+    /// guess a position. Independent of the blink phase.
+    pub caret_anchor: Option<egui::Pos2>,
     pub response: Response,
 }
 
@@ -159,6 +165,20 @@ pub(crate) fn show_virtual_text_editor(
             .max(session.model.maximum_selected_line_columns());
     }
 
+    // After source synchronization, so a completion that just spliced text
+    // lands its caret on the document the editor now holds.
+    if let Some(char_index) = take_queued_caret_char_index(ui.ctx(), editor_id) {
+        let char_index = char_index.min(session.model.len_chars());
+        let (line, _) = session.model.line_column_for_char(char_index);
+        session.model.unfold_at_line(line);
+        session
+            .model
+            .set_selections(vec![TextSelection::caret(char_index)]);
+        session.maximum_columns = session
+            .maximum_columns
+            .max(session.model.maximum_selected_line_columns());
+    }
+
     advance_maximum_column_scan(&mut session);
 
     let initial_model_revision = session.model.revision();
@@ -175,6 +195,7 @@ pub(crate) fn show_virtual_text_editor(
     }
     consume_accesskit_text_selection(ui, editor_id, &mut session.model, style);
     let mut breakpoint_toggled = None;
+    let mut caret_anchor = None;
     let mut requested_scroll = requested_line;
     let available = Vec2::new(ui.available_width(), ui.available_height().max(120.0));
     let scroll_output = ui.allocate_ui(available, |ui| {
@@ -457,6 +478,8 @@ pub(crate) fn show_virtual_text_editor(
                     }
                 }
 
+                caret_anchor =
+                    primary_caret_anchor(&session, origin, code_origin_x, char_width, style);
                 paint_carets_and_ime(
                     ui,
                     &session,
@@ -529,8 +552,32 @@ pub(crate) fn show_virtual_text_editor(
         cursor_char_index,
         selected_char_range,
         breakpoint_toggled,
+        caret_anchor,
         response,
     }
+}
+
+/// Where a popover should sit so it points at the primary caret.
+///
+/// This repeats the caret's own geometry deliberately: the painter skips the
+/// caret on half of every blink cycle, and a popover that moved with the blink
+/// would be unusable. `None` means the caret's line is folded or scrolled out
+/// of the viewport, which is the one case where there is no honest position to
+/// offer.
+fn primary_caret_anchor(
+    session: &VirtualEditorSession,
+    origin: egui::Pos2,
+    code_origin_x: f32,
+    char_width: f32,
+    style: &VirtualEditorStyle<'_>,
+) -> Option<egui::Pos2> {
+    let cursor = session.model.selections().last()?.cursor;
+    let (line, column) = session.model.line_column_for_char(cursor);
+    let visible_row = session.model.visible_row_for_logical_line(line)?;
+    Some(egui::pos2(
+        code_origin_x + column as f32 * char_width,
+        origin.y + style.top_padding + (visible_row + 1) as f32 * style.line_height + 4.0,
+    ))
 }
 
 fn restart_maximum_column_scan(session: &mut VirtualEditorSession) {
@@ -2008,48 +2055,6 @@ mod tests {
         assert!(
             bounds.y0 >= f64::from(style.top_padding + style.line_height),
             "line-two accessibility geometry must not overlap line one: {bounds:?}"
-        );
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn empty_text_edit_fallback_keeps_the_same_named_read_only_contract() {
-        let context = egui::Context::default();
-        context.enable_accesskit();
-        let nodes = context
-            .run_ui(Default::default(), |ui| {
-                let mut source = "";
-                let output = egui::TextEdit::multiline(&mut source)
-                    .id(egui::Id::new("empty-accessible-editor-test"))
-                    .interactive(false)
-                    .show(ui);
-                accessibility::label_text_edit_accessibility(
-                    &output.response,
-                    "Project SPICE netlist viewer",
-                    crate::workbench::MessageCatalog::new(
-                        crate::workbench::UiTextLocale::EnglishUnitedStates,
-                    ),
-                    false,
-                    Some("One error diagnostic on this line, EMPTY-001: Source is required."),
-                );
-            })
-            .platform_output
-            .accesskit_update
-            .expect("AccessKit empty editor tree")
-            .nodes;
-        let editor = nodes
-            .iter()
-            .find_map(|(_, node)| {
-                (node.role() == egui::accesskit::Role::MultilineTextInput
-                    && node.label() == Some("Project SPICE netlist viewer"))
-                .then_some(node)
-            })
-            .expect("named empty editor");
-        assert!(editor.is_read_only());
-        assert!(
-            editor
-                .description()
-                .is_some_and(|description| description.contains("Source is required"))
         );
     }
 

@@ -277,34 +277,6 @@ pub(super) fn update_accesskit_text_state(
     });
 }
 
-pub(super) fn label_text_edit_accessibility(
-    response: &Response,
-    accessible_label: &str,
-    messages: crate::workbench::MessageCatalog,
-    editable: bool,
-    diagnostic_context: Option<&str>,
-) {
-    let mut description = messages.format(
-        if editable {
-            crate::workbench::MessageId::EditorAccessiblePositionEditable
-        } else {
-            crate::workbench::MessageId::EditorAccessiblePositionReadOnly
-        },
-        &[("line", "1"), ("total_lines", "1"), ("column", "1")],
-    );
-    if let Some(context) = diagnostic_context {
-        let context = bounded_accessible_text(context, MAX_ACCESSIBLE_DIAGNOSTIC_CHARS);
-        append_accessible_sentence(&mut description, &context);
-    }
-    response.ctx.accesskit_node_builder(response.id, |node| {
-        node.set_label(accessible_label);
-        node.set_description(description);
-        if !editable {
-            node.set_read_only();
-        }
-    });
-}
-
 fn append_accessible_sentence(description: &mut String, sentence: &str) {
     if !description.is_empty() && !sentence.is_empty() {
         description.push(' ');

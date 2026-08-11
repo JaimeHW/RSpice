@@ -1,10 +1,16 @@
 //! The netlist source surface: a selectable, immutable generated view or an
-//! editable project-owned `TextEdit`, plus line numbers and diagnostic/diff
+//! editable project-owned document, plus line numbers and diagnostic/diff
 //! pips. Full diagnostics are projected by the Code inspector.
 //!
 //! Diagnostics come from one debounced parse of the buffer with the same
 //! resolver the runner uses; the squiggle (underline), gutter pip, and
 //! inspector all read that single vector.
+//!
+//! Every netlist renders through the rope-backed virtual editor, whatever its
+//! size. An editor that swapped substrate at a byte threshold would change
+//! folding, multi-selection, IME, undo, and completion behaviour at an
+//! arbitrary boundary, and the small-document path was the one nothing
+//! exercised.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,10 +20,7 @@ use rspice_core::abort_signal::{AbortSignal, NoAbort};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
-use crate::workbench::documents::text_editor_commands::{
-    EditorSyntax, consume_standard_command, consume_structural_shortcut, place_caret_at_line,
-    show_go_to_line,
-};
+use crate::workbench::documents::text_editor_commands::{EditorSyntax, show_go_to_line};
 use crate::workbench::{AppState, MessageId};
 
 #[cfg(test)]
@@ -32,15 +35,8 @@ use super::{
 const FONT_SIZE: f32 = 11.0;
 /// Width reserved for the mockup's line-number gutter.
 const GUTTER_W: f32 = 47.0;
-const GUTTER_NUMBER_RIGHT_PADDING: f32 = 11.0;
 const CODE_LEFT_PADDING: f32 = 12.0;
-const CODE_RIGHT_PADDING: i8 = 20;
 const CODE_TOP_PADDING: i8 = 8;
-const CODE_BOTTOM_PADDING: i8 = 36;
-// Keep every non-empty netlist on the same rope-backed editor substrate so
-// folding, multi-selection, IME, undo, and large-line behavior do not change
-// at an arbitrary file-size boundary.
-const VIRTUALIZATION_THRESHOLD_BYTES: usize = 1;
 /// Seconds of typing silence before the buffer re-parses.
 const PARSE_DEBOUNCE: f64 = 0.35;
 const SYNTHETIC_EDITOR_SOURCE: &str = "__rspice_netlist_editor__.cir";
@@ -59,25 +55,9 @@ const fn platform_include_access() -> IncludeAccess {
     }
 }
 
-fn code_editor_frame() -> egui::Frame {
-    egui::Frame::new().inner_margin(egui::Margin {
-        left: (GUTTER_W + CODE_LEFT_PADDING) as i8,
-        right: CODE_RIGHT_PADDING,
-        top: CODE_TOP_PADDING,
-        bottom: CODE_BOTTOM_PADDING,
-    })
-}
-
 /// Stable id so the completion accept can reposition the caret.
 pub(crate) fn editor_id() -> egui::Id {
     egui::Id::new("rspice.netlist.editor.text")
-}
-
-fn line_for_char_index(text: &str, char_index: usize) -> usize {
-    text.chars()
-        .take(char_index)
-        .filter(|ch| *ch == '\n')
-        .count()
 }
 
 /// Render the editor and diagnostics strip.
@@ -88,7 +68,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     refresh_diagnostics(ui, state);
 
-    // Popover keys (⇥, ↑↓, Esc) must be consumed before the TextEdit so
+    // Popover keys (⇥, ↑↓, Esc) must be consumed before the editor so
     // an open popover owns them.
     let completion_keys = if editable {
         completion::consume_keys(ui, &state.ui.netlist)
@@ -102,8 +82,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     // Document well backdrop.
     let well = ui.available_rect_before_wrap();
     ui.painter().rect_filled(well, 0.0, c.bg_inset);
-
-    let editor_h = ui.available_height().max(60.0);
 
     let font = theme::mono(FONT_SIZE, FontWeight::Regular);
     let diagnostics = Arc::clone(&state.ui.netlist.diagnostics);
@@ -123,39 +101,16 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .requested_line
         .take()
         .or_else(|| show_go_to_line(ui, editor_id(), &buffer));
-    let use_virtual_editor = buffer.len() >= VIRTUALIZATION_THRESHOLD_BYTES;
-    if !use_virtual_editor && let Some(requested_line) = requested_line {
-        place_caret_at_line(ui.ctx(), editor_id(), &buffer, requested_line);
-        state.ui.netlist.cursor_line = requested_line.saturating_sub(1);
-    }
-    let standard_changed =
-        !use_virtual_editor && consume_standard_command(ui, editor_id(), &mut buffer, editable);
-    let shortcut_changed = !use_virtual_editor
-        && consume_structural_shortcut(ui, editor_id(), &mut buffer, EditorSyntax::Spice, editable);
 
-    let layouter_font = font.clone();
     let diff_document =
         state.ui.netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff;
-    let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
-        let job = if diff_document {
-            highlight::diff_layout_job(text.as_str(), layouter_font.clone(), &c)
-        } else {
-            highlight::layout_job(
-                text.as_str(),
-                layouter_font.clone(),
-                &c,
-                diagnostics.as_slice(),
-            )
-        };
-        ui.fonts_mut(|fonts| fonts.layout_job(job))
-    };
 
-    let mut changed = standard_changed || shortcut_changed;
     let mut completion_changed = false;
-    let mut cursor_line = state.ui.netlist.cursor_line;
-    let mut te_output: Option<egui::text_edit::TextEditOutput> = None;
+    let changed;
+    let cursor_line;
+    let anchor;
 
-    if use_virtual_editor {
+    {
         let messages = state.ui.messages();
         let accessible_label = messages.text(if editable {
             MessageId::EditorProjectSpiceNetlistEditor
@@ -239,174 +194,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 })
             },
         );
-        changed |= output.changed;
+        changed = output.changed;
         cursor_line = output.cursor_line;
-        let _ = output.response;
-    } else {
-        ui.allocate_ui(egui::vec2(ui.available_width(), editor_h), |ui| {
-            egui::ScrollArea::both()
-                .id_salt("rspice.netlist.editor")
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    // Reserve background paint slots before TextEdit emits its
-                    // glyphs and selection, then fill them once galley row
-                    // geometry is known. This preserves crisp text/selection while
-                    // matching the mockup's active-line wash and accent rail.
-                    let hover_background = ui.painter().add(egui::Shape::Noop);
-                    let active_background = ui.painter().add(egui::Shape::Noop);
-                    let active_rail = ui.painter().add(egui::Shape::Noop);
-                    // Source-map cross-probing is painted after the caret wash so
-                    // its device-local identity highlight remains visible even
-                    // when requesting the line also moved the caret there.
-                    let cross_probe_background = ui.painter().add(egui::Shape::Noop);
-                    let cross_probe_rail = ui.painter().add(egui::Shape::Noop);
-                    let mut show_text = |text: &mut dyn egui::TextBuffer| {
-                        egui::TextEdit::multiline(text)
-                            .id(editor_id())
-                            .code_editor()
-                            .font(font.clone())
-                            .desired_width(f32::INFINITY)
-                            .desired_rows(30)
-                            // A custom TextEdit frame owns its insets in egui;
-                            // `TextEdit::margin` is not applied in that mode.
-                            .frame(code_editor_frame())
-                            .layouter(&mut layouter)
-                            .show(ui)
-                    };
-                    let output = if editable {
-                        show_text(&mut buffer)
-                    } else {
-                        // `&str` implements egui's immutable `TextBuffer`: users can
-                        // focus, select, and copy generated source, but no keyboard,
-                        // paste, IME, or accessibility edit can mutate its bytes.
-                        let mut read_only = buffer.as_str();
-                        show_text(&mut read_only)
-                    };
-
-                    if let Some(range) = output.cursor_range {
-                        cursor_line = line_for_char_index(&buffer, range.primary.index.0);
-                    }
-                    changed |= output.response.changed();
-
-                    // Gutter: numbers plus diagnostic (err) and diff (accent)
-                    // pips, aligned to the galley's actual rows.
-                    let painter = ui.painter();
-                    let origin = output.galley_pos;
-                    let row_rect = |row: &egui::epaint::text::PlacedRow| {
-                        egui::Rect::from_min_max(
-                            egui::pos2(output.response.rect.left(), origin.y + row.rect().top()),
-                            egui::pos2(
-                                output.response.rect.right(),
-                                origin.y + row.rect().bottom(),
-                            ),
-                        )
-                    };
-                    if let Some(line) = requested_line
-                        && let Some(row) = output.galley.rows.get(line.saturating_sub(1))
-                    {
-                        ui.scroll_to_rect(row_rect(row), Some(egui::Align::Center));
-                    }
-                    if let Some(line) = cross_probe_line
-                        && let Some(row) = output.galley.rows.get(line)
-                    {
-                        let rect = row_rect(row);
-                        painter.set(
-                            cross_probe_background,
-                            egui::Shape::rect_filled(rect, 0.0, c.info.gamma_multiply(0.075)),
-                        );
-                        painter.set(
-                            cross_probe_rail,
-                            egui::Shape::rect_filled(
-                                egui::Rect::from_min_max(
-                                    rect.left_top(),
-                                    egui::pos2(rect.left() + 2.0, rect.bottom()),
-                                ),
-                                0.0,
-                                c.info,
-                            ),
-                        );
-                    }
-                    if let Some(row) = output.galley.rows.get(cursor_line) {
-                        let rect = row_rect(row);
-                        painter.set(
-                            active_background,
-                            egui::Shape::rect_filled(rect, 0.0, c.accent.gamma_multiply(0.075)),
-                        );
-                        painter.set(
-                            active_rail,
-                            egui::Shape::rect_filled(
-                                egui::Rect::from_min_max(
-                                    rect.left_top(),
-                                    egui::pos2(rect.left() + 2.0, rect.bottom()),
-                                ),
-                                0.0,
-                                c.accent,
-                            ),
-                        );
-                    }
-                    if let Some(pointer) = ui.input(|input| input.pointer.hover_pos())
-                        && output.response.rect.contains(pointer)
-                        && let Some((index, row)) = output
-                            .galley
-                            .rows
-                            .iter()
-                            .enumerate()
-                            .find(|(_, row)| row_rect(row).contains(pointer))
-                        && index != cursor_line
-                    {
-                        painter.set(
-                            hover_background,
-                            egui::Shape::rect_filled(row_rect(row), 0.0, c.bg_hover),
-                        );
-                    }
-                    painter.vline(
-                        output.response.rect.left() + GUTTER_W,
-                        output.response.rect.y_range(),
-                        egui::Stroke::new(1.0, c.border),
-                    );
-                    let gutter_font = theme::mono(FONT_SIZE - 1.5, FontWeight::Regular);
-                    for (idx, row) in output.galley.rows.iter().enumerate() {
-                        let y = origin.y + row.rect().center().y;
-                        if !ui.clip_rect().y_range().contains(y) {
-                            continue;
-                        }
-                        let diagnostic_severity = diagnostics.severity_for_line(idx);
-                        let color = if let Some(severity) = diagnostic_severity {
-                            diagnostic_color(severity, &c)
-                        } else if idx == cursor_line {
-                            c.text_dim
-                        } else {
-                            c.text_faint
-                        };
-                        painter.text(
-                            egui::pos2(
-                                output.response.rect.left() + GUTTER_W
-                                    - GUTTER_NUMBER_RIGHT_PADDING,
-                                y,
-                            ),
-                            egui::Align2::RIGHT_CENTER,
-                            (idx + 1).to_string(),
-                            gutter_font.clone(),
-                            color,
-                        );
-                        if let Some(severity) = diagnostic_severity {
-                            painter.circle_filled(
-                                egui::pos2(output.response.rect.left() + GUTTER_W - 5.0, y),
-                                2.5,
-                                diagnostic_color(severity, &c),
-                            );
-                        } else if edited_lines.contains(&idx) {
-                            painter.circle_filled(
-                                egui::pos2(output.response.rect.left() + GUTTER_W - 5.0, y),
-                                2.5,
-                                c.accent,
-                            );
-                        }
-                    }
-
-                    te_output = Some(output);
-                });
-        });
+        anchor = completion::CompletionAnchor {
+            focused: output.response.has_focus(),
+            caret_char_index: output.cursor_char_index,
+            screen_position: output.caret_anchor,
+        };
     }
 
     let now = ui.input(|input| input.time);
@@ -414,9 +208,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     // Completion is an edit and therefore exists only for project-owned source.
     if editable
-        && let Some(output) = &te_output
         && let Some((start, end, text, caret)) =
-            completion::show(ui, &mut state.ui.netlist, output, &buffer, completion_keys)
+            completion::show(ui, &mut state.ui.netlist, anchor, &buffer, completion_keys)
     {
         completion_changed = true;
         buffer.replace_range(start..end, &text);
@@ -1028,6 +821,57 @@ fn harvest_symbols(netlist: &rspice_core::Netlist) -> Vec<completion::SymbolEntr
 mod tests {
     use super::*;
 
+    /// The defect this exists for: completion used to be wired to a
+    /// `TextEdit` branch that only ran for an *empty* buffer, so the popover
+    /// was unreachable for every real deck while its own unit tests passed.
+    /// Assert it against a document with content in it, through `show`, or
+    /// the same class of regression comes back invisible.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn completion_reaches_a_document_that_has_content_in_it() {
+        let mut state = AppState::default();
+        let source = "test deck\n.tr";
+        state.workspace.netlist_source = Some(source.to_owned());
+        state.simulation.netlist_content = source.to_owned();
+        state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+        state.ui.netlist.active_document_initialized = true;
+        assert!(
+            super::super::active_netlist_source_is_editable(&state),
+            "fixture must be an editable owned document"
+        );
+
+        let context = egui::Context::default();
+        crate::ui::Theme::default().apply(&context);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        // Frame one builds the model and takes focus; the caret request is
+        // applied on the frame after, which is when an anchor exists.
+        for frame in 0..3 {
+            let _ = context.clone().run_ui(input.clone(), |ui| {
+                if frame == 0 {
+                    ui.ctx()
+                        .memory_mut(|memory| memory.request_focus(editor_id()));
+                    crate::workbench::documents::text_editor_commands::queue_caret_char_index(
+                        ui.ctx(),
+                        editor_id(),
+                        source.chars().count(),
+                    );
+                }
+                show(ui, &mut state);
+            });
+        }
+
+        assert!(
+            state.ui.netlist.completion_open,
+            "the dot-command popover must open for a caret trailing `.tr` in a non-empty deck"
+        );
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     struct IncludeFixtureDir(PathBuf);
 
@@ -1307,13 +1151,14 @@ mod tests {
         assert!(diagnostics[0].message.contains("cancelled"));
     }
 
+    /// The gutter is a mockup contract, not a layout accident: line numbers,
+    /// diagnostic pips, and the fold markers all measure from it.
     #[test]
-    fn editor_frame_owns_the_canonical_gutter_and_code_insets() {
-        let frame = code_editor_frame();
-        assert_eq!(frame.inner_margin.left, 59);
-        assert_eq!(frame.inner_margin.right, CODE_RIGHT_PADDING);
-        assert_eq!(frame.inner_margin.top, CODE_TOP_PADDING);
-        assert_eq!(frame.inner_margin.bottom, CODE_BOTTOM_PADDING);
+    fn editor_owns_the_canonical_gutter_and_code_insets() {
+        assert_eq!(GUTTER_W, 47.0);
+        assert_eq!(CODE_LEFT_PADDING, 12.0);
+        assert_eq!(GUTTER_W + CODE_LEFT_PADDING, 59.0);
+        assert_eq!(CODE_TOP_PADDING, 8);
     }
 
     #[test]

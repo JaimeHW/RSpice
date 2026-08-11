@@ -5,8 +5,6 @@
 //! the same parse that drives diagnostics). Anchored at the token being
 //! typed; ↑↓ select, ⇥ accepts, Esc dismisses until the next edit.
 
-use egui::text::{CCursor, CCursorRange};
-use egui::text_edit::TextEditOutput;
 use egui::{Key, Modifiers, Ui};
 
 use crate::ui::theme::{self, FontWeight};
@@ -21,6 +19,20 @@ pub struct SymbolEntry {
     pub kind: &'static str,
     pub detail: String,
     pub doc: String,
+}
+
+/// Where the popover attaches, taken from the editor that owns the caret.
+///
+/// The popover deliberately knows nothing about which editor widget produced
+/// this: it needs a caret index to read the token being typed and a screen
+/// point to sit under, and both are facts any editor can state.
+#[derive(Debug, Clone, Copy)]
+pub struct CompletionAnchor {
+    pub focused: bool,
+    pub caret_char_index: usize,
+    /// `None` when the caret is scrolled or folded out of view. The popover
+    /// closes rather than float somewhere the caret is not.
+    pub screen_position: Option<egui::Pos2>,
 }
 
 /// One row offered by the popover.
@@ -142,7 +154,7 @@ pub fn consume_keys(ui: &Ui, state: &NetlistDocumentState) -> (i32, bool, bool) 
 pub fn show(
     ui: &mut Ui,
     state: &mut NetlistDocumentState,
-    output: &TextEditOutput,
+    anchor: CompletionAnchor,
     buffer: &str,
     keys: (i32, bool, bool),
 ) -> Option<(usize, usize, String, usize)> {
@@ -154,9 +166,8 @@ pub fn show(
         return None;
     }
 
-    // Only complete while the editor owns focus and a cursor exists.
-    let focused = output.response.has_focus();
-    let Some(range) = output.cursor_range.filter(|_| focused) else {
+    // Only complete while the editor owns focus and the caret is on screen.
+    let Some(screen_position) = anchor.screen_position.filter(|_| anchor.focused) else {
         state.completion_open = false;
         return None;
     };
@@ -165,8 +176,8 @@ pub fn show(
         return None;
     }
 
-    let cursor = range.primary;
-    let Some((token_start, token, line_start)) = token_at(buffer, cursor.index.0) else {
+    let caret = anchor.caret_char_index;
+    let Some((token_start, token, line_start)) = token_at(buffer, caret) else {
         state.completion_open = false;
         return None;
     };
@@ -181,17 +192,16 @@ pub fn show(
         (state.completion_index as i32 + move_delta).rem_euclid(candidates.len() as i32) as usize;
     let selected = state.completion_index.min(candidates.len() - 1);
 
-    let clicked = draw_popover(ui, output, &candidates, selected);
+    let clicked = draw_popover(ui, screen_position, &candidates, selected);
     let take = if accept { Some(selected) } else { clicked };
 
     if let Some(index) = take {
         let chosen = &candidates[index];
-        let end = cursor.index.0;
         let byte_start = char_to_byte(buffer, token_start);
-        let byte_end = char_to_byte(buffer, end);
-        let caret = token_start + chosen.insert.chars().count();
+        let byte_end = char_to_byte(buffer, caret);
+        let placed_caret = token_start + chosen.insert.chars().count();
         state.completion_open = false;
-        return Some((byte_start, byte_end, chosen.insert.clone(), caret));
+        return Some((byte_start, byte_end, chosen.insert.clone(), placed_caret));
     }
 
     state.completion_open = true;
@@ -199,13 +209,15 @@ pub fn show(
 }
 
 /// After a completion splice, park the caret right after the insertion.
+///
+/// The splice reaches the editor as a source change, so the caret has to
+/// arrive the same way — as a request the editor applies once it has
+/// synchronized against the new bytes.
 pub fn place_caret(ui: &Ui, editor_id: egui::Id, char_index: usize) {
     let ctx = ui.ctx();
-    let mut te_state = egui::text_edit::TextEditState::load(ctx, editor_id).unwrap_or_default();
-    te_state
-        .cursor
-        .set_char_range(Some(CCursorRange::one(CCursor::new(char_index))));
-    te_state.store(ctx, editor_id);
+    crate::workbench::documents::text_editor_commands::queue_caret_char_index(
+        ctx, editor_id, char_index,
+    );
     ctx.memory_mut(|memory| memory.request_focus(editor_id));
 }
 
@@ -328,7 +340,7 @@ fn completion_popover_geometry(
 /// row index the pointer accepted, if any.
 fn draw_popover(
     ui: &Ui,
-    output: &TextEditOutput,
+    anchor: egui::Pos2,
     candidates: &[Candidate],
     selected: usize,
 ) -> Option<usize> {
@@ -336,10 +348,6 @@ fn draw_popover(
     let c = t.color;
     let mut clicked = None;
 
-    // Anchor at the caret's baseline.
-    let range = output.cursor_range?;
-    let caret_rect = output.galley.pos_from_cursor(range.primary);
-    let anchor = output.galley_pos + caret_rect.left_bottom().to_vec2() + egui::vec2(0.0, 4.0);
     let geometry = completion_popover_geometry(anchor, ui.ctx().content_rect());
 
     egui::Area::new(egui::Id::new("rspice.netlist.completion"))
