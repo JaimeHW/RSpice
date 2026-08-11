@@ -817,6 +817,10 @@ pub struct CodeWorkspaceRuntimeState {
     pub source_import: Option<CodeSourceImportState>,
     pub source_search: Option<CodeSourceSearchState>,
     pub language_tools: Option<super::CodeLanguageToolsState>,
+    /// Language index retained against the exact closure it was built from,
+    /// so the source navigators can run every frame without re-parsing the
+    /// bundle on each one.
+    pub(crate) source_index_cache: Option<super::SourceIndexCache>,
     pub source_carets: std::collections::BTreeMap<(ProjectSourceLanguage, String), usize>,
     pub source_selections:
         std::collections::BTreeMap<(ProjectSourceLanguage, String), (usize, usize)>,

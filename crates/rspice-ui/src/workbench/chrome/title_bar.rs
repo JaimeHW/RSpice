@@ -1874,9 +1874,11 @@ fn active_title_cell(app: &RSpiceApp) -> String {
         Workspace::Results => "Results".to_owned(),
         Workspace::Verify => "Verification".to_owned(),
         Workspace::Models => "Models & PDKs".to_owned(),
-        Workspace::Netlist => {
-            crate::workbench::documents::code_workspace::active_document_label(&app.state)
-        }
+        Workspace::Netlist => crate::workbench::documents::code_workspace::active_document_label(
+            &app.state.workspace,
+            &app.state.ui.code_workspace,
+            app.state.ui.messages(),
+        ),
     }
 }
 

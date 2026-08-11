@@ -1530,6 +1530,86 @@ fn source_line_preview(source: &str, one_based_line: usize) -> String {
         .collect()
 }
 
+/// One row of a source file's outline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SourceOutlineRow {
+    pub kind: &'static str,
+    pub name: String,
+    pub detail: String,
+    /// One-based line, ready to hand to the editor's go-to-line request.
+    pub line: usize,
+}
+
+/// The language index for one bundle, retained against the exact closure it
+/// was built from.
+///
+/// A navigator runs every frame and indexing a source closure does not, so the
+/// index is rebuilt only when the bundle identity it was built against
+/// changes. Keying on the closure digest rather than a revision counter means
+/// an edit that produces identical bytes reuses the index instead of
+/// re-parsing the tree.
+#[derive(Debug, Clone)]
+pub(crate) struct SourceIndexCache {
+    bundle_id: ProjectSourceId,
+    closure_digest: ContentDigest,
+    index: LanguageServiceIndex,
+}
+
+/// The outline of `logical_path`, indexing the bundle only when it must.
+///
+/// An index that cannot be built — a closure past the navigation size bound —
+/// yields no rows rather than a partial outline, because a short outline and a
+/// complete one look identical to the reader.
+pub(crate) fn document_outline(
+    project_id: ProjectId,
+    sources: &crate::state::ProjectSourceRegistry,
+    cache: &mut Option<SourceIndexCache>,
+    language: ProjectSourceLanguage,
+    logical_path: &str,
+) -> Vec<SourceOutlineRow> {
+    let owner = ProjectSourceOwner::code_workspace(language);
+    let refreshed = {
+        let Some(bundle) = sources.bundle_for_owner(&owner) else {
+            return Vec::new();
+        };
+        let current = cache.as_ref().is_some_and(|cache| {
+            cache.bundle_id == bundle.id() && cache.closure_digest == bundle.closure_digest()
+        });
+        if current {
+            None
+        } else {
+            // A closure past the navigation size bound yields no outline
+            // rather than a partial one: a short outline and a complete one
+            // look identical to the reader.
+            LanguageServiceIndex::build(project_id, bundle)
+                .ok()
+                .map(|index| SourceIndexCache {
+                    bundle_id: bundle.id(),
+                    closure_digest: bundle.closure_digest(),
+                    index,
+                })
+        }
+    };
+    if let Some(refreshed) = refreshed {
+        *cache = Some(refreshed);
+    }
+    cache
+        .as_ref()
+        .map(|cache| {
+            cache
+                .index
+                .document_symbols(logical_path)
+                .into_iter()
+                .map(|symbol| SourceOutlineRow {
+                    kind: symbol.kind.label(),
+                    name: symbol.name.clone(),
+                    detail: symbol.signature.clone(),
+                    line: symbol.line.saturating_add(1),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4,6 +4,7 @@ mod design;
 mod symbol;
 
 mod netlist;
+mod source_bundle;
 
 use netlist::*;
 
@@ -79,10 +80,19 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     ui.spacing_mut().item_spacing.y = 0.0;
     header(ui, app);
     if app.state.workbench.workspace == Workspace::Netlist {
+        use crate::workbench::documents::code_workspace::CodeWorkspacePage;
+
         // Canonical code navigator order: header, search, page tabs, outline.
+        // The outline belongs to the page: a Verilog-A module, an automation
+        // pipeline, and a SPICE deck are different objects and read
+        // differently, so none of them borrows another's tree.
         workspace_search(ui, app, Workspace::Netlist);
         code_workspace_pages(ui, app);
-        netlist(ui, app);
+        match app.state.ui.code_workspace.page {
+            CodeWorkspacePage::Netlist => netlist(ui, app),
+            CodeWorkspacePage::VerilogA => source_bundle::veriloga(ui, app),
+            CodeWorkspacePage::Automation => source_bundle::automation(ui, app),
+        }
         return;
     }
     match app.state.workbench.workspace {
@@ -224,7 +234,14 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         Workspace::Results => "Data browser",
         Workspace::Verify => "Verification flows",
         Workspace::Models => "Library browser",
-        Workspace::Netlist => "Netlist outline",
+        Workspace::Netlist => {
+            use crate::workbench::documents::code_workspace::CodeWorkspacePage;
+            match app.state.ui.code_workspace.page {
+                CodeWorkspacePage::Netlist => "Netlist outline",
+                CodeWorkspacePage::VerilogA => "Verilog-A project",
+                CodeWorkspacePage::Automation => "Automation workspace",
+            }
+        }
     };
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));

@@ -356,7 +356,11 @@ fn code_workspace_document(state: &AppState) -> WorkspaceDocument {
     let page = state.ui.code_workspace.page;
     WorkspaceDocument {
         id: WorkspaceDocumentId::NetlistSource,
-        label: crate::workbench::documents::code_workspace::active_document_label(state),
+        label: crate::workbench::documents::code_workspace::active_document_label(
+            &state.workspace,
+            &state.ui.code_workspace,
+            state.ui.messages(),
+        ),
         icon: match page {
             CodeWorkspacePage::Netlist => WorkbenchIcon::Netlist,
             CodeWorkspacePage::VerilogA => WorkbenchIcon::Code,
