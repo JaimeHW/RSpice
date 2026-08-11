@@ -20,6 +20,7 @@ pub(in crate::workbench) mod interaction_state;
 pub(crate) mod run_preflight;
 pub(in crate::workbench) mod session;
 pub(in crate::workbench) mod sim_setup;
+pub(crate) mod technology_demand;
 pub(in crate::workbench) mod viewer_capabilities;
 
 use crate::diagnostics::{ConsoleLevel, ConsoleMessage};
@@ -425,6 +426,34 @@ impl AppState {
             }
         }
         Ok(())
+    }
+
+    /// Whether an attached project technology is in effect: bound, and bound
+    /// through checkpoint-backed authority receipts. Execution paths that
+    /// prefer project-sealed model sources over the plain model library key
+    /// off this, not off the binding alone.
+    pub(crate) fn project_technology_in_effect(&self) -> bool {
+        self.workspace.project.technology_binding().is_some()
+            && !self.workspace.project.technology_change_audit().is_empty()
+    }
+
+    /// What the authored plan needs a project technology for, computed before
+    /// any netlist exists.
+    pub(crate) fn technology_demand(&self) -> technology_demand::TechnologyDemand {
+        technology_demand::technology_demand(&self.sim_setup, &self.workspace)
+    }
+
+    /// The single technology gate: a project need not have a technology; if it
+    /// has one it must be valid; if the plan needs one it must have one.
+    ///
+    /// A present binding is resolved against the full contract, which already
+    /// yields the exact reattach message for a binding without receipts. An
+    /// absent binding blocks only what the plan actually demands.
+    pub(crate) fn technology_gate_block_reason(&self) -> Result<(), String> {
+        if self.workspace.project.technology_binding().is_some() {
+            return self.validate_project_technology_contract();
+        }
+        self.technology_demand().block_reason().map_or(Ok(()), Err)
     }
 
     /// Resolve the exact signed project pin into the physical-layout unit and
@@ -932,7 +961,7 @@ impl AppState {
             &self.model_library_manager,
             self.current_blocking_drc_result(),
         )
-        .or_else(|| self.validate_project_technology_contract().err())
+        .or_else(|| self.technology_gate_block_reason().err())
     }
 
     /// User-facing reason the Netlist workspace cannot run the current deck.

@@ -35,6 +35,7 @@ const RUNNABLE_SUMMARY: &str =
     "Immutable inputs, target, task graph, and save policy are ready for dispatch.";
 const BLOCKED_SUMMARY: &str =
     "The run was not queued. Resolve the ordered issues below, then rerun preflight.";
+const TECHNOLOGY_NOT_REQUIRED_ADVISORY: &str = "Technology: not attached — not required by this plan (built-in device models, TT reference process)";
 const PREFLIGHT_DIALOG_SIZE: DialogSize = DialogSize::SimulationWorkflow;
 const ISSUE_TABLE_COMPACT_BREAKPOINT: f32 = 680.0;
 const CONTEXT_STACK_BREAKPOINT: f32 = 760.0;
@@ -361,16 +362,30 @@ fn collect_report(state: &AppState) -> PreflightReport {
         }
     }
 
+    // A project need not have a technology; if it has one it must be valid,
+    // and if the plan needs one it must have one. Each demanding entity is
+    // reported as its own row so the operator sees what to change.
+    let demand = state.technology_demand();
     match state.workspace.project.technology_binding() {
-        None => blockers.push(PreflightIssue {
+        None if demand.is_empty() => advisories.push(TECHNOLOGY_NOT_REQUIRED_ADVISORY.to_owned()),
+        None => blockers.extend(demand.reasons().iter().map(|reason| PreflightIssue {
             check: "Project technology contract".to_owned(),
-            observed: "No exact model-source and signed PDK package binding is attached".to_owned(),
-            required:
-                "A project-owned binding to authenticated model sources and one trusted signed PDK revision"
-                    .to_owned(),
+            observed: reason.observed(),
+            required: reason.required(),
             remediation: PreflightRemediation::ProjectTechnology,
-        }),
+        })),
         Some(binding) => {
+            if state.workspace.project.technology_change_audit().is_empty() {
+                blockers.push(PreflightIssue {
+                    check: "Project technology contract".to_owned(),
+                    observed:
+                        "The attached technology binding predates checkpoint-backed authority receipts"
+                            .to_owned(),
+                    required: "Reattach the technology to record an audited change receipt"
+                        .to_owned(),
+                    remediation: PreflightRemediation::ProjectTechnology,
+                });
+            }
             if let Err(error) = state
                 .model_library_manager
                 .validate_attached_technology(Some(binding))
@@ -399,9 +414,12 @@ fn collect_report(state: &AppState) -> PreflightReport {
         }
     }
 
-    if let Err(error) = state
-        .model_library_manager
-        .reference_process_model_cards(state.sim_setup.reference_pvt.process)
+    // An unmet demand already owns the missing reference section and carries the
+    // only remediation that resolves it; a second row would contradict it.
+    if (state.project_technology_in_effect() || demand.is_empty())
+        && let Err(error) = state
+            .model_library_manager
+            .reference_process_model_cards(state.sim_setup.reference_pvt.process)
     {
         blockers.push(PreflightIssue {
             check: "Reference model binding".to_owned(),
@@ -790,6 +808,7 @@ fn wide_issue_table(
     let measured_action_width = [
         remediation_label(PreflightRemediation::DesignChecks),
         remediation_label(PreflightRemediation::SimulationPlan),
+        remediation_label(PreflightRemediation::ProjectTechnology),
     ]
     .into_iter()
     .map(|label| {
@@ -1535,6 +1554,157 @@ mod tests {
                 && issue.observed == "Enable at least one analysis instance."
                 && issue.remediation == PreflightRemediation::SimulationPlan
         }));
+        assert!(
+            !report
+                .blockers
+                .iter()
+                .any(|issue| issue.check == "Project technology contract"),
+            "a typical plan demands no technology: {:?}",
+            report.blockers
+        );
+        assert!(
+            report
+                .advisories
+                .iter()
+                .any(|advisory| advisory == TECHNOLOGY_NOT_REQUIRED_ADVISORY),
+            "{:?}",
+            report.advisories
+        );
+    }
+
+    #[test]
+    fn a_non_typical_reference_process_is_the_only_row_that_owns_the_missing_section() {
+        let mut state = AppState::default();
+        state
+            .sim_setup
+            .set_reference_pvt(crate::simulation::dialog::corner::ProcessCorner::SS, 27.0)
+            .expect("the reference point is valid");
+
+        let report = collect_report(&state);
+
+        let technology: Vec<&PreflightIssue> = report
+            .blockers
+            .iter()
+            .filter(|issue| issue.check == "Project technology contract")
+            .collect();
+        assert_eq!(technology.len(), 1, "{technology:?}");
+        assert!(technology[0].observed.contains("SS"), "{technology:?}");
+        assert_eq!(
+            technology[0].remediation,
+            PreflightRemediation::ProjectTechnology
+        );
+        assert!(
+            !report
+                .blockers
+                .iter()
+                .any(|issue| issue.check == "Reference model binding"),
+            "the demand row already owns the missing reference section: {:?}",
+            report.blockers
+        );
+    }
+
+    #[test]
+    fn an_enabled_corner_analysis_names_its_instance_and_sections_in_its_own_row() {
+        let mut state = AppState::default();
+        let plan = state
+            .sim_setup
+            .stable_analysis_plan_mut()
+            .expect("a default state owns a stable plan");
+        let position = plan.instances().len();
+        let (instance, _) = plan
+            .insert_draft_with_id(
+                crate::product::AnalysisInstanceId::new(),
+                crate::simulation::plan::AnalysisDraft::Corner(
+                    crate::simulation::dialog::corner::CornerDialogState::default(),
+                ),
+                true,
+                position,
+            )
+            .expect("a corner analysis has no prerequisites");
+
+        let report = collect_report(&state);
+
+        let technology = report
+            .blockers
+            .iter()
+            .find(|issue| issue.check == "Project technology contract")
+            .expect("an enabled corner analysis demands its non-typical sections");
+        assert!(technology.observed.contains("SS, FF"), "{technology:?}");
+        assert!(
+            technology.observed.contains(&instance.to_string()),
+            "{technology:?}"
+        );
+        assert_eq!(
+            technology.remediation,
+            PreflightRemediation::ProjectTechnology
+        );
+    }
+
+    #[test]
+    fn an_unaudited_technology_binding_blocks_on_reattachment_without_faking_drift() {
+        let mut state = AppState::default();
+        state.provision_test_project_technology_contract();
+        // A project copy retains the exact binding and starts a fresh audit
+        // history, which is precisely the binding-without-receipts state.
+        state.workspace.project = state
+            .workspace
+            .project
+            .fork_copy_at(std::path::PathBuf::from("preflight_copy.rspiceproj"));
+        assert!(state.workspace.project.technology_binding().is_some());
+        assert!(state.workspace.project.technology_change_audit().is_empty());
+
+        let report = collect_report(&state);
+
+        let technology = report
+            .blockers
+            .iter()
+            .find(|issue| issue.check == "Project technology contract")
+            .expect("a binding without receipts blocks preflight");
+        assert_eq!(
+            technology.observed,
+            "The attached technology binding predates checkpoint-backed authority receipts"
+        );
+        assert_eq!(
+            technology.required,
+            "Reattach the technology to record an audited change receipt"
+        );
+        assert_eq!(
+            technology.remediation,
+            PreflightRemediation::ProjectTechnology
+        );
+        assert!(
+            !report.blockers.iter().any(|issue| {
+                issue.check == "Project model technology" || issue.check == "Project signed PDK"
+            }),
+            "the retained binding still resolves exactly: {:?}",
+            report.blockers
+        );
+    }
+
+    #[test]
+    fn a_valid_attached_technology_reports_no_technology_row_at_all() {
+        let mut state = AppState::default();
+        state.provision_test_project_technology_contract();
+
+        let report = collect_report(&state);
+
+        assert!(
+            !report.blockers.iter().any(|issue| {
+                issue.check == "Project technology contract"
+                    || issue.check == "Project model technology"
+                    || issue.check == "Project signed PDK"
+            }),
+            "a valid contract is silent: {:?}",
+            report.blockers
+        );
+        assert!(
+            !report
+                .advisories
+                .iter()
+                .any(|advisory| advisory == TECHNOLOGY_NOT_REQUIRED_ADVISORY),
+            "{:?}",
+            report.advisories
+        );
     }
 
     #[test]
@@ -1742,6 +1912,10 @@ mod tests {
         assert_eq!(
             remediation_label(PreflightRemediation::SimulationPlan),
             "Open plan"
+        );
+        assert_eq!(
+            remediation_label(PreflightRemediation::ProjectTechnology),
+            "Attach technology"
         );
     }
 

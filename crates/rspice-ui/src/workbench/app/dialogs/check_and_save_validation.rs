@@ -111,12 +111,22 @@ impl CheckAndSaveValidationReport {
                 format!("Project descriptor is invalid: {error}"),
             );
         }
-        if let Err(error) = state.validate_project_technology_contract() {
+        // A project need not have a technology; if it has one it must resolve
+        // exactly, and if the plan needs one it must have one. The three states
+        // carry different remedies, so each owns a distinct finding identity.
+        if let Err(error) = state.technology_gate_block_reason() {
+            let discriminator = if state.workspace.project.technology_binding().is_none() {
+                "technology-required-by-plan"
+            } else if state.workspace.project.technology_change_audit().is_empty() {
+                "technology-binding-unaudited"
+            } else {
+                "technology-binding-invalid"
+            };
             insert_finding(
                 &mut findings,
                 CheckAndSaveFindingLevel::Blocker,
                 "technology",
-                "technology-binding-invalid",
+                discriminator,
                 error,
             );
         }

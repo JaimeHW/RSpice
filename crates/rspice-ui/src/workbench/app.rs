@@ -1277,6 +1277,7 @@ mod tests {
     use crate::services::drc::{
         DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
     };
+    use crate::simulation::dialog::corner::ProcessCorner;
     use crate::state::{
         CellViewRef, ComponentType, ConfigurationBlackBoxPolicy, ConfigurationModelProfile,
         ConfigurationSetCatalog, ConfigurationSetDefinition, Point, SchematicState,
@@ -1508,13 +1509,77 @@ mod tests {
     }
 
     #[test]
-    fn full_run_readiness_requires_an_exact_trusted_project_technology_contract() {
-        let state = runnable_state();
+    fn run_readiness_demands_technology_only_when_the_plan_requires_it() {
+        let mut state = runnable_state();
+        assert_eq!(
+            state.simulation_run_preflight_block_reason(),
+            None,
+            "a typical plan runs without an attached project technology"
+        );
+        assert!(state.can_run_simulation());
+
+        state
+            .sim_setup
+            .set_reference_pvt(ProcessCorner::SS, 27.0)
+            .expect("the reference point is valid");
+
         let reason = state
             .simulation_run_preflight_block_reason()
-            .expect("missing project technology must block");
-        assert!(reason.contains("authenticated model-source and signed PDK binding"));
+            .expect("a non-typical reference section demands an attached technology");
+        assert!(
+            reason.contains("requires an attached project technology"),
+            "{reason}"
+        );
+        assert!(reason.contains("SS"), "{reason}");
         assert!(!state.can_run_simulation());
+    }
+
+    #[test]
+    fn run_readiness_rejects_a_technology_binding_without_checkpoint_receipts() {
+        let mut state = runnable_state();
+        state.provision_test_project_technology_contract();
+        // A project copy retains the exact binding and starts a fresh audit
+        // history, which is precisely the binding-without-receipts state.
+        state.workspace.project = state
+            .workspace
+            .project
+            .fork_copy_at(std::path::PathBuf::from("run_readiness_fixture.rspice"));
+
+        let reason = state
+            .simulation_run_preflight_block_reason()
+            .expect("an unaudited binding must block");
+        assert!(
+            reason.contains("predates checkpoint-backed authority receipts"),
+            "{reason}"
+        );
+        assert!(!state.can_run_simulation());
+    }
+
+    #[test]
+    fn run_readiness_still_enforces_an_attached_technology_contract() {
+        let mut state = runnable_state();
+        state.provision_test_project_technology_contract();
+        assert_eq!(
+            state.simulation_run_preflight_block_reason(),
+            None,
+            "an exact attached contract runs"
+        );
+
+        let attached_library = state
+            .workspace
+            .project
+            .technology_binding()
+            .expect("the provisioned project owns an exact binding")
+            .model_library()
+            .to_owned();
+        state
+            .model_library_manager
+            .remove_library(&attached_library);
+
+        let reason = state
+            .simulation_run_preflight_block_reason()
+            .expect("an attached contract that no longer resolves must block");
+        assert!(reason.contains("was removed"), "{reason}");
     }
 
     #[test]

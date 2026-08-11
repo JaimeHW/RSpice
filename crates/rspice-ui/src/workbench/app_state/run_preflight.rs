@@ -11,6 +11,7 @@
 //! schematic, the process corner, or the retained DRC result is the complete
 //! list of what can change the answer.
 
+use super::technology_demand::technology_demand;
 use crate::services::drc::DrcResult;
 use crate::state::model_library::ModelLibraryManager;
 use crate::state::{ProjectWorkspace, SchematicState};
@@ -70,7 +71,13 @@ pub(crate) fn run_preflight_block_reason(
             instance.id()
         ));
     }
-    if let Err(error) = model_library.reference_process_model_cards(sim_setup.reference_pvt.process)
+    // The technology demand row owns this failure when nothing is attached and
+    // the plan demands a technology; reporting both would name two remedies.
+    let technology_attached = workspace.project.technology_binding().is_some()
+        && !workspace.project.technology_change_audit().is_empty();
+    if (technology_attached || technology_demand(sim_setup, workspace).is_empty())
+        && let Err(error) =
+            model_library.reference_process_model_cards(sim_setup.reference_pvt.process)
     {
         return Some(error);
     }
