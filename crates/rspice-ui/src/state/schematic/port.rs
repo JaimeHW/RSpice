@@ -196,8 +196,7 @@ impl PortContract {
             .unwrap_or_default();
         let netlist_order = params
             .get("interface_order")
-            .and_then(|raw| raw.trim().parse::<usize>().ok())
-            .filter(|order| *order > 0);
+            .and_then(|raw| parse_interface_order(raw));
         let documentation = params.get("documentation").cloned().unwrap_or_else(|| {
             format!(
                 "{name} {} {} interface port",
@@ -232,6 +231,28 @@ impl PortContract {
         }
         crate::state::format_params_string(&values)
     }
+}
+
+/// Read a durable interface position.
+///
+/// The numeric property editor writes a whole number as `2`, but a value that
+/// arrived from a hand-edited file or a future schema may not be a position at
+/// all. Anything that is not a positive whole number is no position, and the
+/// port falls back to document order — `interface_order_is_well_formed` is what
+/// stops that fallback from being silent on an edit.
+fn parse_interface_order(raw: &str) -> Option<usize> {
+    let value = raw.trim().parse::<f64>().ok()?;
+    (value.is_finite() && value > 0.0 && value.fract() == 0.0).then_some(value as usize)
+}
+
+/// `true` when an `interface_order=` entry expresses either a position or the
+/// explicit absence of one. Zero and empty both mean "follow document order".
+fn interface_order_is_well_formed(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    trimmed.is_empty()
+        || trimmed
+            .parse::<f64>()
+            .is_ok_and(|value| value.is_finite() && value >= 0.0 && value.fract() == 0.0)
 }
 
 /// Validated one-shot configuration owned by the armed port tool.
@@ -530,6 +551,14 @@ impl SchematicState {
         {
             return Err(PortPlacementError::InvalidContract(
                 "documentation is empty",
+            ));
+        }
+        if encoded
+            .get("interface_order")
+            .is_some_and(|raw| !interface_order_is_well_formed(raw))
+        {
+            return Err(PortPlacementError::InvalidContract(
+                "interface order must be a whole number",
             ));
         }
         let contract = candidate

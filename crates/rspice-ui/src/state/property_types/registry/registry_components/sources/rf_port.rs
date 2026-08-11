@@ -60,6 +60,20 @@ impl PropertyRegistry {
                 .with_order(21)
                 .with_category("Excitation"),
         );
+        // Phase only means anything alongside a magnitude, and only a
+        // multi-port drive needs it — but the lowered source carries it into
+        // `.AC` exactly as a voltage source's would, so leaving it out made a
+        // driven port unable to express anything but zero degrees.
+        sheet.add(
+            PropertyDefinition::new("ac_phase")
+                .with_display_name("AC Phase")
+                .with_description("Excitation phase; applied only when a magnitude is set")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::string(""))
+                .with_unit("°")
+                .with_order(22)
+                .with_category("Excitation"),
+        );
 
         self.sheets.insert(ComponentType::RfPort, sheet);
     }

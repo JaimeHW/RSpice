@@ -321,6 +321,21 @@ impl PropertyDefinition {
         self
     }
 
+    /// Set the condition under which this property appears in the editor.
+    pub fn with_visibility(mut self, condition: VisibilityCondition) -> Self {
+        self.visibility_condition = condition;
+        self
+    }
+
+    /// Show this property only while another property carries a value.
+    ///
+    /// Instance parameters that a device only reads through a model card —
+    /// sheet geometry, thermal material constants — stay hidden until the
+    /// instance is actually bound to one.
+    pub fn when_set(self, property: impl Into<String>) -> Self {
+        self.with_visibility(VisibilityCondition::WhenPropertySet(property.into()))
+    }
+
     /// Validate a value against this definition
     pub fn validate(&self, value: &PropertyValue) -> Result<(), String> {
         if let PropertyValue::Number { value, .. } = value

@@ -72,8 +72,55 @@ impl PropertyRegistry {
                 .with_order(21)
                 .with_category("Geometry"),
         );
+        // Drawn dimensions (order 22-24). With AREA omitted the device scales
+        // by W/L × NF instead; on an HFET1 card W is the real gate width and
+        // NF multiplies it directly.
+        sheet.add(
+            PropertyDefinition::new("w")
+                .with_display_name("Width")
+                .with_description("Drawn gate width; scales the device as W/L when AREA is omitted")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("m")
+                .with_order(22)
+                .with_category("Geometry"),
+        );
+        sheet.add(
+            PropertyDefinition::new("l")
+                .with_display_name("Length")
+                .with_description(
+                    "Drawn gate length; scales the device as W/L when AREA is omitted",
+                )
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("m")
+                .with_order(23)
+                .with_category("Geometry"),
+        );
+        sheet.add(
+            PropertyDefinition::new("nf")
+                .with_display_name("# Fingers")
+                .with_description("Number of gate fingers folded into the W/L scaling")
+                .with_type(PropertyType::Number)
+                .with_default(PropertyValue::number(1.0))
+                .with_range(1.0, 1000.0)
+                .with_order(24)
+                .with_category("Geometry"),
+        );
 
         // Temperature category
+        sheet.add(
+            PropertyDefinition::new("temp")
+                .with_display_name("Temperature")
+                .with_description(
+                    "Absolute device temperature; overrides the circuit temperature entirely",
+                )
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("°C")
+                .with_order(30)
+                .with_category("Temperature"),
+        );
         sheet.add(
             PropertyDefinition::new("dtemp")
                 .with_display_name("Temp Rise")
@@ -81,40 +128,13 @@ impl PropertyRegistry {
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("°C")
-                .with_order(30)
+                .with_order(31)
                 .with_category("Temperature"),
         );
 
-        // Initial Conditions category
-        sheet.add(
-            PropertyDefinition::new("off")
-                .with_display_name("Initially Off")
-                .with_description("Start in off state for DC operating point")
-                .with_type(PropertyType::Boolean)
-                .with_default(PropertyValue::boolean(false))
-                .with_order(40)
-                .with_category("Initial Conditions"),
-        );
-        sheet.add(
-            PropertyDefinition::new("ic_vds")
-                .with_display_name("IC VDS")
-                .with_description("Initial drain-source voltage for transient analysis")
-                .with_type(PropertyType::Number)
-                .with_default(PropertyValue::number(0.0))
-                .with_unit("V")
-                .with_order(41)
-                .with_category("Initial Conditions"),
-        );
-        sheet.add(
-            PropertyDefinition::new("ic_vgs")
-                .with_display_name("IC VGS")
-                .with_description("Initial gate-source voltage for transient analysis")
-                .with_type(PropertyType::Number)
-                .with_default(PropertyValue::number(0.0))
-                .with_unit("V")
-                .with_order(42)
-                .with_category("Initial Conditions"),
-        );
+        // No OFF switch and no IC vector: the JFET instance contract the
+        // engine reads is AREA/W/L/NF/M/TEMP/DTEMP only. OFF and the
+        // IC=VDS,VGS pair are parsed and then dropped.
 
         sheet
     }

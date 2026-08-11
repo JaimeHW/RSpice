@@ -48,16 +48,45 @@ impl PropertyRegistry {
                 .with_category("Electrical")
                 .required(),
         );
+        // A lossless line is specified either by its delay or by an electrical
+        // length at a reference frequency. Setting the frequency is what picks
+        // the second form: the two cannot both be written, because the engine
+        // would take the delay and quietly ignore the frequency.
         sheet.add(
             PropertyDefinition::new("td")
                 .with_display_name("Delay")
-                .with_description("One-way propagation delay (suffixes allowed, e.g. 1n)")
+                .with_description(
+                    "One-way propagation delay; used unless a reference frequency is set",
+                )
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e-9))
                 .with_unit("s")
                 .with_order(11)
-                .with_category("Electrical")
-                .required(),
+                .with_category("Electrical"),
+        );
+        sheet.add(
+            PropertyDefinition::new("f")
+                .with_display_name("Reference Frequency")
+                .with_description(
+                    "Frequency the electrical length is stated at; setting it specifies the line \
+                     by length instead of delay",
+                )
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("Hz")
+                .with_order(12)
+                .with_category("Electrical"),
+        );
+        sheet.add(
+            PropertyDefinition::new("nl")
+                .with_display_name("Electrical Length")
+                .with_description(
+                    "Line length in wavelengths at the reference frequency; 0.25 when left blank",
+                )
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_order(13)
+                .with_category("Electrical"),
         );
 
         self.sheets.insert(ComponentType::TransmissionLine, sheet);

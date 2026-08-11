@@ -51,16 +51,53 @@ impl PropertyRegistry {
                 .with_category("Electrical"),
         );
 
-        // Resistance (for lossy inductors)
+        // Model category (order 13). Ordered after the primary value so the
+        // editor still opens with the inductance focused.
         sheet.add(
-            PropertyDefinition::new("r")
-                .with_display_name("Series Resistance")
-                .with_description("Series DC resistance")
-                .with_type(PropertyType::Expression)
-                .with_default(PropertyValue::number(0.0))
-                .with_unit("Ω")
+            PropertyDefinition::new("model")
+                .with_display_name("Inductor Model")
+                .with_description(
+                    "Library L model card supplying the nominal and temperature terms",
+                )
+                .with_type(PropertyType::String)
+                .with_default(PropertyValue::string(""))
                 .with_order(13)
-                .with_category("Electrical"),
+                .with_category("Model"),
+        );
+
+        // Parasitics (order 14-16). Explicit only: the parser synthesizes a
+        // real element per parasitic and never imposes a default. The winding
+        // resistance is `rser`, not `r` — a bare `r` on an inductor card is
+        // not read by any device.
+        sheet.add(
+            PropertyDefinition::new("rser")
+                .with_display_name("Series Resistance")
+                .with_description("Winding DC resistance inserted through an internal node")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("Ω")
+                .with_order(14)
+                .with_category("Parasitics"),
+        );
+        sheet.add(
+            PropertyDefinition::new("rpar")
+                .with_display_name("Parallel Resistance")
+                .with_description("Core-loss resistance placed across the inductor")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("Ω")
+                .with_order(15)
+                .with_category("Parasitics"),
+        );
+        sheet.add(
+            PropertyDefinition::new("cpar")
+                .with_display_name("Parallel Capacitance")
+                .with_description("Inter-winding capacitance placed across the inductor")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("F")
+                .with_order(16)
+                .with_category("Parasitics"),
         );
 
         // Temperature coefficients
@@ -92,6 +129,18 @@ impl PropertyRegistry {
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("°C")
                 .with_order(22)
+                .with_category("Temperature"),
+        );
+        sheet.add(
+            PropertyDefinition::new("temp")
+                .with_display_name("Temperature")
+                .with_description(
+                    "Absolute instance temperature; overrides the circuit temperature entirely",
+                )
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("°C")
+                .with_order(23)
                 .with_category("Temperature"),
         );
 

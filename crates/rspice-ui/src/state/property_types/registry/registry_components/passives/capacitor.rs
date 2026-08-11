@@ -51,27 +51,81 @@ impl PropertyRegistry {
                 .with_category("Electrical"),
         );
 
-        // Voltage coefficients (order 20-29) - for voltage-dependent capacitance
+        // Model category (order 14). Ordered after the primary value so the
+        // editor still opens with the capacitance focused.
         sheet.add(
-            PropertyDefinition::new("vc1")
-                .with_display_name("Voltage Coeff 1")
-                .with_description("First-order voltage coefficient")
-                .with_type(PropertyType::Number)
-                .with_default(PropertyValue::number(0.0))
-                .with_unit("1/V")
-                .with_order(20)
-                .with_category("Voltage Coefficients"),
+            PropertyDefinition::new("model")
+                .with_display_name("Capacitor Model")
+                .with_description(
+                    "Library C model card; enables per-area/perimeter geometry and CJ/CJSW scaling",
+                )
+                .with_type(PropertyType::String)
+                .with_default(PropertyValue::string(""))
+                .with_order(14)
+                .with_category("Model"),
+        );
+
+        // Geometry (order 15-16). Only meaningful against a model card, whose
+        // CJ/CJSW turn plate area and perimeter into the capacitance.
+        sheet.add(
+            PropertyDefinition::new("w")
+                .with_display_name("Width")
+                .with_description("Drawn plate width; defaults to the model DEFW when omitted")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("m")
+                .with_order(15)
+                .with_category("Geometry")
+                .when_set("model"),
         );
         sheet.add(
-            PropertyDefinition::new("vc2")
-                .with_display_name("Voltage Coeff 2")
-                .with_description("Second-order voltage coefficient")
-                .with_type(PropertyType::Number)
-                .with_default(PropertyValue::number(0.0))
-                .with_unit("1/V²")
-                .with_order(21)
-                .with_category("Voltage Coefficients"),
+            PropertyDefinition::new("l")
+                .with_display_name("Length")
+                .with_description("Drawn plate length; defaults to the model DEFL when omitted")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("m")
+                .with_order(16)
+                .with_category("Geometry")
+                .when_set("model"),
         );
+
+        // Parasitics (order 17-19). Explicit only: the parser synthesizes a
+        // real element per parasitic and never imposes a default.
+        sheet.add(
+            PropertyDefinition::new("rser")
+                .with_display_name("Series Resistance")
+                .with_description("ESR inserted in series through an internal node")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("Ω")
+                .with_order(17)
+                .with_category("Parasitics"),
+        );
+        sheet.add(
+            PropertyDefinition::new("rpar")
+                .with_display_name("Parallel Resistance")
+                .with_description("Leakage resistance placed across the capacitor")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("Ω")
+                .with_order(18)
+                .with_category("Parasitics"),
+        );
+        sheet.add(
+            PropertyDefinition::new("cpar")
+                .with_display_name("Parallel Capacitance")
+                .with_description("Additional capacitance placed across the capacitor")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("F")
+                .with_order(19)
+                .with_category("Parasitics"),
+        );
+
+        // No voltage-coefficient fields: the engine models no
+        // voltage-dependent capacitance, so `vc1`/`vc2` controls would write
+        // a parameter that reaches the deck and is then silently discarded.
 
         // Temperature coefficients
         sheet.add(
@@ -103,6 +157,41 @@ impl PropertyRegistry {
                 .with_unit("°C")
                 .with_order(32)
                 .with_category("Temperature"),
+        );
+        sheet.add(
+            PropertyDefinition::new("temp")
+                .with_display_name("Temperature")
+                .with_description(
+                    "Absolute instance temperature; overrides the circuit temperature entirely",
+                )
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("°C")
+                .with_order(33)
+                .with_category("Temperature"),
+        );
+
+        // Aging (order 35-39). Read only under the Xyce dialect.
+        sheet.add(
+            PropertyDefinition::new("age")
+                .with_display_name("Age")
+                .with_description("Elapsed service time for Xyce capacitor aging")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("h")
+                .with_order(35)
+                .with_category("Aging")
+                .advanced(),
+        );
+        sheet.add(
+            PropertyDefinition::new("d")
+                .with_display_name("Aging Coefficient")
+                .with_description("Xyce capacitance degradation coefficient applied over the age")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_order(36)
+                .with_category("Aging")
+                .advanced(),
         );
 
         // Initial conditions

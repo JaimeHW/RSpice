@@ -72,6 +72,25 @@ impl PropertyRegistry {
                 .with_order(12)
                 .with_category("Interface"),
         );
+        // The cell's `.SUBCKT` port order, and so the node order of every
+        // instance of it. Placement already writes `interface_order=`, the
+        // interface reader already sorts by it, and the dialog's apply path
+        // already rejects a duplicate — only the editor field was missing, so
+        // an interface could be ordered when it was drawn and never after.
+        // Zero is not a position: it means "fall back to document order",
+        // which is what the contract reader does with an absent entry.
+        sheet.add(
+            PropertyDefinition::new("interface_order")
+                .with_display_name("Interface order")
+                .with_description(
+                    "One-based position in the subcircuit port list; 0 follows document order",
+                )
+                .with_type(PropertyType::Number)
+                .with_default(PropertyValue::number(0.0))
+                .with_range(0.0, 1024.0)
+                .with_order(13)
+                .with_category("Interface"),
+        );
         sheet.add(
             PropertyDefinition::new("documentation")
                 .with_display_name("Documentation")

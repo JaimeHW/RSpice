@@ -3,6 +3,22 @@
 
 use super::*;
 
+/// The switch transition-steepness control, shared by all three switch
+/// families. Left blank the engine keeps its own default; the netlister only
+/// writes SMOOTH onto the model card when it carries a value.
+fn smoothness_property(order: i32) -> PropertyDefinition {
+    PropertyDefinition::new("smooth")
+        .with_display_name("Transition Smoothness")
+        .with_description(
+            "Width of the smoothed on/off transition; smaller is steeper and harder to converge",
+        )
+        .with_type(PropertyType::Expression)
+        .with_default(PropertyValue::expression(""))
+        .with_order(order)
+        .with_category("Electrical")
+        .advanced()
+}
+
 impl PropertyRegistry {
     pub(in super::super) fn register_controlled_sources(&mut self) {
         self.register_vcvs();
@@ -38,17 +54,23 @@ impl PropertyRegistry {
                 .with_category("Electrical")
                 .required(),
         );
+        // The expression switch is bounded by the two control values that
+        // close and open it, not by a threshold and a hysteresis width: those
+        // are the voltage switch's spelling, and the generic-switch model
+        // contract the engine reads is ON/OFF/ONH/OFFH/RON/ROFF.
         sheet.add(
-            PropertyDefinition::new("vt")
-                .with_display_name("Threshold")
+            PropertyDefinition::new("on")
+                .with_display_name("On Value")
+                .with_description("Control-expression value at which the switch is fully closed")
                 .with_type(PropertyType::Expression)
-                .with_default(PropertyValue::number(0.0))
+                .with_default(PropertyValue::number(1.0))
                 .with_order(11)
                 .with_category("Electrical"),
         );
         sheet.add(
-            PropertyDefinition::new("vh")
-                .with_display_name("Hysteresis")
+            PropertyDefinition::new("off")
+                .with_display_name("Off Value")
+                .with_description("Control-expression value at which the switch is fully open")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
                 .with_order(12)
@@ -70,6 +92,30 @@ impl PropertyRegistry {
                 .with_default(PropertyValue::expression("1e12"))
                 .with_unit("Ω")
                 .with_order(14)
+                .with_category("Electrical"),
+        );
+        // Hysteresis: giving either bound switches the device onto its
+        // hysteretic path, so both stay blank until the user opts in.
+        sheet.add(
+            PropertyDefinition::new("onh")
+                .with_display_name("On Value (Falling)")
+                .with_description(
+                    "Control value that closes the switch while the control is falling; enables hysteresis",
+                )
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_order(15)
+                .with_category("Electrical"),
+        );
+        sheet.add(
+            PropertyDefinition::new("offh")
+                .with_display_name("Off Value (Falling)")
+                .with_description(
+                    "Control value that opens the switch while the control is falling; enables hysteresis",
+                )
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_order(16)
                 .with_category("Electrical"),
         );
         sheet.add(
@@ -149,6 +195,7 @@ impl PropertyRegistry {
                 .with_order(14)
                 .with_category("Electrical"),
         );
+        sheet.add(smoothness_property(15));
         sheet.add(
             PropertyDefinition::new("state")
                 .with_display_name("Initial State")
@@ -188,6 +235,30 @@ impl PropertyRegistry {
                 .with_category("Electrical")
                 .required(),
         );
+        // Output rails. An ideal op-amp with no rails slams to gain times the
+        // differential input, which is rarely the circuit anyone means; the
+        // netlist generator lowers a limited op-amp to the same behavioral
+        // `limit()` form the VCVS uses, so these carry the identical contract.
+        sheet.add(
+            PropertyDefinition::new("vmax")
+                .with_display_name("Max Output")
+                .with_description("Positive output rail (clipping)")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(1e308))
+                .with_unit("V")
+                .with_order(40)
+                .with_category("Limits"),
+        );
+        sheet.add(
+            PropertyDefinition::new("vmin")
+                .with_display_name("Min Output")
+                .with_description("Negative output rail (clipping)")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(-1e308))
+                .with_unit("V")
+                .with_order(41)
+                .with_category("Limits"),
+        );
 
         self.sheets.insert(ComponentType::OpAmp, sheet);
     }
@@ -217,6 +288,40 @@ impl PropertyRegistry {
                 .with_order(10)
                 .with_category("Electrical")
                 .required(),
+        );
+        sheet.add(
+            PropertyDefinition::new("m")
+                .with_display_name("Multiplicity")
+                .with_description(
+                    "Parallel device count; applies to the I= form only, matching Xyce",
+                )
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(1.0))
+                .with_range(0.0, 1e9)
+                .with_order(11)
+                .with_category("Electrical"),
+        );
+        // TC1/TC2 are the only other instance parameters a B line accepts; the
+        // parser rejects the whole deck on anything else.
+        sheet.add(
+            PropertyDefinition::new("tc1")
+                .with_display_name("Linear Temp Coefficient")
+                .with_description("First-order temperature coefficient of the output")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit("1/°C")
+                .with_order(20)
+                .with_category("Temperature"),
+        );
+        sheet.add(
+            PropertyDefinition::new("tc2")
+                .with_display_name("Quadratic Temp Coefficient")
+                .with_description("Second-order temperature coefficient of the output")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit("1/°C²")
+                .with_order(21)
+                .with_category("Temperature"),
         );
 
         self.sheets.insert(ComponentType::BehavioralSource, sheet);
@@ -274,6 +379,7 @@ impl PropertyRegistry {
                 .with_order(13)
                 .with_category("Electrical"),
         );
+        sheet.add(smoothness_property(14));
 
         self.sheets.insert(ComponentType::VSwitch, sheet);
     }

@@ -58,11 +58,17 @@ pub fn get_primary_property_name(kind: ComponentType) -> &'static str {
         ComponentType::VoltageSourceSin => "vo",
         ComponentType::VoltageSourceExp => "v1",
         ComponentType::VoltageSourceSffm => "vo",
+        ComponentType::VoltageSourceAm => "vo",
+        ComponentType::VoltageSourcePat => "vhi",
+        ComponentType::VoltageSourceNoise => "na",
         ComponentType::CurrentSource => "dc",
         ComponentType::CurrentSourceAc => "ac",
         ComponentType::CurrentSourcePulse => "i1",
         ComponentType::CurrentSourceSin => "io",
         ComponentType::CurrentSourceExp => "i1",
+        ComponentType::CurrentSourceSffm => "vo",
+        ComponentType::CurrentSourceAm => "vo",
+        ComponentType::CurrentSourcePat => "vhi",
         ComponentType::VoltageSourcePwl | ComponentType::CurrentSourcePwl => "pwl_data",
         ComponentType::Diode
         | ComponentType::Nmos
@@ -332,6 +338,12 @@ pub fn apply_properties_to_component(
         if !is_default || (component.kind == ComponentType::Port && is_port_contract_property(key))
         {
             secondary_params.insert(key.clone(), string_value);
+        } else if component.kind == ComponentType::Port {
+            // Only the Port branch seeds `secondary_params` from the existing
+            // params, so only it can carry a stale entry past an edit that
+            // returned the field to its default. Every other kind starts empty
+            // and drops defaults by simply not inserting them.
+            secondary_params.remove(key);
         }
     }
 
@@ -693,6 +705,66 @@ mod tests {
         assert_eq!(contract.discipline, crate::state::PortDiscipline::Thermal);
         assert_eq!(contract.netlist_order, Some(1));
         assert_eq!(contract.documentation, "Thermal monitor output");
+    }
+
+    /// The interface position is editable after placement, and clearing it
+    /// really does return the port to document order — the Port branch seeds
+    /// its parameter map from the existing params, so a defaulted field has to
+    /// be removed rather than merely left uninserted.
+    #[test]
+    fn interface_order_is_editable_and_clears_back_to_document_order() {
+        let registry = PropertyRegistry::new();
+        let mut state = crate::state::SchematicState::default();
+        let pending = crate::state::PendingPortPlacement::new(
+            "OUT",
+            crate::state::PortDirectionType::OutputAnalog,
+            crate::state::PortDiscipline::Electrical,
+            state.topology_version(),
+            state.next_interface_order(),
+        );
+        let id = state
+            .place_pending_port(Point::origin(), pending)
+            .expect("typed port places");
+        let mut component = state
+            .components
+            .iter()
+            .find(|component| component.id == id)
+            .expect("port exists")
+            .clone();
+
+        let mut properties = collect_properties_from_component(&component, &registry);
+        assert_eq!(
+            properties.get("interface_order"),
+            Some(&PropertyValue::number(1.0)),
+            "a placed port shows the position placement gave it"
+        );
+
+        properties.insert("interface_order".to_owned(), PropertyValue::number(4.0));
+        apply_properties_to_component(&mut component, &properties, &registry);
+        assert_eq!(
+            component.port_contract().expect("contract").netlist_order,
+            Some(4)
+        );
+        // A whole number must not reach the params string as `4.0`; the
+        // contract reader would see no position at all.
+        assert_eq!(
+            parse_params_string(&component.params)
+                .get("interface_order")
+                .map(String::as_str),
+            Some("4")
+        );
+
+        properties.insert("interface_order".to_owned(), PropertyValue::number(0.0));
+        apply_properties_to_component(&mut component, &properties, &registry);
+        assert_eq!(
+            component.port_contract().expect("contract").netlist_order,
+            None
+        );
+        assert!(
+            !parse_params_string(&component.params).contains_key("interface_order"),
+            "clearing the position removes the entry: {}",
+            component.params
+        );
     }
 }
 

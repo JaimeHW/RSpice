@@ -74,26 +74,9 @@ impl PropertyRegistry {
                 .with_order(20)
                 .with_category("Geometry"),
         );
-        sheet.add(
-            PropertyDefinition::new("areab")
-                .with_display_name("Base Area Factor")
-                .with_description("Base area multiplier for parasitic capacitance")
-                .with_type(PropertyType::Number)
-                .with_default(PropertyValue::number(1.0))
-                .with_range(1e-6, 1e6)
-                .with_order(21)
-                .with_category("Geometry"),
-        );
-        sheet.add(
-            PropertyDefinition::new("areac")
-                .with_display_name("Collector Area Factor")
-                .with_description("Collector area multiplier for parasitic capacitance")
-                .with_type(PropertyType::Number)
-                .with_default(PropertyValue::number(1.0))
-                .with_range(1e-6, 1e6)
-                .with_order(22)
-                .with_category("Geometry"),
-        );
+        // No AREAB/AREAC: the parser accepts both spellings, but the device
+        // scales every junction off the single AREA factor, so a separate
+        // base or collector area would be written to the deck and dropped.
         sheet.add(
             PropertyDefinition::new("m")
                 .with_display_name("Multiplier")
@@ -107,13 +90,25 @@ impl PropertyRegistry {
 
         // Temperature category
         sheet.add(
+            PropertyDefinition::new("temp")
+                .with_display_name("Temperature")
+                .with_description(
+                    "Absolute junction temperature; overrides the circuit temperature entirely",
+                )
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("°C")
+                .with_order(30)
+                .with_category("Temperature"),
+        );
+        sheet.add(
             PropertyDefinition::new("dtemp")
                 .with_display_name("Temp Rise")
                 .with_description("Instance temperature rise above ambient")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("°C")
-                .with_order(30)
+                .with_order(31)
                 .with_category("Temperature"),
         );
 
@@ -127,44 +122,9 @@ impl PropertyRegistry {
                 .with_order(40)
                 .with_category("Initial Conditions"),
         );
-        sheet.add(
-            PropertyDefinition::new("region")
-                .with_display_name("Region Hint")
-                .with_description("Estimated operating region for convergence aid")
-                .with_type(PropertyType::Enum)
-                .with_default(PropertyValue::enumeration(
-                    "auto",
-                    vec![
-                        "auto".to_string(),
-                        "off".to_string(),
-                        "fwd".to_string(),
-                        "rev".to_string(),
-                        "sat".to_string(),
-                    ],
-                ))
-                .with_order(41)
-                .with_category("Initial Conditions"),
-        );
-        sheet.add(
-            PropertyDefinition::new("ic_vbe")
-                .with_display_name("IC VBE")
-                .with_description("Initial base-emitter voltage for transient analysis")
-                .with_type(PropertyType::Number)
-                .with_default(PropertyValue::number(0.0))
-                .with_unit("V")
-                .with_order(42)
-                .with_category("Initial Conditions"),
-        );
-        sheet.add(
-            PropertyDefinition::new("ic_vce")
-                .with_display_name("IC VCE")
-                .with_description("Initial collector-emitter voltage for transient analysis")
-                .with_type(PropertyType::Number)
-                .with_default(PropertyValue::number(0.0))
-                .with_unit("V")
-                .with_order(43)
-                .with_category("Initial Conditions"),
-        );
+        // No region hint and no per-junction initial conditions: the BJT
+        // instance contract the engine reads is AREA/M/OFF/TEMP/DTEMP only,
+        // so those controls would write parameters nothing consumes.
 
         sheet
     }

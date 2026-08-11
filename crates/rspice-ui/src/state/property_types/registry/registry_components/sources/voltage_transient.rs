@@ -1,5 +1,6 @@
-//! Property sheets for time-varying voltage sources: pulse, sine, PWL,
-//! exponential, and single-frequency FM.
+//! Property sheets for time-varying voltage sources: pulse, sine, PWL, and
+//! exponential. The families that exist identically for both quantities — SFFM,
+//! AM, PAT, TRNOISE — are built in `shared_waveforms`.
 
 use super::*;
 
@@ -89,6 +90,17 @@ impl PropertyRegistry {
                 .with_default(PropertyValue::number(2e-6))
                 .with_unit("s")
                 .with_order(16)
+                .with_category("Pulse"),
+        );
+        sheet.add(
+            PropertyDefinition::new("phase")
+                .with_display_name("Phase (PHASE)")
+                .with_description("Phase offset into the period, in degrees")
+                .with_type(PropertyType::Number)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit("°")
+                .with_range(-360.0, 360.0)
+                .with_order(17)
                 .with_category("Pulse"),
         );
 
@@ -328,82 +340,5 @@ impl PropertyRegistry {
         Self::add_noise_params(&mut sheet);
 
         self.sheets.insert(ComponentType::VoltageSourceExp, sheet);
-    }
-
-    /// Register SFFM (Single-Frequency FM) Voltage Source
-    pub(super) fn register_vsource_sffm(&mut self) {
-        let mut sheet = PropertySheet::new();
-
-        sheet.add(
-            PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
-                .with_type(PropertyType::String)
-                .with_default(PropertyValue::string("V1"))
-                .with_order(0)
-                .with_category("Instance")
-                .required(),
-        );
-
-        // SFFM(VO VA FC MDI FS)
-        sheet.add(
-            PropertyDefinition::new("vo")
-                .with_display_name("DC Offset (VO)")
-                .with_description("DC offset voltage")
-                .with_type(PropertyType::Expression)
-                .with_default(PropertyValue::number(0.0))
-                .with_unit("V")
-                .with_order(10)
-                .with_category("SFFM")
-                .required(),
-        );
-        sheet.add(
-            PropertyDefinition::new("va")
-                .with_display_name("Amplitude (VA)")
-                .with_description("Carrier amplitude")
-                .with_type(PropertyType::Expression)
-                .with_default(PropertyValue::number(1.0))
-                .with_unit("V")
-                .with_order(11)
-                .with_category("SFFM")
-                .required(),
-        );
-        sheet.add(
-            PropertyDefinition::new("fc")
-                .with_display_name("Carrier Freq (FC)")
-                .with_description("Carrier frequency")
-                .with_type(PropertyType::Expression)
-                .with_default(PropertyValue::number(1e6))
-                .with_unit("Hz")
-                .with_order(12)
-                .with_category("SFFM")
-                .required(),
-        );
-        sheet.add(
-            PropertyDefinition::new("mdi")
-                .with_display_name("Mod Index (MDI)")
-                .with_description("Modulation index")
-                .with_type(PropertyType::Expression)
-                .with_default(PropertyValue::number(1.0))
-                .with_order(13)
-                .with_category("SFFM"),
-        );
-        sheet.add(
-            PropertyDefinition::new("fs")
-                .with_display_name("Signal Freq (FS)")
-                .with_description("Signal (modulating) frequency")
-                .with_type(PropertyType::Expression)
-                .with_default(PropertyValue::number(1e3))
-                .with_unit("Hz")
-                .with_order(14)
-                .with_category("SFFM"),
-        );
-
-        // Spectre-parity categories: AC, Advanced AC, Parasitics, Noise
-        Self::add_ac_params(&mut sheet, "V", 0.0);
-        Self::add_advanced_ac_params(&mut sheet, "V");
-        Self::add_parasitics_params(&mut sheet, true);
-        Self::add_noise_params(&mut sheet);
-
-        self.sheets.insert(ComponentType::VoltageSourceSffm, sheet);
     }
 }

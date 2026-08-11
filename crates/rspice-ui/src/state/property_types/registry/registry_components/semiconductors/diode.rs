@@ -61,8 +61,84 @@ impl PropertyRegistry {
                 .with_order(22)
                 .with_category("Geometry"),
         );
+        // Drawn dimensions (order 23-24). A LEVEL=3 geometric card derives
+        // AREA and PJ from W/L, and giving either one suppresses the model
+        // card's own AREA/PJ defaults.
+        diode.add(
+            PropertyDefinition::new("w")
+                .with_display_name("Width")
+                .with_description("Drawn junction width; LEVEL=3 derives AREA and PJ from W and L")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("m")
+                .with_order(23)
+                .with_category("Geometry"),
+        );
+        diode.add(
+            PropertyDefinition::new("l")
+                .with_display_name("Length")
+                .with_description("Drawn junction length; LEVEL=3 derives AREA and PJ from W and L")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("m")
+                .with_order(24)
+                .with_category("Geometry"),
+        );
+
+        // Overlap (order 25-28). LEVEL=3 metal and poly overlap capacitance;
+        // each dimension falls back to the model card when omitted.
+        for (name, display, description, order) in [
+            (
+                "wm",
+                "Metal Width",
+                "Metal overlap width for LEVEL=3 overlap capacitance",
+                25,
+            ),
+            (
+                "lm",
+                "Metal Length",
+                "Metal overlap length for LEVEL=3 overlap capacitance",
+                26,
+            ),
+            (
+                "wp",
+                "Poly Width",
+                "Polysilicon overlap width for LEVEL=3 overlap capacitance",
+                27,
+            ),
+            (
+                "lp",
+                "Poly Length",
+                "Polysilicon overlap length for LEVEL=3 overlap capacitance",
+                28,
+            ),
+        ] {
+            diode.add(
+                PropertyDefinition::new(name)
+                    .with_display_name(display)
+                    .with_description(description)
+                    .with_type(PropertyType::Expression)
+                    .with_default(PropertyValue::expression(""))
+                    .with_unit("m")
+                    .with_order(order)
+                    .with_category("Overlap")
+                    .advanced(),
+            );
+        }
 
         // Temperature category
+        diode.add(
+            PropertyDefinition::new("temp")
+                .with_display_name("Temperature")
+                .with_description(
+                    "Absolute junction temperature; overrides the circuit temperature entirely",
+                )
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("°C")
+                .with_order(30)
+                .with_category("Temperature"),
+        );
         diode.add(
             PropertyDefinition::new("dtemp")
                 .with_display_name("Temp Rise")
@@ -70,30 +146,14 @@ impl PropertyRegistry {
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("°C")
-                .with_order(30)
+                .with_order(31)
                 .with_category("Temperature"),
         );
 
-        // Initial Conditions category
-        diode.add(
-            PropertyDefinition::new("off")
-                .with_display_name("Initially Off")
-                .with_description("Start in off state for DC operating point")
-                .with_type(PropertyType::Boolean)
-                .with_default(PropertyValue::boolean(false))
-                .with_order(40)
-                .with_category("Initial Conditions"),
-        );
-        diode.add(
-            PropertyDefinition::new("ic")
-                .with_display_name("Initial Voltage")
-                .with_description("Initial voltage across diode for transient")
-                .with_type(PropertyType::Number)
-                .with_default(PropertyValue::number(0.0))
-                .with_unit("V")
-                .with_order(41)
-                .with_category("Initial Conditions"),
-        );
+        // No OFF switch and no junction IC: the diode build reads AREA, PJ,
+        // M, W/L, the overlap dimensions, and TEMP/DTEMP only. OFF and IC
+        // are parsed and then dropped, so exposing them would promise a
+        // convergence aid the solver never applies.
         diode.add(symbol_variant_property(
             "Symbol",
             "Schematic symbol skin for the diode family",

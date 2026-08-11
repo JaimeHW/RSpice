@@ -1,5 +1,6 @@
-//! Property sheets for time-varying current sources: pulse, sine, PWL,
-//! exponential, and single-frequency FM.
+//! Property sheets for time-varying current sources: pulse, sine, PWL, and
+//! exponential. The families that exist identically for both quantities — SFFM,
+//! AM, PAT, TRNOISE — are built in `shared_waveforms`.
 
 use super::*;
 
@@ -84,6 +85,17 @@ impl PropertyRegistry {
                 .with_default(PropertyValue::number(2e-6))
                 .with_unit("s")
                 .with_order(16)
+                .with_category("Pulse"),
+        );
+        sheet.add(
+            PropertyDefinition::new("phase")
+                .with_display_name("Phase (PHASE)")
+                .with_description("Phase offset into the period, in degrees")
+                .with_type(PropertyType::Number)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit("°")
+                .with_range(-360.0, 360.0)
+                .with_order(17)
                 .with_category("Pulse"),
         );
 
@@ -308,89 +320,5 @@ impl PropertyRegistry {
         Self::add_noise_params(&mut sheet);
 
         self.sheets.insert(ComponentType::CurrentSourceExp, sheet);
-    }
-
-    /// Register Noise Current Source (for noise analysis)
-    pub(super) fn register_isource_noise(&mut self) {
-        let mut sheet = PropertySheet::new();
-
-        sheet.add(
-            PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
-                .with_type(PropertyType::String)
-                .with_default(PropertyValue::string("I1"))
-                .with_order(0)
-                .with_category("Instance")
-                .required(),
-        );
-        sheet.add(
-            PropertyDefinition::new("dc")
-                .with_display_name("DC Current")
-                .with_type(PropertyType::Expression)
-                .with_default(PropertyValue::number(0.0))
-                .with_unit("A")
-                .with_order(1)
-                .with_category("DC"),
-        );
-        // TRNOISE(NA NT NALPHA NAMP): the transient-noise spec the deck
-        // actually carries. NT must be positive whenever NA or NAMP is
-        // nonzero; 1/f injection needs 0 < NALPHA < 2.
-        sheet.add(
-            PropertyDefinition::new("na")
-                .with_display_name("White RMS Amplitude")
-                .with_description("Gaussian white-noise RMS amplitude (0 disables)")
-                .with_type(PropertyType::Expression)
-                .with_default(PropertyValue::expression("1n"))
-                .with_unit("A")
-                .with_order(10)
-                .with_category("Noise"),
-        );
-        sheet.add(
-            PropertyDefinition::new("nt")
-                .with_display_name("Sample Interval")
-                .with_description("Noise sample timestep (must be > 0 when noise is enabled)")
-                .with_type(PropertyType::Expression)
-                .with_default(PropertyValue::expression("1u"))
-                .with_unit("s")
-                .with_order(11)
-                .with_category("Noise"),
-        );
-        sheet.add(
-            PropertyDefinition::new("nalpha")
-                .with_display_name("1/f Exponent")
-                .with_description("Flicker-noise exponent (0 < NALPHA < 2 when 1/f is enabled)")
-                .with_type(PropertyType::Number)
-                .with_default(PropertyValue::number(0.0))
-                .with_order(12)
-                .with_category("Noise"),
-        );
-        sheet.add(
-            PropertyDefinition::new("namp")
-                .with_display_name("1/f Amplitude")
-                .with_description("Flicker-noise amplitude (0 disables the 1/f term)")
-                .with_type(PropertyType::Expression)
-                .with_default(PropertyValue::number(0.0))
-                .with_unit("A")
-                .with_order(13)
-                .with_category("Noise"),
-        );
-
-        // Spectre-parity categories: AC, Advanced AC, Parasitics (noise source already has noise params)
-        Self::add_ac_params(&mut sheet, "A", 0.0);
-        Self::add_advanced_ac_params(&mut sheet, "A");
-        Self::add_parasitics_params(&mut sheet, false);
-
-        // Add isnoisy flag for consistency (noise source is always noisy by definition)
-        sheet.add(
-            PropertyDefinition::new("isnoisy")
-                .with_display_name("Noisy")
-                .with_description("Enable noise contribution (always true for noise source)")
-                .with_type(PropertyType::Boolean)
-                .with_default(PropertyValue::boolean(true))
-                .with_order(200)
-                .with_category("Noise"),
-        );
-
-        self.sheets.insert(ComponentType::CurrentSourceNoise, sheet);
     }
 }
