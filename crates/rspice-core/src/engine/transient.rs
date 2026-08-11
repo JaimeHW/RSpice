@@ -22,10 +22,37 @@ use crate::numerics::integration::{
     BreakpointManager, BreakpointStepPolicy, LteEstimator, TimestepController, TrapGearController,
 };
 use crate::numerics::integration::{CompanionCoefficients, IntegrationMethod};
+use crate::numerics::xyce_hard_min_timestep;
 use crate::{Netlist, Value};
 use std::collections::{HashMap, HashSet};
 
 use xyce_dae::{XyceOneStepOrder, XyceOneStepWorkspace};
+
+/// How a transient analysis establishes its initial state.
+///
+/// This is explicit execution state rather than a property of an entire
+/// netlist: a deck may contain several `.TRAN` cards with different UIC
+/// selections, and checkpoint continuation must preserve the selected card's
+/// mode exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TransientStartupMode {
+    /// Solve the DC operating point before beginning integration.
+    OperatingPoint,
+    /// Skip the operating point and seed state from `.IC` and device `IC=`.
+    Uic,
+}
+
+impl TransientStartupMode {
+    #[inline]
+    pub const fn from_uic(uic: bool) -> Self {
+        if uic { Self::Uic } else { Self::OperatingPoint }
+    }
+
+    #[inline]
+    pub const fn is_uic(self) -> bool {
+        matches!(self, Self::Uic)
+    }
+}
 
 /// Reproduce `StaticMatrix::raw_residual_norms` for an already formed direct
 /// Xyce DAE residual.  The scaled sum-of-squares recurrence and its initial
@@ -1174,6 +1201,21 @@ impl Engine {
         self.run_tran_with_abort(netlist, tstop, max_step, &NoAbort)
     }
 
+    /// Run transient analysis with an explicit startup contract.
+    ///
+    /// Frontends executing one selected `.TRAN` card should use this method so
+    /// another card in the same deck cannot change whether the operating point
+    /// is skipped.
+    pub fn run_tran_with_startup_mode(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        startup_mode: TransientStartupMode,
+    ) -> Result<TransientResult, SimulationError> {
+        self.run_tran_with_startup_mode_and_abort(netlist, tstop, max_step, startup_mode, &NoAbort)
+    }
+
     /// Return the exact discontinuity/event times authored by selected
     /// independent transient sources over `[0, tstop]`.
     ///
@@ -1558,6 +1600,20 @@ impl Engine {
         max_step: Value,
         abort: &dyn AbortSignal,
     ) -> Result<TransientResult, SimulationError> {
+        let startup_mode = Self::inferred_transient_startup_mode(netlist)?;
+        self.run_tran_with_startup_mode_and_abort(netlist, tstop, max_step, startup_mode, abort)
+    }
+
+    /// Cancellable transient analysis with an explicit selected-card startup
+    /// contract.
+    pub fn run_tran_with_startup_mode_and_abort(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        startup_mode: TransientStartupMode,
+        abort: &dyn AbortSignal,
+    ) -> Result<TransientResult, SimulationError> {
         validate_transient_window(tstop, max_step)?;
         self.reset_convergence_quality();
         let engine = self.resolved_for_netlist(netlist);
@@ -1567,10 +1623,32 @@ impl Engine {
         // without noise sources pass through untouched (no clone).
         match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
             Some(expanded) => {
-                engine.run_tran_with_abort_resolved(&expanded, tstop, max_step, abort)
+                engine.run_tran_with_abort_resolved(&expanded, tstop, max_step, startup_mode, abort)
             }
-            None => engine.run_tran_with_abort_resolved(netlist, tstop, max_step, abort),
+            None => {
+                engine.run_tran_with_abort_resolved(netlist, tstop, max_step, startup_mode, abort)
+            }
         }
+    }
+
+    fn inferred_transient_startup_mode(
+        netlist: &Netlist,
+    ) -> Result<TransientStartupMode, SimulationError> {
+        let mut selected = None;
+        for analysis in &netlist.analyses {
+            let AnalysisCommand::Tran { uic, .. } = analysis else {
+                continue;
+            };
+            let mode = TransientStartupMode::from_uic(*uic);
+            if selected.is_some_and(|existing| existing != mode) {
+                return Err(SimulationError::Circuit(
+                    "netlist contains both UIC and operating-point .TRAN cards; execute the selected card with an explicit TransientStartupMode"
+                        .to_string(),
+                ));
+            }
+            selected = Some(mode);
+        }
+        Ok(selected.unwrap_or(TransientStartupMode::OperatingPoint))
     }
 
     /// Run a transient and additionally return the end-of-run state
@@ -1593,15 +1671,65 @@ impl Engine {
         max_step: Value,
         abort: &dyn AbortSignal,
     ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+        let startup_mode = Self::inferred_transient_startup_mode(netlist)?;
+        self.run_tran_checkpointed_with_startup_mode_and_abort(
+            netlist,
+            tstop,
+            max_step,
+            startup_mode,
+            abort,
+        )
+    }
+
+    /// Run a checkpointed transient using the startup mode of one explicitly
+    /// selected `.TRAN` card.
+    pub fn run_tran_checkpointed_with_startup_mode(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        startup_mode: TransientStartupMode,
+    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+        self.run_tran_checkpointed_with_startup_mode_and_abort(
+            netlist,
+            tstop,
+            max_step,
+            startup_mode,
+            &NoAbort,
+        )
+    }
+
+    /// Cancellable checkpointed transient with an explicit startup contract.
+    pub fn run_tran_checkpointed_with_startup_mode_and_abort(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        startup_mode: TransientStartupMode,
+        abort: &dyn AbortSignal,
+    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
         validate_transient_window(tstop, max_step)?;
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_transient_request_floor(tstop, max_step)?;
         match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
-            Some(expanded) => engine
-                .run_tran_resolved_with_resume(&expanded, netlist, tstop, max_step, abort, None),
-            None => {
-                engine.run_tran_resolved_with_resume(netlist, netlist, tstop, max_step, abort, None)
-            }
+            Some(expanded) => engine.run_tran_resolved_with_resume(
+                &expanded,
+                netlist,
+                tstop,
+                max_step,
+                startup_mode,
+                abort,
+                None,
+            ),
+            None => engine.run_tran_resolved_with_resume(
+                netlist,
+                netlist,
+                tstop,
+                max_step,
+                startup_mode,
+                abort,
+                None,
+            ),
         }
     }
 
@@ -1646,6 +1774,12 @@ impl Engine {
                 checkpoint.time
             )));
         }
+        let startup_mode = checkpoint.startup_mode().ok_or_else(|| {
+            SimulationError::Circuit(
+                "legacy transient checkpoint does not record its startup mode; refusing to guess whether the captured trajectory used UIC"
+                    .to_string(),
+            )
+        })?;
 
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_transient_request_floor(tstop - checkpoint.time, max_step)?;
@@ -1655,6 +1789,7 @@ impl Engine {
                 netlist,
                 tstop,
                 max_step,
+                startup_mode,
                 abort,
                 Some(checkpoint),
             ),
@@ -1663,6 +1798,7 @@ impl Engine {
                 netlist,
                 tstop,
                 max_step,
+                startup_mode,
                 abort,
                 Some(checkpoint),
             ),
@@ -1747,10 +1883,19 @@ impl Engine {
         netlist: &Netlist,
         tstop: Value,
         max_step: Value,
+        startup_mode: TransientStartupMode,
         abort: &dyn AbortSignal,
     ) -> Result<TransientResult, SimulationError> {
-        self.run_tran_resolved_with_resume(netlist, netlist, tstop, max_step, abort, None)
-            .map(|(result, _)| result)
+        self.run_tran_resolved_with_resume(
+            netlist,
+            netlist,
+            tstop,
+            max_step,
+            startup_mode,
+            abort,
+            None,
+        )
+        .map(|(result, _)| result)
     }
 
     /// The transient integration body. `resume` injects a checkpointed
@@ -1764,6 +1909,7 @@ impl Engine {
         checkpoint_netlist: &Netlist,
         tstop: Value,
         max_step: Value,
+        startup_mode: TransientStartupMode,
         abort: &dyn AbortSignal,
         resume: Option<&TransientCheckpoint>,
     ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
@@ -1804,6 +1950,7 @@ impl Engine {
                 0.0,
                 &[],
                 &circuit,
+                startup_mode,
                 None,
             );
             return Ok((result, checkpoint));
@@ -1853,13 +2000,7 @@ impl Engine {
         // from zero everywhere except user-supplied .IC node voltages
         // (applied below) and per-element IC= values (applied after the
         // reactive-history seeding), matching ngspice's MODEUIC semantics.
-        let uic_requested = resume.is_none()
-            && netlist.analyses.iter().any(|analysis| {
-                matches!(
-                    analysis,
-                    crate::netlist::AnalysisCommand::Tran { uic: true, .. }
-                )
-            });
+        let uic_requested = startup_mode.is_uic();
 
         // Establish transient lifecycle state before the t=0 operating point.
         // UIC has no t=0 solve, so its first candidate carries the initial flag
@@ -1879,16 +2020,29 @@ impl Engine {
             .generated_veriloga_devices_mut()
             .set_analysis_step(resume.is_none() && !uic_requested, false);
 
-        // Get DC operating point as initial condition.
-        let (mut solution, initial_solution_mode) = if uic_requested {
+        // Get the startup state. Ordinary transient validates the exact t=0
+        // accepted equation contract below; its waveform can intentionally
+        // differ from the source's separate DC value. UIC skips an operating
+        // point altogether.
+        let (mut solution, initial_solution_mode, accepted_transient_op) = if uic_requested {
             log::info!("Transient UIC startup: skipping the operating point");
             (
                 vec![0.0; circuit.matrix_size()],
                 startup::InitialSolutionMode::LinearizedSeed,
+                None,
             )
         } else {
             self.solve_transient_initial_solution(netlist, &mut circuit, &mut matrix, abort)?
         };
+        if let Some(contract) = accepted_transient_op {
+            self.ensure_solved_transient_operating_point_paths_to_ground(
+                &mut circuit,
+                &mut matrix,
+                &solution,
+                0.0,
+                contract,
+            )?;
+        }
         if let Some(message) = circuit.take_xspice_evaluation_error() {
             return Err(SimulationError::Circuit(format!(
                 "XSPICE evaluation failed: {message}"
@@ -1903,7 +2057,7 @@ impl Engine {
             // A resumed source must observe the tolerance belonging to the
             // restored accepted state before branch-current capture or any
             // other source evaluation occurs.
-            let breakpoint_tolerance = 2.0 * Self::xyce_hard_min_timestep(resume_time);
+            let breakpoint_tolerance = 2.0 * xyce_hard_min_timestep(resume_time);
             circuit
                 .voltage_sources
                 .set_xyce_breakpoint_tolerance(breakpoint_tolerance);
@@ -1934,7 +2088,7 @@ impl Engine {
         // device priming below, and the reactive-history seeding all see
         // one consistent state (ngspice holds UIC capacitors at their IC
         // value at the first instant).
-        if uic_requested {
+        if resume.is_none() && uic_requested {
             Self::apply_capacitor_element_initial_conditions(&circuit, &mut solution);
             let num_nodes = circuit.num_nodes();
             for (ind_idx, ic) in circuit.inductors.ic.iter().enumerate() {
@@ -2161,7 +2315,7 @@ impl Engine {
         );
         let preferred_min_dt = practical_min.max(self.config.min_timestep.max(1e-15));
         let hard_min_dt = if self.config.spice_dialect == SpiceDialect::Xyce {
-            Self::xyce_hard_min_timestep(resume_time)
+            xyce_hard_min_timestep(resume_time)
         } else {
             Self::ngspice_hard_min_timestep(hinted_max_step, preferred_min_dt)
         };
@@ -2988,7 +3142,7 @@ impl Engine {
                 // Stiff state devices can legitimately require steps far below
                 // ngspice's max-step-derived `delmin` while crossing a narrow
                 // physical boundary layer.
-                let hard_min_timestep = Self::xyce_hard_min_timestep(t);
+                let hard_min_timestep = xyce_hard_min_timestep(t);
                 timestep.set_hard_min_dt(hard_min_timestep);
                 let breakpoint_tolerance = 2.0 * hard_min_timestep;
                 circuit
@@ -6938,6 +7092,7 @@ impl Engine {
             t,
             &solution,
             &circuit,
+            startup_mode,
             Some(&lte_estimator),
         );
         Ok((result, final_checkpoint))
@@ -6967,10 +7122,38 @@ impl Engine {
         compression: CompressionConfig,
         abort: &dyn AbortSignal,
     ) -> Result<TransientResultCompressed, SimulationError> {
+        let startup_mode = Self::inferred_transient_startup_mode(netlist)?;
+        self.run_tran_compressed_with_startup_mode_and_abort(
+            netlist,
+            tstop,
+            max_step,
+            startup_mode,
+            compression,
+            abort,
+        )
+    }
+
+    /// Run compressed transient analysis for one explicitly selected startup
+    /// contract.
+    pub fn run_tran_compressed_with_startup_mode_and_abort(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        startup_mode: TransientStartupMode,
+        compression: CompressionConfig,
+        abort: &dyn AbortSignal,
+    ) -> Result<TransientResultCompressed, SimulationError> {
         // Reuse the robust transient solver path, then apply waveform compression
         // during result marshaling. This keeps compressed and uncompressed physics
         // behavior identical, avoiding divergence between solver implementations.
-        let result = self.run_tran_with_abort(netlist, tstop, max_step, abort)?;
+        let result = self.run_tran_with_startup_mode_and_abort(
+            netlist,
+            tstop,
+            max_step,
+            startup_mode,
+            abort,
+        )?;
 
         if result.time.is_empty() {
             return Ok(TransientResultCompressed {

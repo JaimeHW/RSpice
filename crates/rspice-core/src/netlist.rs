@@ -73,8 +73,10 @@ pub use param_scope::{ParamResolver, ParamScope, ScopedParam};
 pub use parser::*;
 pub use source_map::*;
 pub use startup::{validate_startup_directives, validate_startup_directives_with_abort};
+pub(crate) use topology::analyze_dc_ground_paths_with_capacitor_ic_mode;
 pub use topology::{
-    ConnectivityAnalysisError, ConnectivityDiagnostics, DcGroundPathDiagnostics, TopologyReduction,
+    CapacitorIcDcMode, ConnectivityAnalysisError, ConnectivityDiagnostics, DcGroundPathDiagnostics,
+    DcGroundPathNodeDiagnostic, DcGroundPathSeverity, TopologyReduction,
     XYCE_DEFAULT_ZERO_RESISTANCE_TOL, analyze_dc_ground_paths, analyze_xyce_connectivity,
     reduce_supernode_topology,
 };

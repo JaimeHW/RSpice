@@ -110,6 +110,16 @@ pub fn analyze_xyce_connectivity(
 }
 
 fn connectivity_terminal_nodes(element: &Element) -> Result<Vec<&str>, ConnectivityAnalysisError> {
+    if matches!(element.kind, ElementKind::Xspice { .. }) {
+        return Err(ConnectivityAnalysisError {
+            element: element.name.clone(),
+            reason: "XSPICE lead groups are model-specific".to_string(),
+        });
+    }
+    Ok(all_element_terminal_nodes(element))
+}
+
+fn all_element_terminal_nodes(element: &Element) -> Vec<&str> {
     let mut nodes = element.nodes.iter().map(String::as_str).collect::<Vec<_>>();
     match &element.kind {
         ElementKind::Vcvs { control_nodes, .. } | ElementKind::Vccs { control_nodes, .. } => {
@@ -124,23 +134,103 @@ fn connectivity_terminal_nodes(element: &Element) -> Result<Vec<&str>, Connectiv
             nodes.push(control_pos);
             nodes.push(control_neg);
         }
-        ElementKind::Xspice { .. } => {
-            return Err(ConnectivityAnalysisError {
-                element: element.name.clone(),
-                reason: "XSPICE lead groups are model-specific".to_string(),
-            });
+        ElementKind::Xspice { ports, .. } => {
+            for port in ports {
+                match port {
+                    XspicePort::Analog(name)
+                    | XspicePort::Digital(name)
+                    | XspicePort::ExplicitDigital(name)
+                    | XspicePort::DigitalInverted(name)
+                    | XspicePort::Conductance(name)
+                    | XspicePort::Current(name)
+                    | XspicePort::Hybrid(name) => nodes.push(name),
+                    XspicePort::AnalogVector(port_nodes)
+                    | XspicePort::DigitalVector(port_nodes) => {
+                        nodes.extend(port_nodes.iter().map(String::as_str));
+                    }
+                    XspicePort::DigitalVectorMixed(port_nodes) => {
+                        nodes.extend(port_nodes.iter().map(|node| node.name.as_str()));
+                    }
+                    XspicePort::DifferentialVoltage { pos, neg }
+                    | XspicePort::DifferentialCurrent { pos, neg }
+                    | XspicePort::DifferentialConductance { pos, neg }
+                    | XspicePort::DifferentialHybrid { pos, neg } => {
+                        nodes.push(pos);
+                        nodes.push(neg);
+                    }
+                    XspicePort::VoltageName(_) | XspicePort::Null => {}
+                }
+            }
         }
         _ => {}
     }
-    Ok(nodes)
+    nodes
+}
+
+/// Severity assigned to a node with no DC-conducting path to ground.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DcGroundPathSeverity {
+    /// The node is unconstrained but has no current-source constraint driving
+    /// its conductive component. Preserve historical SPICE behavior: warn and
+    /// let the numerical conditioning shunt choose the component common mode.
+    WarningOnly,
+    /// A current source drives the node's otherwise ungrounded conductive
+    /// component. Its operating point would depend on the conditioning shunt,
+    /// or grow without bound when the imposed KCL is inconsistent.
+    FatalCurrentDriven,
+}
+
+/// One typed no-DC-path diagnostic in deck order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DcGroundPathNodeDiagnostic {
+    pub node: String,
+    pub severity: DcGroundPathSeverity,
 }
 
 /// Nodes whose DC voltage nothing in the circuit determines.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DcGroundPathDiagnostics {
+    /// True when every flattened element had a modeled DC conduction contract.
+    /// An empty node list is authoritative only in this state.
+    pub analysis_complete: bool,
     /// Non-ground nodes that no chain of DC-conducting elements connects to
     /// ground, in deck order of first appearance.
     pub no_dc_path_nodes: Vec<String>,
+    /// Typed severity for every entry in [`Self::no_dc_path_nodes`], in the
+    /// same order. All nodes in one conductive component receive the same
+    /// severity.
+    pub node_diagnostics: Vec<DcGroundPathNodeDiagnostic>,
+    /// Ungrounded DC-conductive components in deck order. Node spelling and
+    /// order match [`Self::no_dc_path_nodes`]. The assembled circuit retains
+    /// this partition so source currents can be evaluated using the exact
+    /// installed operating-point values rather than syntax-level guesses.
+    pub floating_components: Vec<Vec<String>>,
+    /// Whether each [`Self::floating_components`] entry is untouched by an
+    /// element whose DC terminal grouping is model-specific. Uncertain
+    /// components remain available for warnings but must not support fatal
+    /// prechecks or nodal-only rank proofs.
+    pub floating_component_is_certain: Vec<bool>,
+}
+
+/// Installed DC meaning of a capacitor's authored `IC=` value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapacitorIcDcMode {
+    /// Xyce allocates and stamps an ideal-voltage constraint during DCOP.
+    EnforcedConstraint,
+    /// Ngspice and the native/default dialect retain IC only for transient
+    /// startup; the capacitor remains open during an ordinary DCOP.
+    TransientSeedOnly,
+}
+
+impl DcGroundPathDiagnostics {
+    /// Fatal no-path nodes, retaining their first source spelling and deck
+    /// order for deterministic user-facing diagnostics.
+    pub fn fatal_nodes(&self) -> impl Iterator<Item = &str> {
+        self.node_diagnostics.iter().filter_map(|diagnostic| {
+            (diagnostic.severity == DcGroundPathSeverity::FatalCurrentDriven)
+                .then_some(diagnostic.node.as_str())
+        })
+    }
 }
 
 /// Find nodes that no DC-conducting element ties to ground.
@@ -156,16 +246,27 @@ pub struct DcGroundPathDiagnostics {
 /// The rule here is conduction, not lead grouping: an element ties all of its
 /// terminals together unless it is open at DC. Capacitors are open, and so is
 /// every current source -- independent, controlled, or behavioral -- because a
-/// prescribed current constrains no node voltage. Everything else conducts,
-/// including a MOSFET's gate, whose oxide blocks DC but whose isolation is not
-/// modeled here: erring toward conduction can only miss a floating node, while
-/// erring the other way would refuse working circuits.
+/// prescribed current constrains no node voltage. A MOSFET's insulated gate
+/// remains separate from its drain/source/body conduction group. Every other
+/// supported native element conservatively ties the terminals its DC model can
+/// conduct through. The post-solve audit independently requires a singular
+/// physical Jacobian, so optional MOS gate leakage cannot be rejected from the
+/// static grouping alone.
 ///
-/// Fails closed for elements whose DC conduction is not modeled -- XSPICE code
-/// models and anything still unresolved after flattening -- so a caller can
-/// decline to judge the circuit rather than guess about it.
+/// Elements whose DC conduction is not modeled -- XSPICE code models, for
+/// example -- mark the result incomplete but do not discard components proven
+/// from the remaining elements. A post-solve audit must then require numeric
+/// rank evidence for each candidate component rather than trusting the partial
+/// static partition by itself.
 pub fn analyze_dc_ground_paths(
     elements: &[Element],
+) -> Result<DcGroundPathDiagnostics, ConnectivityAnalysisError> {
+    analyze_dc_ground_paths_with_capacitor_ic_mode(elements, CapacitorIcDcMode::EnforcedConstraint)
+}
+
+pub(crate) fn analyze_dc_ground_paths_with_capacitor_ic_mode(
+    elements: &[Element],
+    capacitor_ic_mode: CapacitorIcDcMode,
 ) -> Result<DcGroundPathDiagnostics, ConnectivityAnalysisError> {
     let mut union = NodeUnion::default();
     let mut order: Vec<String> = Vec::new();
@@ -177,6 +278,8 @@ pub fn analyze_dc_ground_paths(
     // those equations have full rank is not a question a connectivity walk can
     // answer, so the synthesizer's guarantee stands in for one.
     let mut authored_nodes: BTreeSet<String> = BTreeSet::new();
+    let mut uncertain_node_keys: BTreeSet<String> = BTreeSet::new();
+    let mut analysis_complete = true;
 
     for element in elements {
         union.collect_element_nodes(element);
@@ -186,7 +289,13 @@ pub fn analyze_dc_ground_paths(
                 | crate::netlist::ElementProvenance::GeneratedDynamicInternalNode { .. }
                 | crate::netlist::ElementProvenance::SynthesizedTransferState { .. }
         );
-        for node in connectivity_terminal_nodes(element)? {
+        let terminal_nodes = connectivity_terminal_nodes(element).unwrap_or_else(|_| {
+            analysis_complete = false;
+            let terminals = all_element_terminal_nodes(element);
+            uncertain_node_keys.extend(terminals.iter().map(|node| node_key(node)));
+            terminals
+        });
+        for node in terminal_nodes {
             if !synthesized {
                 authored_nodes.insert(node_key(node));
             }
@@ -194,7 +303,17 @@ pub fn analyze_dc_ground_paths(
                 order.push(normalize_node_name(node));
             }
         }
-        for group in dc_conduction_groups(element)? {
+        let conduction_groups =
+            dc_conduction_groups(element, capacitor_ic_mode).unwrap_or_else(|_| {
+                analysis_complete = false;
+                uncertain_node_keys.extend(
+                    all_element_terminal_nodes(element)
+                        .into_iter()
+                        .map(node_key),
+                );
+                Vec::new()
+            });
+        for group in conduction_groups {
             if let Some((first, rest)) = group.split_first() {
                 for node in rest {
                     union.union_nodes(first, node);
@@ -202,6 +321,31 @@ pub fn analyze_dc_ground_paths(
             }
         }
     }
+
+    // Classify whole DC-conductive components, not merely source terminals.
+    // A nonzero current source whose output terminals belong to different
+    // components injects current into each component without constraining its
+    // common-mode voltage. Conversely, a source wholly inside one conductive
+    // component contributes equal and opposite KCL terms to that component;
+    // it can determine voltage differences but cannot make the arbitrary
+    // common mode depend on the conditioning shunt.
+    let mut current_driven_roots = BTreeSet::new();
+    for element in elements {
+        let roots: BTreeSet<usize> = dc_current_constraint_nodes(element)
+            .iter()
+            .filter_map(|node| union.index_by_key.get(&node_key(node)))
+            .map(|index| union.root_of(*index))
+            .collect();
+        if roots.len() > 1 {
+            current_driven_roots.extend(roots);
+        }
+    }
+
+    let uncertain_roots: BTreeSet<usize> = uncertain_node_keys
+        .iter()
+        .filter_map(|key| union.index_by_key.get(key))
+        .map(|index| union.root_of(*index))
+        .collect();
 
     let Some(ground) = union
         .index_by_key
@@ -213,7 +357,7 @@ pub fn analyze_dc_ground_paths(
         return Ok(DcGroundPathDiagnostics::default());
     };
 
-    let no_dc_path_nodes = order
+    let no_dc_path_nodes: Vec<String> = order
         .into_iter()
         .filter(|node| !is_ground_name(node))
         .filter(|node| authored_nodes.contains(&node_key(node)))
@@ -225,14 +369,131 @@ pub fn analyze_dc_ground_paths(
         })
         .collect();
 
-    Ok(DcGroundPathDiagnostics { no_dc_path_nodes })
+    let node_diagnostics = no_dc_path_nodes
+        .iter()
+        .map(|node| {
+            let severity = union
+                .index_by_key
+                .get(&node_key(node))
+                .map(|index| union.root_of(*index))
+                .filter(|root| {
+                    current_driven_roots.contains(root) && !uncertain_roots.contains(root)
+                })
+                .map_or(DcGroundPathSeverity::WarningOnly, |_| {
+                    DcGroundPathSeverity::FatalCurrentDriven
+                });
+            DcGroundPathNodeDiagnostic {
+                node: node.clone(),
+                severity,
+            }
+        })
+        .collect();
+
+    let mut component_index_by_root = BTreeMap::new();
+    let mut floating_components: Vec<Vec<String>> = Vec::new();
+    let mut floating_component_is_certain = Vec::new();
+    for node in &no_dc_path_nodes {
+        let Some(root) = union
+            .index_by_key
+            .get(&node_key(node))
+            .map(|index| union.root_of(*index))
+        else {
+            continue;
+        };
+        let component_index = *component_index_by_root.entry(root).or_insert_with(|| {
+            floating_components.push(Vec::new());
+            floating_component_is_certain.push(!uncertain_roots.contains(&root));
+            floating_components.len() - 1
+        });
+        floating_components[component_index].push(node.clone());
+    }
+
+    Ok(DcGroundPathDiagnostics {
+        analysis_complete,
+        no_dc_path_nodes,
+        node_diagnostics,
+        floating_components,
+        floating_component_is_certain,
+    })
+}
+
+/// Output terminals whose DC equations prescribe current without constraining
+/// voltage. Control terminals are intentionally excluded: sensing a voltage or
+/// branch current does not drive the control node.
+fn dc_current_constraint_nodes(element: &Element) -> &[String] {
+    match &element.kind {
+        ElementKind::CurrentSource(spec) if !independent_current_is_zero_at_dc(spec) => {
+            &element.nodes
+        }
+        ElementKind::Cccs { .. }
+        | ElementKind::Vccs { .. }
+        | ElementKind::BehavioralCurrent { .. } => &element.nodes,
+        _ => &[],
+    }
+}
+
+/// Whether an independent source is provably inactive during the DC solve.
+///
+/// File-backed PWL sources require the normal resource-bounded loader, so an
+/// uncertain external waveform remains conservatively active. Every other
+/// case below follows the source specification's canonical operating-point
+/// semantics without performing I/O.
+fn independent_current_is_zero_at_dc(spec: &super::SourceSpec) -> bool {
+    match spec {
+        super::SourceSpec::Distortion { inner, .. } | super::SourceSpec::RfPort { inner, .. } => {
+            independent_current_is_zero_at_dc(inner)
+        }
+        super::SourceSpec::Ac { .. } => true,
+        super::SourceSpec::Dc(value)
+        | super::SourceSpec::DcAc {
+            dc_value: value, ..
+        }
+        | super::SourceSpec::DcTransient {
+            dc_value: value, ..
+        }
+        | super::SourceSpec::DcAcTransient {
+            dc_value: value, ..
+        } => *value == 0.0,
+        super::SourceSpec::Pulse { v1, .. } | super::SourceSpec::Exp { v1, .. } => *v1 == 0.0,
+        super::SourceSpec::Sin {
+            offset,
+            amplitude,
+            phase,
+            ..
+        } => *offset + *amplitude * phase.sin() == 0.0,
+        super::SourceSpec::Pwl { points, .. } => {
+            points.first().map_or(0.0, |(_, value)| *value) == 0.0
+        }
+        super::SourceSpec::Sffm { .. }
+        | super::SourceSpec::Am { .. }
+        | super::SourceSpec::TrNoise { .. } => true,
+        super::SourceSpec::PwlFile { delay, .. } => *delay > 0.0,
+        super::SourceSpec::Pat { .. } => false,
+    }
 }
 
 /// Terminal sets an element ties together through DC conduction.
 ///
 /// An empty result means the element conducts between none of its terminals.
-fn dc_conduction_groups(element: &Element) -> Result<Vec<Vec<&str>>, ConnectivityAnalysisError> {
+fn dc_conduction_groups(
+    element: &Element,
+    capacitor_ic_mode: CapacitorIcDcMode,
+) -> Result<Vec<Vec<&str>>, ConnectivityAnalysisError> {
     let all = || vec![element.nodes.iter().map(String::as_str).collect::<Vec<_>>()];
+    if matches!(
+        element.provenance,
+        super::ElementProvenance::GeneratedDynamicStateDerivative {
+            dc_determined: true,
+            ..
+        }
+    ) {
+        // This is not a claim that a behavioral source is a passive DC path.
+        // The parser-certified controller-canonical derivative equations form a
+        // nonsingular algebraic system at DC, so their state voltages are
+        // determined without a physical shunt. Preserve that semantic fact
+        // across the deliberately conservative conduction-only heuristic.
+        return Ok(all());
+    }
     let groups = match &element.kind {
         // A capacitor carrying an initial condition states a voltage across
         // itself. Xyce turns that into a branch constraint that holds during
@@ -243,7 +504,7 @@ fn dc_conduction_groups(element: &Element) -> Result<Vec<Vec<&str>>, Connectivit
         ElementKind::Capacitor {
             initial_voltage: Some(_),
             ..
-        } => all(),
+        } if capacitor_ic_mode == CapacitorIcDcMode::EnforcedConstraint => all(),
         // Open at DC: a capacitor blocks it, and a source that prescribes a
         // current leaves the voltage across itself free.
         ElementKind::Capacitor { .. }
@@ -256,9 +517,9 @@ fn dc_conduction_groups(element: &Element) -> Result<Vec<Vec<&str>>, Connectivit
         // output pair can tie nodes together.
         ElementKind::Vcvs { .. } | ElementKind::VSwitch { .. } => all(),
         ElementKind::Subcircuit { .. }
+        | ElementKind::PspiceChebyshev { .. }
         | ElementKind::VoltageSourceDeferred(_)
-        | ElementKind::CurrentSourceDeferred(_)
-        | ElementKind::PspiceChebyshev { .. } => {
+        | ElementKind::CurrentSourceDeferred(_) => {
             return Err(ConnectivityAnalysisError {
                 element: element.name.clone(),
                 reason: "element must be resolved during flattening".to_string(),
@@ -270,6 +531,14 @@ fn dc_conduction_groups(element: &Element) -> Result<Vec<Vec<&str>>, Connectivit
                 reason: "XSPICE lead groups are model-specific".to_string(),
             });
         }
+        ElementKind::Mosfet { .. } if element.nodes.len() >= 4 => vec![
+            vec![
+                element.nodes[0].as_str(),
+                element.nodes[2].as_str(),
+                element.nodes[3].as_str(),
+            ],
+            vec![element.nodes[1].as_str()],
+        ],
         ElementKind::Resistor { .. }
         | ElementKind::Inductor { .. }
         | ElementKind::JilesAthertonInductor { .. }
@@ -281,10 +550,18 @@ fn dc_conduction_groups(element: &Element) -> Result<Vec<Vec<&str>>, Connectivit
         | ElementKind::ISwitch { .. }
         | ElementKind::GenericSwitch { .. }
         | ElementKind::Bjt { .. }
-        | ElementKind::Mosfet { .. }
         | ElementKind::Jfet { .. }
         | ElementKind::Mesfet { .. }
         | ElementKind::TransmissionLine { .. } => all(),
+        ElementKind::Mosfet { .. } => {
+            return Err(ConnectivityAnalysisError {
+                element: element.name.clone(),
+                reason: format!(
+                    "unexpected terminal count {} for native device",
+                    element.nodes.len()
+                ),
+            });
+        }
     };
     Ok(groups)
 }
@@ -340,9 +617,9 @@ fn xyce_dc_lead_groups(element: &Element) -> Result<Vec<Vec<&str>>, Connectivity
         ],
         ElementKind::Coupling { .. } => Vec::new(),
         ElementKind::Subcircuit { .. }
+        | ElementKind::PspiceChebyshev { .. }
         | ElementKind::VoltageSourceDeferred(_)
-        | ElementKind::CurrentSourceDeferred(_)
-        | ElementKind::PspiceChebyshev { .. } => {
+        | ElementKind::CurrentSourceDeferred(_) => {
             return Err(ConnectivityAnalysisError {
                 element: element.name.clone(),
                 reason: "element must be resolved during flattening".to_string(),
@@ -444,61 +721,8 @@ struct NodeUnion {
 
 impl NodeUnion {
     fn collect_element_nodes(&mut self, element: &Element) {
-        for node in &element.nodes {
+        for node in all_element_terminal_nodes(element) {
             self.ensure_node(node);
-        }
-
-        match &element.kind {
-            ElementKind::Vcvs { control_nodes, .. } | ElementKind::Vccs { control_nodes, .. } => {
-                self.ensure_node(&control_nodes.0);
-                self.ensure_node(&control_nodes.1);
-            }
-            ElementKind::VSwitch {
-                control_pos,
-                control_neg,
-                ..
-            } => {
-                self.ensure_node(control_pos);
-                self.ensure_node(control_neg);
-            }
-            ElementKind::Xspice { ports, .. } => {
-                for port in ports {
-                    self.collect_xspice_port_nodes(port);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn collect_xspice_port_nodes(&mut self, port: &XspicePort) {
-        match port {
-            XspicePort::Analog(name)
-            | XspicePort::Digital(name)
-            | XspicePort::ExplicitDigital(name)
-            | XspicePort::DigitalInverted(name)
-            | XspicePort::Conductance(name)
-            | XspicePort::Current(name)
-            | XspicePort::Hybrid(name) => {
-                self.ensure_node(name);
-            }
-            XspicePort::AnalogVector(nodes) | XspicePort::DigitalVector(nodes) => {
-                for node in nodes {
-                    self.ensure_node(node);
-                }
-            }
-            XspicePort::DigitalVectorMixed(nodes) => {
-                for node in nodes {
-                    self.ensure_node(&node.name);
-                }
-            }
-            XspicePort::DifferentialVoltage { pos, neg }
-            | XspicePort::DifferentialCurrent { pos, neg }
-            | XspicePort::DifferentialConductance { pos, neg }
-            | XspicePort::DifferentialHybrid { pos, neg } => {
-                self.ensure_node(pos);
-                self.ensure_node(neg);
-            }
-            XspicePort::VoltageName(_) | XspicePort::Null => {}
         }
     }
 
@@ -971,6 +1195,189 @@ mod tests {
             .no_dc_path_nodes
     }
 
+    fn dc_ground_path_diagnostics_of(deck: &str) -> DcGroundPathDiagnostics {
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let flat = flatten_netlist_with_models(&netlist)
+            .expect("deck flattens")
+            .elements;
+        analyze_dc_ground_paths(&flat).expect("topology is supported")
+    }
+
+    fn xspice_test_element(name: &str, ports: Vec<XspicePort>) -> Element {
+        Element {
+            name: name.to_string(),
+            kind: ElementKind::Xspice {
+                model: "test_model".to_string(),
+                pspice_u_timing: None,
+                ports,
+                params: Vec::new(),
+                expr_params: Vec::new(),
+                string_params: Vec::new(),
+                string_expr_params: Vec::new(),
+                string_vector_params: Vec::new(),
+                string_vector_expr_params: Vec::new(),
+                real_vector_params: Vec::new(),
+                real_vector_expr_params: Vec::new(),
+            },
+            nodes: Vec::new(),
+            provenance: crate::netlist::ElementProvenance::Authored,
+        }
+    }
+
+    #[test]
+    fn unsupported_element_taints_only_the_components_it_touches() {
+        let netlist = Netlist::parse(
+            "partial topology with independent resistor island\n\
+             i1 0 a dc 1m\n\
+             r1 a b 1k\n\
+             c1 b 0 1u\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let mut elements = flatten_netlist_with_models(&netlist)
+            .expect("deck flattens")
+            .elements;
+        elements.push(xspice_test_element(
+            "Amodel",
+            vec![XspicePort::DifferentialConductance {
+                pos: "X".to_string(),
+                neg: "0".to_string(),
+            }],
+        ));
+
+        let diagnostics = analyze_dc_ground_paths(&elements).expect("partial analysis succeeds");
+        assert!(!diagnostics.analysis_complete);
+        let component = diagnostics
+            .floating_components
+            .iter()
+            .position(|nodes| *nodes == ["A", "B"])
+            .expect("resistor island is retained");
+        assert!(diagnostics.floating_component_is_certain[component]);
+        assert_eq!(diagnostics.fatal_nodes().collect::<Vec<_>>(), ["A", "B"]);
+
+        let xspice_component = diagnostics
+            .floating_components
+            .iter()
+            .position(|nodes| *nodes == ["X"])
+            .expect("XSPICE terminal remains visible for warnings");
+        assert!(!diagnostics.floating_component_is_certain[xspice_component]);
+    }
+
+    #[test]
+    fn unsupported_element_suppresses_fatal_precheck_on_its_component() {
+        let netlist = Netlist::parse(
+            "current source may be grounded by model-specific conductance\n\
+             i1 0 out dc 1m\n\
+             c1 out 0 1u\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let mut elements = flatten_netlist_with_models(&netlist)
+            .expect("deck flattens")
+            .elements;
+        elements.push(xspice_test_element(
+            "Aconductance",
+            vec![XspicePort::DifferentialConductance {
+                pos: "OUT".to_string(),
+                neg: "0".to_string(),
+            }],
+        ));
+
+        let diagnostics = analyze_dc_ground_paths(&elements).expect("partial analysis succeeds");
+        assert_eq!(diagnostics.no_dc_path_nodes, ["OUT"]);
+        assert!(diagnostics.fatal_nodes().next().is_none());
+        assert_eq!(diagnostics.floating_component_is_certain, [false]);
+    }
+
+    #[test]
+    fn passive_capacitor_midpoint_is_warning_only() {
+        let diagnostics = dc_ground_path_diagnostics_of(
+            "passive floating capacitor midpoint\n\
+             v1 in 0 dc 1\n\
+             c1 in mid 1u\n\
+             c2 mid 0 1u\n\
+             .op\n\
+             .end\n",
+        );
+
+        assert_eq!(
+            diagnostics.node_diagnostics,
+            vec![DcGroundPathNodeDiagnostic {
+                node: "MID".to_string(),
+                severity: DcGroundPathSeverity::WarningOnly,
+            }]
+        );
+        assert!(diagnostics.fatal_nodes().next().is_none());
+    }
+
+    #[test]
+    fn current_drive_makes_the_whole_floating_conductive_component_fatal() {
+        let diagnostics = dc_ground_path_diagnostics_of(
+            "current-driven floating resistor island\n\
+             i1 0 a dc 1m\n\
+             r1 a b 1k\n\
+             c1 b 0 1u\n\
+             .op\n\
+             .end\n",
+        );
+
+        assert_eq!(diagnostics.no_dc_path_nodes, ["A", "B"]);
+        assert_eq!(diagnostics.fatal_nodes().collect::<Vec<_>>(), ["A", "B"]);
+        assert!(
+            diagnostics.node_diagnostics.iter().all(|diagnostic| {
+                diagnostic.severity == DcGroundPathSeverity::FatalCurrentDriven
+            })
+        );
+    }
+
+    #[test]
+    fn current_source_inside_one_floating_component_is_warning_only() {
+        let diagnostics = dc_ground_path_diagnostics_of(
+            "internal current source on floating resistor island\n\
+             vref ref 0 0\n\
+             i1 a b dc 1m\n\
+             r1 a b 1k\n\
+             c1 a 0 1u\n\
+             c2 b 0 1u\n\
+             .op\n\
+             .end\n",
+        );
+
+        assert_eq!(diagnostics.no_dc_path_nodes, ["A", "B"]);
+        assert!(diagnostics.fatal_nodes().next().is_none());
+        assert!(
+            diagnostics
+                .node_diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity == DcGroundPathSeverity::WarningOnly)
+        );
+    }
+
+    #[test]
+    fn zero_dc_independent_current_sources_are_warning_only() {
+        for source in ["i1 0 out dc 0", "i1 0 out ac 1"] {
+            let diagnostics = dc_ground_path_diagnostics_of(&format!(
+                "zero operating-point current\n\
+                 vref ref 0 0\n\
+                 {source}\n\
+                 c1 out 0 1u\n\
+                 .op\n\
+                 .end\n"
+            ));
+
+            assert_eq!(diagnostics.no_dc_path_nodes, ["OUT"]);
+            assert_eq!(
+                diagnostics.node_diagnostics,
+                [DcGroundPathNodeDiagnostic {
+                    node: "OUT".to_string(),
+                    severity: DcGroundPathSeverity::WarningOnly,
+                }]
+            );
+        }
+    }
+
     #[test]
     fn dc_ground_paths_flag_a_node_fed_only_by_a_current_source() {
         // The Xyce lead-group analysis puts both leads of a current source in
@@ -982,6 +1389,18 @@ mod tests {
                     .op\n\
                     .end\n";
         assert_eq!(dc_ground_paths_of(deck), vec!["OUT".to_string()]);
+    }
+
+    #[test]
+    fn dc_ground_paths_keep_mos_gates_isolated() {
+        let mos = "current-driven MOS gate\n\
+                   vdd d 0 1\n\
+                   i1 0 g 1m\n\
+                   m1 d g 0 0 nch\n\
+                   .model nch nmos level=1\n\
+                   .op\n\
+                   .end\n";
+        assert_eq!(dc_ground_paths_of(mos), ["G"]);
     }
 
     #[test]
@@ -1060,6 +1479,34 @@ mod tests {
                     .op\n\
                     .end\n";
         assert!(dc_ground_paths_of(deck).is_empty());
+    }
+
+    #[test]
+    fn capacitor_initial_condition_topology_follows_the_selected_dc_contract() {
+        let deck = "capacitor initial condition dialect contract\n\
+                    i1 0 out 1m\n\
+                    c1 out 0 1u ic=0\n\
+                    .op\n\
+                    .end\n";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let flat = flatten_netlist_with_models(&netlist)
+            .expect("deck flattens")
+            .elements;
+
+        let enforced = analyze_dc_ground_paths_with_capacitor_ic_mode(
+            &flat,
+            CapacitorIcDcMode::EnforcedConstraint,
+        )
+        .expect("Xyce capacitor-IC topology is supported");
+        assert!(enforced.no_dc_path_nodes.is_empty());
+
+        let seed_only = analyze_dc_ground_paths_with_capacitor_ic_mode(
+            &flat,
+            CapacitorIcDcMode::TransientSeedOnly,
+        )
+        .expect("transient-only capacitor-IC topology is supported");
+        assert_eq!(seed_only.no_dc_path_nodes, ["OUT"]);
+        assert_eq!(seed_only.fatal_nodes().collect::<Vec<_>>(), ["OUT"]);
     }
 
     #[test]

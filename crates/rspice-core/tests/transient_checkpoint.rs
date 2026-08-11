@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 #[cfg(feature = "veriloga-builtins")]
 use rspice_core::engine::ConvergenceConfig;
-use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect, TransientCheckpoint};
+use rspice_core::engine::{
+    Engine, SimulationConfig, SpiceDialect, TransientCheckpoint, TransientStartupMode,
+};
 use rspice_core::netlist::Netlist;
 use rspice_core::numerics::integration::IntegrationMethod;
 use rspice_core::xspice::{register_data_file, unregister_data_file};
@@ -121,6 +123,54 @@ fn branch_index(result: &rspice_core::engine::TransientResult, name: &str) -> us
         .iter()
         .position(|candidate| candidate.eq_ignore_ascii_case(name))
         .unwrap_or_else(|| panic!("branch '{name}' present in {:?}", result.branch_names))
+}
+
+#[test]
+fn uic_checkpoint_resume_preserves_startup_mode_and_floating_trajectory() {
+    let netlist = Netlist::parse(
+        "UIC checkpoint floating capacitor\n\
+         I1 0 out 1m\n\
+         C1 out 0 1u\n\
+         .TRAN 0.5u 4u UIC\n\
+         .END\n",
+    )
+    .expect("UIC checkpoint deck parses");
+    let engine = Engine::default();
+
+    let (first, checkpoint) = engine
+        .run_tran_checkpointed_with_startup_mode(
+            &netlist,
+            2.0e-6,
+            0.5e-6,
+            TransientStartupMode::Uic,
+        )
+        .expect("UIC first segment completes without a DC operating point");
+    assert_eq!(checkpoint.startup_mode(), Some(TransientStartupMode::Uic));
+    assert!(checkpoint.to_text().contains("startup_mode uic\n"));
+
+    let restored = TransientCheckpoint::from_text(&checkpoint.to_text())
+        .expect("UIC checkpoint text round-trips");
+    let (resumed, final_checkpoint) = engine
+        .run_tran_resume(&netlist, &restored, 4.0e-6, 0.5e-6)
+        .expect("UIC checkpoint resumes without reclassifying startup as an operating point");
+    assert_eq!(
+        final_checkpoint.startup_mode(),
+        Some(TransientStartupMode::Uic)
+    );
+
+    let first_out = out_index(&first);
+    let resumed_out = out_index(&resumed);
+    assert_eq!(
+        first.voltages[first_out].last().unwrap().to_bits(),
+        resumed.voltages[resumed_out][0].to_bits(),
+        "UIC resume must preserve the seam state exactly"
+    );
+    assert!(
+        resumed.time.iter().all(|value| value.is_finite())
+            && resumed.voltages[resumed_out]
+                .iter()
+                .all(|value| value.is_finite())
+    );
 }
 
 #[test]

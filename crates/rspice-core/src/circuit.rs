@@ -401,10 +401,24 @@ pub struct CircuitData {
     /// Nodes that no DC-conducting element ties to ground, as found during
     /// construction from the flattened elements.
     ///
-    /// Empty also means "nothing to report" when the topology could not be
-    /// analyzed at all (an XSPICE code model, say); the two cases are not
-    /// distinguished because both leave the operating point free to run.
     pub(crate) no_dc_path_nodes: Vec<String>,
+    /// Subset of [`Self::no_dc_path_nodes`] whose ungrounded conductive
+    /// components are driven by current-source equations and must therefore
+    /// be rejected before numerical conditioning invents an operating point.
+    pub(crate) fatal_no_dc_path_nodes: Vec<String>,
+    /// Conductance of the authored `.OPTIONS RSHUNT` resistor from every
+    /// electrical node to ground. This is part of the physical circuit and is
+    /// kept separate from solver-controlled GMIN/conditioning diagonals.
+    pub(crate) global_shunt_conductance: Value,
+    /// Floating DC-conductive component index for each electrical node ID.
+    /// Ground and nodes outside a floating component contain `None`.
+    pub(crate) dc_floating_component_by_node: Vec<Option<usize>>,
+    /// Original node spellings for each floating component, retained for
+    /// deterministic diagnostics after circuit assembly.
+    pub(crate) dc_floating_component_nodes: Vec<Vec<String>>,
+    /// Whether each floating component is untouched by a model-specific DC
+    /// terminal grouping and can therefore support a fatal topology proof.
+    pub(crate) dc_floating_component_is_certain: Vec<bool>,
     pub(crate) bsim3v3: Bsim3v3s,
     pub(crate) bsim4v8: Bsim4v8s,
     pub(crate) ekv26s: EkvMosfets,

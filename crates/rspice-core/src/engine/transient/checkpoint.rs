@@ -39,8 +39,10 @@ use crate::numerics::integration::TransientLteReference;
 use crate::xspice::{CmContextCheckpoint, XspiceInstanceCheckpoint};
 use std::io::Read;
 
+use super::TransientStartupMode;
+
 /// Format version written to and required from checkpoint files.
-const FORMAT_VERSION: u32 = 11;
+const FORMAT_VERSION: u32 = 12;
 
 /// Snapshot of transient-integration state at an accepted time point.
 #[derive(Debug, Clone, PartialEq)]
@@ -59,6 +61,9 @@ pub struct TransientCheckpoint {
     /// Kept optional solely so legacy checkpoint files can be parsed and
     /// rejected with a precise diagnostic.
     simulation_identity: Option<String>,
+    /// Startup contract of the selected `.TRAN` analysis. Optional only so
+    /// older files can be parsed and rejected with a precise resume error.
+    startup_mode: Option<TransientStartupMode>,
 
     cap_v_prev: Vec<Value>,
     cap_v_prev_prev: Vec<Value>,
@@ -572,7 +577,7 @@ pub(crate) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
 
 pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> String {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"rspice-transient-resolved-config-v2\0");
+    hasher.update(b"rspice-transient-resolved-config-v3\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);
@@ -589,6 +594,7 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
         config.resolved_jfet_level2_model(),
     );
     hash_field(&mut hasher, "b3soi_gmin_scaling", config.b3soi_gmin_scaling);
+    hash_field(&mut hasher, "rshunt", config.rshunt.map(f64::to_bits));
     hash_field(
         &mut hasher,
         "transient_trtol",
@@ -1189,6 +1195,7 @@ impl TransientCheckpoint {
         time: Value,
         solution: &[Value],
         circuit: &CircuitData,
+        startup_mode: TransientStartupMode,
         lte_estimator: Option<&LteEstimator>,
     ) -> Self {
         if !circuit.tlines.is_empty() || !circuit.coupled_tlines.is_empty() {
@@ -1230,6 +1237,7 @@ impl TransientCheckpoint {
             netlist_fingerprint: fingerprint,
             netlist_identity,
             simulation_identity: Some(simulation_identity),
+            startup_mode: Some(startup_mode),
             cap_v_prev: circuit.capacitors.v_prev.clone(),
             cap_v_prev_prev: circuit.capacitors.v_prev_prev.clone(),
             cap_v_prev_prev_prev: circuit.capacitors.v_prev_prev_prev.clone(),
@@ -1454,7 +1462,20 @@ impl TransientCheckpoint {
                 "checkpoint was captured with a different resolved simulation configuration (identity {captured_identity}, this run is {target_identity}); refusing to resume mismatched state"
             ));
         }
+        if self.startup_mode.is_none() {
+            return Err(
+                "legacy transient checkpoint does not record whether its selected .TRAN analysis used UIC; refusing to resume an ambiguous trajectory"
+                    .to_string(),
+            );
+        }
         Ok(())
+    }
+
+    /// Startup contract captured for the selected transient analysis.
+    ///
+    /// Legacy checkpoint formats return `None` and are refused for resume.
+    pub fn startup_mode(&self) -> Option<TransientStartupMode> {
+        self.startup_mode
     }
 
     //=========================================================================
@@ -1475,6 +1496,12 @@ impl TransientCheckpoint {
             "simulation_identity {}\n",
             self.simulation_identity.as_deref().unwrap_or("none")
         ));
+        let startup_mode = match self.startup_mode {
+            Some(TransientStartupMode::OperatingPoint) => "operating-point",
+            Some(TransientStartupMode::Uic) => "uic",
+            None => "unknown",
+        };
+        out.push_str(&format!("startup_mode {startup_mode}\n"));
         out.push_str(&format!("time {}\n", self.time));
 
         let section = |out: &mut String, name: &str, rows: &[&[Value]]| {
@@ -1685,6 +1712,18 @@ impl TransientCheckpoint {
             None
         };
 
+        let startup_mode = if version >= 12 {
+            let mode_line = lines.next().ok_or("missing startup mode line")?;
+            match mode_line.strip_prefix("startup_mode ").map(str::trim) {
+                Some("operating-point") => Some(TransientStartupMode::OperatingPoint),
+                Some("uic") => Some(TransientStartupMode::Uic),
+                Some("unknown") => None,
+                _ => return Err(format!("malformed startup mode line: '{mode_line}'")),
+            }
+        } else {
+            None
+        };
+
         let time_line = lines.next().ok_or("missing time line")?;
         let time: Value = time_line
             .strip_prefix("time ")
@@ -1817,6 +1856,7 @@ impl TransientCheckpoint {
             netlist_fingerprint,
             netlist_identity,
             simulation_identity,
+            startup_mode,
             cap_v_prev: cap_iter.next().unwrap(),
             cap_v_prev_prev: cap_iter.next().unwrap(),
             cap_v_prev_prev_prev: cap_iter.next().unwrap(),
@@ -2019,6 +2059,7 @@ mod tests {
             netlist_fingerprint: 0xDEAD_BEEF_0123_4567,
             netlist_identity: Some("fedcba9876543210".repeat(4)),
             simulation_identity: Some("abcdef0123456789".repeat(4)),
+            startup_mode: Some(TransientStartupMode::Uic),
             cap_v_prev: vec![0.1, -0.2],
             cap_v_prev_prev: vec![0.09, -0.19],
             cap_v_prev_prev_prev: vec![0.08, -0.18],
@@ -2068,6 +2109,9 @@ mod tests {
                 continue;
             }
             if version < 9 && line.starts_with("simulation_identity ") {
+                continue;
+            }
+            if version < 12 && line.starts_with("startup_mode ") {
                 continue;
             }
             if version < 10 && line.starts_with("xyce_memristor_resistance_stores ") {
@@ -2204,6 +2248,32 @@ mod tests {
     }
 
     #[test]
+    fn startup_mode_round_trips_and_legacy_format_does_not_invent_it() {
+        let checkpoint = sample();
+        let current = TransientCheckpoint::from_text(&checkpoint.to_text())
+            .expect("current checkpoint parses");
+        assert_eq!(current.startup_mode(), Some(TransientStartupMode::Uic));
+
+        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 11))
+            .expect("version-eleven checkpoint remains parseable for diagnostics");
+        assert_eq!(legacy.startup_mode(), None);
+    }
+
+    #[test]
+    fn rshunt_participates_in_resolved_simulation_checkpoint_identity() {
+        let base = SimulationConfig::default();
+        let with_rshunt = SimulationConfig {
+            rshunt: Some(1.0e9),
+            ..base.clone()
+        };
+        assert_ne!(
+            simulation_checkpoint_identity(&base),
+            simulation_checkpoint_identity(&with_rshunt),
+            "changing the physical global shunt must invalidate transient and HB continuation state"
+        );
+    }
+
+    #[test]
     fn pem_resistance_store_round_trips_and_legacy_resume_fails_closed() {
         let unique = format!(
             "checkpoint-pem-store-{}-{}",
@@ -2239,6 +2309,7 @@ mod tests {
             0.0,
             &solution,
             &captured_circuit,
+            TransientStartupMode::OperatingPoint,
             None,
         );
         let restored = TransientCheckpoint::from_text(&checkpoint.to_text())

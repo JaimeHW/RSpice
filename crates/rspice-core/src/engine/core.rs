@@ -15,7 +15,7 @@ pub(in crate::engine) enum DcOpStartup<'a> {
 use crate::diagnostics::ConvergenceQuality;
 use crate::netlist::{ElementKind, SubcircuitDef};
 use crate::resource::{ResourceKind, ResourceLimitError};
-use crate::{Netlist, Value};
+use crate::{CircuitData, Netlist, Value};
 use std::collections::{HashMap, HashSet};
 
 /// Main simulation engine
@@ -1149,7 +1149,11 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        match startup {
+        let force_initial_conditions = matches!(startup, DcOpStartup::ForceInitialConditions);
+        if !force_initial_conditions {
+            self.ensure_dc_paths_to_ground(circuit)?;
+        }
+        let solution = match startup {
             DcOpStartup::ForceInitialConditions => {
                 let hints = self.collect_initial_condition_hints(netlist, circuit);
                 if hints.is_empty() {
@@ -1208,6 +1212,110 @@ impl Engine {
                     self.solve_linear(circuit, matrix)
                 }
             }
+        }?;
+        // A forced `.IC` solve deliberately replaces authored node KCL rows
+        // with ideal voltage constraints. It is a constrained state, not a
+        // physical unconstrained DC equilibrium, so reconstructing ordinary
+        // DC KCL here would apply the wrong equation contract.
+        if !force_initial_conditions {
+            self.ensure_solved_dc_paths_to_ground(circuit, matrix, &solution)?;
         }
+        Ok(solution)
+    }
+
+    /// Refuse a current-driven floating component whose operating point the
+    /// numerical conditioning shunt would invent rather than the circuit
+    /// determine.
+    ///
+    /// This check belongs at the shared DC-solve boundary: operating-point,
+    /// AC, noise, distortion, pole-zero, PSS, STB, sensitivity, and ordinary
+    /// transient startup all pass through here. A `.TRAN ... UIC` run skips
+    /// this boundary because it deliberately skips the operating point.
+    ///
+    /// Purely passive floating islands preserve historical SPICE behavior:
+    /// construction reports their no-path warning and the solve may choose
+    /// their irrelevant common mode. `.OPTIONS RSHUNT` is a physical escape
+    /// hatch because it adds an author-sized path from every node to ground.
+    pub(in crate::engine) fn ensure_dc_paths_to_ground(
+        &self,
+        circuit: &CircuitData,
+    ) -> Result<(), SimulationError> {
+        let floating =
+            circuit.independent_dc_drive_nodes(self.current_abstol(), self.residual_reltol());
+        self.ensure_named_dc_paths_to_ground(&floating)
+    }
+
+    pub(in crate::engine) fn ensure_solved_dc_paths_to_ground(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        solution: &[Value],
+    ) -> Result<(), SimulationError> {
+        let violating = self.physical_dc_kcl_violation_nodes(circuit, matrix, solution)?;
+        self.ensure_no_conditioning_dependent_kcl(circuit, &violating, "DC operating point")
+    }
+
+    pub(in crate::engine) fn ensure_solved_transient_operating_point_paths_to_ground(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        solution: &[Value],
+        time: Value,
+        contract: super::convergence::AcceptedTransientOperatingPointContract,
+    ) -> Result<(), SimulationError> {
+        let violating = self.physical_transient_operating_point_kcl_violation_nodes(
+            circuit, matrix, solution, time, contract,
+        )?;
+        self.ensure_no_conditioning_dependent_kcl(circuit, &violating, "transient operating point")
+    }
+
+    fn ensure_no_conditioning_dependent_kcl(
+        &self,
+        circuit: &CircuitData,
+        violating: &[String],
+        operating_point_kind: &str,
+    ) -> Result<(), SimulationError> {
+        if violating.is_empty() {
+            return Ok(());
+        }
+        let shown: Vec<&str> = violating.iter().take(8).map(String::as_str).collect();
+        let suffix = if violating.len() > shown.len() {
+            format!(" (and {} more)", violating.len() - shown.len())
+        } else {
+            String::new()
+        };
+        let remediation = if circuit.has_global_shunt() {
+            "Reduce .OPTIONS RSHUNT to provide a stronger physical shunt, or add a stronger explicit DC path."
+        } else {
+            "Add a physical DC path, or set .OPTIONS RSHUNT=<ohms> to shunt every node to ground."
+        };
+        Err(SimulationError::Circuit(format!(
+            "{operating_point_kind} at node(s) {}{} depends materially on the simulator's numerical \
+             nodal conditioning: the accepted bias has no DC path to ground strong enough to \
+             satisfy the installed circuit's physical KCL at the configured tolerances after that \
+             conditioning is removed. {remediation}",
+            shown.join(", "),
+            suffix
+        )))
+    }
+
+    fn ensure_named_dc_paths_to_ground(&self, floating: &[String]) -> Result<(), SimulationError> {
+        if floating.is_empty() {
+            return Ok(());
+        }
+        let shown: Vec<&str> = floating.iter().take(8).map(String::as_str).collect();
+        let suffix = if floating.len() > shown.len() {
+            format!(" (and {} more)", floating.len() - shown.len())
+        } else {
+            String::new()
+        };
+        Err(SimulationError::Circuit(format!(
+            "no DC path to ground from node(s) {}{}: capacitors and current sources do not \
+             conduct at DC, so nothing in the circuit sets their operating-point voltage. \
+             Connect them through a conducting element, or set .OPTIONS RSHUNT=<ohms> to \
+             shunt every node to ground with a resistor of that value.",
+            shown.join(", "),
+            suffix
+        )))
     }
 }

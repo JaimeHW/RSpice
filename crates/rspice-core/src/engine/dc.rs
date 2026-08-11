@@ -578,44 +578,6 @@ impl Engine {
         self.run_dc_op_with_startup_report_and_abort(netlist, DcOpStartup::Zero, abort)
     }
 
-    /// Refuse an operating point whose answer the conditioning shunt would
-    /// invent rather than the circuit determine.
-    ///
-    /// A node that no DC-conducting element ties to ground contributes an
-    /// all-but-empty matrix row. The nodal GMIN floor keeps that row solvable,
-    /// which is what makes continuation and startup work on real circuits, but
-    /// it also means the solve always returns *something*: divide an injected
-    /// current by a 1e-15 S floor and the node reports a teravolt, and the
-    /// bias moves if the floor ever changes. ngspice has no such floor, so its
-    /// matrix goes singular here and its operating point produces no table at
-    /// all; reporting a number in that situation is strictly worse than
-    /// refusing, because nothing downstream can tell the number is fictional.
-    ///
-    /// `.OPTIONS RSHUNT` is the escape hatch, matching ngspice. It is not a
-    /// flag that suppresses the check: it adds a real shunt conductance to
-    /// every node, so the topology genuinely acquires the DC path the deck was
-    /// missing, and the resulting bias is one the author chose and can size.
-    fn ensure_dc_paths_to_ground(&self, circuit: &CircuitData) -> Result<(), SimulationError> {
-        let floating = circuit.no_dc_path_nodes();
-        if floating.is_empty() || self.nodal_shunt_conductance() > 0.0 {
-            return Ok(());
-        }
-        let shown: Vec<&str> = floating.iter().take(8).map(String::as_str).collect();
-        let suffix = if floating.len() > shown.len() {
-            format!(" (and {} more)", floating.len() - shown.len())
-        } else {
-            String::new()
-        };
-        Err(SimulationError::Circuit(format!(
-            "no DC path to ground from node(s) {}{}: capacitors and current sources do not \
-             conduct at DC, so nothing in the circuit sets their operating-point voltage. \
-             Connect them through a conducting element, or set .OPTIONS RSHUNT=<ohms> to \
-             shunt every node to ground with a resistor of that value.",
-            shown.join(", "),
-            suffix
-        )))
-    }
-
     fn run_dc_op_with_startup_report_and_abort(
         &self,
         netlist: &Netlist,
@@ -631,8 +593,6 @@ impl Engine {
 
         // Build circuit from netlist
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
-
-        engine.ensure_dc_paths_to_ground(&circuit)?;
 
         if circuit.num_nodes() == 0 {
             if force_initial_conditions {
@@ -674,6 +634,9 @@ impl Engine {
         } else {
             solution
         };
+        if !force_initial_conditions {
+            engine.ensure_solved_dc_paths_to_ground(&mut circuit, &mut matrix, &solution)?;
+        }
         if requires_nonlinear_observation {
             engine.try_observe_dc_operating_point(&mut circuit, &mut matrix, &solution)?;
         }
@@ -1071,6 +1034,7 @@ impl Engine {
                 }
                 // Update source value.
                 sweep_source.set_value(&mut circuit, sweep_value);
+                engine.ensure_dc_paths_to_ground(&circuit)?;
 
                 // Solve DC at this point
                 // Key optimization: use previous solution as initial guess for faster convergence
@@ -1167,6 +1131,7 @@ impl Engine {
                     } else {
                         solution
                     };
+                engine.ensure_solved_dc_paths_to_ground(&mut circuit, &mut matrix, &solution)?;
                 if circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty() {
                     engine.try_observe_dc_operating_point(&mut circuit, &mut matrix, &solution)?;
                 }
@@ -1759,6 +1724,23 @@ mod tests {
         let (result, _) = Engine::default()
             .run_dc_op_forced_ic_with_report_and_abort(&netlist, &NoAbort)
             .expect("forced .IC solve succeeds");
+        assert_voltage(&result, "out", 2.0);
+    }
+
+    #[test]
+    fn forced_ic_can_anchor_a_current_driven_capacitive_node() {
+        let netlist = Netlist::parse(
+            "forced floating startup\n\
+             I1 0 out 1m\n\
+             C1 out 0 1u\n\
+             .ic V(out)=2\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let (result, _) = Engine::default()
+            .run_dc_op_forced_ic_with_report_and_abort(&netlist, &NoAbort)
+            .expect("the hard .IC equation must replace the floating-node KCL row");
         assert_voltage(&result, "out", 2.0);
     }
 
