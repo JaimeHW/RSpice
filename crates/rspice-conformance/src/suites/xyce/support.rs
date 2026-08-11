@@ -1611,7 +1611,7 @@ impl XyceTestRunner {
             probes: output.probes,
         };
 
-        let (netlist, frequency_bound) = match Self::parse_xyce_netlist(&source, path) {
+        let netlist = match Self::parse_xyce_netlist(&source, path) {
             Ok(netlist)
                 if Self::parsed_netlist_has_ac_frequency_dependent_global(&netlist)
                     || netlist.elements.iter().any(|element| {
@@ -1625,31 +1625,40 @@ impl XyceTestRunner {
                     }) =>
             {
                 let bound = Self::source_with_ac_frequency_bindings(&source, 1.0);
-                (
-                    Self::parse_xyce_netlist(&bound, path)
-                        .map_err(|err| format!("ABM_FREQ frequency-bound parse failed: {err}"))?,
-                    true,
-                )
+                Self::parse_xyce_netlist(&bound, path)
+                    .map_err(|err| format!("ABM_FREQ frequency-bound parse failed: {err}"))?
             }
-            Ok(netlist) => (netlist, false),
+            Ok(netlist) => netlist,
             Err(err) if Self::parse_error_is_unbound_ac_frequency_dependency(&source, &err) => {
                 let bound = Self::source_with_ac_frequency_bindings(&source, 1.0);
-                (
-                    Self::parse_xyce_netlist(&bound, path).map_err(|retry| {
-                        format!("ABM_FREQ frequency-bound parse failed: {retry}")
-                    })?,
-                    true,
-                )
+                Self::parse_xyce_netlist(&bound, path)
+                    .map_err(|retry| format!("ABM_FREQ frequency-bound parse failed: {retry}"))?
             }
             Err(err) => return Err(format!("ABM_FREQ parser rejected relational deck: {err}")),
+        };
+        // The historical pair assigns roles by the authored AC representation:
+        // the GOODFILE owner is a DEC sweep and the TESTFILE control is AC DATA.
+        // Expression storage is deliberately not the role discriminator because
+        // a parser stage may resolve or retain a direct {FREQ}/{HERTZ} value. The
+        // strict authored-source snapshot still requires the exact runtime
+        // expression for every owner.
+        let frequency_bound = match netlist.analyses.as_slice() {
+            [AnalysisCommand::Ac { .. }] => true,
+            [AnalysisCommand::AcData { .. }] => false,
+            _ => {
+                return Err(
+                    "ABM_FREQ requires exactly one DEC owner or one DATA control analysis"
+                        .to_string(),
+                );
+            }
         };
         let ac = Self::single_ac_analysis(&netlist)?;
         if !Self::step_commands(&netlist)?.is_empty() {
             return Err("ABM_FREQ relational comparison does not admit .STEP".to_string());
         }
-        if frequency_bound && ac.data_points().is_some() {
+        if frequency_bound == ac.data_points().is_some() {
             return Err(
-                "ABM_FREQ does not admit DATA combined with runtime frequency bindings".to_string(),
+                "ABM_FREQ AC representation and resolved point provenance disagree".to_string(),
             );
         }
         Ok(XyceRelationalAcPlan {

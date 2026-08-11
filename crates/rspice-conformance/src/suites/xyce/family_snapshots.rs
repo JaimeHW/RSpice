@@ -5099,28 +5099,13 @@ impl XyceTestRunner {
             }
         };
 
-        let raw_frequency_bits = plan
-            .ac
-            .frequencies
-            .iter()
-            .copied()
-            .map(Value::to_bits)
-            .collect::<Vec<_>>();
-        let expected_raw_frequency_bits = if plan.frequency_bound {
-            Self::xyce_ac_sweep_frequencies(FreqVariation::Dec, 1, 1.0, 1.0e5)
-        } else {
-            XYCE_ABM_FREQUENCY_GRID.to_vec()
-        }
-        .into_iter()
-        .map(Value::to_bits)
-        .collect::<Vec<_>>();
         let frequency_bits = XYCE_ABM_FREQUENCY_GRID
             .iter()
             .copied()
             .map(Value::to_bits)
             .collect::<Vec<_>>();
         let effective_resistance_bits = frequency_bits.clone();
-        if raw_frequency_bits != expected_raw_frequency_bits {
+        if !Self::abm_frequency_grid_matches(&plan.ac.frequencies) {
             return Err(format!("{LABEL} frequency/resistance grid changed"));
         }
 

@@ -783,6 +783,26 @@ impl XyceTestRunner {
             .expect("Release 7.10 ABM_FREQ ACComparator tolerance is valid")
     }
 
+    /// Match the mathematical decade grid while admitting only libm roundoff.
+    ///
+    /// Optimized `exp`/`powf` implementations can differ by a few ULPs across
+    /// native and WebAssembly targets. This bound is intentionally independent
+    /// of ACComparator's much wider frequency tolerance; authored DATA rows are
+    /// still checked bit-for-bit by the strict snapshot.
+    pub(super) fn abm_frequency_grid_matches(frequencies: &[Value]) -> bool {
+        frequencies.len() == XYCE_ABM_FREQUENCY_GRID.len()
+            && frequencies
+                .iter()
+                .copied()
+                .zip(XYCE_ABM_FREQUENCY_GRID)
+                .all(|(actual, expected)| {
+                    actual.is_finite()
+                        && (actual.to_bits() == expected.to_bits()
+                            || (actual - expected).abs()
+                                <= expected.abs() * XYCE_ABM_FREQUENCY_GRID_RELATIVE_ROUNDOFF)
+                })
+    }
+
     pub(super) fn abm_frequency_historical_oracle_provenance_records() -> Vec<String> {
         let mut records = XYCE_ABM_FREQUENCY_CASES
             .iter()
@@ -846,24 +866,7 @@ impl XyceTestRunner {
         plan: &XyceRelationalAcPlan,
     ) -> Result<(), String> {
         const LABEL: &str = "ABM_FREQ relational family";
-        let expected_frequencies = if plan.frequency_bound {
-            Self::xyce_ac_sweep_frequencies(FreqVariation::Dec, 1, 1.0, 1.0e5)
-        } else {
-            XYCE_ABM_FREQUENCY_GRID.to_vec()
-        };
-        let expected_frequency_bits = expected_frequencies
-            .iter()
-            .copied()
-            .map(Value::to_bits)
-            .collect::<Vec<_>>();
-        let frequency_bits = plan
-            .ac
-            .frequencies
-            .iter()
-            .copied()
-            .map(Value::to_bits)
-            .collect::<Vec<_>>();
-        if frequency_bits != expected_frequency_bits {
+        if !Self::abm_frequency_grid_matches(&plan.ac.frequencies) {
             return Err(format!(
                 "{LABEL} requires the exact six-point 1 Hz through 100 kHz decade grid, got {:?}",
                 plan.ac.frequencies

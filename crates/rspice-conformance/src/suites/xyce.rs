@@ -422,6 +422,7 @@ const XYCE_ABM_FREQUENCY_HISTORICAL_ORACLE_RECORD_COUNT: usize = 6;
 const XYCE_ABM_FREQUENCY_HISTORICAL_ORACLE_BLAKE3: &str =
     "e08dd112070ff4b275d29c41cb5cc623c81687dda49aeb40460a4092c4655676";
 const XYCE_ABM_FREQUENCY_GRID: [Value; 6] = [1.0, 10.0, 100.0, 1.0e3, 1.0e4, 1.0e5];
+const XYCE_ABM_FREQUENCY_GRID_RELATIVE_ROUNDOFF: Value = 64.0 * f64::EPSILON;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct XyceAbmFrequencyCaseSpec {
