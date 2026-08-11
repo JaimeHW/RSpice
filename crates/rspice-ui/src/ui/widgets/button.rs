@@ -165,7 +165,11 @@ impl<'a> Button<'a> {
             .map_or(unconstrained_width, |max_width| {
                 unconstrained_width.min(max_width)
             })
-            .max(if t.metrics.ctl_h >= 44.0 { 44.0 } else { 0.0 });
+            .max(if t.metrics.is_touch() {
+                tokens::TOUCH_TARGET
+            } else {
+                0.0
+            });
         let height = t
             .metrics
             .ctl_h
@@ -321,8 +325,11 @@ impl<'a> IconButton<'a> {
     pub fn show(self, ui: &mut Ui) -> Response {
         let t = Tokens::get(ui.ctx());
         let c = &t.color;
-        let size = if t.metrics.ctl_h >= 44.0 {
-            vec2(self.size.x.max(44.0), self.size.y.max(44.0))
+        let size = if t.metrics.is_touch() {
+            vec2(
+                self.size.x.max(tokens::TOUCH_TARGET),
+                self.size.y.max(tokens::TOUCH_TARGET),
+            )
         } else {
             self.size
         };

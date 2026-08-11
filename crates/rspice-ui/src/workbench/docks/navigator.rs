@@ -2576,7 +2576,11 @@ fn result_quantity_row(
         egui::vec2(ui.available_width(), row_height),
         egui::Sense::hover(),
     );
-    let hovered = ui.rect_contains_pointer(rect);
+    // On a coarse pointer there is no hover to reveal anything with, so the
+    // row's actions are simply present. Hiding them behind a state a finger
+    // cannot produce would put plot membership and favouriting out of reach
+    // on the tablet composition entirely.
+    let hovered = ui.rect_contains_pointer(rect) || t.metrics.is_touch();
     let visibility_rect = egui::Rect::from_min_max(
         rect.left_top(),
         egui::pos2((rect.left() + 26.0).min(rect.right()), rect.bottom()),

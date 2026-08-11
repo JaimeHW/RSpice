@@ -169,7 +169,25 @@ pub struct Metrics {
     pub bar_pad: f32,
 }
 
+/// Smallest control a coarse pointer can reliably hit.
+///
+/// `Theme::apply` raises `ctl_h` to at least this when the shell is in touch
+/// mode, so a control at or above it is the signal that the composition is
+/// laid out for a finger rather than a cursor.
+pub const TOUCH_TARGET: f32 = 44.0;
+
 impl Metrics {
+    /// Whether these metrics describe a touch composition.
+    ///
+    /// One owner for a threshold that had been spelled out at each widget
+    /// that honours it, so a surface cannot honour a different number than
+    /// the controls it contains — which is exactly how the Results bars came
+    /// to hold 44 px chips inside a 31 px band.
+    #[must_use]
+    pub fn is_touch(&self) -> bool {
+        self.ctl_h >= TOUCH_TARGET
+    }
+
     fn for_selection(_direction: Direction, density: Density) -> Self {
         match density {
             Density::Compact => Metrics {

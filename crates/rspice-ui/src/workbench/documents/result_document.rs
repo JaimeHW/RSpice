@@ -2660,7 +2660,7 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
 /// controls, result-document creation and properties remain owned by the full
 /// Results workspace; every compatible existing viewer stays reachable here.
 fn show_compact_docbar(ui: &mut Ui, state: &mut AppState) {
-    docbar_at_height(ui, RESULT_VIEWER_TABS_HEIGHT, |ui| {
+    docbar_at_height(ui, ResultBarMetrics::of(ui).viewer_tabs, |ui| {
         viewer_tab_scroller(ui, "rspice.results.split.viewer-tabs", |ui| {
             viewer_tabs(ui, state);
         });
@@ -2678,7 +2678,7 @@ pub(super) fn show_persistent_docbar(ui: &mut Ui, app: &mut RSpiceApp, family_la
 fn show_docbar_for_family(ui: &mut Ui, app: &mut RSpiceApp, family_label: Option<&str>) {
     let mut create_document = false;
     let mut open_properties = false;
-    docbar_at_height(ui, RESULT_VIEWER_TABS_HEIGHT, |ui| {
+    docbar_at_height(ui, ResultBarMetrics::of(ui).viewer_tabs, |ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             open_properties =
@@ -2714,9 +2714,55 @@ fn show_docbar_for_family(ui: &mut Ui, app: &mut RSpiceApp, family_label: Option
     }
 }
 
-const RESULT_VIEWER_TABS_HEIGHT: f32 = 41.0;
-const RESULT_VIEWER_TAB_HEIGHT: f32 = 30.0;
-const RESULT_SHEET_BAR_HEIGHT: f32 = 31.0;
+/// The Results shell own bar geometry, resolved against the pointer.
+///
+/// These were fixed numbers, so the workspace kept its workstation rows on a
+/// tablet while `chip` and `IconButton` grew to the 44 px target the rest of
+/// the shell already honours — a control taller than the band holding it.
+/// Each row keeps the mockup fine-pointer height, or the touch target plus
+/// that row own chrome, whichever the pointer calls for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ResultBarMetrics {
+    viewer_tabs: f32,
+    viewer_tab: f32,
+    sheet_bar: f32,
+    structured_strip: f32,
+    instrument_control: f32,
+}
+
+/// Space a row keeps around its control at the mockup fine-pointer sizes:
+/// 41 − 30 for the tab strip, 31 − 23 for the instrument bar.
+const RESULT_TAB_STRIP_CHROME: f32 = 11.0;
+const RESULT_CONTROL_ROW_CHROME: f32 = 8.0;
+
+impl ResultBarMetrics {
+    fn resolve(tokens: &Tokens) -> Self {
+        let fine = Self {
+            viewer_tabs: 41.0,
+            viewer_tab: 30.0,
+            sheet_bar: 31.0,
+            structured_strip: 40.0,
+            instrument_control: 23.0,
+        };
+        if !tokens.metrics.is_touch() {
+            return fine;
+        }
+        let target = tokens.metrics.ctl_h;
+        Self {
+            viewer_tabs: fine.viewer_tabs.max(target + RESULT_TAB_STRIP_CHROME),
+            viewer_tab: fine.viewer_tab.max(target),
+            sheet_bar: fine.sheet_bar.max(target + RESULT_CONTROL_ROW_CHROME),
+            structured_strip: fine
+                .structured_strip
+                .max(target + RESULT_CONTROL_ROW_CHROME),
+            instrument_control: fine.instrument_control.max(target),
+        }
+    }
+
+    fn of(ui: &Ui) -> Self {
+        Self::resolve(&Tokens::get(ui.ctx()))
+    }
+}
 
 /// Horizontal viewer-tab list with the mockup's overflow chevrons: 20×30
 /// paddles flanking the list, present only while it genuinely overflows,
@@ -2780,7 +2826,7 @@ fn viewer_tab_scroller(ui: &mut Ui, salt: &'static str, add_tabs: impl FnOnce(&m
 fn viewer_tab_overflow_chevron(ui: &mut Ui, direction: f32, enabled: bool) -> bool {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(20.0, RESULT_VIEWER_TAB_HEIGHT),
+        egui::vec2(20.0, ResultBarMetrics::of(ui).viewer_tab),
         if enabled {
             egui::Sense::click()
         } else {
@@ -2836,8 +2882,6 @@ fn viewer_tab_overflow_chevron(ui: &mut Ui, direction: f32, enabled: bool) -> bo
     }
     enabled && response.clicked()
 }
-const RESULT_STRUCTURED_STRIP_HEIGHT: f32 = 40.0;
-const RESULT_INSTRUMENT_CONTROL_HEIGHT: f32 = 23.0;
 
 fn viewer_picker(ui: &mut Ui, icon: WorkbenchIcon, label: &str, accessible_label: &str) -> bool {
     let t = Tokens::get(ui.ctx());
@@ -2848,7 +2892,7 @@ fn viewer_picker(ui: &mut Ui, icon: WorkbenchIcon, label: &str, accessible_label
     );
     let width = galley.size().x + 36.0;
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(width, RESULT_VIEWER_TAB_HEIGHT),
+        egui::vec2(width, ResultBarMetrics::of(ui).viewer_tab),
         egui::Sense::click(),
     );
     response
@@ -2885,7 +2929,7 @@ fn viewer_picker(ui: &mut Ui, icon: WorkbenchIcon, label: &str, accessible_label
 
 fn viewer_picker_separator(ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(1.0, RESULT_VIEWER_TAB_HEIGHT),
+        egui::vec2(1.0, ResultBarMetrics::of(ui).viewer_tab),
         egui::Sense::hover(),
     );
     ui.painter().vline(
@@ -2899,10 +2943,11 @@ fn show_sheet_bar(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let viewer = state.ui.results.viewer;
     let structured = viewer_has_structured_strip(viewer);
+    let metrics = ResultBarMetrics::resolve(&t);
     let height = if structured {
-        RESULT_STRUCTURED_STRIP_HEIGHT
+        metrics.structured_strip
     } else {
-        RESULT_SHEET_BAR_HEIGHT
+        metrics.sheet_bar
     };
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
@@ -3089,7 +3134,7 @@ fn show_wave_instrument(ui: &mut Ui, state: &mut AppState) {
                             // the named modes beside them.
                             instrument_separator(ui);
                             if IconButton::new(Icon::BoxZoom)
-                                .side(RESULT_INSTRUMENT_CONTROL_HEIGHT)
+                                .side(ResultBarMetrics::of(ui).instrument_control)
                                 .on(state.ui.results.plot_tool == ResultPlotTool::BoxZoom)
                                 .tooltip("Box zoom - drag a region")
                                 .show(ui)
@@ -3098,7 +3143,7 @@ fn show_wave_instrument(ui: &mut Ui, state: &mut AppState) {
                                 state.ui.results.plot_tool = ResultPlotTool::BoxZoom;
                             }
                             if IconButton::new(Icon::Pan)
-                                .side(RESULT_INSTRUMENT_CONTROL_HEIGHT)
+                                .side(ResultBarMetrics::of(ui).instrument_control)
                                 .on(state.ui.results.plot_tool == ResultPlotTool::Pan)
                                 .tooltip("Pan viewport - drag the plot")
                                 .show(ui)
@@ -3112,7 +3157,7 @@ fn show_wave_instrument(ui: &mut Ui, state: &mut AppState) {
                             // lettered controls beside them are named modes.
                             instrument_separator(ui);
                             if IconButton::new(Icon::ZoomIn)
-                                .side(RESULT_INSTRUMENT_CONTROL_HEIGHT)
+                                .side(ResultBarMetrics::of(ui).instrument_control)
                                 .tooltip("Zoom active pane in 2x")
                                 .show(ui)
                                 .clicked()
@@ -3120,7 +3165,7 @@ fn show_wave_instrument(ui: &mut Ui, state: &mut AppState) {
                                 waves::zoom_active_pane(state, &t, 0.5);
                             }
                             if IconButton::new(Icon::ZoomOut)
-                                .side(RESULT_INSTRUMENT_CONTROL_HEIGHT)
+                                .side(ResultBarMetrics::of(ui).instrument_control)
                                 .tooltip("Zoom active pane out 2x")
                                 .show(ui)
                                 .clicked()
@@ -3128,7 +3173,7 @@ fn show_wave_instrument(ui: &mut Ui, state: &mut AppState) {
                                 waves::zoom_active_pane(state, &t, 2.0);
                             }
                             if IconButton::new(Icon::ZoomFit)
-                                .side(RESULT_INSTRUMENT_CONTROL_HEIGHT)
+                                .side(ResultBarMetrics::of(ui).instrument_control)
                                 .tooltip("Fit active waveform pane")
                                 .show(ui)
                                 .clicked()
@@ -3245,7 +3290,7 @@ fn instrument_control<'a>(
     );
     let width = (galley.size().x + 12.0).max(26.0);
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(width, RESULT_INSTRUMENT_CONTROL_HEIGHT),
+        egui::vec2(width, ResultBarMetrics::of(ui).instrument_control),
         egui::Sense::click(),
     );
     response
@@ -3789,7 +3834,9 @@ fn viewer_tab(ui: &mut Ui, viewer: ResultViewer, active: bool) -> bool {
     );
     let galley = ui.fonts_mut(|f| f.layout_job(job));
 
-    let height = RESULT_VIEWER_TAB_HEIGHT.min(ui.available_height());
+    let height = ResultBarMetrics::of(ui)
+        .viewer_tab
+        .min(ui.available_height());
     let horizontal_padding = 20.0;
     let icon_width = 13.0;
     let icon_gap = 6.0;
@@ -4268,11 +4315,54 @@ mod availability_tests {
 
     #[test]
     fn result_shell_matches_mockup_bar_geometry() {
-        assert_eq!(RESULT_VIEWER_TABS_HEIGHT, 41.0);
-        assert_eq!(RESULT_VIEWER_TAB_HEIGHT, 30.0);
-        assert_eq!(RESULT_SHEET_BAR_HEIGHT, 31.0);
-        assert_eq!(RESULT_STRUCTURED_STRIP_HEIGHT, 40.0);
-        assert_eq!(RESULT_INSTRUMENT_CONTROL_HEIGHT, 23.0);
+        let mut tokens = Tokens::default();
+        tokens.metrics.ctl_h = 28.0;
+        let fine = ResultBarMetrics::resolve(&tokens);
+        assert_eq!(fine.viewer_tabs, 41.0);
+        assert_eq!(fine.viewer_tab, 30.0);
+        assert_eq!(fine.sheet_bar, 31.0);
+        assert_eq!(fine.structured_strip, 40.0);
+        assert_eq!(fine.instrument_control, 23.0);
+    }
+
+    /// Under a coarse pointer the shell raises every control to a 44 px
+    /// target, and these rows have to make room for the controls they hold.
+    ///
+    /// The old fixed geometry meant a 44 px chip was laid out inside a 31 px
+    /// band on a tablet — taller than the row containing it — while the title
+    /// bar, drawers, navigator and console all grew correctly around it. The
+    /// assertion is the containment, not the numbers: a row that merely got
+    /// bigger is no use if it is still shorter than its own controls.
+    #[test]
+    fn result_bars_make_room_for_a_touch_target() {
+        let mut tokens = Tokens::default();
+        tokens.metrics.ctl_h = 44.0;
+        let touch = ResultBarMetrics::resolve(&tokens);
+
+        assert!(touch.viewer_tab >= 44.0, "{}", touch.viewer_tab);
+        assert!(
+            touch.instrument_control >= 44.0,
+            "{}",
+            touch.instrument_control
+        );
+        assert!(
+            touch.viewer_tabs >= touch.viewer_tab,
+            "the strip must contain its own tab: {} < {}",
+            touch.viewer_tabs,
+            touch.viewer_tab
+        );
+        assert!(
+            touch.sheet_bar >= touch.instrument_control,
+            "the instrument bar must contain its own controls: {} < {}",
+            touch.sheet_bar,
+            touch.instrument_control
+        );
+        assert!(
+            touch.structured_strip >= touch.instrument_control,
+            "the structured strip must contain its own controls: {} < {}",
+            touch.structured_strip,
+            touch.instrument_control
+        );
     }
 
     #[test]
@@ -5518,6 +5608,52 @@ mod availability_tests {
             !active_axis_is_pinned(&app.state, PaneAxis::X),
             "a fitted sheet must not report itself pinned just because it drew"
         );
+    }
+
+    /// Every sheet, drawn at the touch composition the tablet build uses.
+    ///
+    /// The shell has raised its own rows to a 44 px target for a long time
+    /// while this workspace kept fixed workstation heights, so its chips and
+    /// icon buttons grew past the bands holding them. A frame is what proves
+    /// the composition survives, not the constants alone.
+    #[test]
+    fn every_sheet_draws_at_a_touch_composition() {
+        for viewer in ResultViewer::every() {
+            let mut app = app_showing(viewer);
+            app.state.ui.results.viewer = viewer;
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            crate::ui::Theme::default()
+                .apply_responsive_metrics_with_target(&ctx, Some(crate::ui::tokens::TOUCH_TARGET));
+            assert!(
+                Tokens::get(&ctx).metrics.is_touch(),
+                "the fixture did not reach a touch composition"
+            );
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_024.0, 1_366.0),
+                )),
+                ..Default::default()
+            };
+            for _ in 0..2 {
+                let output = ctx.run_ui(input.clone(), |ctx| {
+                    egui::CentralPanel::default()
+                        .show(ctx, |ui| show_persistent_pane_viewer(ui, &mut app, viewer));
+                });
+                for primitive in ctx.tessellate(output.shapes, output.pixels_per_point) {
+                    let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive else {
+                        continue;
+                    };
+                    assert!(
+                        mesh.vertices
+                            .iter()
+                            .all(|vertex| vertex.pos.x.is_finite() && vertex.pos.y.is_finite()),
+                        "{viewer:?} put a non-finite vertex in the mesh at a touch composition",
+                    );
+                }
+            }
+        }
     }
 
     #[test]
