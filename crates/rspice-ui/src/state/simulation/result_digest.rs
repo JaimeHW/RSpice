@@ -521,6 +521,30 @@ fn encode_result_payload(writer: &mut ResultDigestWriter, payload: &AnalysisResu
                 writer.u8(soa_violation_severity_tag(violation.severity));
             }
         }
+        AnalysisResultPayload::TransientEvents {
+            digital_traces,
+            real_traces,
+        } => {
+            writer.u8(7);
+            writer.sequence(digital_traces.len());
+            for trace in digital_traces {
+                writer.string(&trace.node_name);
+                writer.sequence(trace.points.len());
+                for point in &trace.points {
+                    writer.f64(point.time_s);
+                    writer.u8(point.value_code);
+                }
+            }
+            writer.sequence(real_traces.len());
+            for trace in real_traces {
+                writer.string(&trace.node_name);
+                writer.sequence(trace.points.len());
+                for point in &trace.points {
+                    writer.f64(point.time_s);
+                    writer.f64(point.value);
+                }
+            }
+        }
     }
 }
 

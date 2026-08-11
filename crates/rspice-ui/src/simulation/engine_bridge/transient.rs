@@ -255,6 +255,7 @@ fn convert_transient_result(
 
     let measurements =
         super::measure::evaluate_measurements(netlist, "TRAN", &filtered_time, &waveforms, abort)?;
+    let events = collect_event_history(&tran_result, start_time, abort)?;
     Ok(SimulationResult::Transient {
         time: filtered_time,
         waveforms,
@@ -262,7 +263,74 @@ fn convert_transient_result(
         periodic_state: None,
         // The engine is not in scope here; `run_transient` fills this in.
         convergence: Default::default(),
+        events,
     })
+}
+
+/// Retain the committed event schedule, windowed to the same authored start
+/// the analog traces are windowed to.
+///
+/// Events keep their own times: an event node changes when the event solver
+/// accepted the change, which is not generally an analog timestep. A node
+/// whose whole history precedes the output window is dropped entirely rather
+/// than retained empty, so the payload never claims a node it cannot show.
+fn collect_event_history(
+    tran_result: &rspice_core::engine::TransientResult,
+    start_time: f64,
+    abort: &dyn AbortSignal,
+) -> Result<crate::simulation::results::TransientEventHistory, SimulationError> {
+    use crate::simulation::results::{
+        DigitalEventPoint, EventNodeHistory, RealEventPoint, TransientEventHistory,
+    };
+
+    let window_start = if start_time.is_finite() && start_time > 0.0 {
+        start_time
+    } else {
+        0.0
+    };
+    let retained = |time: f64| time.is_finite() && time >= window_start;
+
+    let mut digital = Vec::new();
+    for trace in &tran_result.digital_traces {
+        ensure_not_aborted(abort)?;
+        let points = trace
+            .points
+            .iter()
+            .filter(|point| retained(point.time))
+            .map(|point| DigitalEventPoint {
+                time_s: point.time,
+                value_code: point.value.event_code(),
+            })
+            .collect::<Vec<_>>();
+        if !points.is_empty() {
+            digital.push(EventNodeHistory {
+                node_name: trace.node_name.clone(),
+                points,
+            });
+        }
+    }
+
+    let mut real = Vec::new();
+    for trace in &tran_result.real_traces {
+        ensure_not_aborted(abort)?;
+        let points = trace
+            .points
+            .iter()
+            .filter(|point| retained(point.time) && point.value.is_finite())
+            .map(|point| RealEventPoint {
+                time_s: point.time,
+                value: point.value,
+            })
+            .collect::<Vec<_>>();
+        if !points.is_empty() {
+            real.push(EventNodeHistory {
+                node_name: trace.node_name.clone(),
+                points,
+            });
+        }
+    }
+
+    Ok(TransientEventHistory { digital, real })
 }
 
 #[cfg(test)]

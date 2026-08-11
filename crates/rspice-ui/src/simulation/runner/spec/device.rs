@@ -321,6 +321,17 @@ fn run_soa(
         "count",
         "s",
     );
+    for trace in &data.stress_history {
+        super::ensure_not_aborted(abort)?;
+        insert_scalar_waveform(
+            &mut waveforms,
+            crate::services::safety::soa_stress_waveform_name(&trace.device_id, trace.parameter),
+            data.time.clone(),
+            trace.values.clone(),
+            &trace.unit,
+            "s",
+        );
+    }
 
     Ok(SimulationResult::Soa {
         time: data.time,

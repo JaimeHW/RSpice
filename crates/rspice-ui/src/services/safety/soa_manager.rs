@@ -32,6 +32,35 @@ pub enum SoAParameter {
     Temp,
 }
 
+impl SoAParameter {
+    /// Stable stress-trace code for this parameter.
+    #[must_use]
+    pub const fn stress_code(self) -> &'static str {
+        match self {
+            Self::Vgs => "VGS",
+            Self::Vds => "VDS",
+            Self::Vgd => "VGD",
+            Self::Vbe => "VBE",
+            Self::Vce => "VCE",
+            Self::Vbc => "VBC",
+            Self::Id => "ID",
+            Self::Ic => "IC",
+            Self::Pdiss => "PDISS",
+            Self::Temp => "TEMP",
+        }
+    }
+}
+
+/// Canonical retained-waveform name for one rule's stress history.
+///
+/// The producer and the Results viewer both address the history by this name,
+/// so it has exactly one owner: a second spelling anywhere would silently
+/// disconnect a rule from its own trace.
+#[must_use]
+pub fn soa_stress_waveform_name(device_id: &str, parameter: SoAParameter) -> String {
+    format!("SOA_{}({device_id})", parameter.stress_code())
+}
+
 /// A specific limit definition for a device type or model
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SoALimit {
@@ -117,6 +146,11 @@ pub struct SoAManager {
     violations: Vec<SoAViolation>,
     /// Complete evaluated-rule coverage, keyed by stable device/parameter identity.
     evaluations: HashMap<(String, SoAParameter), SoAEvaluation>,
+    /// Every sampled stress magnitude per rule, in `check_point` order.
+    ///
+    /// Kept beside `evaluations` and written in the same step, so a rule's
+    /// history can never disagree with the worst point derived from it.
+    stress_history: HashMap<(String, SoAParameter), Vec<f64>>,
 }
 
 impl Default for SoAManager {
@@ -131,6 +165,7 @@ impl SoAManager {
             device_defs: HashMap::new(),
             violations: Vec::new(),
             evaluations: HashMap::new(),
+            stress_history: HashMap::new(),
         }
     }
 
@@ -203,6 +238,10 @@ impl SoAManager {
                         }
                         let verdict = rule_verdict(actual, limit.max_value);
                         let key = (device_id.clone(), limit.parameter);
+                        self.stress_history
+                            .entry(key.clone())
+                            .or_default()
+                            .push(actual);
                         let evaluation =
                             self.evaluations
                                 .entry(key)
@@ -258,6 +297,16 @@ impl SoAManager {
     /// transport these records must impose canonical ordering.
     pub fn evaluations(&self) -> impl Iterator<Item = &SoAEvaluation> {
         self.evaluations.values()
+    }
+
+    /// The sampled stress history for one evaluated rule, in sample order.
+    ///
+    /// Its length always equals that rule's `sample_count`; a rule the run
+    /// never sampled has no entry at all.
+    pub fn stress_history(&self, device_id: &str, parameter: SoAParameter) -> Option<&[f64]> {
+        self.stress_history
+            .get(&(device_id.to_owned(), parameter))
+            .map(Vec::as_slice)
     }
 }
 

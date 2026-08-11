@@ -762,6 +762,20 @@ fn payload_values_label(payload: &AnalysisResultPayload) -> String {
             evaluations.len(),
             violations.len()
         ),
+        AnalysisResultPayload::TransientEvents {
+            digital_traces,
+            real_traces,
+        } => {
+            let events: usize = digital_traces
+                .iter()
+                .map(|trace| trace.points.len())
+                .chain(real_traces.iter().map(|trace| trace.points.len()))
+                .sum();
+            format!(
+                "{} event nodes / {events} committed events",
+                digital_traces.len() + real_traces.len()
+            )
+        }
     }
 }
 

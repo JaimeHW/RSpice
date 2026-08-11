@@ -37,8 +37,9 @@ use crate::simulation::multi_run::{
 };
 use crate::simulation::reliability_engine::{ParamShift, ReliabilityResult, StressMetrics};
 use crate::simulation::results::{
-    DcOpResult, MonteCarloVariableResult, SimulationResult, TransferFunctionQuantity,
-    TransferFunctionScalar, WaveformData,
+    DcOpResult, DigitalEventPoint, EventNodeHistory, MonteCarloVariableResult, RealEventPoint,
+    SimulationResult, TransferFunctionQuantity, TransferFunctionScalar, TransientEventHistory,
+    WaveformData,
 };
 use crate::simulation::status::{SimulationProgress, SimulationStatus};
 use crate::state::{NoiseContributorRow, NoiseSummary};
@@ -837,6 +838,8 @@ pub(crate) enum WorkerSimulationResult {
         time: Vec<f64>,
         waveforms: Vec<WorkerWaveform>,
         measurements: Vec<WorkerMeasurement>,
+        #[serde(default)]
+        events: WorkerEventHistory,
     },
     /// PSS numerical evidence is transported once. Display waveforms are
     /// deterministically reconstructed from this retained orbit by the
@@ -966,10 +969,12 @@ impl WorkerSimulationResult {
                 time,
                 waveforms,
                 measurements,
+                events,
             } => sum_payload_bytes([
                 f64_payload_bytes(time.len()),
                 waveforms_payload_bytes(waveforms),
                 measurements_payload_bytes(measurements),
+                event_history_payload_bytes(events),
             ]),
             WorkerSimulationResult::Pss {
                 measurements,
@@ -1145,6 +1150,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 // rather than swallowed by `..` so adding a field to this
                 // result forces a decision here.
                 convergence: _,
+                events,
             } => match periodic_state {
                 Some(operating_point) => {
                     validate_pss_display_contract(&time, &waveforms, &operating_point)?;
@@ -1157,6 +1163,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                     time,
                     waveforms: worker_waveforms(waveforms),
                     measurements: worker_measurements(measurements),
+                    events: events.into(),
                 }),
             },
             SimulationResult::Ac {
@@ -1358,6 +1365,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 time,
                 waveforms,
                 measurements,
+                events,
             } => Self::Transient {
                 time,
                 waveforms: waveform_map(waveforms),
@@ -1365,6 +1373,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 periodic_state: None,
                 // See the outbound conversion: not carried over the wire.
                 convergence: Default::default(),
+                events: events.into(),
             },
             WorkerSimulationResult::Pss {
                 measurements,

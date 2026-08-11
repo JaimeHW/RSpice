@@ -24,18 +24,19 @@ pub const MAX_RUN_HISTORY: usize = 20;
 pub use ac_bode::ac_bode_summary_for_selection;
 pub use analysis_result::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
-    AnalysisResultSourceDomain, ComplexResultValue, DcOpResult, MonteCarloVariableMetadata,
-    NoiseContributorRow, NoiseSummary, OperatingPointAccuracyEvidence,
-    OperatingPointAnnotationEvidence, OperatingPointDeviceDetailEvidence,
-    OperatingPointHomotopyEvidence, OperatingPointInitialGuessEvidence,
-    OperatingPointNodeInitializationEvidence, OperatingPointProcessEvidence,
-    OperatingPointSaveDeviceEvidence, OperatingPointTemperatureEvidence, OperatingPointValue,
-    PeriodicNoiseOutputQuantity, ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence,
-    ReliabilityShiftEvidence, ReliabilityStressEvidence, SensitivityResultMode,
-    SensitivityResultRow, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
-    SoaViolationEvidence, SoaViolationSeverityEvidence, TransferFunctionAccuracyEvidence,
-    TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
-    TransferFunctionScalarEvidence,
+    AnalysisResultSourceDomain, ComplexResultValue, DcOpResult, DigitalEventPointEvidence,
+    DigitalEventTraceEvidence, MonteCarloVariableMetadata, NoiseContributorRow, NoiseSummary,
+    OperatingPointAccuracyEvidence, OperatingPointAnnotationEvidence,
+    OperatingPointDeviceDetailEvidence, OperatingPointHomotopyEvidence,
+    OperatingPointInitialGuessEvidence, OperatingPointNodeInitializationEvidence,
+    OperatingPointProcessEvidence, OperatingPointSaveDeviceEvidence,
+    OperatingPointTemperatureEvidence, OperatingPointValue, PeriodicNoiseOutputQuantity,
+    RealEventPointEvidence, RealEventTraceEvidence, ReliabilityCheckpointEvidence,
+    ReliabilityDeviceEvidence, ReliabilityShiftEvidence, ReliabilityStressEvidence,
+    SensitivityResultMode, SensitivityResultRow, SoaEvaluationEvidence, SoaParameterEvidence,
+    SoaRuleVerdictEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence,
+    TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
+    TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
 };
 pub use analysis_type::AnalysisType;
 pub use cross_probe::CrossProbeMapping;

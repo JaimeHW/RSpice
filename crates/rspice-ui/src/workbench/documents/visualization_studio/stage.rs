@@ -451,7 +451,8 @@ pub(super) fn retained_pole_zero_payload(
         | AnalysisResultPayload::TransferFunction { .. }
         | AnalysisResultPayload::ScalarMeasurements { .. }
         | AnalysisResultPayload::Reliability { .. }
-        | AnalysisResultPayload::Soa { .. } => None,
+        | AnalysisResultPayload::Soa { .. }
+        | AnalysisResultPayload::TransientEvents { .. } => None,
     }
 }
 
@@ -476,7 +477,8 @@ pub(super) fn retained_sensitivity_payload(
         | AnalysisResultPayload::TransferFunction { .. }
         | AnalysisResultPayload::ScalarMeasurements { .. }
         | AnalysisResultPayload::Reliability { .. }
-        | AnalysisResultPayload::Soa { .. } => None,
+        | AnalysisResultPayload::Soa { .. }
+        | AnalysisResultPayload::TransientEvents { .. } => None,
     }
 }
 

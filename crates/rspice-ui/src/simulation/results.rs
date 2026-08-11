@@ -46,6 +46,48 @@ impl TransferFunctionScalar {
         }
     }
 }
+/// One committed event on an XSPICE digital node.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DigitalEventPoint {
+    /// Event time in seconds.
+    pub time_s: f64,
+    /// XSPICE 12-state code, produced by `DigitalValue::event_code`.
+    pub value_code: u8,
+}
+
+/// One committed event on an XSPICE real-valued node.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RealEventPoint {
+    /// Event time in seconds.
+    pub time_s: f64,
+    pub value: f64,
+}
+
+/// The committed event history of one node.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EventNodeHistory<P> {
+    pub node_name: String,
+    pub points: Vec<P>,
+}
+
+/// Every event node a transient run committed.
+///
+/// Empty for the overwhelming majority of decks, which have no event nodes at
+/// all — hence `is_empty`, so callers can skip the whole payload rather than
+/// retain an empty one.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TransientEventHistory {
+    pub digital: Vec<EventNodeHistory<DigitalEventPoint>>,
+    pub real: Vec<EventNodeHistory<RealEventPoint>>,
+}
+
+impl TransientEventHistory {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.digital.is_empty() && self.real.is_empty()
+    }
+}
+
 //=============================================================================
 // Simulation Result Container
 //=============================================================================
@@ -86,6 +128,12 @@ pub enum SimulationResult {
         /// point is a sample the solver could not converge and kept anyway,
         /// so a curve that looks smooth can still be wrong there.
         convergence: rspice_core::diagnostics::ConvergenceQuality,
+        /// Committed XSPICE event histories, when the deck has event nodes.
+        ///
+        /// Events keep their own sparse schedule instead of being resampled
+        /// onto `time`: the instant a digital node changed is the datum, and
+        /// the analog grid would only approximate it.
+        events: TransientEventHistory,
     },
 
     /// AC analysis results

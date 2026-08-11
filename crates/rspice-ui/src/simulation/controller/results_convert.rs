@@ -13,6 +13,61 @@ use crate::state::{
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Retain a transient run's committed event schedule as result evidence.
+///
+/// Nodes are ordered by name so the payload — and therefore the result
+/// digest derived from it — is identical for identical runs regardless of the
+/// order the engine happened to register event nodes in.
+fn transient_events_payload(
+    events: crate::simulation::results::TransientEventHistory,
+) -> Option<AnalysisResultPayload> {
+    if events.is_empty() {
+        return None;
+    }
+    let mut digital_traces = events
+        .digital
+        .into_iter()
+        .map(|trace| crate::state::DigitalEventTraceEvidence {
+            node_name: trace.node_name,
+            points: trace
+                .points
+                .into_iter()
+                .map(|point| crate::state::DigitalEventPointEvidence {
+                    time_s: point.time_s,
+                    value_code: point.value_code,
+                })
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    digital_traces.sort_by(|left, right| left.node_name.cmp(&right.node_name));
+    let mut real_traces = events
+        .real
+        .into_iter()
+        .map(|trace| crate::state::RealEventTraceEvidence {
+            node_name: trace.node_name,
+            points: trace
+                .points
+                .into_iter()
+                .map(|point| crate::state::RealEventPointEvidence {
+                    time_s: point.time_s,
+                    value: point.value,
+                })
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    real_traces.sort_by(|left, right| left.node_name.cmp(&right.node_name));
+    let payload = AnalysisResultPayload::TransientEvents {
+        digital_traces,
+        real_traces,
+    };
+    // A history the validator would reject is retained as nothing at all: a
+    // viewer must never have to decide whether its own evidence is usable.
+    payload
+        .validate_for(crate::state::AnalysisType::Transient)
+        .is_ok()
+        .then_some(payload)
+}
+
 /// Frequencies, output noise, optional input noise, and per-source
 /// contributors, all in the same stable order.
 type OrderedNoiseSeries = (
@@ -148,14 +203,24 @@ impl SimulationController {
                 time,
                 waveforms,
                 measurements,
+                events,
                 ..
-            } => AnalysisResult::new(1, analysis_type, label.to_string())
-                .with_waveforms(self.build_sorted_waveforms_with_shared_x_owned(
-                    time,
-                    waveforms,
-                    |name, waveform| (name, waveform.y_values),
-                ))
-                .with_measurements(measurements),
+            } => {
+                let result = AnalysisResult::new(1, analysis_type, label.to_string())
+                    .with_waveforms(self.build_sorted_waveforms_with_shared_x_owned(
+                        time,
+                        waveforms,
+                        |name, waveform| (name, waveform.y_values),
+                    ))
+                    .with_measurements(measurements);
+                // Only a deck with event nodes carries a payload. Attaching an
+                // empty one would make every transient claim event evidence it
+                // does not have, and the payload validator rejects it anyway.
+                match transient_events_payload(events) {
+                    Some(payload) => result.with_result_payload(payload),
+                    None => result,
+                }
+            }
 
             SimulationResult::Ac {
                 frequencies,

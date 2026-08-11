@@ -419,6 +419,45 @@ fn prepare_active_typed_result_csv(state: &AppState) -> Option<PreparedTypedResu
                 ),
             })
         }
+        AnalysisResultPayload::TransientEvents {
+            digital_traces,
+            real_traces,
+        } => {
+            let mut contents = String::from("node,domain,time_s,value_code,value\n");
+            for trace in digital_traces {
+                for point in &trace.points {
+                    contents.push_str(&format!(
+                        "{},digital,{:.17e},{},\n",
+                        csv_text(&trace.node_name),
+                        point.time_s,
+                        point.value_code,
+                    ));
+                }
+            }
+            for trace in real_traces {
+                for point in &trace.points {
+                    contents.push_str(&format!(
+                        "{},real,{:.17e},,{:.17e}\n",
+                        csv_text(&trace.node_name),
+                        point.time_s,
+                        point.value,
+                    ));
+                }
+            }
+            let events: usize = digital_traces
+                .iter()
+                .map(|trace| trace.points.len())
+                .chain(real_traces.iter().map(|trace| trace.points.len()))
+                .sum();
+            Some(PreparedTypedResultCsv {
+                default_name: "event-history.csv",
+                contents,
+                detail: format!(
+                    "{} event nodes, {events} committed events",
+                    digital_traces.len() + real_traces.len()
+                ),
+            })
+        }
     }
 }
 

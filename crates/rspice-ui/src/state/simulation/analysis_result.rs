@@ -279,6 +279,43 @@ pub struct ReliabilityDeviceEvidence {
     pub checkpoints: Vec<ReliabilityCheckpointEvidence>,
 }
 
+/// One committed digital event on an XSPICE event node.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DigitalEventPointEvidence {
+    pub time_s: f64,
+    /// XSPICE 12-state event code, 0..=12. The producer is
+    /// `rspice_core::xspice::DigitalValue::event_code`.
+    pub value_code: u8,
+}
+
+/// The committed event history of one XSPICE digital node.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DigitalEventTraceEvidence {
+    pub node_name: String,
+    pub points: Vec<DigitalEventPointEvidence>,
+}
+
+/// One committed real-valued event on an XSPICE event node.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RealEventPointEvidence {
+    pub time_s: f64,
+    pub value: f64,
+}
+
+/// The committed event history of one XSPICE real-valued node.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RealEventTraceEvidence {
+    pub node_name: String,
+    pub points: Vec<RealEventPointEvidence>,
+}
+
+/// The highest XSPICE event code a digital event may carry.
+pub(crate) const MAX_DIGITAL_EVENT_CODE: u8 = 12;
+
 /// Electrical quantity governed by a retained safe-operating-area rule.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
@@ -318,6 +355,21 @@ pub enum SoaRuleVerdictEvidence {
     Warning,
     Violation,
     Critical,
+}
+
+impl SoaRuleVerdictEvidence {
+    /// How this verdict is named wherever it is reported — the SOA sheet, the
+    /// component inspector, and the printed evidence table all read it here so
+    /// a rule cannot be called one thing on screen and another on paper.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Pass => "PASS",
+            Self::Warning => "WARNING",
+            Self::Violation => "VIOLATION",
+            Self::Critical => "CRITICAL",
+        }
+    }
 }
 
 /// Complete worst-point and sampling evidence for one SOA rule.
@@ -593,6 +645,15 @@ pub enum AnalysisResultPayload {
     Soa {
         evaluations: Vec<SoaEvaluationEvidence>,
         violations: Vec<SoaViolationEvidence>,
+    },
+    /// Committed XSPICE event histories from a transient run.
+    ///
+    /// Events are the sparse schedule the event solver accepted, not the
+    /// analog timestep grid, so they are retained as their own evidence
+    /// rather than resampled into waveforms.
+    TransientEvents {
+        digital_traces: Vec<DigitalEventTraceEvidence>,
+        real_traces: Vec<RealEventTraceEvidence>,
     },
 }
 
@@ -1012,6 +1073,58 @@ impl AnalysisResultPayload {
                     previous = Some(violation);
                 }
             }
+            Self::TransientEvents {
+                digital_traces,
+                real_traces,
+            } => {
+                if analysis_type != AnalysisType::Transient {
+                    return Err(format!(
+                        "event payload does not match analysis type {analysis_type:?}"
+                    ));
+                }
+                if digital_traces.is_empty() && real_traces.is_empty() {
+                    return Err("event payload contains no retained event history".to_owned());
+                }
+                let mut seen = std::collections::BTreeSet::new();
+                for trace in digital_traces {
+                    require_non_empty(&trace.node_name, "event node identity")?;
+                    if !seen.insert(trace.node_name.as_str()) {
+                        return Err(format!(
+                            "event node '{}' is retained more than once",
+                            trace.node_name
+                        ));
+                    }
+                    let times = trace.points.iter().map(|point| point.time_s);
+                    validate_event_times(&trace.node_name, times)?;
+                    if trace
+                        .points
+                        .iter()
+                        .any(|point| point.value_code > MAX_DIGITAL_EVENT_CODE)
+                    {
+                        return Err(format!(
+                            "event node '{}' has a value outside the XSPICE 12-state encoding",
+                            trace.node_name
+                        ));
+                    }
+                }
+                for trace in real_traces {
+                    require_non_empty(&trace.node_name, "event node identity")?;
+                    if !seen.insert(trace.node_name.as_str()) {
+                        return Err(format!(
+                            "event node '{}' is retained more than once",
+                            trace.node_name
+                        ));
+                    }
+                    let times = trace.points.iter().map(|point| point.time_s);
+                    validate_event_times(&trace.node_name, times)?;
+                    if trace.points.iter().any(|point| !point.value.is_finite()) {
+                        return Err(format!(
+                            "event node '{}' has a non-finite value",
+                            trace.node_name
+                        ));
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -1029,8 +1142,42 @@ impl AnalysisResultPayload {
             } => gain.is_some() || input_resistance.is_some() || output_resistance.is_some(),
             Self::Reliability { devices } => !devices.is_empty(),
             Self::Soa { evaluations, .. } => !evaluations.is_empty(),
+            Self::TransientEvents {
+                digital_traces,
+                real_traces,
+            } => !digital_traces.is_empty() || !real_traces.is_empty(),
         }
     }
+}
+
+/// An event history is a schedule: nonnegative, finite, and non-decreasing.
+///
+/// Non-decreasing, not strictly increasing. An event-driven solver settles a
+/// node through several delta cycles at one physical time, and every one of
+/// those transitions is a committed event with its own value. Their order is
+/// the order they were committed in, which is the order they are stored in —
+/// so a repeated timestamp is evidence, not corruption.
+fn validate_event_times(node_name: &str, times: impl Iterator<Item = f64>) -> Result<(), String> {
+    let mut previous: Option<f64> = None;
+    let mut count = 0usize;
+    for time in times {
+        count += 1;
+        if !time.is_finite() || time < 0.0 {
+            return Err(format!(
+                "event node '{node_name}' has an invalid event time"
+            ));
+        }
+        if previous.is_some_and(|previous| previous > time) {
+            return Err(format!(
+                "event node '{node_name}' events must not move backwards in time"
+            ));
+        }
+        previous = Some(time);
+    }
+    if count == 0 {
+        return Err(format!("event node '{node_name}' retained no events"));
+    }
+    Ok(())
 }
 
 fn validate_transfer_function_output(

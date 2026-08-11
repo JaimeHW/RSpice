@@ -720,6 +720,11 @@ pub(crate) enum WorkerSimulationResultTransport {
         time: WorkerF64Series,
         waveforms: Vec<WorkerWaveformTransport>,
         measurements: Vec<WorkerMeasurement>,
+        /// Event histories ride the JSON envelope rather than the binary
+        /// buffer channel: they are short, and their times are the datum, not
+        /// a resampling of `time`.
+        #[serde(default)]
+        events: WorkerEventHistory,
     },
     Pss {
         measurements: Vec<WorkerMeasurement>,
@@ -856,10 +861,12 @@ impl WorkerSimulationResultTransport {
                 time,
                 waveforms,
                 measurements,
+                events,
             } => Self::Transient {
                 time: WorkerF64Series::from_vec(time, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
                 measurements,
+                events,
             },
             WorkerSimulationResult::Pss {
                 measurements,
@@ -1021,10 +1028,12 @@ impl WorkerSimulationResultTransport {
                 time,
                 waveforms,
                 measurements,
+                events,
             } => Ok(WorkerSimulationResult::Transient {
                 time: time.into_vec(buffers)?,
                 waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
                 measurements,
+                events,
             }),
             Self::Pss {
                 measurements,

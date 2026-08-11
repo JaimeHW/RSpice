@@ -264,6 +264,7 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
         measurements: Vec::new(),
         periodic_state: None,
         convergence: Default::default(),
+        events: Default::default(),
     };
     let artifact = ExecutionArtifactEnvelope::from_transient_result(
         snapshot_digest,
@@ -584,6 +585,28 @@ fn transient_worker_result_round_trips_through_json() {
             tolerance: Some(1e-12),
             event_axis: Some(1e-9),
         }],
+        events: WorkerEventHistory {
+            digital: vec![WorkerDigitalEventTrace {
+                node_name: "clk".to_string(),
+                points: vec![
+                    WorkerDigitalEventPoint {
+                        time_s: 0.0,
+                        value_code: 0,
+                    },
+                    WorkerDigitalEventPoint {
+                        time_s: 5e-10,
+                        value_code: 1,
+                    },
+                ],
+            }],
+            real: vec![WorkerRealEventTrace {
+                node_name: "level".to_string(),
+                points: vec![WorkerRealEventPoint {
+                    time_s: 2.5e-10,
+                    value: 0.75,
+                }],
+            }],
+        },
     };
 
     let encoded = serde_json::to_string(&result).expect("result serializes");
@@ -591,6 +614,54 @@ fn transient_worker_result_round_trips_through_json() {
         serde_json::from_str(&encoded).expect("result deserializes");
 
     assert_eq!(decoded, result);
+}
+
+/// A worker built before event transport omits the field entirely. It must
+/// still decode — reporting no events, which is the truth for that worker —
+/// rather than failing the whole result.
+#[test]
+fn a_transient_result_without_an_events_field_still_decodes() {
+    let encoded = r#"{"Transient":{"time":[0.0],"waveforms":[],"measurements":[]}}"#;
+    let decoded: WorkerSimulationResult =
+        serde_json::from_str(encoded).expect("legacy result deserializes");
+    let WorkerSimulationResult::Transient { events, .. } = decoded else {
+        panic!("expected a transient result");
+    };
+    assert_eq!(events, WorkerEventHistory::default());
+}
+
+/// The event schedule is the datum. A round trip that quietly dropped it
+/// would leave the browser build with no event history at all.
+#[test]
+fn event_histories_survive_the_worker_edge_in_both_directions() {
+    let source = SimulationResult::Transient {
+        time: vec![0.0, 1e-9],
+        waveforms: HashMap::new(),
+        measurements: Vec::new(),
+        periodic_state: None,
+        convergence: Default::default(),
+        events: crate::simulation::results::TransientEventHistory {
+            digital: vec![crate::simulation::results::EventNodeHistory {
+                node_name: "clk".to_owned(),
+                points: vec![crate::simulation::results::DigitalEventPoint {
+                    time_s: 5e-10,
+                    value_code: 1,
+                }],
+            }],
+            real: Vec::new(),
+        },
+    };
+    let wire = WorkerSimulationResult::try_from(source.clone()).expect("transient converts");
+    let SimulationResult::Transient { events, .. } = SimulationResult::from(wire) else {
+        panic!("expected a transient result");
+    };
+    let SimulationResult::Transient {
+        events: expected, ..
+    } = source
+    else {
+        unreachable!("constructed as a transient result");
+    };
+    assert_eq!(events, expected);
 }
 
 #[test]
@@ -668,6 +739,7 @@ fn worker_result_payload_estimate_counts_high_volume_arrays() {
             y_imag: None,
         }],
         measurements: Vec::new(),
+        events: WorkerEventHistory::default(),
     };
     assert_eq!(transient.estimated_numeric_payload_bytes(), 48);
 
@@ -709,6 +781,7 @@ fn worker_response_rejects_payloads_that_exceed_transport_limit() {
         measurements: Vec::new(),
         periodic_state: None,
         convergence: Default::default(),
+        events: Default::default(),
     };
 
     let accepted = worker_outcome_from_result(Ok(result.clone()), 48);
@@ -736,6 +809,7 @@ fn worker_transfer_response_does_not_apply_legacy_clone_budget() {
         measurements: Vec::new(),
         periodic_state: None,
         convergence: Default::default(),
+        events: Default::default(),
     };
 
     let legacy = worker_outcome_from_result(Ok(result.clone()), 47);
@@ -775,6 +849,7 @@ fn worker_transport_extracts_transient_waveform_buffers() {
                 y_imag: None,
             }],
             measurements: Vec::new(),
+            events: WorkerEventHistory::default(),
         })),
     };
 
@@ -899,6 +974,7 @@ fn worker_transport_rejects_missing_or_mismatched_buffers() {
                 y_imag: None,
             }],
             measurements: Vec::new(),
+            events: WorkerEventHistory::default(),
         })),
     };
 
@@ -935,6 +1011,7 @@ fn worker_transport_validates_complex_waveform_shape() {
                     y_imag: Some(WorkerF64Series::Buffer { buffer: 3, len: 1 }),
                 }],
                 measurements: Vec::new(),
+                events: WorkerEventHistory::default(),
             }),
         },
         buffers: vec![vec![0.0, 1.0], vec![0.0, 1.0], vec![0.2, 0.4], vec![0.1]],
@@ -959,6 +1036,7 @@ fn worker_transport_validates_complex_waveform_shape() {
                     y_imag: Some(WorkerF64Series::Buffer { buffer: 3, len: 2 }),
                 }],
                 measurements: Vec::new(),
+                events: WorkerEventHistory::default(),
             }),
         },
         buffers: vec![
@@ -1741,6 +1819,7 @@ fn worker_result_round_trip() {
         )],
         periodic_state: None,
         convergence: Default::default(),
+        events: Default::default(),
     };
     let transient = round_trip_result(transient);
     match transient {

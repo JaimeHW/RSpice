@@ -306,6 +306,35 @@ impl DigitalValue {
         self.state.logic_level()
     }
 
+    /// Encode this value as the XSPICE event code an event history records.
+    ///
+    /// Codes 0..=11 are the level (0, 1, X) within a strength band, in the
+    /// order strong, resistive, high-Z, undetermined; code 12 is the
+    /// disconnected state itself. A state that already names its own band
+    /// (`ZeroR`, `OneZ`, …) is authoritative — `strength` decides only for the
+    /// three unqualified levels, which is the one case it adds information.
+    pub fn event_code(&self) -> u8 {
+        let (level, band) = match self.state {
+            DigitalState::Zero => (0, self.strength),
+            DigitalState::One => (1, self.strength),
+            DigitalState::Unknown => (2, self.strength),
+            DigitalState::ZeroR => (0, DigitalStrength::Resistive),
+            DigitalState::OneR => (1, DigitalStrength::Resistive),
+            DigitalState::UnknownR => (2, DigitalStrength::Resistive),
+            DigitalState::ZeroZ => (0, DigitalStrength::HighZ),
+            DigitalState::OneZ => (1, DigitalStrength::HighZ),
+            DigitalState::UnknownZ => (2, DigitalStrength::HighZ),
+            DigitalState::HighZ => return 12,
+        };
+        let offset = match band {
+            DigitalStrength::Strong => 0,
+            DigitalStrength::Resistive => 3,
+            DigitalStrength::HighZ => 6,
+            DigitalStrength::Undetermined => 9,
+        };
+        level + offset
+    }
+
     /// Invert the value
     pub fn invert(&self) -> Self {
         Self::new(self.state.invert(), self.strength)

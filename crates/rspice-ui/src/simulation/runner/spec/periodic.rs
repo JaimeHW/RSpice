@@ -229,6 +229,9 @@ fn run_pss(
         // A shooting-PSS result is not produced by the transient driver, so
         // the driver's convergence metrics would not describe it.
         convergence: Default::default(),
+        // The periodic solver reports a converged steady state, not the
+        // event schedule that reached it.
+        events: Default::default(),
     })
 }
 
@@ -387,6 +390,7 @@ fn run_envelope(
         periodic_state: None,
         // As above: this waveform comes from the periodic solver.
         convergence: Default::default(),
+        events: Default::default(),
     })
 }
 

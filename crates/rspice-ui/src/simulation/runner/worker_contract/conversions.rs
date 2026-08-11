@@ -515,6 +515,121 @@ impl From<WorkerViolationSeverity> for ViolationSeverity {
     }
 }
 
+/// One committed digital event, as it crosses the worker edge.
+///
+/// Points are transported whole rather than as parallel time/value arrays:
+/// an event history is short enough that the buffer split buys nothing, and
+/// paired arrays can arrive with different lengths.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerDigitalEventPoint {
+    pub time_s: f64,
+    pub value_code: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerRealEventPoint {
+    pub time_s: f64,
+    pub value: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerDigitalEventTrace {
+    pub node_name: String,
+    pub points: Vec<WorkerDigitalEventPoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerRealEventTrace {
+    pub node_name: String,
+    pub points: Vec<WorkerRealEventPoint>,
+}
+
+/// Every event node a transient run committed, on the wire.
+///
+/// Both fields default so a worker built before event transport still
+/// deserializes — it simply reports no events, which is the truth for it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerEventHistory {
+    #[serde(default)]
+    pub digital: Vec<WorkerDigitalEventTrace>,
+    #[serde(default)]
+    pub real: Vec<WorkerRealEventTrace>,
+}
+
+impl From<TransientEventHistory> for WorkerEventHistory {
+    fn from(value: TransientEventHistory) -> Self {
+        Self {
+            digital: value
+                .digital
+                .into_iter()
+                .map(|trace| WorkerDigitalEventTrace {
+                    node_name: trace.node_name,
+                    points: trace
+                        .points
+                        .into_iter()
+                        .map(|point| WorkerDigitalEventPoint {
+                            time_s: point.time_s,
+                            value_code: point.value_code,
+                        })
+                        .collect(),
+                })
+                .collect(),
+            real: value
+                .real
+                .into_iter()
+                .map(|trace| WorkerRealEventTrace {
+                    node_name: trace.node_name,
+                    points: trace
+                        .points
+                        .into_iter()
+                        .map(|point| WorkerRealEventPoint {
+                            time_s: point.time_s,
+                            value: point.value,
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<WorkerEventHistory> for TransientEventHistory {
+    fn from(value: WorkerEventHistory) -> Self {
+        Self {
+            digital: value
+                .digital
+                .into_iter()
+                .map(|trace| EventNodeHistory {
+                    node_name: trace.node_name,
+                    points: trace
+                        .points
+                        .into_iter()
+                        .map(|point| DigitalEventPoint {
+                            time_s: point.time_s,
+                            value_code: point.value_code,
+                        })
+                        .collect(),
+                })
+                .collect(),
+            real: value
+                .real
+                .into_iter()
+                .map(|trace| EventNodeHistory {
+                    node_name: trace.node_name,
+                    points: trace
+                        .points
+                        .into_iter()
+                        .map(|point| RealEventPoint {
+                            time_s: point.time_s,
+                            value: point.value,
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerWaveform {
     pub name: String,
@@ -1163,6 +1278,20 @@ pub(super) fn complex_pair_payload_bytes(len: usize) -> usize {
 }
 
 #[cfg(test)]
+pub(super) fn event_history_payload_bytes(events: &WorkerEventHistory) -> usize {
+    let digital = events
+        .digital
+        .iter()
+        .map(|trace| f64_payload_bytes(trace.points.len()).saturating_add(trace.points.len()))
+        .fold(0usize, |total, bytes| total.saturating_add(bytes));
+    events
+        .real
+        .iter()
+        .map(|trace| f64_payload_bytes(trace.points.len().saturating_mul(2)))
+        .fold(digital, |total, bytes| total.saturating_add(bytes))
+}
+
+#[cfg(test)]
 pub(super) fn waveforms_payload_bytes(waveforms: &[WorkerWaveform]) -> usize {
     waveforms
         .iter()
@@ -1286,6 +1415,7 @@ pub(super) fn simulation_result_from_worker_pss(
         measurements: measure_results(measurements),
         periodic_state: Some(std::sync::Arc::new(operating_point)),
         convergence: Default::default(),
+        events: TransientEventHistory::default(),
     }
 }
 

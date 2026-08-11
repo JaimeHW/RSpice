@@ -92,6 +92,19 @@ impl SoaRunConfig {
     }
 }
 
+/// The complete sampled stress magnitude behind one evaluated rule.
+#[derive(Debug, Clone)]
+pub struct SoaStressTrace {
+    /// Device the rule constrains.
+    pub device_id: String,
+    /// Stressed parameter.
+    pub parameter: SoAParameter,
+    /// One magnitude per transient sample, aligned with [`SoaData::time`].
+    pub values: Vec<Value>,
+    /// Unit the rule is expressed in.
+    pub unit: String,
+}
+
 /// SOA analysis output.
 #[derive(Debug, Clone)]
 pub struct SoaData {
@@ -103,6 +116,11 @@ pub struct SoaData {
     pub violations: Vec<SoAViolation>,
     /// Complete worst-point evidence for every evaluated device rule.
     pub evaluations: Vec<SoAEvaluation>,
+    /// Retained stress history per rule, in `evaluations` order.
+    ///
+    /// A rule appears here only when it was sampled at every retained time
+    /// point, so a trace can always be drawn against the full time axis.
+    pub stress_history: Vec<SoaStressTrace>,
 }
 
 /// Run SOA analysis with default configuration and no source path.
@@ -234,12 +252,31 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
             .cmp(&right.device_id)
             .then_with(|| left.parameter.cmp(&right.parameter))
     });
+    let sample_count = transient.time.len();
+    let mut stress_history = Vec::with_capacity(evaluations.len());
+    for (evaluation_index, evaluation) in evaluations.iter().enumerate() {
+        poll_periodically(abort, evaluation_index)?;
+        let Some(values) = manager.stress_history(&evaluation.device_id, evaluation.parameter)
+        else {
+            continue;
+        };
+        if values.len() != sample_count {
+            continue;
+        }
+        stress_history.push(SoaStressTrace {
+            device_id: evaluation.device_id.clone(),
+            parameter: evaluation.parameter,
+            values: values.to_vec(),
+            unit: evaluation.unit.clone(),
+        });
+    }
     ensure_not_aborted(abort)?;
     Ok(SoaData {
         time: transient.time,
         violation_count,
         violations,
         evaluations,
+        stress_history,
     })
 }
 
