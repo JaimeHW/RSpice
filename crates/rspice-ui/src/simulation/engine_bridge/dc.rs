@@ -7,7 +7,7 @@ use rspice_core::abort_signal::AbortSignal;
 use super::{EngineBridge, ensure_not_aborted};
 use crate::simulation::config::DcSweepConfig;
 use crate::simulation::dialog::{
-    OpAccuracy, OpConfig, OpHomotopy, OpInitialGuess, OpNodeInitialization, OpSaveDevice,
+    OpConfig, OpHomotopy, OpInitialGuess, OpNodeInitialization, OpSaveDevice,
 };
 use crate::simulation::results::{DcOpResult, SimulationResult, WaveformData};
 use crate::simulation::runner::SimulationError;
@@ -265,33 +265,8 @@ fn configured_op_engine(
     netlist: &rspice_core::Netlist,
     config: &OpConfig,
 ) -> Result<rspice_core::Engine, SimulationError> {
-    let (preset, reltol, abstol, max_iterations) = match config.accuracy {
-        OpAccuracy::Fast => (rspice_core::ConvergencePreset::Fast, None, None, Some(50)),
-        OpAccuracy::Balanced => (
-            rspice_core::ConvergencePreset::Default,
-            None,
-            None,
-            Some(150),
-        ),
-        OpAccuracy::Accurate => (
-            rspice_core::ConvergencePreset::Default,
-            Some(1.0e-8),
-            Some(1.0e-14),
-            Some(250),
-        ),
-        OpAccuracy::Robust => (
-            rspice_core::ConvergencePreset::Robust,
-            None,
-            None,
-            Some(500),
-        ),
-    };
     let overrides = rspice_core::SimulationConfigOverrides {
         temperature_kelvin: Some(config.temperature_celsius + 273.15),
-        convergence_preset: Some(preset),
-        reltol,
-        abstol,
-        max_iterations,
         ..Default::default()
     };
     let mut resolved = rspice_core::resolve_simulation_config(
@@ -299,6 +274,9 @@ fn configured_op_engine(
         Some(&netlist.options),
         &overrides,
     );
+    // The accuracy tier applies last, on top of the fully resolved policy, so
+    // "only tightens" is measured against what the reader would otherwise get.
+    config.accuracy.solver_policy().apply(&mut resolved);
     let convergence = &mut resolved.convergence_config;
     match config.homotopy {
         OpHomotopy::Adaptive => {}

@@ -3,6 +3,7 @@
 //! Commercial-grade simulation execution and configuration.
 //! Manages the complete simulation workflow from netlist generation to result display.
 
+pub(crate) mod accuracy;
 pub(crate) mod automation;
 pub(crate) mod config;
 pub(crate) mod controller;

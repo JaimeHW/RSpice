@@ -32,29 +32,10 @@ impl XfNormalization {
 }
 
 /// Numerical policy for the operating-point and zero-hertz linear solves.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum XfAccuracy {
-    Fast,
-    #[default]
-    Balanced,
-    Accurate,
-    Robust,
-}
-
-impl XfAccuracy {
-    pub const ALL: [Self; 4] = [Self::Fast, Self::Balanced, Self::Accurate, Self::Robust];
-
-    /// The tier's name, as the analysis form offers it and the solver page's
-    /// resolved-policy ledger reports it.
-    pub const fn display_name(self) -> &'static str {
-        match self {
-            Self::Fast => "Fast",
-            Self::Balanced => "Balanced",
-            Self::Accurate => "Accurate",
-            Self::Robust => "Robust",
-        }
-    }
-}
+///
+/// The same tier as every other analysis offers; see
+/// [`crate::simulation::accuracy`] for what a tier name resolves to.
+pub type XfAccuracy = crate::simulation::accuracy::AnalysisAccuracy;
 
 /// Exact transfer-function execution configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]

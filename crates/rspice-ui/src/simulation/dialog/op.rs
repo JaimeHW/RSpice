@@ -207,15 +207,10 @@ impl OpSaveDevice {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OpAccuracy {
-    Fast,
-    #[default]
-    Balanced,
-    Accurate,
-    Robust,
-}
+/// The solver-effort tier, shared with every other analysis that offers one.
+///
+/// See [`crate::simulation::accuracy`] for the contract a tier name carries.
+pub type OpAccuracy = crate::simulation::accuracy::AnalysisAccuracy;
 
 /// Complete, identity-bound MNA state retained by an earlier accepted OP.
 /// Node order excludes ground and is followed by branch order in `solution`,
@@ -307,21 +302,6 @@ impl OpRunPointContext {
     #[must_use]
     pub const fn is_final(self) -> bool {
         self.count > 0 && self.index + 1 == self.count
-    }
-}
-
-impl OpAccuracy {
-    pub const ALL: [Self; 4] = [Self::Fast, Self::Balanced, Self::Accurate, Self::Robust];
-
-    /// The tier's name, as the analysis form offers it and the solver page's
-    /// resolved-policy ledger reports it.
-    pub const fn display_name(self) -> &'static str {
-        match self {
-            Self::Fast => "Fast",
-            Self::Balanced => "Balanced",
-            Self::Accurate => "Accurate",
-            Self::Robust => "Robust",
-        }
     }
 }
 

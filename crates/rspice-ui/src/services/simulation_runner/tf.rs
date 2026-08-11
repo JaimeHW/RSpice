@@ -13,7 +13,7 @@ use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
 use rspice_core::abort_signal::NoAbort;
-use rspice_core::engine::{DampingStrategy, Engine, SimulationConfig};
+use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::ElementKind;
 use std::path::Path;
 
@@ -30,18 +30,11 @@ pub enum TfNormalization {
 }
 
 /// Numerical policy applied after source-authored `.OPTIONS` are resolved.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum TfAccuracy {
-    /// Direct Newton, 25 iterations, 1e-5 absolute voltage tolerance.
-    Fast,
-    /// Preserve the resolved project/netlist policy.
-    #[default]
-    Balanced,
-    /// At least 100 iterations with 1e-9/1e-5 absolute/relative tolerances.
-    Accurate,
-    /// At least 200 iterations and every nonlinear continuation aid enabled.
-    Robust,
-}
+///
+/// This runner used to carry its own four-tier enum and its own resolution of
+/// it, which disagreed with the operating point's on every tier. Both now name
+/// the one contract in [`crate::simulation::accuracy`].
+pub type TfAccuracy = crate::simulation::accuracy::AnalysisAccuracy;
 
 /// Physical quantity at one side of the transfer derivative.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -325,51 +318,8 @@ fn infer_tf_run_config(
 }
 
 fn apply_accuracy_policy(mut config: SimulationConfig, accuracy: TfAccuracy) -> SimulationConfig {
-    match accuracy {
-        TfAccuracy::Fast => {
-            config.tolerance = 1.0e-5;
-            config.max_iterations = 25;
-            config.convergence_config.gmin_stepping = false;
-            config.convergence_config.source_stepping = false;
-            config.convergence_config.pseudo_transient = false;
-            config.convergence_config.arc_length = false;
-            config.convergence_config.damping_strategy = DampingStrategy::None;
-            config.convergence_config.voltage_reltol = 1.0e-3;
-            config.convergence_config.voltage_abstol = 1.0e-5;
-            config.convergence_config.current_abstol = 1.0e-10;
-            config.convergence_config.residual_reltol = 1.0e-3;
-        }
-        TfAccuracy::Balanced => {}
-        TfAccuracy::Accurate => {
-            config.tolerance = config.tolerance.min(1.0e-9);
-            config.max_iterations = config.max_iterations.max(100);
-            config.convergence_config.voltage_reltol =
-                config.convergence_config.voltage_reltol.min(1.0e-5);
-            config.convergence_config.voltage_abstol =
-                positive_minimum(config.convergence_config.voltage_abstol, 1.0e-9);
-            config.convergence_config.current_abstol =
-                positive_minimum(config.convergence_config.current_abstol, 1.0e-14);
-            config.convergence_config.residual_reltol =
-                config.convergence_config.residual_reltol.min(1.0e-5);
-        }
-        TfAccuracy::Robust => {
-            config.max_iterations = config.max_iterations.max(200);
-            config.convergence_config.gmin_stepping = true;
-            config.convergence_config.source_stepping = true;
-            config.convergence_config.pseudo_transient = true;
-            config.convergence_config.arc_length = true;
-            config.convergence_config.damping_strategy = DampingStrategy::Combined;
-        }
-    }
+    accuracy.solver_policy().apply(&mut config);
     config
-}
-
-fn positive_minimum(current: Value, ceiling: Value) -> Value {
-    if current > 0.0 {
-        current.min(ceiling)
-    } else {
-        ceiling
-    }
 }
 
 fn input_quantity(
@@ -902,35 +852,31 @@ VZERO out 0 0
         assert_eq!(data.gain_metadata.basis, TfGainBasis::PerSourceUnit);
     }
 
+    /// The runner resolves a tier through the one shared contract, so a tier
+    /// name here buys exactly what it buys on the operating-point form.
     #[test]
-    fn accuracy_policies_have_stable_documented_solver_contracts() {
+    fn accuracy_policies_resolve_through_the_shared_contract() {
         let mut base = SimulationConfig::default();
         base.max_iterations = 63;
+        // A reader who asked for a tighter tolerance than any tier states.
+        base.convergence_config.voltage_reltol = 1.0e-6;
 
-        let fast = apply_accuracy_policy(base.clone(), TfAccuracy::Fast);
-        assert_eq!(fast.max_iterations, 25);
-        assert_eq!(fast.tolerance, 1.0e-5);
-        assert!(!fast.convergence_config.gmin_stepping);
-        assert_eq!(
-            fast.convergence_config.damping_strategy,
-            DampingStrategy::None
-        );
+        for accuracy in TfAccuracy::ALL {
+            let policy = accuracy.solver_policy();
+            let mut expected = base.clone();
+            policy.apply(&mut expected);
+            let resolved = apply_accuracy_policy(base.clone(), accuracy);
 
-        let balanced = apply_accuracy_policy(base.clone(), TfAccuracy::Balanced);
-        assert_eq!(balanced.max_iterations, 63);
-        assert_eq!(balanced.tolerance, base.tolerance);
-
-        let accurate = apply_accuracy_policy(base.clone(), TfAccuracy::Accurate);
-        assert_eq!(accurate.max_iterations, 100);
-        assert!(accurate.tolerance <= 1.0e-9);
-        assert!(accurate.convergence_config.voltage_reltol <= 1.0e-5);
-
-        let robust = apply_accuracy_policy(base, TfAccuracy::Robust);
-        assert_eq!(robust.max_iterations, 200);
-        assert!(robust.convergence_config.arc_length);
-        assert_eq!(
-            robust.convergence_config.damping_strategy,
-            DampingStrategy::Combined
-        );
+            assert_eq!(resolved.max_iterations, policy.iteration_budget);
+            assert_eq!(
+                format!("{:?}", resolved.convergence_config),
+                format!("{:?}", expected.convergence_config),
+                "{} must resolve through the shared policy",
+                accuracy.display_name()
+            );
+            // No tier may coarsen the reader's own relative tolerance. `Fast`
+            // used to reset it to 1e-3 here and leave it alone elsewhere.
+            assert!(resolved.convergence_config.voltage_reltol <= 1.0e-6);
+        }
     }
 }
