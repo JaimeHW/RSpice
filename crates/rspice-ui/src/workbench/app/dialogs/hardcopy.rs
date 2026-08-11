@@ -22,6 +22,8 @@ mod execution;
 mod finalize;
 mod publish;
 mod render;
+#[cfg(test)]
+mod setting_effects;
 #[cfg(any(test, target_arch = "wasm32"))]
 mod worker;
 /// Resolution a raster export starts at when the setup carries none. It is a
@@ -41,6 +43,18 @@ pub(crate) enum HardcopyDialogPage {
     PrinterProperties,
     CustomPaperMargins,
     PrintMapping,
+}
+
+/// Which region a surface too narrow to hold both is showing.
+///
+/// View state: it is a property of how this hardcopy is being looked at, never
+/// of the hardcopy itself, so it stays out of the setup the workflow commits
+/// and out of the comparisons that invalidate the preview.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum HardcopyRegion {
+    #[default]
+    Setup,
+    Preview,
 }
 
 /// The one concern the main page is editing right now.
@@ -238,6 +252,10 @@ pub(crate) struct HardcopyDialogState {
     pub(crate) open: bool,
     pub(crate) page: HardcopyDialogPage,
     pub(crate) section: HardcopySection,
+    /// Which region the one-at-a-time surface is showing. Meaningless where
+    /// the setup and the page are both on screen, which is why nothing else
+    /// reads it.
+    pub(crate) region: HardcopyRegion,
     pub(crate) subflow_snapshot: Option<HardcopySubflowSnapshot>,
     pub(crate) workflow: HardcopyWorkflow,
     pub(crate) source: Option<ActiveHardcopySource>,
@@ -372,6 +390,7 @@ impl HardcopyDialogState {
             open: false,
             page: HardcopyDialogPage::Main,
             section: HardcopySection::default(),
+            region: HardcopyRegion::default(),
             subflow_snapshot: None,
             workflow: HardcopyWorkflow::PageSetup,
             source: None,
@@ -466,6 +485,7 @@ impl HardcopyDialogState {
         draft.open = true;
         draft.page = HardcopyDialogPage::Main;
         draft.section = HardcopySection::default();
+        draft.region = HardcopyRegion::default();
         draft.subflow_snapshot = None;
         draft.workflow = workflow;
         draft.source = Some(source);
@@ -592,19 +612,34 @@ impl HardcopyDialogState {
         self.error = None;
     }
 
+    /// The scope the print-mapping page will commit: the selected kind
+    /// carrying the name currently typed. The name is not normalised, because
+    /// a project catalog keys its presets by exactly this text.
+    pub(crate) fn edited_mapping_scope(&self) -> PrintMappingSaveScope {
+        match &self.mapping_scope_draft {
+            PrintMappingSaveScope::Document => PrintMappingSaveScope::Document,
+            PrintMappingSaveScope::ProjectPrintSet(_) => {
+                PrintMappingSaveScope::ProjectPrintSet(self.mapping_name_draft.clone())
+            }
+            PrintMappingSaveScope::PortablePersonalPreset(_) => {
+                PrintMappingSaveScope::PortablePersonalPreset(self.mapping_name_draft.clone())
+            }
+        }
+    }
+
+    /// Why the contract would refuse that scope, if it would. The field asks
+    /// the contract rather than restating its rule, so what the name control
+    /// reports and what the save refuses can never disagree.
+    pub(crate) fn mapping_scope_refusal(&self) -> Option<String> {
+        PrintMappingTable::try_new(self.edited_mapping_scope(), Vec::new())
+            .err()
+            .map(|error| error.to_string())
+    }
+
     pub(crate) fn accept_subflow(&mut self) -> Result<(), HardcopyDialogError> {
         let mapping = if self.page == HardcopyDialogPage::PrintMapping {
-            let scope = match &self.mapping_scope_draft {
-                PrintMappingSaveScope::Document => PrintMappingSaveScope::Document,
-                PrintMappingSaveScope::ProjectPrintSet(_) => {
-                    PrintMappingSaveScope::ProjectPrintSet(self.mapping_name_draft.clone())
-                }
-                PrintMappingSaveScope::PortablePersonalPreset(_) => {
-                    PrintMappingSaveScope::PortablePersonalPreset(self.mapping_name_draft.clone())
-                }
-            };
             Some(PrintMappingTable::try_new(
-                scope,
+                self.edited_mapping_scope(),
                 self.print_mapping.entries().to_vec(),
             )?)
         } else {

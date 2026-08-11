@@ -6,7 +6,8 @@
 //! so moving a control from one section to another cannot quietly stop it
 //! invalidating the plan. Options a target cannot honour are disabled with the
 //! reason attached rather than offered and then refused: transparency needs a
-//! vector artifact, color needs a printer that reports it, and a raster
+//! vector artifact, color needs a printer that reports it, searchable text
+//! needs the typefaces that draw it inside the artifact, and a raster
 //! resolution is bounded by what this host can afford for the chosen page.
 
 use super::*;
@@ -515,9 +516,11 @@ pub(super) fn output_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
     if old_format != draft.format && !draft.format.is_vector() {
         draft.searchable_text = false;
     }
+    // The archive format is the one case where the contract makes the font
+    // decision itself. It says nothing about outlining, so searchable text
+    // stays the operator's.
     if draft.format == OutputFormat::PdfA {
         draft.embed_fonts = true;
-        draft.searchable_text = true;
     }
 
     let color_supported = draft.format != OutputFormat::NativePrinter
@@ -744,18 +747,41 @@ pub(super) fn identity_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) {
         };
     }
     ui.add_space(10.0);
-    let mut fonts = draft.embed_fonts && draft.searchable_text;
-    ui.add_enabled_ui(draft.format.is_vector(), |ui| {
-        if ui
-            .checkbox(&mut fonts, "Embed fonts and preserve searchable text")
-            .changed()
-        {
-            draft.embed_fonts = fonts;
-            draft.searchable_text = fonts;
+    // Two capabilities, one dependency: the contract accepts embedded fonts on
+    // their own, refuses searchable text without them, and refuses searchable
+    // text on a raster target at all. Each is offered where it is legal and
+    // disabled with the reason where it is not, so no combination the contract
+    // admits is unreachable and none it refuses is offered.
+    let vector = draft.format.is_vector();
+    let archival = draft.format == OutputFormat::PdfA;
+    ui.columns(2, |columns| {
+        let embed = columns[0].add_enabled(
+            vector && !archival,
+            egui::Checkbox::new(&mut draft.embed_fonts, "Embed fonts"),
+        );
+        if !vector {
+            embed.on_disabled_hover_text("A raster target carries no typeface to embed.");
+        } else if archival {
+            embed.on_disabled_hover_text(
+                "PDF/A refuses an artifact whose typefaces are not inside it.",
+            );
+        }
+        let searchable = columns[1].add_enabled(
+            vector && draft.embed_fonts,
+            egui::Checkbox::new(&mut draft.searchable_text, "Searchable text"),
+        );
+        if !vector {
+            searchable.on_disabled_hover_text("A raster target has no text to keep live.");
+        } else if !draft.embed_fonts {
+            searchable.on_disabled_hover_text(
+                "Text a reader can select needs the typefaces that draw it inside the artifact.",
+            );
         }
     });
-    if !draft.format.is_vector() {
+    if !vector {
         draft.embed_fonts = false;
+        draft.searchable_text = false;
+    } else if !draft.embed_fonts {
         draft.searchable_text = false;
     }
     ui.add_space(6.0);
@@ -763,13 +789,16 @@ pub(super) fn identity_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) {
         ui,
         match draft.format {
             OutputFormat::PdfA => {
-                "PDF/A requires embedded fonts and searchable text; the archive contract sets both."
+                "PDF/A embeds its typefaces by contract. Searchable text is still a choice: without it the letters are published as outlines."
+            }
+            OutputFormat::SvgVector => {
+                "SVG has no outlined-text form here, so a page carrying any text is refused unless it stays searchable."
             }
             format if format.is_vector() => {
-                "Embedded fonts make the artifact self-contained and its text selectable."
+                "Embedded fonts make the artifact self-contained; searchable text keeps its letters selectable rather than drawn as outlines."
             }
             _ => {
-                "A raster target has no text to embed or search; the option applies to vector formats only."
+                "A raster target has no text to embed or search; both apply to vector formats only."
             }
         },
     );
@@ -801,11 +830,7 @@ fn raster_resolution_field(ui: &mut Ui, draft: &mut HardcopyDialogState) {
     if draft.format.raster_dpi().is_none() {
         return;
     }
-    let ceiling = draft
-        .preview_plan
-        .as_ref()
-        .and_then(|plan| max_raster_dpi(plan, draft.format));
-    let committed = draft.format.raster_dpi().unwrap_or(DEFAULT_RASTER_DPI);
+    let ceiling = raster_dpi_ceiling(draft);
 
     field(ui, "Resolution", |ui| {
         let visuals = ui.style().visuals.widgets.inactive;
@@ -827,6 +852,7 @@ fn raster_resolution_field(ui: &mut Ui, draft: &mut HardcopyDialogState) {
                             control_height,
                         ),
                         egui::TextEdit::singleline(&mut draft.raster_dpi_draft)
+                            .id(raster_resolution_id())
                             .font(egui::TextStyle::Monospace)
                             .frame(Frame::NONE),
                     );
@@ -854,14 +880,11 @@ fn raster_resolution_field(ui: &mut Ui, draft: &mut HardcopyDialogState) {
 
         // Commit on Enter or on leaving the field. Never per keystroke: `60`
         // is a legal prefix of `600` and an order of magnitude away from it.
-        let committing = response.lost_focus();
-        if committing {
-            match parse_raster_dpi(&draft.raster_dpi_draft, ceiling) {
-                Ok(dpi) => draft.format = draft.format.with_raster_dpi(dpi),
-                Err(_) => draft.raster_dpi_draft = committed.to_string(),
-            }
+        if response.lost_focus() {
+            commit_raster_resolution(draft, ceiling);
         }
 
+        let committed = draft.format.raster_dpi().unwrap_or(DEFAULT_RASTER_DPI);
         let (message, tone) = raster_resolution_note(&draft.raster_dpi_draft, ceiling, committed);
         ui.add(
             egui::Label::new(
@@ -872,6 +895,58 @@ fn raster_resolution_field(ui: &mut Ui, draft: &mut HardcopyDialogState) {
             .wrap(),
         );
     });
+}
+
+/// The resolution field's fixed identity, so whether it is being edited can be
+/// read on the passes where the section that draws it is no longer on screen.
+fn raster_resolution_id() -> egui::Id {
+    egui::Id::new("hardcopy-raster-resolution")
+}
+
+/// What this page and this host will accept, or the contract's own range while
+/// no plan has compiled.
+fn raster_dpi_ceiling(draft: &HardcopyDialogState) -> Option<u16> {
+    draft
+        .preview_plan
+        .as_ref()
+        .and_then(|plan| max_raster_dpi(plan, draft.format))
+}
+
+/// Take what the field holds into the draft. An entry that names no resolution
+/// this page admits reverts to the one in force, because the field states the
+/// committed value whenever it is not being typed into.
+fn commit_raster_resolution(draft: &mut HardcopyDialogState, ceiling: Option<u16>) {
+    match parse_raster_dpi(&draft.raster_dpi_draft, ceiling) {
+        Ok(dpi) => draft.format = draft.format.with_raster_dpi(dpi),
+        Err(_) => {
+            draft.raster_dpi_draft = draft
+                .format
+                .raster_dpi()
+                .unwrap_or(DEFAULT_RASTER_DPI)
+                .to_string();
+        }
+    }
+}
+
+/// Settle a resolution the operator typed and then walked away from.
+///
+/// The field's text outlives the widget that edits it. Selecting another
+/// section, or the page instead of the setup, replaces what is drawn in the
+/// same pass the choice is made, so the field is never drawn again to notice
+/// its editing session ended — and a publication started from wherever the
+/// operator landed would carry the previously committed resolution while the
+/// field still showed the typed one. The body settles it once, on the path
+/// every pass takes, rather than from the surfaces a layout may decide not to
+/// draw.
+pub(super) fn settle_raster_resolution(ui: &Ui, draft: &mut HardcopyDialogState) {
+    if draft.format.raster_dpi().is_none()
+        || ui
+            .ctx()
+            .memory(|memory| memory.has_focus(raster_resolution_id()))
+    {
+        return;
+    }
+    commit_raster_resolution(draft, raster_dpi_ceiling(draft));
 }
 
 /// Accept a resolution only if both the contract and this host admit it.
@@ -911,5 +986,641 @@ fn raster_resolution_note(text: &str, ceiling: Option<u16>, committed: u16) -> (
             Some(ceiling) => (format!("up to {ceiling} dpi for this page"), dim),
             None => (format!("{MIN_RASTER_DPI}–{MAX_RASTER_DPI} dpi"), dim),
         },
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    use egui::accesskit::Role;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use crate::hardcopy::sources::HardcopySourceIdentity;
+    use crate::hardcopy::{HardcopyDocumentId, HardcopyPlanId, HardcopyScope};
+    use crate::product::ObjectRevision;
+    use crate::state::SchematicSheetFormat;
+    use crate::workbench::hardcopy_adapters::render::{
+        HardcopyPublicationTimestamp, HardcopySceneMetadata,
+    };
+    use crate::workbench::hardcopy_adapters::sources::resolve_blank_schematic_sheet_with_format;
+
+    /// The save picker the export reaches once the plan is sealed. It refuses a
+    /// destination so nothing is written, and counts the calls so a test can
+    /// tell "the export ran and carried this plan" from "the export never got
+    /// past the plan".
+    struct RefusedDestination(Arc<AtomicUsize>);
+
+    impl crate::workbench::workflows::export_workflow::ExportWorkflowIo for RefusedDestination {
+        fn show_save_dialog(
+            &self,
+            _config: crate::workbench::workflows::export_workflow::SaveDialogConfig<'_>,
+        ) -> Result<Option<PathBuf>, String> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(None)
+        }
+
+        fn write_text_file(&self, _path: &Path, _contents: &str) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn write_waveform_csv(
+            &self,
+            _dataset: &crate::io::WaveformDataset,
+            _path: &Path,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    struct Studio {
+        ctx: Context,
+        app: RSpiceApp,
+        exports: Arc<AtomicUsize>,
+        viewport: Vec2,
+    }
+
+    impl Studio {
+        /// The Export workflow open on the active cell view, settled onto a
+        /// 150 dpi raster target: a resolution the operator can be seen to
+        /// change, an order of magnitude clear of this page's ceiling.
+        fn raster(viewport: Vec2) -> Self {
+            let ctx = Context::default();
+            ctx.enable_accesskit();
+            crate::ui::Theme::default().apply(&ctx);
+            let exports = Arc::new(AtomicUsize::new(0));
+            let mut app = RSpiceApp::test_instance();
+            app.export_workflow_io = Box::new(RefusedDestination(exports.clone()));
+            let reference = app.state.workspace.active_view.clone();
+            app.state.workbench.documents.activate(
+                crate::workbench::state::WorkspaceDocumentId::CellView(reference),
+            );
+            publish::open_hardcopy_workflow(&mut app, HardcopyWorkflow::Export);
+            let mut studio = Self {
+                ctx,
+                app,
+                exports,
+                viewport,
+            };
+            studio.settle();
+            studio.app.state.dialogs.hardcopy.section = HardcopySection::Output;
+            studio.app.state.dialogs.hardcopy.region = HardcopyRegion::Setup;
+            studio.app.state.dialogs.hardcopy.format = OutputFormat::Png { dpi: 150 };
+            studio.app.state.dialogs.hardcopy.raster_dpi_draft = "150".to_owned();
+            studio.app.state.dialogs.hardcopy.embed_fonts = false;
+            studio.app.state.dialogs.hardcopy.searchable_text = false;
+            studio.app.state.dialogs.hardcopy.refresh_preview();
+            studio.settle();
+            studio
+        }
+
+        /// The desktop composition: rail, editor and preview all on screen.
+        fn wide() -> Self {
+            Self::raster(vec2(1_440.0, 900.0))
+        }
+
+        /// A phone-width surface, which is below `STUDIO_SPLIT_WIDTH` and so
+        /// shows the setup or the page but never both.
+        fn narrow() -> Self {
+            Self::raster(vec2(390.0, 844.0))
+        }
+
+        fn pass(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
+            let app = &mut self.app;
+            let viewport = self.viewport;
+            self.ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, viewport)),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.render_hardcopy_dialog(ui),
+            )
+        }
+
+        /// The source resolves on a worker and the exact page raster lands a
+        /// pass after the plan it belongs to, so a measurement is only
+        /// meaningful once both have happened.
+        fn settle(&mut self) -> egui::FullOutput {
+            for _ in 0..400 {
+                let _ = self.pass(Vec::new());
+                if self.app.state.dialogs.hardcopy.preview.is_some() {
+                    let _ = self.pass(Vec::new());
+                    return self.pass(Vec::new());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            panic!("the hardcopy studio never resolved a source and an exact page preview");
+        }
+
+        fn control(&mut self, role: Role, label: &str) -> Rect {
+            let output = self.pass(Vec::new());
+            controls(&output)
+                .into_iter()
+                .find(|(found, name, _)| *found == role && name == label)
+                .unwrap_or_else(|| panic!("the studio drew no {role:?} labelled {label:?}"))
+                .2
+        }
+
+        fn field(&mut self) -> Rect {
+            let output = self.pass(Vec::new());
+            controls(&output)
+                .into_iter()
+                .find(|(role, _, _)| *role == Role::TextInput)
+                .expect("the output section draws the resolution field")
+                .2
+        }
+
+        /// Put the caret in the resolution field and replace what it holds.
+        fn type_resolution(&mut self, text: &str) {
+            let field = self.field();
+            let caret = egui::pos2(field.right() - 4.0, field.center().y);
+            let _ = self.pass(press(caret));
+            let _ = self.pass(release(caret));
+            let _ = self.pass(vec![
+                egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::COMMAND,
+                },
+                egui::Event::Text(text.to_owned()),
+            ]);
+            assert_eq!(
+                self.app.state.dialogs.hardcopy.raster_dpi_draft, text,
+                "the field did not take the typed resolution"
+            );
+        }
+
+        /// The resolution of the plan the export sealed. `current_plan` hands
+        /// the publication the dialog's own preview plan, so this is the plan
+        /// that ran — and the export is only credited if the workflow reached
+        /// its destination picker rather than refusing before it.
+        fn published_resolution(&self) -> Option<u16> {
+            assert_eq!(
+                self.exports.load(Ordering::SeqCst),
+                1,
+                "the export never reached its destination: {:?}",
+                self.app.state.dialogs.hardcopy.error
+            );
+            self.app
+                .state
+                .dialogs
+                .hardcopy
+                .preview_plan
+                .as_ref()
+                .and_then(|plan| plan.setup().render().format().raster_dpi())
+        }
+    }
+
+    fn controls(output: &egui::FullOutput) -> Vec<(Role, String, Rect)> {
+        output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("the probe enables AccessKit, so every pass carries a tree")
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| {
+                let bounds = node.bounds()?;
+                let rect = Rect::from_min_max(
+                    egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                    egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                );
+                rect.is_finite().then(|| {
+                    (
+                        node.role(),
+                        node.label()
+                            .or_else(|| node.value())
+                            .unwrap_or_default()
+                            .to_owned(),
+                        rect,
+                    )
+                })
+            })
+            .collect()
+    }
+
+    fn press(pos: egui::Pos2) -> Vec<egui::Event> {
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]
+    }
+
+    fn release(pos: egui::Pos2) -> Vec<egui::Event> {
+        vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]
+    }
+
+    fn click(pos: egui::Pos2) -> Vec<egui::Event> {
+        let mut events = press(pos);
+        events.extend(release(pos));
+        events
+    }
+
+    /// A click delivered inside one pass — a press and a release between two
+    /// repaints, which is what an ordinary click on a settled surface is. The
+    /// dialog draws its body before its command row, so the field has to notice
+    /// it is no longer being edited within the same pass that publishes.
+    #[test]
+    fn a_resolution_typed_and_published_in_one_gesture_publishes_what_it_shows() {
+        let mut studio = Studio::wide();
+        studio.type_resolution("300");
+        let button = studio.control(Role::Button, "Export hardcopy");
+        let _ = studio.pass(click(button.center()));
+
+        assert_eq!(studio.published_resolution(), Some(300));
+        assert_eq!(studio.app.state.dialogs.hardcopy.raster_dpi_draft, "300");
+    }
+
+    /// The same gesture spread over two passes, which is what a click looks
+    /// like when the surface repaints between the press and the release.
+    #[test]
+    fn a_resolution_published_by_a_click_spanning_two_passes_publishes_what_it_shows() {
+        let mut studio = Studio::wide();
+        studio.type_resolution("300");
+        let button = studio.control(Role::Button, "Export hardcopy");
+        let _ = studio.pass(press(button.center()));
+        let _ = studio.pass(release(button.center()));
+
+        assert_eq!(studio.published_resolution(), Some(300));
+        assert_eq!(studio.app.state.dialogs.hardcopy.raster_dpi_draft, "300");
+    }
+
+    /// The rail replaces the section in the pass it is clicked, so the field is
+    /// never drawn again to see that its editing session ended. Publishing from
+    /// the section the operator landed on used to seal the previous resolution
+    /// while the field still held the typed one.
+    #[test]
+    fn a_resolution_left_behind_by_the_rail_is_still_the_one_published() {
+        let mut studio = Studio::wide();
+        studio.type_resolution("300");
+        let rail = studio.control(Role::Button, "Identity");
+        let _ = studio.pass(click(rail.center()));
+        assert_eq!(
+            studio.app.state.dialogs.hardcopy.section,
+            HardcopySection::Identity,
+            "the rail did not leave the output section"
+        );
+
+        let button = studio.control(Role::Button, "Export hardcopy");
+        let _ = studio.pass(click(button.center()));
+
+        assert_eq!(studio.published_resolution(), Some(300));
+        assert_eq!(studio.app.state.dialogs.hardcopy.raster_dpi_draft, "300");
+    }
+
+    /// Below `STUDIO_SPLIT_WIDTH` the surface shows the setup or the page and
+    /// never both, so choosing the page replaces the whole editor — the section
+    /// panels included — in the pass the switch is clicked. Publishing from
+    /// there used to seal the previous resolution while the field held the
+    /// typed one, and no section panel was left running to notice.
+    #[test]
+    fn a_resolution_left_behind_by_the_region_switch_is_still_the_one_published() {
+        let mut studio = Studio::narrow();
+        studio.type_resolution("300");
+        let preview = studio.control(Role::Button, "Exact preview");
+        let _ = studio.pass(click(preview.center()));
+        assert_eq!(
+            studio.app.state.dialogs.hardcopy.region,
+            HardcopyRegion::Preview,
+            "the switch did not leave the setup region"
+        );
+
+        let button = studio.control(Role::Button, "Export hardcopy");
+        let _ = studio.pass(click(button.center()));
+
+        assert_eq!(studio.published_resolution(), Some(300));
+        assert_eq!(studio.app.state.dialogs.hardcopy.raster_dpi_draft, "300");
+    }
+
+    /// Settling belongs on the path every pass takes, not on the surfaces a
+    /// composition may choose not to draw. Whatever the rail, the tab strip and
+    /// the region switch select — in either composition — a pass has to leave
+    /// the draft holding the resolution the field is showing.
+    #[test]
+    fn no_section_or_region_can_strand_a_typed_resolution() {
+        for mut studio in [Studio::wide(), Studio::narrow()] {
+            let composition = studio.viewport;
+            for section in HardcopySection::ALL {
+                for region in [HardcopyRegion::Setup, HardcopyRegion::Preview] {
+                    studio.app.state.dialogs.hardcopy.format = OutputFormat::Png { dpi: 150 };
+                    studio.app.state.dialogs.hardcopy.raster_dpi_draft = "300".to_owned();
+                    studio.app.state.dialogs.hardcopy.section = section;
+                    studio.app.state.dialogs.hardcopy.region = region;
+                    let _ = studio.pass(Vec::new());
+                    assert_eq!(
+                        studio.app.state.dialogs.hardcopy.format.raster_dpi(),
+                        Some(300),
+                        "{composition:?} {section:?} {region:?} left a typed resolution uncommitted"
+                    );
+                }
+            }
+        }
+    }
+
+    /// An entry that names no resolution cannot be published, so an unfocused
+    /// field states the one in force rather than a number that will not be used.
+    #[test]
+    fn a_field_nobody_is_editing_states_the_resolution_in_force() {
+        let mut studio = Studio::wide();
+        studio.app.state.dialogs.hardcopy.raster_dpi_draft = "3oo".to_owned();
+        studio.app.state.dialogs.hardcopy.section = HardcopySection::Page;
+        let _ = studio.pass(Vec::new());
+
+        assert_eq!(studio.app.state.dialogs.hardcopy.raster_dpi_draft, "150");
+        assert_eq!(
+            studio.app.state.dialogs.hardcopy.format,
+            OutputFormat::Png { dpi: 150 }
+        );
+    }
+
+    /// A resolution being typed is not a resolution yet: `60` is a legal prefix
+    /// of `600`, so nothing commits while the caret is still in the field.
+    #[test]
+    fn a_resolution_still_being_typed_commits_nothing() {
+        let mut studio = Studio::wide();
+        studio.type_resolution("1200");
+        assert_eq!(
+            studio.app.state.dialogs.hardcopy.format,
+            OutputFormat::Png { dpi: 150 },
+            "the field committed while it was still being typed into"
+        );
+        let _ = studio.pass(Vec::new());
+        assert_eq!(
+            studio.app.state.dialogs.hardcopy.format,
+            OutputFormat::Png { dpi: 150 },
+            "the field committed while it still held the caret"
+        );
+    }
+
+    /// A blank drawing sheet is the smallest source that resolves into a real
+    /// scene, which is what makes the font settings observable in an artifact
+    /// rather than only in the draft.
+    fn sheet_draft() -> HardcopyDialogState {
+        let identity = HardcopySourceIdentity::try_new(
+            "hardcopy-font-capabilities",
+            HardcopyDocumentId::try_from_uuid(uuid::Uuid::from_u128(0x4834_0101)).unwrap(),
+            ObjectRevision::INITIAL,
+            "Font capabilities",
+        )
+        .unwrap();
+        let sheet = resolve_blank_schematic_sheet_with_format(
+            identity,
+            HardcopyScope::CurrentSheet,
+            Some(&SchematicSheetFormat::default()),
+        )
+        .unwrap();
+        let mut draft = HardcopyDialogState::default();
+        draft
+            .open_resolved(HardcopyWorkflow::Export, sheet, None)
+            .expect("blank drawing sheet opens");
+        draft.format = OutputFormat::SvgVector;
+        draft.refresh_preview();
+        draft
+    }
+
+    fn metadata(lettered: bool) -> HardcopySceneMetadata {
+        let mut metadata =
+            HardcopySceneMetadata::try_new("Font capabilities", "RSpice hardcopy tests").unwrap();
+        metadata.set_publication_timestamp(
+            HardcopyPublicationTimestamp::try_new(2026, 8, 11, 9, 0, 0).unwrap(),
+        );
+        if lettered {
+            metadata
+                .set_header_lines(vec!["Font capabilities".to_owned()])
+                .unwrap();
+        }
+        metadata
+    }
+
+    fn artifact(draft: &HardcopyDialogState, metadata: HardcopySceneMetadata) -> Vec<u8> {
+        let setup = draft.build_setup().expect("the draft is a legal setup");
+        let document = draft.resolved_document.as_ref().expect("resolved source");
+        let extent = document
+            .content_extent_for_setup(setup.schematic())
+            .expect("resolved extent");
+        let plan = crate::hardcopy::HardcopyPlan::compile_with_id(
+            HardcopyPlanId::try_from_uuid(uuid::Uuid::from_u128(0x4834_0102)).unwrap(),
+            document.authority().clone(),
+            setup,
+            extent,
+        )
+        .expect("the draft compiles a plan");
+        HardcopyRenderer::render_resolved(&plan, document, metadata)
+            .expect("the plan publishes")
+            .parts()
+            .iter()
+            .flat_map(|part| part.bytes().to_vec())
+            .collect()
+    }
+
+    /// Drive the identity panel the way an operator does, and return what the
+    /// two font controls left in the draft.
+    struct FontControls {
+        ctx: Context,
+        draft: HardcopyDialogState,
+    }
+
+    impl FontControls {
+        fn new(draft: HardcopyDialogState) -> Self {
+            let ctx = Context::default();
+            ctx.enable_accesskit();
+            crate::ui::Theme::default().apply(&ctx);
+            Self { ctx, draft }
+        }
+
+        fn pass(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
+            let draft = &mut self.draft;
+            self.ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(620.0, 420.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| identity_panel(ui, draft),
+            )
+        }
+
+        fn click_checkbox(&mut self, label: &str) {
+            let output = self.pass(Vec::new());
+            let rect = controls(&output)
+                .into_iter()
+                .find(|(role, name, _)| *role == Role::CheckBox && name == label)
+                .unwrap_or_else(|| panic!("the identity panel draws no checkbox {label:?}"))
+                .2;
+            let _ = self.pass(click(rect.center()));
+        }
+
+        fn state(&mut self) -> (bool, bool) {
+            let _ = self.pass(Vec::new());
+            (self.draft.embed_fonts, self.draft.searchable_text)
+        }
+    }
+
+    /// `RenderSetup::validate` accepts embedded fonts on their own, refuses
+    /// searchable text without them, and refuses searchable text on a raster
+    /// target — three legal vector states, not two. The single checkbox this
+    /// replaced could reach two of them and read a third back as unchecked.
+    #[test]
+    fn embedded_fonts_and_searchable_text_are_two_decisions() {
+        let mut controls = FontControls::new(sheet_draft());
+        controls.draft.embed_fonts = false;
+        controls.draft.searchable_text = false;
+
+        controls.click_checkbox("Searchable text");
+        assert_eq!(
+            controls.state(),
+            (false, false),
+            "searchable text was offered without the typefaces it needs"
+        );
+
+        controls.click_checkbox("Embed fonts");
+        assert_eq!(
+            controls.state(),
+            (true, false),
+            "embedding fonts alone is a state the contract admits"
+        );
+        assert!(controls.draft.build_setup().is_ok());
+
+        controls.click_checkbox("Searchable text");
+        assert_eq!(controls.state(), (true, true));
+        assert!(controls.draft.build_setup().is_ok());
+
+        controls.click_checkbox("Embed fonts");
+        assert_eq!(
+            controls.state(),
+            (false, false),
+            "dropping the typefaces left text the contract refuses to keep live"
+        );
+        assert!(controls.draft.build_setup().is_ok());
+    }
+
+    /// A raster target has neither capability, and the archive format has one
+    /// of them by contract. Both are stated at the control rather than accepted
+    /// and refused on publication.
+    #[test]
+    fn a_target_that_cannot_honour_a_font_capability_does_not_offer_it() {
+        let mut controls = FontControls::new(sheet_draft());
+        controls.draft.format = OutputFormat::Png { dpi: 300 };
+        controls.draft.embed_fonts = true;
+        controls.draft.searchable_text = true;
+        assert_eq!(
+            controls.state(),
+            (false, false),
+            "a raster target kept a font capability it cannot carry"
+        );
+        controls.click_checkbox("Embed fonts");
+        controls.click_checkbox("Searchable text");
+        assert_eq!(controls.state(), (false, false));
+
+        controls.draft.format = OutputFormat::PdfA;
+        controls.draft.embed_fonts = true;
+        controls.draft.searchable_text = true;
+        controls.click_checkbox("Embed fonts");
+        assert_eq!(
+            controls.state(),
+            (true, true),
+            "PDF/A let its typefaces be dropped"
+        );
+        controls.click_checkbox("Searchable text");
+        assert_eq!(
+            controls.state(),
+            (true, false),
+            "PDF/A pinned a decision its contract leaves open"
+        );
+        // Leaving that decision open is only honest if the writer agrees: an
+        // archive whose letters are outlined has to publish, and has to have
+        // outlined them.
+        let archive = artifact(&controls.draft, metadata(true));
+        let parsed = lopdf::Document::load_mem(&archive).expect("valid PDF/A");
+        let pages = parsed.get_pages().keys().copied().collect::<Vec<_>>();
+        assert!(
+            !parsed
+                .extract_text(&pages)
+                .unwrap_or_default()
+                .contains("Font capabilities"),
+            "the archive kept text live that the control said it would outline"
+        );
+    }
+
+    /// Comparing whole artifacts would prove nothing: both vector writers stamp
+    /// the plan digest, so anything that reaches the sealed setup changes the
+    /// bytes. Each control is checked against the specific property it governs
+    /// with the other one held still.
+    #[test]
+    fn each_font_control_reaches_the_artifact_on_its_own() {
+        // An SVG cannot outline text, so dropping the typefaces is only legal
+        // once the page carries none.
+        let unlettered = || {
+            let mut draft = sheet_draft();
+            draft.include_sheet_paper = false;
+            draft.include_sheet_border = false;
+            draft.include_sheet_title_block = false;
+            draft.include_sheet_zones = false;
+            draft.include_schematic_grid = false;
+            draft.crop_marks = false;
+            draft.embed_fonts = false;
+            draft.searchable_text = false;
+            draft
+        };
+        let mut linked = FontControls::new(unlettered());
+        assert_eq!(linked.state(), (false, false));
+        let mut embedded = FontControls::new(unlettered());
+        embedded.click_checkbox("Embed fonts");
+        assert_eq!(embedded.state(), (true, false));
+
+        assert!(
+            String::from_utf8_lossy(&artifact(&embedded.draft, metadata(false)))
+                .contains("@font-face"),
+            "embedding fonts wrote no typeface into the artifact"
+        );
+        assert!(
+            !String::from_utf8_lossy(&artifact(&linked.draft, metadata(false)))
+                .contains("@font-face"),
+            "the artifact carries a typeface nobody asked it to embed"
+        );
+
+        // Searchable text is the PDF writer's outlining decision, so it is read
+        // back the way a reader would: by extracting the text.
+        let lettered = || {
+            let mut draft = sheet_draft();
+            draft.format = OutputFormat::PdfVector;
+            draft.embed_fonts = true;
+            draft.searchable_text = false;
+            draft
+        };
+        let mut outlined = FontControls::new(lettered());
+        assert_eq!(outlined.state(), (true, false));
+        let mut searchable = FontControls::new(lettered());
+        searchable.click_checkbox("Searchable text");
+        assert_eq!(searchable.state(), (true, true));
+
+        let extract = |bytes: &[u8]| {
+            let parsed = lopdf::Document::load_mem(bytes).expect("valid PDF");
+            let pages = parsed.get_pages().keys().copied().collect::<Vec<_>>();
+            parsed.extract_text(&pages).unwrap_or_default()
+        };
+        assert!(
+            extract(&artifact(&searchable.draft, metadata(true))).contains("Font capabilities"),
+            "a searchable PDF has no extractable text"
+        );
+        assert!(
+            !extract(&artifact(&outlined.draft, metadata(true))).contains("Font capabilities"),
+            "outlining text left extractable text behind"
+        );
     }
 }

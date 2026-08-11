@@ -33,8 +33,8 @@ use crate::workbench::hardcopy_adapters::render::HardcopyRenderer;
 use crate::workbench::hardcopy_adapters::render::{HardcopyPreviewPage, max_raster_dpi};
 
 use super::{
-    DEFAULT_RASTER_DPI, HardcopyDialogPage, HardcopyDialogState, HardcopySection, HardcopyWorkflow,
-    PaperDraft, publish,
+    DEFAULT_RASTER_DPI, HardcopyDialogPage, HardcopyDialogState, HardcopyRegion, HardcopySection,
+    HardcopyWorkflow, PaperDraft, publish,
 };
 
 #[derive(Clone)]
@@ -247,8 +247,12 @@ impl RSpiceApp {
             .primary_on_enter(false)
             .primary_enabled(!busy && (plan_valid || page != HardcopyDialogPage::Main))
             .ghost("Cancel");
+        // `SchematicPageSetup` already fills its surface at the authored height
+        // clamped to the viewport, so the studio only has to claim the body
+        // track: it divides that track itself and owns whatever scrolling any
+        // region of it ever needs.
         dialog = if page == HardcopyDialogPage::Main {
-            dialog.fixed_height(760.0).manual_body_scroll()
+            dialog.manual_body_scroll()
         } else {
             dialog.body_scroll_offset(&mut body_scroll_offset)
         };
@@ -690,9 +694,13 @@ fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
 /// two surfaces a hardcopy passes through do not shift under the pointer.
 const NAV_WIDTH: f32 = 230.0;
 /// Below this the rail, the editor and the preview cannot all hold the width
-/// their contents need, so the surface stacks and scrolls deliberately rather
-/// than clipping a form nobody can reach.
+/// their contents need, so the rail gives way to a tab strip across the top.
 const STUDIO_STACK_WIDTH: f32 = 980.0;
+/// Below this the editor and the preview cannot hold their widths side by side
+/// either, so the surface shows one of them at a time. Nothing below this width
+/// can carry a form and a page desk at once, and a surface that answers that by
+/// scrolling is the failure this studio exists to remove.
+const STUDIO_SPLIT_WIDTH: f32 = 730.0;
 const PANEL_INSET_X: i8 = 18;
 const PANEL_INSET_Y: i8 = 16;
 /// Height of one row of the preview's estimate strip. The strip's total height
@@ -710,6 +718,12 @@ fn main_body(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
     // of them.
     let before_content = content_inputs(draft);
     let before_render = rendering_inputs(draft);
+    // A field the operator typed into and then navigated away from is settled
+    // here, on the one path every pass takes, because the surfaces that draw it
+    // are exactly the ones a layout can decide not to draw. It has to come
+    // after the snapshot above: a resolution settled outside that comparison
+    // would never invalidate the plan it is meant to publish.
+    settle_raster_resolution(ui, draft);
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
 
     let sections = available_sections(draft);
@@ -720,7 +734,7 @@ fn main_body(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
     let body_height = available.y.max(1.0);
     let mut action = BodyAction::None;
     if available.x < STUDIO_STACK_WIDTH {
-        action = stacked_body(ui, draft, &sections, body_height);
+        action = tabbed_body(ui, draft, &sections, available.x, body_height);
     } else {
         let t = Tokens::get(ui.ctx());
         ui.allocate_ui_with_layout(
@@ -738,31 +752,7 @@ fn main_body(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
                     nav.response.rect.y_range(),
                     Stroke::new(1.0, t.color.border),
                 );
-                // The preview takes 0.82 of every 1.82 units left over, with
-                // both columns floored at the width their contents need: a
-                // preview too small to read is not worth the space it costs
-                // the form, and vice versa.
-                let remaining = (available.x - NAV_WIDTH).max(720.0);
-                let preview_width = (remaining * (0.82 / 1.82))
-                    .max(330.0)
-                    .min((remaining - 390.0).max(330.0));
-                let editor_width = (remaining - preview_width).max(390.0);
-                let editor = ui.allocate_ui_with_layout(
-                    vec2(editor_width, body_height),
-                    Layout::top_down(Align::Min),
-                    |ui| editor_column(ui, draft, Some(body_height)),
-                );
-                action = editor.inner;
-                ui.painter().vline(
-                    editor.response.rect.right(),
-                    editor.response.rect.y_range(),
-                    Stroke::new(1.0, t.color.border),
-                );
-                ui.allocate_ui_with_layout(
-                    vec2(preview_width, body_height),
-                    Layout::top_down(Align::Min),
-                    |ui| preview_column(ui, draft, body_height),
-                );
+                action = editor_and_preview(ui, draft, available.x - NAV_WIDTH, body_height);
             },
         );
     }
@@ -829,8 +819,11 @@ fn section_navigation(
                 .inner_margin(Margin::symmetric(12, 10))
                 .show(ui, |ui| {
                     let width = ui.available_width();
+                    // The entry's own height, floored at the design system's
+                    // row metric so a coarse pointer is given the target the
+                    // rest of the shell gives it.
                     ui.allocate_ui_with_layout(
-                        vec2(width, 34.0),
+                        vec2(width, 34.0_f32.max(t.metrics.row_h)),
                         Layout::left_to_right(Align::Min),
                         |ui| {
                             ui.set_min_width(width);
@@ -1315,36 +1308,202 @@ pub(super) fn short_digest(digest: &crate::product::ContentDigest) -> String {
         .collect()
 }
 
-fn stacked_body(
+/// The composition below the rail's width: the sections become a tab strip
+/// across the top, and the regions under it divide exactly what the strip left.
+/// Both arrangements are given fixed tracks rather than a scroll area, because
+/// a surface that can only be read by scrolling is the failure this studio
+/// exists to remove.
+fn tabbed_body(
     ui: &mut Ui,
     draft: &mut HardcopyDialogState,
     sections: &[HardcopySection],
+    width: f32,
     height: f32,
 ) -> BodyAction {
+    let split = width >= STUDIO_SPLIT_WIDTH;
+    let strip_height = section_tab_strip(ui, draft, sections, split);
+    let remaining = (height - strip_height).max(1.0);
+    if split {
+        return editor_and_preview(ui, draft, width, remaining);
+    }
     let mut action = BodyAction::None;
-    egui::ScrollArea::vertical()
-        .id_salt("hardcopy-studio-stacked")
-        .show(ui, |ui| {
-            Frame::NONE
-                .fill(Tokens::get(ui.ctx()).color.bg_panel)
-                .inner_margin(Margin::same(10))
-                .show(ui, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        for section in sections.iter().copied() {
-                            let label = format!("{}  {}", section.number(), section.label());
-                            if ui
-                                .selectable_label(draft.section == section, label)
-                                .clicked()
-                            {
-                                draft.section = section;
-                            }
-                        }
-                    });
-                });
-            action = editor_column(ui, draft, None);
-            preview_column(ui, draft, height.clamp(300.0, 460.0));
-        });
+    ui.allocate_ui_with_layout(vec2(width, remaining), Layout::top_down(Align::Min), |ui| {
+        match draft.region {
+            HardcopyRegion::Preview => preview_column(ui, draft, remaining),
+            HardcopyRegion::Setup => action = editor_column(ui, draft, Some(remaining)),
+        }
+    });
     action
+}
+
+/// The rail's stand-in below its width.
+///
+/// Two questions live on this strip and each gets a control of its own: a
+/// segmented switch decides whether the surface is showing the setup or the
+/// page, and the chips under it decide which section the setup is editing.
+/// Both as chips in one row asks them as though they were the same question,
+/// and a row of identical chips gives no clue that one of them replaces the
+/// whole surface. Each control is drawn only where it decides something: there
+/// is nothing to switch while both regions are on screen, and no section to
+/// choose while the page is. Returns the height the strip took.
+fn section_tab_strip(
+    ui: &mut Ui,
+    draft: &mut HardcopyDialogState,
+    sections: &[HardcopySection],
+    split: bool,
+) -> f32 {
+    let t = Tokens::get(ui.ctx());
+    let strip = Frame::NONE
+        .fill(t.color.bg_panel)
+        .inner_margin(Margin::same(10))
+        .show(ui, |ui| {
+            // Claim the track the strip was assigned rather than the width the
+            // chips happen to need. A fill that stops at the last chip reads as
+            // a second, lighter panel butted against the first.
+            ui.set_min_width(ui.available_width());
+            ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+            if !split {
+                region_switch(ui, draft);
+            }
+            if split || draft.region == HardcopyRegion::Setup {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                    for section in sections.iter().copied() {
+                        let label = format!("{}  {}", section.number(), section.label());
+                        if ui
+                            .selectable_label(draft.section == section, label)
+                            .clicked()
+                        {
+                            draft.section = section;
+                        }
+                    }
+                });
+            }
+        });
+    ui.painter().hline(
+        strip.response.rect.x_range(),
+        strip.response.rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    strip.response.rect.height()
+}
+
+/// The region switch of a surface that can only show one region at a time.
+///
+/// One control with two halves, not two more chips: this decides what the
+/// whole surface is, so it reads as a switch and spans the strip. Its halves
+/// take the design system's control height, which is the touch target wherever
+/// the shell is in touch mode.
+fn region_switch(ui: &mut Ui, draft: &mut HardcopyDialogState) {
+    let t = Tokens::get(ui.ctx());
+    let height = t.metrics.ctl_h;
+    let segment = (ui.available_width() * 0.5).floor();
+    let row = ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        for (region, label) in [
+            (HardcopyRegion::Setup, "Setup"),
+            (HardcopyRegion::Preview, "Exact preview"),
+        ] {
+            let selected = draft.region == region;
+            if ui
+                .add_sized(
+                    vec2(segment, height),
+                    egui::Button::selectable(selected, label),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                draft.region = region;
+            }
+        }
+    });
+    let rect = row.response.rect;
+    ui.painter().rect_stroke(
+        rect,
+        0.0,
+        Stroke::new(1.0, t.color.border_strong),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().vline(
+        rect.center().x,
+        rect.y_range(),
+        Stroke::new(1.0, t.color.border_strong),
+    );
+}
+
+/// The editor and the preview side by side across `track`, each given the whole
+/// of `height`.
+fn editor_and_preview(
+    ui: &mut Ui,
+    draft: &mut HardcopyDialogState,
+    track: f32,
+    height: f32,
+) -> BodyAction {
+    let t = Tokens::get(ui.ctx());
+    let (editor_width, preview_width) = column_widths(track, height);
+    let mut action = BodyAction::None;
+    ui.allocate_ui_with_layout(
+        vec2(track, height),
+        Layout::left_to_right(Align::Min),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let editor = ui.allocate_ui_with_layout(
+                vec2(editor_width, height),
+                Layout::top_down(Align::Min),
+                |ui| editor_column(ui, draft, Some(height)),
+            );
+            action = editor.inner;
+            ui.painter().vline(
+                editor.response.rect.right(),
+                editor.response.rect.y_range(),
+                Stroke::new(1.0, t.color.border),
+            );
+            ui.allocate_ui_with_layout(
+                vec2(preview_width, height),
+                Layout::top_down(Align::Min),
+                |ui| preview_column(ui, draft, height),
+            );
+        },
+    );
+    action
+}
+
+/// The narrowest column a form field and its unit suffix stay legible in, and
+/// the narrowest page desk worth rendering an exact page onto. Neither column
+/// is ever given less; where the track cannot pay for both, the studio is
+/// already below `STUDIO_SPLIT_WIDTH` and shows one of them at a time.
+const EDITOR_MIN: f32 = 390.0;
+const PREVIEW_MIN: f32 = 330.0;
+/// The track a two-up form row needs before it stops stacking.
+const PAIRED_TRACK_MINIMUM: f32 = 430.0;
+/// The measure a stacked form is authored to: one full-width field per row,
+/// wide enough that nothing in a section wraps of its own accord.
+const EDITOR_STACKED_MEASURE: f32 = 430.0;
+/// The measure a paired form needs: the two-up track plus the panel's insets.
+const EDITOR_PAIRED_MEASURE: f32 = 2.0 * PANEL_INSET_X as f32 + PAIRED_TRACK_MINIMUM;
+/// The column height a stacked form needs before it is worth trading width for
+/// it. Below this the tallest section does not fit stacked, and a form that
+/// does not fit is worse than a page desk one field narrower.
+const STACKED_FORM_HEIGHT: f32 = 560.0;
+
+/// How a track that carries both columns is divided.
+///
+/// The editor takes the measure its forms are authored for and the page desk
+/// takes the whole remainder. A form gains nothing from a wider column — past
+/// the width its fields need it only pushes a label and its value to opposite
+/// edges of the surface — while every point the desk is given comes back as a
+/// larger page. Height is the other half of the trade: a stacked form spends
+/// height to save width, so it only stacks where the column has the height to
+/// spend, and pairs its rows where it does not.
+fn column_widths(track: f32, height: f32) -> (f32, f32) {
+    let track = track.max(EDITOR_MIN + PREVIEW_MIN);
+    let measure = if height >= STACKED_FORM_HEIGHT {
+        EDITOR_STACKED_MEASURE
+    } else {
+        EDITOR_PAIRED_MEASURE
+    };
+    let editor = measure.min(track - PREVIEW_MIN).max(EDITOR_MIN);
+    (editor, track - editor)
 }
 
 fn preview_column(ui: &mut Ui, draft: &mut HardcopyDialogState, height: f32) {
@@ -1356,14 +1515,58 @@ fn preview_column(ui: &mut Ui, draft: &mut HardcopyDialogState, height: f32) {
         // The three bands divide the column's exact assigned height between
         // them. The page desk takes what the toolbar and the estimate do not,
         // so the preview grows with the surface instead of staying a thumbnail.
-        const TOOLBAR_HEIGHT: f32 = 38.0;
+        let pages = draft
+            .preview_plan
+            .as_ref()
+            .map_or(0, |plan| plan.pagination().pages().len() as u32);
+        let mut view = PreviewView {
+            page: draft.preview_page,
+            zoom: draft.preview_zoom_percent,
+        };
+        let toolbar_height = preview_toolbar_height(ui, &view, pages, width);
         let facts = preview_facts(draft);
         let facts_height = facts.len() as f32 * FACT_ROW_HEIGHT + FACT_STRIP_INSET;
-        let desk_height = (height - facts_height - TOOLBAR_HEIGHT).max(160.0);
+        let desk_height = (height - facts_height - toolbar_height).max(160.0);
         preview_desk(ui, draft, width, desk_height);
-        preview_toolbar(ui, draft, width, TOOLBAR_HEIGHT);
+        preview_toolbar(ui, &mut view, pages, width);
+        if view.page != draft.preview_page {
+            draft.preview_page = view.page;
+            draft.invalidate_preview_raster();
+        }
+        draft.preview_zoom_percent = view.zoom;
         preview_facts_strip(ui, &facts, width, facts_height);
     });
+}
+
+/// The band the toolbar needs, measured rather than assumed.
+///
+/// Its controls are the design system's and its row wraps when they cannot
+/// share the column, so the number of rows is a fact about this width and this
+/// control set — not about whether the shell is in touch mode. A sizing pass
+/// lays the same row out invisibly and reports what it took, which is exact at
+/// every width; reserving a second row for every touch surface cost the page
+/// desk a whole row of page wherever one row was enough.
+fn preview_toolbar_height(ui: &mut Ui, view: &PreviewView, pages: u32, width: f32) -> f32 {
+    let mut probe = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(Rect::from_min_size(
+                ui.max_rect().min,
+                vec2(width, ui.max_rect().height().max(width)),
+            ))
+            .layout(Layout::top_down(Align::Min))
+            .sizing_pass()
+            .invisible(),
+    );
+    preview_toolbar(&mut probe, &mut { *view }, pages, width)
+}
+
+/// What the preview toolbar edits. The toolbar is laid out twice — once
+/// invisibly to measure its band — so it edits a copy the measuring pass can
+/// throw away rather than the draft itself.
+#[derive(Clone, Copy)]
+struct PreviewView {
+    page: u32,
+    zoom: u16,
 }
 
 fn preview_desk(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height: f32) {
@@ -1448,21 +1651,19 @@ fn preview_desk(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height
     });
 }
 
-fn preview_toolbar(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height: f32) {
+fn preview_toolbar(ui: &mut Ui, view: &mut PreviewView, count: u32, width: f32) -> f32 {
     let t = Tokens::get(ui.ctx());
-    let content_height = (height - 12.0).max(1.0);
     let toolbar = Frame::NONE
         .fill(t.color.bg_panel)
         .inner_margin(Margin::symmetric(10, 6))
         .show(ui, |ui| {
             ui.set_width((width - 20.0).max(0.0));
-            ui.set_min_height(content_height);
-            let count = draft
-                .preview_plan
-                .as_ref()
-                .map_or(0, |plan| plan.pagination().pages().len() as u32);
             if count == 0 {
-                ui.with_layout(
+                // Sized rather than justified: a justified row claims the whole
+                // rectangle the column had left, and the band is exactly what
+                // this function reports back to it.
+                ui.allocate_ui_with_layout(
+                    vec2(ui.available_width(), t.metrics.ctl_h),
                     Layout::centered_and_justified(egui::Direction::LeftToRight),
                     |ui| {
                         ui.monospace("No valid page");
@@ -1470,65 +1671,66 @@ fn preview_toolbar(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, hei
                 );
                 return;
             }
-            ui.allocate_ui_with_layout(
-                vec2(ui.available_width(), content_height),
-                Layout::centered_and_justified(egui::Direction::LeftToRight),
-                |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
-                        if IconButton::new(Icon::ChevronLeft)
-                            .tooltip("Previous page")
-                            .enabled(draft.preview_page > 0)
-                            .show(ui)
-                            .clicked()
-                        {
-                            draft.preview_page -= 1;
-                            draft.invalidate_preview_raster();
-                        }
-                        ui.monospace(format!(
-                            "Page {} / {}",
-                            draft.preview_page.saturating_add(1),
-                            count
-                        ));
-                        if IconButton::new(Icon::ChevronRight)
-                            .tooltip("Next page")
-                            .enabled(draft.preview_page + 1 < count)
-                            .show(ui)
-                            .clicked()
-                        {
-                            draft.preview_page += 1;
-                            draft.invalidate_preview_raster();
-                        }
-                        ui.separator();
-                        if IconButton::new(Icon::ZoomOut)
-                            .tooltip("Zoom out")
-                            .show(ui)
-                            .clicked()
-                        {
-                            draft.preview_zoom_percent =
-                                draft.preview_zoom_percent.saturating_sub(10).max(25);
-                        }
-                        ui.monospace(format!("{}%", draft.preview_zoom_percent));
-                        if IconButton::new(Icon::ZoomIn)
-                            .tooltip("Zoom in")
-                            .show(ui)
-                            .clicked()
-                        {
-                            draft.preview_zoom_percent =
-                                draft.preview_zoom_percent.saturating_add(10).min(200);
-                        }
-                        if Button::new("Fit page").show(ui).clicked() {
-                            draft.preview_zoom_percent = 85;
-                        }
-                    })
-                },
-            );
+            // Wrapped, not fixed to one row: a column narrow enough to need the
+            // second row would otherwise run Fit page off its right edge, and
+            // the band above reserves whichever count this produces.
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                if IconButton::new(Icon::ChevronLeft)
+                    .tooltip("Previous page")
+                    .enabled(view.page > 0)
+                    .show(ui)
+                    .clicked()
+                {
+                    view.page -= 1;
+                }
+                ui.monospace(format!("Page {} / {}", view.page.saturating_add(1), count));
+                if IconButton::new(Icon::ChevronRight)
+                    .tooltip("Next page")
+                    .enabled(view.page + 1 < count)
+                    .show(ui)
+                    .clicked()
+                {
+                    view.page += 1;
+                }
+                // Painted rather than `ui.separator()`, which takes the band's
+                // whole height and would set the wrapped row's height from a
+                // rule instead of from the controls beside it.
+                let (rule, _) = ui.allocate_exact_size(
+                    vec2(1.0, Tokens::get(ui.ctx()).metrics.ctl_h),
+                    Sense::hover(),
+                );
+                ui.painter().vline(
+                    rule.center().x,
+                    rule.y_range().shrink(5.0),
+                    Stroke::new(1.0, t.color.border),
+                );
+                if IconButton::new(Icon::ZoomOut)
+                    .tooltip("Zoom out")
+                    .show(ui)
+                    .clicked()
+                {
+                    view.zoom = view.zoom.saturating_sub(10).max(25);
+                }
+                ui.monospace(format!("{}%", view.zoom));
+                if IconButton::new(Icon::ZoomIn)
+                    .tooltip("Zoom in")
+                    .show(ui)
+                    .clicked()
+                {
+                    view.zoom = view.zoom.saturating_add(10).min(200);
+                }
+                if Button::new("Fit page").show(ui).clicked() {
+                    view.zoom = 85;
+                }
+            });
         });
     ui.painter().hline(
         toolbar.response.rect.x_range(),
         toolbar.response.rect.top(),
         Stroke::new(1.0, t.color.border_strong),
     );
+    toolbar.response.rect.height()
 }
 
 /// What this configuration will actually produce, as facts rather than as the
@@ -1795,11 +1997,13 @@ fn mapping_cell<R>(ui: &mut Ui, height: f32, add_contents: impl FnOnce(&mut Ui) 
         .inner
 }
 
+/// What the mapping page cannot show as a control: why the redundancy columns
+/// exist at all. Where a mapping is saved is not one of these — the scope
+/// control above decides it, and a note restating a live control only invites
+/// the reader to look for a second place to set it.
 fn mapping_note_grid(ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    let stacked = ui.ctx().content_rect().width() <= 760.0;
-    let mut divider = None;
-    let notes = Frame::NONE
+    Frame::NONE
         .stroke(Stroke::new(1.0, t.color.border_strong))
         .outer_margin(Margin {
             left: 0,
@@ -1807,55 +2011,16 @@ fn mapping_note_grid(ui: &mut Ui) {
             top: 10,
             bottom: 0,
         })
+        .inner_margin(Margin::same(10))
         .show(ui, |ui| {
-            let note = |ui: &mut Ui, title: &str, detail: &str| {
-                Frame::NONE
-                    .inner_margin(Margin::same(10))
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 4.0;
-                        note_text(ui, title, detail)
-                    })
-            };
-            if stacked {
-                let first = note(
-                    ui,
-                    "Color-safe output",
-                    "Dash, marker, hatch, and label redundancy keeps traces and layers distinguishable in grayscale and common color-vision deficiencies.",
-                );
-                divider = Some(first.response.rect.bottom());
-                note(
-                    ui,
-                    "Scope",
-                    "Mappings may be saved per document, project print set, or portable personal preset.",
-                );
-            } else {
-                ui.columns(2, |columns| {
-                    note(
-                        &mut columns[0],
-                        "Color-safe output",
-                        "Dash, marker, hatch, and label redundancy keeps traces and layers distinguishable in grayscale and common color-vision deficiencies.",
-                    );
-                    note(
-                        &mut columns[1],
-                        "Scope",
-                        "Mappings may be saved per document, project print set, or portable personal preset.",
-                    );
-                });
-            }
+            ui.set_min_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 4.0;
+            note_text(
+                ui,
+                "Color-safe output",
+                "Dash, marker, hatch, and label redundancy keeps traces and layers distinguishable in grayscale and common color-vision deficiencies.",
+            );
         });
-    if let Some(y) = divider {
-        ui.painter().hline(
-            notes.response.rect.x_range(),
-            y,
-            Stroke::new(1.0, t.color.border_strong),
-        );
-    } else {
-        ui.painter().vline(
-            notes.response.rect.center().x,
-            notes.response.rect.y_range(),
-            Stroke::new(1.0, t.color.border_strong),
-        );
-    }
 }
 
 fn preview_texture(ctx: &Context, preview: &HardcopyPreviewPage, slot: usize) -> TextureHandle {
@@ -2029,7 +2194,6 @@ pub(super) fn form_row(ui: &mut Ui, add: impl FnOnce(&mut FormRow<'_>)) {
 
 fn form_grid_widths(ui: &Ui) -> (f32, f32) {
     let track = ui.available_width();
-    const PAIRED_TRACK_MINIMUM: f32 = 430.0;
     if track < PAIRED_TRACK_MINIMUM {
         let width = track.max(120.0);
         return (width, width);
@@ -2927,6 +3091,506 @@ mod tests {
         assert_eq!(
             preview_schedule_decision(None, 42),
             PreviewScheduleDecision::Launch
+        );
+    }
+
+    /// Viewports the studio has to fit: the desktop sizes the workbench ships
+    /// against, the widths where its three columns stop fitting side by side,
+    /// and the edge-to-edge tablet and phone surfaces.
+    #[cfg(not(target_arch = "wasm32"))]
+    const FIT_VIEWPORTS: [(f32, f32); 9] = [
+        (1_920.0, 1_200.0),
+        (1_440.0, 900.0),
+        (1_366.0, 768.0),
+        (1_280.0, 800.0),
+        (1_024.0, 768.0),
+        (900.0, 700.0),
+        (820.0, 1_180.0),
+        (768.0, 1_024.0),
+        (390.0, 844.0),
+    ];
+
+    /// The last two controls in the preview column — the toolbar's Fit page
+    /// button and the final row of the estimate strip. They are named because
+    /// they are what a surface that does not fit loses first, and because
+    /// bounds alone cannot tell a control that fits from one that was never
+    /// drawn.
+    #[cfg(not(target_arch = "wasm32"))]
+    const PREVIEW_TAIL_CONTROLS: [&str; 2] = ["Fit page", "COLOR"];
+
+    /// Where `DialogSize::SchematicPageSetup` puts the surface: 1280 × 760 pt
+    /// inside a 12 pt viewport gutter, edge to edge at or below the 820 pt
+    /// manager breakpoint. Anything the studio lays out beyond this rectangle
+    /// is off the dialog.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn studio_surface(viewport: Vec2) -> Rect {
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, viewport);
+        if viewport.x <= 820.0 {
+            return screen;
+        }
+        Rect::from_center_size(
+            screen.center(),
+            vec2(
+                1_280.0_f32.min(viewport.x - 12.0),
+                760.0_f32.min(viewport.y - 12.0),
+            ),
+        )
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn studio_app() -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        let reference = app.state.workspace.active_view.clone();
+        app.state.workbench.documents.activate(
+            crate::workbench::state::WorkspaceDocumentId::CellView(reference),
+        );
+        publish::open_hardcopy_workflow(&mut app, HardcopyWorkflow::Export);
+        app
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn render_studio(ctx: &Context, app: &mut RSpiceApp, viewport: Vec2) -> egui::FullOutput {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, viewport)),
+                ..Default::default()
+            },
+            |ui| app.render_hardcopy_dialog(ui),
+        )
+    }
+
+    /// Fonts build on the first pass, the source resolves on a worker thread,
+    /// and the exact page raster lands a pass after the plan it belongs to. The
+    /// measurement is only meaningful once all three have happened, so the
+    /// probe waits for them.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn settled_studio(ctx: &Context, app: &mut RSpiceApp, viewport: Vec2) -> egui::FullOutput {
+        for _ in 0..400 {
+            let _ = render_studio(ctx, app, viewport);
+            if app.state.dialogs.hardcopy.preview.is_some() {
+                let _ = render_studio(ctx, app, viewport);
+                return render_studio(ctx, app, viewport);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("the hardcopy studio never resolved a source and an exact page preview");
+    }
+
+    /// Every control the dialog laid out this pass, at the rect it was laid out
+    /// at. A scroll area clips what it paints but still lays its content out at
+    /// true coordinates, so a control that can only be reached by scrolling
+    /// reports a rect outside the surface — which is the condition being
+    /// measured.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn dialog_controls(output: &egui::FullOutput) -> Vec<(String, Rect)> {
+        output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("the probe enables AccessKit, so every pass carries a tree")
+            .nodes
+            .iter()
+            // The modal container spans the whole viewport by design: it is the
+            // scrim, not the surface.
+            .filter(|(_, node)| node.role() != egui::accesskit::Role::Dialog)
+            .filter_map(|(_, node)| {
+                let bounds = node.bounds()?;
+                let rect = Rect::from_min_max(
+                    egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                    egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                );
+                // A static label carries its text as the node's value; every
+                // other control carries it as the node's label.
+                let text = node.label().or_else(|| node.value()).unwrap_or_default();
+                rect.is_finite().then(|| (text.to_owned(), rect))
+            })
+            .collect()
+    }
+
+    /// How far outside the surface a control reaches, in points.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn overflow_beyond(surface: Rect, control: Rect) -> f32 {
+        (control.bottom() - surface.bottom())
+            .max(surface.top() - control.top())
+            .max(control.right() - surface.right())
+            .max(surface.left() - control.left())
+    }
+
+    /// The studio's whole claim is that it fits by construction. Rendering it
+    /// and looking at the picture is how a size gets missed, so the claim is
+    /// measured: across every viewport the workbench supports and every section
+    /// the rail offers, no control may land outside the dialog surface. A
+    /// control outside it is one a scroll area is hiding, which is the failure
+    /// this layout exists to remove.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn the_studio_fits_every_viewport_and_section_without_scrolling() {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = studio_app();
+        // The workflow resolves its source on a worker thread and rewrites the
+        // draft when it lands, so the matrix starts from a settled one.
+        let _ = settled_studio(&ctx, &mut app, vec2(FIT_VIEWPORTS[0].0, FIT_VIEWPORTS[0].1));
+        let mut failures = Vec::new();
+        for (width, height) in FIT_VIEWPORTS {
+            let viewport = vec2(width, height);
+            let surface = studio_surface(viewport);
+            // Below the split width the studio shows one region at a time, so
+            // each one is measured holding the whole track.
+            let regions: &[bool] = if surface.width() < STUDIO_SPLIT_WIDTH {
+                &[false, true]
+            } else {
+                &[true]
+            };
+            for section in HardcopySection::ALL {
+                for previewing in regions.iter().copied() {
+                    app.state.dialogs.hardcopy.section = section;
+                    app.state.dialogs.hardcopy.region = if previewing {
+                        HardcopyRegion::Preview
+                    } else {
+                        HardcopyRegion::Setup
+                    };
+                    let output = settled_studio(&ctx, &mut app, viewport);
+                    let case = format!(
+                        "{width}x{height} {section:?}{}",
+                        if previewing && regions.len() > 1 {
+                            " previewing"
+                        } else {
+                            ""
+                        }
+                    );
+                    let controls = dialog_controls(&output);
+                    assert!(
+                        !controls.is_empty(),
+                        "{case}: the dialog drew no controls at all"
+                    );
+                    // The header sits on the surface's top edge and the command
+                    // row on its bottom one, so both edges must be reached.
+                    // Without this the probe would be measuring against a
+                    // rectangle larger than the dialog, and would pass on
+                    // anything.
+                    let reach = controls
+                        .iter()
+                        .fold((f32::MAX, f32::MIN), |acc, (_, rect)| {
+                            (acc.0.min(rect.top()), acc.1.max(rect.bottom()))
+                        });
+                    assert!(
+                        reach.0 - surface.top() <= 16.0 && surface.bottom() - reach.1 <= 16.0,
+                        "{case}: the surface this probe measures against is not the one the \
+                         dialog drew — its controls span {:.0}..{:.0} inside {:.0}..{:.0}",
+                        reach.0,
+                        reach.1,
+                        surface.top(),
+                        surface.bottom()
+                    );
+                    if previewing {
+                        for missing in PREVIEW_TAIL_CONTROLS
+                            .into_iter()
+                            .filter(|wanted| !controls.iter().any(|(label, _)| label == wanted))
+                        {
+                            failures.push(format!("{case}: {missing:?} was never drawn"));
+                        }
+                    }
+                    if let Some((label, overflow)) = controls
+                        .iter()
+                        .map(|(label, rect)| (label, overflow_beyond(surface, *rect)))
+                        .max_by(|left, right| left.1.total_cmp(&right.1))
+                        .filter(|(_, overflow)| *overflow > 0.5)
+                    {
+                        failures.push(format!(
+                            "{case}: {label:?} is {overflow:.0} pt outside the {:.0}x{:.0} pt \
+                             surface",
+                            surface.width(),
+                            surface.height()
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "the hardcopy studio does not fit:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    /// Every filled rectangle the dialog painted this pass. Geometry the
+    /// AccessKit tree cannot see: a panel's fill is not a control, and the
+    /// defect it carries — a fill that stops short of the track it was given —
+    /// is invisible to a probe that only reads controls.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn painted_rects(output: &egui::FullOutput) -> Vec<(egui::Color32, Rect)> {
+        fn walk(shape: &egui::Shape, into: &mut Vec<(egui::Color32, Rect)>) {
+            match shape {
+                egui::Shape::Rect(rect) => into.push((rect.fill, rect.rect)),
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, into);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut rects = Vec::new();
+        for clipped in &output.shapes {
+            walk(&clipped.shape, &mut rects);
+        }
+        rects
+    }
+
+    /// The largest control carrying `label`. A rail entry names itself twice —
+    /// once as the text inside it and once as the row that selects it — so the
+    /// row is the taller of the two.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn control_rect(controls: &[(String, Rect)], label: &str) -> Option<Rect> {
+        controls
+            .iter()
+            .filter(|(found, _)| found == label)
+            .map(|(_, rect)| *rect)
+            .reduce(|held, rect| {
+                if rect.height() > held.height() {
+                    rect
+                } else {
+                    held
+                }
+            })
+    }
+
+    /// The strip is a band across the surface, so its fill is the surface's
+    /// width. Sized to its chips instead, it stopped after the last one and the
+    /// rest of the band read as a second, lighter panel butted against it.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn the_tab_strip_fills_the_track_it_was_given() {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let panel = Tokens::get(&ctx).color.bg_panel;
+        let mut app = studio_app();
+        let viewport = vec2(900.0, 700.0);
+        let surface = studio_surface(viewport);
+        let output = settled_studio(&ctx, &mut app, viewport);
+        let chip = control_rect(&dialog_controls(&output), "01  Source and scope")
+            .expect("the strip carries a chip for every section");
+        let strip = painted_rects(&output)
+            .into_iter()
+            .filter(|(fill, rect)| *fill == panel && rect.contains_rect(chip))
+            .fold(None::<Rect>, |narrowest, (_, rect)| {
+                Some(narrowest.map_or(rect, |held| {
+                    if rect.height() < held.height() {
+                        rect
+                    } else {
+                        held
+                    }
+                }))
+            })
+            .expect("the strip paints a panel behind its chips");
+        assert!(
+            strip.width() >= surface.width() - 1.0,
+            "the strip's fill is {:.0} pt wide inside a {:.0} pt surface",
+            strip.width(),
+            surface.width()
+        );
+    }
+
+    /// Which region the surface is showing and which section it is editing are
+    /// different questions. Asked by identical chips in one row they read as
+    /// one list of six peers, and nothing says that choosing the sixth replaces
+    /// the whole surface.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn the_narrow_strip_asks_one_question_per_control() {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = studio_app();
+        let viewport = vec2(390.0, 844.0);
+
+        app.state.dialogs.hardcopy.region = HardcopyRegion::Setup;
+        let controls = dialog_controls(&settled_studio(&ctx, &mut app, viewport));
+        assert!(control_rect(&controls, "01  Source and scope").is_some());
+        assert!(control_rect(&controls, "Setup").is_some());
+        assert!(control_rect(&controls, "Exact preview").is_some());
+        assert!(
+            !controls
+                .iter()
+                .any(|(label, _)| label.starts_with("0") && label.contains("Exact preview")),
+            "the preview must not be offered as a sixth section chip"
+        );
+
+        // With the page on screen there is no section to choose, so the chips
+        // that would choose one are not there to be read as inert.
+        app.state.dialogs.hardcopy.region = HardcopyRegion::Preview;
+        let controls = dialog_controls(&settled_studio(&ctx, &mut app, viewport));
+        assert!(control_rect(&controls, "01  Source and scope").is_none());
+        assert!(control_rect(&controls, "Setup").is_some());
+        assert!(control_rect(&controls, "Exact preview").is_some());
+    }
+
+    /// The studio ships to tablet and phone, so every row and chip it navigates
+    /// by is a touch target where the shell is in touch mode.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn navigation_targets_meet_the_touch_minimum() {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        crate::ui::Theme::default().apply_responsive_metrics_with_target(&ctx, Some(44.0));
+        let mut app = studio_app();
+
+        let rail = dialog_controls(&settled_studio(&ctx, &mut app, vec2(1_440.0, 900.0)));
+        for section in HardcopySection::ALL {
+            if let Some(rect) = control_rect(&rail, section.label()) {
+                assert!(
+                    rect.height() >= tokens::TOUCH_TARGET,
+                    "rail row {:?} is {:.0} pt tall",
+                    section.label(),
+                    rect.height()
+                );
+            }
+        }
+
+        let strip = dialog_controls(&settled_studio(&ctx, &mut app, vec2(390.0, 844.0)));
+        for label in ["01  Source and scope", "Setup", "Exact preview"] {
+            let rect = control_rect(&strip, label).unwrap_or_else(|| panic!("{label} is drawn"));
+            assert!(
+                rect.height() >= tokens::TOUCH_TARGET,
+                "strip control {label:?} is {:.0} pt tall",
+                rect.height()
+            );
+        }
+    }
+
+    /// The editor column at `measure`, laid out to its own natural height:
+    /// what the section takes, and how far the widest thing in it reaches.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn editor_extent(app: &mut RSpiceApp, section: HardcopySection, measure: f32) -> (f32, f32) {
+        app.state.dialogs.hardcopy.section = section;
+        let draft = &mut app.state.dialogs.hardcopy;
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut natural = 0.0_f32;
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    vec2(measure + 40.0, 4_000.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default()
+                    .frame(Frame::NONE)
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                        let column = ui.allocate_ui_with_layout(
+                            vec2(measure, 0.0),
+                            Layout::top_down(Align::Min),
+                            |ui| {
+                                ui.set_width(measure);
+                                editor_column(ui, draft, None);
+                            },
+                        );
+                        natural = column.response.rect.height();
+                    });
+            },
+        );
+        let reach = dialog_controls(&output)
+            .iter()
+            .filter(|(_, rect)| rect.width() < measure + 1.0)
+            .fold(0.0_f32, |acc, (_, rect)| acc.max(rect.right()));
+        (natural, reach)
+    }
+
+    /// The division is a claim about the forms, not about the surface: at the
+    /// measure the studio picks, every section reaches the column's far edge.
+    /// The fixed fraction this replaced left Identity — a column of switches
+    /// with nothing two-up in it — standing in a column a third wider than
+    /// anything it contained, which is the emptiness the measure exists to
+    /// remove.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn every_section_reaches_the_edge_of_the_measure_it_is_given() {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = studio_app();
+        // Sections draw what the resolved source gives them, so the measurement
+        // is only of the real form once the source has landed.
+        let _ = settled_studio(&ctx, &mut app, vec2(1_440.0, 900.0));
+        for section in HardcopySection::ALL {
+            let (_, reach) = editor_extent(&mut app, section, EDITOR_STACKED_MEASURE);
+            assert!(
+                reach >= EDITOR_STACKED_MEASURE - 24.0,
+                "{section:?} reaches only {reach:.0} pt of its {EDITOR_STACKED_MEASURE:.0} pt \
+                 column"
+            );
+        }
+    }
+
+    /// Whatever the track, the editor takes its measure and the page desk takes
+    /// the rest — and a column too short for a stacked form buys its height
+    /// back with the width the desk would have had.
+    #[test]
+    fn the_page_desk_takes_every_point_the_form_does_not_need() {
+        let tall = STACKED_FORM_HEIGHT;
+        for track in [1_050.0_f32, 888.0, 782.0, 768.0] {
+            let (editor, preview) = column_widths(track, tall);
+            assert_eq!(editor, EDITOR_STACKED_MEASURE);
+            assert!((editor + preview - track).abs() < 0.5);
+        }
+        let (editor, preview) = column_widths(1_050.0, STACKED_FORM_HEIGHT - 1.0);
+        assert_eq!(editor, EDITOR_PAIRED_MEASURE);
+        assert!((editor + preview - 1_050.0).abs() < 0.5);
+        // A track that cannot pay for both gives way from the editor first: a
+        // page too small to read is not worth a wider form.
+        let (editor, preview) = column_widths(EDITOR_MIN + PREVIEW_MIN, tall);
+        assert_eq!((editor, preview), (EDITOR_MIN, PREVIEW_MIN));
+    }
+
+    /// The toolbar's band is measured, not assumed. A wide column holds its
+    /// controls in one row at any control height, and a narrow one wraps them —
+    /// and either way the band the desk gave up is the band the toolbar drew.
+    #[test]
+    fn the_preview_toolbar_reserves_exactly_the_band_it_draws() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply_responsive_metrics_with_target(&ctx, Some(44.0));
+        let mut bands = Vec::new();
+        let _ = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                for width in [620.0_f32, 340.0] {
+                    let view = PreviewView { page: 0, zoom: 100 };
+                    let reserved = preview_toolbar_height(ui, &view, 4, width);
+                    let drawn = ui
+                        .allocate_ui_with_layout(
+                            vec2(width, 400.0),
+                            Layout::top_down(Align::Min),
+                            |ui| preview_toolbar(ui, &mut { view }, 4, width),
+                        )
+                        .inner;
+                    bands.push((width, reserved, drawn));
+                }
+            });
+        });
+        for (width, reserved, drawn) in &bands {
+            assert!(
+                (reserved - drawn).abs() < 0.5,
+                "at {width:.0} pt the desk gave up {reserved:.0} pt for a toolbar that drew \
+                 {drawn:.0}"
+            );
+        }
+        let row = 44.0 + 12.0;
+        assert!(
+            bands[0].1 < row + 6.0,
+            "a 620 pt column holds the toolbar in one row, but {:.0} pt was reserved",
+            bands[0].1
+        );
+        assert!(
+            bands[1].1 > row,
+            "a 340 pt column cannot hold the toolbar in one row, but only {:.0} pt was reserved",
+            bands[1].1
         );
     }
 

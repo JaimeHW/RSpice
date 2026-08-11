@@ -7,6 +7,8 @@
 
 use super::*;
 
+use crate::hardcopy::PrintMappingSaveScope;
+
 pub(super) fn printer_properties_body(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
     #[cfg(target_os = "windows")]
@@ -353,10 +355,120 @@ pub(super) fn split_column<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) ->
         .inner
 }
 
+/// Where "Save print mapping" puts this table, and under what name.
+///
+/// The three scopes are not interchangeable: a document mapping travels inside
+/// the hardcopy setup, a project print set is owned by the project catalog and
+/// reviewed with the design, and a personal preset is portable across
+/// projects. Only the last two carry a name, and the catalog keys its presets
+/// by exactly that text, so the contract's own verdict on the name is reported
+/// at the field instead of after the button.
+fn mapping_save_scope(ui: &mut Ui, draft: &mut HardcopyDialogState) {
+    let t = Tokens::get(ui.ctx());
+    Frame::NONE
+        .stroke(Stroke::new(1.0, t.color.border_strong))
+        .inner_margin(Margin::same(10))
+        .outer_margin(Margin {
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 10,
+        })
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, 5.0);
+            form_row(ui, |row| {
+                row.narrow(|ui| {
+                    let current = mapping_scope_key(&draft.mapping_scope_draft);
+                    let mut key = current;
+                    field(ui, "Save to", |ui| {
+                        egui::ComboBox::from_id_salt("hardcopy-mapping-scope")
+                            .selected_text(mapping_scope_label(key))
+                            .width(ui.available_width())
+                            .show_ui(ui, |ui| {
+                                for candidate in 0..3 {
+                                    ui.selectable_value(
+                                        &mut key,
+                                        candidate,
+                                        mapping_scope_label(candidate),
+                                    );
+                                }
+                            });
+                    });
+                    if key != current {
+                        let name = draft.mapping_name_draft.clone();
+                        draft.mapping_scope_draft = match key {
+                            0 => PrintMappingSaveScope::Document,
+                            1 => PrintMappingSaveScope::ProjectPrintSet(name),
+                            _ => PrintMappingSaveScope::PortablePersonalPreset(name),
+                        };
+                    }
+                });
+                row.wide(|ui| {
+                    let named =
+                        !matches!(draft.mapping_scope_draft, PrintMappingSaveScope::Document);
+                    field(ui, "Preset name", |ui| {
+                        ui.add_enabled_ui(named, |ui| {
+                            ui.add_sized(
+                                vec2(ui.available_width(), ui.spacing().interact_size.y),
+                                egui::TextEdit::singleline(&mut draft.mapping_name_draft)
+                                    .hint_text("Fabrication review"),
+                            );
+                        });
+                        let refusal = named.then(|| draft.mapping_scope_refusal()).flatten();
+                        let (text, color) = match refusal.as_deref() {
+                            Some(reason) => (reason, ui.visuals().warn_fg_color),
+                            None => (
+                                mapping_scope_destination(&draft.mapping_scope_draft),
+                                t.color.text_dim,
+                            ),
+                        };
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(text).size(tokens::FS_0).color(color),
+                            )
+                            .wrap(),
+                        );
+                    });
+                });
+            });
+        });
+}
+
+const fn mapping_scope_key(scope: &PrintMappingSaveScope) -> u8 {
+    match scope {
+        PrintMappingSaveScope::Document => 0,
+        PrintMappingSaveScope::ProjectPrintSet(_) => 1,
+        PrintMappingSaveScope::PortablePersonalPreset(_) => 2,
+    }
+}
+
+const fn mapping_scope_label(key: u8) -> &'static str {
+    match key {
+        0 => "This document",
+        1 => "Project print set",
+        _ => "Portable personal preset",
+    }
+}
+
+const fn mapping_scope_destination(scope: &PrintMappingSaveScope) -> &'static str {
+    match scope {
+        PrintMappingSaveScope::Document => {
+            "Travels inside this document's hardcopy setup; no name needed."
+        }
+        PrintMappingSaveScope::ProjectPrintSet(_) => {
+            "Stored in the project print-set catalog under this exact name."
+        }
+        PrintMappingSaveScope::PortablePersonalPreset(_) => {
+            "Stored in your portable preset catalog, available in every project."
+        }
+    }
+}
+
 pub(super) fn print_mapping_body(ui: &mut Ui, draft: &mut HardcopyDialogState) {
     let mut mapping_changed = false;
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
     let t = Tokens::get(ui.ctx());
+    mapping_save_scope(ui, draft);
     let mut changed_entry = None;
     egui::ScrollArea::horizontal()
         .id_salt("hardcopy-print-mapping-horizontal")
@@ -548,5 +660,59 @@ pub(super) fn print_mapping_body(ui: &mut Ui, draft: &mut HardcopyDialogState) {
     mapping_note_grid(ui);
     if mapping_changed {
         draft.refresh_preview();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mapping_page(draft: &mut HardcopyDialogState) -> Vec<String> {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| print_mapping_body(ui, draft));
+        })
+        .platform_output
+        .accesskit_update
+        .expect("AccessKit tree update")
+        .nodes
+        .into_iter()
+        .filter_map(|(_, node)| node.value().or_else(|| node.label()).map(str::to_owned))
+        .collect()
+    }
+
+    fn shows(page: &[String], text: &str) -> bool {
+        page.iter().any(|entry| entry.contains(text))
+    }
+
+    #[test]
+    fn the_save_scope_and_its_name_are_on_the_page() {
+        let mut draft = HardcopyDialogState::default();
+        let document = mapping_page(&mut draft);
+        assert!(shows(&document, "Save to"));
+        assert!(shows(&document, "This document"));
+        assert!(shows(&document, "Preset name"));
+
+        draft.mapping_scope_draft =
+            PrintMappingSaveScope::ProjectPrintSet("Fabrication review".to_owned());
+        draft.mapping_name_draft = "Fabrication review".to_owned();
+        let project = mapping_page(&mut draft);
+        assert!(shows(&project, "Project print set"));
+        assert!(shows(&project, "Fabrication review"));
+        assert!(shows(&project, "project print-set catalog"));
+    }
+
+    #[test]
+    fn a_name_the_contract_would_refuse_states_its_reason_on_the_page() {
+        let mut draft = HardcopyDialogState::default();
+        draft.mapping_scope_draft = PrintMappingSaveScope::ProjectPrintSet(String::new());
+        draft.mapping_name_draft = " untrimmed".to_owned();
+
+        assert!(shows(
+            &mapping_page(&mut draft),
+            "project print set mapping name must be trimmed"
+        ));
     }
 }
