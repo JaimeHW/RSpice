@@ -1731,6 +1731,7 @@ mod tests {
             min: Some(9.0),
             max: Some(10.0),
             unit: "dB".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
         };
         let row = measurement_table_row(&measurement, "AC", Some(&spec));
         assert_eq!(row.status, "PASS");

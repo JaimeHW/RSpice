@@ -7,16 +7,17 @@
 
 use egui::Ui;
 
-use crate::state::SpecEntry;
 use crate::state::workspace::SimulationPlanPayload;
+use crate::state::{SpecEntry, SpecPointScope};
 use crate::workbench::RSpiceApp;
 
-use crate::ui::widgets::Button;
+use crate::ui::widgets::{Button, select};
 
 use super::page_kit::{
-    Tone, card, card_body, card_head_row, card_note, card_row, card_with_head, ledger_head,
-    ledger_row, rule_row,
+    Tone, card, card_body, card_head_row, card_note, card_row, card_with_head, field_pair,
+    ledger_head, ledger_row, rule_row,
 };
+use super::workflows::commit_plan_change;
 
 const REGISTRY_COLUMNS: [f32; 5] = [0.24, 0.26, 0.18, 0.16, 0.16];
 
@@ -39,6 +40,51 @@ fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
         .map(|plan| plan.id())
         .and_then(|plan_id| app.state.workspace.active_plan_data(plan_id).cloned())
         .unwrap_or_default()
+}
+
+/// The process corners the current run set actually reaches.
+///
+/// Read from the declared space rather than from a fixed corner list, because
+/// a specification scoped to a corner the run set does not declare is a claim
+/// nothing will ever answer. A run set with no process axis still runs one
+/// corner — the plan's reference section — so that is what it declares.
+fn declared_process_corners(app: &RSpiceApp) -> Vec<String> {
+    use crate::simulation::run_set::RunSetDimensionKind;
+
+    let run_set = &app.state.sim_setup.corner.run_set;
+    match run_set.enabled_dimension_of(RunSetDimensionKind::ProcessSection) {
+        Some(dimension) if !dimension.values.is_empty() => dimension
+            .values
+            .iter()
+            .map(|value| value.lexical.trim().to_owned())
+            .collect(),
+        _ => vec![
+            app.state
+                .sim_setup
+                .reference_pvt
+                .process
+                .short_name()
+                .to_owned(),
+        ],
+    }
+}
+
+/// The corners a specification names that the run set does not declare.
+///
+/// Recomputed every frame rather than recorded at authoring time: the run set
+/// is edited independently of the specifications, so a scope that was sound
+/// when it was written goes stale without the specification changing at all.
+fn undeclared_corners(spec: &SpecEntry, declared: &[String]) -> Vec<String> {
+    spec.scope
+        .named_corners()
+        .iter()
+        .filter(|corner| {
+            !declared
+                .iter()
+                .any(|declared| declared.eq_ignore_ascii_case(corner))
+        })
+        .cloned()
+        .collect()
 }
 
 /// Resolved evidence for one specification against the active dataset.
@@ -113,10 +159,12 @@ fn evidence_for(app: &RSpiceApp, spec: &SpecEntry) -> Evidence {
 
 fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     let specs = &payload.specs;
+    let declared = declared_process_corners(app);
     let mut passing = 0usize;
     let mut failing = 0usize;
     let mut unmapped = 0usize;
     let mut partial = 0usize;
+    let mut unreachable_scope = 0usize;
     let rows: Vec<(String, Tone)> = specs
         .iter()
         .map(|spec| {
@@ -129,7 +177,19 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
             if evidence.is_partial() {
                 partial += 1;
             }
-            evidence.cell(spec)
+            // A scope the run set cannot reach outranks "no evidence" in the
+            // cell, because the two have different fixes: one needs a run, the
+            // other needs the scope or the run set changed.
+            let missing = undeclared_corners(spec, &declared);
+            if missing.is_empty() {
+                evidence.cell(spec)
+            } else {
+                unreachable_scope += 1;
+                (
+                    format!("scoped to {} · not in the run set", missing.join(" · ")),
+                    Tone::Warn,
+                )
+            }
         })
         .collect();
     // A partially-covered pass is reported separately rather than folded into
@@ -140,9 +200,14 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     if partial > 0 {
         status.push_str(&format!(" · {partial} judged on the worst of several points"));
     }
+    if unreachable_scope > 0 {
+        status.push_str(&format!(
+            " · {unreachable_scope} scoped to corners the run set does not declare"
+        ));
+    }
     let tone = if failing > 0 {
         Tone::Error
-    } else if unmapped > 0 || partial > 0 {
+    } else if unmapped > 0 || partial > 0 || unreachable_scope > 0 {
         Tone::Warn
     } else {
         Tone::Ok
@@ -222,7 +287,9 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                  measurements of one name — a corner, temperature or Monte Carlo run set — the \
                  result shown is the worst of them against this limit, marked with the count it \
                  was chosen from. That verdict is sound for every point the dataset retained; it \
-                 does not speak for points the run never measured. Authoring lives in the \
+                 does not speak for points the run never measured. A limit narrowed to nominal or \
+                 to named corners is answered only by measurements the executor attributed to a \
+                 point, so an unattributed result never satisfies one. Authoring lives in the \
                  specification editor, which owns the limits this page reads.",
             );
         },
@@ -266,7 +333,49 @@ fn margin_label(app: &RSpiceApp, spec: &SpecEntry) -> String {
     format!("{margin:+.6} {}", spec.unit)
 }
 
-fn selected_record(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) {
+/// The scopes the "Applies to" control offers, each with the exact value it
+/// commits.
+///
+/// One entry per corner the run set declares rather than a fixed corner list,
+/// so the control cannot offer a corner the plan will not run. A scope already
+/// held that none of the derived entries reproduces — several corners at once,
+/// or a corner the run set has since dropped — is appended so that opening the
+/// record and picking nothing cannot quietly rewrite the requirement.
+fn scope_options(app: &RSpiceApp, current: &SpecPointScope) -> Vec<(String, SpecPointScope)> {
+    let points = app.state.sim_setup.corner.run_set.point_count();
+    let mut options = vec![
+        (
+            format!("All {points} PVT points"),
+            SpecPointScope::AllPoints,
+        ),
+        ("Nominal only".to_owned(), SpecPointScope::Nominal),
+    ];
+    options.extend(declared_process_corners(app).into_iter().map(|corner| {
+        (
+            format!("Corner {corner} only"),
+            SpecPointScope::SelectedCorners {
+                corners: vec![corner],
+            },
+        )
+    }));
+    if !options.iter().any(|(_, scope)| scope == current) {
+        options.push((scope_label(current), current.clone()));
+    }
+    options
+}
+
+/// A scope spelled the way the control shows it.
+fn scope_label(scope: &SpecPointScope) -> String {
+    match scope {
+        SpecPointScope::AllPoints => "All PVT points".to_owned(),
+        SpecPointScope::Nominal => "Nominal only".to_owned(),
+        SpecPointScope::SelectedCorners { corners } => {
+            format!("Corners {}", corners.join(" · "))
+        }
+    }
+}
+
+fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     // Resolved case-insensitively, which is how a measurement name is matched
     // everywhere else: a specification whose case changed is still the same
     // requirement, and one that was deleted resolves to nothing rather than to
@@ -281,8 +390,9 @@ fn selected_record(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload
                 .specs
                 .iter()
                 .find(|spec| spec.measurement.eq_ignore_ascii_case(measurement))
-        });
-    let Some(spec) = selected else {
+        })
+        .cloned();
+    let Some(spec) = selected.as_ref() else {
         card(
             ui,
             "Selected specification",
@@ -301,8 +411,34 @@ fn selected_record(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload
     let evidence = evidence_for(app, spec);
     let coverage = evidence_coverage(app, spec);
     let (result, tone) = evidence.cell(spec);
+    let options = scope_options(app, &spec.scope);
+    let option_labels: Vec<String> = options.iter().map(|(label, _)| label.clone()).collect();
+    let current_scope = options
+        .iter()
+        .find(|(_, scope)| *scope == spec.scope)
+        .map_or_else(|| scope_label(&spec.scope), |(label, _)| label.clone());
+    let missing = undeclared_corners(spec, &declared_process_corners(app));
+    let mut picked = None;
     card(ui, &title, Some((result.as_str(), tone)), |ui| {
         card_body(ui, |ui| {
+            // The scope is a control rather than a read-only row because it is
+            // part of the requirement: narrowing it changes which points the
+            // limit is a claim about, so it commits as a plan transaction like
+            // every other specification edit.
+            field_pair(
+                ui,
+                ("Applies to", &mut |ui: &mut Ui, width: f32| {
+                    picked = select(
+                        ui,
+                        "simulation-plan.spec-editor.scope",
+                        "Applies to",
+                        &current_scope,
+                        &option_labels,
+                        width,
+                    );
+                }),
+                None,
+            );
             rule_row(ui, "Evidence coverage", &coverage);
             rule_row(
                 ui,
@@ -320,25 +456,80 @@ fn selected_record(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload
             );
             rule_row(ui, "Display unit", &spec.unit);
             rule_row(ui, "Margin", &margin_label(app, spec));
+            if !missing.is_empty() {
+                card_note(
+                    ui,
+                    &format!(
+                        "This limit is scoped to {}, which the current run set does not declare, \
+                         so no run can produce evidence for it. Widen the scope or add the corner \
+                         to the run set.",
+                        missing.join(" · ")
+                    ),
+                );
+            }
         });
+    });
+    if let Some(index) = picked
+        && options[index].1 != spec.scope
+    {
+        commit_scope(app, &spec.measurement, options[index].1.clone());
+    }
+}
+
+/// Adopt a scope change as one plan-configuration transaction.
+///
+/// The specs vector is replaced whole because that is the only mutation the
+/// workspace exposes for it; matching is case-insensitive for the same reason
+/// selection is.
+pub(super) fn commit_scope(app: &mut RSpiceApp, measurement: &str, scope: SpecPointScope) {
+    let Ok(plan_id) = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .map(|plan| plan.id())
+    else {
+        return;
+    };
+    let detail = format!(
+        "Scoped specification {measurement} to {}.",
+        scope_label(&scope).to_lowercase()
+    );
+    let measurement = measurement.to_owned();
+    commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
+        let mut specs = workspace.active_specs(plan_id).to_vec();
+        let target = specs
+            .iter_mut()
+            .find(|spec| spec.measurement.eq_ignore_ascii_case(&measurement))
+            .ok_or_else(|| format!("specification {measurement} no longer exists"))?;
+        target.scope = scope;
+        target.validate()?;
+        workspace.replace_active_specs(plan_id, specs);
+        Ok(())
     });
 }
 
 /// How much of the dataset the reported value speaks for.
 ///
 /// Spelled out rather than implied, because "judged" and "judged against one
-/// of forty-five points" are different claims about the same number.
+/// of forty-five points" are different claims about the same number. The count
+/// is the one *in the specification's scope*, which is the only honest number:
+/// a limit narrowed to one corner was never judged against the rest.
 fn evidence_coverage(app: &RSpiceApp, spec: &SpecEntry) -> String {
     let Some(run) = super::output_evidence::selected_output_dataset(&app.state.simulation) else {
         return "no dataset loaded".to_owned();
     };
+    let within = if spec.scope.is_all_points() {
+        String::new()
+    } else {
+        format!(" in {}", scope_label(&spec.scope).to_lowercase())
+    };
     match super::output_evidence::measurement_in_output_dataset(run, spec) {
-        None => "no attributed measurement of this name".to_owned(),
+        None => format!("no attributed measurement of this name{within}"),
         Some(evidence) if evidence.is_complete_coverage() => {
-            "the dataset's only measurement of this name".to_owned()
+            format!("the only measurement of this name{within}")
         }
         Some(evidence) => format!(
-            "worst of {} retained measurements of this name",
+            "worst of {} retained measurements of this name{within}",
             evidence.retained_measurements
         ),
     }

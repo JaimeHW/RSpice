@@ -557,6 +557,11 @@ impl ProjectSimulationResults {
                             "runs[{run_idx}].analyses[{analysis_idx}].provenance.source_domain is required by schema v5"
                         ));
                     }
+                    if provenance.pvt_point.is_some() {
+                        return Err(format!(
+                            "runs[{run_idx}].analyses[{analysis_idx}].provenance.pvt_point was introduced after schema v{source_schema}"
+                        ));
+                    }
                 }
             }
         }
@@ -1682,10 +1687,72 @@ pub struct ProjectAnalysisResultProvenance {
     pub prepared_snapshot_digest: ContentDigest,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dependency_ids: Vec<AnalysisInstanceId>,
+    /// The PVT point the producing task was expanded to. Absent both for
+    /// projects written before results were attributed and for a task that
+    /// legitimately has no point; the two are indistinguishable here on
+    /// purpose, because neither may be read as evidence about a corner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pvt_point: Option<ProjectAnalysisResultPvtPoint>,
+}
+
+/// Project-file representation of one attributed PVT point.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectAnalysisResultPvtPoint {
+    pub process: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supply_voltage: Option<f64>,
+    pub temperature_celsius: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corner_contract: Option<ContentDigest>,
+    pub nominal: bool,
+}
+
+/// Bitwise, so a persisted point is `Eq` like the rest of the provenance wire
+/// record. Load-time validation refuses the non-finite quantities that would
+/// make this anything other than an equivalence.
+impl PartialEq for ProjectAnalysisResultPvtPoint {
+    fn eq(&self, other: &Self) -> bool {
+        self.process == other.process
+            && self.supply_voltage.map(f64::to_bits) == other.supply_voltage.map(f64::to_bits)
+            && self.temperature_celsius.to_bits() == other.temperature_celsius.to_bits()
+            && self.corner_contract == other.corner_contract
+            && self.nominal == other.nominal
+    }
+}
+
+impl Eq for ProjectAnalysisResultPvtPoint {}
+
+impl ProjectAnalysisResultPvtPoint {
+    fn into_point(self) -> Result<AnalysisResultPvtPoint, String> {
+        AnalysisResultPvtPoint::new(
+            self.process,
+            self.supply_voltage,
+            self.temperature_celsius,
+            self.corner_contract,
+            self.nominal,
+        )
+    }
+}
+
+impl From<&AnalysisResultPvtPoint> for ProjectAnalysisResultPvtPoint {
+    fn from(point: &AnalysisResultPvtPoint) -> Self {
+        Self {
+            process: point.process().to_owned(),
+            supply_voltage: point.supply_voltage(),
+            temperature_celsius: point.temperature_celsius(),
+            corner_contract: point.corner_contract(),
+            nominal: point.is_nominal(),
+        }
+    }
 }
 
 impl ProjectAnalysisResultProvenance {
     fn into_provenance(self) -> Result<AnalysisResultProvenance, String> {
+        let pvt_point = self
+            .pvt_point
+            .map(ProjectAnalysisResultPvtPoint::into_point)
+            .transpose()?;
         AnalysisResultProvenance::new_with_authored_source_domain(
             self.source_domain
                 .into_value()
@@ -1697,9 +1764,13 @@ impl ProjectAnalysisResultProvenance {
             self.prepared_snapshot_digest,
             self.dependency_ids,
         )
+        .map(|provenance| provenance.with_pvt_point(pvt_point))
     }
 
     fn validate(&self) -> Result<(), String> {
+        if let Some(point) = self.pvt_point.clone() {
+            point.into_point()?;
+        }
         AnalysisResultProvenance::new_with_authored_source_domain(
             self.source_domain
                 .as_ref()
@@ -1727,6 +1798,9 @@ impl From<&AnalysisResultProvenance> for ProjectAnalysisResultProvenance {
             source_revision: provenance.source_revision(),
             prepared_snapshot_digest: provenance.prepared_snapshot_digest(),
             dependency_ids: provenance.dependency_ids().to_vec(),
+            pvt_point: provenance
+                .pvt_point()
+                .map(ProjectAnalysisResultPvtPoint::from),
         }
     }
 }

@@ -46,9 +46,9 @@ use crate::product::{
     ResultDocumentId, RevisionError, RunId, SavedOutputId, SimulationPlanId,
 };
 use crate::state::{
-    AnalysisResultSourceDomain, Cell, ComponentType, Library, LibraryCellInstance, LibraryManager,
-    SchematicState, View, ViewType, validate_builtin_xspice_binding,
-    validate_generated_veriloga_binding,
+    AnalysisResultPvtPoint, AnalysisResultSourceDomain, Cell, ComponentType, Library,
+    LibraryCellInstance, LibraryManager, SchematicState, View, ViewType,
+    validate_builtin_xspice_binding, validate_generated_veriloga_binding,
 };
 
 /// Default editable design library created for new projects.

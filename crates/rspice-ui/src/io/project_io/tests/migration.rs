@@ -2352,3 +2352,136 @@ fn canonical_plan_kind_tags_cover_the_complete_manifest_without_collisions() {
         34
     );
 }
+
+/// A project written before results were attributed to a PVT point still
+/// loads, and its results stay unattributed. Inventing a nominal point for
+/// them would let a specification scoped to nominal pass on evidence that
+/// belongs to no point at all.
+#[test]
+fn results_written_before_point_attribution_load_as_unattributed() {
+    use crate::state::SpecPointScope;
+
+    let mut run = SimulationRun::new(41);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Ac, "Prepared AC").with_provenance(
+            AnalysisResultProvenance::new(
+                AnalysisInstanceId::new(),
+                ObjectRevision::INITIAL,
+                ContentDigest::from_bytes([0xb7; 32]),
+                Vec::new(),
+            )
+            .expect("prepared provenance fixture"),
+        ),
+    );
+    seal_prepared_run(
+        &mut run,
+        AnalysisResultSourceDomain::SimulationPlan,
+        Some(SimulationPlanId::new()),
+        ObjectRevision::INITIAL,
+        ContentDigest::from_bytes([0xb6; 32]),
+        PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0xb5; 32])),
+        &[2],
+    );
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run];
+    simulation.next_run_id = 41;
+
+    let mut v5 = ProjectSimulationResults::from_state(&simulation);
+    v5.schema_version = SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION;
+    clear_v6_execution_fields(&mut v5);
+    assert_eq!(
+        v5.runs[0].analyses[0]
+            .provenance
+            .as_ref()
+            .expect("provenance")
+            .pvt_point,
+        None,
+        "a v5 file has no point field to write"
+    );
+
+    v5.migrate_to_current(ProjectId::new())
+        .expect("a project without point attribution migrates");
+    let restored = v5
+        .into_simulation_state()
+        .expect("migrated results restore");
+    let provenance = restored.runs[0].analyses[0]
+        .provenance
+        .as_ref()
+        .expect("provenance survives the migration");
+
+    assert_eq!(provenance.pvt_point(), None);
+    assert!(
+        SpecPointScope::AllPoints.admits(provenance.pvt_point()),
+        "an unscoped specification still judges restored legacy evidence"
+    );
+    assert!(
+        !SpecPointScope::Nominal.admits(provenance.pvt_point()),
+        "a nominal-scoped specification is never answered by unattributed evidence"
+    );
+}
+
+/// Attribution round-trips exactly, and a legacy file cannot smuggle it in:
+/// a point on a v5 record would be current-schema evidence wearing an older
+/// version number.
+#[test]
+fn point_attribution_round_trips_and_cannot_masquerade_as_a_legacy_schema() {
+    let point = crate::state::AnalysisResultPvtPoint::new(
+        "SS",
+        Some(1.62),
+        125.0,
+        Some(ContentDigest::from_bytes([0xc4; 32])),
+        false,
+    )
+    .expect("valid attributed point");
+    let mut run = SimulationRun::new(42);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Ac, "SS 125C").with_provenance(
+            AnalysisResultProvenance::new(
+                AnalysisInstanceId::new(),
+                ObjectRevision::INITIAL,
+                ContentDigest::from_bytes([0xc3; 32]),
+                Vec::new(),
+            )
+            .expect("prepared provenance fixture")
+            .with_pvt_point(Some(point.clone())),
+        ),
+    );
+    seal_prepared_run(
+        &mut run,
+        AnalysisResultSourceDomain::SimulationPlan,
+        Some(SimulationPlanId::new()),
+        ObjectRevision::INITIAL,
+        ContentDigest::from_bytes([0xc2; 32]),
+        PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0xc1; 32])),
+        &[2],
+    );
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run];
+    simulation.next_run_id = 42;
+
+    let current = ProjectSimulationResults::from_state(&simulation);
+    let json = serde_json::to_string(&current).expect("serialize attributed results");
+    let reloaded: ProjectSimulationResults =
+        serde_json::from_str(&json).expect("attributed results restore");
+    let restored = reloaded
+        .into_simulation_state()
+        .expect("attributed results apply");
+    assert_eq!(
+        restored.runs[0].analyses[0]
+            .provenance
+            .as_ref()
+            .expect("provenance")
+            .pvt_point(),
+        Some(&point)
+    );
+
+    let mut smuggled = current;
+    smuggled.schema_version = SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION;
+    clear_v6_execution_fields(&mut smuggled);
+    assert!(
+        smuggled
+            .migrate_to_current(ProjectId::new())
+            .expect_err("a v5 record cannot carry point attribution")
+            .contains("pvt_point was introduced after schema v5")
+    );
+}

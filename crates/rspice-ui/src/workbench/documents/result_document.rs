@@ -5014,6 +5014,7 @@ mod availability_tests {
                     min: Some(-2.0),
                     max: Some(5.0),
                     unit: "V".to_owned(),
+                    scope: crate::state::SpecPointScope::AllPoints,
                 });
                 transient_analysis()
             }

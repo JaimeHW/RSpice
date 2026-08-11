@@ -677,6 +677,7 @@ fn a_selected_specification_is_identified_by_its_measurement_not_its_row() {
             min: Some(0.0),
             max: Some(1.0),
             unit: "V".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
         }
     }
 
@@ -1252,5 +1253,164 @@ fn a_plan_written_before_per_analysis_numerics_still_loads() {
             .and_then(|instance| instance.numeric_override())
             .and_then(|record| record.trtol()),
         Some(3.0)
+    );
+}
+
+/// The scope control is only honest if its options come from the plan: an
+/// option list with a literal point count, or a corner the run set does not
+/// declare, would offer a scope no run can answer.
+#[test]
+fn the_applies_to_control_is_built_from_the_declared_run_set() {
+    use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig, ProcessCorner};
+    use crate::simulation::run_set::RunSetState;
+    use crate::state::{SpecEntry, SpecPointScope};
+
+    fn spec(scope: SpecPointScope) -> SpecEntry {
+        SpecEntry {
+            measurement: "gain".to_owned(),
+            expression: "meas ac gain max V(out)".to_owned(),
+            min: Some(10.0),
+            max: None,
+            unit: "dB".to_owned(),
+            scope,
+        }
+    }
+
+    fn six_point_run_set() -> RunSetState {
+        RunSetState::from_corner_config(&CornerConfig {
+            process_corners: vec![ProcessCorner::TT, ProcessCorner::SS],
+            voltages: vec![1.0],
+            temperatures: vec![-40.0, 27.0, 125.0],
+            full_matrix: true,
+            points: Vec::new(),
+            base_analysis: CornerBaseAnalysis::Op,
+        })
+    }
+
+    let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
+        let id = plan_id(app);
+        app.state.sim_setup.corner.run_set = six_point_run_set();
+        app.state.workbench.selected_specification = Some("gain".to_owned());
+        app.state
+            .workspace
+            .replace_active_specs(id, vec![spec(SpecPointScope::AllPoints)]);
+    });
+    assert!(
+        rendered.contains("Applies to"),
+        "the record carries the scope control: {rendered}"
+    );
+    assert!(
+        rendered.contains("All 6 PVT points"),
+        "the point count is the run set's own, not a literal: {rendered}"
+    );
+
+    // A scope the run set cannot reach is standing validation, recomputed
+    // every frame, so it belongs in the registry's own status line.
+    let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
+        let id = plan_id(app);
+        app.state.sim_setup.corner.run_set = six_point_run_set();
+        app.state.workbench.selected_specification = Some("gain".to_owned());
+        app.state.workspace.replace_active_specs(
+            id,
+            vec![spec(SpecPointScope::SelectedCorners {
+                corners: vec!["FF".to_owned()],
+            })],
+        );
+    });
+    assert!(
+        rendered.contains("1 scoped to corners the run set does not declare"),
+        "the registry reports the unreachable scope: {rendered}"
+    );
+    assert!(
+        rendered.contains("which the current run set does not declare"),
+        "the selected record says which corner is unreachable: {rendered}"
+    );
+
+    // A corner the run set does declare is reachable and reported as nothing
+    // more than a limit still awaiting evidence.
+    let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
+        let id = plan_id(app);
+        app.state.sim_setup.corner.run_set = six_point_run_set();
+        app.state.workbench.selected_specification = Some("gain".to_owned());
+        app.state.workspace.replace_active_specs(
+            id,
+            vec![spec(SpecPointScope::SelectedCorners {
+                corners: vec!["SS".to_owned()],
+            })],
+        );
+    });
+    assert!(
+        !rendered.contains("does not declare"),
+        "a declared corner raises nothing: {rendered}"
+    );
+    assert!(
+        rendered.contains("Corner SS only"),
+        "the control shows the scope it holds: {rendered}"
+    );
+}
+
+/// The scope is part of the requirement, so changing it has to move the plan
+/// the same way every other specification edit does: one validated
+/// transaction that leaves a receipt and invalidates preflight. A rejected
+/// scope must leave the plan exactly as it was.
+#[test]
+fn a_scope_change_commits_as_a_plan_transaction_and_a_rejected_one_changes_nothing() {
+    use crate::state::{SpecEntry, SpecPointScope};
+
+    let mut app = RSpiceApp::test_instance();
+    let id = plan_id(&app);
+    app.state.workspace.replace_active_specs(
+        id,
+        vec![SpecEntry {
+            measurement: "gain".to_owned(),
+            expression: "meas ac gain max V(out)".to_owned(),
+            min: Some(10.0),
+            max: None,
+            unit: "dB".to_owned(),
+            scope: SpecPointScope::AllPoints,
+        }],
+    );
+    let revision = |app: &RSpiceApp| {
+        app.state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("stable plan")
+            .revision()
+    };
+    let before = revision(&app);
+
+    // Matched case-insensitively, exactly as the selection resolves it.
+    super::page_specs::commit_scope(&mut app, "GAIN", SpecPointScope::Nominal);
+    assert_eq!(
+        app.state.workspace.active_specs(id)[0].scope,
+        SpecPointScope::Nominal
+    );
+    assert_ne!(
+        revision(&app),
+        before,
+        "an accepted edit moves the plan revision"
+    );
+    assert!(
+        !app.state.workbench.analysis_lifecycle_status.is_empty(),
+        "the transaction reports its receipt"
+    );
+
+    let after_accept = revision(&app);
+    super::page_specs::commit_scope(
+        &mut app,
+        "gain",
+        SpecPointScope::SelectedCorners {
+            corners: Vec::new(),
+        },
+    );
+    assert_eq!(
+        app.state.workspace.active_specs(id)[0].scope,
+        SpecPointScope::Nominal,
+        "a rejected scope leaves the stored requirement untouched"
+    );
+    assert_eq!(
+        revision(&app),
+        after_accept,
+        "a rejected edit does not move the plan revision"
     );
 }

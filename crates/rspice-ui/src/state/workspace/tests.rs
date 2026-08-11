@@ -2674,3 +2674,111 @@ fn library_manager_revision_survives_serialization_for_audit_continuity() {
     let restored: LibraryManager = serde_json::from_str(&json).expect("restore library manager");
     assert_eq!(restored.revision(), revision);
 }
+
+/// A plan written before the point scope existed judged every retained point,
+/// so it has to keep doing exactly that after it is reloaded. Anything else
+/// would narrow a requirement nobody narrowed.
+#[test]
+fn a_specification_written_before_the_point_scope_loads_as_every_point() {
+    let legacy = r#"{
+        "measurement": "gain",
+        "expression": "meas ac gain max V(out)",
+        "min": 10.0,
+        "max": null,
+        "unit": "dB"
+    }"#;
+
+    let spec: SpecEntry = serde_json::from_str(legacy).expect("legacy specification restores");
+
+    assert_eq!(spec.scope, SpecPointScope::AllPoints);
+    assert!(spec.validate().is_ok());
+    // The default is also what an untouched specification writes back, so a
+    // project reopened by an older build still reads the same requirement.
+    let json = serde_json::to_string(&spec).expect("serialize specification");
+    assert!(
+        !json.contains("scope"),
+        "an unscoped specification must not grow a field: {json}"
+    );
+}
+
+#[test]
+fn a_scoped_specification_round_trips_and_rejects_a_nonsense_scope() {
+    let scoped = SpecEntry {
+        measurement: "gain".to_owned(),
+        expression: String::new(),
+        min: Some(10.0),
+        max: None,
+        unit: "dB".to_owned(),
+        scope: SpecPointScope::SelectedCorners {
+            corners: vec!["SS".to_owned(), "FF".to_owned()],
+        },
+    };
+    scoped.validate().expect("a named corner set is valid");
+
+    let json = serde_json::to_string(&scoped).expect("serialize scoped specification");
+    let restored: SpecEntry = serde_json::from_str(&json).expect("scoped specification restores");
+    assert_eq!(restored, scoped);
+
+    let nominal = SpecEntry {
+        scope: SpecPointScope::Nominal,
+        ..scoped.clone()
+    };
+    let json = serde_json::to_string(&nominal).expect("serialize nominal specification");
+    assert_eq!(
+        serde_json::from_str::<SpecEntry>(&json).expect("nominal specification restores"),
+        nominal
+    );
+
+    let empty = SpecEntry {
+        scope: SpecPointScope::SelectedCorners {
+            corners: Vec::new(),
+        },
+        ..scoped.clone()
+    };
+    assert!(
+        empty
+            .validate()
+            .is_err_and(|error| error.contains("at least one")),
+        "a corner scope that names nothing selects nothing and is not a requirement"
+    );
+
+    let repeated = SpecEntry {
+        scope: SpecPointScope::SelectedCorners {
+            corners: vec!["ss".to_owned(), "SS".to_owned()],
+        },
+        ..scoped
+    };
+    assert!(
+        repeated
+            .validate()
+            .is_err_and(|error| error.contains("repeats corner")),
+        "corners are matched case-insensitively, so a repeat is a repeat"
+    );
+}
+
+/// The scope decides what counts as evidence, so the rule lives in one place
+/// and every surface reads the same answer from it.
+#[test]
+fn a_narrowed_scope_admits_only_evidence_attributed_to_a_point() {
+    let nominal = AnalysisResultPvtPoint::new("TT", Some(1.8), 27.0, None, true)
+        .expect("valid nominal point");
+    let hot_corner = AnalysisResultPvtPoint::new("SS", Some(1.62), 125.0, None, false)
+        .expect("valid corner point");
+
+    assert!(SpecPointScope::AllPoints.admits(None));
+    assert!(SpecPointScope::AllPoints.admits(Some(&nominal)));
+
+    assert!(SpecPointScope::Nominal.admits(Some(&nominal)));
+    assert!(!SpecPointScope::Nominal.admits(Some(&hot_corner)));
+    assert!(
+        !SpecPointScope::Nominal.admits(None),
+        "an unattributed result is not proof that the nominal point passed"
+    );
+
+    let corners = SpecPointScope::SelectedCorners {
+        corners: vec!["ss".to_owned()],
+    };
+    assert!(corners.admits(Some(&hot_corner)));
+    assert!(!corners.admits(Some(&nominal)));
+    assert!(!corners.admits(None));
+}

@@ -1172,3 +1172,122 @@ fn an_authored_iteration_budget_reaches_the_task_deck_and_changes_its_identity()
         "the later options card must win per key, or the override resolves to the deck's value"
     );
 }
+
+/// Attribution is what lets a specification be a claim about one corner, so it
+/// has to be exact in both directions: an expanded point names the point it
+/// solved, and a task that runs once for the whole space names nothing. A
+/// fabricated nominal on the second kind would let a scoped limit pass on
+/// evidence that never belonged to a point.
+#[test]
+fn expanded_op_points_are_attributed_and_an_unexpanded_task_is_not() {
+    let mut swept = parts();
+    swept.executable_netlist =
+        "diode\nV1 in 0 0.7\nD1 in 0 DTEST\n.model DTEST D\n.op\n.end\n".to_owned();
+    swept.tasks = vec![
+        prepared("op", "DC Operating Point", task()),
+        prepared(
+            "temperature",
+            "Temperature",
+            temperature_task(vec![-40.0, 27.0, 85.0]),
+        ),
+        prepared("tran", "Transient", transient_task()),
+    ];
+
+    let snapshot = PreparedRunSnapshot::new(swept).expect("three-point OP snapshot");
+    let attributed: Vec<(String, f64, bool)> = snapshot
+        .tasks
+        .iter()
+        .filter_map(|task| task.pvt_point())
+        .map(|point| {
+            (
+                point.process().to_owned(),
+                point.temperature_celsius(),
+                point.is_nominal(),
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        attributed,
+        vec![
+            ("TT".to_owned(), -40.0, false),
+            ("TT".to_owned(), 27.0, true),
+            ("TT".to_owned(), 85.0, false),
+        ],
+        "each expanded point names its own process and temperature, and only the \
+         reference temperature is the run's nominal point"
+    );
+    assert_eq!(
+        snapshot
+            .tasks
+            .iter()
+            .filter(|task| task.pvt_point().is_none())
+            .count(),
+        2,
+        "the temperature axis task and the transient run once for the whole space"
+    );
+    for point in snapshot.tasks.iter().filter_map(PreparedTask::pvt_point) {
+        assert_eq!(
+            point.supply_voltage(),
+            None,
+            "a temperature-only axis leaves the deck's own supply standing"
+        );
+        assert_eq!(
+            point.corner_contract(),
+            None,
+            "a temperature-only axis has no corner contract to name"
+        );
+    }
+}
+
+/// A supply axis makes exactly one point nominal — the reference process at
+/// the reference temperature and the contract's nominal supply — so a limit
+/// scoped to nominal cannot be answered by a derated point.
+#[test]
+fn a_corner_axis_marks_exactly_one_point_nominal_and_names_its_contract() {
+    use crate::services::simulation_runner::CornerProcess;
+
+    let mut corner = corner_task(
+        vec![CornerProcess::TT, CornerProcess::SS],
+        vec![1.0, 1.2],
+        vec![27.0],
+        true,
+    );
+    corner
+        .spec_options
+        .corner
+        .as_mut()
+        .expect("corner config")
+        .model_bindings = vec![
+        corner_binding(CornerProcess::TT, "tt.lib", "1e-12"),
+        corner_binding(CornerProcess::SS, "ss.lib", "1e-13"),
+    ];
+    let mut pvt = parts();
+    pvt.executable_netlist = "pvt\nVDD in 0 1\nR1 in 0 1k\n.op\n.end\n".to_owned();
+    pvt.tasks.push(prepared("corner", "Corner", corner));
+
+    let snapshot = PreparedRunSnapshot::new(pvt).expect("PVT snapshot");
+    let points: Vec<_> = snapshot
+        .tasks
+        .iter()
+        .filter_map(PreparedTask::pvt_point)
+        .collect();
+
+    assert_eq!(points.len(), 4);
+    let nominal: Vec<_> = points.iter().filter(|point| point.is_nominal()).collect();
+    assert_eq!(nominal.len(), 1);
+    assert_eq!(nominal[0].process(), "TT");
+    assert_eq!(nominal[0].supply_voltage(), Some(1.0));
+    assert_eq!(nominal[0].temperature_celsius(), 27.0);
+    assert!(
+        points.iter().all(|point| point.corner_contract().is_some()),
+        "a corner axis binds process models through a contract, and the point names it"
+    );
+    assert_eq!(
+        points
+            .iter()
+            .filter(|point| point.process() == "SS")
+            .count(),
+        2
+    );
+}

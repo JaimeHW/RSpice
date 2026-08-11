@@ -9,6 +9,75 @@
 
 use super::*;
 
+/// Which of a run's PVT points a specification is a claim about.
+///
+/// A bound is only ever evidence for the points it was judged against, so the
+/// scope is part of the requirement rather than a view filter over it. A
+/// narrowed scope admits nothing that the executor could not attribute to a
+/// point: an unattributed measurement is not proof about a corner, and
+/// answering with it would make the limit pass on a fiction.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SpecPointScope {
+    /// Every point the run retained, attributed or not. The verdict is the
+    /// worst of them, which is what a specification with no stated scope has
+    /// always meant.
+    #[default]
+    AllPoints,
+    /// The run's own reference point only.
+    Nominal,
+    /// Named process corners only, matched case-insensitively against the
+    /// corner name the run set and the PDK section share.
+    SelectedCorners { corners: Vec<String> },
+}
+
+impl SpecPointScope {
+    /// Whether evidence attributed to `point` answers this scope.
+    ///
+    /// One owner for the rule, so the evaluator, the coverage text and the
+    /// registry's standing check cannot disagree about what is in scope.
+    #[must_use]
+    pub fn admits(&self, point: Option<&AnalysisResultPvtPoint>) -> bool {
+        match self {
+            Self::AllPoints => true,
+            Self::Nominal => point.is_some_and(AnalysisResultPvtPoint::is_nominal),
+            Self::SelectedCorners { corners } => point.is_some_and(|point| {
+                corners
+                    .iter()
+                    .any(|corner| corner.eq_ignore_ascii_case(point.process()))
+            }),
+        }
+    }
+
+    /// The corners this scope names, empty for every other case.
+    #[must_use]
+    pub fn named_corners(&self) -> &[String] {
+        match self {
+            Self::AllPoints | Self::Nominal => &[],
+            Self::SelectedCorners { corners } => corners,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        let Self::SelectedCorners { corners } = self else {
+            return Ok(());
+        };
+        if corners.is_empty() {
+            return Err(
+                "a specification scoped to selected corners must name at least one".to_owned(),
+            );
+        }
+        let mut seen = HashSet::with_capacity(corners.len());
+        for corner in corners {
+            validate_bounded_text("corner", corner, 64, false)?;
+            if !seen.insert(corner.to_ascii_uppercase()) {
+                return Err(format!("specification scope repeats corner {corner}"));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// One specification bound for a `.MEAS` result — a row of the specs
 /// matrix. At least one of `min`/`max` is normally set; a spec with
 /// neither still pins the measurement as a tracked row (value-only).
@@ -27,6 +96,20 @@ pub struct SpecEntry {
     pub max: Option<f64>,
     /// Display unit, purely cosmetic (e.g. "V", "s", "dB").
     pub unit: String,
+    /// Which PVT points this bound is a claim about. Plans authored before
+    /// the scope existed judged every retained point, so the default has to
+    /// stay [`SpecPointScope::AllPoints`] or reloading one would narrow a
+    /// requirement nobody narrowed.
+    #[serde(default, skip_serializing_if = "SpecPointScope::is_all_points")]
+    pub scope: SpecPointScope,
+}
+
+impl SpecPointScope {
+    /// Whether serialization may leave the field out entirely.
+    #[must_use]
+    pub const fn is_all_points(&self) -> bool {
+        matches!(self, Self::AllPoints)
+    }
 }
 
 impl SpecEntry {
@@ -36,6 +119,7 @@ impl SpecEntry {
         if !self.expression.trim().is_empty() {
             validate_single_line_expression("measurement expression", &self.expression)?;
         }
+        self.scope.validate()?;
         if self.min.is_some_and(|value| !value.is_finite())
             || self.max.is_some_and(|value| !value.is_finite())
         {
