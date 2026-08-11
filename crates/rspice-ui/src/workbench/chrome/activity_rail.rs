@@ -174,7 +174,10 @@ const fn activity_workspace_label(workspace: Workspace) -> &'static str {
     match workspace {
         Workspace::Project => "Project",
         Workspace::Design => "Schematic",
-        Workspace::Simulate => "Analyses",
+        // The workspace, not the first of its eight routes: its own navigator
+        // dock is titled "Simulation Studio", and every other entry here names
+        // a whole workspace rather than one page inside it.
+        Workspace::Simulate => "Simulation Studio",
         Workspace::Results => "Results",
         Workspace::Verify => "Verification",
         Workspace::Models => "Models and PDKs",
@@ -224,7 +227,10 @@ mod tests {
     fn activity_accessibility_names_match_the_mockup_workspace_language() {
         assert_eq!(activity_workspace_label(Workspace::Project), "Project");
         assert_eq!(activity_workspace_label(Workspace::Design), "Schematic");
-        assert_eq!(activity_workspace_label(Workspace::Simulate), "Analyses");
+        assert_eq!(
+            activity_workspace_label(Workspace::Simulate),
+            "Simulation Studio"
+        );
         assert_eq!(activity_workspace_label(Workspace::Results), "Results");
         assert_eq!(activity_workspace_label(Workspace::Verify), "Verification");
         assert_eq!(
