@@ -798,11 +798,17 @@ const fn is_named_source(kind: ComponentType) -> bool {
             | ComponentType::VoltageSourcePwl
             | ComponentType::VoltageSourceExp
             | ComponentType::VoltageSourceSffm
+            | ComponentType::VoltageSourceAm
+            | ComponentType::VoltageSourcePat
+            | ComponentType::VoltageSourceNoise
             | ComponentType::CurrentSourceAc
             | ComponentType::CurrentSourcePulse
             | ComponentType::CurrentSourceSin
             | ComponentType::CurrentSourcePwl
             | ComponentType::CurrentSourceExp
+            | ComponentType::CurrentSourceSffm
+            | ComponentType::CurrentSourceAm
+            | ComponentType::CurrentSourcePat
             | ComponentType::CurrentSourceNoise
             | ComponentType::BehavioralSource
             | ComponentType::RfPort

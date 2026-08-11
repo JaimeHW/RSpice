@@ -156,6 +156,7 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
     if editable {
         rejection_slot(
             ui,
+            editing_identity_field(&app.state, component.id),
             instance_rejection.as_deref().or(value_rejection.as_deref()),
         );
     }
@@ -622,7 +623,11 @@ pub(super) fn parameters_section(
         );
         rejection = rejection.or(raw_rejection);
         if editable {
-            rejection_slot(ui, rejection.as_deref());
+            rejection_slot(
+                ui,
+                editing_parameter_field(&app.state, component.id),
+                rejection.as_deref(),
+            );
         }
         return;
     }
@@ -645,8 +650,31 @@ pub(super) fn parameters_section(
         }
     }
     if editable {
-        rejection_slot(ui, rejection.as_deref());
+        rejection_slot(
+            ui,
+            editing_parameter_field(&app.state, component.id),
+            rejection.as_deref(),
+        );
     }
+}
+
+/// `true` while one of the identity group's editable fields holds the open
+/// inline-edit session.
+pub(super) fn editing_identity_field(state: &AppState, component: u64) -> bool {
+    matches!(
+        state.workbench.inline_edit.editing_field(component),
+        Some(InlineEditField::Instance | InlineEditField::Value)
+    )
+}
+
+/// `true` while one of the parameter group's editable fields — the instance
+/// temperature, a typed parameter, or the raw override string — holds the
+/// open inline-edit session.
+pub(super) fn editing_parameter_field(state: &AppState, component: u64) -> bool {
+    matches!(
+        state.workbench.inline_edit.editing_field(component),
+        Some(InlineEditField::Parameters | InlineEditField::Parameter(_))
+    )
 }
 
 /// SPICE instance-temperature parameter.
@@ -727,6 +755,16 @@ pub(super) fn inline_parameter_contract(
     rows
 }
 
+/// Leading inset of a terminal row's status icon, matching the section
+/// header's title and the property rows' label column.
+pub(super) const TERMINAL_ROW_PAD_X: f32 = 10.0;
+/// Icon box, then the gap before the pin name.
+pub(super) const TERMINAL_ROW_ICON_W: f32 = 15.0;
+pub(super) const TERMINAL_ROW_ICON_GAP: f32 = 6.0;
+/// Where a terminal row's pin name starts.
+pub(super) const TERMINAL_ROW_LABEL_X: f32 =
+    TERMINAL_ROW_PAD_X + TERMINAL_ROW_ICON_W + TERMINAL_ROW_ICON_GAP;
+
 /// Per-pin terminal table: every declared terminal with the net it binds,
 /// clickable to select that conductor. Unbound pins read `open` and are
 /// not clickable, because there is no net to select.
@@ -746,7 +784,9 @@ pub(super) fn terminal_row(ui: &mut Ui, pin: &str, net: Option<&str>) -> TreeRow
         });
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_role(egui::accesskit::Role::TreeItem);
-            node.set_level(2);
+            // The pins are a flat list under the section heading; no row of
+            // this table has a parent row to be nested beneath.
+            node.set_level(1);
         });
 
         if ui.is_rect_visible(rect) {
@@ -754,9 +794,14 @@ pub(super) fn terminal_row(ui: &mut Ui, pin: &str, net: Option<&str>) -> TreeRow
                 ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
             }
 
-            // Mockup `.tree-row.level-1`: 22 px leading inset, a blank
-            // 9 px caret column, 6 px gap, then a 15 px terminal-status icon.
-            let icon_center = egui::pos2(rect.left() + 44.5, rect.center().y);
+            // The list has no parent row and no pin ever expands, so the
+            // mockup's nesting inset and blank caret column would only push
+            // the whole table away from the panel edge. The status icon takes
+            // the section's own 10 px inset instead.
+            let icon_center = egui::pos2(
+                rect.left() + TERMINAL_ROW_PAD_X + TERMINAL_ROW_ICON_W * 0.5,
+                rect.center().y,
+            );
             if net.is_some() {
                 ui.painter().hline(
                     egui::Rangef::new(icon_center.x - 5.5, icon_center.x + 5.5),
@@ -773,14 +818,15 @@ pub(super) fn terminal_row(ui: &mut Ui, pin: &str, net: Option<&str>) -> TreeRow
                 theme::mono(tokens::FS_0, FontWeight::Regular),
                 t.color.text_faint,
             );
-            let meta_left = rect.right() - 8.0 - meta_galley.size().x;
+            let meta_left = rect.right() - TERMINAL_ROW_PAD_X - meta_galley.size().x;
+            let label_left = rect.left() + TERMINAL_ROW_LABEL_X;
             ui.painter()
                 .with_clip_rect(egui::Rect::from_x_y_ranges(
-                    (rect.left() + 58.0)..=(meta_left - 8.0).max(rect.left() + 58.0),
+                    label_left..=(meta_left - 8.0).max(label_left),
                     rect.y_range(),
                 ))
                 .text(
-                    egui::pos2(rect.left() + 58.0, rect.center().y),
+                    egui::pos2(label_left, rect.center().y),
                     egui::Align2::LEFT_CENTER,
                     pin,
                     theme::mono(tokens::FS_1, FontWeight::Regular),
@@ -816,7 +862,7 @@ pub(super) fn terminals_section(
     let bindings = sheet.terminals.get(&component.id).unwrap_or(&empty);
     let open_pins = bindings.iter().filter(|(_, net)| net.is_none()).count();
 
-    schematic_tree_section_header(
+    section_header(
         ui,
         "Terminals",
         Some(&if open_pins == 0 {
@@ -856,10 +902,105 @@ pub(super) fn terminals_section(
 pub(super) const OP_SUMMARY_MARGIN_X: f32 = 8.0;
 pub(super) const OP_SUMMARY_PADDING: f32 = 9.0;
 pub(super) const OP_SUMMARY_ROW_H: f32 = 22.0;
+/// Gap between an annotation row's label and its value.
+pub(super) const OP_SUMMARY_GAP: f32 = 8.0;
+/// Widest share of a row the label may hold once the two columns compete.
+pub(super) const OP_SUMMARY_LABEL_FRACTION: f32 = 0.45;
+
+/// One measured row of the annotation card.
+pub(super) struct OperatingPointRow {
+    pub(super) label: std::sync::Arc<egui::Galley>,
+    pub(super) value: std::sync::Arc<egui::Galley>,
+    /// Top of each galley relative to the row, so the first line of a wrapped
+    /// value sits on the same band as every single-line row.
+    pub(super) label_top: f32,
+    pub(super) value_top: f32,
+    pub(super) height: f32,
+}
+
+/// Height of a laid-out column's first line.
+fn first_line_height(galley: &egui::Galley) -> f32 {
+    galley
+        .rows
+        .first()
+        .map_or_else(|| galley.size().y, |row| row.rect().height())
+}
+
+/// How much taller than one line a wrapped column is.
+fn wrapped_overflow(galley: &egui::Galley) -> f32 {
+    (galley.size().y - first_line_height(galley)).max(0.0)
+}
+
+/// Lay a row out against the card's inner width.
+///
+/// The label keeps its measured width while both columns fit, and is capped
+/// at [`OP_SUMMARY_LABEL_FRACTION`] once they compete. Whatever the value
+/// then needs it wraps into, growing the row: retained evidence and the
+/// reason a run does not apply are facts, and neither may be hidden behind an
+/// ellipsis or painted over its own label.
+pub(super) fn operating_point_row(
+    ui: &Ui,
+    inner_width: f32,
+    label: &str,
+    value: &str,
+) -> OperatingPointRow {
+    let t = Tokens::get(ui.ctx());
+    let label_font = theme::sans(tokens::FS_2, FontWeight::Regular);
+    let value_font = theme::mono(tokens::FS_2, FontWeight::Medium);
+    let columns = (inner_width - OP_SUMMARY_GAP).max(1.0);
+    let measure = |text: &str, font: &egui::FontId| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE)
+            .size()
+            .x
+    };
+    let natural_label = measure(label, &label_font);
+    let label_width = if natural_label + measure(value, &value_font) <= columns {
+        natural_label
+    } else {
+        natural_label.min(columns * OP_SUMMARY_LABEL_FRACTION)
+    };
+    let value_width = (columns - label_width).max(1.0);
+
+    let label_galley =
+        ui.painter()
+            .layout(label.to_owned(), label_font, t.color.text_dim, label_width);
+    let mut value_job = egui::text::LayoutJob::simple(
+        value.to_owned(),
+        value_font,
+        t.color.text,
+        value_width.max(1.0),
+    );
+    value_job.halign = egui::Align::RIGHT;
+    let value_galley = ui.fonts_mut(|fonts| fonts.layout_job(value_job));
+
+    // Center each column's *first* line in the base band, then grow the row
+    // by whatever the taller wrapped column spills past one line. Measuring
+    // the galley rather than the font metric keeps a row of single-line
+    // columns exactly one band tall: the two disagree by a fraction of a
+    // pixel, and that fraction would compound down the card.
+    let label_top = (OP_SUMMARY_ROW_H - first_line_height(&label_galley)) * 0.5;
+    let value_top = (OP_SUMMARY_ROW_H - first_line_height(&value_galley)) * 0.5;
+    let height =
+        OP_SUMMARY_ROW_H + wrapped_overflow(&label_galley).max(wrapped_overflow(&value_galley));
+    OperatingPointRow {
+        label: label_galley,
+        value: value_galley,
+        label_top,
+        value_top,
+        height,
+    }
+}
 
 pub(super) fn operating_point_summary(ui: &mut Ui, rows: &[(String, String)]) {
     let t = Tokens::get(ui.ctx());
-    let height = OP_SUMMARY_PADDING * 2.0 + OP_SUMMARY_ROW_H * rows.len() as f32;
+    let inner_width =
+        (ui.available_width() - 2.0 * OP_SUMMARY_MARGIN_X - 2.0 * OP_SUMMARY_PADDING).max(1.0);
+    let measured = rows
+        .iter()
+        .map(|(label, value)| operating_point_row(ui, inner_width, label, value))
+        .collect::<Vec<_>>();
+    let height = OP_SUMMARY_PADDING * 2.0 + measured.iter().map(|row| row.height).sum::<f32>();
     let (outer, _) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
         egui::Sense::hover(),
@@ -876,22 +1017,19 @@ pub(super) fn operating_point_summary(ui: &mut Ui, rows: &[(String, String)]) {
         egui::StrokeKind::Inside,
     );
     let painter = ui.painter().with_clip_rect(card);
-    for (index, (label, value)) in rows.iter().enumerate() {
-        let y = card.top() + OP_SUMMARY_PADDING + OP_SUMMARY_ROW_H * (index as f32 + 0.5);
-        painter.text(
-            egui::pos2(card.left() + OP_SUMMARY_PADDING, y),
-            egui::Align2::LEFT_CENTER,
-            label,
-            theme::sans(tokens::FS_2, FontWeight::Regular),
+    let mut top = card.top() + OP_SUMMARY_PADDING;
+    for row in measured {
+        painter.galley(
+            egui::pos2(card.left() + OP_SUMMARY_PADDING, top + row.label_top),
+            row.label,
             t.color.text_dim,
         );
-        painter.text(
-            egui::pos2(card.right() - OP_SUMMARY_PADDING, y),
-            egui::Align2::RIGHT_CENTER,
-            value,
-            theme::mono(tokens::FS_2, FontWeight::Medium),
+        painter.galley(
+            egui::pos2(card.right() - OP_SUMMARY_PADDING, top + row.value_top),
+            row.value,
             t.color.text,
         );
+        top += row.height;
     }
 }
 
@@ -916,7 +1054,7 @@ pub(super) fn operating_point(ui: &mut Ui, app: &RSpiceApp, component: &Componen
         })
     });
     if let Some((run_id, analysis, region, params, current)) = retained {
-        schematic_annotation_section_header(
+        section_header(
             ui,
             &format!("Operating point · Run {run_id}"),
             Some(if current { "current" } else { "stale" }),
@@ -944,7 +1082,7 @@ pub(super) fn operating_point(ui: &mut Ui, app: &RSpiceApp, component: &Componen
         rows.push(("Analysis".to_owned(), analysis));
         operating_point_summary(ui, &rows);
     } else {
-        schematic_annotation_section_header(ui, "Operating point", Some("no evidence"));
+        section_header(ui, "Operating point", Some("no evidence"));
         operating_point_summary(
             ui,
             &[

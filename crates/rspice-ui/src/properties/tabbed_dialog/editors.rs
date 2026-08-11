@@ -1,17 +1,21 @@
 //! Typed value editors for registry rows — mono inputs for numbers,
 //! strings, and expressions; chips for small enums; checks for booleans.
+//!
+//! Every editor fills the width of its grid cell and stands exactly one
+//! control track tall, so a boolean or a small enum carries the same visual
+//! weight as the mono inputs beside it.
 
-use egui::Ui;
+use egui::{Sense, Stroke, Ui, pos2, vec2};
 
+use super::state::numeric_source_text;
 use crate::quantity::{
-    QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
+    QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, format_engineering_value,
+    parse_ui_quantity,
 };
 use crate::state::property_types::{DisplayMode, PropertyDefinition, PropertyType, PropertyValue};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{chip, mono_input};
-
-use super::state::numeric_source_text;
+use crate::ui::widgets::{chip, mono_input, select_mono_with_response};
 
 pub(super) struct ValueEditorOutput {
     pub changed: Option<PropertyValue>,
@@ -68,11 +72,18 @@ pub(super) fn render_value_editor(
 ) -> ValueEditorOutput {
     if def.read_only || def.display_mode == DisplayMode::Readonly {
         let t = Tokens::get(ui.ctx());
-        ui.label(
-            egui::RichText::new(current.display_string())
-                .font(theme::mono(tokens::FS_1, FontWeight::Regular))
-                .color(t.color.text_dim),
-        );
+        // Readonly values still occupy a full control track: dropping to a
+        // bare label would pull every field below them out of alignment.
+        let (rect, _) = ui.allocate_exact_size(vec2(width, t.metrics.ctl_h), Sense::hover());
+        if ui.is_rect_visible(rect) {
+            ui.painter().text(
+                pos2(rect.left() + 8.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                current.display_string(),
+                theme::mono(tokens::FS_1, FontWeight::Regular),
+                t.color.text_dim,
+            );
+        }
         return ValueEditorOutput::readonly();
     }
 
@@ -96,8 +107,8 @@ pub(super) fn render_value_editor(
             quantity_policy,
             number_locale,
         ),
-        PropertyType::Enum => render_enum_editor(ui, def, current),
-        PropertyType::Boolean => render_boolean_editor(ui, current),
+        PropertyType::Enum => render_enum_editor(ui, def, current, width),
+        PropertyType::Boolean => render_boolean_editor(ui, def, current, width),
     }
 }
 
@@ -113,7 +124,7 @@ fn render_number_editor(
 ) -> ValueEditorOutput {
     let text = retained_text
         .map(str::to_owned)
-        .unwrap_or_else(|| numeric_source_text(def, current));
+        .unwrap_or_else(|| editor_source_text(def, current, quantity_policy, number_locale));
 
     let mut new_text = text.clone();
     let response = mono_input(ui, &mut new_text, width);
@@ -192,7 +203,7 @@ fn render_expression_editor(
 ) -> ValueEditorOutput {
     let text = retained_text
         .map(str::to_owned)
-        .unwrap_or_else(|| numeric_source_text(def, current));
+        .unwrap_or_else(|| editor_source_text(def, current, quantity_policy, number_locale));
 
     let mut new_text = text.clone();
     let response = mono_input(ui, &mut new_text, width);
@@ -273,6 +284,54 @@ pub(crate) fn parse_expression_source(
     Ok(PropertyValue::Expression(expression.to_owned()))
 }
 
+/// Editor text for a stored numeric value.
+///
+/// An engineer reads `1n s`, not `0.000000001 s`, so the editor offers the
+/// engineering form — but this text is also what a commit re-parses, and the
+/// engineering formatter rounds. The candidate is therefore run back through
+/// the real parser and used only when it reproduces the stored number bit for
+/// bit; anything lossy keeps the exact decimal. Temperatures and angles are
+/// left alone because SI prefixes are not idiomatic for them ("1m °C").
+pub(super) fn editor_source_text(
+    def: &PropertyDefinition,
+    value: &PropertyValue,
+    quantity_policy: QuantityPresentationPolicy,
+    number_locale: UiNumberLocale,
+) -> String {
+    let exact = numeric_source_text(def, value);
+    let PropertyValue::Number { value: number, .. } = value else {
+        return exact;
+    };
+    if !number.is_finite()
+        || matches!(
+            property_quantity_kind(def),
+            QuantityInputKind::Temperature
+                | QuantityInputKind::TemperatureDelta
+                | QuantityInputKind::Angle
+        )
+    {
+        return exact;
+    }
+
+    // The engineering prefix has to abut its unit — the parser reads `1ns`,
+    // never `1n s`, because it strips the unit and then expects a bare prefix.
+    let magnitude = format_engineering_value(*number);
+    let candidate = match def.unit.as_deref() {
+        Some("s") => format!("{magnitude}s"),
+        Some("Hz") => format!("{magnitude}Hz"),
+        _ => magnitude,
+    };
+    if candidate == exact {
+        return exact;
+    }
+    match parse_number_source(def, &candidate, quantity_policy, number_locale) {
+        Ok(PropertyValue::Number { value: parsed, .. }) if parsed.to_bits() == number.to_bits() => {
+            candidate
+        }
+        _ => exact,
+    }
+}
+
 fn property_quantity_kind(def: &PropertyDefinition) -> QuantityInputKind {
     match def.unit.as_deref() {
         Some("s") => QuantityInputKind::Time,
@@ -297,11 +356,13 @@ fn value_for_property_schema(def: &PropertyDefinition, value_si: f64) -> f64 {
     }
 }
 
-/// Enum editor — chips for small sets, dropdown beyond that.
+/// Enum editor — chips while the whole option set fits the cell, the
+/// design-system select once it does not.
 fn render_enum_editor(
     ui: &mut Ui,
     def: &PropertyDefinition,
     current: &PropertyValue,
+    width: f32,
 ) -> ValueEditorOutput {
     let (selected, options) = match current {
         PropertyValue::Enum { selected, options } => (selected.clone(), options.clone()),
@@ -311,30 +372,39 @@ fn render_enum_editor(
     let mut new_selected = selected.clone();
     let control_id;
 
-    if options.len() <= 4 {
+    if chips_fit(ui, &options, width) {
+        let t = Tokens::get(ui.ctx());
         let mut first = None;
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            for option in &options {
-                let response = chip(ui, option, *option == selected);
-                first.get_or_insert(response.id);
-                if response.clicked() {
-                    new_selected = option.clone();
-                }
-            }
-        });
-        control_id = first;
-    } else {
-        let response = egui::ComboBox::from_id_salt(("property-enum", &def.name))
-            .selected_text(&new_selected)
-            .show_ui(ui, |ui| {
+        ui.allocate_ui_with_layout(
+            vec2(width, t.metrics.ctl_h),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = CHIP_GAP;
                 for option in &options {
-                    if ui.selectable_label(*option == selected, option).clicked() {
+                    let response = chip(ui, option, *option == selected);
+                    first.get_or_insert(response.id);
+                    if response.clicked() {
                         new_selected = option.clone();
                     }
                 }
-            });
-        control_id = Some(response.response.id);
+            },
+        );
+        control_id = first;
+    } else {
+        let output = select_mono_with_response(
+            ui,
+            &format!("property-enum-{}", def.name),
+            &def.display_name,
+            &selected,
+            &options,
+            width,
+        );
+        if let Some(index) = output.picked
+            && let Some(option) = options.get(index)
+        {
+            new_selected = option.clone();
+        }
+        control_id = Some(output.response.id);
     }
 
     ValueEditorOutput {
@@ -346,20 +416,131 @@ fn render_enum_editor(
     }
 }
 
-/// Boolean editor (checkbox).
-fn render_boolean_editor(ui: &mut Ui, current: &PropertyValue) -> ValueEditorOutput {
-    let value = match current {
-        PropertyValue::Boolean(b) => *b,
-        _ => false,
-    };
+/// Gap between adjacent option chips.
+const CHIP_GAP: f32 = 4.0;
 
+/// Whether the complete option set can be presented as chips inside `width`.
+/// Chips must never wrap: a second chip line would break the fixed control
+/// track every neighboring field is aligned to.
+fn chips_fit(ui: &Ui, options: &[String], width: f32) -> bool {
+    if options.len() > 4 {
+        return false;
+    }
+    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let color = Tokens::get(ui.ctx()).color.text;
+    let total = options
+        .iter()
+        .map(|option| {
+            ui.fonts_mut(|fonts| fonts.layout_no_wrap(option.clone(), font.clone(), color))
+                .size()
+                .x
+                + CHIP_WIDTH_PADDING
+        })
+        .sum::<f32>()
+        + CHIP_GAP * options.len().saturating_sub(1) as f32;
+    total <= width
+}
+
+/// Horizontal padding `chip` adds around its label.
+const CHIP_WIDTH_PADDING: f32 = 18.0;
+
+/// Boolean editor — a full-cell check control styled as the inset well its
+/// neighboring value inputs use, so a flag never reads as a stray square in
+/// an otherwise empty half-row.
+fn render_boolean_editor(
+    ui: &mut Ui,
+    def: &PropertyDefinition,
+    current: &PropertyValue,
+    width: f32,
+) -> ValueEditorOutput {
+    let value = matches!(current, PropertyValue::Boolean(true));
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+
+    let (rect, response) = ui.allocate_exact_size(vec2(width, t.metrics.ctl_h), Sense::click());
     let mut new_value = value;
-    let response = ui.checkbox(&mut new_value, "");
+    if response.clicked() {
+        new_value = !value;
+    }
+    if response.has_focus()
+        && ui.input_mut(|input| {
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Space)
+                || input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+        })
+    {
+        new_value = !value;
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Checkbox,
+            ui.is_enabled(),
+            new_value,
+            &def.display_name,
+        )
+    });
+
+    if ui.is_rect_visible(rect) {
+        let hover = ui.ctx().animate_bool_with_time(
+            response.id,
+            response.hovered(),
+            ui.style().animation_time,
+        );
+        let painter = ui.painter();
+        painter.rect(
+            rect,
+            t.radius,
+            c.bg_inset,
+            Stroke::new(1.0, theme::mix(c.border, c.border_strong, hover)),
+            egui::StrokeKind::Inside,
+        );
+
+        let box_size = 13.0;
+        let box_rect = egui::Rect::from_center_size(
+            pos2(rect.left() + 8.0 + box_size * 0.5, rect.center().y),
+            egui::Vec2::splat(box_size),
+        );
+        painter.rect(
+            box_rect,
+            2.0,
+            if new_value {
+                c.accent
+            } else {
+                egui::Color32::TRANSPARENT
+            },
+            Stroke::new(
+                1.0,
+                if new_value {
+                    c.accent
+                } else {
+                    theme::mix(c.border_strong, c.text_dim, hover)
+                },
+            ),
+            egui::StrokeKind::Inside,
+        );
+        if new_value {
+            let center = box_rect.center();
+            painter.add(egui::Shape::line(
+                vec![
+                    pos2(center.x - 3.2, center.y - 0.2),
+                    pos2(center.x - 0.8, center.y + 2.4),
+                    pos2(center.x + 3.4, center.y - 2.6),
+                ],
+                Stroke::new(1.6, c.accent_ink),
+            ));
+        }
+        painter.text(
+            pos2(box_rect.right() + 8.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            PropertyValue::Boolean(new_value).display_string(),
+            theme::mono(tokens::FS_1, FontWeight::Regular),
+            c.text,
+        );
+    }
+    theme::paint_focus_ring_outset(ui, &response, rect);
+
     ValueEditorOutput::control(
         response.id,
-        response
-            .changed()
-            .then_some(PropertyValue::Boolean(new_value)),
+        (new_value != value).then_some(PropertyValue::Boolean(new_value)),
     )
 }
 
@@ -593,6 +774,67 @@ mod tests {
                     Ok(PropertyValue::Expression(String::new()))
                 );
             }
+        }
+    }
+
+    #[test]
+    fn engineering_display_is_offered_only_when_it_round_trips_exactly() {
+        let policy = QuantityPresentationPolicy::default();
+        let locale = UiNumberLocale::default();
+
+        // A time whose engineering form the parser reads back bit for bit.
+        let rise = PropertyDefinition::new("tr")
+            .with_type(PropertyType::Number)
+            .with_unit("s");
+        assert_eq!(
+            editor_source_text(&rise, &PropertyValue::number(1e-9), policy, locale),
+            "1ns"
+        );
+        // ... and one it cannot: the engineering formatter stops at three
+        // decimals, so the exact decimal has to survive.
+        let awkward = PropertyValue::number(1.234_567_89e-9);
+        assert_eq!(
+            editor_source_text(&rise, &awkward, policy, locale),
+            numeric_source_text(&rise, &awkward)
+        );
+
+        // Temperatures keep their plain form: "1m °C" is not how anyone
+        // writes a temperature.
+        let dtemp = PropertyDefinition::new("dtemp")
+            .with_type(PropertyType::Number)
+            .with_unit("°C");
+        assert_eq!(
+            editor_source_text(&dtemp, &PropertyValue::number(0.001), policy, locale),
+            "0.001 °C"
+        );
+    }
+
+    #[test]
+    fn every_offered_engineering_form_parses_back_to_the_stored_value() {
+        let policy = QuantityPresentationPolicy::default();
+        let locale = UiNumberLocale::default();
+        let cases = [
+            (PropertyDefinition::new("tr").with_unit("s"), 1e-9),
+            (PropertyDefinition::new("per").with_unit("s"), 2e-6),
+            (PropertyDefinition::new("f").with_unit("Hz"), 1.5e9),
+            (PropertyDefinition::new("r"), 1e3),
+            (PropertyDefinition::new("c").with_unit("F"), 1e-12),
+            (PropertyDefinition::new("td").with_unit("s"), 0.0),
+        ];
+        for (definition, stored) in cases {
+            let definition = definition.with_type(PropertyType::Number);
+            let value = PropertyValue::number(stored);
+            let text = editor_source_text(&definition, &value, policy, locale);
+            let Ok(PropertyValue::Number { value: parsed, .. }) =
+                parse_number_source(&definition, &text, policy, locale)
+            else {
+                panic!("offered text {text:?} for {stored} does not parse as a number");
+            };
+            assert_eq!(
+                parsed.to_bits(),
+                stored.to_bits(),
+                "offered text {text:?} does not restore {stored}"
+            );
         }
     }
 }

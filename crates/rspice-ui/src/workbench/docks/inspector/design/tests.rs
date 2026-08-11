@@ -42,28 +42,77 @@ fn app_with_model_bound_instance() -> (RSpiceApp, u64) {
     (app, 41)
 }
 
-fn validation_slot_height(reason: Option<&str>) -> f32 {
+fn validation_slot_height(editing: bool, reason: Option<&str>) -> f32 {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut height = 0.0;
     let _ = ctx.run_ui(Default::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.set_width(312.0);
-            height = rejection_slot(ui, reason).height();
+            height = rejection_slot(ui, editing, reason).height();
         });
     });
     height
 }
 
 #[test]
-fn inspector_validation_slot_never_reflows_following_sections() {
-    assert_eq!(validation_slot_height(None), INLINE_VALIDATION_SLOT_H);
+fn inspector_validation_slot_never_reflows_while_a_field_is_typed_into() {
+    assert_eq!(validation_slot_height(true, None), INLINE_VALIDATION_SLOT_H);
     assert_eq!(
-        validation_slot_height(Some(
-            "This deliberately long validation message must truncate without growing the slot"
-        )),
+        validation_slot_height(
+            true,
+            Some(
+                "This deliberately long validation message must truncate without growing the slot"
+            )
+        ),
         INLINE_VALIDATION_SLOT_H
     );
+}
+
+#[test]
+fn a_closed_edit_session_leaves_no_reserved_validation_strip() {
+    assert_eq!(validation_slot_height(false, None), 0.0);
+    assert_eq!(
+        validation_slot_height(false, Some("stated rejections are still shown")),
+        INLINE_VALIDATION_SLOT_H
+    );
+}
+
+#[test]
+fn each_editable_group_reserves_its_strip_only_for_its_own_fields() {
+    let (mut app, id) = app_with_model_bound_instance();
+    assert!(!editing_identity_field(&app.state, id));
+    assert!(!editing_parameter_field(&app.state, id));
+
+    let component = app
+        .state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.id == id)
+        .expect("the model-bound instance")
+        .clone();
+    begin_edit(
+        &mut app,
+        &component,
+        InlineEditField::Value,
+        component.value.clone(),
+    );
+    assert!(editing_identity_field(&app.state, id));
+    assert!(!editing_parameter_field(&app.state, id));
+
+    begin_edit(
+        &mut app,
+        &component,
+        InlineEditField::Parameter(TEMPERATURE_PARAM.to_owned()),
+        String::new(),
+    );
+    assert!(!editing_identity_field(&app.state, id));
+    assert!(editing_parameter_field(&app.state, id));
+
+    commit_edit(&mut app, "edit instance temperature");
+    assert!(!editing_identity_field(&app.state, id));
+    assert!(!editing_parameter_field(&app.state, id));
 }
 
 fn accesskit_nodes(
@@ -859,6 +908,136 @@ fn operating_point_summary_matches_the_upgraded_inset_contract() {
     assert_eq!(OP_SUMMARY_MARGIN_X, 8.0);
     assert_eq!(OP_SUMMARY_PADDING, 9.0);
     assert_eq!(OP_SUMMARY_ROW_H, 22.0);
+}
+
+/// Lay one annotation row out at the docked inspector's real inner width.
+fn measured_operating_point_row(label: &str, value: &str) -> (f32, f32, f32, usize) {
+    const PANEL_W: f32 = 312.0;
+    let inner_width = PANEL_W - 2.0 * OP_SUMMARY_MARGIN_X - 2.0 * OP_SUMMARY_PADDING;
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut measured = (0.0, 0.0, 0.0, 0);
+    let _ = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.set_width(PANEL_W);
+            let row = operating_point_row(ui, inner_width, label, value);
+            // Both galleys are placed against the card's inner box: the label
+            // from its left edge, the right-aligned value back from its right.
+            let label_right = row.label.size().x;
+            let value_left = inner_width - row.value.size().x;
+            measured = (label_right, value_left, row.height, row.value.rows.len());
+        });
+    });
+    measured
+}
+
+#[test]
+fn a_long_operating_point_value_wraps_instead_of_covering_its_label() {
+    let (label_right, value_left, height, rows) =
+        measured_operating_point_row("Selection", "No retained device operating point");
+
+    assert!(
+        value_left >= label_right,
+        "the value column started at {value_left} and the label ran to {label_right}"
+    );
+    assert!(rows > 1, "the value was not wrapped: {rows} row(s)");
+    assert!(
+        height > OP_SUMMARY_ROW_H,
+        "a wrapped row must grow the card, measured {height}"
+    );
+}
+
+#[test]
+fn a_short_operating_point_row_keeps_the_base_band_and_one_line() {
+    let (label_right, value_left, height, rows) = measured_operating_point_row("Region", "sat");
+
+    assert!(value_left > label_right + OP_SUMMARY_GAP);
+    assert_eq!(rows, 1);
+    assert_eq!(height, OP_SUMMARY_ROW_H);
+}
+
+/// Measure the space a section body leaves above its first block and below
+/// its last, for a body drawn by `content`.
+fn section_body_padding(mut content: impl FnMut(&mut Ui)) -> (f32, f32) {
+    use super::super::{begin_inspector_sections, finish_inspector_sections};
+    use crate::workbench::design_system::PANEL_SECTION_H;
+
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut measured = (0.0, 0.0);
+    let _ = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.set_width(312.0);
+            ui.spacing_mut().item_spacing.y = 0.0;
+            begin_inspector_sections(ui);
+            let before_header = ui.cursor().top();
+            section_header(ui, "Identity", Some("editable"));
+            let body_top = ui.cursor().top();
+            content(ui);
+            let body_bottom = ui.cursor().top();
+            finish_inspector_sections(ui);
+            measured = (
+                body_top - before_header - PANEL_SECTION_H,
+                ui.cursor().top() - body_bottom,
+            );
+        });
+    });
+    measured
+}
+
+#[test]
+fn every_inspector_section_frames_its_body_with_the_same_step() {
+    use super::super::INSPECTOR_SECTION_PADDING;
+
+    let list = section_body_padding(|ui| {
+        property_row(ui, "Instance", "R1");
+        property_row(ui, "Value", "1k");
+    });
+    assert_eq!(list, (INSPECTOR_SECTION_PADDING, INSPECTOR_SECTION_PADDING));
+
+    let tree = section_body_padding(|ui| {
+        terminal_row(ui, "+", Some("net1"));
+        terminal_row(ui, "-", None);
+    });
+    assert_eq!(tree, list, "a tree body is framed like a property list");
+
+    let annotation = section_body_padding(|ui| {
+        operating_point_summary(ui, &[("Region".to_owned(), "saturation".to_owned())]);
+    });
+    assert_eq!(
+        annotation, list,
+        "an annotation card is framed like a property list"
+    );
+
+    let actions = section_body_padding(|ui| {
+        action_stack(ui, |ui| {
+            let _ = Button::new("Run schematic checks").show(ui);
+        });
+    });
+    assert_eq!(
+        actions, list,
+        "an action row is framed like a property list"
+    );
+
+    let list_then_actions = section_body_padding(|ui| {
+        property_row(ui, "Instance", "R1");
+        action_stack(ui, |ui| {
+            let _ = Button::new("Edit symbol…").ghost().show(ui);
+        });
+    });
+    assert_eq!(
+        list_then_actions, list,
+        "adding a second block must not change how the body is framed"
+    );
+}
+
+#[test]
+fn terminal_rows_start_at_the_panel_inset_with_no_empty_caret_column() {
+    // The table has no parent row and no pin expands, so the row leads with
+    // its status icon at the same 10 px inset as the section title and the
+    // property labels — not behind a nesting inset and a blank caret column.
+    assert_eq!(TERMINAL_ROW_PAD_X, 10.0);
+    assert_eq!(TERMINAL_ROW_LABEL_X, 31.0);
 }
 
 #[test]

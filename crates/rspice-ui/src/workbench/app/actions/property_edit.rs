@@ -136,8 +136,10 @@ fn builtin_xspice_property_sheet(
                 _ => PropertyValue::expression(""),
             };
         }
+        // The label is the model's exact parameter key: it is what the user
+        // writes on the `.MODEL` card, so a derived prose label would only
+        // introduce a second name for the same thing.
         let mut definition = PropertyDefinition::new(&parameter.name)
-            .with_display_name(parameter.name.replace('_', " "))
             .with_description(if parameter.description.trim().is_empty() {
                 format!(
                     "{} model parameter ({:?}).",
@@ -194,8 +196,9 @@ fn generated_veriloga_property_sheet(
         if !parameter.aliases.is_empty() {
             description.push_str(&format!(" Aliases: {}.", parameter.aliases.join(", ")));
         }
+        // As with code models, the compiled Verilog-A parameter key is the
+        // name the deck and the compiled module both use.
         let mut definition = PropertyDefinition::new(parameter.name)
-            .with_display_name(parameter.name.replace('_', " "))
             .with_description(description)
             .with_type(PropertyType::Expression)
             .with_default(default)

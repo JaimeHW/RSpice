@@ -5,6 +5,7 @@
 
 use crate::properties::model_browser::ModelBrowserState;
 use crate::properties::pwl_editor::PwlEditorState;
+use crate::quantity::{QuantityPresentationPolicy, UiNumberLocale};
 use crate::state::property_types::{
     PropertyDefinition, PropertySheet, PropertyType, PropertyValue,
 };
@@ -49,6 +50,8 @@ pub struct TabbedPropertyDialogState {
     /// invalid input survives repaint and remains isolated until valid.
     numeric_text_drafts: HashMap<String, String>,
     original_numeric_text_drafts: HashMap<String, String>,
+    /// Whether `present_numeric_drafts` has already run for this open.
+    numeric_drafts_presented: bool,
     numeric_draft_errors: HashMap<String, String>,
 
     /// Whether to show advanced properties
@@ -202,6 +205,7 @@ impl TabbedPropertyDialogState {
         self.values = current_values.clone();
         self.original_values = current_values;
         self.initialize_numeric_text_drafts(sheet);
+        self.numeric_drafts_presented = false;
         self.modified.clear();
         self.validation_errors.clear();
         self.global_error = None;
@@ -397,11 +401,14 @@ impl TabbedPropertyDialogState {
         } else {
             self.numeric_draft_errors.remove(name);
             self.validation_errors.remove(name);
-            let is_modified = self
-                .values
-                .get(name)
-                .zip(self.original_values.get(name))
-                .is_none_or(|(value, original)| value != original);
+            // A parameter the instance never authored is absent from both
+            // maps. That is the schema default, not an edit: treating the
+            // missing pair as a difference marked every unauthored field
+            // modified the instant the editor opened.
+            let is_modified = match (self.values.get(name), self.original_values.get(name)) {
+                (None, None) => false,
+                (value, original) => value != original,
+            };
             if is_modified {
                 self.modified.insert(name.to_owned());
             } else {
@@ -555,6 +562,53 @@ impl TabbedPropertyDialogState {
         std::mem::take(&mut self.prepared_commit)
     }
 
+    /// Re-present the untouched drafts in engineering notation, once, as soon
+    /// as a render pass supplies the presentation policy.
+    ///
+    /// `open_for_component` runs before any policy is in hand, so it seeds the
+    /// exact decimal — correct but unreadable for a rise time
+    /// (`0.000000001 s`). This cannot run every frame: it would snap a user
+    /// who is deliberately typing that exact form back to `1ns` mid-edit.
+    pub(super) fn present_numeric_drafts(
+        &mut self,
+        sheet: &PropertySheet,
+        quantity_policy: QuantityPresentationPolicy,
+        number_locale: UiNumberLocale,
+    ) {
+        if self.numeric_drafts_presented {
+            return;
+        }
+        self.numeric_drafts_presented = true;
+        let presented = sheet
+            .iter()
+            .filter(|def| {
+                matches!(
+                    def.prop_type,
+                    PropertyType::Number | PropertyType::Expression
+                )
+            })
+            .filter(|def| {
+                // Only re-present a draft nobody has touched. A caller can
+                // write a draft between `open_for_component` and the first
+                // paint — a retained invalid entry, for instance — and
+                // rewriting that would silently discard their edit.
+                self.numeric_text_drafts.get(&def.name)
+                    == self.original_numeric_text_drafts.get(&def.name)
+            })
+            .map(|def| {
+                let value = self.values.get(&def.name).unwrap_or(&def.default_value);
+                (
+                    def.name.clone(),
+                    super::editors::editor_source_text(def, value, quantity_policy, number_locale),
+                )
+            })
+            .collect::<Vec<_>>();
+        for (name, text) in presented {
+            self.numeric_text_drafts.insert(name.clone(), text.clone());
+            self.original_numeric_text_drafts.insert(name, text);
+        }
+    }
+
     fn initialize_numeric_text_drafts(&mut self, sheet: &PropertySheet) {
         self.numeric_text_drafts.clear();
         self.original_numeric_text_drafts.clear();
@@ -584,24 +638,43 @@ impl TabbedPropertyDialogState {
 /// presentation-only precision limit. Quantity-aware fields receive an
 /// explicit base unit so merely opening their tab cannot turn a valid stored
 /// value into an invalid draft under the strict input policy.
+/// Whether the editor's own text carries this property's unit.
+///
+/// The unit-safe parser refuses a bare number for these kinds, so the unit is
+/// part of the value's syntax rather than metadata about it. The caption reads
+/// the same predicate and suppresses its unit chip for them, so the unit is
+/// presented exactly once.
+pub(super) fn unit_is_part_of_value_text(definition: &PropertyDefinition) -> bool {
+    definition.prop_type == PropertyType::Number
+        && matches!(
+            definition.unit.as_deref(),
+            Some("s" | "Hz" | "°" | "deg" | "rad" | "K" | "°C" | "°F")
+        )
+}
+
+/// Append the unit the value's own syntax must carry, if any.
+///
+/// One owner for the suffix so the exact form and the engineering form the
+/// editor offers can never disagree about it.
+pub(super) fn unit_suffixed(definition: &PropertyDefinition, magnitude: &str) -> String {
+    match definition.unit.as_deref() {
+        Some("s") => format!("{magnitude} s"),
+        Some("Hz") => format!("{magnitude} Hz"),
+        Some("°" | "deg") => format!("{magnitude} deg"),
+        Some("rad") => format!("{magnitude} rad"),
+        Some("K") => format!("{magnitude} K"),
+        Some("°C") => format!("{magnitude} °C"),
+        Some("°F") => format!("{magnitude} °F"),
+        _ => magnitude.to_owned(),
+    }
+}
+
 pub(super) fn numeric_source_text(
     definition: &PropertyDefinition,
     value: &PropertyValue,
 ) -> String {
     match value {
-        PropertyValue::Number { value, .. } => {
-            let exact = value.to_string();
-            match definition.unit.as_deref() {
-                Some("s") => format!("{exact} s"),
-                Some("Hz") => format!("{exact} Hz"),
-                Some("°" | "deg") => format!("{exact} deg"),
-                Some("rad") => format!("{exact} rad"),
-                Some("K") => format!("{exact} K"),
-                Some("°C") => format!("{exact} °C"),
-                Some("°F") => format!("{exact} °F"),
-                _ => exact,
-            }
-        }
+        PropertyValue::Number { value, .. } => unit_suffixed(definition, &value.to_string()),
         PropertyValue::Expression(expression) => expression.clone(),
         _ => value.display_string(),
     }

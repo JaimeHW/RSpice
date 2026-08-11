@@ -119,84 +119,74 @@ pub(crate) fn bind_component_model_from_catalog(
     Ok(())
 }
 
-const INSPECTOR_PROPERTY_LIST_PADDING_TOP: f32 = 7.0;
-const INSPECTOR_PROPERTY_LIST_PADDING_BOTTOM: f32 = 10.0;
-const INSPECTOR_TREE_PADDING_TOP: f32 = 4.0;
-const INSPECTOR_TREE_PADDING_BOTTOM: f32 = 7.0;
+/// Space a section leaves above the first block of its body, below the last,
+/// and between two blocks of the same body.
+///
+/// One measure governs every section — property list, tree, annotation card
+/// or action row — so the panel reads as a single rhythm instead of a stack
+/// of separately tuned boxes, and no section is framed unevenly.
+const INSPECTOR_SECTION_PADDING: f32 = 8.0;
 
 fn inspector_section_state_id() -> egui::Id {
     egui::Id::new("workbench.inspector.property-list-open")
 }
 
+/// Top of the open section's body, so a second block in the same body can
+/// tell itself apart from the first one.
+fn inspector_section_body_id() -> egui::Id {
+    egui::Id::new("workbench.inspector.section-body-top")
+}
+
 fn begin_inspector_sections(ui: &mut Ui) {
-    ui.data_mut(|data| data.insert_temp(inspector_section_state_id(), -1.0_f32));
+    ui.data_mut(|data| {
+        data.insert_temp(inspector_section_state_id(), -1.0_f32);
+        data.remove_temp::<f32>(inspector_section_body_id());
+    });
+}
+
+/// Close the body of the section above, if there is one.
+fn close_open_section(ui: &mut Ui) {
+    let previous_bottom = ui.data_mut(|data| {
+        data.get_temp::<f32>(inspector_section_state_id())
+            .unwrap_or(-1.0)
+    });
+    if previous_bottom >= 0.0 {
+        ui.add_space(previous_bottom);
+    }
+}
+
+/// Open a body under the header just painted, and record the step the body
+/// owes its last block.
+fn open_section_body(ui: &mut Ui) {
+    ui.add_space(INSPECTOR_SECTION_PADDING);
+    let body_top = ui.cursor().top();
+    ui.data_mut(|data| {
+        data.insert_temp(inspector_section_state_id(), INSPECTOR_SECTION_PADDING);
+        data.insert_temp(inspector_section_body_id(), body_top);
+    });
+}
+
+/// One section step between two blocks of the same body. The body's first
+/// block already sits below the header's padding and takes no further gap.
+fn section_block_gap(ui: &mut Ui) {
+    let body_top = ui.data_mut(|data| data.get_temp::<f32>(inspector_section_body_id()));
+    if body_top.is_none_or(|top| ui.cursor().top() > top + 0.5) {
+        ui.add_space(INSPECTOR_SECTION_PADDING);
+    }
 }
 
 fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
-    let previous_bottom = ui.data_mut(|data| {
-        data.get_temp::<f32>(inspector_section_state_id())
-            .unwrap_or(-1.0)
-    });
-    if previous_bottom >= 0.0 {
-        ui.add_space(previous_bottom);
-    }
+    close_open_section(ui);
     design_section_header(ui, title, meta);
-    ui.add_space(INSPECTOR_PROPERTY_LIST_PADDING_TOP);
-    ui.data_mut(|data| {
-        data.insert_temp(
-            inspector_section_state_id(),
-            INSPECTOR_PROPERTY_LIST_PADDING_BOTTOM,
-        )
-    });
+    open_section_body(ui);
 }
 
+/// Schematic-dock section heading: the same rhythm as [`section_header`] with
+/// the schematic's larger, tracked EDA typography.
 fn schematic_section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
-    let previous_bottom = ui.data_mut(|data| {
-        data.get_temp::<f32>(inspector_section_state_id())
-            .unwrap_or(-1.0)
-    });
-    if previous_bottom >= 0.0 {
-        ui.add_space(previous_bottom);
-    }
+    close_open_section(ui);
     design_schematic_section_header(ui, title, meta);
-    ui.add_space(INSPECTOR_PROPERTY_LIST_PADDING_TOP);
-    ui.data_mut(|data| {
-        data.insert_temp(
-            inspector_section_state_id(),
-            INSPECTOR_PROPERTY_LIST_PADDING_BOTTOM,
-        )
-    });
-}
-
-/// Schematic section followed by a compact mockup `.tree` rather than a
-/// property list. Keeping this local prevents the tree rhythm from changing
-/// form sections or inspectors in other workspaces.
-fn schematic_tree_section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
-    let previous_bottom = ui.data_mut(|data| {
-        data.get_temp::<f32>(inspector_section_state_id())
-            .unwrap_or(-1.0)
-    });
-    if previous_bottom >= 0.0 {
-        ui.add_space(previous_bottom);
-    }
-    design_schematic_section_header(ui, title, meta);
-    ui.add_space(INSPECTOR_TREE_PADDING_TOP);
-    ui.data_mut(|data| {
-        data.insert_temp(inspector_section_state_id(), INSPECTOR_TREE_PADDING_BOTTOM)
-    });
-}
-
-fn schematic_annotation_section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
-    let previous_bottom = ui.data_mut(|data| {
-        data.get_temp::<f32>(inspector_section_state_id())
-            .unwrap_or(-1.0)
-    });
-    if previous_bottom >= 0.0 {
-        ui.add_space(previous_bottom);
-    }
-    design_schematic_section_header(ui, title, meta);
-    ui.add_space(8.0);
-    ui.data_mut(|data| data.insert_temp(inspector_section_state_id(), 8.0_f32));
+    open_section_body(ui);
 }
 
 fn schematic_section_header_action(
@@ -205,13 +195,7 @@ fn schematic_section_header_action(
     action: &str,
     enabled: bool,
 ) -> Response {
-    let previous_bottom = ui.data_mut(|data| {
-        data.get_temp::<f32>(inspector_section_state_id())
-            .unwrap_or(-1.0)
-    });
-    if previous_bottom >= 0.0 {
-        ui.add_space(previous_bottom);
-    }
+    close_open_section(ui);
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(
         Vec2::new(ui.available_width(), PANEL_SECTION_H),
@@ -290,19 +274,16 @@ fn schematic_section_header_action(
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, action.to_owned())
     });
-    ui.add_space(INSPECTOR_PROPERTY_LIST_PADDING_TOP);
-    ui.data_mut(|data| {
-        data.insert_temp(
-            inspector_section_state_id(),
-            INSPECTOR_PROPERTY_LIST_PADDING_BOTTOM,
-        )
-    });
+    open_section_body(ui);
     response
 }
 
 fn finish_inspector_sections(ui: &mut Ui) {
     let bottom = ui
-        .data_mut(|data| data.remove_temp::<f32>(inspector_section_state_id()))
+        .data_mut(|data| {
+            data.remove_temp::<f32>(inspector_section_body_id());
+            data.remove_temp::<f32>(inspector_section_state_id())
+        })
         .unwrap_or(-1.0);
     if bottom >= 0.0 {
         ui.add_space(bottom);
@@ -1838,11 +1819,8 @@ fn active_result_pane(
     // The unit names the pane in a unit-scoped stack; the viewer name is
     // already on the sheet tab above.
     let tokens = Tokens::get(ui.ctx());
-    let facts = crate::workbench::documents::result_document::active_pane_facts(
-        ui.ctx(),
-        &tokens,
-        &mut app.state,
-    );
+    let facts =
+        crate::workbench::documents::result_document::active_pane_facts(&tokens, &mut app.state);
     // The waveform stack keys its viewports by analysis; only the
     // single-canvas viewers keep one under a plot ordinal. Reading the wrong
     // store here reported "automatic fit" over a pinned pane and left the fit
@@ -1926,8 +1904,7 @@ fn axis_limit_row(
     label: &str,
 ) {
     use crate::workbench::documents::result_document::{
-        active_axis_is_pinned, active_axis_range, format_axis_range, parse_axis_range,
-        set_active_axis_range,
+        active_axis_is_pinned, active_axis_range, set_active_axis_range,
     };
 
     let viewer = app.state.ui.results.viewer;
@@ -1976,6 +1953,32 @@ fn axis_limit_row(
         set_active_axis_range(&tokens, &mut app.state, axis, None);
         app.state.ui.results.axis_limit_draft = None;
     }
+}
+
+/// Render an interval the field can read back without loss.
+fn format_axis_range((minimum, maximum): (f64, f64)) -> String {
+    format!(
+        "{} … {}",
+        format_result_scalar(minimum),
+        format_result_scalar(maximum)
+    )
+}
+
+/// Read an interval typed as `min … max`, in engineering notation.
+///
+/// Accepts the ellipsis this writes back, plus `..`, a comma or plain space,
+/// so a value pasted from a datasheet or a netlist parses without reformatting.
+/// A reversed or degenerate interval is refused rather than silently sorted:
+/// on a log axis the two are not the same request.
+pub(crate) fn parse_axis_range(text: &str) -> Option<(f64, f64)> {
+    let cleaned = text.replace('…', " ").replace("..", " ").replace(',', " ");
+    let mut parts = cleaned.split_whitespace();
+    let minimum = crate::quantity::engineering::parse_engineering_value(parts.next()?).ok()?;
+    let maximum = crate::quantity::engineering::parse_engineering_value(parts.next()?).ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    (minimum.is_finite() && maximum.is_finite() && maximum > minimum).then_some((minimum, maximum))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -3434,9 +3437,8 @@ mod tests {
     }
 
     #[test]
-    fn inspector_property_lists_keep_mockup_vertical_padding() {
-        assert_eq!(INSPECTOR_PROPERTY_LIST_PADDING_TOP, 7.0);
-        assert_eq!(INSPECTOR_PROPERTY_LIST_PADDING_BOTTOM, 10.0);
+    fn one_step_frames_every_inspector_section_body() {
+        assert_eq!(INSPECTOR_SECTION_PADDING, 8.0);
     }
 
     #[test]

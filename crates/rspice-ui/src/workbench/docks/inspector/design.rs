@@ -48,8 +48,7 @@ use crate::workbench::{AppState, RSpiceApp};
 
 use super::{
     ComponentModelEvidence, component_model_evidence, muted_inspector_copy,
-    schematic_annotation_section_header, schematic_section_header as section_header,
-    schematic_section_header_action, schematic_tree_section_header,
+    schematic_section_header as section_header, schematic_section_header_action, section_block_gap,
 };
 
 /// The mockup's `.inspector-hero` is an 82 px band: an 82 px square symbol
@@ -478,13 +477,16 @@ fn hero(ui: &mut Ui, app: &mut RSpiceApp, spec: Hero) {
 /// The section body's action row: content-sized buttons that wrap, matching
 /// the mockup's `.section-body.panel-action-stack` box and the design
 /// system's own rule that an action row is a group, not a run-on.
+///
+/// The row takes the section's own step from the block above it and leaves
+/// the closing step to the section, so a body that ends in buttons is framed
+/// exactly like one that ends in a property list.
 const ACTION_ROW_PAD_X: f32 = 10.0;
-const ACTION_ROW_PAD_Y: f32 = 8.0;
 const ACTION_ROW_GAP: f32 = 6.0;
 
 fn action_stack(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
     let width = (ui.available_width() - 2.0 * ACTION_ROW_PAD_X).max(1.0);
-    ui.add_space(ACTION_ROW_PAD_Y);
+    section_block_gap(ui);
     ui.horizontal(|ui| {
         ui.add_space(ACTION_ROW_PAD_X);
         ui.allocate_ui_with_layout(
@@ -496,7 +498,6 @@ fn action_stack(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
             },
         );
     });
-    ui.add_space(ACTION_ROW_PAD_Y);
 }
 
 /// One action bound to a workbench command, disabled with the registry's
@@ -1290,10 +1291,18 @@ const INLINE_VALIDATION_SLOT_H: f32 = 18.0;
 
 /// Stable validation slot for an editable property group.
 ///
-/// The slot always owns the same height, so intermediate invalid input cannot
-/// push the terminal, parameter, or operating-point sections up and down.
-fn rejection_slot(ui: &mut Ui, reason: Option<&str>) -> egui::Rect {
+/// The slot belongs to the open edit session: while one of the group's fields
+/// holds focus it owns the same height whether or not the typed text was
+/// rejected, so intermediate invalid input cannot push the terminal,
+/// parameter, or operating-point sections up and down as it is typed. With no
+/// session open there is nothing to report, and reserving the strip would only
+/// leave every editable section framed by more space below its last row than
+/// above its first.
+fn rejection_slot(ui: &mut Ui, editing: bool, reason: Option<&str>) -> egui::Rect {
     let t = Tokens::get(ui.ctx());
+    if !editing && reason.is_none() {
+        return egui::Rect::from_min_size(ui.cursor().min, egui::Vec2::ZERO);
+    }
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), INLINE_VALIDATION_SLOT_H),
         egui::Sense::hover(),
@@ -1385,7 +1394,7 @@ fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[DesignNet]) {
         },
     );
 
-    schematic_tree_section_header(
+    section_header(
         ui,
         "Connected terminals",
         Some(&terminals.len().to_string()),

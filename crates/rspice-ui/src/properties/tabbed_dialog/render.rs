@@ -20,7 +20,10 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 
 use super::editors::render_value_editor;
-use super::state::{ComponentEditorContext, TabbedDialogResult, TabbedPropertyDialogState};
+use super::state::{
+    ComponentEditorContext, TabbedDialogResult, TabbedPropertyDialogState,
+    unit_is_part_of_value_text,
+};
 
 const DIALOG_SIZE: DialogSize = DialogSize::ComponentEditor;
 const EYEBROW: &str = "EDIT · TYPED PARAMETERS";
@@ -215,10 +218,18 @@ fn component_identity_header(
                 );
 
                 let status_width = (ui.available_width() * 0.28).clamp(110.0, 190.0);
+                let identity_width =
+                    (ui.available_width() - status_width - ui.spacing().item_spacing.x).max(180.0);
                 ui.allocate_ui_with_layout(
-                    vec2((ui.available_width() - status_width).max(180.0), 34.0),
+                    vec2(identity_width, 34.0),
                     Layout::top_down(Align::Min),
                     |ui| {
+                        // Claim the whole track. `allocate_ui_with_layout`
+                        // advances the cursor by the content it ends up with,
+                        // not by the size it was asked for, so a short instance
+                        // path would otherwise drag the family badge in off the
+                        // right edge instead of leaving it flush.
+                        ui.set_min_width(identity_width);
                         ui.spacing_mut().item_spacing.y = 2.0;
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 7.0;
@@ -273,6 +284,7 @@ fn component_identity_header(
                     vec2(status_width, 34.0),
                     Layout::right_to_left(Align::Center),
                     |ui| {
+                        ui.set_min_width(status_width);
                         ui.add(
                             egui::Label::new(
                                 egui::RichText::new(&context.family)
@@ -321,6 +333,22 @@ fn parameters_pane(
     first_control
 }
 
+/// Narrowest cell that still fits a caption, a value input, and a readable
+/// hint. Below twice this the grid drops to a single column.
+const MIN_CELL_WIDTH: f32 = 190.0;
+/// Horizontal gap between grid columns.
+const CELL_GAP: f32 = 14.0;
+/// Vertical gap between grid rows.
+const ROW_GAP: f32 = 10.0;
+/// Caption track height (label, required marker, modified dot, unit).
+const CAPTION_H: f32 = 15.0;
+/// Gap between a field block's caption, control, and hint tracks.
+const TRACK_GAP: f32 = 3.0;
+/// Reserved hint track for a field whose micro-copy is a single line.
+const HINT_LINE_H: f32 = 13.0;
+/// Longest hint or validation message rendered before elision.
+const HINT_MAX_ROWS: usize = 2;
+
 fn parameters_contents(
     ui: &mut Ui,
     state: &mut TabbedPropertyDialogState,
@@ -329,6 +357,7 @@ fn parameters_contents(
     quantity_policy: QuantityPresentationPolicy,
     number_locale: UiNumberLocale,
 ) -> Option<Id> {
+    state.present_numeric_drafts(sheet, quantity_policy, number_locale);
     section_band(ui, "Parameters", "typed · unit-checked");
     let properties = sheet
         .iter()
@@ -342,46 +371,29 @@ fn parameters_contents(
         .filter(|definition| property_is_visible(definition, state))
         .cloned()
         .collect::<Vec<_>>();
+    let groups = group_by_category(&properties);
 
     let mut first_control = None;
     egui::Frame::NONE
         .inner_margin(Margin::symmetric(16, 10))
         .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 10.0;
-            for pair in properties.chunks(2) {
-                let gap = 14.0;
-                let field_width = ((ui.available_width() - gap) * 0.5).max(120.0);
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = gap;
-                    for definition in pair {
-                        let control = ui
-                            .push_id(("component-editor-property", &definition.name), |ui| {
-                                ui.allocate_ui_with_layout(
-                                    vec2(field_width, 58.0),
-                                    Layout::top_down(Align::Min),
-                                    |ui| {
-                                        render_property_field(
-                                            ui,
-                                            definition,
-                                            state,
-                                            quantity_policy,
-                                            number_locale,
-                                        )
-                                    },
-                                )
-                                .inner
-                            })
-                            .inner;
-                        first_control = first_control.or(control);
+            ui.spacing_mut().item_spacing.y = 0.0;
+            // A single-category sheet is already titled by the section band
+            // above; repeating it would be pure decoration.
+            let show_headings = groups.len() > 1;
+            for (index, (category, definitions)) in groups.iter().enumerate() {
+                if show_headings {
+                    if index > 0 {
+                        ui.add_space(12.0);
                     }
-                    if pair.len() == 1 {
-                        ui.allocate_space(vec2(field_width, 58.0));
-                    }
-                });
+                    property_group_heading(ui, category);
+                }
+                let control = property_grid(ui, definitions, state, quantity_policy, number_locale);
+                first_control = first_control.or(control);
             }
 
             if component_type.is_pwl_source() {
-                ui.add_space(4.0);
+                ui.add_space(12.0);
                 property_group_heading(ui, "Piecewise-linear waveform");
                 let pwl_result = crate::properties::pwl_editor::render_pwl_editor(
                     ui,
@@ -403,7 +415,7 @@ fn parameters_contents(
                 .iter()
                 .any(|definition| definition.display_mode == DisplayMode::Advanced);
             if has_advanced {
-                ui.add_space(4.0);
+                ui.add_space(8.0);
                 crate::ui::widgets::check_row(
                     ui,
                     "Show advanced properties",
@@ -415,24 +427,191 @@ fn parameters_contents(
             let message = state
                 .commit_error
                 .as_deref()
-                .or(state.global_error.as_deref())
-                .unwrap_or(" ");
-            ui.add_sized(
-                [ui.available_width(), 16.0],
-                egui::Label::new(
-                    egui::RichText::new(message)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(
-                            if state.commit_error.is_some() || state.global_error.is_some() {
-                                t.color.err
-                            } else {
-                                egui::Color32::TRANSPARENT
-                            },
-                        ),
-                ),
-            );
+                .or(state.global_error.as_deref());
+            ui.add_space(6.0);
+            let (rect, _) =
+                ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
+            if let Some(message) = message {
+                ui.painter().text(
+                    pos2(rect.left(), rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    message,
+                    theme::sans(tokens::FS_0, FontWeight::Regular),
+                    t.color.err,
+                );
+            }
         });
     first_control
+}
+
+/// Partition the visible sheet into its authored categories, keeping both the
+/// categories and their members in schema order.
+fn group_by_category(properties: &[PropertyDefinition]) -> Vec<(String, Vec<PropertyDefinition>)> {
+    let mut groups: Vec<(String, Vec<PropertyDefinition>)> = Vec::new();
+    for definition in properties {
+        match groups
+            .iter_mut()
+            .find(|(category, _)| category == &definition.category)
+        {
+            Some((_, members)) => members.push(definition.clone()),
+            None => groups.push((definition.category.clone(), vec![definition.clone()])),
+        }
+    }
+    groups
+}
+
+/// Lay one category out on the two-column field grid.
+///
+/// Rows are packed first, then measured, so every field block on a row shares
+/// one height and the columns below it stay aligned no matter how long an
+/// individual description or validation message runs.
+fn property_grid(
+    ui: &mut Ui,
+    definitions: &[PropertyDefinition],
+    state: &mut TabbedPropertyDialogState,
+    quantity_policy: QuantityPresentationPolicy,
+    number_locale: UiNumberLocale,
+) -> Option<Id> {
+    let available = ui.available_width();
+    let columns = if available >= MIN_CELL_WIDTH * 2.0 + CELL_GAP {
+        2
+    } else {
+        1
+    };
+    let single_width = available.max(MIN_CELL_WIDTH);
+    let column_width = ((available - CELL_GAP) * 0.5).max(MIN_CELL_WIDTH);
+
+    let mut first_control = None;
+    for row in pack_rows(definitions, columns) {
+        let widths = row
+            .iter()
+            .map(|definition| {
+                if columns == 1 || property_span(definition) >= columns {
+                    single_width
+                } else {
+                    column_width
+                }
+            })
+            .collect::<Vec<_>>();
+        let height = row
+            .iter()
+            .zip(&widths)
+            .map(|(definition, width)| field_block_height(ui, definition, state, *width))
+            .fold(0.0_f32, f32::max);
+
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = CELL_GAP;
+            for (definition, width) in row.iter().zip(&widths) {
+                let control = ui
+                    .push_id(("component-editor-property", &definition.name), |ui| {
+                        ui.allocate_ui_with_layout(
+                            vec2(*width, height),
+                            Layout::top_down(Align::Min),
+                            |ui| {
+                                render_property_field(
+                                    ui,
+                                    definition,
+                                    state,
+                                    quantity_policy,
+                                    number_locale,
+                                )
+                            },
+                        )
+                        .inner
+                    })
+                    .inner;
+                first_control = first_control.or(control);
+            }
+        });
+        ui.add_space(ROW_GAP);
+    }
+    first_control
+}
+
+/// Pack definitions into grid rows, honoring each field's column span.
+fn pack_rows(definitions: &[PropertyDefinition], columns: usize) -> Vec<Vec<PropertyDefinition>> {
+    let mut rows: Vec<Vec<PropertyDefinition>> = Vec::new();
+    let mut used = columns;
+    for definition in definitions {
+        let span = property_span(definition).min(columns);
+        if used + span > columns {
+            rows.push(Vec::new());
+            used = 0;
+        }
+        used += span;
+        rows.last_mut()
+            .expect("a row was just opened")
+            .push(definition.clone());
+    }
+    rows
+}
+
+/// Columns one field occupies.
+///
+/// Composite values — a model binding with its Browse action, or a vector
+/// coefficient list — are unreadable in a half-width well, so they take the
+/// full grid width. The span is derived from the schema rather than the live
+/// draft so typing can never reflow the grid under the cursor.
+fn property_span(definition: &PropertyDefinition) -> usize {
+    if definition.name == "model" {
+        return 2;
+    }
+    let composite_default = matches!(
+        &definition.default_value,
+        PropertyValue::String(text) | PropertyValue::Expression(text)
+            if text.starts_with('[') || text.starts_with('<')
+    );
+    if composite_default { 2 } else { 1 }
+}
+
+/// Total height of one field block at `width`, including however many hint
+/// rows its longest current message needs.
+fn field_block_height(
+    ui: &Ui,
+    definition: &PropertyDefinition,
+    state: &TabbedPropertyDialogState,
+    width: f32,
+) -> f32 {
+    let control_h = Tokens::get(ui.ctx()).metrics.ctl_h;
+    let hint = field_hint(definition, state);
+    let hint_h = if hint.is_empty() {
+        HINT_LINE_H
+    } else {
+        ui.fonts_mut(|fonts| fonts.layout_job(hint_layout_job(&hint, width)))
+            .size()
+            .y
+            .max(HINT_LINE_H)
+    };
+    CAPTION_H + TRACK_GAP + control_h + TRACK_GAP + hint_h
+}
+
+/// The micro-copy under one field: its validation error when it has one, and
+/// its schema description otherwise.
+fn field_hint(definition: &PropertyDefinition, state: &TabbedPropertyDialogState) -> String {
+    state
+        .validation_errors
+        .get(&definition.name)
+        .cloned()
+        .unwrap_or_else(|| definition.description.clone())
+}
+
+/// Wrapped, row-capped layout for a hint track. The cap keeps one verbose
+/// message from pushing the rest of the sheet off screen.
+fn hint_layout_job(hint: &str, width: f32) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::single_section(
+        hint.to_owned(),
+        egui::TextFormat {
+            font_id: theme::sans(tokens::FS_0, FontWeight::Regular),
+            ..Default::default()
+        },
+    );
+    job.wrap = egui::text::TextWrapping {
+        max_width: width,
+        max_rows: HINT_MAX_ROWS,
+        overflow_character: Some('…'),
+        ..Default::default()
+    };
+    job
 }
 
 fn property_is_visible(definition: &PropertyDefinition, state: &TabbedPropertyDialogState) -> bool {
@@ -502,6 +681,12 @@ fn supports_source_preview(kind: crate::state::ComponentType) -> bool {
             | ComponentType::VoltageSourceExp
             | ComponentType::CurrentSourceExp
             | ComponentType::VoltageSourceSffm
+            | ComponentType::CurrentSourceSffm
+            | ComponentType::VoltageSourceAm
+            | ComponentType::CurrentSourceAm
+            | ComponentType::VoltageSourcePat
+            | ComponentType::CurrentSourcePat
+            | ComponentType::VoltageSourceNoise
             | ComponentType::CurrentSourceNoise
     )
 }
@@ -537,14 +722,36 @@ fn section_band(ui: &mut Ui, title: &str, status: &str) {
         .hline(ui.max_rect().x_range(), y, Stroke::new(1.0, t.color.border));
 }
 
+/// A category rule: the group name followed by a hairline running to the
+/// right edge, so the eye can find where one parameter group ends.
 fn property_group_heading(ui: &mut Ui, label: &str) {
     let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(label.to_uppercase())
-            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-            .color(t.color.text_faint),
-    );
-    ui.add_space(3.0);
+    let width = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(vec2(width, 16.0), Sense::hover());
+    if ui.is_rect_visible(rect) {
+        let galley = ui.fonts_mut(|fonts| {
+            fonts.layout_no_wrap(
+                label.to_uppercase(),
+                theme::mono(tokens::FS_0, FontWeight::Medium),
+                t.color.text_faint,
+            )
+        });
+        let text_width = galley.size().x;
+        ui.painter().galley(
+            pos2(rect.left(), rect.center().y - galley.size().y * 0.5),
+            galley,
+            t.color.text_faint,
+        );
+        let rule_start = rect.left() + text_width + 8.0;
+        if rule_start < rect.right() {
+            ui.painter().hline(
+                rule_start..=rect.right(),
+                rect.center().y,
+                Stroke::new(1.0, t.color.border),
+            );
+        }
+    }
+    ui.add_space(5.0);
 }
 
 fn section_block(ui: &mut Ui, title: &str, status: &str, body: impl FnOnce(&mut Ui)) {
@@ -794,10 +1001,15 @@ fn terminal_table_row(
 ) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
+    // The row must span the whole evidence pane: a shrink-to-fit frame would
+    // stop its fill and its bottom rule at the widest cell, leaving the table
+    // narrower than the band above it.
+    let row_width = ui.available_width();
     let frame = egui::Frame::NONE
         .fill(if heading { c.bg_panel_2 } else { c.bg_panel })
         .inner_margin(Margin::symmetric(10, 6))
         .show(ui, |ui| {
+            ui.set_width(row_width - 20.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 let font = if heading {
@@ -844,7 +1056,11 @@ fn source_preview_card(
     state: &TabbedPropertyDialogState,
     kind: crate::state::ComponentType,
 ) {
-    let status = if kind == crate::state::ComponentType::CurrentSourceNoise {
+    let status = if matches!(
+        kind,
+        crate::state::ComponentType::CurrentSourceNoise
+            | crate::state::ComponentType::VoltageSourceNoise
+    ) {
         "representative realization"
     } else {
         "exact expression"
@@ -1145,25 +1361,119 @@ fn source_preview_samples(
                 })
                 .collect()
         }
-        ComponentType::VoltageSourceSffm => {
+        ComponentType::VoltageSourceSffm | ComponentType::CurrentSourceSffm => {
             let offset = value("vo", 0.0);
             let amplitude = value("va", 1.0);
             let carrier_frequency = value("fc", 1e6).abs().max(f64::EPSILON);
             let modulation = value("mdi", 1.0);
             let signal_frequency = value("fs", 1e3).abs();
-            sample_times(3.0 / carrier_frequency)
+            let delay = value("td", 0.0).max(0.0);
+            let phase_modulation = value("phasem", 0.0).to_radians();
+            let phase_carrier = value("phasec", 0.0).to_radians();
+            // ngspice holds the source at exactly 0 before TD rather than at
+            // the offset, so the preview has to show the same step.
+            sample_times(delay + 3.0 / carrier_frequency)
                 .into_iter()
                 .map(|time| {
+                    if time < delay {
+                        return 0.0;
+                    }
+                    let time = time - delay;
                     offset
                         + amplitude
                             * (std::f64::consts::TAU * carrier_frequency * time
+                                + phase_carrier
                                 + modulation
-                                    * (std::f64::consts::TAU * signal_frequency * time).sin())
+                                    * (std::f64::consts::TAU * signal_frequency * time
+                                        + phase_modulation)
+                                        .sin())
                             .sin()
                 })
                 .collect()
         }
-        ComponentType::CurrentSourceNoise => {
+        ComponentType::VoltageSourceAm | ComponentType::CurrentSourceAm => {
+            let offset = value("vo", 0.0);
+            let modulation_offset = value("vmo", 0.0);
+            let modulation_amplitude = value("vma", 1.0);
+            let modulating_frequency = value("fm", 1e3).abs().max(f64::EPSILON);
+            let carrier_frequency = value("fc", 1e6).abs().max(f64::EPSILON);
+            let delay = value("td", 0.0).max(0.0);
+            let phase_modulation = value("phasem", 0.0).to_radians();
+            let phase_carrier = value("phasec", 0.0).to_radians();
+            // Two modulation periods make the envelope legible; a carrier-based
+            // window would draw a solid band at any realistic FC/FM ratio.
+            sample_times(delay + 2.0 / modulating_frequency)
+                .into_iter()
+                .map(|time| {
+                    if time < delay {
+                        return 0.0;
+                    }
+                    let time = time - delay;
+                    let envelope = modulation_offset
+                        + modulation_amplitude
+                            * (std::f64::consts::TAU * modulating_frequency * time
+                                + phase_modulation)
+                                .sin();
+                    offset
+                        + envelope
+                            * (std::f64::consts::TAU * carrier_frequency * time + phase_carrier)
+                                .sin()
+                })
+                .collect()
+        }
+        ComponentType::VoltageSourcePat | ComponentType::CurrentSourcePat => {
+            let high = value("vhi", 1.0);
+            let low = value("vlo", 0.0);
+            let delay = value("td", 0.0);
+            let rise = value("tr", 1e-9).max(f64::EPSILON);
+            let fall = value("tf", 1e-9).max(f64::EPSILON);
+            let interval = value("tsample", 1e-6).max(f64::EPSILON);
+            let bits = state
+                .get_value("data")
+                .map(|value| value.display_string())
+                .unwrap_or_default();
+            let bits = bits
+                .trim()
+                .trim_start_matches(['b', 'B'])
+                .chars()
+                .filter(|bit| matches!(bit, '0' | '1'))
+                .map(|bit| bit == '1')
+                .collect::<Vec<_>>();
+            if bits.is_empty() {
+                return vec![low; count];
+            }
+            let duration = delay + interval * bits.len() as f64;
+            sample_times(duration)
+                .into_iter()
+                .map(|time| {
+                    let time = time - delay;
+                    if time <= 0.0 {
+                        return low;
+                    }
+                    let index = ((time / interval).floor() as usize).min(bits.len() - 1);
+                    let target = if bits[index] { high } else { low };
+                    let previous = if index == 0 {
+                        low
+                    } else if bits[index - 1] {
+                        high
+                    } else {
+                        low
+                    };
+                    if previous == target {
+                        return target;
+                    }
+                    // Xyce ramps across TR/TF at the start of the bit slot.
+                    let edge = if target > previous { rise } else { fall };
+                    let into_bit = time - index as f64 * interval;
+                    if into_bit >= edge {
+                        target
+                    } else {
+                        previous + (target - previous) * (into_bit / edge)
+                    }
+                })
+                .collect()
+        }
+        ComponentType::VoltageSourceNoise | ComponentType::CurrentSourceNoise => {
             let dc = value("dc", 0.0);
             if !enabled("isnoisy", true) {
                 return vec![dc; count];
@@ -1243,8 +1553,11 @@ fn render_model_browser(
     }
 }
 
-/// One mockup field block: caption, fixed control track, and a stable
-/// micro-copy track that validation can replace without moving its neighbors.
+/// One field block: caption, fixed control track, and a micro-copy track that
+/// validation can replace without moving its neighbors.
+///
+/// The caller has already sized this block for the tallest field on its row,
+/// so each track is allocated explicitly rather than left to flow.
 fn render_property_field(
     ui: &mut Ui,
     def: &PropertyDefinition,
@@ -1254,7 +1567,8 @@ fn render_property_field(
 ) -> Option<egui::Id> {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    ui.spacing_mut().item_spacing.y = 2.0;
+    ui.spacing_mut().item_spacing.y = TRACK_GAP;
+    let width = ui.available_width();
     let is_modified = state.is_modified(&def.name);
     let error = state.validation_errors.get(&def.name).cloned();
     let current_value = state
@@ -1264,23 +1578,8 @@ fn render_property_field(
     let numeric_text_draft = state.numeric_text_draft(&def.name).map(str::to_owned);
     let browse = def.name == "model";
 
-    ui.set_width(ui.available_width());
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 5.0;
-        ui.label(
-            egui::RichText::new(if def.required {
-                format!("{} *", def.display_name)
-            } else {
-                def.display_name.clone()
-            })
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-            .color(if error.is_some() { c.err } else { c.text_dim }),
-        );
-        if is_modified {
-            let (dot, _) = ui.allocate_exact_size(vec2(7.0, 12.0), Sense::hover());
-            ui.painter().circle_filled(dot.center(), 2.5, c.accent);
-        }
-    });
+    ui.set_width(width);
+    field_caption(ui, def, is_modified, error.is_some(), width);
 
     let mut changed_value = None;
     let mut numeric_text = None;
@@ -1365,31 +1664,107 @@ fn render_property_field(
         state.model_browser.open = true;
     }
 
-    let hint = error.clone().unwrap_or_else(|| {
-        let mut hint = def.description.clone();
-        if let Some(unit) = def.unit.as_deref() {
-            if hint.is_empty() {
-                hint = unit.to_owned();
-            } else {
-                hint.push_str(" · ");
-                hint.push_str(unit);
-            }
-        }
-        hint
-    });
-    let response = ui.add_sized(
-        [ui.available_width(), 13.0],
-        egui::Label::new(
-            egui::RichText::new(if hint.is_empty() { " " } else { &hint })
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(if error.is_some() { c.err } else { c.text_faint }),
-        )
-        .truncate(),
-    );
+    // The unit is presented once, in the caption; repeating it here would be
+    // the only duplicated token on the block.
+    let hint = field_hint(def, state);
+    let hint_height = (ui.available_height() - TRACK_GAP).max(HINT_LINE_H);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, hint_height), Sense::hover());
     if !hint.is_empty() {
+        if ui.is_rect_visible(rect) {
+            let galley = ui.fonts_mut(|fonts| fonts.layout_job(hint_layout_job(&hint, width)));
+            ui.painter().galley(
+                rect.left_top(),
+                galley,
+                if error.is_some() { c.err } else { c.text_faint },
+            );
+        }
         response.on_hover_text(hint);
     }
     editor_id
+}
+
+/// The caption track: label, required marker, unsaved-edit dot, and the
+/// schema unit pinned to the right so units align down the column.
+fn field_caption(
+    ui: &mut Ui,
+    def: &PropertyDefinition,
+    is_modified: bool,
+    invalid: bool,
+    width: f32,
+) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let (rect, _) = ui.allocate_exact_size(vec2(width, CAPTION_H), Sense::hover());
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+
+    let unit_width = def
+        .unit
+        .as_deref()
+        .filter(|_| !unit_is_part_of_value_text(def))
+        .map(|unit| {
+            let galley = ui.fonts_mut(|fonts| {
+                fonts.layout_no_wrap(
+                    unit.to_owned(),
+                    theme::mono(tokens::FS_0, FontWeight::Regular),
+                    c.text_faint,
+                )
+            });
+            ui.painter().galley(
+                pos2(
+                    rect.right() - galley.size().x,
+                    rect.center().y - galley.size().y * 0.5,
+                ),
+                galley.clone(),
+                c.text_faint,
+            );
+            galley.size().x + 8.0
+        })
+        .unwrap_or(0.0);
+
+    let dot_width = if is_modified { 9.0 } else { 0.0 };
+    let label_width = (rect.width() - unit_width - dot_width).max(0.0);
+    let label = if def.required {
+        format!("{} *", def.display_name)
+    } else {
+        def.display_name.clone()
+    };
+    let mut job = egui::text::LayoutJob::single_section(
+        label,
+        egui::TextFormat {
+            font_id: label_font(def),
+            color: if invalid { c.err } else { c.text_dim },
+            ..Default::default()
+        },
+    );
+    job.wrap = egui::text::TextWrapping {
+        max_width: label_width,
+        max_rows: 1,
+        overflow_character: Some('…'),
+        ..Default::default()
+    };
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    let label_end = rect.left() + galley.size().x;
+    ui.painter().galley(
+        pos2(rect.left(), rect.center().y - galley.size().y * 0.5),
+        galley,
+        if invalid { c.err } else { c.text_dim },
+    );
+    if is_modified {
+        ui.painter()
+            .circle_filled(pos2(label_end + 5.0, rect.center().y), 2.5, c.accent);
+    }
+}
+
+/// A sheet whose labels are the device's exact parameter keys renders them in
+/// the mono face, matching the deck the user will read back.
+fn label_font(def: &PropertyDefinition) -> egui::FontId {
+    if def.display_name == def.name {
+        theme::mono(tokens::FS_0, FontWeight::Regular)
+    } else {
+        theme::sans(tokens::FS_0, FontWeight::Regular)
+    }
 }
 
 fn model_type_for_component(
@@ -1403,7 +1778,9 @@ fn model_type_for_component(
         ComponentType::NpnBjt | ComponentType::NpnBjt4 | ComponentType::NpnBjt5 => ModelType::Npn,
         ComponentType::PnpBjt | ComponentType::PnpBjt4 | ComponentType::PnpBjt5 => ModelType::Pnp,
         ComponentType::Diode => ModelType::Diode,
-        ComponentType::SaturableInductor => ModelType::Inductor,
+        ComponentType::Resistor => ModelType::Resistor,
+        ComponentType::Capacitor => ModelType::Capacitor,
+        ComponentType::Inductor | ComponentType::SaturableInductor => ModelType::Inductor,
         ComponentType::LossyTransmissionLine
         | ComponentType::CoupledTransmissionLine
         | ComponentType::RfPort => ModelType::Rf,
