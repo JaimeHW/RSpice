@@ -1066,6 +1066,12 @@ impl<'a> Flattener<'a> {
                 super::ElementProvenance::GeneratedXyceAddResistor { mode } => {
                     super::ElementProvenance::GeneratedXyceAddResistor { mode: *mode }
                 }
+                super::ElementProvenance::SynthesizedTransferState { owner, form } => {
+                    super::ElementProvenance::SynthesizedTransferState {
+                        owner: self.remap_local_element_reference(owner, prefix),
+                        form: *form,
+                    }
+                }
             },
         }
     }

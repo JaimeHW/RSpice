@@ -170,10 +170,24 @@ pub fn analyze_dc_ground_paths(
     let mut union = NodeUnion::default();
     let mut order: Vec<String> = Vec::new();
     let mut seen: BTreeSet<String> = BTreeSet::new();
+    // Nodes some authored element touches. A rational-transfer realization's
+    // state nodes reach only its own generated elements, and their operating
+    // point is set by that realization's equations -- the state currents read
+    // each other's voltages -- rather than by conduction to ground. Whether
+    // those equations have full rank is not a question a connectivity walk can
+    // answer, so the synthesizer's guarantee stands in for one.
+    let mut authored_nodes: BTreeSet<String> = BTreeSet::new();
 
     for element in elements {
         union.collect_element_nodes(element);
+        let synthesized = matches!(
+            element.provenance,
+            crate::netlist::ElementProvenance::SynthesizedTransferState { .. }
+        );
         for node in connectivity_terminal_nodes(element)? {
+            if !synthesized {
+                authored_nodes.insert(node_key(node));
+            }
             if seen.insert(node_key(node)) {
                 order.push(normalize_node_name(node));
             }
@@ -200,6 +214,7 @@ pub fn analyze_dc_ground_paths(
     let no_dc_path_nodes = order
         .into_iter()
         .filter(|node| !is_ground_name(node))
+        .filter(|node| authored_nodes.contains(&node_key(node)))
         .filter(|node| {
             union
                 .index_by_key

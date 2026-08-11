@@ -49,7 +49,10 @@ pub(crate) fn filter_elements_with_abort(
             ElementProvenance::Authored => {
                 rejected_owners.contains(&element.name.to_ascii_uppercase())
             }
-            ElementProvenance::GeneratedPassiveHelper { owner, .. } => {
+            // A realization's states are meaningless without the source they
+            // integrate for, so they leave with it.
+            ElementProvenance::GeneratedPassiveHelper { owner, .. }
+            | ElementProvenance::SynthesizedTransferState { owner, .. } => {
                 rejected_owners.contains(&owner.to_ascii_uppercase())
             }
             ElementProvenance::GeneratedXyceAddResistor { .. } => false,

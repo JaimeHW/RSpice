@@ -438,12 +438,47 @@ pub(super) fn synthesize_laplace(
     voltage_output: bool,
     line_num: usize,
 ) -> Result<Vec<Element>, ParseError> {
-    let fail = |message: String| ParseError::Syntax {
+    let (num, den) = parse_rational_in_s(rational_text).map_err(|message| ParseError::Syntax {
         line: line_num,
         message: format!("LAPLACE source '{name}': {message}"),
-    };
+    })?;
+    synthesize_rational_transfer(
+        name,
+        node_pos,
+        node_neg,
+        input_expr,
+        num,
+        den,
+        voltage_output,
+        crate::netlist::SynthesizedTransferForm::Laplace,
+        line_num,
+    )
+}
 
-    let (num, den) = parse_rational_in_s(rational_text).map_err(&fail)?;
+/// Realize a real rational transfer function as circuit elements.
+///
+/// This is the half of [`synthesize_laplace`] that follows parsing, split out
+/// because a filter designed from a specification rather than written down as
+/// a ratio of polynomials -- PSpice's CHEBYSHEV sources -- has to reach exactly
+/// the same realization. `form` names the authoring keyword in error messages
+/// and travels with the generated elements, so a failure points at the source
+/// the user actually wrote and nothing downstream has to guess where the
+/// realization came from.
+pub(super) fn synthesize_rational_transfer(
+    name: &str,
+    node_pos: &str,
+    node_neg: &str,
+    input_expr: &str,
+    num: Vec<Value>,
+    den: Vec<Value>,
+    voltage_output: bool,
+    form: crate::netlist::SynthesizedTransferForm,
+    line_num: usize,
+) -> Result<Vec<Element>, ParseError> {
+    let fail = |message: String| ParseError::Syntax {
+        line: line_num,
+        message: format!("{} source '{name}': {message}", form.label()),
+    };
 
     let n = den.len() - 1; // denominator degree
     if num.len() - 1 > n {
@@ -523,6 +558,14 @@ pub(super) fn synthesize_laplace(
 
     let state_node = |i: usize| format!("{}.__X{}", name, i);
     let cap_value = 1.0 / omega0;
+    // The state nodes are reached only by these elements, and their operating
+    // point comes from the realization's equations rather than from a resistive
+    // path to ground. Marking them is what keeps the floating-node check from
+    // refusing every filter this function builds.
+    let internal = || crate::netlist::ElementProvenance::SynthesizedTransferState {
+        owner: name.to_string(),
+        form,
+    };
 
     for i in 1..=n {
         elements.push(Element {
@@ -536,7 +579,7 @@ pub(super) fn synthesize_laplace(
                 deferred_params: Vec::new(),
             },
             nodes: vec![state_node(i), "0".to_string()],
-            provenance: crate::netlist::ElementProvenance::Authored,
+            provenance: internal(),
         });
     }
 
@@ -551,7 +594,7 @@ pub(super) fn synthesize_laplace(
                 multiplicity: SourceMultiplicity::default(),
             },
             nodes: vec!["0".to_string(), state_node(i)],
-            provenance: crate::netlist::ElementProvenance::Authored,
+            provenance: internal(),
         });
     }
 
@@ -570,7 +613,7 @@ pub(super) fn synthesize_laplace(
             multiplicity: SourceMultiplicity::default(),
         },
         nodes: vec!["0".to_string(), state_node(n)],
-        provenance: crate::netlist::ElementProvenance::Authored,
+        provenance: internal(),
     });
 
     // Output: y = Σ b̂_k z_{k+1} + d·u.
