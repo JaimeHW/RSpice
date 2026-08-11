@@ -30,7 +30,7 @@ use crate::state::{
     AnalysisResultSourceDomain, AnalysisType, CanonicalCellViewOwnerKey, CellViewRef, DcOpResult,
     ExecutionTarget, LibraryManager, NoiseContributorRow, NoiseSummary, OperatingPointValue,
     PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
-    PreparedSourceCheckReceipt, ProjectWorkspace, SavedOutputMaterializationStatus,
+    PreparedSourceCheckReceipt, ProjectWorkspace, RunRetention, SavedOutputMaterializationStatus,
     SavedOutputReceipt, SimulationRun, SimulationRunLifecycle, SimulationRunProvenance,
     SimulationState, ViewType, WaveformData, canonical_cell_view_owner_key,
 };

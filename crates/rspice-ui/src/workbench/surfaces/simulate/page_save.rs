@@ -33,7 +33,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         ui,
         app,
         |ui, _| streaming_contract(ui, &payload),
-        |ui, app| retention_contract(ui, app),
+        retention_contract,
     );
 }
 

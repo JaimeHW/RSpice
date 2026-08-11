@@ -27,6 +27,11 @@ pub struct ProjectSimulationResults {
     pub runs: Vec<ProjectSimulationRun>,
     #[serde(default)]
     pub next_run_id: u64,
+    /// How many datasets this project retains. Absent means the built-in
+    /// default, which is what every project written before the limit became
+    /// visible was running under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retained_dataset_limit: Option<usize>,
     /// Stable v2 selection identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_run_stable_id: Option<RunId>,
@@ -55,6 +60,7 @@ impl Default for ProjectSimulationResults {
             schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
             runs: Vec::new(),
             next_run_id: 0,
+            retained_dataset_limit: None,
             active_run_stable_id: None,
             active_dataset_id: None,
             active_analysis_sequence: None,
@@ -77,11 +83,18 @@ impl ProjectSimulationResults {
             && self.active_run_id.is_none()
             && self.active_analysis_id.is_none()
             && self.overlay_run_ids.is_empty()
+            && self.retained_dataset_limit.is_none()
     }
 
     pub fn from_state(state: &SimulationState) -> Self {
         if state.runs.is_empty() {
-            return Self::default();
+            // A project with no results can still carry a retention decision
+            // the reader made; dropping it here would silently reset the
+            // policy the moment the history was cleared.
+            return Self {
+                retained_dataset_limit: state.retained_dataset_limit,
+                ..Self::default()
+            };
         }
 
         let runs: Vec<_> = state.runs.iter().map(ProjectSimulationRun::from).collect();
@@ -90,6 +103,7 @@ impl ProjectSimulationResults {
             schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
             runs,
             next_run_id: state.next_run_id.max(max_run_id),
+            retained_dataset_limit: state.retained_dataset_limit,
             active_run_stable_id: state.active_run().map(|run| run.run_id),
             active_dataset_id: state.active_run().map(|run| run.dataset_id),
             active_analysis_sequence: state.active_analysis().map(|analysis| analysis.id),
@@ -116,6 +130,9 @@ impl ProjectSimulationResults {
             .into_iter()
             .map(ProjectSimulationRun::into_run)
             .collect::<Result<Vec<_>, _>>()?;
+        // Restored before the history, so the project's own limit is the one
+        // that prunes it rather than the built-in default.
+        state.retained_dataset_limit = self.retained_dataset_limit;
         state.restore_run_history(
             runs,
             self.next_run_id,
@@ -1211,6 +1228,12 @@ pub struct ProjectSimulationRun {
     pub provenance_mode: PersistedField<ProjectRunProvenanceMode>,
     #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
     pub prepared_receipt: PersistedField<ProjectPreparedRunReceipt>,
+    /// Retention classification. Absent is `Pruneable`, which is what every
+    /// project written before baselines existed was already under; it is a
+    /// user policy over the run rather than sealed result content, so it is
+    /// outside the dataset digest and needs no schema era of its own.
+    #[serde(default, skip_serializing_if = "RunRetention::is_pruneable")]
+    pub retention: RunRetention,
     #[serde(default)]
     pub elapsed_time: f64,
     #[serde(default = "default_true")]
@@ -1302,6 +1325,7 @@ impl ProjectSimulationRun {
         run.label = self.label;
         run.timestamp = self.timestamp;
         run.analyses = analyses;
+        run.set_retention(self.retention);
         run.elapsed_time = self.elapsed_time;
         run.success = if matches!(
             restored_lifecycle,
@@ -1594,6 +1618,7 @@ impl From<&SimulationRun> for ProjectSimulationRun {
             dataset_content_digest: PersistedField::Value(run.dataset_content_digest()),
             provenance_mode,
             prepared_receipt,
+            retention: run.retention(),
             elapsed_time: run.elapsed_time,
             success,
         }

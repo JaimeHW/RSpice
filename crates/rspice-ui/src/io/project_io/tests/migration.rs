@@ -1246,6 +1246,7 @@ fn project_results_restore_rejects_invalid_overlay_references() {
     seal_legacy_unattributed(&mut run_one);
     seal_legacy_unattributed(&mut run_two);
     let results = ProjectSimulationResults {
+        retained_dataset_limit: None,
         schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
         runs: vec![
             ProjectSimulationRun::from(&run_one),
@@ -1280,6 +1281,7 @@ fn project_results_validation_rejects_duplicate_run_ids() {
     seal_legacy_unattributed(&mut run_one);
     seal_legacy_unattributed(&mut run_duplicate);
     let results = ProjectSimulationResults {
+        retained_dataset_limit: None,
         schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
         runs: vec![
             ProjectSimulationRun::from(&run_one),
@@ -1341,6 +1343,54 @@ fn project_results_v2_requires_unique_stable_run_and_dataset_ids() {
         .validate()
         .expect_err("dataset ids are globally unique");
     assert!(error.contains("duplicate immutable dataset id"));
+}
+
+#[test]
+fn projects_written_before_golden_baselines_restore_every_run_pruneable() {
+    let mut run_one = SimulationRun::new(1);
+    run_one.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN one"));
+    let mut run_two = SimulationRun::new(2);
+    run_two.add_analysis(AnalysisResult::new(1, AnalysisType::Ac, "AC two"));
+    seal_legacy_unattributed(&mut run_one);
+    seal_legacy_unattributed(&mut run_two);
+    let baseline_run_id = run_one.run_id;
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run_two, run_one];
+    simulation.next_run_id = 2;
+
+    let historical = serde_json::to_string(&ProjectSimulationResults::from_state(&simulation))
+        .expect("results serialize");
+    assert!(
+        !historical.contains("retention"),
+        "a project with no baselines writes exactly what it wrote before they existed"
+    );
+    let restored = serde_json::from_str::<ProjectSimulationResults>(&historical)
+        .expect("historical results decode")
+        .into_simulation_state()
+        .expect("historical results restore");
+    assert_eq!(restored.pinned_run_count(), 0);
+    assert!(
+        restored
+            .runs
+            .iter()
+            .all(|run| run.retention() == RunRetention::Pruneable)
+    );
+
+    assert!(simulation.set_run_retention(baseline_run_id, RunRetention::GoldenBaseline));
+    let current = serde_json::to_string(&ProjectSimulationResults::from_state(&simulation))
+        .expect("results with a baseline serialize");
+    let reloaded = serde_json::from_str::<ProjectSimulationResults>(&current)
+        .expect("results with a baseline decode")
+        .into_simulation_state()
+        .expect("results with a baseline restore");
+    assert_eq!(reloaded.pinned_run_count(), 1);
+    assert!(
+        reloaded
+            .run_by_stable_id(baseline_run_id)
+            .expect("the baseline is retained")
+            .retention()
+            .is_pinned()
+    );
 }
 
 #[test]
@@ -1525,6 +1575,7 @@ fn project_results_validation_rejects_duplicate_waveform_names_in_analysis() {
     let run_id = RunId::new();
     let dataset_id = DatasetId::new();
     let results = ProjectSimulationResults {
+        retained_dataset_limit: None,
         schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
         runs: vec![ProjectSimulationRun {
             job_id: None,
@@ -1573,6 +1624,7 @@ fn project_results_validation_rejects_duplicate_waveform_names_in_analysis() {
             dataset_content_digest: PersistedField::Missing,
             provenance_mode: PersistedField::Value(ProjectRunProvenanceMode::LegacyUnattributed),
             prepared_receipt: PersistedField::Missing,
+            retention: RunRetention::Pruneable,
             elapsed_time: 0.1,
             success: true,
         }],
@@ -1599,6 +1651,7 @@ fn project_results_validation_rejects_non_monotonic_waveform_x() {
     let run_id = RunId::new();
     let dataset_id = DatasetId::new();
     let results = ProjectSimulationResults {
+        retained_dataset_limit: None,
         schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
         runs: vec![ProjectSimulationRun {
             job_id: None,
@@ -1637,6 +1690,7 @@ fn project_results_validation_rejects_non_monotonic_waveform_x() {
             dataset_content_digest: PersistedField::Missing,
             provenance_mode: PersistedField::Value(ProjectRunProvenanceMode::LegacyUnattributed),
             prepared_receipt: PersistedField::Missing,
+            retention: RunRetention::Pruneable,
             elapsed_time: 0.1,
             success: true,
         }],
@@ -1673,6 +1727,7 @@ fn project_results_preserve_core_noise_mechanism_labels() {
     let run_id = RunId::new();
     let dataset_id = DatasetId::new();
     let mut results = ProjectSimulationResults {
+        retained_dataset_limit: None,
         schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
         runs: vec![ProjectSimulationRun {
             job_id: None,
@@ -1722,6 +1777,7 @@ fn project_results_preserve_core_noise_mechanism_labels() {
             dataset_content_digest: PersistedField::Missing,
             provenance_mode: PersistedField::Value(ProjectRunProvenanceMode::LegacyUnattributed),
             prepared_receipt: PersistedField::Missing,
+            retention: RunRetention::Pruneable,
             elapsed_time: 0.1,
             success: true,
         }],
