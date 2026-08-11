@@ -198,7 +198,10 @@ pub(super) fn corner_point_labels(
     let AnalysisDraft::Corner(state) = instance.draft() else {
         return None;
     };
-    let labels = state.to_config().ok()?.corner_names();
+    let labels = state
+        .to_config(app.state.sim_setup.reference_pvt)
+        .ok()?
+        .corner_names();
     let points = result.waveforms.first()?.x.len();
     (labels.len() == points).then_some(labels)
 }

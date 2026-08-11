@@ -762,6 +762,19 @@ impl VerificationPage {
     }
 }
 
+/// Authored text of the run-set execution budgets while they are being edited.
+///
+/// A budget is committed on release, not on keystroke: a partially typed
+/// "4 Mi" would otherwise parse to four bytes and refuse the whole space for
+/// as long as the field had focus.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunSetBudgetDrafts {
+    pub maximum_tasks: String,
+    pub maximum_storage: String,
+    pub cost_per_point_ms: String,
+    pub bytes_per_point: String,
+}
+
 /// Simulation Studio setup route.
 ///
 /// The analyses page owns the ordered plan and its per-analysis forms; the
@@ -1111,6 +1124,19 @@ pub struct WorkbenchState {
     /// Selected saved-output row on the outputs page, by exact name.
     #[serde(default)]
     pub selected_saved_output: Option<String>,
+    /// Selected run-set dimension on the PVT, sweeps & variation page, by its
+    /// stable identity. Identities survive reordering, which is a command the
+    /// page offers, where a position would not.
+    #[serde(default)]
+    pub selected_run_set_dimension: Option<String>,
+    /// In-progress edit of the selected dimension's authored value list.
+    /// Runtime-only: half-typed values must never be restored as a declared
+    /// run space.
+    #[serde(skip)]
+    pub run_set_values_draft: Option<(String, String)>,
+    /// In-progress edit of the execution budgets, as authored text.
+    #[serde(skip)]
+    pub run_set_budget_drafts: Option<RunSetBudgetDrafts>,
     /// In-progress edit of the selected design variable's expression.
     /// Runtime-only: a partially typed expression must never be restored as
     /// authoritative plan data.
@@ -1294,6 +1320,9 @@ impl Default for WorkbenchState {
             selected_specification: None,
             selected_design_variable: None,
             selected_saved_output: None,
+            selected_run_set_dimension: None,
+            run_set_values_draft: None,
+            run_set_budget_drafts: None,
             design_variable_expression_draft: None,
             design_variable_bounds_draft: None,
             saved_output_name_draft: None,

@@ -2596,7 +2596,7 @@ pub(crate) fn automation_task_count(app: &RSpiceApp) -> Result<usize, String> {
         app.state
             .sim_setup
             .corner
-            .to_config()
+            .to_config(app.state.sim_setup.reference_pvt)
             .map_or(0, |config| config.num_corners())
     } else {
         1
@@ -3227,7 +3227,7 @@ fn require_corner_matrix(app: &RSpiceApp) -> Result<(), String> {
     app.state
         .sim_setup
         .corner
-        .to_config()
+        .to_config(app.state.sim_setup.reference_pvt)
         .map(|_| ())
         .map_err(|error| format!("The configured PVT matrix is invalid: {error}"))
 }

@@ -17,22 +17,9 @@ use std::collections::HashSet;
 ///
 /// This is execution state, not display state: temperature is copied into the
 /// effective solver options and process is used when resolving model-library
-/// sections for a run.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ReferencePvtPoint {
-    pub process: crate::simulation::dialog::corner::ProcessCorner,
-    pub temperature_celsius: f64,
-}
-
-impl Default for ReferencePvtPoint {
-    fn default() -> Self {
-        Self {
-            process: crate::simulation::dialog::corner::ProcessCorner::TT,
-            temperature_celsius: 27.0,
-        }
-    }
-}
+/// sections for a run. It is also what an axis the run set does not declare
+/// resolves to, so it is one type rather than two that have to agree.
+pub type ReferencePvtPoint = crate::simulation::run_set::ReferencePoint;
 
 /// `.tran` draft. SI suffixes allowed; "auto" max step defers to the
 /// engine's LTE control.
@@ -413,35 +400,9 @@ impl SimSetupState {
             return Some(1);
         }
         self.corner
-            .to_config()
+            .to_config(self.reference_pvt)
             .ok()
             .map(|config| config.num_corners())
-    }
-
-    /// Named points of the resolved run space, in execution order.
-    ///
-    /// `None` when the corner configuration does not parse: the caller must
-    /// show the configuration error rather than an invented point list.
-    pub fn run_set_point_names(&self) -> Option<Vec<String>> {
-        if !self.has_enabled_analysis_kind(crate::simulation::plan::AnalysisKind::Corner) {
-            return Some(vec![format!(
-                "{} · {} °C",
-                self.reference_pvt.process.short_name(),
-                format_temperature(self.reference_pvt.temperature_celsius)
-            )]);
-        }
-        self.corner
-            .to_config()
-            .ok()
-            .map(|config| config.corner_names())
-    }
-
-    /// Why the run space could not be resolved, if it could not be.
-    pub fn run_set_error(&self) -> Option<String> {
-        if !self.has_enabled_analysis_kind(crate::simulation::plan::AnalysisKind::Corner) {
-            return None;
-        }
-        self.corner.to_config().err()
     }
 
     /// Commit globally validated options while keeping the workbench reference
@@ -540,19 +501,15 @@ impl SimSetupState {
                 self.xf.output_expression, self.xf.input_source
             ),
             18 => {
-                let corner = &self.corner;
-                let flags = [
-                    (corner.process_tt, "TT"),
-                    (corner.process_ss, "SS"),
-                    (corner.process_ff, "FF"),
-                    (corner.process_sf, "SF"),
-                    (corner.process_fs, "FS"),
-                ];
-                let on: Vec<&str> = flags.iter().filter(|(f, _)| *f).map(|(_, n)| *n).collect();
-                if on.is_empty() {
-                    "no corners selected".to_owned()
+                let run_set = &self.corner.run_set;
+                let axes: Vec<String> = run_set
+                    .enabled_dimensions()
+                    .map(|dimension| format!("{}×{}", dimension.name, dimension.values.len()))
+                    .collect();
+                if axes.is_empty() {
+                    "no run-space axis enabled".to_owned()
                 } else {
-                    on.join(" ")
+                    format!("{} = {} points", axes.join(" "), run_set.point_count())
                 }
             }
             19 => format!(
@@ -699,7 +656,7 @@ impl SimSetupState {
             15 => self.pxf.to_config().err(),
             16 => self.pstb.to_config().err(),
             17 => self.xf.to_config().err(),
-            18 => self.corner.to_config().err(),
+            18 => self.corner.to_config(self.reference_pvt).err(),
             19 => self.envelope.to_config().err(),
             20 => self.fourier.to_config().err(),
             21 => self.reliability.to_config().err(),

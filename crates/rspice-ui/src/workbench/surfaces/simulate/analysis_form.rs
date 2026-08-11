@@ -1633,70 +1633,46 @@ pub(super) fn form(
             "DC-linearized transfer gain plus input and output resistance."
         }
         AnalysisDraft::Corner(setup) => {
-            sub_header(ui, "Process");
-            check_row(ui, "TT — typical", &mut setup.process_tt);
-            check_row(ui, "SS — slow/slow", &mut setup.process_ss);
-            check_row(ui, "FF — fast/fast", &mut setup.process_ff);
-            check_row(ui, "SF — slow/fast", &mut setup.process_sf);
-            check_row(ui, "FS — fast/slow", &mut setup.process_fs);
-            sub_header(ui, "Supply");
-            check_row(ui, "Sweep voltage", &mut setup.enable_voltage_sweep);
-            input_row_enabled(
+            // The run space has one editor — PVT, sweeps & variation — and this
+            // form states what that declaration resolves to. A second set of
+            // axis controls here would be a second owner of the same fact, and
+            // the two would eventually disagree about how many points run.
+            sub_header(ui, "Run space");
+            for dimension in setup.run_set.dimensions.iter() {
+                let values = if dimension.values.is_empty() {
+                    "no values".to_owned()
+                } else {
+                    dimension
+                        .values
+                        .iter()
+                        .map(|value| value.lexical.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+                property_row(
+                    ui,
+                    &dimension.name,
+                    &if dimension.enabled {
+                        values
+                    } else {
+                        format!("{values} · disabled")
+                    },
+                );
+            }
+            property_row(ui, "Composition", setup.run_set.composition.mode.label());
+            property_row(
                 ui,
-                "Min",
-                &mut setup.voltage_min,
-                setup.enable_voltage_sweep,
+                "Resolved points",
+                &setup.run_set.point_count().to_string(),
             );
-            input_row_enabled(
-                ui,
-                "Nominal",
-                &mut setup.voltage_nom,
-                setup.enable_voltage_sweep,
-            );
-            input_row_enabled(
-                ui,
-                "Max",
-                &mut setup.voltage_max,
-                setup.enable_voltage_sweep,
-            );
-            sub_header(ui, "Temperature");
-            check_row(ui, "Sweep temperature", &mut setup.enable_temp_sweep);
-            quantity_input_row_enabled(
-                ui,
-                "Cold",
-                &mut setup.temp_cold,
-                QuantityInputKind::Temperature,
-                policy,
-                locale,
-                setup.enable_temp_sweep,
-            );
-            quantity_input_row_enabled(
-                ui,
-                "Room",
-                &mut setup.temp_room,
-                QuantityInputKind::Temperature,
-                policy,
-                locale,
-                setup.enable_temp_sweep,
-            );
-            quantity_input_row_enabled(
-                ui,
-                "Hot",
-                &mut setup.temp_hot,
-                QuantityInputKind::Temperature,
-                policy,
-                locale,
-                setup.enable_temp_sweep,
-            );
-            ui.add_space(4.0);
-            check_row(ui, "Full matrix", &mut setup.full_matrix);
+            sub_header(ui, "At every point");
             choice_row(
                 ui,
                 "Base",
                 &["tran", "ac", "dc", "op"],
                 &mut setup.base_analysis_idx,
             );
-            "Repeats the base analysis across the selected corners."
+            "Repeats the base analysis at every point of the declared run space."
         }
         AnalysisDraft::Envelope(setup) => {
             input_row(ui, ENVELOPE_FIELD_LABELS[0], &mut setup.carrier_tones);
@@ -2143,13 +2119,17 @@ mod tests {
 
         let mut disabled = AnalysisDraft::for_kind(AnalysisKind::Corner);
         let mut enabled = disabled.clone();
+        // A disabled axis is still declared, so the form states the same number
+        // of rows either way and only their values change.
         if let AnalysisDraft::Corner(setup) = &mut disabled {
-            setup.enable_voltage_sweep = false;
-            setup.enable_temp_sweep = false;
+            for dimension in &mut setup.run_set.dimensions {
+                dimension.enabled = false;
+            }
         }
         if let AnalysisDraft::Corner(setup) = &mut enabled {
-            setup.enable_voltage_sweep = true;
-            setup.enable_temp_sweep = true;
+            for dimension in &mut setup.run_set.dimensions {
+                dimension.enabled = true;
+            }
         }
         pairs.push((disabled, enabled));
 

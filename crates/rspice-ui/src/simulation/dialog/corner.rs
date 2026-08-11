@@ -16,7 +16,7 @@
 //!
 //! Run transient analysis at SS corner with reduced voltage and hot temperature.
 
-use super::options::parse_si_value;
+use crate::simulation::run_set::RunSetState;
 
 // =============================================================================
 // Process Corner
@@ -88,9 +88,11 @@ pub struct CornerConfig {
     /// Voltage values to sweep (V)
     pub voltages: Vec<f64>,
     /// Temperature values to sweep (°C)
+    ///
+    /// Always Celsius. The run configuration, the engine's `TEMP` option and
+    /// every result label agree on that one unit, so there is nothing here to
+    /// select between.
     pub temperatures: Vec<f64>,
-    /// Use Kelvin for temperatures
-    pub temp_in_kelvin: bool,
     /// Full matrix (all combinations) or diagonal sweep
     pub full_matrix: bool,
     /// Base analysis type
@@ -103,7 +105,6 @@ impl Default for CornerConfig {
             process_corners: vec![ProcessCorner::TT],
             voltages: vec![1.0],
             temperatures: vec![25.0],
-            temp_in_kelvin: false,
             full_matrix: true,
             base_analysis: CornerBaseAnalysis::Transient,
         }
@@ -191,12 +192,9 @@ impl CornerConfig {
             return Err("At least one temperature value required".to_string());
         }
 
-        // Check temperature range (assuming Celsius)
-        if !self.temp_in_kelvin {
-            for t in &self.temperatures {
-                if *t < -273.15 {
-                    return Err("Temperature cannot be below absolute zero".to_string());
-                }
+        for t in &self.temperatures {
+            if *t < -273.15 {
+                return Err("Temperature cannot be below absolute zero".to_string());
             }
         }
 
@@ -208,80 +206,161 @@ impl CornerConfig {
 // Dialog State
 // =============================================================================
 
-/// Dialog state with UI buffers
+/// The corner analysis's authored state.
+///
+/// The run space itself is one owner — [`RunSetState`] — rather than a fixed
+/// process/min-nom-max/cold-room-hot triple. The engine has always accepted
+/// arbitrary-length process, supply and temperature axes; the fixed buffers
+/// were a UI restriction, and a run set that cannot say "four supplies" is a
+/// run set that cannot express what the executor already runs.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(from = "CornerDialogStateRepr")]
 pub struct CornerDialogState {
-    /// Selected process corners (as bit flags or indices)
-    pub process_tt: bool,
-    pub process_ss: bool,
-    pub process_ff: bool,
-    pub process_sf: bool,
-    pub process_fs: bool,
-    /// Voltage values buffer
-    pub voltage_min: String,
-    pub voltage_nom: String,
-    pub voltage_max: String,
-    pub enable_voltage_sweep: bool,
-    /// Temperature values buffer
-    pub temp_cold: String,
-    pub temp_room: String,
-    pub temp_hot: String,
-    pub enable_temp_sweep: bool,
-    /// Full matrix mode
-    pub full_matrix: bool,
-    /// Base analysis type index
+    /// The declared run space.
+    pub run_set: RunSetState,
+    /// Base analysis type index.
     pub base_analysis_idx: usize,
-    /// Initialized flag
+    /// Initialized flag.
     #[serde(skip)]
     pub initialized: bool,
 }
 
-impl CornerDialogState {
-    /// Initialize from config
-    pub fn from_config(config: &CornerConfig) -> Self {
-        let has_voltage_sweep = config.voltages.len() > 1;
-        let has_temp_sweep = config.temperatures.len() > 1;
+/// Wire form of [`CornerDialogState`].
+///
+/// Projects authored before the run set stored the space as three fixed
+/// buffers. Those keys are still read here and migrated exactly once, so an
+/// existing plan opens on the space it was saved with instead of silently
+/// reverting to the default PVT matrix. They are never written back.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CornerDialogStateRepr {
+    #[serde(default)]
+    run_set: Option<RunSetState>,
+    #[serde(default)]
+    base_analysis_idx: usize,
+    #[serde(default)]
+    process_tt: bool,
+    #[serde(default)]
+    process_ss: bool,
+    #[serde(default)]
+    process_ff: bool,
+    #[serde(default)]
+    process_sf: bool,
+    #[serde(default)]
+    process_fs: bool,
+    #[serde(default)]
+    voltage_min: String,
+    #[serde(default)]
+    voltage_nom: String,
+    #[serde(default)]
+    voltage_max: String,
+    #[serde(default)]
+    enable_voltage_sweep: bool,
+    #[serde(default)]
+    temp_cold: String,
+    #[serde(default)]
+    temp_room: String,
+    #[serde(default)]
+    temp_hot: String,
+    #[serde(default)]
+    enable_temp_sweep: bool,
+    #[serde(default)]
+    full_matrix: bool,
+}
 
+impl From<CornerDialogStateRepr> for CornerDialogState {
+    fn from(mut repr: CornerDialogStateRepr) -> Self {
+        let run_set = repr
+            .run_set
+            .take()
+            .unwrap_or_else(|| migrate_legacy_space(&repr));
         Self {
-            process_tt: config.process_corners.contains(&ProcessCorner::TT),
-            process_ss: config.process_corners.contains(&ProcessCorner::SS),
-            process_ff: config.process_corners.contains(&ProcessCorner::FF),
-            process_sf: config.process_corners.contains(&ProcessCorner::SF),
-            process_fs: config.process_corners.contains(&ProcessCorner::FS),
-            voltage_min: config
-                .voltages
-                .first()
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "0.9".to_string()),
-            voltage_nom: config
-                .voltages
-                .get(1)
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "1.0".to_string()),
-            voltage_max: config
-                .voltages
-                .last()
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "1.1".to_string()),
-            enable_voltage_sweep: has_voltage_sweep,
-            temp_cold: config
-                .temperatures
-                .first()
-                .map(|t| t.to_string())
-                .unwrap_or_else(|| "-40".to_string()),
-            temp_room: config
-                .temperatures
-                .get(1)
-                .map(|t| t.to_string())
-                .unwrap_or_else(|| "25".to_string()),
-            temp_hot: config
-                .temperatures
-                .last()
-                .map(|t| t.to_string())
-                .unwrap_or_else(|| "125".to_string()),
-            enable_temp_sweep: has_temp_sweep,
-            full_matrix: config.full_matrix,
+            run_set,
+            base_analysis_idx: repr.base_analysis_idx,
+            initialized: true,
+        }
+    }
+}
+
+/// Rebuild the declared space from the pre-run-set buffers.
+///
+/// A value that no longer parses is carried across as written rather than
+/// dropped: validation will refuse it by name, which is what a user needs to
+/// see, and losing it would quietly shrink the space the plan was saved with.
+fn migrate_legacy_space(repr: &CornerDialogStateRepr) -> RunSetState {
+    use crate::simulation::run_set::{RunSetDimension, RunSetDimensionKind};
+
+    let sections: Vec<&str> = [
+        (repr.process_tt, "TT"),
+        (repr.process_ss, "SS"),
+        (repr.process_ff, "FF"),
+        (repr.process_sf, "SF"),
+        (repr.process_fs, "FS"),
+    ]
+    .into_iter()
+    .filter_map(|(selected, name)| selected.then_some(name))
+    .collect();
+    if sections.is_empty() && repr.voltage_nom.is_empty() && repr.temp_room.is_empty() {
+        // Nothing was authored: this is a fresh state, not a saved space.
+        return RunSetState::default();
+    }
+
+    let supplies: Vec<&str> = if repr.enable_voltage_sweep {
+        vec![
+            repr.voltage_min.as_str(),
+            repr.voltage_nom.as_str(),
+            repr.voltage_max.as_str(),
+        ]
+    } else {
+        vec![repr.voltage_nom.as_str()]
+    };
+    let temperatures: Vec<&str> = if repr.enable_temp_sweep {
+        vec![
+            repr.temp_cold.as_str(),
+            repr.temp_room.as_str(),
+            repr.temp_hot.as_str(),
+        ]
+    } else {
+        vec![repr.temp_room.as_str()]
+    };
+
+    let mut supply = RunSetDimension::new(
+        "dimension-supply",
+        RunSetDimensionKind::Supply,
+        &supplies,
+        1,
+    );
+    supply.enabled = repr.enable_voltage_sweep;
+
+    let mut state = RunSetState::default();
+    state.composition.mode = if repr.full_matrix {
+        crate::simulation::run_set::RunSetCompositionMode::Cartesian
+    } else {
+        crate::simulation::run_set::RunSetCompositionMode::Zipped
+    };
+    state.dimensions = vec![
+        RunSetDimension::new(
+            "dimension-process",
+            RunSetDimensionKind::ProcessSection,
+            &sections,
+            1,
+        ),
+        supply,
+        RunSetDimension::new(
+            "dimension-temperature",
+            RunSetDimensionKind::Temperature,
+            &temperatures,
+            1,
+        ),
+    ];
+    state
+}
+
+impl CornerDialogState {
+    /// Initialize from config.
+    pub fn from_config(config: &CornerConfig) -> Self {
+        Self {
+            run_set: RunSetState::from_corner_config(config),
             base_analysis_idx: match config.base_analysis {
                 CornerBaseAnalysis::Transient => 0,
                 CornerBaseAnalysis::Ac => 1,
@@ -292,73 +371,30 @@ impl CornerDialogState {
         }
     }
 
-    /// Convert to config
-    pub fn to_config(&self) -> Result<CornerConfig, String> {
-        // Process corners
-        let mut process_corners = Vec::new();
-        if self.process_tt {
-            process_corners.push(ProcessCorner::TT);
-        }
-        if self.process_ss {
-            process_corners.push(ProcessCorner::SS);
-        }
-        if self.process_ff {
-            process_corners.push(ProcessCorner::FF);
-        }
-        if self.process_sf {
-            process_corners.push(ProcessCorner::SF);
-        }
-        if self.process_fs {
-            process_corners.push(ProcessCorner::FS);
-        }
-
-        if process_corners.is_empty() {
-            return Err("Select at least one process corner".to_string());
-        }
-
-        // Voltages
-        let voltages = if self.enable_voltage_sweep {
-            let vmin: f64 = parse_si_value(&self.voltage_min).map_err(|_| "Invalid min voltage")?;
-            let vnom: f64 = parse_si_value(&self.voltage_nom).map_err(|_| "Invalid nom voltage")?;
-            let vmax: f64 = parse_si_value(&self.voltage_max).map_err(|_| "Invalid max voltage")?;
-            vec![vmin, vnom, vmax]
-        } else {
-            let vnom: f64 = parse_si_value(&self.voltage_nom).map_err(|_| "Invalid voltage")?;
-            vec![vnom]
-        };
-
-        // Temperatures
-        let temperatures = if self.enable_temp_sweep {
-            let tcold: f64 = self.temp_cold.parse().map_err(|_| "Invalid cold temp")?;
-            let troom: f64 = self.temp_room.parse().map_err(|_| "Invalid room temp")?;
-            let thot: f64 = self.temp_hot.parse().map_err(|_| "Invalid hot temp")?;
-            vec![tcold, troom, thot]
-        } else {
-            let troom: f64 = self.temp_room.parse().map_err(|_| "Invalid temperature")?;
-            vec![troom]
-        };
-
-        let base_analysis = match self.base_analysis_idx {
+    /// The base analysis executed at every point.
+    pub fn base_analysis(&self) -> CornerBaseAnalysis {
+        match self.base_analysis_idx {
             0 => CornerBaseAnalysis::Transient,
             1 => CornerBaseAnalysis::Ac,
             2 => CornerBaseAnalysis::Dc,
             _ => CornerBaseAnalysis::Op,
-        };
-
-        let config = CornerConfig {
-            process_corners,
-            voltages,
-            temperatures,
-            temp_in_kelvin: false,
-            full_matrix: self.full_matrix,
-            base_analysis,
-        };
-
-        config.validate()?;
-        Ok(config)
+        }
     }
 
-    /// Ensure initialized
+    /// Convert to config against the plan's nominal point.
+    ///
+    /// The reference is passed in rather than stored: an axis the run set does
+    /// not declare resolves to the plan's own value for that quantity, and the
+    /// plan owns it.
+    pub fn to_config(
+        &self,
+        reference: crate::simulation::run_set::ReferencePoint,
+    ) -> Result<CornerConfig, String> {
+        self.run_set
+            .to_corner_config(self.base_analysis(), reference)
+    }
+
+    /// Ensure initialized.
     pub fn ensure_initialized(&mut self) {
         if !self.initialized {
             *self = Self::from_config(&CornerConfig::commercial_pvt());

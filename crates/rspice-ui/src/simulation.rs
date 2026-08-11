@@ -20,6 +20,7 @@ pub use output_contract::{
 pub(crate) mod plan;
 pub(crate) mod reliability_engine;
 pub(crate) mod results;
+pub(crate) mod run_set;
 pub(crate) mod runner;
 pub(crate) mod spice_value;
 pub(crate) mod status;

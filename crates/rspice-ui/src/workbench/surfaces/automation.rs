@@ -1713,7 +1713,7 @@ fn execution_preview(app: &RSpiceApp) -> ExecutionPreview {
         app.state
             .sim_setup
             .corner
-            .to_config()
+            .to_config(app.state.sim_setup.reference_pvt)
             .map_or(0, |config| config.num_corners())
     } else {
         0

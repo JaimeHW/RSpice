@@ -596,8 +596,9 @@ pub(super) fn configured_pvt_count(
     for instance in instances.iter().filter(|instance| instance.enabled()) {
         match instance.draft() {
             AnalysisDraft::Corner(draft) => {
-                count = count
-                    .saturating_add(draft.to_config().map_or(0, |config| config.num_corners()));
+                // The point count depends only on the declared axis lengths, so
+                // it resolves without the plan's reference point.
+                count = count.saturating_add(draft.run_set.point_count());
             }
             AnalysisDraft::Temperature(draft) => {
                 count =

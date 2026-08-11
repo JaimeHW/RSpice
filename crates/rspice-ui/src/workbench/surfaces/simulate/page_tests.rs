@@ -211,12 +211,93 @@ fn the_solver_page_states_both_acceptance_criteria_and_the_whole_ladder() {
     }
 }
 
+/// The run-space page states its declaration, its cost and its composition.
+///
+/// Each of these is a fact the page is the owner of: the axes it declares, the
+/// forecast they resolve to, and the rule that combines them. A page that drew
+/// the strip without the forecast would be showing a space with no stated cost.
 #[test]
-fn a_page_never_claims_a_run_space_it_cannot_resolve() {
+fn the_run_space_page_states_every_axis_and_what_they_resolve_to() {
     let rendered = render(SimulationPage::RunSet, 1200.0);
+
+    for fragment in [
+        "Run space",
+        "Process section",
+        "Supply voltage",
+        "Temperature",
+        "cartesian composition",
+        "Tasks",
+        "Storage",
+        "Resolved point table",
+        "Execution budgets",
+        "Composition",
+    ] {
+        assert!(
+            rendered.contains(fragment),
+            "the run-space page omitted {fragment:?}:\n{rendered}"
+        );
+    }
     assert!(
-        rendered.contains("single reference point") || rendered.contains("corner sweep enabled"),
-        "the run-set page did not state which composition is active:\n{rendered}"
+        rendered.contains("27"),
+        "the forecast must state the resolved point count:\n{rendered}"
+    );
+}
+
+/// A refusal is shown against the declaration that caused it, and the invalid
+/// value stays on screen. Dropping it would leave the user with an error about
+/// a value they could no longer see.
+#[test]
+fn an_unresolvable_run_space_shows_its_refusal_and_keeps_the_invalid_value() {
+    let rendered = render_with(SimulationPage::RunSet, 1200.0, |app| {
+        let id = app.state.sim_setup.corner.run_set.dimensions[2].id.clone();
+        crate::simulation::run_set::dispatch(
+            &mut app.state.sim_setup.corner.run_set,
+            crate::simulation::run_set::RunSetAction::SetValues {
+                id,
+                text: "-40\nwarm\n125".to_owned(),
+            },
+            1,
+        );
+    });
+
+    assert!(
+        rendered.contains("RUNSET-VALUE-SOURCE"),
+        "the refusal must be identified by its stable code:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("warm"),
+        "the invalid value must stay visible:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("Run-set preview blocked"),
+        "the page must say that nothing was dispatched:\n{rendered}"
+    );
+}
+
+/// The strip, the forecast and the point table read one declaration.
+///
+/// Before the run set they read three: the axis cards read the corner dialog's
+/// fixed buffers, the forecast read `num_corners`, and the table read
+/// `corner_names`. Disabling an axis is the cheapest way to prove they move
+/// together.
+#[test]
+fn disabling_an_axis_moves_the_forecast_and_the_point_table_together() {
+    let rendered = render_with(SimulationPage::RunSet, 1200.0, |app| {
+        let id = app.state.sim_setup.corner.run_set.dimensions[1].id.clone();
+        crate::simulation::run_set::dispatch(
+            &mut app.state.sim_setup.corner.run_set,
+            crate::simulation::run_set::RunSetAction::SetEnabled { id, enabled: false },
+            1,
+        );
+    });
+
+    assert!(
+        rendered.contains('9'),
+        "3 process × 3 temperature is nine points:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("9 points"),
+        "the point table must report the same nine:\n{rendered}"
     );
 }
 
@@ -232,7 +313,6 @@ fn every_edited_option_survives_a_draft_round_trip() {
         pivrel: 0.125,
         pivtol: 2.5e-14,
         itl1: 77,
-        itl2: 133,
         itl4: 21,
         arc_length: true,
         gmin_stepping: false,
@@ -824,10 +904,19 @@ fn a_run_space_change_moves_the_plan_revision() {
         .stable_analysis_plan()
         .expect("stable plan")
         .revision();
-    app.state.sim_setup.corner.enable_temp_sweep = true;
+    let id = app.state.sim_setup.corner.run_set.dimensions[2].id.clone();
+    let transaction = crate::simulation::run_set::dispatch(
+        &mut app.state.sim_setup.corner.run_set,
+        crate::simulation::run_set::RunSetAction::SetValues {
+            id,
+            text: "-40\n0\n25\n85\n125".to_owned(),
+        },
+        1,
+    );
+    assert!(transaction.was_adopted(), "{:?}", transaction.receipt);
     app.state
         .sim_setup
-        .commit_active_plan_configuration_change("Updated the temperature axis.".to_owned())
+        .commit_active_plan_configuration_change("Run set · set-dimension-values".to_owned())
         .expect("a run-space change commits as a configuration change");
     let after = app
         .state

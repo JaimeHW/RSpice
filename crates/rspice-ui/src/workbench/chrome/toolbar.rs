@@ -1881,9 +1881,7 @@ fn configured_pvt_count(app: &RSpiceApp) -> usize {
     );
     for instance in app.state.sim_setup.enabled_analysis_instances() {
         count = count.saturating_add(match instance.draft() {
-            AnalysisDraft::Corner(draft) => {
-                draft.to_config().map_or(0, |config| config.num_corners())
-            }
+            AnalysisDraft::Corner(draft) => draft.run_set.point_count(),
             AnalysisDraft::Temperature(draft) => {
                 draft.to_config().map_or(0, |config| config.num_temps())
             }

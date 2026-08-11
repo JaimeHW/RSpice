@@ -384,7 +384,7 @@ impl SimulationController {
                 let mut corner_state = state.sim_setup.corner.clone();
                 corner_state.ensure_initialized();
                 let corner_cfg = corner_state
-                    .to_config()
+                    .to_config(state.sim_setup.reference_pvt)
                     .map_err(|e| format!("invalid corner settings: {}", e))?;
                 Ok(SpecExecutionOptions {
                     temp: None,

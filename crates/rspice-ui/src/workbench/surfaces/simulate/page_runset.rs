@@ -1,445 +1,812 @@
 //! PVT, sweeps & variation.
 //!
-//! The run space is composed from independent axes — process, supply,
-//! temperature — and resolves to an exact point count. The page is that
-//! composition: each axis states what it contributes, and the forecast states
-//! what they multiply out to, derived from the same corner configuration the
-//! run consumes.
+//! The page is the run space: a strip of axis cards joined by the composition
+//! operator and closing on the forecast they multiply out to, over the editors
+//! that declare them. Every edit is a transaction against the plan's run set —
+//! it moves a working revision, leaves a receipt, and clears any frozen
+//! forecast — so what the page shows and what a dispatch would execute are the
+//! same declaration read twice rather than two things kept in step.
 
-use egui::Ui;
+use egui::{Sense, Ui, vec2};
 
-use crate::simulation::dialog::corner::ProcessCorner;
 use crate::simulation::plan::AnalysisKind;
+use crate::simulation::run_set::{
+    self, InvalidValuePolicy, RunSetAction, RunSetBudgets, RunSetComposition,
+    RunSetCompositionMode, RunSetDimension, RunSetDimensionKind, RunSetReceiptStatus, RunSetState,
+    RunSetValidation,
+};
+use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{mono_input, select};
+use crate::ui::widgets::{Button, IconButton, mono_input, select};
 use crate::workbench::RSpiceApp;
+use crate::workbench::state::RunSetBudgetDrafts;
 
 use super::page_kit::{
-    CARD_PAD_X, Tone, card, card_body, card_note, card_row, field_pair, ledger_head, ledger_row,
-    rule_row,
+    CARD_PAD_X, Tone, card, card_body, card_head_row, card_note, card_row, field_pair, ledger_head,
+    ledger_row, rule_row,
 };
 
-/// Rows shown before the point table truncates. A resolved run space can be
-/// large; a table that rendered all of it would be a scrolling wall rather
+/// Rows shown before the resolved point table truncates. A resolved run space
+/// can be large; a table that listed all of it would be a scrolling wall rather
 /// than a check on the composition.
 const POINT_TABLE_LIMIT: usize = 40;
 
+/// Value chips drawn on an axis card before the rest are counted.
+const AXIS_CHIP_LIMIT: usize = 8;
+
+/// Width of one axis card in the run-space strip. Fixed rather than shared:
+/// axes with different value counts must still read as the same kind of thing.
+const AXIS_CARD_W: f32 = 214.0;
+
+/// Width of the closing forecast tile.
+const FORECAST_TILE_W: f32 = 232.0;
+
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let sweeping = app
-        .state
-        .sim_setup
-        .has_enabled_analysis_kind(AnalysisKind::Corner);
-    forecast(ui, app, sweeping);
-    if sweeping {
-        card_row(ui, app, process_axis, supply_axis);
-        card_row(ui, app, temperature_axis, composition_policy);
-        point_table(ui, app);
-    } else {
-        card_row(ui, app, reference_point, composition_policy);
+    let analyses = app.state.sim_setup.enabled_analysis_instance_count();
+    let validation = run_set::validate(&app.state.sim_setup.corner.run_set, analyses);
+
+    toolbar(ui, app, &validation);
+    if !validation.errors.is_empty() {
+        error_summary(ui, app, &validation);
     }
+    run_space(ui, app, &validation);
+    card_row(ui, app, selected_dimension, composition);
+    card_row(ui, app, budgets, receipts);
+    point_table(ui, app, &validation);
 }
 
-// ------------------------------------------------------------------- forecast
+// ------------------------------------------------------------------ toolbar
 
-fn forecast(ui: &mut Ui, app: &RSpiceApp, sweeping: bool) {
+/// The transaction commands, above the space they act on.
+fn toolbar(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
     let t = Tokens::get(ui.ctx());
-    let points = app.state.sim_setup.run_set_point_count();
-    let error = app.state.sim_setup.run_set_error();
-    let analyses = app.state.sim_setup.enabled_analysis_instance_count();
-    let strip_width = ui.available_width();
+    let addable = app.state.sim_setup.corner.run_set.addable_kinds();
+    let can_undo = !app.state.sim_setup.corner.run_set.history.is_empty();
+    let can_redo = !app.state.sim_setup.corner.run_set.future.is_empty();
+    let revision = app.state.sim_setup.corner.run_set.revision;
+    let mut action: Option<RunSetAction> = None;
+
+    let width = ui.available_width();
     egui::Frame::new()
         .fill(t.color.bg_panel)
         .stroke(egui::Stroke::new(1.0, t.color.border))
         .corner_radius(t.radius)
-        .inner_margin(egui::Margin::symmetric(CARD_PAD_X as i8, 9))
+        .inner_margin(egui::Margin::symmetric(CARD_PAD_X as i8, 7))
         .show(ui, |ui| {
-            ui.set_width(strip_width - CARD_PAD_X * 2.0 - 2.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(14.0, 6.0);
-                match (points, &error) {
-                    (Some(points), _) => {
+            ui.set_width(width - CARD_PAD_X * 2.0 - 2.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.menu_button("＋ Add dimension", |ui| {
+                    if addable.is_empty() {
                         ui.label(
-                            egui::RichText::new(points.to_string())
-                                .font(theme::mono(tokens::FS_4, FontWeight::SemiBold))
-                                .color(t.color.text),
-                        );
-                        ui.label(
-                            egui::RichText::new(if points == 1 { "point" } else { "points" })
-                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.text_dim),
-                        );
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "× {analyses} enabled {} = {} task{}",
-                                if analyses == 1 {
-                                    "analysis"
-                                } else {
-                                    "analyses"
-                                },
-                                points * analyses,
-                                if points * analyses == 1 { "" } else { "s" }
-                            ))
-                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                            egui::RichText::new(
+                                "Every axis the executor binds is already declared.",
+                            )
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                             .color(t.color.text_faint),
                         );
                     }
-                    (None, Some(error)) => {
-                        ui.label(
-                            egui::RichText::new(format!("run space unresolved · {error}"))
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.err),
-                        );
+                    for kind in addable {
+                        if ui.button(kind.default_name()).clicked() {
+                            action = Some(RunSetAction::AddDimension(kind));
+                            ui.close();
+                        }
                     }
-                    (None, None) => {}
+                });
+                if Button::new("Undo").enabled(can_undo).show(ui).clicked() {
+                    action = Some(RunSetAction::Undo);
                 }
+                if Button::new("Redo").enabled(can_redo).show(ui).clicked() {
+                    action = Some(RunSetAction::Redo);
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if Button::new("Validate and preview")
+                        .accent()
+                        .icon(Icon::Grid)
+                        .show(ui)
+                        .clicked()
+                    {
+                        action = Some(RunSetAction::Preview);
+                    }
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "working revision {revision} · {}",
+                            validation.status.as_str()
+                        ))
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_faint),
+                    );
+                });
+            });
+        });
+
+    if let Some(action) = action {
+        commit(app, action);
+    }
+}
+
+// ------------------------------------------------------------ error summary
+
+/// Every standing refusal, each one a jump to the control that caused it.
+fn error_summary(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
+    let t = Tokens::get(ui.ctx());
+    let count = validation.errors.len();
+    let title = format!(
+        "Run-set preview blocked · {count} issue{}",
+        if count == 1 { "" } else { "s" }
+    );
+    let mut focus = None;
+    card(
+        ui,
+        &title,
+        Some(("invalid input retained", Tone::Error)),
+        |ui| {
+            card_body(ui, |ui| {
+                for error in &validation.errors {
+                    let response = ui
+                        .add(
+                            egui::Label::new(
+                                egui::RichText::new(format!("{} · {}", error.id, error.message))
+                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                    .color(t.color.err),
+                            )
+                            .wrap()
+                            .sense(Sense::click()),
+                        )
+                        .on_hover_text(error.dimension_id.as_deref().map_or(
+                            "Composition or budget refusal",
+                            |_| "Select the dimension this refusal is about",
+                        ));
+                    if response.clicked() {
+                        focus = error.dimension_id.clone();
+                    }
+                }
+            });
+            card_note(
+                ui,
+                "Invalid input is preserved exactly as written. No task matrix, no dispatch and no \
+                 result were created, and every prior dataset is retained unchanged.",
+            );
+        },
+    );
+    if let Some(id) = focus {
+        app.state.workbench.selected_run_set_dimension = Some(id);
+        app.state.workbench.run_set_values_draft = None;
+    }
+}
+
+// ---------------------------------------------------------------- run space
+
+/// The composed space: one card per axis, the operator between them, and the
+/// forecast they resolve to.
+fn run_space(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
+    let mode = app.state.sim_setup.corner.run_set.composition.mode;
+    let status = format!("{} composition", mode.as_str());
+    let tone = match validation.status {
+        run_set::RunSetStatus::Ready => Tone::Ok,
+        run_set::RunSetStatus::Invalid => Tone::Error,
+        run_set::RunSetStatus::NotEvaluated => Tone::Neutral,
+    };
+    let mut action = None;
+    let mut selection = None;
+
+    super::page_kit::card_with_head(
+        ui,
+        |ui| card_head_row(ui, "Run space", Some((status.as_str(), tone)), |_| {}),
+        |ui| {
+            card_body(ui, |ui| {
+                let selected = app.state.workbench.selected_run_set_dimension.clone();
+                let dimensions = app.state.sim_setup.corner.run_set.dimensions.clone();
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                    for (index, dimension) in dimensions.iter().enumerate() {
+                        let is_selected = selected.as_deref() == Some(dimension.id.as_str());
+                        match axis_card(ui, dimension, index, is_selected) {
+                            Some(AxisEvent::Select) => {
+                                selection = Some(dimension.id.clone());
+                            }
+                            Some(AxisEvent::SetEnabled(enabled)) => {
+                                action = Some(RunSetAction::SetEnabled {
+                                    id: dimension.id.clone(),
+                                    enabled,
+                                });
+                            }
+                            None => {}
+                        }
+                        let next_enabled = dimensions
+                            .get(index + 1)
+                            .is_some_and(|next| next.enabled && dimension.enabled);
+                        if index + 1 < dimensions.len() {
+                            operator_tile(ui, mode.operator(), next_enabled);
+                        }
+                    }
+                    if !dimensions.is_empty() {
+                        operator_tile(ui, "=", validation.is_ready());
+                    }
+                    forecast_tile(ui, validation);
+                });
+            });
+            variation_strip(ui, app);
+        },
+    );
+
+    if let Some(id) = selection {
+        app.state.workbench.selected_run_set_dimension = Some(id);
+        app.state.workbench.run_set_values_draft = None;
+    }
+    if let Some(action) = action {
+        commit(app, action);
+    }
+}
+
+enum AxisEvent {
+    Select,
+    SetEnabled(bool),
+}
+
+/// One axis of the space: what it contributes and where it comes from.
+fn axis_card(
+    ui: &mut Ui,
+    dimension: &RunSetDimension,
+    index: usize,
+    selected: bool,
+) -> Option<AxisEvent> {
+    let t = Tokens::get(ui.ctx());
+    let mut event = None;
+    let fill = if selected {
+        t.color.accent_dim
+    } else if dimension.enabled {
+        t.color.bg_panel_2
+    } else {
+        t.color.bg_inset
+    };
+    let stroke = egui::Stroke::new(
+        1.0,
+        if selected {
+            t.color.accent
+        } else {
+            t.color.border
+        },
+    );
+    let text_color = if dimension.enabled {
+        t.color.text
+    } else {
+        t.color.text_faint
+    };
+
+    egui::Frame::new()
+        .fill(fill)
+        .stroke(stroke)
+        .corner_radius(t.radius)
+        .inner_margin(egui::Margin::symmetric(8, 7))
+        .show(ui, |ui| {
+            ui.set_width(AXIS_CARD_W);
+            ui.spacing_mut().item_spacing.y = 5.0;
+
+            ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(if sweeping {
-                        "corner sweep enabled · the axes below compose the space"
+                    egui::RichText::new(format!("{:02}", index + 1))
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_faint),
+                );
+                let title = ui
+                    .add(
+                        egui::Label::new(
+                            egui::RichText::new(&dimension.name)
+                                .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                                .color(text_color),
+                        )
+                        .sense(Sense::click()),
+                    )
+                    .on_hover_text("Edit this dimension");
+                if title.clicked() {
+                    event = Some(AxisEvent::Select);
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let mut enabled = dimension.enabled;
+                    if ui
+                        .add(egui::Checkbox::without_text(&mut enabled))
+                        .on_hover_text(format!("Include {} in the run space", dimension.name))
+                        .changed()
+                    {
+                        event = Some(AxisEvent::SetEnabled(enabled));
+                    }
+                });
+            });
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} · {}",
+                    dimension.kind.as_str(),
+                    dimension.kind.value_type().as_str()
+                ))
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_faint),
+            );
+
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+                for value in dimension.values.iter().take(AXIS_CHIP_LIMIT) {
+                    let tone = if value.canonical.is_some() {
+                        text_color
                     } else {
-                        "single reference point · enable a corner analysis to sweep"
+                        t.color.err
+                    };
+                    value_chip(ui, &value.lexical, tone);
+                }
+                if dimension.values.len() > AXIS_CHIP_LIMIT {
+                    value_chip(
+                        ui,
+                        &format!("+{}", dimension.values.len() - AXIS_CHIP_LIMIT),
+                        t.color.text_faint,
+                    );
+                }
+                if dimension.values.is_empty() {
+                    value_chip(ui, "no values", t.color.err);
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} value{}",
+                        dimension.values.len(),
+                        if dimension.values.len() == 1 { "" } else { "s" }
+                    ))
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_faint),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let short = dimension
+                        .source
+                        .rsplit(':')
+                        .next()
+                        .unwrap_or(&dimension.source);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(short)
+                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                .color(t.color.text_faint),
+                        )
+                        .truncate(),
+                    )
+                    .on_hover_text(&dimension.source);
+                });
+            });
+        });
+    event
+}
+
+fn value_chip(ui: &mut Ui, text: &str, color: egui::Color32) {
+    let t = Tokens::get(ui.ctx());
+    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let width = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font.clone(), color)
+        .size()
+        .x;
+    let (rect, _) = ui.allocate_exact_size(vec2(width + 10.0, 17.0), Sense::hover());
+    ui.painter().rect(
+        rect,
+        3.0,
+        t.color.bg_inset,
+        egui::Stroke::new(1.0, t.color.border),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        text,
+        font,
+        color,
+    );
+}
+
+/// The composition glyph drawn between two adjacent axes.
+fn operator_tile(ui: &mut Ui, glyph: &str, active: bool) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(vec2(18.0, 26.0), Sense::hover());
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        glyph,
+        theme::mono(tokens::FS_2, FontWeight::Regular),
+        if active {
+            t.color.text_dim
+        } else {
+            t.color.text_faint
+        },
+    );
+}
+
+/// What the axes multiply out to.
+fn forecast_tile(ui: &mut Ui, validation: &RunSetValidation) {
+    let t = Tokens::get(ui.ctx());
+    let forecast = validation.forecast;
+    egui::Frame::new()
+        .fill(t.color.bg_panel_2)
+        .stroke(egui::Stroke::new(
+            1.0,
+            if validation.is_ready() {
+                t.color.ok
+            } else {
+                t.color.border
+            },
+        ))
+        .corner_radius(t.radius)
+        .inner_margin(egui::Margin::symmetric(9, 7))
+        .show(ui, |ui| {
+            ui.set_width(FORECAST_TILE_W);
+            ui.spacing_mut().item_spacing.y = 4.0;
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(forecast.point_count.to_string())
+                        .font(theme::mono(tokens::FS_4, FontWeight::SemiBold))
+                        .color(t.color.text),
+                );
+                ui.label(
+                    egui::RichText::new(if forecast.point_count == 1 {
+                        "point"
+                    } else {
+                        "points"
                     })
                     .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                     .color(t.color.text_dim),
                 );
             });
+            ui.label(
+                egui::RichText::new(format!(
+                    "× {} task{} / point",
+                    forecast.enabled_analysis_count,
+                    if forecast.enabled_analysis_count == 1 {
+                        ""
+                    } else {
+                        "s"
+                    }
+                ))
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_faint),
+            );
+            for (label, value) in [
+                ("Tasks", forecast.task_count.to_string()),
+                ("Cost", run_set::format_duration_ms(forecast.cost_ms)),
+                ("Storage", run_set::format_bytes(forecast.storage_bytes)),
+            ] {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(label)
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_dim),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new(value)
+                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                .color(t.color.text),
+                        );
+                    });
+                });
+            }
         });
 }
 
-// ----------------------------------------------------------------------- axes
-
-fn process_axis(ui: &mut Ui, app: &mut RSpiceApp) {
-    let corners = [
-        (ProcessCorner::TT, "Typical"),
-        (ProcessCorner::SS, "Slow / slow"),
-        (ProcessCorner::FF, "Fast / fast"),
-        (ProcessCorner::SF, "Slow / fast"),
-        (ProcessCorner::FS, "Fast / slow"),
-    ];
-    let selected = selected_process_count(app);
-    let status = format!("{selected} of 5");
-    card(
-        ui,
-        "Process axis",
-        Some((
-            status.as_str(),
-            if selected == 0 { Tone::Error } else { Tone::Ok },
-        )),
-        |ui| {
-            card_body(ui, |ui| {
-                for (corner, meaning) in corners {
-                    let value = process_flag(app, corner);
-                    let mut enabled = *value;
-                    if ui
-                        .checkbox(
-                            &mut enabled,
-                            egui::RichText::new(format!("{} · {meaning}", corner.short_name()))
-                                .font(theme::sans(tokens::FS_0, FontWeight::Regular)),
-                        )
-                        .changed()
-                    {
-                        *process_flag(app, corner) = enabled;
-                        commit_run_space(app, "Updated the process axis.");
-                    }
-                }
-            });
-            card_note(
-                ui,
-                "A corner selects the model section each library resolves to. Deselecting every \
-                 corner leaves the sweep with no process axis, which preflight refuses rather \
-                 than silently running at typical.",
-            );
-        },
-    );
-}
-
-fn process_flag(app: &mut RSpiceApp, corner: ProcessCorner) -> &mut bool {
-    let state = &mut app.state.sim_setup.corner;
-    match corner {
-        ProcessCorner::TT => &mut state.process_tt,
-        ProcessCorner::SS => &mut state.process_ss,
-        ProcessCorner::FF => &mut state.process_ff,
-        ProcessCorner::SF => &mut state.process_sf,
-        ProcessCorner::FS => &mut state.process_fs,
-    }
-}
-
-fn selected_process_count(app: &RSpiceApp) -> usize {
-    let state = &app.state.sim_setup.corner;
-    usize::from(state.process_tt)
-        + usize::from(state.process_ss)
-        + usize::from(state.process_ff)
-        + usize::from(state.process_sf)
-        + usize::from(state.process_fs)
-}
-
-fn supply_axis(ui: &mut Ui, app: &mut RSpiceApp) {
-    let on = app.state.sim_setup.corner.enable_voltage_sweep;
-    let status = if on { "3 values" } else { "nominal only" };
-    card(
-        ui,
-        "Supply axis",
-        Some((status, if on { Tone::Ok } else { Tone::Neutral })),
-        |ui| {
-            card_body(ui, |ui| {
-                let released = std::cell::Cell::new(false);
-                let mut enable = on;
-                if ui
-                    .checkbox(
-                        &mut enable,
-                        egui::RichText::new("Sweep supply voltage")
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular)),
-                    )
-                    .changed()
-                {
-                    app.state.sim_setup.corner.enable_voltage_sweep = enable;
-                    commit_run_space(app, "Updated the supply axis.");
-                }
-                field_pair(
-                    ui,
-                    ("Minimum", &mut |ui: &mut Ui, width: f32| {
-                        released.set(
-                            released.get()
-                                | mono_input(
-                                    ui,
-                                    &mut app.state.sim_setup.corner.voltage_min,
-                                    width,
-                                )
-                                .lost_focus(),
-                        );
-                    }),
-                    Some(("Nominal", &mut |ui: &mut Ui, width: f32| {
-                        released.set(
-                            released.get()
-                                | mono_input(
-                                    ui,
-                                    &mut app.state.sim_setup.corner.voltage_nom,
-                                    width,
-                                )
-                                .lost_focus(),
-                        );
-                    })),
-                );
-                field_pair(
-                    ui,
-                    ("Maximum", &mut |ui: &mut Ui, width: f32| {
-                        released.set(
-                            released.get()
-                                | mono_input(
-                                    ui,
-                                    &mut app.state.sim_setup.corner.voltage_max,
-                                    width,
-                                )
-                                .lost_focus(),
-                        );
-                    }),
-                    None,
-                );
-                if released.get() {
-                    commit_run_space(app, "Updated the supply axis values.");
-                }
-            });
-            card_note(
-                ui,
-                "With the sweep off only the nominal value is used and the axis contributes one \
-                 point; the minimum and maximum are retained so turning the axis back on restores \
-                 the same space.",
-            );
-        },
-    );
-}
-
-fn temperature_axis(ui: &mut Ui, app: &mut RSpiceApp) {
-    let on = app.state.sim_setup.corner.enable_temp_sweep;
-    let status = if on { "3 values" } else { "reference only" };
-    card(
-        ui,
-        "Temperature axis",
-        Some((status, if on { Tone::Ok } else { Tone::Neutral })),
-        |ui| {
-            card_body(ui, |ui| {
-                let released = std::cell::Cell::new(false);
-                let mut enable = on;
-                if ui
-                    .checkbox(
-                        &mut enable,
-                        egui::RichText::new("Sweep temperature")
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular)),
-                    )
-                    .changed()
-                {
-                    app.state.sim_setup.corner.enable_temp_sweep = enable;
-                    commit_run_space(app, "Updated the temperature axis.");
-                }
-                field_pair(
-                    ui,
-                    ("Cold · °C", &mut |ui: &mut Ui, width: f32| {
-                        released.set(
-                            released.get()
-                                | mono_input(ui, &mut app.state.sim_setup.corner.temp_cold, width)
-                                    .lost_focus(),
-                        );
-                    }),
-                    Some(("Room · °C", &mut |ui: &mut Ui, width: f32| {
-                        released.set(
-                            released.get()
-                                | mono_input(ui, &mut app.state.sim_setup.corner.temp_room, width)
-                                    .lost_focus(),
-                        );
-                    })),
-                );
-                field_pair(
-                    ui,
-                    ("Hot · °C", &mut |ui: &mut Ui, width: f32| {
-                        released.set(
-                            released.get()
-                                | mono_input(ui, &mut app.state.sim_setup.corner.temp_hot, width)
-                                    .lost_focus(),
-                        );
-                    }),
-                    None,
-                );
-                if released.get() {
-                    commit_run_space(app, "Updated the temperature axis values.");
-                }
-            });
-            card_note(
-                ui,
-                "Temperature enters device models through TNOM as well as the ambient value, so a \
-                 temperature axis is a model-evaluation axis and not only an operating condition.",
-            );
-        },
-    );
-}
-
-fn reference_point(ui: &mut Ui, app: &mut RSpiceApp) {
-    let corners: Vec<String> = [
-        ProcessCorner::TT,
-        ProcessCorner::SS,
-        ProcessCorner::FF,
-        ProcessCorner::SF,
-        ProcessCorner::FS,
-    ]
-    .iter()
-    .map(|corner| corner.short_name().to_owned())
-    .collect();
-    let current = app
+/// Statistical variation is a Monte Carlo analysis, not an axis of this space.
+fn variation_strip(ui: &mut Ui, app: &mut RSpiceApp) {
+    let t = Tokens::get(ui.ctx());
+    let active = app
         .state
         .sim_setup
-        .reference_pvt
-        .process
-        .short_name()
-        .to_owned();
-    let mut temperature = format!(
-        "{:.1}",
-        app.state.sim_setup.reference_pvt.temperature_celsius
-    );
-    card(
+        .has_enabled_analysis_kind(AnalysisKind::MonteCarlo);
+    egui::Frame::new()
+        .fill(t.color.bg_panel_2)
+        .inner_margin(egui::Margin {
+            left: CARD_PAD_X as i8,
+            right: CARD_PAD_X as i8,
+            top: 7,
+            bottom: 7,
+        })
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
+                ui.label(
+                    egui::RichText::new(if active { "active" } else { "not in run set" })
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(if active {
+                            t.color.ok
+                        } else {
+                            t.color.text_faint
+                        }),
+                );
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(if active {
+                            "Statistical variation multiplies every point by the Monte Carlo \
+                             sample count; each point draws its own deterministic seed."
+                        } else {
+                            "Statistical variation is owned by a Monte Carlo analysis instance. \
+                             None is enabled in this plan, so the matrix carries deterministic \
+                             points only."
+                        })
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
+                    )
+                    .wrap(),
+                );
+            });
+        });
+}
+
+// -------------------------------------------------------- dimension editor
+
+/// Everything the selected axis declares.
+fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
+    let selected = app
+        .state
+        .workbench
+        .selected_run_set_dimension
+        .clone()
+        .filter(|id| app.state.sim_setup.corner.run_set.dimension(id).is_some())
+        .or_else(|| {
+            app.state
+                .sim_setup
+                .corner
+                .run_set
+                .dimensions
+                .first()
+                .map(|dimension| dimension.id.clone())
+        });
+    let Some(id) = selected else {
+        card(
+            ui,
+            "Selected dimension",
+            Some(("none declared", Tone::Warn)),
+            |ui| {
+                card_note(
+                    ui,
+                    "The run space declares no axes, so every analysis runs once at the plan's \
+                     reference point. Add a dimension to sweep.",
+                );
+            },
+        );
+        return;
+    };
+    let dimension = app
+        .state
+        .sim_setup
+        .corner
+        .run_set
+        .dimension(&id)
+        .expect("the selected identity was just resolved")
+        .clone();
+    let index = app
+        .state
+        .sim_setup
+        .corner
+        .run_set
+        .index_of(&id)
+        .unwrap_or_default();
+    let last = app.state.sim_setup.corner.run_set.dimensions.len() - 1;
+    let title = format!("Selected dimension · {}", dimension.name);
+    let status = if dimension.enabled {
+        ("enabled", Tone::Ok)
+    } else {
+        ("disabled", Tone::Neutral)
+    };
+    // The head and the body both raise commands, and two closures cannot each
+    // hold the same `&mut` — the pending command is shared through a cell.
+    let action: std::cell::RefCell<Option<RunSetAction>> = std::cell::RefCell::new(None);
+
+    super::page_kit::card_with_head(
         ui,
-        "Reference point",
-        Some(("what one run resolves to", Tone::Neutral)),
+        |ui| {
+            card_head_row(ui, &title, Some(status), |ui| {
+                if IconButton::new(Icon::Trash)
+                    .tooltip("Remove this dimension")
+                    .show(ui)
+                    .clicked()
+                {
+                    *action.borrow_mut() = Some(RunSetAction::RemoveDimension { id: id.clone() });
+                }
+                if IconButton::new(Icon::ChevronDown)
+                    .enabled(index < last)
+                    .tooltip("Move later")
+                    .show(ui)
+                    .clicked()
+                {
+                    *action.borrow_mut() = Some(RunSetAction::MoveDimension {
+                        id: id.clone(),
+                        later: true,
+                    });
+                }
+                if IconButton::new(Icon::ChevronUp)
+                    .enabled(index > 0)
+                    .tooltip("Move earlier")
+                    .show(ui)
+                    .clicked()
+                {
+                    *action.borrow_mut() = Some(RunSetAction::MoveDimension {
+                        id: id.clone(),
+                        later: false,
+                    });
+                }
+            });
+        },
         |ui| {
             card_body(ui, |ui| {
-                let mut picked = None;
-                let mut temperature_response = None;
+                let mut name = dimension.name.clone();
+                let mut source = dimension.source.clone();
+                let mut name_released = false;
+                let mut source_released = false;
                 field_pair(
                     ui,
-                    ("Process corner", &mut |ui: &mut Ui, width: f32| {
+                    ("Name", &mut |ui: &mut Ui, width: f32| {
+                        name_released |= mono_input(ui, &mut name, width).lost_focus();
+                    }),
+                    Some(("Source authority", &mut |ui: &mut Ui, width: f32| {
+                        source_released |= mono_input(ui, &mut source, width).lost_focus();
+                    })),
+                );
+                if name_released && name != dimension.name {
+                    *action.borrow_mut() = Some(RunSetAction::Rename {
+                        id: id.clone(),
+                        name,
+                    });
+                } else if source_released && source != dimension.source {
+                    *action.borrow_mut() = Some(RunSetAction::SetSource {
+                        id: id.clone(),
+                        source,
+                    });
+                }
+
+                rule_row(
+                    ui,
+                    "Binds to",
+                    match dimension.kind {
+                        RunSetDimensionKind::ProcessSection => {
+                            "the library section every model resolves through"
+                        }
+                        RunSetDimensionKind::Supply => "the DC value of the design's supplies",
+                        RunSetDimensionKind::Temperature => {
+                            "the solve temperature and every model's TNOM reference"
+                        }
+                    },
+                );
+
+                // The value list is a draft until focus leaves: committing per
+                // keystroke would move the plan revision on every character and
+                // refuse the space while a number was half-typed.
+                let draft_matches = app
+                    .state
+                    .workbench
+                    .run_set_values_draft
+                    .as_ref()
+                    .is_some_and(|(draft_id, _)| *draft_id == id);
+                if !draft_matches {
+                    app.state.workbench.run_set_values_draft =
+                        Some((id.clone(), dimension.values_text()));
+                }
+                let mut text = app
+                    .state
+                    .workbench
+                    .run_set_values_draft
+                    .as_ref()
+                    .map(|(_, text)| text.clone())
+                    .unwrap_or_default();
+                let unit = dimension
+                    .unit()
+                    .map(|unit| format!(" · {unit}"))
+                    .unwrap_or_default();
+                ui.label(
+                    egui::RichText::new(format!("Typed values · one per line{unit}"))
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(Tokens::get(ui.ctx()).color.text_dim),
+                );
+                let response = ui.add(
+                    egui::TextEdit::multiline(&mut text)
+                        .desired_rows(5)
+                        .desired_width(ui.available_width())
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                );
+                if response.changed() {
+                    app.state.workbench.run_set_values_draft = Some((id.clone(), text.clone()));
+                }
+                if response.lost_focus() && text != dimension.values_text() {
+                    *action.borrow_mut() = Some(RunSetAction::SetValues {
+                        id: id.clone(),
+                        text,
+                    });
+                    app.state.workbench.run_set_values_draft = None;
+                }
+
+                let policies = InvalidValuePolicy::ALL
+                    .map(|policy| policy_label(policy).to_owned())
+                    .to_vec();
+                let current = policy_label(dimension.invalid_value_policy).to_owned();
+                let mut picked = None;
+                field_pair(
+                    ui,
+                    ("Invalid-value policy", &mut |ui: &mut Ui, width: f32| {
                         picked = select(
                             ui,
-                            "simulation.runset.process",
-                            "Reference process corner",
+                            "simulation.runset.invalid-policy",
+                            "Invalid-value policy",
                             &current,
-                            &corners,
+                            &policies,
                             width,
                         );
                     }),
-                    Some(("Temperature · °C", &mut |ui: &mut Ui, width: f32| {
-                        temperature_response = Some(mono_input(ui, &mut temperature, width));
-                    })),
+                    None,
                 );
-                let requested_process = picked.map(|index| {
-                    [
-                        ProcessCorner::TT,
-                        ProcessCorner::SS,
-                        ProcessCorner::FF,
-                        ProcessCorner::SF,
-                        ProcessCorner::FS,
-                    ][index.min(4)]
-                });
-                let committed = temperature_response.is_some_and(|response| response.lost_focus())
-                    || requested_process.is_some();
-                if committed {
-                    let process =
-                        requested_process.unwrap_or(app.state.sim_setup.reference_pvt.process);
-                    let celsius = temperature
-                        .trim()
-                        .parse::<f64>()
-                        .unwrap_or(app.state.sim_setup.reference_pvt.temperature_celsius);
-                    if let Err(error) = app.state.sim_setup.set_reference_pvt(process, celsius) {
-                        app.state.workbench.analysis_lifecycle_status = error;
-                    } else {
-                        // The reference point sets the solver TEMP option, so
-                        // it is a plan-configuration change like any axis edit.
-                        commit_run_space(app, "Updated the reference point.");
-                    }
+                if let Some(index) = picked {
+                    *action.borrow_mut() = Some(RunSetAction::SetInvalidValuePolicy {
+                        id: id.clone(),
+                        policy: InvalidValuePolicy::ALL[index.min(1)],
+                    });
                 }
             });
             card_note(
                 ui,
-                "The reference temperature is the solver's TEMP option: changing it here changes \
-                 what every analysis in the plan is evaluated at, which is why the solver page \
-                 shows it as owned by the run set rather than editable there.",
+                "A value that does not parse keeps its place and its identity so the points it \
+                 blocks can be named. Nothing is corrected, rounded or dropped on the way to the \
+                 engine.",
             );
         },
     );
+
+    if let Some(action) = action.into_inner() {
+        commit(app, action);
+    }
 }
 
-fn composition_policy(ui: &mut Ui, app: &mut RSpiceApp) {
-    let full_matrix = app.state.sim_setup.corner.full_matrix;
-    let sweeping = app
-        .state
-        .sim_setup
-        .has_enabled_analysis_kind(AnalysisKind::Corner);
+fn policy_label(policy: InvalidValuePolicy) -> &'static str {
+    match policy {
+        InvalidValuePolicy::PreserveAndBlockAffectedPoints => "Preserve · block affected points",
+        InvalidValuePolicy::BlockEntireRunSet => "Preserve · block the entire run set",
+    }
+}
+
+// ------------------------------------------------------------- composition
+
+fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
+    let mode = app.state.sim_setup.corner.run_set.composition.mode;
     let variation = app
         .state
         .sim_setup
         .has_enabled_analysis_kind(AnalysisKind::MonteCarlo);
+    let mut action: Option<RunSetAction> = None;
     card(
         ui,
         "Composition",
-        Some((
-            if full_matrix { "cartesian" } else { "diagonal" },
-            Tone::Neutral,
-        )),
+        Some((mode.as_str(), Tone::Neutral)),
         |ui| {
             card_body(ui, |ui| {
-                if sweeping {
-                    let options = vec![
-                        "Cartesian · every combination".to_owned(),
-                        "Diagonal · zipped".to_owned(),
-                    ];
-                    let selected = options[usize::from(!full_matrix)].clone();
-                    let mut picked = None;
-                    field_pair(
-                        ui,
-                        ("Axis composition", &mut |ui: &mut Ui, width: f32| {
-                            picked = select(
-                                ui,
-                                "simulation.runset.composition",
-                                "Axis composition",
-                                &selected,
-                                &options,
-                                width,
-                            );
-                        }),
-                        None,
-                    );
-                    if let Some(index) = picked {
-                        app.state.sim_setup.corner.full_matrix = index == 0;
-                        commit_run_space(app, "Updated the axis composition.");
-                    }
+                let options: Vec<String> = RunSetCompositionMode::ALL
+                    .iter()
+                    .map(|mode| mode.label().to_owned())
+                    .collect();
+                let current = mode.label().to_owned();
+                let mut picked = None;
+                field_pair(
+                    ui,
+                    ("Mode", &mut |ui: &mut Ui, width: f32| {
+                        picked = select(
+                            ui,
+                            "simulation.runset.composition",
+                            "Axis composition",
+                            &current,
+                            &options,
+                            width,
+                        );
+                    }),
+                    None,
+                );
+                if let Some(index) = picked {
+                    action = Some(RunSetAction::SetComposition(RunSetComposition {
+                        mode: RunSetCompositionMode::ALL[index.min(1)],
+                    }));
                 }
+                rule_row(ui, "Contract", mode.contract());
                 rule_row(
                     ui,
                     "Statistical variation",
@@ -452,75 +819,357 @@ fn composition_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                 rule_row(
                     ui,
                     "Point identity",
-                    "each point carries its corner, supply and temperature into the manifest",
+                    "every coordinate is carried into the run manifest",
                 );
             });
             card_note(
                 ui,
-                "Cartesian composition multiplies the axes; diagonal zips them and requires every \
-                 enabled axis to have the same length. Variation is a separate dimension owned by \
-                 its analysis, not an axis of this space.",
+                "Predicate-filtered, conditional, adaptive and nested compositions are not offered: \
+             the executor expands a declared matrix, and a mode it could not expand would be a \
+             choice that changed nothing about what runs.",
+            );
+        },
+    );
+    if let Some(action) = action {
+        commit(app, action);
+    }
+}
+
+// ----------------------------------------------------------------- budgets
+
+fn budgets(ui: &mut Ui, app: &mut RSpiceApp) {
+    let current = app.state.sim_setup.corner.run_set.budgets;
+    let analyses = app.state.sim_setup.enabled_analysis_instance_count();
+    let validation = run_set::validate(&app.state.sim_setup.corner.run_set, analyses);
+    let exceeded = validation
+        .errors
+        .iter()
+        .any(|error| error.id.ends_with("BUDGET"));
+    if app.state.workbench.run_set_budget_drafts.is_none() {
+        app.state.workbench.run_set_budget_drafts = Some(drafts_from(&current));
+    }
+    let mut action: Option<RunSetAction> = None;
+
+    card(
+        ui,
+        "Execution budgets",
+        Some((
+            if exceeded {
+                "exceeded"
+            } else {
+                "within budget"
+            },
+            if exceeded { Tone::Error } else { Tone::Ok },
+        )),
+        |ui| {
+            card_body(ui, |ui| {
+                let mut drafts = app
+                    .state
+                    .workbench
+                    .run_set_budget_drafts
+                    .clone()
+                    .unwrap_or_else(|| drafts_from(&current));
+                let released = std::cell::Cell::new(false);
+                field_pair(
+                    ui,
+                    ("Maximum tasks", &mut |ui: &mut Ui, width: f32| {
+                        released.set(
+                            released.get()
+                                | mono_input(ui, &mut drafts.maximum_tasks, width).lost_focus(),
+                        );
+                    }),
+                    Some(("Maximum storage", &mut |ui: &mut Ui, width: f32| {
+                        released.set(
+                            released.get()
+                                | mono_input(ui, &mut drafts.maximum_storage, width).lost_focus(),
+                        );
+                    })),
+                );
+                field_pair(
+                    ui,
+                    ("Cost / task · ms", &mut |ui: &mut Ui, width: f32| {
+                        released.set(
+                            released.get()
+                                | mono_input(ui, &mut drafts.cost_per_point_ms, width).lost_focus(),
+                        );
+                    }),
+                    Some(("Storage / task", &mut |ui: &mut Ui, width: f32| {
+                        released.set(
+                            released.get()
+                                | mono_input(ui, &mut drafts.bytes_per_point, width).lost_focus(),
+                        );
+                    })),
+                );
+                app.state.workbench.run_set_budget_drafts = Some(drafts.clone());
+                if released.get() {
+                    match budgets_from(&drafts) {
+                        Ok(budgets) if budgets != current => {
+                            action = Some(RunSetAction::SetBudgets(budgets));
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            app.state.workbench.analysis_lifecycle_status = error;
+                            app.state.workbench.run_set_budget_drafts = Some(drafts_from(&current));
+                        }
+                    }
+                }
+            });
+            card_note(
+                ui,
+                "Exceeding a budget blocks preview and dispatch. Nothing is truncated silently, \
+                 and the cost and storage models are the plan's own — they state what this run \
+                 would consume, not a measured result.",
+            );
+        },
+    );
+    if let Some(action) = action {
+        commit(app, action);
+        app.state.workbench.run_set_budget_drafts = None;
+    }
+}
+
+fn drafts_from(budgets: &RunSetBudgets) -> RunSetBudgetDrafts {
+    RunSetBudgetDrafts {
+        maximum_tasks: budgets.maximum_tasks.to_string(),
+        maximum_storage: run_set::format_bytes(budgets.maximum_storage_bytes),
+        cost_per_point_ms: budgets.cost_per_point_ms.to_string(),
+        bytes_per_point: run_set::format_bytes(budgets.bytes_per_point),
+    }
+}
+
+fn budgets_from(drafts: &RunSetBudgetDrafts) -> Result<RunSetBudgets, String> {
+    Ok(RunSetBudgets {
+        maximum_tasks: drafts
+            .maximum_tasks
+            .trim()
+            .replace([',', '_'], "")
+            .parse()
+            .map_err(|_| format!("{:?} is not a task count", drafts.maximum_tasks))?,
+        maximum_storage_bytes: run_set::parse_bytes(&drafts.maximum_storage)?,
+        cost_per_point_ms: drafts
+            .cost_per_point_ms
+            .trim()
+            .parse()
+            .map_err(|_| format!("{:?} is not a duration in ms", drafts.cost_per_point_ms))?,
+        bytes_per_point: run_set::parse_bytes(&drafts.bytes_per_point)?,
+    })
+}
+
+// ---------------------------------------------------------------- receipts
+
+const RECEIPT_COLUMNS: [f32; 4] = [0.10, 0.34, 0.20, 0.36];
+/// Receipts shown. The log is evidence, not a history the page has to hold.
+const RECEIPT_LIMIT: usize = 6;
+
+fn receipts(ui: &mut Ui, app: &mut RSpiceApp) {
+    let receipts = &app.state.sim_setup.corner.run_set.receipts;
+    let total = receipts.len();
+    let status = if total == 0 {
+        "no transaction".to_owned()
+    } else {
+        format!("{total} recorded")
+    };
+    card(
+        ui,
+        "Transaction receipts",
+        Some((status.as_str(), Tone::Neutral)),
+        |ui| {
+            if total == 0 {
+                card_note(
+                    ui,
+                    "No run-set transaction has run in this session. Editing an axis, a \
+                     composition or a budget records one; so does a validate-and-preview, which \
+                     creates planning evidence only and no numerical result.",
+                );
+                return;
+            }
+            ledger_head(ui, &RECEIPT_COLUMNS, &["#", "Action", "Revision", "Digest"]);
+            for receipt in receipts.iter().rev().take(RECEIPT_LIMIT) {
+                let tone = match receipt.status {
+                    RunSetReceiptStatus::Completed => Tone::Ok,
+                    RunSetReceiptStatus::Blocked => Tone::Error,
+                };
+                ledger_row(
+                    ui,
+                    &RECEIPT_COLUMNS,
+                    &[
+                        (receipt.sequence.to_string().as_str(), Tone::Neutral),
+                        (receipt.action, tone),
+                        (
+                            format!("{} → {}", receipt.before_revision, receipt.after_revision)
+                                .as_str(),
+                            Tone::Neutral,
+                        ),
+                        (receipt.digest.as_str(), Tone::Neutral),
+                    ],
+                    false,
+                );
+            }
+            card_note(
+                ui,
+                "Every prior dataset is retained unchanged. A blocked transaction leaves the \
+                 declaration exactly as it was and still records that it was attempted.",
             );
         },
     );
 }
 
-// -------------------------------------------------------------- resolved points
+// ---------------------------------------------------------- resolved points
 
-const POINT_COLUMNS: [f32; 2] = [0.18, 0.82];
-
-fn point_table(ui: &mut Ui, app: &RSpiceApp) {
-    let Some(names) = app.state.sim_setup.run_set_point_names() else {
-        return;
-    };
-    let total = names.len();
-    let shown = total.min(POINT_TABLE_LIMIT);
-    let status = if total > shown {
-        format!("first {shown} of {total}")
-    } else {
-        format!("{total} resolved")
-    };
-    card(
-        ui,
-        "Resolved points",
-        Some((status.as_str(), Tone::Neutral)),
-        |ui| {
-            ledger_head(ui, &POINT_COLUMNS, &["Index", "Point"]);
-            for (index, name) in names.iter().take(shown).enumerate() {
-                ledger_row(
-                    ui,
-                    &POINT_COLUMNS,
-                    &[
-                        (format!("{:03}", index + 1).as_str(), Tone::Neutral),
-                        (name.as_str(), Tone::Neutral),
-                    ],
-                    false,
-                );
-            }
-            if total > shown {
+fn point_table(ui: &mut Ui, app: &RSpiceApp, validation: &RunSetValidation) {
+    let state: &RunSetState = &app.state.sim_setup.corner.run_set;
+    let Some(points) = run_set::resolve(state) else {
+        card(
+            ui,
+            "Resolved point table",
+            Some(("unresolved", Tone::Error)),
+            |ui| {
                 card_note(
                     ui,
-                    "The remaining points are not listed here. Every point is still executed and \
-                     recorded in the run manifest; this table exists to check the composition, \
-                     not to enumerate the run.",
+                    "The declared space does not expand exactly, so no point list is shown. The \
+                     refusals above name what has to change; a partial table would read as a \
+                     shorter run than the one that would execute.",
                 );
+            },
+        );
+        return;
+    };
+
+    let axes: Vec<&RunSetDimension> = state
+        .enabled_dimensions()
+        .filter(|dimension| !dimension.values.is_empty())
+        .collect();
+    let total = points.len();
+    let shown = total.min(POINT_TABLE_LIMIT);
+    let status = format!(
+        "{total} point{} · {} task{}",
+        if total == 1 { "" } else { "s" },
+        validation.forecast.task_count,
+        if validation.forecast.task_count == 1 {
+            ""
+        } else {
+            "s"
+        }
+    );
+
+    let mut fractions = Vec::with_capacity(axes.len() + 2);
+    fractions.push(0.09);
+    let axis_share = 0.75 / axes.len().max(1) as f32;
+    for _ in &axes {
+        fractions.push(axis_share);
+    }
+    fractions.push(0.16);
+    let mut headers: Vec<String> = Vec::with_capacity(fractions.len());
+    headers.push("Point".to_owned());
+    for axis in &axes {
+        headers.push(axis.name.clone());
+    }
+    headers.push("Tasks".to_owned());
+    let header_refs: Vec<&str> = headers.iter().map(String::as_str).collect();
+    let tasks = validation.forecast.enabled_analysis_count.to_string();
+
+    card(
+        ui,
+        "Resolved point table",
+        Some((
+            status.as_str(),
+            if validation.is_ready() {
+                Tone::Ok
+            } else {
+                Tone::Neutral
+            },
+        )),
+        |ui| {
+            ledger_head(ui, &fractions, &header_refs);
+            for (index, point) in points.iter().take(shown).enumerate() {
+                let mut cells: Vec<String> = Vec::with_capacity(headers.len());
+                cells.push(format!("{:03}", index + 1));
+                for axis in &axes {
+                    let value = point
+                        .coordinates
+                        .iter()
+                        .find(|(dimension, _)| dimension.id == axis.id)
+                        .map(|(_, value)| value.lexical.clone())
+                        .unwrap_or_else(|| "—".to_owned());
+                    cells.push(value);
+                }
+                cells.push(tasks.clone());
+                let row: Vec<(&str, Tone)> = cells
+                    .iter()
+                    .map(|cell| (cell.as_str(), Tone::Neutral))
+                    .collect();
+                ledger_row(ui, &fractions, &row, false).on_hover_text(point.label());
             }
+            card_note(
+                ui,
+                &if total > shown {
+                    format!(
+                        "The first {shown} of {total} points are listed. Every point is still \
+                         executed and recorded in the run manifest; this table exists to check \
+                         the composition, not to enumerate the run."
+                    )
+                } else {
+                    "Each row is one execution point of the declared matrix, and every enabled \
+                     analysis contributes one task per point. The run manifest carries these \
+                     exact identities."
+                        .to_owned()
+                },
+            );
         },
     );
 }
 
-/// Record a run-space change as a plan-configuration transaction.
+// ------------------------------------------------------------------ commit
+
+/// Apply a run-set command and record it as a plan-configuration change.
 ///
 /// The composed run space decides how many points a dispatch executes, so a
-/// change to it has to move the plan revision and invalidate preflight. Without
-/// this an authorized preflight could be followed by a sweep change and then a
-/// dispatch that ran a different run space than the one that was checked.
-fn commit_run_space(app: &mut RSpiceApp, detail: &str) {
+/// change to it has to move the plan revision and invalidate preflight.
+/// Without this an authorized preflight could be followed by a sweep change
+/// and then a dispatch that ran a different space than the one checked.
+fn commit(app: &mut RSpiceApp, action: RunSetAction) {
+    let analyses = app.state.sim_setup.enabled_analysis_instance_count();
+    let previewing = matches!(action, RunSetAction::Preview);
+    let transaction = run_set::dispatch(
+        &mut app.state.sim_setup.corner.run_set,
+        action,
+        analyses.max(1),
+    );
+
+    if !transaction.was_adopted() {
+        app.state.workbench.analysis_lifecycle_status = transaction.receipt.status_line();
+        return;
+    }
+    if previewing {
+        // A preview evaluates the declaration; it does not change it, so the
+        // plan revision must not move and preflight stays valid. What it
+        // produces is planning evidence: the exact space a dispatch would run.
+        let forecast = transaction
+            .validation
+            .as_ref()
+            .map(|validation| validation.forecast);
+        app.state.workbench.analysis_lifecycle_status = match forecast {
+            Some(forecast) => format!(
+                "Run-set preview · {} point{} · {} task{} · {} · receipt {}",
+                forecast.point_count,
+                if forecast.point_count == 1 { "" } else { "s" },
+                forecast.task_count,
+                if forecast.task_count == 1 { "" } else { "s" },
+                run_set::format_bytes(forecast.storage_bytes),
+                transaction.receipt.digest,
+            ),
+            None => transaction.receipt.status_line(),
+        };
+        return;
+    }
+
     match app
         .state
         .sim_setup
-        .commit_active_plan_configuration_change(detail.to_owned())
-    {
+        .commit_active_plan_configuration_change(format!(
+            "Run set · {}",
+            transaction.receipt.action
+        )) {
         Ok(receipt) => {
             app.invalidate_simulation_preflight();
             app.state.workbench.analysis_lifecycle_status = receipt.status_line();
