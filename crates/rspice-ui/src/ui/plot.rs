@@ -28,7 +28,8 @@ mod spec;
 
 pub use cursor::CursorPair;
 pub use decimate::{
-    DecimationCache, DisplayDecimation, SampleInterpolation, sample_at, sample_at_with,
+    DEFAULT_DISPLAY_CACHE_MIB, DecimationCache, DisplayDecimation, SampleInterpolation, sample_at,
+    sample_at_with,
 };
 pub use format::{fmt_si, fmt_si_significant, fmt_significant};
 pub use render::{

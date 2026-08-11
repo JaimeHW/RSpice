@@ -233,6 +233,13 @@ pub struct ProjectFile {
     /// marker must never alter a result's provenance digest.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub result_markers: Vec<ProjectResultMarker>,
+    /// Waveform panes the reader put on a logarithmic Y axis.
+    ///
+    /// The same kind of fact as a marker and kept the same way: a decision
+    /// about how to read a retained dataset, living beside the result
+    /// document rather than inside it so it cannot alter a provenance digest.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub result_log_y_panes: Vec<ProjectResultLogYPane>,
     /// Authoritative execution inputs. Absent only in projects written before
     /// project-owned simulation plans were introduced.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -248,6 +255,8 @@ pub struct ProjectFile {
 /// the retained analyses were reordered — and silently drops if the dataset
 /// it annotated is no longer in the project.
 pub type ProjectResultMarker = crate::workbench::documents::result_document::ResultMarker;
+pub type ProjectResultLogYPane =
+    crate::workbench::documents::result_document::WavePanePresentationKey;
 
 impl ProjectFile {
     #[cfg(test)]
@@ -258,6 +267,7 @@ impl ProjectFile {
             libraries,
             simulation_results: ProjectSimulationResults::default(),
             result_markers: Vec::new(),
+            result_log_y_panes: Vec::new(),
             execution_context: None,
             simulation_results_warning: None,
         }
@@ -275,6 +285,7 @@ impl ProjectFile {
             libraries,
             simulation_results,
             result_markers: Vec::new(),
+            result_log_y_panes: Vec::new(),
             execution_context: None,
             simulation_results_warning: None,
         }
@@ -298,6 +309,7 @@ impl ProjectFile {
             libraries,
             simulation_results,
             result_markers: Vec::new(),
+            result_log_y_panes: Vec::new(),
             execution_context: Some(execution_context),
             simulation_results_warning: None,
         }
@@ -307,6 +319,13 @@ impl ProjectFile {
     #[must_use]
     pub fn with_result_markers(mut self, markers: Vec<ProjectResultMarker>) -> Self {
         self.result_markers = markers;
+        self
+    }
+
+    /// Attach the logarithmic-axis pane choices to a snapshot.
+    #[must_use]
+    pub fn with_result_log_y_panes(mut self, panes: Vec<ProjectResultLogYPane>) -> Self {
+        self.result_log_y_panes = panes;
         self
     }
 

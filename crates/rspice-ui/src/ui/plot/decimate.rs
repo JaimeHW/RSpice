@@ -89,7 +89,19 @@ pub struct TraceView {
 
 /// Entry-count bound; old views evict once it's exceeded.
 const CACHE_CAP: usize = 256;
-const DEFAULT_BYTE_CAPACITY: usize = 512 * 1024 * 1024;
+
+/// Default resident budget for reconstructable display envelopes.
+///
+/// Every entry here is derived data that costs one O(n) pass to rebuild, so
+/// the budget buys latency, not correctness. A workstation can spare half a
+/// gigabyte for it; a phone browser cannot — the whole WebAssembly heap is
+/// often smaller than that, and the retained waveforms have to live in it too.
+#[cfg(not(target_arch = "wasm32"))]
+pub const DEFAULT_DISPLAY_CACHE_MIB: u32 = 512;
+#[cfg(target_arch = "wasm32")]
+pub const DEFAULT_DISPLAY_CACHE_MIB: u32 = 96;
+
+const DEFAULT_BYTE_CAPACITY: usize = DEFAULT_DISPLAY_CACHE_MIB as usize * 1024 * 1024;
 
 impl Default for DecimationCache {
     fn default() -> Self {

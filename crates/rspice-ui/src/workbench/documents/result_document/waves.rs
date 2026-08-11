@@ -2511,16 +2511,15 @@ pub(crate) fn active_pane_facts(
         .then(|| active_pane_is_pinned(tokens, state));
     let key = state.ui.results.active_wave_pane.as_ref();
     let scale = key.map(|key| {
-        let log = ctx
-            .data_mut(|data| {
-                data.get_persisted::<bool>(egui::Id::new((
-                    "rspice.results.pane-log-y",
-                    key.analysis,
-                    key.unit.as_str(),
-                )))
-            })
-            .unwrap_or(false);
-        if log { "logarithmic" } else { "linear" }
+        // One owner: the pane’s own log-Y flag on ResultsState. This read
+        // used to reach into egui’s persisted memory with a hand-built id,
+        // which is a second copy of a fact and drifts the moment either side
+        // changes its key.
+        if state.ui.results.log_y_panes.contains(key) {
+            "logarithmic"
+        } else {
+            "linear"
+        }
     });
     ActivePaneFacts {
         unit: key.map(|key| key.unit.clone()),
@@ -2802,19 +2801,24 @@ fn active_pane_viewports(
     (x, y)
 }
 
-fn pane_log_y_id(model: &StripModel, pane: &UnitPane) -> egui::Id {
-    egui::Id::new(("rspice.results.pane-log-y", model.analysis_key, pane.unit))
+fn pane_log_y_key(model: &StripModel, pane: &UnitPane) -> WavePanePresentationKey {
+    WavePanePresentationKey {
+        analysis: model.analysis_key,
+        unit: pane.unit.to_owned(),
+    }
 }
 
-fn pane_log_y(ui: &Ui, model: &StripModel, pane: &UnitPane) -> bool {
-    ui.ctx()
-        .data_mut(|data| data.get_persisted::<bool>(pane_log_y_id(model, pane)))
-        .unwrap_or(false)
+pub(super) fn pane_log_y(results: &ResultsState, model: &StripModel, pane: &UnitPane) -> bool {
+    results.log_y_panes.contains(&pane_log_y_key(model, pane))
 }
 
-fn set_pane_log_y(ui: &Ui, model: &StripModel, pane: &UnitPane, enabled: bool) {
-    ui.ctx()
-        .data_mut(|data| data.insert_persisted(pane_log_y_id(model, pane), enabled));
+fn set_pane_log_y(results: &mut ResultsState, model: &StripModel, pane: &UnitPane, enabled: bool) {
+    let key = pane_log_y_key(model, pane);
+    if enabled {
+        results.log_y_panes.insert(key);
+    } else {
+        results.log_y_panes.remove(&key);
+    }
 }
 
 fn trace_belongs_to_pane(
@@ -3734,9 +3738,9 @@ fn show_unit_pane(
         }
     };
     let log_y_available = auto_y.is_some_and(|(minimum, maximum)| minimum > 0.0 && maximum > 0.0);
-    let mut log_y = pane_log_y(ui, model, pane) && log_y_available;
-    if !log_y_available && pane_log_y(ui, model, pane) {
-        set_pane_log_y(ui, model, pane, false);
+    let mut log_y = pane_log_y(&state.ui.results, model, pane) && log_y_available;
+    if !log_y_available && log_y {
+        set_pane_log_y(&mut state.ui.results, model, pane, false);
     }
     let header = show_unit_pane_header(
         ui,
@@ -3758,7 +3762,7 @@ fn show_unit_pane(
     }
     if header.toggle_log_y {
         log_y = !log_y;
-        set_pane_log_y(ui, model, pane, log_y);
+        set_pane_log_y(&mut state.ui.results, model, pane, log_y);
     }
 
     let Some((auto_y0, auto_y1)) = auto_y else {

@@ -831,7 +831,7 @@ const fn default_revision() -> u64 {
 }
 
 const fn default_tile_memory_mib() -> u32 {
-    512
+    crate::ui::plot::DEFAULT_DISPLAY_CACHE_MIB
 }
 
 const fn default_significant_digits() -> u8 {

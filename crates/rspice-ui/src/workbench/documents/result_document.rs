@@ -697,6 +697,24 @@ pub(crate) fn restore_markers(state: &mut AppState, markers: Vec<ResultMarker>) 
     state.ui.results.adopt_markers(retained);
 }
 
+/// Restore the reader's logarithmic-axis pane choices, dropping any whose
+/// analysis this project no longer retains.
+///
+/// Same rule as the markers above: a presentation decision that cannot find
+/// the dataset it was made about is not a decision about anything.
+pub(crate) fn restore_log_y_panes(state: &mut AppState, panes: Vec<WavePanePresentationKey>) {
+    state.ui.results.log_y_panes = panes
+        .into_iter()
+        .filter(|pane| {
+            state
+                .simulation
+                .runs
+                .iter()
+                .any(|run| pane.analysis.resolve(run).is_some())
+        })
+        .collect();
+}
+
 /// A user-placed marker on a waveform strip.
 ///
 /// The anchor is a *signal*, not one solve of it: `y` is resampled from the
@@ -723,8 +741,8 @@ pub struct ResultMarker {
 ///
 /// The analysis key retains the exact dataset identity; the unit is the pane
 /// grouping contract and remains independent of transient pane ordinals.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct WavePanePresentationKey {
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct WavePanePresentationKey {
     pub analysis: AnalysisPresentationKey,
     pub unit: String,
 }
@@ -924,6 +942,15 @@ pub struct ResultsState {
     pub(super) active_wave_pane: Option<WavePanePresentationKey>,
     /// Horizontal cursor, bound to the pane whose Y axis owns its value.
     pub(super) horizontal_cursor: Option<HorizontalWaveCursor>,
+    /// Unit-scoped panes the user put on a logarithmic Y axis.
+    ///
+    /// This lived in egui's persisted memory under a hand-built id, which put
+    /// a project-scoped presentation decision outside every owner that knows
+    /// about projects: `clear_project_scoped_state` could not reach it, the
+    /// project file could not carry it, and it accumulated an entry for every
+    /// dataset the user ever opened. It is the same class of fact as a marker
+    /// and it is kept the same way.
+    pub(crate) log_y_panes: HashSet<WavePanePresentationKey>,
     /// Draw exact project specification bounds compatible with visible axes.
     pub(super) show_spec_limits: bool,
     /// Draw derived min/max curves only when retained family samples exist.
@@ -2409,7 +2436,14 @@ pub(super) fn show_persistent_pane_viewer(ui: &mut Ui, app: &mut RSpiceApp, view
 
 pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
     let data_version = app.state.simulation.data_version;
+    // The user's display-cache budget is session state, and the cache is not,
+    // so applying it only where the setting is edited left a restored session
+    // running on the default until the reader happened to reopen that panel.
+    // Reasserting it each frame keeps the two in step by construction; it
+    // costs a comparison unless the budget actually shrank.
+    let budget = app.state.workbench.visualization_studio.tile_memory_mib;
     let results = &mut app.state.ui.results;
+    results.cache.set_memory_budget_mib(budget);
     if results.seen_version != data_version {
         results.seen_version = data_version;
         results.clear_cursors();

@@ -1037,6 +1037,7 @@ fn apply_loaded_project_authorized(
     accepted_baseline.execution_context = accepted_execution_context;
     let simulation_results = project.simulation_results;
     let result_markers = project.result_markers;
+    let result_log_y_panes = project.result_log_y_panes;
     let mut simulation_results_warning = project.simulation_results_warning;
     state.clear_design_execution_context();
     state.library_manager = project.libraries;
@@ -1062,6 +1063,7 @@ fn apply_loaded_project_authorized(
     // that still find their analysis: a marker pointing at a dataset this
     // project no longer retains would draw on nothing.
     crate::workbench::documents::result_document::restore_markers(state, result_markers);
+    crate::workbench::documents::result_document::restore_log_y_panes(state, result_log_y_panes);
     if let Some(path) = origin.recent_path() {
         state.remember_recent_file(crate::workbench::app_state::RecentKind::Project, path);
     }
@@ -2518,6 +2520,87 @@ mod tests {
         );
         assert_eq!(reopened.ui.results.markers.len(), 1);
         assert_eq!(reopened.ui.results.markers[0].note, "settling point");
+    }
+
+    /// A logarithmic Y axis is a decision about a dataset, like a marker.
+    ///
+    /// It used to live in egui's persisted memory under a hand-built id,
+    /// which put it outside every owner that knows what a project is: closing
+    /// one could not clear it, saving one could not carry it, and it grew an
+    /// entry for every dataset ever opened.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn save_project_to_path_round_trips_logarithmic_panes() {
+        use crate::workbench::documents::result_document::{
+            AnalysisPresentationKey, WavePanePresentationKey,
+        };
+
+        let mut state = AppState::default();
+        let mut run = crate::state::SimulationRun::new(12);
+        run.add_analysis(
+            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Ac, "AC")
+                .with_waveforms(vec![crate::state::WaveformData::new(
+                    "V(out)",
+                    vec![1.0, 10.0, 100.0],
+                    vec![1.0, 0.5, 0.1],
+                    "#00aaff",
+                )]),
+        );
+        seal_legacy_unattributed(&mut run);
+        state.simulation.runs = vec![run];
+        state.simulation.next_run_id = 12;
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+
+        let active = state.simulation.active_run().expect("active retained run");
+        let analysis = AnalysisPresentationKey::new(active.dataset_id, &active.analyses[0]);
+        let pane = WavePanePresentationKey {
+            analysis,
+            unit: "V".to_owned(),
+        };
+        // A pane whose analysis this project does not retain must not come
+        // back — it would put an axis in log space for nothing on screen.
+        let orphan = WavePanePresentationKey {
+            analysis: AnalysisPresentationKey::new(
+                crate::product::DatasetId::new(),
+                &crate::state::AnalysisResult::new(
+                    9,
+                    crate::state::AnalysisType::Transient,
+                    "gone",
+                ),
+            ),
+            unit: "A".to_owned(),
+        };
+        state.ui.results.log_y_panes.insert(pane.clone());
+        state.ui.results.log_y_panes.insert(orphan);
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "rspice-save-project-logy-{}-{unique}.rspiceproj",
+            std::process::id()
+        ));
+
+        let saved = save_project_to_path(&mut state, &path);
+        let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(saved);
+        assert_eq!(loaded.result_log_y_panes.len(), 2);
+
+        let mut reopened = AppState::default();
+        reopened.simulation = state.simulation.clone();
+        crate::workbench::documents::result_document::restore_log_y_panes(
+            &mut reopened,
+            loaded.result_log_y_panes,
+        );
+        assert_eq!(
+            reopened.ui.results.log_y_panes.iter().collect::<Vec<_>>(),
+            vec![&pane],
+            "only the pane whose analysis is still retained comes back"
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
