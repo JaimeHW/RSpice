@@ -285,8 +285,7 @@ pub(crate) fn analyze_dc_ground_paths_with_capacitor_ic_mode(
         union.collect_element_nodes(element);
         let synthesized = matches!(
             element.provenance,
-            crate::netlist::ElementProvenance::GeneratedDynamicStateDerivative { .. }
-                | crate::netlist::ElementProvenance::GeneratedDynamicInternalNode { .. }
+            crate::netlist::ElementProvenance::GeneratedDynamicInternalNode { .. }
                 | crate::netlist::ElementProvenance::SynthesizedTransferState { .. }
         );
         let terminal_nodes = connectivity_terminal_nodes(element).unwrap_or_else(|_| {
