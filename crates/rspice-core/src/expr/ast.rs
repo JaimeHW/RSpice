@@ -27,8 +27,11 @@ pub enum Expr {
     Function { func: Function, args: Vec<Expr> },
     /// String literal used by build-time-resolved expression functions.
     StringLiteral(String),
-    /// Build-time-resolved file-backed lookup table.
-    LookupTable(LookupTable),
+    /// Build-time-resolved lookup table with an explicit runtime input.
+    LookupTable {
+        input: Box<Expr>,
+        table: LookupTable,
+    },
     /// Time variable (for transient)
     Time,
     /// Frequency variable (for AC)
@@ -124,7 +127,7 @@ pub enum Function {
     FastTableFile, // fasttablefile("path") / fasttablefile(path)
     Cubic,     // cubic("path") = file-backed natural cubic spline of time
     CubicFile, // cubicfile("path") alias
-    Akima,     // akima("path") / spline("path") = file-backed Akima spline
+    Akima,     // akima(x, x1,y1, ...) or akima("path"); spline alias
     AkimaFile, // akimafile("path") / splinefile("path") alias
     Wodicka,   // wodicka("path") = file-backed rounded-corner Akima variant
     WodickaFile, // wodickafile("path") alias
@@ -140,7 +143,7 @@ pub enum Function {
     If, // if(cond, then, else)
 }
 
-/// File-backed one-dimensional lookup data resolved during circuit build.
+/// One-dimensional lookup data resolved and precomputed during circuit build.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LookupTable {
     /// Sorted `(x, y)` pairs used for interpolation.

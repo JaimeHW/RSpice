@@ -1330,10 +1330,11 @@ impl GenericSwitch {
             | Expr::Temperature
             | Expr::ThermalVoltage
             | Expr::Gmin => {}
-            Expr::LookupTable(table) => {
+            Expr::LookupTable { input, table } => {
                 if table.transient_breakpoints {
-                    breakpoints.extend(table.points.iter().map(|(time, _)| *time));
+                    Self::collect_lookup_time_breakpoints(input, &table.points, breakpoints);
                 }
+                Self::collect_time_breakpoints_from_expr(input, breakpoints);
             }
         }
     }
@@ -1351,6 +1352,24 @@ impl GenericSwitch {
             };
             breakpoints.push((*knot - time_offset) / time_scale);
         }
+    }
+
+    fn collect_lookup_time_breakpoints(
+        input: &Expr,
+        points: &[(Value, Value)],
+        breakpoints: &mut Vec<Value>,
+    ) {
+        let Some((time_scale, time_offset)) = Self::affine_time(input) else {
+            return;
+        };
+        if time_scale.abs() < 1.0e-30 {
+            return;
+        }
+        breakpoints.extend(
+            points
+                .iter()
+                .map(|(knot, _)| (*knot - time_offset) / time_scale),
+        );
     }
 
     fn push_affine_crossing(left: &Expr, right: &Expr, breakpoints: &mut Vec<Value>) {
@@ -1404,12 +1423,12 @@ impl GenericSwitch {
             | Expr::NodeVoltage(_)
             | Expr::BranchCurrent(_)
             | Expr::StringLiteral(_)
-            | Expr::LookupTable(_)
             | Expr::Frequency
             | Expr::Temperature
             | Expr::ThermalVoltage
             | Expr::Gmin
             | Expr::Function { .. } => None,
+            Expr::LookupTable { .. } => None,
         }
     }
 

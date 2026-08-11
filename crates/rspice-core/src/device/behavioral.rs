@@ -8,8 +8,8 @@ use crate::Value;
 use crate::config::ExpressionDialect;
 use crate::expr::{
     BinaryOp, CompiledExpr, Context, Expr, Function, UnaryOp, Vm, compile,
-    normalize_expression_boundary, parse_expression_strict, real_pow_with_derivative,
-    resolve_file_lookup_functions_with_limits,
+    lookup_table_interpolate_with_derivative, normalize_expression_boundary,
+    parse_expression_strict, real_pow_with_derivative, resolve_file_lookup_functions_with_limits,
 };
 use crate::solver::StaticMatrix;
 use std::path::Path;
@@ -576,7 +576,10 @@ fn expression_excludes_voltage_output_from_transient_lte(expr: &Expr) -> bool {
         | Expr::ThermalVoltage
         | Expr::Gmin => false,
         Expr::Time => true,
-        Expr::LookupTable(table) => table.transient_breakpoints,
+        Expr::LookupTable { input, table } => {
+            table.transient_breakpoints
+                && expression_excludes_voltage_output_from_transient_lte(input)
+        }
         Expr::Unary { op, operand } => {
             matches!(op, UnaryOp::Not)
                 || expression_excludes_voltage_output_from_transient_lte(operand)
@@ -674,10 +677,16 @@ fn collect_expression_transient_breakpoints(
         | Expr::Temperature
         | Expr::ThermalVoltage
         | Expr::Gmin => {}
-        Expr::LookupTable(table) => {
+        Expr::LookupTable { input, table } => {
             if table.transient_breakpoints {
-                breakpoints.extend(table.points.iter().map(|(time, _)| *time));
+                collect_time_lookup_breakpoints(
+                    input,
+                    table.points.iter().map(|(knot, _)| *knot),
+                    tstop,
+                    breakpoints,
+                );
             }
+            collect_expression_transient_breakpoints(input, tstop, breakpoints);
         }
     }
 }
@@ -697,6 +706,16 @@ fn collect_time_table_breakpoints(args: &[Expr], tstop: Value, breakpoints: &mut
         }
     }
 
+    collect_time_lookup_breakpoints(input, knots, tstop, breakpoints);
+}
+
+fn collect_time_lookup_breakpoints(
+    input: &Expr,
+    knots: impl IntoIterator<Item = Value>,
+    tstop: Value,
+    breakpoints: &mut Vec<Value>,
+) {
+    let knots = knots.into_iter().collect::<Vec<_>>();
     match input {
         Expr::Time => breakpoints.extend(knots),
         Expr::Binary {
@@ -818,7 +837,7 @@ fn expression_depends_on_runtime_quantity(expr: &Expr) -> bool {
         | Expr::Temperature
         | Expr::ThermalVoltage
         | Expr::Gmin => true,
-        Expr::LookupTable(_) => true,
+        Expr::LookupTable { input, .. } => expression_depends_on_runtime_quantity(input),
         Expr::Unary { operand, .. } => expression_depends_on_runtime_quantity(operand),
         Expr::Binary { left, right, .. } => {
             expression_depends_on_runtime_quantity(left)
@@ -843,11 +862,11 @@ fn expression_depends_on_frequency(expr: &Expr) -> bool {
         | Expr::NodeVoltage(_)
         | Expr::BranchCurrent(_)
         | Expr::StringLiteral(_)
-        | Expr::LookupTable(_)
         | Expr::Time
         | Expr::Temperature
         | Expr::ThermalVoltage
         | Expr::Gmin => false,
+        Expr::LookupTable { input, .. } => expression_depends_on_frequency(input),
     }
 }
 
@@ -975,9 +994,22 @@ fn eval_behavioral_expr_with_derivative(
         )),
         Expr::Gmin => Some((context.gmin, 0.0)),
         Expr::StringLiteral(_) => Some((0.0, 0.0)),
-        Expr::LookupTable(table) => {
-            let value = eval_lookup_table(table.points.as_ref(), context.time)?;
-            Some((value, 0.0))
+        Expr::LookupTable { input, table } => {
+            let (input_value, input_derivative) =
+                eval_behavioral_expr_with_derivative(input, context)?;
+            let (value, derivative) = lookup_table_interpolate_with_derivative(
+                input_value,
+                table,
+                context.expression_dialect,
+            );
+            Some((
+                value,
+                if input_derivative == 0.0 {
+                    0.0
+                } else {
+                    derivative * input_derivative
+                },
+            ))
         }
         Expr::NodeVoltage(name) => {
             let idx = *context.program.node_map.get(name)?;
@@ -1417,10 +1449,6 @@ fn eval_piecewise_function_with_derivative(
         points.push((px, py));
     }
     evaluator(x, dx, &points)
-}
-
-fn eval_lookup_table(points: &[(Value, Value)], x: Value) -> Option<Value> {
-    eval_table_points_with_derivative(x, 0.0, points).map(|(value, _)| value)
 }
 
 fn eval_table_points_with_derivative(
@@ -2386,6 +2414,12 @@ mod tests {
     fn periodic_time_table_breakpoints_repeat_knots() {
         let ast =
             parse_expression_strict("table(time%120n,0,0,60n,3.3,100n,0)").expect("parse table");
+        let ast = resolve_file_lookup_functions_with_limits(
+            ast,
+            None,
+            crate::resource::ResourceLimits::default(),
+        )
+        .expect("constant inline table resolves");
         let breakpoints = expression_transient_breakpoints(&ast, 200.0e-9);
 
         for expected in [0.0, 60.0e-9, 100.0e-9, 120.0e-9, 180.0e-9] {
@@ -2396,6 +2430,92 @@ mod tests {
                 "missing breakpoint {expected:e}; got {breakpoints:?}"
             );
         }
+    }
+
+    #[test]
+    fn inline_lookup_jacobians_follow_xyce_and_voltage_inputs_add_no_time_knots() {
+        let mut akima = BehavioralVoltageSource::new(
+            "Bakima".to_string(),
+            1,
+            0,
+            1,
+            "akima(v(a),1,4,0.5,2.25,0,1)",
+        )
+        .expect("inline Akima source resolves");
+        akima.set_expression_dialect(ExpressionDialect::Xyce);
+        akima
+            .bind_references(|name| name.eq_ignore_ascii_case("a").then_some(1), |_| None)
+            .expect("Akima input binds");
+        akima.linearize_at(&[0.3]);
+        let (_, derivative) = akima
+            .linearized_partials()
+            .next()
+            .expect("Akima source has one node partial");
+        assert!((derivative - 2.6).abs() < 2.0e-14, "{derivative}");
+        assert!(expression_transient_breakpoints(&akima.ast, 1.0).is_empty());
+
+        let step = 1.0e-6;
+        let mut vm = Vm::new();
+        let upper = vm.execute(
+            &akima.program,
+            &Context::dc(&[0.3 + step], &[]).with_expression_dialect(ExpressionDialect::Xyce),
+        );
+        let lower = vm.execute(
+            &akima.program,
+            &Context::dc(&[0.3 - step], &[]).with_expression_dialect(ExpressionDialect::Xyce),
+        );
+        let numerical = (upper - lower) / (2.0 * step);
+        assert!((derivative - numerical).abs() < 2.0e-9, "{numerical}");
+
+        let mut table = BehavioralVoltageSource::new(
+            "Btable".to_string(),
+            1,
+            0,
+            1,
+            "table(v(a),1,3,0.5,2,0,1)",
+        )
+        .expect("inline table source resolves");
+        table.set_expression_dialect(ExpressionDialect::Xyce);
+        table
+            .bind_references(|name| name.eq_ignore_ascii_case("a").then_some(1), |_| None)
+            .expect("table input binds");
+        table.linearize_at(&[0.1]);
+        let (_, derivative) = table
+            .linearized_partials()
+            .next()
+            .expect("table source has one node partial");
+        assert!((derivative - 0.8).abs() < 2.0e-14, "{derivative}");
+        assert!(expression_transient_breakpoints(&table.ast, 1.0).is_empty());
+    }
+
+    #[test]
+    fn xyce_barycentric_knot_derivative_does_not_poison_an_inactive_direction() {
+        let dir = unique_temp_dir("behavioral-barycentric-inactive-direction");
+        std::fs::create_dir_all(&dir).expect("create temp table directory");
+        std::fs::write(dir.join("curve.dat"), "0 1\n1 2\n2 5\n")
+            .expect("write barycentric table data");
+        let deck_path = dir.join("deck.cir");
+
+        let mut source = BehavioralVoltageSource::new_with_source_path(
+            "Bbli".to_string(),
+            1,
+            0,
+            1,
+            "bli(\"curve.dat\") + 0*v(a)",
+            Some(&deck_path),
+        )
+        .expect("barycentric source resolves");
+        source.set_expression_dialect(ExpressionDialect::Xyce);
+        source
+            .bind_references(|name| name.eq_ignore_ascii_case("a").then_some(1), |_| None)
+            .expect("inactive voltage reference binds");
+
+        source.linearize_at(&[7.0]);
+        let (_, derivative) = source
+            .linearized_partials()
+            .next()
+            .expect("source retains its inactive node partial");
+        assert_eq!(derivative.to_bits(), 0.0_f64.to_bits());
     }
 
     #[test]
