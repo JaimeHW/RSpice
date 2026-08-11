@@ -2852,6 +2852,46 @@ mod integrity_scan_tests {
         assert_eq!(app.state.workbench.visualization_studio.dock, None);
     }
 
+    /// The viewer library publishes every designed view, and most of them this
+    /// build cannot draw. The row a user cannot click has to say which kind of
+    /// unavailable it is: "requires X analysis data" is an instruction, and the
+    /// user can act on it, so a view that will never resolve for any dataset
+    /// must not borrow that phrasing — nor state it as a missing registration.
+    #[test]
+    fn every_catalog_viewer_is_either_drawable_or_says_it_is_not_in_this_build() {
+        use sections::{VIEWER_UNAVAILABLE_IN_THIS_BUILD, resolved_viewer_availability};
+
+        let app = app_with_exact_source();
+        let analysis_ids = available_analysis_ids(&app.state);
+        let mut drawable = 0;
+        for definition in VIEWER_DOCUMENTS {
+            let availability = resolved_viewer_availability(
+                &app.state,
+                definition,
+                ViewerCapabilities {
+                    analysis_ids: &analysis_ids,
+                    external_capabilities: &[],
+                },
+            );
+            let ships_a_renderer = ResultViewer::from_viewer_document_id(definition.id).is_some();
+            drawable += usize::from(ships_a_renderer);
+            match availability {
+                Ok(_) => assert!(ships_a_renderer, "{} drew without a sheet", definition.id),
+                Err(reason) => assert_eq!(
+                    reason == VIEWER_UNAVAILABLE_IN_THIS_BUILD,
+                    !ships_a_renderer,
+                    "{} reports the wrong kind of unavailable: {reason}",
+                    definition.id
+                ),
+            }
+        }
+        assert!(
+            drawable > 0 && drawable < VIEWER_DOCUMENTS.len(),
+            "the catalog and the shipped renderers have stopped disagreeing; \
+             fold this expectation into whichever is now the whole truth"
+        );
+    }
+
     /// Three sheets render `viewer-table`, so a retained pane's sheet cannot be
     /// recovered from its viewer document — only checked against it. Reading
     /// that check backwards would reject every retained Specs and OP pane as
