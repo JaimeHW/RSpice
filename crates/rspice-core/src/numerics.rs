@@ -10,3 +10,27 @@
 //! an assembled matrix rather than defining one.
 
 pub mod integration;
+
+use crate::Value;
+
+/// The smallest timestep Xyce will take at `current_time`, and the scale its
+/// breakpoint comparisons are measured against.
+///
+/// Xyce derives this from the floating-point resolution of the clock itself:
+/// once a step is small enough that adding it to the current time changes only
+/// the last few bits, advancing it means nothing. Twice this value is the
+/// tolerance for deciding whether a transient has landed *on* a waveform
+/// breakpoint, which is why a source waveform needs it as much as the step
+/// controller does.
+///
+/// Multiplying before taking the magnitude would overflow near `Value::MAX`, so
+/// the magnitude comes first; a non-finite clock has no resolution to speak of
+/// and yields zero.
+#[must_use]
+pub fn xyce_hard_min_timestep(current_time: Value) -> Value {
+    if current_time.is_finite() {
+        current_time.abs() * (10.0 * Value::EPSILON)
+    } else {
+        0.0
+    }
+}

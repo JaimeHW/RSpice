@@ -900,13 +900,14 @@ impl Engine {
     /// `currentTime * 10 * MachinePrecision()` after every accepted point.
     /// The controller supplies its own tiny positive implementation floor at
     /// time zero, where the canonical expression is exactly zero.
+    ///
+    /// The quantity itself lives in [`crate::numerics`], because a source
+    /// waveform needs the same number to decide whether the transient has
+    /// landed on one of its breakpoints, and reaching up into the engine for it
+    /// would put the circuit store above the analyses that drive it.
     #[inline]
     pub(crate) fn xyce_hard_min_timestep(current_time: Value) -> Value {
-        if current_time.is_finite() {
-            current_time.abs() * (10.0 * Value::EPSILON)
-        } else {
-            0.0
-        }
+        crate::numerics::xyce_hard_min_timestep(current_time)
     }
 
     #[inline]

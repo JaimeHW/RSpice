@@ -1397,9 +1397,7 @@ impl VoltageSources {
                     // fallback because they have no accepted state.
                     let breakpoint_tolerance = context
                         .and_then(|context| context.xyce_breakpoint_tolerance)
-                        .unwrap_or_else(|| {
-                            2.0 * crate::engine::Engine::xyce_hard_min_timestep(time)
-                        });
+                        .unwrap_or_else(|| 2.0 * crate::numerics::xyce_hard_min_timestep(time));
                     let rise_width = rise + width;
                     let end = rise_width + fall;
                     if t <= 0.0 || (t > end && (t - end).abs() > breakpoint_tolerance) {
