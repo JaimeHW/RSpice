@@ -24,6 +24,12 @@ mod publish;
 mod render;
 #[cfg(any(test, target_arch = "wasm32"))]
 mod worker;
+/// Resolution a raster export starts at when the setup carries none. It is a
+/// starting point, not a ceiling: what the host can actually afford for the
+/// chosen page comes from `render::max_raster_dpi`, and on a small enough
+/// budget the field opens already showing a violation rather than a lie.
+pub(crate) const DEFAULT_RASTER_DPI: u16 = 600;
+
 pub(crate) use publish::open_hardcopy_workflow;
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(crate) use worker::run_worker_request_value;
@@ -35,6 +41,52 @@ pub(crate) enum HardcopyDialogPage {
     PrinterProperties,
     CustomPaperMargins,
     PrintMapping,
+}
+
+/// The one concern the main page is editing right now.
+///
+/// The surface shows exactly one of these at a time, which is what keeps it
+/// scroll-free: the number of controls a hardcopy carries is not bounded, but
+/// the number visible at once is. The rail keeps the others legible by
+/// summarising each in a line, so nothing is hidden — only deferred.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub(crate) enum HardcopySection {
+    #[default]
+    Source,
+    Page,
+    DrawingSheet,
+    Output,
+    Identity,
+}
+
+impl HardcopySection {
+    pub(crate) const ALL: [Self; 5] = [
+        Self::Source,
+        Self::Page,
+        Self::DrawingSheet,
+        Self::Output,
+        Self::Identity,
+    ];
+
+    pub(crate) const fn number(self) -> &'static str {
+        match self {
+            Self::Source => "01",
+            Self::Page => "02",
+            Self::DrawingSheet => "03",
+            Self::Output => "04",
+            Self::Identity => "05",
+        }
+    }
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Source => "Source and scope",
+            Self::Page => "Page and pagination",
+            Self::DrawingSheet => "Drawing sheet",
+            Self::Output => "Output",
+            Self::Identity => "Identity",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -185,6 +237,7 @@ pub(crate) struct SchematicPageSetupAuthority {
 pub(crate) struct HardcopyDialogState {
     pub(crate) open: bool,
     pub(crate) page: HardcopyDialogPage,
+    pub(crate) section: HardcopySection,
     pub(crate) subflow_snapshot: Option<HardcopySubflowSnapshot>,
     pub(crate) workflow: HardcopyWorkflow,
     pub(crate) source: Option<ActiveHardcopySource>,
@@ -224,6 +277,11 @@ pub(crate) struct HardcopyDialogState {
         Option<crate::workbench::hardcopy_adapters::print::PrinterCapabilitySnapshot>,
     pub(crate) printer_discovery_busy: bool,
     pub(crate) format: OutputFormat,
+    /// Editable resolution for the raster formats. `format` stays the
+    /// authority; this is the text being typed, committed on Enter or focus
+    /// loss, because `60` is a legal prefix of `600` and refusing it mid-word
+    /// would fight the typist.
+    pub(crate) raster_dpi_draft: String,
     pub(crate) color_mapping: ColorMapping,
     pub(crate) background: BackgroundMode,
     pub(crate) embed_fonts: bool,
@@ -313,6 +371,7 @@ impl HardcopyDialogState {
         Self {
             open: false,
             page: HardcopyDialogPage::Main,
+            section: HardcopySection::default(),
             subflow_snapshot: None,
             workflow: HardcopyWorkflow::PageSetup,
             source: None,
@@ -358,6 +417,10 @@ impl HardcopyDialogState {
             printer_capabilities: None,
             printer_discovery_busy: false,
             format,
+            raster_dpi_draft: format
+                .raster_dpi()
+                .unwrap_or(DEFAULT_RASTER_DPI)
+                .to_string(),
             color_mapping: render.color_mapping(),
             background: render.background(),
             embed_fonts: render.fonts().embed_fonts(),
@@ -402,6 +465,7 @@ impl HardcopyDialogState {
         let mut draft = saved.cloned().map_or_else(Self::default, Self::from_setup);
         draft.open = true;
         draft.page = HardcopyDialogPage::Main;
+        draft.section = HardcopySection::default();
         draft.subflow_snapshot = None;
         draft.workflow = workflow;
         draft.source = Some(source);

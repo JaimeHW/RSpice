@@ -19,6 +19,9 @@ mod raster;
 mod svg;
 
 use pdf::*;
+/// The dialog asks the publisher what it can afford rather than predicting it,
+/// so this crosses the module boundary the glob import above does not.
+pub(crate) use raster::max_raster_dpi;
 use raster::*;
 
 use svg::*;
@@ -1389,7 +1392,7 @@ impl HardcopyRenderer {
                         maximum: MAX_RASTER_PIXELS_TOTAL,
                     });
                 }
-                validate_raster_working_set(largest_page, 1, 8)?;
+                validate_raster_working_set(largest_page, 1, PNG_BYTES_PER_PIXEL)?;
                 let mut parts = Vec::with_capacity(plan.pagination().pages().len());
                 for page in plan.pagination().pages() {
                     let pixels = rasterize_page(plan, scene, page, dpi)?;

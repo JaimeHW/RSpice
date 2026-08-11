@@ -579,6 +579,47 @@ fn exact_cross_hatch_is_shared_by_svg_pdf_and_raster_paths() {
     decoder.read_info().unwrap();
 }
 
+/// The dangerous direction is a ceiling that promises more than the publisher
+/// will accept, so that is the one pinned here: one step above it has to be
+/// refused, and refused for the budget rather than for anything else. The
+/// opposite error — a ceiling lower than necessary — costs resolution, not
+/// correctness, and the bisection cannot produce it without also failing this.
+#[test]
+fn the_offered_resolution_ceiling_is_the_one_the_publisher_enforces() {
+    let content = extent(100_000, 100_000);
+    let format = OutputFormat::Png { dpi: 600 };
+    let compiled = plan(format, content, false);
+    let ceiling =
+        max_raster_dpi(&compiled, format).expect("a Letter page rasters at some resolution");
+    assert!((MIN_RASTER_DPI..MAX_RASTER_DPI).contains(&ceiling));
+
+    let refused = plan(OutputFormat::Png { dpi: ceiling + 1 }, content, false);
+    assert!(matches!(
+        HardcopyRenderer::render(&refused, &scene(content)),
+        Err(HardcopyRenderError::ResourceLimit { .. })
+    ));
+}
+
+/// TIFF materialises an RGB8 copy of the page on top of the pixmap it shares
+/// with PNG, so it costs more per pixel and has to stop lower. One constant
+/// for both would pass every other test here.
+#[test]
+fn png_and_tiff_do_not_share_a_resolution_ceiling() {
+    let content = extent(100_000, 100_000);
+    let compiled = plan(OutputFormat::Png { dpi: 600 }, content, false);
+    let png = max_raster_dpi(&compiled, OutputFormat::Png { dpi: 600 }).unwrap();
+    let tiff = max_raster_dpi(&compiled, OutputFormat::Tiff { dpi: 600 }).unwrap();
+    assert!(tiff < png, "png {png} dpi, tiff {tiff} dpi");
+}
+
+#[test]
+fn a_vector_format_has_no_resolution_to_offer() {
+    let content = extent(100_000, 100_000);
+    let compiled = plan(OutputFormat::SvgVector, content, false);
+    assert_eq!(max_raster_dpi(&compiled, OutputFormat::SvgVector), None);
+    assert_eq!(max_raster_dpi(&compiled, OutputFormat::PdfA), None);
+}
+
 #[test]
 fn printer_working_set_accounts_for_retained_rgba_and_spool_conversion() {
     let letter_1200_dpi_pixels = 13_200_u64 * 10_200;

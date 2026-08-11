@@ -364,6 +364,14 @@ pub enum OutputFormat {
     Tiff { dpi: u16 },
 }
 
+/// Absolute bounds on a raster output resolution. These are the contract's
+/// own limits, independent of any target: what a given host can actually
+/// afford is narrower and depends on the page, so the dialog derives its
+/// ceiling from the renderer instead of from these.
+pub const MIN_RASTER_DPI: u16 = 72;
+/// See [`MIN_RASTER_DPI`].
+pub const MAX_RASTER_DPI: u16 = 9_600;
+
 impl OutputFormat {
     #[must_use]
     pub const fn is_vector(self) -> bool {
@@ -373,9 +381,29 @@ impl OutputFormat {
         )
     }
 
+    /// The resolution a raster format carries, if this is one.
+    #[must_use]
+    pub const fn raster_dpi(self) -> Option<u16> {
+        match self {
+            Self::Png { dpi } | Self::Tiff { dpi } => Some(dpi),
+            _ => None,
+        }
+    }
+
+    /// The same format at another resolution. Vector and printer formats have
+    /// no resolution to change and are returned unaltered.
+    #[must_use]
+    pub const fn with_raster_dpi(self, dpi: u16) -> Self {
+        match self {
+            Self::Png { .. } => Self::Png { dpi },
+            Self::Tiff { .. } => Self::Tiff { dpi },
+            other => other,
+        }
+    }
+
     fn validate(self) -> Result<(), HardcopyError> {
         if let Self::Png { dpi } | Self::Tiff { dpi } = self
-            && !(72..=9_600).contains(&dpi)
+            && !(MIN_RASTER_DPI..=MAX_RASTER_DPI).contains(&dpi)
         {
             return Err(HardcopyError::InvalidRasterResolution(dpi));
         }

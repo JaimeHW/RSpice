@@ -44,9 +44,9 @@ use super::sources::{
 use crate::hardcopy::RenderTarget;
 use crate::hardcopy::{
     BackgroundMode, Bleed, ColorMapping, ContentExtent, HardcopyArtifactIdentity, HardcopyPlan,
-    Length, OutputFormat, OutsideSheetContentPolicy, PageRect, PreviewPage, PrintColor,
-    PrintMappingTable, PrintObjectKind, PrintRedundancy, ResolvedOrientation, ScaleRatio,
-    SchematicHardcopyExtent, SchematicHardcopySetup, Watermark,
+    Length, MAX_RASTER_DPI, MIN_RASTER_DPI, OutputFormat, OutsideSheetContentPolicy, PageRect,
+    PreviewPage, PrintColor, PrintMappingTable, PrintObjectKind, PrintRedundancy,
+    ResolvedOrientation, ScaleRatio, SchematicHardcopyExtent, SchematicHardcopySetup, Watermark,
 };
 #[cfg(any(test, target_arch = "wasm32"))]
 use crate::hardcopy::{HardcopyDocumentId, HardcopyPlanId};

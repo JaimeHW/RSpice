@@ -15,6 +15,61 @@ pub(super) struct RasterPage {
     pub(super) rgba: Vec<u8>,
 }
 
+/// Peak working-set cost per pixel, per raster format. PNG holds the RGBA
+/// pixmap and the encoder's window; TIFF additionally materialises an RGB8
+/// copy of the page before compressing it. These are the numbers the publisher
+/// charges, so anything that predicts a refusal has to charge the same ones.
+pub(super) const PNG_BYTES_PER_PIXEL: u64 = 8;
+/// See [`PNG_BYTES_PER_PIXEL`].
+pub(super) const TIFF_BYTES_PER_PIXEL: u64 = 12;
+
+/// The greatest resolution this plan's pages can be rastered at on this host,
+/// or `None` when the format is not raster or even [`MIN_RASTER_DPI`] does not
+/// fit.
+///
+/// Derived by asking the same predicates the publisher runs, never by
+/// inverting them: `raster_dimensions` rounds each axis up independently, the
+/// two formats charge different bytes per pixel, and a closed form would drift
+/// from all of that the first time any of it changed — which is precisely how
+/// a dialog comes to offer a setting its own renderer refuses. Pixel counts
+/// rise monotonically with resolution, so bisecting the contract's range finds
+/// the exact boundary.
+pub(crate) fn max_raster_dpi(plan: &HardcopyPlan, format: OutputFormat) -> Option<u16> {
+    let bytes_per_pixel = match format {
+        OutputFormat::Png { .. } => PNG_BYTES_PER_PIXEL,
+        OutputFormat::Tiff { .. } => TIFF_BYTES_PER_PIXEL,
+        _ => return None,
+    };
+    let admits = |dpi| raster_budget_admits(plan, dpi, bytes_per_pixel);
+    if !admits(MIN_RASTER_DPI) {
+        return None;
+    }
+    if admits(MAX_RASTER_DPI) {
+        return Some(MAX_RASTER_DPI);
+    }
+    let (mut admitted, mut refused) = (MIN_RASTER_DPI, MAX_RASTER_DPI);
+    while admitted + 1 < refused {
+        let midpoint = admitted + (refused - admitted) / 2;
+        if admits(midpoint) {
+            admitted = midpoint;
+        } else {
+            refused = midpoint;
+        }
+    }
+    Some(admitted)
+}
+
+/// Every budget a raster publication must satisfy, evaluated together.
+/// `aggregate_raster_pixels` already refuses a single oversized page, so the
+/// remaining checks are the aggregate and the working set.
+fn raster_budget_admits(plan: &HardcopyPlan, dpi: u16, bytes_per_pixel: u64) -> bool {
+    let Ok((total_pixels, largest_page)) = aggregate_raster_pixels(plan, dpi) else {
+        return false;
+    };
+    total_pixels <= MAX_RASTER_PIXELS_TOTAL
+        && validate_raster_working_set(largest_page, 1, bytes_per_pixel).is_ok()
+}
+
 pub(super) fn raster_dimensions(
     page: &PreviewPage,
     dpi: u16,
@@ -175,7 +230,7 @@ pub(super) fn render_tiff(
             maximum: MAX_RASTER_PIXELS_TOTAL,
         });
     }
-    validate_raster_working_set(largest_page, 1, 12)?;
+    validate_raster_working_set(largest_page, 1, TIFF_BYTES_PER_PIXEL)?;
     let mut bytes = Vec::new();
     let cursor = Cursor::new(&mut bytes);
     let mut encoder = TiffEncoder::new(cursor)

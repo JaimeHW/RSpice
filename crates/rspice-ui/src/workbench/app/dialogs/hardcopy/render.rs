@@ -11,28 +11,31 @@ use bodies::*;
 use content_options::*;
 
 use egui::{
-    Align, ColorImage, Context, Frame, Layout, Margin, Sense, Stroke, TextureHandle,
-    TextureOptions, Ui, vec2,
+    Align, ColorImage, Context, Frame, Layout, Margin, Rect, Sense, Stroke, TextureHandle,
+    TextureOptions, Ui, Vec2, vec2,
 };
 
 use crate::hardcopy::{
-    AuthoredSheetMedia, BackgroundMode, ColorMapping, Length, LengthUnit, Orientation,
-    OutputFormat, OutsideSheetContentPolicy, PaperSize, PrintColor, PrintMappingEntry,
-    PrintMappingTable, PrintRedundancy, ScaleMode, SchematicHardcopyExtent, StandardPaper,
-    TilingMode, Watermark,
+    AuthoredSheetMedia, BackgroundMode, ColorMapping, Length, LengthUnit, MAX_RASTER_DPI,
+    MIN_RASTER_DPI, Orientation, OutputFormat, OutsideSheetContentPolicy, PaperSize, PrintColor,
+    PrintMappingEntry, PrintMappingTable, PrintRedundancy, ScaleMode, SchematicHardcopyExtent,
+    StandardPaper, TilingMode, Watermark,
 };
 use crate::ui::icons::Icon;
+use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, IconButton,
 };
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::design_system::section_header;
-use crate::workbench::hardcopy_adapters::render::HardcopyPreviewPage;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::hardcopy_adapters::render::HardcopyRenderer;
+use crate::workbench::hardcopy_adapters::render::{HardcopyPreviewPage, max_raster_dpi};
 
-use super::{HardcopyDialogPage, HardcopyDialogState, HardcopyWorkflow, PaperDraft, publish};
+use super::{
+    DEFAULT_RASTER_DPI, HardcopyDialogPage, HardcopyDialogState, HardcopySection, HardcopyWorkflow,
+    PaperDraft, publish,
+};
 
 #[derive(Clone)]
 struct PreviewTexture {
@@ -227,14 +230,28 @@ impl RSpiceApp {
         };
         let mut body_scroll_offset = self.state.dialogs.hardcopy.body_scroll_offset;
         let mut body_action = BodyAction::None;
+        // The main page is a studio, not a form: a fixed section rail, one
+        // section's fields, and a full-height preview beside them. Showing
+        // every control at once could only ever fit the surface by accident,
+        // and did not — the settings ran off the bottom and took the preview
+        // and the command row with them. Showing one section at a time fits by
+        // construction, so the dialog never scrolls no matter how many
+        // controls a hardcopy grows.
         let mut dialog = Dialog::new(eyebrow, title, primary)
             .description(description)
-            .size(DialogSize::SimulationWorkflow)
+            .size(match page {
+                HardcopyDialogPage::Main => DialogSize::SchematicPageSetup,
+                _ => DialogSize::SimulationWorkflow,
+            })
             .flush_body()
-            .body_scroll_offset(&mut body_scroll_offset)
             .primary_on_enter(false)
             .primary_enabled(!busy && (plan_valid || page != HardcopyDialogPage::Main))
             .ghost("Cancel");
+        dialog = if page == HardcopyDialogPage::Main {
+            dialog.fixed_height(760.0).manual_body_scroll()
+        } else {
+            dialog.body_scroll_offset(&mut body_scroll_offset)
+        };
         if let Some(label) = secondary {
             dialog = dialog.secondary(label);
         }
@@ -669,343 +686,777 @@ fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
     }
 }
 
+/// The section rail's fixed track, matched to the drawing-sheet studio so the
+/// two surfaces a hardcopy passes through do not shift under the pointer.
+const NAV_WIDTH: f32 = 230.0;
+/// Below this the rail, the editor and the preview cannot all hold the width
+/// their contents need, so the surface stacks and scrolls deliberately rather
+/// than clipping a form nobody can reach.
+const STUDIO_STACK_WIDTH: f32 = 980.0;
+const PANEL_INSET_X: i8 = 18;
+const PANEL_INSET_Y: i8 = 16;
+/// Height of one row of the preview's estimate strip. The strip's total height
+/// is reserved before it is drawn, so this is the contract the rows keep: a row
+/// that laid itself out freely made the column taller than the height it was
+/// assigned, and the whole studio then hung 40 pt below the rail beside it.
+const FACT_ROW_HEIGHT: f32 = 20.0;
+const FACT_STRIP_INSET: f32 = 20.0;
+
 fn main_body(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
+    // One before/after comparison for the whole surface. Each form used to run
+    // its own, so a control could only invalidate the preview if it happened to
+    // be declared in the same block as the fields it changed — and with the
+    // controls now spread across five sections, that is no longer true of any
+    // of them.
+    let before_content = content_inputs(draft);
+    let before_render = rendering_inputs(draft);
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-    context_strip(ui, draft);
+
+    let sections = available_sections(draft);
+    if !sections.contains(&draft.section) {
+        draft.section = sections[0];
+    }
+    let available = ui.available_size();
+    let body_height = available.y.max(1.0);
     let mut action = BodyAction::None;
-    let width = ui.available_width();
-    let screen_width = ui.ctx().content_rect().width();
-    Frame::NONE.show(ui, |ui| {
-        if screen_width > 760.0 {
-            let t = Tokens::get(ui.ctx());
-            let right_width = (width * (0.65 / 2.0)).max(280.0).min(width - 320.0);
-            let left_width = width - right_width - 1.0;
-            let response = ui.horizontal_top(|ui| {
+    if available.x < STUDIO_STACK_WIDTH {
+        action = stacked_body(ui, draft, &sections, body_height);
+    } else {
+        let t = Tokens::get(ui.ctx());
+        ui.allocate_ui_with_layout(
+            vec2(available.x, body_height),
+            Layout::left_to_right(Align::Min),
+            |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                ui.allocate_ui_with_layout(
-                    vec2(left_width, 0.0),
+                let nav = ui.allocate_ui_with_layout(
+                    vec2(NAV_WIDTH, body_height),
                     Layout::top_down(Align::Min),
-                    |ui| {
-                        ui.set_width(left_width);
-                        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-                        if let Some(next) = content_pagination(ui, draft) {
-                            action = next;
-                        }
-                    },
+                    |ui| section_navigation(ui, draft, &sections, body_height),
                 );
-                ui.add_space(1.0);
-                ui.allocate_ui_with_layout(
-                    vec2(right_width, 0.0),
+                ui.painter().vline(
+                    nav.response.rect.right(),
+                    nav.response.rect.y_range(),
+                    Stroke::new(1.0, t.color.border),
+                );
+                // The preview takes 0.82 of every 1.82 units left over, with
+                // both columns floored at the width their contents need: a
+                // preview too small to read is not worth the space it costs
+                // the form, and vice versa.
+                let remaining = (available.x - NAV_WIDTH).max(720.0);
+                let preview_width = (remaining * (0.82 / 1.82))
+                    .max(330.0)
+                    .min((remaining - 390.0).max(330.0));
+                let editor_width = (remaining - preview_width).max(390.0);
+                let editor = ui.allocate_ui_with_layout(
+                    vec2(editor_width, body_height),
                     Layout::top_down(Align::Min),
-                    |ui| {
-                        ui.set_width(right_width);
-                        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-                        rendering_options(ui, draft);
-                    },
+                    |ui| editor_column(ui, draft, Some(body_height)),
                 );
-            });
-            ui.painter().vline(
-                response.response.rect.left() + left_width,
-                response.response.rect.y_range(),
-                Stroke::new(1.0, t.color.border),
-            );
-        } else {
-            let t = Tokens::get(ui.ctx());
-            let content = Frame::NONE.show(ui, |ui| {
-                if let Some(next) = content_pagination(ui, draft) {
-                    action = next;
-                }
-            });
-            ui.painter().hline(
-                content.response.rect.x_range(),
-                content.response.rect.bottom(),
-                Stroke::new(1.0, t.color.border),
-            );
-            rendering_options(ui, draft);
-        }
-    });
-    preview_surface(ui, draft);
-    let t = Tokens::get(ui.ctx());
-    let command_row = Frame::NONE
-        .fill(t.color.bg_panel)
-        .inner_margin(Margin::symmetric(10, 6))
-        .show(ui, |ui| {
-            ui.set_min_height(26.0);
-            let viewport_width = ui.available_width();
-            egui::ScrollArea::horizontal()
-                .id_salt("hardcopy-command-row")
-                .max_height(26.0)
-                .auto_shrink([false, true])
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                .show(ui, |ui| {
-                    ui.set_min_width(viewport_width);
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
-                        #[cfg(target_os = "windows")]
-                        if Button::new("Printer properties…").show(ui).clicked() {
-                            action = BodyAction::PrinterProperties;
-                        }
-                        #[cfg(all(not(target_os = "windows"), target_arch = "wasm32"))]
-                        {
-                            Button::new("Printer properties…")
-                                .enabled(false)
-                                .show(ui)
-                                .on_disabled_hover_text(
-                                    "Printer capabilities are selected in the browser print dialog.",
-                                );
-                        }
-                        #[cfg(all(not(target_os = "windows"), not(target_arch = "wasm32")))]
-                        {
-                            Button::new("Printer properties…")
-                                .enabled(false)
-                                .show(ui)
-                                .on_disabled_hover_text(
-                                    "System printer driver properties are available on Windows desktop.",
-                                );
-                        }
-                        if Button::new("Custom paper and margins…").show(ui).clicked() {
-                            action = BodyAction::CustomPaper;
-                        }
-                        if Button::new("Layer, trace, and marker mapping…")
-                            .show(ui)
-                            .clicked()
-                        {
-                            action = BodyAction::PrintMapping;
-                        }
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui
-                                .checkbox(&mut draft.soft_proof, "Soft-proof print-safe colors")
-                                .changed()
-                            {
-                                draft.refresh_preview();
-                            }
-                        });
-                    });
-                });
-        });
-    ui.painter().hline(
-        command_row.response.rect.x_range(),
-        command_row.response.rect.top(),
-        Stroke::new(1.0, t.color.border_strong),
-    );
-    preview_toolbar(ui, draft);
+                action = editor.inner;
+                ui.painter().vline(
+                    editor.response.rect.right(),
+                    editor.response.rect.y_range(),
+                    Stroke::new(1.0, t.color.border),
+                );
+                ui.allocate_ui_with_layout(
+                    vec2(preview_width, body_height),
+                    Layout::top_down(Align::Min),
+                    |ui| preview_column(ui, draft, body_height),
+                );
+            },
+        );
+    }
+
+    if draft.format == OutputFormat::NativePrinter
+        && (before_content.paper != draft.paper || before_content.orientation != draft.orientation)
+    {
+        reconcile_native_printer_job(draft);
+    }
+    if content_inputs(draft) != before_content || rendering_inputs(draft) != before_render {
+        draft.refresh_preview();
+    }
     action
 }
 
-fn context_strip(ui: &mut Ui, draft: &HardcopyDialogState) {
+/// The sections this source actually has. A document with no governed drawing
+/// sheet has no sheet furniture to configure, so the section is absent rather
+/// than present and inert — a rail entry that can never do anything is worse
+/// than one that is not there.
+fn available_sections(draft: &HardcopyDialogState) -> Vec<HardcopySection> {
+    let sheet = schematic_sheet_relationship(draft).is_some();
+    HardcopySection::ALL
+        .into_iter()
+        .filter(|section| sheet || *section != HardcopySection::DrawingSheet)
+        .collect()
+}
+
+/// `Some(true)` when resolved schematic content crosses the authored sheet,
+/// `Some(false)` when it does not, `None` when this source has no authored
+/// sheet at all.
+pub(super) fn schematic_sheet_relationship(draft: &HardcopyDialogState) -> Option<bool> {
+    draft.resolved_document.as_ref().and_then(|document| {
+        document
+            .schematic_drawing_sheet_has_outside_content()
+            .ok()
+            .flatten()
+    })
+}
+
+fn section_navigation(
+    ui: &mut Ui,
+    draft: &mut HardcopyDialogState,
+    sections: &[HardcopySection],
+    height: f32,
+) {
     let t = Tokens::get(ui.ctx());
-    let strip = Frame::NONE
-        .inner_margin(Margin::symmetric(11, 8))
-        .show(ui, |ui| {
-            ui.set_min_height(36.0);
-            let source = draft
-                .source
-                .as_ref()
-                .map_or("No active publication source", |source| {
-                    source.display_name()
-                });
-            let kind = draft.source.as_ref().map_or("unresolved", |source| {
-                document_kind_label(source.document_kind())
-            });
-            let scope = draft
-                .source
-                .as_ref()
-                .map_or("extent unavailable", |source| {
-                    detailed_scope_label(source.scope())
-                });
-            let pages = draft
-                .preview_plan
-                .as_ref()
-                .map_or(0, |plan| plan.pagination().pages().len());
-            let estimate = format!(
-                "{pages} page{} · {}",
-                if pages == 1 { "" } else { "s" },
-                if draft.format.is_vector() {
-                    "vector-safe"
+    // Paint the rail over the column it was assigned rather than over the
+    // entries it happens to contain. A Frame would only cover its content, and
+    // a rail that stops short of the editor beside it reads as a broken panel.
+    ui.painter()
+        .rect_filled(ui.max_rect(), 0.0, t.color.bg_panel);
+    {
+        ui.set_width(NAV_WIDTH);
+        ui.spacing_mut().item_spacing.y = 0.0;
+        for section in sections.iter().copied() {
+            let selected = draft.section == section;
+            let detail = section_detail(draft, section);
+            let entry = Frame::NONE
+                .fill(if selected {
+                    t.color.bg_active
                 } else {
-                    "raster"
-                }
-            );
-            let width = ui.available_width();
-            if ui.ctx().content_rect().width() > 460.0 {
-                ui.horizontal_top(|ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    let column_width = width * 0.5;
+                    t.color.bg_panel
+                })
+                .inner_margin(Margin::symmetric(12, 10))
+                .show(ui, |ui| {
+                    let width = ui.available_width();
                     ui.allocate_ui_with_layout(
-                        vec2(column_width, 0.0),
-                        Layout::top_down(Align::Min),
+                        vec2(width, 34.0),
+                        Layout::left_to_right(Align::Min),
                         |ui| {
-                            ui.set_width(column_width);
+                            ui.set_min_width(width);
                             ui.label(
-                                egui::RichText::new("Active source")
-                                    .size(tokens::FS_0)
-                                    .color(ui.visuals().weak_text_color()),
+                                egui::RichText::new(section.number())
+                                    .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
+                                    .color(if selected {
+                                        t.color.accent
+                                    } else {
+                                        t.color.text_faint
+                                    }),
                             );
-                            ui.strong(source);
-                            ui.label(
-                                egui::RichText::new(format!("{kind} · {scope}"))
-                                    .size(tokens::FS_0)
-                                    .color(ui.visuals().weak_text_color()),
-                            );
-                        },
-                    );
-                    ui.allocate_ui_with_layout(
-                        vec2(column_width, 0.0),
-                        Layout::top_down(Align::Min),
-                        |ui| {
-                            ui.set_width(column_width);
-                            ui.label(
-                                egui::RichText::new("Output estimate")
-                                    .size(tokens::FS_0)
-                                    .color(ui.visuals().weak_text_color()),
-                            );
-                            ui.strong(estimate);
-                            ui.label(
-                                egui::RichText::new(
-                                    match (draft.include_legends, draft.include_provenance) {
-                                        (true, true) => "Legends and provenance included",
-                                        (true, false) => "Legends included · no provenance",
-                                        (false, true) => "Provenance included · no legends",
-                                        (false, false) => "Legends and provenance omitted",
-                                    },
-                                )
-                                .size(tokens::FS_0)
-                                .color(ui.visuals().weak_text_color()),
-                            );
+                            paint_section_icon(ui, section, selected);
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    egui::RichText::new(section.label())
+                                        .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
+                                        .color(t.color.text),
+                                );
+                                // Truncated, never wrapped: a two-line summary
+                                // would push the entry past the height it was
+                                // allocated and ripple down the whole rail.
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(detail)
+                                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                            .color(t.color.text_dim),
+                                    )
+                                    .truncate(),
+                                );
+                            });
                         },
                     );
                 });
-                let rect = ui.min_rect();
-                ui.painter().vline(
-                    rect.center().x,
-                    rect.y_range(),
-                    Stroke::new(1.0, t.color.border),
+            let rect = entry.response.rect;
+            if selected {
+                ui.painter().rect_filled(
+                    Rect::from_min_max(rect.min, egui::pos2(rect.left() + 3.0, rect.bottom())),
+                    0.0,
+                    t.color.accent,
                 );
-            } else {
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 6.0;
-                    ui.label(
-                        egui::RichText::new("Active source")
-                            .size(tokens::FS_0)
-                            .color(ui.visuals().weak_text_color()),
-                    );
-                    ui.strong(source);
-                    ui.label(
-                        egui::RichText::new(format!("{kind} · {scope}"))
-                            .size(tokens::FS_0)
-                            .color(ui.visuals().weak_text_color()),
-                    );
-                    ui.separator();
-                    ui.label(
-                        egui::RichText::new("Output estimate")
-                            .size(tokens::FS_0)
-                            .color(ui.visuals().weak_text_color()),
-                    );
-                    ui.strong(estimate);
-                });
             }
+            let response = entry.response.interact(Sense::click());
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::SelectableLabel,
+                    ui.is_enabled(),
+                    selected,
+                    section.label(),
+                )
+            });
+            theme::paint_focus_ring(ui, &response, rect);
+            if response
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                draft.section = section;
+            }
+            ui.painter().hline(
+                rect.x_range(),
+                rect.bottom(),
+                Stroke::new(1.0, t.color.border),
+            );
+        }
+        // Dock the sealed source identity on the rail's bottom edge with
+        // whatever the entries left over. It belongs here rather than in a
+        // strip across the top: it is the one fact every section is about, and
+        // the rail is the only region that is never replaced.
+        let remaining = (height - ui.min_rect().height()).max(12.0);
+        ui.allocate_ui_with_layout(
+            vec2(ui.available_width(), remaining),
+            Layout::bottom_up(Align::Min),
+            |ui| {
+                // Claim the whole leftover, or the bottom-up region collapses
+                // to the note's own height and the rail ends above the columns.
+                ui.set_min_height(remaining);
+                Frame::NONE
+                    .fill(t.color.bg_inset)
+                    .inner_margin(Margin::same(12))
+                    .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        // The frame inherits the bottom-up layout, so the note
+                        // is added in reverse reading order.
+                        let kind = draft.source.as_ref().map_or("unresolved", |source| {
+                            document_kind_label(source.document_kind())
+                        });
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(kind)
+                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                    .color(t.color.text_dim),
+                            )
+                            .truncate(),
+                        );
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(
+                                    draft
+                                        .source
+                                        .as_ref()
+                                        .map_or("No active publication source", |source| {
+                                            source.display_name()
+                                        }),
+                                )
+                                .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
+                                .color(t.color.text),
+                            )
+                            .truncate(),
+                        );
+                        ui.add_space(5.0);
+                        ui.label(
+                            egui::RichText::new("SEALED PUBLICATION SOURCE")
+                                .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
+                                .color(t.color.accent),
+                        );
+                    });
+            },
+        );
+    }
+}
+
+fn paint_section_icon(ui: &mut Ui, section: HardcopySection, selected: bool) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+    let color = if selected {
+        t.color.accent
+    } else {
+        t.color.text_dim
+    };
+    let stroke = Stroke::new(1.0, color);
+    let page = Rect::from_center_size(rect.center(), vec2(13.0, 15.0));
+    let painter = ui.painter();
+    painter.rect_stroke(page, 0.5, stroke, egui::StrokeKind::Inside);
+    match section {
+        // A turned corner: the retained document, sealed as it was read.
+        HardcopySection::Source => {
+            painter.line_segment(
+                [
+                    egui::pos2(page.right() - 4.5, page.top()),
+                    egui::pos2(page.right(), page.top() + 4.5),
+                ],
+                Stroke::new(0.8, color),
+            );
+        }
+        // Tile seams across the sheet: pagination.
+        HardcopySection::Page => {
+            painter.vline(page.center().x, page.y_range(), Stroke::new(0.6, color));
+            painter.hline(page.x_range(), page.center().y, Stroke::new(0.6, color));
+        }
+        // Border and title block: the authored drawing sheet's furniture.
+        HardcopySection::DrawingSheet => {
+            painter.rect_stroke(
+                page.shrink(2.5),
+                0.0,
+                Stroke::new(0.6, color),
+                egui::StrokeKind::Inside,
+            );
+            painter.rect_stroke(
+                Rect::from_min_max(
+                    egui::pos2(page.center().x, page.bottom() - 4.5),
+                    page.right_bottom(),
+                ),
+                0.0,
+                Stroke::new(0.8, color),
+                egui::StrokeKind::Inside,
+            );
+        }
+        // A page leaving the surface: the artifact or the spool.
+        HardcopySection::Output => {
+            let tip = egui::pos2(page.center().x, page.top() + 3.0);
+            painter.line_segment(
+                [egui::pos2(page.center().x, page.bottom() - 3.0), tip],
+                Stroke::new(0.9, color),
+            );
+            painter.line_segment(
+                [tip, egui::pos2(tip.x - 3.0, tip.y + 3.5)],
+                Stroke::new(0.9, color),
+            );
+            painter.line_segment(
+                [tip, egui::pos2(tip.x + 3.0, tip.y + 3.5)],
+                Stroke::new(0.9, color),
+            );
+        }
+        // Ruled lines: the legends, header and provenance a page carries.
+        HardcopySection::Identity => {
+            for offset in [4.5, 8.0, 11.5] {
+                painter.hline(
+                    egui::Rangef::new(page.left() + 3.0, page.right() - 3.0),
+                    page.top() + offset,
+                    Stroke::new(0.7, color),
+                );
+            }
+        }
+    }
+}
+
+/// The one-line summary a section shows while another is open. Without these
+/// the rail would be a filing cabinet; with them nothing is hidden, only
+/// deferred.
+fn section_detail(draft: &HardcopyDialogState, section: HardcopySection) -> String {
+    match section {
+        HardcopySection::Source => draft.source.as_ref().map_or_else(
+            || "unresolved".to_owned(),
+            |source| detailed_scope_label(source.scope()).to_lowercase(),
+        ),
+        HardcopySection::Page => format!(
+            "{} · {}",
+            short_paper_label(&draft.paper),
+            orientation_word(draft.orientation)
+        ),
+        HardcopySection::DrawingSheet => match draft.schematic_extent {
+            SchematicHardcopyExtent::CompleteSchematicContent => "complete content".to_owned(),
+            // The outside-content policy only decides anything when there is
+            // outside content. Reporting "undecided" for a drawing that fits
+            // its sheet would name a decision nobody has to make.
+            SchematicHardcopyExtent::AuthoredDrawingSheet
+                if schematic_sheet_relationship(draft) == Some(false) =>
+            {
+                "authored sheet".to_owned()
+            }
+            SchematicHardcopyExtent::AuthoredDrawingSheet => format!(
+                "authored · {}",
+                match draft.outside_sheet_content {
+                    OutsideSheetContentPolicy::Ask => "undecided",
+                    OutsideSheetContentPolicy::ClipToAuthoredSheet => "clipped",
+                    OutsideSheetContentPolicy::ExtendOutput => "extended",
+                }
+            ),
+        },
+        HardcopySection::Output => output_summary(draft.format),
+        HardcopySection::Identity => {
+            let included = usize::from(draft.include_legends)
+                + usize::from(draft.include_header)
+                + usize::from(draft.include_provenance)
+                + usize::from(!matches!(draft.watermark, Watermark::None));
+            format!("{included} of 4 marks")
+        }
+    }
+}
+
+fn short_paper_label(paper: &PaperDraft) -> String {
+    match paper {
+        PaperDraft::Standard(paper) => match paper {
+            StandardPaper::Letter => "US Letter",
+            StandardPaper::Legal => "Legal",
+            StandardPaper::Tabloid => "US Ledger",
+            StandardPaper::A4 => "A4",
+            StandardPaper::A3 => "A3",
+            StandardPaper::A2 => "A2",
+            StandardPaper::A1 => "A1",
+            StandardPaper::A0 => "A0",
+        }
+        .to_owned(),
+        PaperDraft::MatchAuthoredSheets => "per authored sheet".to_owned(),
+        PaperDraft::Custom { name, .. } => name.clone(),
+    }
+}
+
+const fn orientation_word(orientation: Orientation) -> &'static str {
+    match orientation {
+        Orientation::Landscape => "landscape",
+        Orientation::Portrait => "portrait",
+        Orientation::AutomaticPerPage => "auto per page",
+    }
+}
+
+/// The target in one phrase. A raster format is nothing without its
+/// resolution, so it never appears without one.
+fn output_summary(format: OutputFormat) -> String {
+    format.raster_dpi().map_or_else(
+        || format_label(format).to_owned(),
+        |dpi| {
+            format!(
+                "{} · {dpi} dpi",
+                if matches!(format, OutputFormat::Png { .. }) {
+                    "PNG"
+                } else {
+                    "TIFF"
+                }
+            )
+        },
+    )
+}
+
+/// The editor column. `height` fills the studio's assigned track; `None` sizes
+/// to the section's own content, which is what the stacked layout needs — a
+/// fixed track there would strand the preview a screen below the form.
+fn editor_column(ui: &mut Ui, draft: &mut HardcopyDialogState, height: Option<f32>) -> BodyAction {
+    let t = Tokens::get(ui.ctx());
+    let mut action = BodyAction::None;
+    Frame::NONE.fill(t.color.bg_app).show(ui, |ui| {
+        let Some(height) = height else {
+            action = editor_panel(ui, draft);
+            return;
+        };
+        ui.set_min_height(height);
+        ui.allocate_ui(vec2(ui.available_width(), height.max(120.0)), |ui| {
+            // Every section is authored to fit this column outright. The scroll
+            // area is the fallback for a hostile font scale, not the layout.
+            egui::ScrollArea::vertical()
+                .id_salt(("hardcopy-editor", draft.section))
+                .auto_shrink([false, false])
+                .show(ui, |ui| action = editor_panel(ui, draft));
+        });
+    });
+    action
+}
+
+fn editor_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
+    section_panel_header(ui, draft.section, draft.workflow);
+    Frame::NONE
+        .inner_margin(Margin::symmetric(PANEL_INSET_X, PANEL_INSET_Y))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 6.0;
+            match draft.section {
+                HardcopySection::Source => source_panel(ui, draft),
+                HardcopySection::Page => page_panel(ui, draft),
+                HardcopySection::DrawingSheet => {
+                    drawing_sheet_panel(ui, draft);
+                    BodyAction::None
+                }
+                HardcopySection::Output => output_panel(ui, draft),
+                HardcopySection::Identity => {
+                    identity_panel(ui, draft);
+                    BodyAction::None
+                }
+            }
+        })
+        .inner
+}
+
+fn section_panel_header(ui: &mut Ui, section: HardcopySection, workflow: HardcopyWorkflow) {
+    let (eyebrow, description) = match section {
+        HardcopySection::Source => (
+            "SEALED INPUT",
+            "Choose the retained document and the extent of it this hardcopy publishes. Both are resolved again before execution.",
+        ),
+        HardcopySection::Page => (
+            "OUTPUT MEDIA",
+            "Physical media, scale and tiling for the output. None of it rewrites the authored drawing sheet.",
+        ),
+        HardcopySection::DrawingSheet => (
+            "SHEET FURNITURE",
+            "Decide how much of the authored sheet is drawn, and what becomes of content that crosses it.",
+        ),
+        HardcopySection::Output => (
+            if workflow == HardcopyWorkflow::Export {
+                "ARTIFACT TARGET"
+            } else {
+                "PUBLICATION TARGET"
+            },
+            "Format, resolution and color. Each option is bounded by what this host can actually produce.",
+        ),
+        HardcopySection::Identity => (
+            "PROVENANCE",
+            "Legends, headers, provenance and watermark carried on every published page.",
+        ),
+    };
+    panel_header(ui, eyebrow, section.label(), description);
+}
+
+fn panel_header(ui: &mut Ui, eyebrow: &str, title: &str, description: &str) {
+    let t = Tokens::get(ui.ctx());
+    let header = Frame::NONE
+        .fill(t.color.bg_elevated)
+        .inner_margin(Margin::symmetric(18, 14))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.label(
+                egui::RichText::new(eyebrow)
+                    .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
+                    .color(t.color.accent),
+            );
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(title)
+                    .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
+                    .color(t.color.text),
+            );
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(description)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+            );
         });
     ui.painter().hline(
-        strip.response.rect.x_range(),
-        strip.response.rect.bottom(),
+        header.response.rect.x_range(),
+        header.response.rect.bottom(),
         Stroke::new(1.0, t.color.border),
     );
 }
 
-fn preview_surface(ui: &mut Ui, draft: &mut HardcopyDialogState) {
+/// A supporting flow, offered where the settings it owns are edited rather
+/// than from a command strip that belonged to no section in particular.
+pub(super) fn action_row(
+    ui: &mut Ui,
+    label: &str,
+    detail: &str,
+    enabled: bool,
+    disabled_hint: &str,
+) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let mut clicked = false;
+    Frame::NONE
+        .fill(t.color.bg_inset)
+        .stroke(Stroke::new(1.0, t.color.border))
+        .inner_margin(Margin::symmetric(10, 9))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
+                let response = Button::new(label).enabled(enabled).show(ui);
+                clicked = response.clicked();
+                if !enabled {
+                    response.on_disabled_hover_text(disabled_hint.to_owned());
+                }
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(detail)
+                            .size(tokens::FS_0)
+                            .color(t.color.text_dim),
+                    )
+                    .truncate(),
+                );
+            });
+        });
+    clicked
+}
+
+/// A bordered label/value readout for facts a section is about but does not
+/// edit. Values are monospaced and truncated, never wrapped, so the block's
+/// height is a function of how many facts there are and nothing else.
+pub(super) fn fact_list(ui: &mut Ui, facts: &[(&'static str, String)]) {
+    let t = Tokens::get(ui.ctx());
+    Frame::NONE
+        .fill(t.color.bg_inset)
+        .stroke(Stroke::new(1.0, t.color.border))
+        .inner_margin(Margin::symmetric(12, 10))
+        .show(ui, |ui| {
+            let content_width = ui.available_width();
+            ui.set_min_width(content_width);
+            ui.spacing_mut().item_spacing = vec2(10.0, 0.0);
+            for (label, value) in facts {
+                ui.allocate_ui_with_layout(
+                    vec2(content_width, FACT_ROW_HEIGHT),
+                    Layout::left_to_right(Align::Center),
+                    |ui| {
+                        ui.allocate_ui_with_layout(
+                            vec2(118.0, FACT_ROW_HEIGHT),
+                            Layout::left_to_right(Align::Center),
+                            |ui| {
+                                ui.label(
+                                    egui::RichText::new(label.to_uppercase())
+                                        .font(theme::sans(tokens::FS_MICRO, FontWeight::Regular))
+                                        .color(t.color.text_faint),
+                                );
+                            },
+                        );
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(value)
+                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                    .color(t.color.text),
+                            )
+                            .truncate(),
+                        );
+                    },
+                );
+            }
+        });
+}
+
+/// The leading bytes of a content digest, which is as much as anyone reads and
+/// still far more than enough to tell two revisions apart by eye.
+pub(super) fn short_digest(digest: &crate::product::ContentDigest) -> String {
+    digest
+        .as_bytes()
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn stacked_body(
+    ui: &mut Ui,
+    draft: &mut HardcopyDialogState,
+    sections: &[HardcopySection],
+    height: f32,
+) -> BodyAction {
+    let mut action = BodyAction::None;
+    egui::ScrollArea::vertical()
+        .id_salt("hardcopy-studio-stacked")
+        .show(ui, |ui| {
+            Frame::NONE
+                .fill(Tokens::get(ui.ctx()).color.bg_panel)
+                .inner_margin(Margin::same(10))
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for section in sections.iter().copied() {
+                            let label = format!("{}  {}", section.number(), section.label());
+                            if ui
+                                .selectable_label(draft.section == section, label)
+                                .clicked()
+                            {
+                                draft.section = section;
+                            }
+                        }
+                    });
+                });
+            action = editor_column(ui, draft, None);
+            preview_column(ui, draft, height.clamp(300.0, 460.0));
+        });
+    action
+}
+
+fn preview_column(ui: &mut Ui, draft: &mut HardcopyDialogState, height: f32) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width();
-    let preview_surface = Frame::NONE
-        .fill(t.color.bg_inset)
-        .inner_margin(Margin::same(14))
-        .show(ui, |ui| {
-            ui.set_width((width - 28.0).max(0.0));
-            if let Some(plan) = draft.preview_plan.as_ref() {
-                let mut selected_adjacent = None;
-                let card_count = plan.pagination().pages().len().clamp(1, 2);
-                let stacked = ui.ctx().content_rect().width() <= 460.0;
-                let height = if stacked {
-                    card_count as f32 * 112.0 + card_count.saturating_sub(1) as f32 * 16.0
-                } else {
-                    112.0
-                };
+    Frame::NONE.fill(t.color.bg_panel).show(ui, |ui| {
+        ui.set_min_size(vec2(width, height));
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        // The three bands divide the column's exact assigned height between
+        // them. The page desk takes what the toolbar and the estimate do not,
+        // so the preview grows with the surface instead of staying a thumbnail.
+        const TOOLBAR_HEIGHT: f32 = 38.0;
+        let facts = preview_facts(draft);
+        let facts_height = facts.len() as f32 * FACT_ROW_HEIGHT + FACT_STRIP_INSET;
+        let desk_height = (height - facts_height - TOOLBAR_HEIGHT).max(160.0);
+        preview_desk(ui, draft, width, desk_height);
+        preview_toolbar(ui, draft, width, TOOLBAR_HEIGHT);
+        preview_facts_strip(ui, &facts, width, facts_height);
+    });
+}
+
+fn preview_desk(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height: f32) {
+    let t = Tokens::get(ui.ctx());
+    Frame::NONE.fill(t.color.bg_inset).show(ui, |ui| {
+        ui.set_min_size(vec2(width, height));
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        let Some(count) = draft
+            .preview_plan
+            .as_ref()
+            .map(|plan| plan.pagination().pages().len().clamp(1, 2))
+        else {
+            ui.allocate_ui_with_layout(
+                vec2(width, height),
+                Layout::centered_and_justified(egui::Direction::LeftToRight),
+                |ui| {
+                    ui.add(
+                        egui::Label::new("Resolve the configuration to render an exact page.")
+                            .wrap(),
+                    );
+                },
+            );
+            return;
+        };
+        // The card is sized from the page, not the other way round: the white
+        // area is the sheet plus its margin, so the desk never shows a
+        // letterboxed page inside a card of some other proportion.
+        let aspect = draft.preview.as_ref().map_or_else(
+            || match draft.orientation {
+                Orientation::Portrait => 1.0 / std::f32::consts::SQRT_2,
+                _ => std::f32::consts::SQRT_2,
+            },
+            |preview| preview.width() as f32 / preview.height() as f32,
+        );
+        let columns = count as f32;
+        let max_card = vec2(
+            ((width - 40.0) - 16.0 * (columns - 1.0)) / columns,
+            height - 40.0,
+        );
+        let image = fit_aspect(
+            vec2((max_card.x - 20.0).max(40.0), (max_card.y - 38.0).max(40.0)),
+            aspect,
+        );
+        let card = vec2(image.x + 20.0, image.y + 38.0);
+        let group_width = card.x * columns + 16.0 * (columns - 1.0);
+        let mut selected_adjacent = None;
+        ui.allocate_ui_with_layout(vec2(width, height), Layout::top_down(Align::Min), |ui| {
+            ui.set_width(width);
+            ui.add_space(((height - card.y) * 0.5).max(0.0));
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 16.0;
+                ui.add_space(((width - group_width) * 0.5).max(0.0));
                 let pages = [draft.preview.as_ref(), draft.preview_adjacent.as_ref()]
                     .into_iter()
                     .flatten()
                     .collect::<Vec<_>>();
-                let preview_width = ui.available_width();
-                ui.allocate_ui_with_layout(
-                    vec2(preview_width, height),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        ui.set_width(preview_width);
-                        let mut render_cards = |ui: &mut Ui| {
-                            ui.spacing_mut().item_spacing.x = 16.0;
-                            ui.spacing_mut().item_spacing.y = 16.0;
-                            for slot in 0..card_count {
-                                if let Some(preview) = pages.get(slot).copied() {
-                                    let selected = preview.page_number()
-                                        == draft.preview_page.saturating_add(1);
-                                    if preview_card(
-                                        ui,
-                                        preview,
-                                        selected,
-                                        draft.preview_zoom_percent,
-                                        slot,
-                                    ) && !selected
-                                    {
-                                        selected_adjacent =
-                                            Some(preview.page_number().saturating_sub(1));
-                                    }
-                                } else {
-                                    preview_placeholder(ui, slot == 0);
-                                }
-                            }
-                        };
-                        if stacked {
-                            ui.vertical_centered(&mut render_cards);
-                        } else {
-                            let card_group_width = card_count as f32 * 160.0
-                                + card_count.saturating_sub(1) as f32 * 16.0;
-                            ui.horizontal_top(|ui| {
-                                ui.add_space(
-                                    ((ui.available_width() - card_group_width) * 0.5).max(0.0),
-                                );
-                                render_cards(ui);
-                            });
+                for slot in 0..count {
+                    if let Some(preview) = pages.get(slot).copied() {
+                        let selected =
+                            preview.page_number() == draft.preview_page.saturating_add(1);
+                        if preview_card(
+                            ui,
+                            preview,
+                            selected,
+                            draft.preview_zoom_percent,
+                            slot,
+                            card,
+                        ) && !selected
+                        {
+                            selected_adjacent = Some(preview.page_number().saturating_sub(1));
                         }
-                    },
-                );
-                if let Some(page) = selected_adjacent {
-                    draft.preview_page = page;
-                    draft.invalidate_preview_raster();
+                    } else {
+                        preview_placeholder(ui, slot == 0, card);
+                    }
                 }
-            } else {
-                ui.allocate_ui_with_layout(
-                    vec2(ui.available_width(), 112.0),
-                    Layout::centered_and_justified(egui::Direction::LeftToRight),
-                    |ui| {
-                        ui.label("Resolve the configuration above to render an exact page.");
-                    },
-                );
-            }
+            });
         });
-    ui.painter().hline(
-        preview_surface.response.rect.x_range(),
-        preview_surface.response.rect.top(),
-        Stroke::new(1.0, t.color.border),
-    );
+        if let Some(page) = selected_adjacent {
+            draft.preview_page = page;
+            draft.invalidate_preview_raster();
+        }
+    });
 }
 
-fn preview_toolbar(ui: &mut Ui, draft: &mut HardcopyDialogState) {
+fn preview_toolbar(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height: f32) {
     let t = Tokens::get(ui.ctx());
-    let width = ui.available_width();
+    let content_height = (height - 12.0).max(1.0);
     let toolbar = Frame::NONE
         .fill(t.color.bg_panel)
         .inner_margin(Margin::symmetric(10, 6))
         .show(ui, |ui| {
             ui.set_width((width - 20.0).max(0.0));
-            ui.set_min_height(26.0);
+            ui.set_min_height(content_height);
             let count = draft
                 .preview_plan
                 .as_ref()
@@ -1019,9 +1470,8 @@ fn preview_toolbar(ui: &mut Ui, draft: &mut HardcopyDialogState) {
                 );
                 return;
             }
-            let toolbar_height = ui.spacing().interact_size.y;
             ui.allocate_ui_with_layout(
-                vec2(ui.available_width(), toolbar_height),
+                vec2(ui.available_width(), content_height),
                 Layout::centered_and_justified(egui::Direction::LeftToRight),
                 |ui| {
                     ui.horizontal(|ui| {
@@ -1079,9 +1529,86 @@ fn preview_toolbar(ui: &mut Ui, draft: &mut HardcopyDialogState) {
         toolbar.response.rect.top(),
         Stroke::new(1.0, t.color.border_strong),
     );
+}
+
+/// What this configuration will actually produce, as facts rather than as the
+/// settings that produced them.
+fn preview_facts(draft: &HardcopyDialogState) -> Vec<(&'static str, String)> {
+    let pages = draft.preview_plan.as_ref().map_or_else(
+        || "no valid page".to_owned(),
+        |plan| {
+            let pagination = plan.pagination();
+            let count = pagination.pages().len();
+            let arrangement = if pagination.sections().is_empty() {
+                format!(" · {} × {} tiles", pagination.columns(), pagination.rows())
+            } else {
+                " · section-aware".to_owned()
+            };
+            format!(
+                "{count} page{}{arrangement}",
+                if count == 1 { "" } else { "s" }
+            )
+        },
+    );
+    vec![
+        ("Pages", pages),
+        (
+            "Media",
+            format!(
+                "{} · {}",
+                short_paper_label(&draft.paper),
+                orientation_word(draft.orientation)
+            ),
+        ),
+        ("Target", output_summary(draft.format)),
+        ("Scale", scale_label(scale_key(draft.scale)).to_owned()),
+        ("Color", color_mapping_label(draft.color_mapping).to_owned()),
+    ]
+}
+
+fn preview_facts_strip(ui: &mut Ui, facts: &[(&'static str, String)], width: f32, height: f32) {
+    let t = Tokens::get(ui.ctx());
+    let strip = Frame::NONE
+        .fill(t.color.bg_inset)
+        .inner_margin(Margin::symmetric(12, 10))
+        .show(ui, |ui| {
+            let content_width = (width - 24.0).max(0.0);
+            ui.set_width(content_width);
+            ui.set_min_height((height - FACT_STRIP_INSET).max(0.0));
+            ui.spacing_mut().item_spacing = vec2(10.0, 0.0);
+            let label_width = 74.0_f32.min(content_width * 0.4);
+            for (label, value) in facts {
+                // Each row takes exactly the height the strip reserved for it.
+                ui.allocate_ui_with_layout(
+                    vec2(content_width, FACT_ROW_HEIGHT),
+                    Layout::left_to_right(Align::Center),
+                    |ui| {
+                        ui.allocate_ui_with_layout(
+                            vec2(label_width, FACT_ROW_HEIGHT),
+                            Layout::left_to_right(Align::Center),
+                            |ui| {
+                                ui.label(
+                                    egui::RichText::new(label.to_uppercase())
+                                        .font(theme::sans(tokens::FS_MICRO, FontWeight::Regular))
+                                        .color(t.color.text_faint),
+                                );
+                            },
+                        );
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(value)
+                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                    .color(t.color.text),
+                            )
+                            .truncate(),
+                        );
+                    },
+                );
+            }
+        });
     ui.painter().hline(
-        toolbar.response.rect.x_range(),
-        toolbar.response.rect.bottom(),
+        strip.response.rect.x_range(),
+        strip.response.rect.top(),
         Stroke::new(1.0, t.color.border),
     );
 }
@@ -1092,9 +1619,12 @@ fn preview_card(
     selected: bool,
     zoom_percent: u16,
     texture_slot: usize,
+    size: Vec2,
 ) -> bool {
     let texture = preview_texture(ui.ctx(), preview, texture_slot);
     let t = Tokens::get(ui.ctx());
+    let inner_width = (size.x - 20.0).max(20.0);
+    let image_box = vec2(inner_width, (size.y - 38.0).max(20.0));
     let card = Frame::NONE
         .fill(egui::Color32::from_rgb(245, 244, 239))
         .stroke(Stroke::new(1.0, egui::Color32::from_rgb(155, 155, 150)))
@@ -1106,10 +1636,10 @@ fn preview_card(
         })
         .inner_margin(Margin::same(10))
         .show(ui, |ui| {
-            ui.set_width(138.0);
+            ui.set_width(inner_width);
             ui.with_layout(Layout::top_down(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
-                let (rect, _) = ui.allocate_exact_size(vec2(138.0, 74.0), Sense::hover());
+                let (rect, _) = ui.allocate_exact_size(image_box, Sense::hover());
                 let aspect = preview.width() as f32 / preview.height() as f32;
                 let fitted = fit_aspect(rect.size(), aspect);
                 let image_rect = egui::Rect::from_center_size(
@@ -1123,7 +1653,7 @@ fn preview_card(
                     egui::Color32::WHITE,
                 );
                 ui.add_sized(
-                    vec2(138.0, 18.0),
+                    vec2(inner_width, 18.0),
                     egui::Label::new(
                         egui::RichText::new(format!(
                             "Page {} · {}",
@@ -1156,12 +1686,13 @@ fn preview_card(
             label.clone(),
         )
     });
-    crate::ui::theme::paint_focus_ring(ui, &response, response.rect);
+    theme::paint_focus_ring(ui, &response, response.rect);
     response.clicked()
 }
 
-fn preview_placeholder(ui: &mut Ui, selected: bool) {
+fn preview_placeholder(ui: &mut Ui, selected: bool, size: Vec2) {
     let t = Tokens::get(ui.ctx());
+    let inner_width = (size.x - 20.0).max(20.0);
     let card = Frame::NONE
         .fill(egui::Color32::from_rgb(245, 244, 239))
         .stroke(Stroke::new(1.0, egui::Color32::from_rgb(155, 155, 150)))
@@ -1173,18 +1704,18 @@ fn preview_placeholder(ui: &mut Ui, selected: bool) {
         })
         .inner_margin(Margin::same(10))
         .show(ui, |ui| {
-            ui.set_width(138.0);
+            ui.set_width(inner_width);
             ui.with_layout(Layout::top_down(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 ui.allocate_ui_with_layout(
-                    vec2(138.0, 74.0),
+                    vec2(inner_width, (size.y - 38.0).max(20.0)),
                     Layout::centered_and_justified(egui::Direction::LeftToRight),
                     |ui| {
                         ui.spinner();
                     },
                 );
                 ui.allocate_ui_with_layout(
-                    vec2(138.0, 18.0),
+                    vec2(inner_width, 18.0),
                     Layout::centered_and_justified(egui::Direction::LeftToRight),
                     |ui| {
                         ui.label(
@@ -1426,12 +1957,84 @@ fn field(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui)) {
     });
 }
 
+/// Widths for the two-up form rows.
+///
+/// Measured against the **track**, not the viewport. Keying off the viewport
+/// was the layout's central defect: inside a column each pair was still sized
+/// as though it had the whole dialog, never fit, and wrapped — and a wrapped
+/// row still reserves its full height, which is where the dead band under
+/// every other field came from. When a pair cannot share its track, both
+/// halves take the whole of it and stack deliberately instead.
+/// One row of the settings form: two fields side by side where the track can
+/// hold them, stacked where it cannot.
+///
+/// This exists because `horizontal_wrapped` cannot do the second case
+/// cleanly. A pair that overflows its track wraps, and the wrapped row still
+/// reserves height for the tallest thing that was *going* to be in it, so the
+/// column grows an empty band under every other field. Stacking is a layout
+/// decision, so the layout makes it rather than discovering it.
+pub(super) struct FormRow<'a> {
+    ui: &'a mut Ui,
+    stacked: bool,
+    narrow: f32,
+    wide: f32,
+}
+
+impl FormRow<'_> {
+    fn cell(&mut self, width: f32, add: impl FnOnce(&mut Ui)) {
+        if self.stacked {
+            add(self.ui);
+            return;
+        }
+        self.ui
+            .allocate_ui_with_layout(vec2(width, 0.0), Layout::top_down(Align::Min), |ui| {
+                // The requested track is not binding on its own — a Ui shrinks
+                // to its content and the neighbour then slides inward.
+                ui.set_width(width);
+                add(ui);
+            });
+    }
+
+    pub(super) fn narrow(&mut self, add: impl FnOnce(&mut Ui)) {
+        self.cell(self.narrow, add);
+    }
+
+    pub(super) fn wide(&mut self, add: impl FnOnce(&mut Ui)) {
+        self.cell(self.wide, add);
+    }
+}
+
+pub(super) fn form_row(ui: &mut Ui, add: impl FnOnce(&mut FormRow<'_>)) {
+    let (narrow, wide) = form_grid_widths(ui);
+    let stacked = narrow + wide + 11.0 > ui.available_width() + 0.5;
+    if stacked {
+        add(&mut FormRow {
+            ui,
+            stacked,
+            narrow,
+            wide,
+        });
+    } else {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 11.0;
+            add(&mut FormRow {
+                ui,
+                stacked,
+                narrow,
+                wide,
+            });
+        });
+    }
+}
+
 fn form_grid_widths(ui: &Ui) -> (f32, f32) {
-    if ui.ctx().content_rect().width() <= 460.0 {
-        let width = ui.available_width().max(120.0);
+    let track = ui.available_width();
+    const PAIRED_TRACK_MINIMUM: f32 = 430.0;
+    if track < PAIRED_TRACK_MINIMUM {
+        let width = track.max(120.0);
         return (width, width);
     }
-    let available = (ui.available_width() - 11.0).max(240.0);
+    let available = (track - 11.0).max(240.0);
     let narrow = (available * 0.4).max(110.0);
     (narrow, (available - narrow).max(130.0))
 }
@@ -1818,9 +2421,10 @@ fn format_label(format: OutputFormat) -> &'static str {
         OutputFormat::PdfVector => "PDF · vector",
         OutputFormat::PdfA => "PDF/A · vector",
         OutputFormat::SvgVector => "SVG · vector",
-        OutputFormat::Png { dpi: 600 } => "PNG · 600 dpi",
+        // The resolution is its own field, so the format no longer spells one
+        // out. It used to read "PNG · 600 dpi" — a number nobody could change,
+        // and on a browser-sized raster budget one nothing could deliver.
         OutputFormat::Png { .. } => "PNG · raster",
-        OutputFormat::Tiff { dpi: 600 } => "TIFF · 600 dpi",
         OutputFormat::Tiff { .. } => "TIFF · raster",
     }
 }
@@ -2206,6 +2810,70 @@ fn apply_suggested_paper(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A source with no governed drawing sheet has no sheet furniture to
+    /// configure, so the rail must not offer the section — and a selection
+    /// left pointing at it must land somewhere real rather than on a blank
+    /// editor.
+    #[test]
+    fn a_source_without_an_authored_sheet_offers_no_sheet_section() {
+        let draft = HardcopyDialogState::default();
+        let sections = available_sections(&draft);
+
+        assert!(!sections.contains(&HardcopySection::DrawingSheet));
+        assert_eq!(sections.first(), Some(&HardcopySection::Source));
+        assert!(sections.contains(&HardcopySection::Output));
+    }
+
+    /// The rail summarises the sections nobody is looking at, so a summary that
+    /// names a decision the document does not pose is worse than none.
+    #[test]
+    fn the_sheet_summary_only_reports_a_decision_there_is_one_to_make() {
+        let mut draft = HardcopyDialogState::default();
+        draft.outside_sheet_content = OutsideSheetContentPolicy::Ask;
+        // No resolved document: nothing crosses a sheet that does not exist.
+        assert_eq!(
+            section_detail(&draft, HardcopySection::DrawingSheet),
+            "authored · undecided"
+        );
+        draft.schematic_extent = SchematicHardcopyExtent::CompleteSchematicContent;
+        assert_eq!(
+            section_detail(&draft, HardcopySection::DrawingSheet),
+            "complete content"
+        );
+    }
+
+    /// A raster target is meaningless without its resolution, and the rail is
+    /// where it is read while another section is open.
+    #[test]
+    fn the_output_summary_carries_the_resolution_of_a_raster_target() {
+        assert_eq!(
+            output_summary(OutputFormat::Png { dpi: 300 }),
+            "PNG · 300 dpi"
+        );
+        assert_eq!(
+            output_summary(OutputFormat::Tiff { dpi: 1_200 }),
+            "TIFF · 1200 dpi"
+        );
+        assert_eq!(output_summary(OutputFormat::PdfA), "PDF/A · vector");
+    }
+
+    /// The field must refuse what the publisher would refuse, and for the
+    /// same reason. A ceiling of `None` means the plan has not compiled yet,
+    /// so only the contract's own range is known.
+    #[test]
+    fn a_resolution_outside_the_offered_range_is_refused() {
+        assert_eq!(parse_raster_dpi("300", Some(600)), Ok(300));
+        assert_eq!(parse_raster_dpi("  600 ", Some(600)), Ok(600));
+        assert!(parse_raster_dpi("601", Some(600)).is_err());
+        assert!(parse_raster_dpi("71", Some(600)).is_err());
+        assert!(parse_raster_dpi("", Some(600)).is_err());
+        assert!(parse_raster_dpi("600dpi", Some(600)).is_err());
+        assert!(parse_raster_dpi("-300", Some(600)).is_err());
+        // Without a compiled plan the contract is the only authority.
+        assert_eq!(parse_raster_dpi("9600", None), Ok(MAX_RASTER_DPI));
+        assert!(parse_raster_dpi("9601", None).is_err());
+    }
 
     #[test]
     fn preview_texture_cache_is_bounded_to_two_rotating_slots() {
