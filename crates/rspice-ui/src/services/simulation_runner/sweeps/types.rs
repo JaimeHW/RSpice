@@ -242,6 +242,35 @@ impl CornerRunConfig {
                 "Corner analysis nominal voltage must be a positive finite value".to_string(),
             );
         }
+        if !self.full_matrix {
+            // A diagonal sweep pairs the axes index by index. Axes of
+            // different non-scalar lengths have no such pairing: continuing
+            // would silently cycle the shorter one, producing a point set the
+            // declaration never asked for and a manifest that could not
+            // justify its own labels. A single-valued axis is shared by every
+            // point, which is a pairing and is allowed.
+            let mut lengths: Vec<usize> = [
+                self.process_corners.len(),
+                self.voltages.len(),
+                self.temperatures_c.len(),
+            ]
+            .into_iter()
+            .filter(|length| *length != 1)
+            .collect();
+            lengths.sort_unstable();
+            lengths.dedup();
+            if lengths.len() > 1 {
+                return Err(format!(
+                    "Diagonal corner sweeps require equal non-scalar axis lengths; this \
+                     configuration declares {}. Implicit cycling is not performed.",
+                    lengths
+                        .iter()
+                        .map(usize::to_string)
+                        .collect::<Vec<_>>()
+                        .join(" and ")
+                ));
+            }
+        }
         for binding in &self.model_bindings {
             binding.validate()?;
         }

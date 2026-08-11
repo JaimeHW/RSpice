@@ -392,6 +392,7 @@ fn inject_model_cards_with_abort(
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use super::super::execution::expand_corner_points;
     use super::super::types::{CornerBaseMode, CornerModelBinding, CornerProcess};
     use super::*;
 
@@ -501,6 +502,35 @@ mod tests {
 
         assert_eq!(result.temperatures_c.len(), 1);
         assert_eq!(result.corner_labels, vec!["FF_1.000000V_27.000000C"]);
+    }
+
+    #[test]
+    fn a_diagonal_sweep_refuses_unequal_axes_rather_than_cycling_the_shorter_one() {
+        let unequal = CornerRunConfig {
+            process_corners: vec![CornerProcess::TT],
+            voltages: vec![0.9, 1.0],
+            temperatures_c: vec![-40.0, 27.0, 125.0],
+            full_matrix: false,
+            ..CornerRunConfig::default()
+        };
+
+        let error = unequal
+            .validate()
+            .expect_err("2 and 3 have no index-by-index pairing");
+        assert!(error.contains("equal non-scalar axis lengths"), "{error}");
+
+        // A single-valued axis is shared by every point, which is a pairing.
+        let shared = CornerRunConfig {
+            voltages: vec![1.0],
+            ..unequal
+        };
+        shared
+            .validate()
+            .expect("a scalar axis pairs with any length");
+        let points = expand_corner_points(&shared, 64).expect("diagonal expansion");
+        assert_eq!(points.len(), 3);
+        assert!(points.iter().all(|point| point.voltage == 1.0));
+        assert_eq!(points[2].temperature_c, 125.0);
     }
 
     #[test]

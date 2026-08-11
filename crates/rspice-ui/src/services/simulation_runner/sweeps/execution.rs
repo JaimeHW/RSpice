@@ -104,6 +104,9 @@ fn expand_corner_points_impl(
         return Ok(points);
     }
 
+    // Diagonal pairing. `validate` has already refused unequal non-scalar
+    // lengths, so the modulus below only ever shares a single-valued axis
+    // across the points — it never cycles a longer one back to its start.
     for idx in 0..requested {
         if let Some(abort) = abort {
             poll_periodically(abort, idx)?;

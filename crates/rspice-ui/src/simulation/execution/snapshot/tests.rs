@@ -673,10 +673,19 @@ fn pvt_metadata_counts_the_exact_full_corner_matrix_inside_one_task() {
     assert_eq!(snapshot.metadata().pvt_point_count, 8);
 }
 
+/// A diagonal sweep pairs the axes index by index, and axes of different
+/// non-scalar lengths have no such pairing.
+///
+/// This used to expand by modular arithmetic: two processes against three
+/// voltages produced a third point whose process silently wrapped back to the
+/// first, so the manifest recorded a corner the plan never declared. The
+/// expansion now refuses it, and a scalar axis — which is genuinely shared by
+/// every point — still pairs with any length.
 #[test]
-fn pvt_metadata_uses_the_runners_diagonal_corner_expansion_order() {
+fn a_diagonal_corner_sweep_refuses_unequal_axes_and_shares_a_scalar_one() {
     use crate::services::simulation_runner::CornerProcess;
-    let mut diagonal = parts();
+
+    let mut unequal = parts();
     let mut corner = corner_task(
         vec![CornerProcess::SS, CornerProcess::FF],
         vec![0.9, 1.0, 1.1],
@@ -692,16 +701,41 @@ fn pvt_metadata_uses_the_runners_diagonal_corner_expansion_order() {
         corner_binding(CornerProcess::SS, "ss.lib", "1e-13"),
         corner_binding(CornerProcess::FF, "ff.lib", "1e-11"),
     ];
-    diagonal.tasks = vec![prepared("corner", "Corner", corner)];
+    unequal.tasks = vec![prepared("corner", "Corner", corner)];
 
-    let snapshot = PreparedRunSnapshot::new(diagonal).expect("diagonal corner snapshot");
-    assert_eq!(snapshot.pvt_points.len(), 3);
+    let error = PreparedRunSnapshot::new(unequal)
+        .expect_err("2 processes, 3 voltages and 2 temperatures have no diagonal pairing");
+    assert!(
+        format!("{error}").contains("equal non-scalar axis lengths"),
+        "{error}"
+    );
+
+    let mut paired = parts();
+    let mut corner = corner_task(
+        vec![CornerProcess::SS, CornerProcess::FF],
+        vec![1.0],
+        vec![-40.0, 125.0],
+        false,
+    );
+    corner
+        .spec_options
+        .corner
+        .as_mut()
+        .expect("corner config")
+        .model_bindings = vec![
+        corner_binding(CornerProcess::SS, "ss.lib", "1e-13"),
+        corner_binding(CornerProcess::FF, "ff.lib", "1e-11"),
+    ];
+    paired.tasks = vec![prepared("corner", "Corner", corner)];
+
+    let snapshot = PreparedRunSnapshot::new(paired).expect("diagonal corner snapshot");
+    assert_eq!(snapshot.pvt_points.len(), 2);
     assert_eq!(snapshot.pvt_points[0].process, ProcessCorner::SS);
-    assert_eq!(snapshot.pvt_points[0].voltage, Some(0.9));
+    assert_eq!(snapshot.pvt_points[0].voltage, Some(1.0));
     assert_eq!(snapshot.pvt_points[0].temperature_celsius, -40.0);
-    assert_eq!(snapshot.pvt_points[2].process, ProcessCorner::SS);
-    assert_eq!(snapshot.pvt_points[2].voltage, Some(1.1));
-    assert_eq!(snapshot.pvt_points[2].temperature_celsius, -40.0);
+    assert_eq!(snapshot.pvt_points[1].process, ProcessCorner::FF);
+    assert_eq!(snapshot.pvt_points[1].voltage, Some(1.0));
+    assert_eq!(snapshot.pvt_points[1].temperature_celsius, 125.0);
 }
 
 #[test]
