@@ -1982,6 +1982,7 @@ impl XyceTestRunner {
             | XyceBaselineFamilyKind::SinExpression
             | XyceBaselineFamilyKind::ParamExpression
             | XyceBaselineFamilyKind::Params1
+            | XyceBaselineFamilyKind::Bug1826ThermalParameter
             | XyceBaselineFamilyKind::PassiveCapPrimaryValue
             | XyceBaselineFamilyKind::PassiveTemperatureOverride
             | XyceBaselineFamilyKind::Subckt
@@ -2390,6 +2391,71 @@ impl XyceTestRunner {
                 "{LABEL} captured execution source identity changed: expected {expected_hash}, got {actual_hash}"
             ));
         }
+        Ok(())
+    }
+
+    pub(super) fn bug1826_thermal_parameter_source_qualification(
+        source: &str,
+    ) -> Result<XyceBug1826ThermalParameterRepresentation, String> {
+        const LABEL: &str = "BUG 1826 thermal-parameter-scope equivalence";
+        if Self::source_has_comp_directive(source) {
+            return Err(format!(
+                "{LABEL} uses the canonical Release 7.10 xyce_verify tolerance and does not admit *COMP"
+            ));
+        }
+        let canonical = Self::canonical_lf_text_identity(LABEL, source.as_bytes())?;
+        let source_hash = blake3::hash(&canonical).to_hex().to_string();
+        match source_hash.as_str() {
+            XYCE_BUG1826_THERMAL_PARAMETER_GLOBAL_BASELINE_CONTENT_BLAKE3 => {
+                Ok(XyceBug1826ThermalParameterRepresentation::GlobalParameter)
+            }
+            XYCE_BUG1826_THERMAL_PARAMETER_LOCAL_MEMBER_CONTENT_BLAKE3 => {
+                Ok(XyceBug1826ThermalParameterRepresentation::LocalParameter)
+            }
+            _ => Err(format!(
+                "{LABEL} source identity is not one of the two canonical Release 7.10 executable members: {source_hash}"
+            )),
+        }
+    }
+
+    pub(super) fn validate_bug1826_thermal_parameter_transient_plan(
+        plan: &XyceStaticTranPlan,
+    ) -> Result<(), String> {
+        const LABEL: &str = "BUG 1826 thermal-parameter-scope equivalence";
+        if plan.contract != XyceStaticTranContract::PlainStatic
+            || !matches!(plan.oracle, XyceStaticTranOracle::None)
+            || plan.comparison_mode != XyceStaticTranComparisonMode::Pointwise
+            || !plan.steps.is_empty()
+            || plan.output_override
+            || plan.timeint_conststep
+            || plan.wrapper_tolerance.is_some()
+        {
+            return Err(format!(
+                "{LABEL} requires one ordinary unstepped adaptive default .prn relational plan without a file oracle or tolerance override"
+            ));
+        }
+        if plan.tran.step.to_bits() != 0.0f64.to_bits()
+            || plan.tran.stop.to_bits() != 1.0f64.to_bits()
+            || plan.tran.start.is_some()
+            || plan.tran.max_step.is_some()
+            || plan.tran.uic
+        {
+            return Err(format!(
+                "{LABEL} requires exact '.TRAN 0 1' semantics without START, MAXSTEP, or UIC"
+            ));
+        }
+        let print = plan.require_print("BUG 1826 transient validation")?;
+        let probes = print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        if probes != ["r1:r", "r1:temp", "i(r1)", "r1:a"] {
+            return Err(format!(
+                "{LABEL} requires the exact ordered probes R1:R, R1:TEMP, I(R1), and R1:A"
+            ));
+        }
+        Self::bug1826_thermal_parameter_source_qualification(&plan.source)?;
         Ok(())
     }
 
@@ -3970,6 +4036,15 @@ impl XyceTestRunner {
                     return Ok(());
                 }
                 "temp" if Self::resistor_temperature_value(netlist, &element_name)?.is_some() => {
+                    return Ok(());
+                }
+                parameter
+                    if Self::resistor_instance_parameter_probe_is_supported(
+                        netlist,
+                        &element_name,
+                        parameter,
+                    ) =>
+                {
                     return Ok(());
                 }
                 _ => {}

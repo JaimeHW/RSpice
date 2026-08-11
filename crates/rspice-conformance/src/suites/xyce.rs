@@ -58,15 +58,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 189;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 191;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "d54d989a3392df3bcdada4d18e73cf8b064050bdda296b14140ca10e52726274";
+    "4462b3b1fdcff3131d162f40e36969b2c731089558f44f54a93918e94a6d85b1";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "d6567ee60da98668ffe138540533234a50d33e0f6357c3d1bdd4211f3e711474";
+    "5620d0b15c0f99671b8f7dcc6f24d40d63a258ea665b46aa3c92f0e7a4e3a39d";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "e234249f1f9ff03d5aacad8eff82b5ef09d5975ac65d07d34accdede7c251867";
+    "e2938e406676848acbffc82777e69bfeef8e5de5d8370b579135e043dc350991";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -298,6 +298,65 @@ const XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_BLAKE3: &str =
 const XYCE_NAKED_ALGEBRA_HISTORICAL_ORACLE_RECORD_COUNT: usize = 2;
 const XYCE_NAKED_ALGEBRA_HISTORICAL_ORACLE_BLAKE3: &str =
     "0c56df6d66baca7083b8ef80ab6db52cc82d92c1087b8aff9e5eb8cad6c956c3";
+// BUG 1826's removed Release 7.10 wrapper compares the GLOBAL_PARAM member
+// against the ordinary PARAM member by byte identity first and default
+// `xyce_verify` second. The comparator is directional: the sorted global deck
+// is GOODFILE and the local-parameter deck is TESTFILE. These identities bind
+// both executable roots, their shared copper material model, and that exact
+// historical oracle before native execution is admitted.
+const XYCE_BUG1826_THERMAL_PARAMETER_WRAPPER_OWNER_CONTRACT: &str =
+    "bug1826_thermal_parameter_scope_wrapper_owner";
+const XYCE_BUG1826_THERMAL_PARAMETER_GLOBAL_BASELINE_CONTRACT: &str =
+    "bug1826_thermal_parameter_scope_global_baseline";
+const XYCE_BUG1826_THERMAL_PARAMETER_LOCAL_MEMBER_CONTRACT: &str =
+    "bug1826_thermal_parameter_scope_local_member";
+const XYCE_BUG1826_THERMAL_PARAMETER_OWNER_RECORD: &str =
+    "netlists/certification_tests/bug_1826/linear_simple.cir";
+const XYCE_BUG1826_THERMAL_PARAMETER_GLOBAL_BASELINE_RECORD: &str =
+    "netlists/certification_tests/bug_1826/linear_simple_global.cir";
+const XYCE_BUG1826_THERMAL_PARAMETER_LOCAL_MEMBER_RECORD: &str =
+    "netlists/certification_tests/bug_1826/linear_simple_param.cir";
+const XYCE_BUG1826_THERMAL_PARAMETER_SUPPORT_RECORD: &str =
+    "netlists/certification_tests/bug_1826/copper.linear";
+const XYCE_BUG1826_THERMAL_PARAMETER_OWNER_CONTENT_BLAKE3: &str =
+    "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262";
+const XYCE_BUG1826_THERMAL_PARAMETER_GLOBAL_BASELINE_CONTENT_BLAKE3: &str =
+    "0498a73d52c4e66391b4920baf96c0838f08aa007c33fa5573be616609beca0a";
+const XYCE_BUG1826_THERMAL_PARAMETER_LOCAL_MEMBER_CONTENT_BLAKE3: &str =
+    "fcc455267359d3ab906fe0aee58f4967e46c867a6fbef4f0420a6667f348ca45";
+const XYCE_BUG1826_THERMAL_PARAMETER_SUPPORT_CONTENT_BLAKE3: &str =
+    "4754b245583f213148103d11e3b76484916fe57bf63d18c307a381d708741e3d";
+const XYCE_BUG1826_THERMAL_PARAMETER_CANDIDATE_COUNT: usize = 3;
+const XYCE_BUG1826_THERMAL_PARAMETER_CANDIDATE_BLAKE3: &str =
+    "2f37d60ff33cb0f8516e44d24cef01316847b48e8d5e99fa73354f4638be1293";
+const XYCE_BUG1826_THERMAL_PARAMETER_CANDIDATE_CONTENT_BLAKE3: &str =
+    "c297b34e5e4611fde354bbd41b019d59eda9fef8ae01d03d8a1cd1eee3b04f1d";
+const XYCE_BUG1826_THERMAL_PARAMETER_OWNER_COUNT: usize = 1;
+const XYCE_BUG1826_THERMAL_PARAMETER_OWNER_MANIFEST_BLAKE3: &str =
+    "954fb7ec9f57f9bf266813a7a85592c2b19548b54652e1126b8a58c89be59ffd";
+const XYCE_BUG1826_THERMAL_PARAMETER_EXCLUSION_COUNT: usize = 2;
+const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUSION_BLAKE3: &str =
+    "db80e2386563f743b021b1c1400d050254e5644de87361b2b41f327a0324e3f7";
+const XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_REGRESSION_COMMIT: &str =
+    "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_PATH: &str =
+    "Netlists/Certification_Tests/BUG_1826/linear_simple.cir.sh";
+const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_BYTES: usize = 1_994;
+const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_SHA256: &str =
+    "155f0ba65fc5c1ab5e750f36b6905a54dc50eac250acfb2813ae853063a9e860";
+const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_BLAKE3: &str =
+    "e9f1460c2a494dc9998dcfa1c07b7a24cefad947c779ace0377f8ee24f8a541b";
+const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_PATH: &str =
+    "Netlists/Certification_Tests/BUG_1826/exclude";
+const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_BYTES: usize = 49;
+const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_SHA256: &str =
+    "f65dcf286bb349dc23ba25b0f5a7ad70c1ab2a1c3f209d9d73b5dec740f73d37";
+const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_BLAKE3: &str =
+    "84f595a0c23dbf23318e472473347fec6f36f1c5fc535f87b2e36c0f95390397";
+const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_ORACLE_RECORD_COUNT: usize = 3;
+const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_ORACLE_BLAKE3: &str =
+    "7ef9daf7fa72a71ca5981eff8c863aba6e8a87873b2f390f9708fbc0fe41303c";
 const XYCE_LEVEL2_DIODE_DTEMP_WRAPPER_CONTRACT: &str =
     "level2_diode_dtemp_relational_wrapper_owner";
 const XYCE_LEVEL2_DIODE_DTEMP_REFERENCE_CONTRACT: &str =
@@ -5296,6 +5355,14 @@ struct XyceNakedAlgebraFamilyContract {
 }
 
 #[derive(Debug, Clone)]
+struct XyceBug1826ThermalParameterFamilyContract {
+    relational: XyceBaselineFamilyContract,
+    owner_path: PathBuf,
+    support_path: PathBuf,
+    role: XyceBug1826ThermalParameterRole,
+}
+
+#[derive(Debug, Clone)]
 struct XyceSwitchStateCaseFamilyContract {
     relational: XyceBaselineFamilyContract,
     role: XyceSwitchStateCaseFamilyRole,
@@ -5402,6 +5469,32 @@ impl XyceNakedAlgebraRole {
             XYCE_NAKED_ALGEBRA_OWNER_RECORD => Some(Self::WrapperOwner),
             XYCE_NAKED_ALGEBRA_BRACED_BASELINE_RECORD => Some(Self::BracedBaseline),
             XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_RECORD => Some(Self::GlobalMember),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBug1826ThermalParameterRole {
+    WrapperOwner,
+    GlobalBaseline,
+    LocalMember,
+}
+
+impl XyceBug1826ThermalParameterRole {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::WrapperOwner => XYCE_BUG1826_THERMAL_PARAMETER_WRAPPER_OWNER_CONTRACT,
+            Self::GlobalBaseline => XYCE_BUG1826_THERMAL_PARAMETER_GLOBAL_BASELINE_CONTRACT,
+            Self::LocalMember => XYCE_BUG1826_THERMAL_PARAMETER_LOCAL_MEMBER_CONTRACT,
+        }
+    }
+
+    fn for_record(relative_path: &str) -> Option<Self> {
+        match XyceTestRunner::normalize_manifest_key(relative_path).as_str() {
+            XYCE_BUG1826_THERMAL_PARAMETER_OWNER_RECORD => Some(Self::WrapperOwner),
+            XYCE_BUG1826_THERMAL_PARAMETER_GLOBAL_BASELINE_RECORD => Some(Self::GlobalBaseline),
+            XYCE_BUG1826_THERMAL_PARAMETER_LOCAL_MEMBER_RECORD => Some(Self::LocalMember),
             _ => None,
         }
     }
@@ -5892,6 +5985,44 @@ struct XyceNakedAlgebraSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceBug1826ThermalParameterSnapshot {
+    representation: XyceBug1826ThermalParameterRepresentation,
+    title: String,
+    parameter_name: String,
+    parameter_bits: u64,
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    model_name: String,
+    model_type: String,
+    model_numeric_bits: Vec<(String, u64)>,
+    model_expressions: BTreeMap<String, XyceExpressionAstFingerprint>,
+    runtime_resistor: XyceThermalResistorRuntimeFingerprint,
+    tran_step_bits: u64,
+    tran_stop_bits: u64,
+    ordered_probes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceThermalResistorRuntimeFingerprint {
+    name: String,
+    length_bits: u64,
+    area_bits: u64,
+    thermal_length_bits: u64,
+    thermal_area_bits: u64,
+    multiplicity_bits: u64,
+    scale_bits: u64,
+    temperature_celsius_bits: u64,
+    resistivity_bits: u64,
+    heat_capacity_bits: u64,
+    thermal_heat_capacity_bits: u64,
+    reported_resistance_bits: u64,
+    output_resistance_bits: u64,
+    output_conductance_bits: u64,
+    tnom_celsius_bits: u64,
+    model_numeric_bits: Vec<(String, u64)>,
+    model_expressions: BTreeMap<String, XyceExpressionAstFingerprint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct XyceAgeCapFamilySnapshot {
     representation: XyceAgeCapRepresentation,
     elements: BTreeMap<String, XyceRelationalElementFingerprint>,
@@ -6040,6 +6171,7 @@ enum XyceStrictTransientFamilySnapshot {
     ParamExpression(XyceParamExpressionFamilySnapshot),
     Params1(XyceParams1Snapshot),
     NakedAlgebra(XyceNakedAlgebraSnapshot),
+    Bug1826ThermalParameter(XyceBug1826ThermalParameterSnapshot),
     PassivePrimaryValue(XycePassivePrimaryValueSnapshot),
     PassiveTemperatureOverride(XycePassiveTemperatureOverrideSnapshot),
     TransientAnalysisExpression(XyceTransientAnalysisExpressionSnapshot),
@@ -6139,6 +6271,12 @@ enum XyceNakedAlgebraRepresentation {
     BracedLocalBaseline,
     MixedLocalParameters,
     MixedGlobalParameters,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBug1826ThermalParameterRepresentation {
+    GlobalParameter,
+    LocalParameter,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -6254,6 +6392,7 @@ enum XyceBaselineFamilyKind {
     ParamExpression,
     Params1,
     NakedAlgebra,
+    Bug1826ThermalParameter,
     PassiveCapPrimaryValue,
     PassiveResPrimaryValue,
     PassiveTemperatureOverride,
@@ -6341,6 +6480,7 @@ impl XyceBaselineFamilyKind {
             Self::ParamExpression => "PARAM_EXPRESSION",
             Self::Params1 => "PARAMS1_PARAMETER_EQUIVALENCE",
             Self::NakedAlgebra => "NAKED_ALGEBRA_PARAMETER_EQUIVALENCE",
+            Self::Bug1826ThermalParameter => "BUG1826_THERMAL_PARAMETER_SCOPE_EQUIVALENCE",
             Self::PassiveCapPrimaryValue => "PASSIVE_CAP_PRIMARY_VALUE",
             Self::PassiveResPrimaryValue => "PASSIVE_RES_PRIMARY_VALUE",
             Self::PassiveTemperatureOverride => "PASSIVE_TEMPERATURE_OVERRIDE",
@@ -6367,6 +6507,7 @@ impl XyceBaselineFamilyKind {
             Self::ParamExpression => "param_expression_family_wrapper",
             Self::Params1 => XYCE_PARAMS1_WRAPPER_OWNER_CONTRACT,
             Self::NakedAlgebra => XYCE_NAKED_ALGEBRA_WRAPPER_OWNER_CONTRACT,
+            Self::Bug1826ThermalParameter => XYCE_BUG1826_THERMAL_PARAMETER_WRAPPER_OWNER_CONTRACT,
             Self::PassiveCapPrimaryValue => "passive_primary_value_capacitor_tran_wrapper",
             Self::PassiveResPrimaryValue => "passive_primary_value_resistor_dc_wrapper",
             Self::PassiveTemperatureOverride => "passive_temperature_override_family_wrapper",
@@ -6393,6 +6534,9 @@ impl XyceBaselineFamilyKind {
             Self::ParamExpression => "param_expression_family_baseline",
             Self::Params1 => XYCE_PARAMS1_LITERAL_BASELINE_CONTRACT,
             Self::NakedAlgebra => XYCE_NAKED_ALGEBRA_BRACED_BASELINE_CONTRACT,
+            Self::Bug1826ThermalParameter => {
+                XYCE_BUG1826_THERMAL_PARAMETER_GLOBAL_BASELINE_CONTRACT
+            }
             Self::PassiveCapPrimaryValue => "passive_primary_value_capacitor_tran_baseline",
             Self::PassiveResPrimaryValue => "passive_primary_value_resistor_dc_baseline",
             Self::PassiveTemperatureOverride => "passive_temperature_override_family_baseline",
@@ -6437,6 +6581,7 @@ impl XyceBaselineFamilyKind {
             | Self::ParamExpression
             | Self::Params1
             | Self::NakedAlgebra
+            | Self::Bug1826ThermalParameter
             | Self::PassiveCapPrimaryValue
             | Self::PassiveTemperatureOverride
             | Self::TransientAnalysisExpression

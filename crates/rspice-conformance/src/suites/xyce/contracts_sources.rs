@@ -3111,6 +3111,485 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    pub(super) fn bug1826_thermal_parameter_historical_oracle_provenance_records() -> Vec<String> {
+        [
+            (
+                XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_PATH,
+                XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_BYTES,
+                XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_SHA256,
+                XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_BLAKE3,
+            ),
+            (
+                XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_PATH,
+                XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_BYTES,
+                XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_SHA256,
+                XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_BLAKE3,
+            ),
+            (
+                XYCE_RELEASE_710_XYCE_VERIFY_PATH,
+                XYCE_RELEASE_710_XYCE_VERIFY_BYTES,
+                XYCE_RELEASE_710_XYCE_VERIFY_SHA256,
+                XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3,
+            ),
+        ]
+        .into_iter()
+        .map(|(path, bytes, sha256, content_blake3)| {
+            format!(
+                "{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
+            )
+        })
+        .collect()
+    }
+
+    pub(super) fn validate_bug1826_thermal_parameter_historical_oracle_provenance()
+    -> Result<(), String> {
+        let mut records = Self::bug1826_thermal_parameter_historical_oracle_provenance_records();
+        records.sort();
+        let provenance_hash = blake3::hash(records.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if records.len() != XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_ORACLE_RECORD_COUNT
+            || provenance_hash != XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_ORACLE_BLAKE3
+        {
+            return Err(format!(
+                "BUG 1826 Release-7.10 wrapper/exclude/xyce_verify provenance changed: records={}/{provenance_hash}",
+                records.len()
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn bug1826_thermal_parameter_current_wrapper_manifest_rows(
+        &self,
+    ) -> Result<Vec<String>, String> {
+        const LABEL: &str = "BUG 1826 wrapper manifest";
+        let path = self.root.join(HARNESS_MANIFEST_FILE);
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| format!("failed to inspect {LABEL}: {error}"))?;
+        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+            return Err(format!(
+                "{LABEL} '{}' must be a regular non-symlink file",
+                self.display_path(&path)
+            ));
+        }
+        let bytes = fs::read(&path).map_err(|error| format!("failed to read {LABEL}: {error}"))?;
+        let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
+        let source = std::str::from_utf8(&canonical)
+            .map_err(|error| format!("{LABEL} is not UTF-8: {error}"))?;
+        let expected = format!(
+            "Netlists/Certification_Tests/BUG_1826/linear_simple.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"
+        );
+        let mut rows = Vec::new();
+        for (line_index, line) in source.lines().enumerate() {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some((raw_path, _)) = line.split_once('\t') else {
+                if line.to_ascii_lowercase().contains("bug_1826") {
+                    return Err(format!(
+                        "{LABEL} line {} mentioning BUG_1826 is not tab-delimited",
+                        line_index + 1
+                    ));
+                }
+                continue;
+            };
+            if Self::normalize_manifest_key(raw_path)
+                .starts_with("netlists/certification_tests/bug_1826/")
+            {
+                if line != expected {
+                    return Err(format!(
+                        "{LABEL} line {} is not the exact removed-wrapper owner row",
+                        line_index + 1
+                    ));
+                }
+                rows.push(line.to_string());
+            }
+        }
+        if rows != [expected] {
+            return Err(format!(
+                "{LABEL} requires exactly the canonical linear_simple.cir owner row"
+            ));
+        }
+        Ok(rows)
+    }
+
+    pub(super) fn bug1826_thermal_parameter_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceBug1826ThermalParameterFamilyContract, String>> {
+        let relative = Self::normalize_manifest_key(&deck.relative_path);
+        let role = XyceBug1826ThermalParameterRole::for_record(&relative)?;
+        Some((|| {
+            const LABEL: &str = "BUG 1826 thermal-parameter-scope family";
+            if deck.section != XyceDeckSection::Netlists {
+                return Err(format!(
+                    "recognized {LABEL} record '{}' is not classified as a Netlists deck",
+                    deck.relative_path
+                ));
+            }
+            if Self::normalize_manifest_key(&self.relative_key(&deck.path)) != relative {
+                return Err(format!(
+                    "recognized {LABEL} record '{}' does not match its physical deck path",
+                    deck.relative_path
+                ));
+            }
+
+            let parent = deck
+                .path
+                .parent()
+                .ok_or_else(|| format!("recognized {LABEL} record has no sibling directory"))?;
+            let owner_path = parent.join("linear_simple.cir");
+            let global_baseline_path = parent.join("linear_simple_global.cir");
+            let local_member_path = parent.join("linear_simple_param.cir");
+            let support_path = parent.join("copper.linear");
+            let expected_target = match role {
+                XyceBug1826ThermalParameterRole::WrapperOwner => &owner_path,
+                XyceBug1826ThermalParameterRole::GlobalBaseline => &global_baseline_path,
+                XyceBug1826ThermalParameterRole::LocalMember => &local_member_path,
+            };
+            if !Self::same_path(&deck.path, expected_target) {
+                return Err(format!(
+                    "recognized {LABEL} role {role:?} is not backed by its exact canonical path"
+                ));
+            }
+
+            let target_path = match role {
+                XyceBug1826ThermalParameterRole::WrapperOwner => None,
+                XyceBug1826ThermalParameterRole::GlobalBaseline => {
+                    Some(global_baseline_path.clone())
+                }
+                XyceBug1826ThermalParameterRole::LocalMember => Some(local_member_path.clone()),
+            };
+            let contract = XyceBug1826ThermalParameterFamilyContract {
+                relational: XyceBaselineFamilyContract {
+                    kind: XyceBaselineFamilyKind::Bug1826ThermalParameter,
+                    comparison: XyceBaselineFamilyComparison::TolerancedStrict,
+                    family: "BUG_1826/linear_simple".to_string(),
+                    baseline_path: global_baseline_path.clone(),
+                    member_paths: vec![global_baseline_path, local_member_path],
+                    target_path,
+                },
+                owner_path,
+                support_path,
+                role,
+            };
+            self.validate_bug1826_thermal_parameter_provenance(&contract)?;
+            Ok(contract)
+        })())
+    }
+
+    pub(super) fn validate_bug1826_thermal_parameter_provenance(
+        &self,
+        contract: &XyceBug1826ThermalParameterFamilyContract,
+    ) -> Result<(), String> {
+        const LABEL: &str = "BUG 1826 thermal-parameter-scope family";
+        Self::validate_bug1826_thermal_parameter_historical_oracle_provenance()?;
+        let parent = contract
+            .owner_path
+            .parent()
+            .ok_or_else(|| format!("{LABEL} owner has no parent directory"))?;
+        let parent_metadata = fs::symlink_metadata(parent)
+            .map_err(|error| format!("failed to inspect {LABEL} directory: {error}"))?;
+        if parent_metadata.file_type().is_symlink() || !parent_metadata.file_type().is_dir() {
+            return Err(format!(
+                "{LABEL} directory '{}' must be a regular non-symlink directory",
+                self.display_path(parent)
+            ));
+        }
+
+        let global_baseline_path = parent.join("linear_simple_global.cir");
+        let local_member_path = parent.join("linear_simple_param.cir");
+        let support_path = parent.join("copper.linear");
+        let expected_member_paths = [&global_baseline_path, &local_member_path];
+        let member_paths_match = contract.relational.member_paths.len()
+            == expected_member_paths.len()
+            && contract
+                .relational
+                .member_paths
+                .iter()
+                .zip(expected_member_paths)
+                .all(|(actual, expected)| Self::same_path(actual, expected));
+        let target_matches = match (contract.relational.target_path.as_ref(), contract.role) {
+            (None, XyceBug1826ThermalParameterRole::WrapperOwner) => true,
+            (Some(actual), XyceBug1826ThermalParameterRole::GlobalBaseline) => {
+                Self::same_path(actual, &global_baseline_path)
+            }
+            (Some(actual), XyceBug1826ThermalParameterRole::LocalMember) => {
+                Self::same_path(actual, &local_member_path)
+            }
+            _ => false,
+        };
+        if contract.relational.kind != XyceBaselineFamilyKind::Bug1826ThermalParameter
+            || contract.relational.comparison != XyceBaselineFamilyComparison::TolerancedStrict
+            || contract.relational.family != "BUG_1826/linear_simple"
+            || !Self::same_path(&contract.relational.baseline_path, &global_baseline_path)
+            || !Self::same_path(&contract.support_path, &support_path)
+            || !member_paths_match
+            || !target_matches
+        {
+            return Err(format!(
+                "{LABEL} contract is not the exact directional global-to-local toleranced-strict contract"
+            ));
+        }
+
+        let expected_records = [
+            (
+                &contract.owner_path,
+                XYCE_BUG1826_THERMAL_PARAMETER_OWNER_RECORD,
+            ),
+            (
+                &global_baseline_path,
+                XYCE_BUG1826_THERMAL_PARAMETER_GLOBAL_BASELINE_RECORD,
+            ),
+            (
+                &local_member_path,
+                XYCE_BUG1826_THERMAL_PARAMETER_LOCAL_MEMBER_RECORD,
+            ),
+            (&support_path, XYCE_BUG1826_THERMAL_PARAMETER_SUPPORT_RECORD),
+        ];
+        for (path, expected_record) in expected_records {
+            if Self::normalize_manifest_key(&self.relative_key(path)) != expected_record {
+                return Err(format!(
+                    "{LABEL} path '{}' is not canonical record '{expected_record}'",
+                    self.display_path(path)
+                ));
+            }
+        }
+
+        let expected_role_record = match contract.role {
+            XyceBug1826ThermalParameterRole::WrapperOwner => {
+                XYCE_BUG1826_THERMAL_PARAMETER_OWNER_RECORD
+            }
+            XyceBug1826ThermalParameterRole::GlobalBaseline => {
+                XYCE_BUG1826_THERMAL_PARAMETER_GLOBAL_BASELINE_RECORD
+            }
+            XyceBug1826ThermalParameterRole::LocalMember => {
+                XYCE_BUG1826_THERMAL_PARAMETER_LOCAL_MEMBER_RECORD
+            }
+        };
+        let actual_role_record = match contract.relational.target_path.as_ref() {
+            Some(path) => Self::normalize_manifest_key(&self.relative_key(path)),
+            None => Self::normalize_manifest_key(&self.relative_key(&contract.owner_path)),
+        };
+        if actual_role_record != expected_role_record {
+            return Err(format!(
+                "{LABEL} role {:?} is not bound to its exact canonical record",
+                contract.role
+            ));
+        }
+
+        let exclusions = Self::load_upstream_exclusions(&self.root)
+            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
+        let owner_manifest_rows = self.bug1826_thermal_parameter_current_wrapper_manifest_rows()?;
+        let current_wrapper_records = Self::load_upstream_wrapper_decks(&self.root);
+        let entries = fs::read_dir(parent)
+            .map_err(|error| format!("failed to read {LABEL} directory: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("failed to enumerate {LABEL}: {error}"))?;
+
+        let mut directory_names = BTreeMap::<String, PathBuf>::new();
+        let mut candidate_paths = BTreeMap::<String, PathBuf>::new();
+        for entry in &entries {
+            let path = entry.path();
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or_else(|| format!("{LABEL} directory contains a non-UTF-8 entry"))?
+                .to_string();
+            let normalized_name = name.to_ascii_lowercase();
+            if directory_names
+                .insert(normalized_name.clone(), path.clone())
+                .is_some()
+            {
+                return Err(format!(
+                    "{LABEL} directory contains a case-colliding entry '{name}'"
+                ));
+            }
+            let metadata = fs::symlink_metadata(&path)
+                .map_err(|error| format!("failed to inspect {LABEL} entry: {error}"))?;
+            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+                return Err(format!(
+                    "{LABEL} entry '{}' must be a regular non-symlink file",
+                    self.display_path(&path)
+                ));
+            }
+            if path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+            {
+                let relative = self.relative_key(&path);
+                let key = Self::normalize_manifest_key(&relative);
+                if candidate_paths.insert(key, path).is_some() {
+                    return Err(format!(
+                        "{LABEL} candidate census contains a normalized-path collision"
+                    ));
+                }
+            }
+        }
+        let expected_directory_names = BTreeSet::from([
+            "copper.linear".to_string(),
+            "linear_simple.cir".to_string(),
+            "linear_simple_global.cir".to_string(),
+            "linear_simple_param.cir".to_string(),
+        ]);
+        if directory_names.keys().cloned().collect::<BTreeSet<_>>() != expected_directory_names {
+            return Err(format!(
+                "{LABEL} directory must contain only the three canonical decks and copper.linear"
+            ));
+        }
+        let expected_candidate_keys = BTreeSet::from([
+            XYCE_BUG1826_THERMAL_PARAMETER_OWNER_RECORD.to_string(),
+            XYCE_BUG1826_THERMAL_PARAMETER_GLOBAL_BASELINE_RECORD.to_string(),
+            XYCE_BUG1826_THERMAL_PARAMETER_LOCAL_MEMBER_RECORD.to_string(),
+        ]);
+        let actual_candidate_keys = candidate_paths.keys().cloned().collect::<BTreeSet<_>>();
+        if actual_candidate_keys != expected_candidate_keys {
+            return Err(format!(
+                "{LABEL} must contain exactly its three canonical .cir records, got {actual_candidate_keys:?}"
+            ));
+        }
+
+        let support_bytes = fs::read(&support_path)
+            .map_err(|error| format!("failed to read {LABEL} copper.linear: {error}"))?;
+        let support_canonical = Self::canonical_lf_text_identity(LABEL, &support_bytes)?;
+        let support_hash = blake3::hash(&support_canonical).to_hex().to_string();
+        if support_canonical.is_empty()
+            || support_hash != XYCE_BUG1826_THERMAL_PARAMETER_SUPPORT_CONTENT_BLAKE3
+        {
+            return Err(format!(
+                "{LABEL} copper.linear identity changed: expected {XYCE_BUG1826_THERMAL_PARAMETER_SUPPORT_CONTENT_BLAKE3}, got {support_hash}"
+            ));
+        }
+
+        let mut candidates = Vec::with_capacity(candidate_paths.len());
+        let mut candidate_content = Vec::with_capacity(candidate_paths.len());
+        let mut historical_exclusion_rows = Vec::new();
+        for (key, path) in &candidate_paths {
+            let relative = self.relative_key(path);
+            let role = XyceBug1826ThermalParameterRole::for_record(&relative)
+                .ok_or_else(|| format!("{LABEL} candidate role became ambiguous"))?;
+            let bytes = fs::read(path).map_err(|error| {
+                format!("failed to read {LABEL} candidate '{relative}': {error}")
+            })?;
+            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
+            if (role == XyceBug1826ThermalParameterRole::WrapperOwner) != canonical.is_empty() {
+                return Err(format!(
+                    "{LABEL} owner must be exactly empty and both executable members must be nonempty"
+                ));
+            }
+            let content_hash = blake3::hash(&canonical).to_hex().to_string();
+            let expected_content_hash = match role {
+                XyceBug1826ThermalParameterRole::WrapperOwner => {
+                    XYCE_BUG1826_THERMAL_PARAMETER_OWNER_CONTENT_BLAKE3
+                }
+                XyceBug1826ThermalParameterRole::GlobalBaseline => {
+                    XYCE_BUG1826_THERMAL_PARAMETER_GLOBAL_BASELINE_CONTENT_BLAKE3
+                }
+                XyceBug1826ThermalParameterRole::LocalMember => {
+                    XYCE_BUG1826_THERMAL_PARAMETER_LOCAL_MEMBER_CONTENT_BLAKE3
+                }
+            };
+            if content_hash != expected_content_hash {
+                return Err(format!(
+                    "{LABEL} candidate '{relative}' canonical source identity changed: expected {expected_content_hash}, got {content_hash}"
+                ));
+            }
+            candidates.push(relative.clone());
+            candidate_content.push(format!("{relative}\t{content_hash}"));
+
+            match role {
+                XyceBug1826ThermalParameterRole::WrapperOwner => {
+                    if !self.requires_upstream_wrapper(&relative)
+                        || !current_wrapper_records.contains(key)
+                        || exclusions.contains_key(key)
+                    {
+                        return Err(format!(
+                            "{LABEL} owner '{relative}' lost its exclusive wrapper provenance"
+                        ));
+                    }
+                }
+                XyceBug1826ThermalParameterRole::GlobalBaseline
+                | XyceBug1826ThermalParameterRole::LocalMember => {
+                    if self.requires_upstream_wrapper(&relative)
+                        || current_wrapper_records.contains(key)
+                    {
+                        return Err(format!(
+                            "{LABEL} executable member '{relative}' must not own the wrapper"
+                        ));
+                    }
+                    let exclusion = exclusions.get(key).ok_or_else(|| {
+                        format!(
+                            "{LABEL} executable member '{relative}' lost its historical exclusion provenance"
+                        )
+                    })?;
+                    if !matches!(
+                        &exclusion.disposition,
+                        XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                            expected_contract,
+                        } if expected_contract == role.result_contract()
+                    ) {
+                        return Err(format!(
+                            "{LABEL} executable member '{relative}' does not carry its exact independent qualification contract"
+                        ));
+                    }
+                    historical_exclusion_rows.push(format!(
+                        "{relative}\t{}\t{UPSTREAM_EXCLUDED_DISPOSITION}",
+                        exclusion.source
+                    ));
+                }
+            }
+
+            self.reject_wrapper_output_artifacts(path)
+                .map_err(|error| format!("{LABEL} candidate '{relative}' {error}"))?;
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| format!("{LABEL} candidate filename is not UTF-8"))?;
+            for suffix in ["prn", "res", "prn.gs", "res.gs", "csv", "csd"] {
+                let sidecar_name = format!("{file_name}.{suffix}").to_ascii_lowercase();
+                if let Some(sidecar) = directory_names.get(&sidecar_name) {
+                    return Err(format!(
+                        "{LABEL} candidate must not have source-side output artifact '{}'",
+                        self.display_path(sidecar)
+                    ));
+                }
+            }
+        }
+
+        candidates.sort();
+        candidate_content.sort();
+        historical_exclusion_rows.sort();
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(candidate_content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let owner_hash = blake3::hash(owner_manifest_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let exclusion_hash = blake3::hash(historical_exclusion_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if candidates.len() != XYCE_BUG1826_THERMAL_PARAMETER_CANDIDATE_COUNT
+            || candidate_hash != XYCE_BUG1826_THERMAL_PARAMETER_CANDIDATE_BLAKE3
+            || content_hash != XYCE_BUG1826_THERMAL_PARAMETER_CANDIDATE_CONTENT_BLAKE3
+            || owner_manifest_rows.len() != XYCE_BUG1826_THERMAL_PARAMETER_OWNER_COUNT
+            || owner_hash != XYCE_BUG1826_THERMAL_PARAMETER_OWNER_MANIFEST_BLAKE3
+            || historical_exclusion_rows.len() != XYCE_BUG1826_THERMAL_PARAMETER_EXCLUSION_COUNT
+            || exclusion_hash != XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUSION_BLAKE3
+        {
+            return Err(format!(
+                "{LABEL} provenance changed: candidates={}/{candidate_hash}/{content_hash}, owners={}/{owner_hash}, exclusions={}/{exclusion_hash}",
+                candidates.len(),
+                owner_manifest_rows.len(),
+                historical_exclusion_rows.len()
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn param_expression_family_contract(
         &self,
         deck: &XyceDeck,

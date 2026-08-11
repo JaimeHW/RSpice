@@ -9195,6 +9195,47 @@ fn test_xyce_naked_algebra_parameter_equivalence_relational_oracles() {
 }
 
 #[test]
+fn test_xyce_bug1826_thermal_parameter_scope_equivalence_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, wrapper_origin) in [
+        (
+            "Netlists/Certification_Tests/BUG_1826/linear_simple.cir",
+            "bug1826_thermal_parameter_scope_wrapper_owner",
+            true,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1826/linear_simple_global.cir",
+            "bug1826_thermal_parameter_scope_global_baseline",
+            false,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1826/linear_simple_param.cir",
+            "bug1826_thermal_parameter_scope_local_member",
+            false,
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            wrapper_origin,
+            "{relative} wrapper provenance changed"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should satisfy strict global/local thermal-parameter equivalence, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should satisfy the directional Release 7.10 interpolated RMS comparison"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_switch_initial_state_case_relational_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

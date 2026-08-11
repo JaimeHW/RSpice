@@ -4282,6 +4282,52 @@ fn transient_resistor_power_probe_uses_recorded_branch_current() {
 }
 
 #[test]
+fn transient_resistor_instance_parameters_work_in_direct_expression_and_stateful_output() {
+    let netlist = Netlist::parse(
+        "transient resistor instance parameter probes\n\
+             R1 out 0 rmod L=0.1 A=1e-5\n\
+             .model rmod r (r=1)\n\
+             .tran 1m 1m\n\
+             .end\n",
+    )
+    .expect("resistor instance-parameter deck parses");
+    let result = TransientResult {
+        time: vec![0.0, 1.0e-3],
+        step_sizes: vec![0.0; 2],
+        voltages: vec![vec![0.0, 0.0]],
+        branch_currents: Vec::new(),
+        num_nodes: 1,
+        node_names: vec!["out".to_string()],
+        branch_names: Vec::new(),
+        digital_traces: Vec::new(),
+        real_traces: Vec::new(),
+        device_op_traces: Vec::new(),
+        store_traces: Vec::new(),
+    };
+
+    for probe in ["R1:A", "{R1:A*2}", "{SDT(R1:A)}"] {
+        XyceTestRunner::validate_tran_probe(probe, &netlist)
+            .unwrap_or_else(|error| panic!("{probe} must validate: {error}"));
+    }
+    let direct = XyceTestRunner::evaluate_tran_probe("R1:A", &netlist, &result, 1.0e-3)
+        .expect("direct instance parameter evaluates");
+    let expression = XyceTestRunner::evaluate_tran_probe("{R1:A*2}", &netlist, &result, 1.0e-3)
+        .expect("instance parameter expression evaluates");
+    let stateful = XyceTestRunner::stateful_tran_probe_waveform("{SDT(R1:A)}", &netlist, &result)
+        .expect("stateful instance parameter evaluates")
+        .expect("SDT expression produces a waveform");
+    assert_eq!(direct.to_bits(), 1.0e-5f64.to_bits());
+    assert_eq!(expression.to_bits(), 2.0e-5f64.to_bits());
+    assert_eq!(stateful.len(), result.time.len());
+    assert_eq!(stateful[0].to_bits(), 0.0f64.to_bits());
+    assert!((stateful[1] - 1.0e-8).abs() <= 1.0e-22);
+
+    assert!(XyceTestRunner::validate_tran_probe("R1:UNSET", &netlist).is_err());
+    assert!(XyceTestRunner::evaluate_tran_probe("R1:UNSET", &netlist, &result, 1.0e-3).is_err());
+    assert!(XyceTestRunner::static_transient_device_parameter_value(&netlist, "R1:UNSET").is_err());
+}
+
+#[test]
 fn transient_voltage_source_power_probe_uses_recorded_branch_current() {
     let netlist = Netlist::parse(
         "transient voltage source power probe\n\
@@ -15167,6 +15213,590 @@ fn naked_algebra_malformed_fixed_records_route_to_executed_failures() {
         assert_eq!(result.contract, expected_contract);
         assert!(result.error.is_some());
         fs::remove_dir_all(root).expect("remove nakedAlgebra routing fixture");
+    }
+}
+
+fn bug1826_thermal_parameter_corpus_sources() -> [String; 4] {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let family = corpus.join("Netlists/Certification_Tests/BUG_1826");
+    [
+        fs::read_to_string(family.join("linear_simple.cir")).expect("read BUG 1826 wrapper owner"),
+        fs::read_to_string(family.join("linear_simple_global.cir"))
+            .expect("read BUG 1826 global baseline"),
+        fs::read_to_string(family.join("linear_simple_param.cir"))
+            .expect("read BUG 1826 local member"),
+        fs::read_to_string(family.join("copper.linear")).expect("read BUG 1826 copper model"),
+    ]
+}
+
+fn bug1826_thermal_parameter_fixture(
+    label: &str,
+    sources: [&str; 4],
+) -> (PathBuf, [XyceDeck; 3], PathBuf, XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-bug1826-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = root.join("Netlists/Certification_Tests/BUG_1826");
+    fs::create_dir_all(&family).expect("create BUG 1826 fixture directory");
+    let records = [
+        "Netlists/Certification_Tests/BUG_1826/linear_simple.cir",
+        "Netlists/Certification_Tests/BUG_1826/linear_simple_global.cir",
+        "Netlists/Certification_Tests/BUG_1826/linear_simple_param.cir",
+    ];
+    let decks = std::array::from_fn(|index| {
+        let path = root.join(records[index]);
+        fs::write(&path, sources[index]).expect("write BUG 1826 fixture source");
+        XyceDeck {
+            path,
+            relative_path: records[index].to_string(),
+            section: XyceDeckSection::Netlists,
+        }
+    });
+    let support_path = family.join("copper.linear");
+    fs::write(&support_path, sources[3]).expect("write BUG 1826 copper model");
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n", records[0]),
+    )
+    .expect("write BUG 1826 wrapper provenance");
+    fs::write(
+        root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[
+            &format!(
+                "{}\tNetlists/Certification_Tests/BUG_1826/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_BUG1826_THERMAL_PARAMETER_GLOBAL_BASELINE_CONTRACT}",
+                records[1]
+            ),
+            &format!(
+                "{}\tNetlists/Certification_Tests/BUG_1826/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_BUG1826_THERMAL_PARAMETER_LOCAL_MEMBER_CONTRACT}",
+                records[2]
+            ),
+        ]),
+    )
+    .expect("write BUG 1826 exclusion provenance");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    (root, decks, support_path, runner)
+}
+
+#[test]
+fn bug1826_thermal_parameter_candidate_census_is_an_exact_three_record_bijection() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&corpus, XyceRunnerConfig::default());
+    let selected = runner
+        .discover_tests()
+        .iter()
+        .filter_map(|deck| {
+            runner
+                .bug1826_thermal_parameter_family_contract(deck)
+                .map(|contract| {
+                    let contract = contract.unwrap_or_else(|error| {
+                        panic!("BUG 1826 candidate failed qualification: {error}")
+                    });
+                    (
+                        XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                        contract.role,
+                    )
+                })
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        selected.len(),
+        XYCE_BUG1826_THERMAL_PARAMETER_CANDIDATE_COUNT
+    );
+    assert_eq!(
+        selected,
+        BTreeMap::from([
+            (
+                XYCE_BUG1826_THERMAL_PARAMETER_OWNER_RECORD.to_string(),
+                XyceBug1826ThermalParameterRole::WrapperOwner,
+            ),
+            (
+                XYCE_BUG1826_THERMAL_PARAMETER_GLOBAL_BASELINE_RECORD.to_string(),
+                XyceBug1826ThermalParameterRole::GlobalBaseline,
+            ),
+            (
+                XYCE_BUG1826_THERMAL_PARAMETER_LOCAL_MEMBER_RECORD.to_string(),
+                XyceBug1826ThermalParameterRole::LocalMember,
+            ),
+        ])
+    );
+}
+
+#[test]
+fn bug1826_thermal_parameter_family_is_role_typed_directional_and_provenance_bound() {
+    let sources = bug1826_thermal_parameter_corpus_sources();
+    let (root, decks, support_path, runner) = bug1826_thermal_parameter_fixture(
+        "qualification",
+        [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+            sources[3].as_str(),
+        ],
+    );
+    for (deck, role) in decks.iter().zip([
+        XyceBug1826ThermalParameterRole::WrapperOwner,
+        XyceBug1826ThermalParameterRole::GlobalBaseline,
+        XyceBug1826ThermalParameterRole::LocalMember,
+    ]) {
+        let contract = runner
+            .bug1826_thermal_parameter_family_contract(deck)
+            .expect("exact BUG 1826 record is selected")
+            .expect("exact BUG 1826 family qualifies");
+        assert_eq!(contract.role, role);
+        assert_eq!(
+            contract.relational.kind,
+            XyceBaselineFamilyKind::Bug1826ThermalParameter
+        );
+        assert_eq!(
+            contract.relational.comparison,
+            XyceBaselineFamilyComparison::TolerancedStrict
+        );
+        assert!(XyceTestRunner::same_path(
+            &contract.relational.baseline_path,
+            &decks[1].path
+        ));
+        assert!(XyceTestRunner::same_path(
+            &contract.support_path,
+            &support_path
+        ));
+        assert_eq!(contract.relational.member_paths.len(), 2);
+        runner
+            .validate_bug1826_thermal_parameter_provenance(&contract)
+            .expect("exact shared BUG 1826 provenance validates");
+    }
+    assert!(
+        !XyceBaselineFamilyKind::Bug1826ThermalParameter.xyce_verify_member_is_good_waveform(),
+        "global baseline must remain GOODFILE and local member TESTFILE"
+    );
+    fs::remove_dir_all(root).expect("remove BUG 1826 qualification fixture");
+}
+
+#[test]
+fn bug1826_thermal_parameter_historical_wrapper_and_default_verifier_provenance_is_exact() {
+    let records = XyceTestRunner::bug1826_thermal_parameter_historical_oracle_provenance_records();
+    assert_eq!(
+        records.len(),
+        XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_ORACLE_RECORD_COUNT
+    );
+    assert!(records.contains(&format!(
+        "{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_RELEASE_TAG}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_PATH}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_BYTES}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_SHA256}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_BLAKE3}"
+    )));
+    assert!(records.contains(&format!(
+        "{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_RELEASE_TAG}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_PATH}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_BYTES}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_SHA256}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_BLAKE3}"
+    )));
+    assert!(records.contains(&format!(
+        "{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_RELEASE_TAG}\t{XYCE_RELEASE_710_XYCE_VERIFY_PATH}\t{XYCE_RELEASE_710_XYCE_VERIFY_BYTES}\t{XYCE_RELEASE_710_XYCE_VERIFY_SHA256}\t{XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3}"
+    )));
+    XyceTestRunner::validate_bug1826_thermal_parameter_historical_oracle_provenance().expect(
+        "BUG 1826 Release-7.10 wrapper/exclude/xyce_verify provenance is internally consistent",
+    );
+}
+
+#[test]
+fn bug1826_thermal_parameter_snapshot_proves_only_global_to_local_scope_equivalence() {
+    let sources = bug1826_thermal_parameter_corpus_sources();
+    let (root, decks, _, _) = bug1826_thermal_parameter_fixture(
+        "snapshot",
+        [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+            sources[3].as_str(),
+        ],
+    );
+    let global = XyceTestRunner::parse_xyce_netlist(&sources[1], &decks[1].path)
+        .expect("parse BUG 1826 global baseline");
+    let local = XyceTestRunner::parse_xyce_netlist(&sources[2], &decks[2].path)
+        .expect("parse BUG 1826 local member");
+    let print = XycePrintRequest {
+        probes: vec![
+            "R1:R".to_string(),
+            "R1:TEMP".to_string(),
+            "I(R1)".to_string(),
+            "R1:A".to_string(),
+        ],
+    };
+    let global_snapshot =
+        XyceTestRunner::bug1826_thermal_parameter_family_snapshot(&global, &print)
+            .expect("global BUG 1826 snapshot qualifies");
+    let local_snapshot = XyceTestRunner::bug1826_thermal_parameter_family_snapshot(&local, &print)
+        .expect("local BUG 1826 snapshot qualifies");
+    assert_eq!(
+        global_snapshot.representation,
+        XyceBug1826ThermalParameterRepresentation::GlobalParameter
+    );
+    assert_eq!(
+        local_snapshot.representation,
+        XyceBug1826ThermalParameterRepresentation::LocalParameter
+    );
+    XyceTestRunner::compare_bug1826_thermal_parameter_family_snapshots(
+        &global_snapshot,
+        &local_snapshot,
+    )
+    .expect("global and local parameter scopes produce identical thermal semantics");
+    assert!(
+        XyceTestRunner::compare_bug1826_thermal_parameter_family_snapshots(
+            &global_snapshot,
+            &global_snapshot,
+        )
+        .is_err(),
+        "two global decks do not exercise parameter-scope equivalence"
+    );
+
+    let mut changed_geometry = local.clone();
+    let ElementKind::Resistor {
+        instance_params, ..
+    } = &mut changed_geometry.elements[0].kind
+    else {
+        panic!("BUG 1826 first element remains R1");
+    };
+    let (_, area) = instance_params
+        .iter_mut()
+        .find(|(name, _)| name.eq_ignore_ascii_case("A"))
+        .expect("BUG 1826 R1 retains A");
+    *area = 2.0e-5;
+    assert!(
+        XyceTestRunner::bug1826_thermal_parameter_family_snapshot(&changed_geometry, &print)
+            .is_err(),
+        "typed resistor-geometry drift must fail the snapshot"
+    );
+
+    let mut changed_material = local.clone();
+    let (_, resistivity) = changed_material.models[0]
+        .expr_params
+        .iter_mut()
+        .find(|(name, _)| name.eq_ignore_ascii_case("RESISTIVITY"))
+        .expect("BUG 1826 copper model retains RESISTIVITY");
+    *resistivity = resistivity.replace("0.5e-9", "0.6e-9");
+    let changed_material_snapshot =
+        XyceTestRunner::bug1826_thermal_parameter_family_snapshot(&changed_material, &print)
+            .expect("changed material remains a valid thermal-resistor snapshot");
+    assert!(
+        XyceTestRunner::compare_bug1826_thermal_parameter_family_snapshots(
+            &global_snapshot,
+            &changed_material_snapshot,
+        )
+        .is_err(),
+        "copper material AST and runtime-state drift must fail comparison"
+    );
+
+    for (mutated, reason) in [
+        (sources[2].replace("L=0.1", "L=0.2"), "resistor geometry"),
+        (sources[2].replace("v1  1 0 5", "v1  1 0 6"), "source"),
+        (
+            sources[2].replace(".tran 0 1", ".tran 0 2"),
+            "transient stop",
+        ),
+        (
+            sources[2].replace("i(r1) r1:a", "r1:a i(r1)"),
+            "ordered probes",
+        ),
+    ] {
+        let path = decks[1]
+            .path
+            .parent()
+            .expect("BUG 1826 baseline has a family directory")
+            .join("mutated.cir");
+        fs::write(&path, &mutated).expect("write semantic mutation");
+        let rejected = XyceTestRunner::parse_xyce_netlist(&mutated, &path)
+            .ok()
+            .and_then(|netlist| {
+                XyceTestRunner::bug1826_thermal_parameter_family_snapshot(&netlist, &print).ok()
+            })
+            .is_none();
+        assert!(rejected, "{reason} mutation must fail closed");
+        fs::remove_file(path).expect("remove semantic mutation");
+    }
+    fs::remove_dir_all(root).expect("remove BUG 1826 snapshot fixture");
+}
+
+#[test]
+fn bug1826_thermal_parameter_transient_outputs_are_physically_coherent() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/xyce/Netlists/Certification_Tests/BUG_1826/linear_simple_global.cir");
+    let source = fs::read_to_string(&path).expect("read canonical BUG 1826 global baseline");
+    let netlist = XyceTestRunner::parse_xyce_netlist(&source, &path)
+        .expect("parse canonical BUG 1826 global baseline");
+    let result = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+        .run_tran(&netlist, 1.0, 0.1)
+        .expect("canonical BUG 1826 thermal transient solves");
+    let resistance = result
+        .try_device_op_waveform_named("R1", "R")
+        .expect("BUG 1826 records the R1:R waveform");
+    let temperature = result
+        .try_device_op_waveform_named("R1", "TEMP")
+        .expect("BUG 1826 records the R1:TEMP waveform");
+    let current = result
+        .try_branch_current_waveform_named("R1")
+        .expect("BUG 1826 records the I(R1) waveform");
+
+    assert!(
+        result.time.len() >= 2,
+        "thermal transient needs multiple accepted points"
+    );
+    assert!(
+        result
+            .time
+            .iter()
+            .all(|time| time.is_finite() && *time >= 0.0)
+    );
+    assert!(result.time.windows(2).all(|pair| pair[0] < pair[1]));
+    assert_eq!(resistance.len(), result.time.len());
+    assert_eq!(temperature.len(), result.time.len());
+    assert_eq!(current.len(), result.time.len());
+    assert!(
+        resistance
+            .iter()
+            .all(|value| value.is_finite() && *value > 0.0)
+    );
+    assert!(
+        temperature
+            .iter()
+            .all(|value| value.is_finite() && *value > 0.0)
+    );
+    assert!(
+        current
+            .iter()
+            .all(|value| value.is_finite() && *value > 0.0)
+    );
+    assert!(
+        temperature.windows(2).all(|pair| pair[1] >= pair[0]),
+        "Joule heating must not decrease the uncooled resistor temperature: {temperature:?}"
+    );
+    assert!(
+        temperature
+            .last()
+            .copied()
+            .expect("temperature has a final sample")
+            > temperature[0],
+        "powered thermal resistor must heat above its initial temperature"
+    );
+
+    for (index, ((&time, &resistance), &current)) in
+        result.time.iter().zip(resistance).zip(current).enumerate()
+    {
+        let voltage_drop = current.abs() * resistance;
+        assert!(
+            (voltage_drop - 5.0).abs() <= 1.0e-10 * 5.0f64.max(voltage_drop.abs()),
+            "sample {index} at t={time:.17e}: accepted I(R1)*R1:R must equal 5 V, got {voltage_drop:.17e}"
+        );
+        for (probe, expected) in [("R1:R", resistance), ("R1:TEMP", temperature[index])] {
+            let direct = XyceTestRunner::evaluate_tran_probe(probe, &netlist, &result, time)
+                .unwrap_or_else(|error| panic!("{probe} direct evaluation failed: {error}"));
+            let braced_probe = format!("{{{probe}}}");
+            let braced =
+                XyceTestRunner::evaluate_tran_probe(&braced_probe, &netlist, &result, time)
+                    .unwrap_or_else(|error| panic!("{braced_probe} evaluation failed: {error}"));
+            assert_eq!(direct.to_bits(), expected.to_bits());
+            assert_eq!(braced.to_bits(), expected.to_bits());
+        }
+    }
+}
+
+#[test]
+fn bug1826_thermal_parameter_transient_plan_rejects_analysis_and_output_mutations() {
+    let sources = bug1826_thermal_parameter_corpus_sources();
+    let (root, decks, _, runner) = bug1826_thermal_parameter_fixture(
+        "plan",
+        [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+            sources[3].as_str(),
+        ],
+    );
+    for deck in &decks[1..] {
+        let plan = runner
+            .static_tran_family_plan_for_path(
+                &deck.path,
+                XyceStaticTranPlanPurpose::RelationalFamily,
+            )
+            .expect("build BUG 1826 transient plan");
+        XyceTestRunner::validate_bug1826_thermal_parameter_transient_plan(&plan)
+            .expect("canonical BUG 1826 transient plan qualifies");
+    }
+    let plan = runner
+        .static_tran_family_plan_for_path(
+            &decks[1].path,
+            XyceStaticTranPlanPurpose::RelationalFamily,
+        )
+        .expect("build BUG 1826 baseline transient plan");
+    let mut source_identity = plan.clone();
+    source_identity.source = source_identity.source.replace("L=0.1", "L=0.10");
+    assert!(
+        XyceTestRunner::validate_bug1826_thermal_parameter_transient_plan(&source_identity)
+            .is_err()
+    );
+    let mut comp = plan.clone();
+    comp.source = comp.source.replace(".tran", "*COMP R1:R RELTOL=1\n.tran");
+    assert!(XyceTestRunner::validate_bug1826_thermal_parameter_transient_plan(&comp).is_err());
+    let mut extra_probe = plan.clone();
+    extra_probe
+        .print
+        .as_mut()
+        .expect("BUG 1826 plan has a print request")
+        .probes
+        .push("V(1)".to_string());
+    assert!(
+        XyceTestRunner::validate_bug1826_thermal_parameter_transient_plan(&extra_probe).is_err()
+    );
+    let mut max_step = plan.clone();
+    max_step.tran.max_step = Some(0.01);
+    assert!(XyceTestRunner::validate_bug1826_thermal_parameter_transient_plan(&max_step).is_err());
+    let mut output_override = plan.clone();
+    output_override.output_override = true;
+    assert!(
+        XyceTestRunner::validate_bug1826_thermal_parameter_transient_plan(&output_override)
+            .is_err()
+    );
+    let mut wrong_contract = plan;
+    wrong_contract.contract = XyceStaticTranContract::PlainCsv;
+    assert!(
+        XyceTestRunner::validate_bug1826_thermal_parameter_transient_plan(&wrong_contract).is_err()
+    );
+    fs::remove_dir_all(root).expect("remove BUG 1826 plan fixture");
+}
+
+#[test]
+fn bug1826_thermal_parameter_provenance_rejects_content_directory_manifest_and_artifact_drift() {
+    let sources = bug1826_thermal_parameter_corpus_sources();
+    let source_refs = [
+        sources[0].as_str(),
+        sources[1].as_str(),
+        sources[2].as_str(),
+        sources[3].as_str(),
+    ];
+    for (index, mutation, reason) in [
+        (0usize, "nonempty owner\n".to_string(), "owner content"),
+        (
+            1,
+            sources[1].replace("a1=1e-5", "a1=2e-5"),
+            "global content",
+        ),
+        (
+            2,
+            sources[2].replace(".param", ".global_param"),
+            "local content",
+        ),
+    ] {
+        let (root, decks, _, runner) = bug1826_thermal_parameter_fixture(reason, source_refs);
+        fs::write(&decks[index].path, mutation).expect("write BUG 1826 content mutation");
+        assert!(
+            runner
+                .bug1826_thermal_parameter_family_contract(&decks[0])
+                .expect("fixed BUG 1826 owner remains selected")
+                .is_err(),
+            "{reason} drift must fail shared provenance"
+        );
+        fs::remove_dir_all(root).expect("remove BUG 1826 content fixture");
+    }
+
+    let (root, decks, support_path, runner) =
+        bug1826_thermal_parameter_fixture("support", source_refs);
+    fs::write(&support_path, sources[3].replace("0.5e-9", "0.6e-9"))
+        .expect("mutate BUG 1826 copper model");
+    assert!(
+        runner
+            .bug1826_thermal_parameter_family_contract(&decks[0])
+            .expect("fixed BUG 1826 owner remains selected")
+            .is_err(),
+        "shared copper-model drift must fail provenance"
+    );
+    fs::remove_dir_all(root).expect("remove BUG 1826 support fixture");
+
+    let (root, decks, _, runner) = bug1826_thermal_parameter_fixture("directory", source_refs);
+    fs::write(
+        root.join("Netlists/Certification_Tests/BUG_1826/unqualified.cir"),
+        &sources[1],
+    )
+    .expect("write extra BUG 1826 candidate");
+    assert!(
+        runner
+            .bug1826_thermal_parameter_family_contract(&decks[0])
+            .expect("fixed BUG 1826 owner remains selected")
+            .is_err(),
+        "additional directory entries must fail the exact census"
+    );
+    fs::remove_dir_all(root).expect("remove BUG 1826 directory fixture");
+
+    let (root, decks, _, runner) = bug1826_thermal_parameter_fixture("manifest", source_refs);
+    fs::write(root.join(HARNESS_MANIFEST_FILE), "").expect("remove BUG 1826 wrapper manifest row");
+    assert!(
+        runner
+            .bug1826_thermal_parameter_family_contract(&decks[0])
+            .expect("fixed BUG 1826 owner remains selected")
+            .is_err(),
+        "wrapper ownership drift must fail closed"
+    );
+    fs::remove_dir_all(root).expect("remove BUG 1826 manifest fixture");
+
+    let (root, decks, _, runner) = bug1826_thermal_parameter_fixture("artifact", source_refs);
+    fs::write(
+        root.join("Netlists/Certification_Tests/BUG_1826/linear_simple_param.cir.PRN"),
+        "forbidden source-side output\n",
+    )
+    .expect("write BUG 1826 output artifact");
+    assert!(
+        runner
+            .bug1826_thermal_parameter_family_contract(&decks[0])
+            .expect("fixed BUG 1826 owner remains selected")
+            .is_err(),
+        "source-side output artifacts must fail closed"
+    );
+    fs::remove_dir_all(root).expect("remove BUG 1826 artifact fixture");
+
+    let (root, decks, _, runner) =
+        bug1826_thermal_parameter_fixture("output-artifact", source_refs);
+    let output = root.join("OutputData/Certification_Tests/BUG_1826");
+    fs::create_dir_all(&output).expect("create BUG 1826 OutputData fixture directory");
+    fs::write(
+        output.join("linear_simple_global.cir.prn"),
+        "forbidden checked-in oracle\n",
+    )
+    .expect("write BUG 1826 checked-in output artifact");
+    let error = runner
+        .bug1826_thermal_parameter_family_contract(&decks[0])
+        .expect("fixed BUG 1826 owner remains selected")
+        .expect_err("checked-in worker output must invalidate provenance");
+    assert!(error.contains("must not have checked-in output artifacts"));
+    fs::remove_dir_all(root).expect("remove BUG 1826 output-artifact fixture");
+}
+
+#[test]
+fn bug1826_thermal_parameter_malformed_fixed_records_route_to_executed_failures() {
+    let sources = bug1826_thermal_parameter_corpus_sources();
+    let source_refs = [
+        sources[0].as_str(),
+        sources[1].as_str(),
+        sources[2].as_str(),
+        sources[3].as_str(),
+    ];
+    for (index, expected_contract) in [
+        (
+            0usize,
+            XYCE_BUG1826_THERMAL_PARAMETER_WRAPPER_OWNER_CONTRACT,
+        ),
+        (1, "upstream_exclusion_promotion_mismatch"),
+        (2, "upstream_exclusion_promotion_mismatch"),
+    ] {
+        let (root, decks, _, runner) = bug1826_thermal_parameter_fixture("routing", source_refs);
+        fs::write(&decks[index].path, "recognized malformed BUG 1826 record\n")
+            .expect("write malformed fixed BUG 1826 record");
+        let result = runner.run_discovered_test(&decks[index]);
+        assert!(
+            !result.passed,
+            "malformed fixed record must fail: {result:?}"
+        );
+        assert!(!result.expected_unsupported);
+        assert!(!result.upstream_excluded);
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.error.is_some());
+        fs::remove_dir_all(root).expect("remove BUG 1826 routing fixture");
     }
 }
 

@@ -2067,6 +2067,10 @@ impl XyceTestRunner {
                 XyceStrictTransientFamilySnapshot::NakedAlgebra(target),
             ) => Self::compare_naked_algebra_family_snapshots(baseline, target),
             (
+                XyceStrictTransientFamilySnapshot::Bug1826ThermalParameter(baseline),
+                XyceStrictTransientFamilySnapshot::Bug1826ThermalParameter(target),
+            ) => Self::compare_bug1826_thermal_parameter_family_snapshots(baseline, target),
+            (
                 XyceStrictTransientFamilySnapshot::PassivePrimaryValue(baseline),
                 XyceStrictTransientFamilySnapshot::PassivePrimaryValue(target),
             ) => Self::compare_passive_primary_snapshots(baseline, target),
@@ -2260,6 +2264,31 @@ impl XyceTestRunner {
         if baseline != target {
             return Err(
                 "resolved parameter values, behavioral SPICE_PULSE semantics, topology, transient analysis, TIMEINT options, or ordered probes differ outside the admitted parameter representation and non-semantic title/comments"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
+    pub(super) fn compare_bug1826_thermal_parameter_family_snapshots(
+        baseline: &XyceBug1826ThermalParameterSnapshot,
+        target: &XyceBug1826ThermalParameterSnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XyceBug1826ThermalParameterRepresentation::GlobalParameter
+            || target.representation != XyceBug1826ThermalParameterRepresentation::LocalParameter
+        {
+            return Err(
+                "family must compare the GLOBAL_PARAM baseline with the ordinary PARAM member"
+                    .to_string(),
+            );
+        }
+        let mut baseline = baseline.clone();
+        let mut target = target.clone();
+        baseline.representation = XyceBug1826ThermalParameterRepresentation::GlobalParameter;
+        target.representation = XyceBug1826ThermalParameterRepresentation::GlobalParameter;
+        if baseline != target {
+            return Err(
+                "parameter value, topology, copper material expressions, native thermal state, transient analysis, or ordered probes differ outside the admitted parameter namespace"
                     .to_string(),
             );
         }

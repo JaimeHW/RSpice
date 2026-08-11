@@ -938,6 +938,36 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.bug1826_thermal_parameter_family_contract(deck) {
+            let result = match contract {
+                Ok(contract) => {
+                    self.run_bug1826_thermal_parameter_family_contract(deck, contract, start)
+                }
+                Err(reason) => {
+                    let role = XyceBug1826ThermalParameterRole::for_record(&deck.relative_path)
+                        .expect(
+                            "BUG 1826 family detection must only select a recognized family record",
+                        );
+                    self.failure_result(
+                        deck,
+                        start,
+                        role.result_contract(),
+                        format!("BUG 1826 family provenance qualification failed: {reason}"),
+                        Vec::new(),
+                    )
+                }
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.baseline_family_contract(deck) {
             let result = self.run_baseline_family_contract(deck, contract, start);
             if self.config.verbose {
@@ -9967,6 +9997,40 @@ impl XyceTestRunner {
         result
     }
 
+    pub(super) fn run_bug1826_thermal_parameter_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceBug1826ThermalParameterFamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.role.result_contract();
+        if let Err(reason) = self.validate_bug1826_thermal_parameter_provenance(&contract) {
+            return self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("BUG 1826 family provenance changed before execution: {reason}"),
+                Vec::new(),
+            );
+        }
+
+        let mut result =
+            self.run_baseline_family_contract(deck, contract.relational.clone(), start);
+        if result.passed && !result.expected_unsupported {
+            if let Err(reason) = self.validate_bug1826_thermal_parameter_provenance(&contract) {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG 1826 family provenance changed during execution: {reason}"),
+                    Vec::new(),
+                );
+            }
+            result.contract = result_contract.to_string();
+        }
+        result
+    }
+
     pub(super) fn run_switch_state_case_family_contract(
         &self,
         deck: &XyceDeck,
@@ -10100,6 +10164,7 @@ impl XyceTestRunner {
                 | XyceBaselineFamilyKind::DiodeModelAlias
                 | XyceBaselineFamilyKind::Params1
                 | XyceBaselineFamilyKind::NakedAlgebra
+                | XyceBaselineFamilyKind::Bug1826ThermalParameter
                 | XyceBaselineFamilyKind::SwitchStateCase
                 | XyceBaselineFamilyKind::SinExpression
                 | XyceBaselineFamilyKind::ParamExpression
@@ -11217,6 +11282,21 @@ impl XyceTestRunner {
                 Vec::new(),
             );
         }
+        if contract.kind == XyceBaselineFamilyKind::Bug1826ThermalParameter
+            && let Err(err) =
+                Self::validate_bug1826_thermal_parameter_transient_plan(&baseline_plan)
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline qualification failed: {err}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
         if contract.kind == XyceBaselineFamilyKind::PassiveCapPrimaryValue
             && let Err(err) = Self::validate_passive_cap_primary_transient_plan(&baseline_plan)
         {
@@ -11590,6 +11670,22 @@ impl XyceTestRunner {
             }
             if contract.kind == XyceBaselineFamilyKind::NakedAlgebra
                 && let Err(err) = Self::validate_naked_algebra_transient_plan(&target_plan)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} qualification failed: {err}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+            if contract.kind == XyceBaselineFamilyKind::Bug1826ThermalParameter
+                && let Err(err) =
+                    Self::validate_bug1826_thermal_parameter_transient_plan(&target_plan)
             {
                 return self.failure_result(
                     deck,

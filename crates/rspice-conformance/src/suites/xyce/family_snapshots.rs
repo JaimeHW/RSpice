@@ -5021,6 +5021,10 @@ impl XyceTestRunner {
                 Self::naked_algebra_family_snapshot(netlist, print)
                     .map(XyceStrictTransientFamilySnapshot::NakedAlgebra)
             }
+            XyceBaselineFamilyKind::Bug1826ThermalParameter => {
+                Self::bug1826_thermal_parameter_family_snapshot(netlist, print)
+                    .map(XyceStrictTransientFamilySnapshot::Bug1826ThermalParameter)
+            }
             XyceBaselineFamilyKind::PassiveCapPrimaryValue => {
                 Self::passive_cap_primary_snapshot(netlist, print)
                     .map(XyceStrictTransientFamilySnapshot::PassivePrimaryValue)
@@ -5650,6 +5654,403 @@ impl XyceTestRunner {
             tran_stop_bits: stop.to_bits(),
             ordered_probes,
             option_directives,
+        })
+    }
+
+    pub(super) fn bug1826_thermal_parameter_family_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<XyceBug1826ThermalParameterSnapshot, String> {
+        const LABEL: &str = "BUG 1826 thermal-parameter-scope equivalence";
+        let source = netlist
+            .source_text
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} requires original source text"))?;
+        let representation = Self::bug1826_thermal_parameter_source_qualification(source)?;
+
+        let [
+            AnalysisCommand::Tran {
+                step,
+                stop,
+                start,
+                max_step,
+                uic,
+            },
+        ] = netlist.analyses.as_slice()
+        else {
+            return Err(format!("{LABEL} requires exactly one transient analysis"));
+        };
+        if step.to_bits() != 0.0f64.to_bits()
+            || stop.to_bits() != 1.0f64.to_bits()
+            || start.is_some()
+            || max_step.is_some()
+            || *uic
+        {
+            return Err(format!(
+                "{LABEL} requires exact '.TRAN 0 1' semantics without START, MAXSTEP, or UIC"
+            ));
+        }
+        let diagnostics_are_canonical = matches!(
+            netlist.diagnostics.as_slice(),
+            [diagnostic]
+                if diagnostic.line == 4
+                    && diagnostic.code == "xyce_resistor_model_missing_value"
+                    && diagnostic.severity
+                        == rspice_core::netlist::DiagnosticSeverity::Warning
+                    && diagnostic.message.contains("Resistor 'R1'")
+                    && diagnostic.origin.as_ref().is_some_and(|origin| {
+                        origin.line == 4
+                            && match (&origin.path, &netlist.source_path) {
+                                (Some(origin), Some(source)) => Self::same_path(origin, source),
+                                _ => false,
+                            }
+                    })
+        );
+        if !netlist.title.trim().is_empty()
+            || !diagnostics_are_canonical
+            || netlist.lin_analysis.is_some()
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || netlist.device_initial_conditions.is_some()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+            || !netlist.params.all_parameter_expressions().is_empty()
+            || !netlist.params.all_global_expressions().is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires the canonical untitled flat transient circuit, its single model-value warning, and no auxiliary analysis or startup state"
+            ));
+        }
+
+        let parameters = netlist
+            .params
+            .all_params()
+            .into_iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+            .collect::<BTreeMap<_, _>>();
+        let expected_parameters = BTreeMap::from([("a1".to_string(), 1.0e-5f64.to_bits())]);
+        if parameters != expected_parameters || !netlist.params.has_any_parameter_binding("A1") {
+            return Err(format!("{LABEL} requires exactly A1=1e-5"));
+        }
+        let is_local_parameter = netlist.params.has_parameter_binding("A1");
+        match representation {
+            XyceBug1826ThermalParameterRepresentation::GlobalParameter if is_local_parameter => {
+                return Err(format!(
+                    "{LABEL} global baseline placed A1 in the ordinary parameter namespace"
+                ));
+            }
+            XyceBug1826ThermalParameterRepresentation::LocalParameter if !is_local_parameter => {
+                return Err(format!(
+                    "{LABEL} local member did not retain A1 in the ordinary parameter namespace"
+                ));
+            }
+            XyceBug1826ThermalParameterRepresentation::GlobalParameter
+            | XyceBug1826ThermalParameterRepresentation::LocalParameter => {}
+        }
+
+        let ordered_probes = print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        if ordered_probes != ["r1:r", "r1:temp", "i(r1)", "r1:a"] {
+            return Err(format!("{LABEL} ordered probe contract changed"));
+        }
+        for probe in &print.probes {
+            Self::validate_tran_probe(probe, netlist)
+                .map_err(|error| format!("{LABEL} probe '{probe}' is not executable: {error}"))?;
+        }
+        validate_output_symbols(netlist)
+            .map_err(|error| format!("{LABEL} has an unresolved output dependency: {error}"))?;
+
+        let element_fingerprint = |element: &rspice_core::netlist::Element| {
+            let name = element.name.trim().to_ascii_lowercase();
+            if name.is_empty() || !matches!(element.provenance, ElementProvenance::Authored) {
+                return Err(format!(
+                    "{LABEL} contains an empty or generated element '{}'",
+                    element.name
+                ));
+            }
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| node.trim().to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            let fingerprint = match (name.as_str(), &element.kind) {
+                (
+                    "r1",
+                    ElementKind::Resistor {
+                        value,
+                        value_expr,
+                        model,
+                        instance_params,
+                        deferred_params,
+                    },
+                ) if nodes == ["1", "0"]
+                    && value.to_bits() == 0.0f64.to_bits()
+                    && value_expr.is_none()
+                    && model
+                        .as_deref()
+                        .is_some_and(|name| name.eq_ignore_ascii_case("copper"))
+                    && deferred_params.is_empty() =>
+                {
+                    let length = Self::instance_param(instance_params, &["L", "LENGTH"])
+                        .ok_or_else(|| format!("{LABEL} R1 is missing L/LENGTH"))?;
+                    let area = Self::instance_param(instance_params, &["A", "AREA"])
+                        .ok_or_else(|| format!("{LABEL} R1 is missing A/AREA"))?;
+                    let actual_params = instance_params
+                        .iter()
+                        .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+                        .collect::<BTreeMap<_, _>>();
+                    let expected_params = BTreeMap::from([
+                        ("l".to_string(), 0.1f64.to_bits()),
+                        ("a".to_string(), 1.0e-5f64.to_bits()),
+                        (
+                            rspice_core::netlist::XYCE_DEFAULT_RESISTOR_VALUE_MARKER
+                                .to_ascii_lowercase(),
+                            1.0f64.to_bits(),
+                        ),
+                    ]);
+                    if instance_params.len() != expected_params.len()
+                        || actual_params != expected_params
+                        || length.to_bits() != 0.1f64.to_bits()
+                        || area.to_bits() != 1.0e-5f64.to_bits()
+                    {
+                        return Err(format!("{LABEL} R1 requires only L=0.1 and A=1e-5"));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: "R:LEVEL2_THERMAL".to_string(),
+                        nodes,
+                        numeric_bits: vec![length.to_bits(), area.to_bits()],
+                        text: vec!["copper".to_string()],
+                    }
+                }
+                ("v1", ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Dc(value)))
+                    if nodes == ["1", "0"]
+                        && value.is_finite()
+                        && value.to_bits() == 5.0f64.to_bits() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "V:DC".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} element '{}' is outside the exact R1/V1 topology and value envelope",
+                        element.name
+                    ));
+                }
+            };
+            Ok((name, fingerprint))
+        };
+
+        let mut elements = BTreeMap::new();
+        for element in &netlist.elements {
+            let (name, fingerprint) = element_fingerprint(element)?;
+            if elements.insert(name, fingerprint).is_some() {
+                return Err(format!("{LABEL} contains a duplicate element"));
+            }
+        }
+        if elements.keys().map(String::as_str).collect::<BTreeSet<_>>()
+            != BTreeSet::from(["r1", "v1"])
+        {
+            return Err(format!("{LABEL} requires exactly R1 and V1"));
+        }
+
+        let flattened = flatten_netlist_with_models(netlist)
+            .map_err(|error| format!("{LABEL} flattening failed: {error}"))?;
+        if !flattened.scoped_models.is_empty()
+            || !flattened.scoped_initial_conditions.is_empty()
+            || !flattened.scoped_node_sets.is_empty()
+            || !flattened.scoped_startup_directives.is_empty()
+            || !flattened.xspice_auto_bridge_node_hints.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} does not admit hierarchy-derived models, startup state, or XSPICE bridge hints"
+            ));
+        }
+        let mut flattened_elements = BTreeMap::new();
+        for element in &flattened.elements {
+            let (name, fingerprint) = element_fingerprint(element)?;
+            if flattened_elements.insert(name, fingerprint).is_some() {
+                return Err(format!("{LABEL} flattening produced a duplicate element"));
+            }
+        }
+        if flattened_elements != elements {
+            return Err(format!(
+                "{LABEL} flattening changed authored element identity, topology, or values"
+            ));
+        }
+
+        let [model] = netlist.models.as_slice() else {
+            return Err(format!(
+                "{LABEL} requires exactly one copper resistor model"
+            ));
+        };
+        if !model.name.eq_ignore_ascii_case("copper")
+            || !model.model_type.eq_ignore_ascii_case("r")
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires one scalar/expression-only copper R model"
+            ));
+        }
+        let mut model_numeric_bits = model
+            .params
+            .iter()
+            .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.to_bits()))
+            .collect::<Vec<_>>();
+        model_numeric_bits.sort();
+        if model_numeric_bits != [("level".to_string(), 2.0f64.to_bits())] {
+            return Err(format!(
+                "{LABEL} copper model requires only LEVEL=2 numerically"
+            ));
+        }
+        let mut model_expressions = BTreeMap::new();
+        for (name, expression) in &model.expr_params {
+            let name = name.trim().to_ascii_lowercase();
+            let fingerprint = Self::parse_expression_fingerprint(expression)?;
+            if model_expressions.insert(name, fingerprint).is_some() {
+                return Err(format!("{LABEL} copper model has a duplicate expression"));
+            }
+        }
+        if model_expressions
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>()
+            != BTreeSet::from(["heatcapacity", "resistivity"])
+        {
+            return Err(format!(
+                "{LABEL} copper model requires the dynamic RESISTIVITY and HEATCAPACITY expressions"
+            ));
+        }
+
+        let circuit = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        })
+        .build_circuit(netlist)
+        .map_err(|error| format!("{LABEL} native circuit build failed: {error}"))?;
+        let storage = circuit.resistor_storage();
+        let [runtime_name] = storage.names.as_slice() else {
+            return Err(format!("{LABEL} must build exactly one native resistor"));
+        };
+        let [Some(state)] = storage.thermal.as_slice() else {
+            return Err(format!(
+                "{LABEL} R1 did not build a native LEVEL=2 self-consistent thermal state"
+            ));
+        };
+        if storage.conductances.len() != 1
+            || storage.small_signal_conductances.len() != 1
+            || !runtime_name.eq_ignore_ascii_case("r1")
+            || state.length.to_bits() != 0.1f64.to_bits()
+            || state.area.to_bits() != 1.0e-5f64.to_bits()
+            || state.thermal_length.to_bits() != 0.0f64.to_bits()
+            || state.thermal_area.to_bits() != 0.0f64.to_bits()
+            || state.multiplicity.to_bits() != 1.0f64.to_bits()
+            || state.scale.to_bits() != 1.0f64.to_bits()
+            || state.tnom_celsius.to_bits() != 27.0f64.to_bits()
+            || state.instance_resistivity.is_some()
+            || state.instance_heat_capacity.is_some()
+            || state.instance_thermal_heat_capacity.is_some()
+            || state.output_resistance.to_bits() != state.reported_resistance.to_bits()
+            || state.thermal_heat_capacity.to_bits() != state.heat_capacity.to_bits()
+            || state.output_conductance.to_bits() != storage.conductances[0].to_bits()
+            || state.output_conductance.to_bits() != storage.small_signal_conductances[0].to_bits()
+            || state.reported_resistance.to_bits()
+                != (state.resistivity * state.length / state.area).to_bits()
+            || [
+                state.temperature_celsius,
+                state.resistivity,
+                state.heat_capacity,
+                state.thermal_heat_capacity,
+                state.reported_resistance,
+                state.output_resistance,
+                state.output_conductance,
+            ]
+            .into_iter()
+            .any(|value| !value.is_finite() || value <= 0.0)
+        {
+            return Err(format!(
+                "{LABEL} native thermal resistor geometry, material state, or defaults changed"
+            ));
+        }
+        let mut runtime_model_numeric_bits = state
+            .model_params
+            .iter()
+            .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.to_bits()))
+            .collect::<Vec<_>>();
+        runtime_model_numeric_bits.sort();
+        let mut runtime_model_expressions = BTreeMap::new();
+        for (name, expression) in &state.model_expr_params {
+            let name = name.trim().to_ascii_lowercase();
+            let fingerprint = Self::parse_expression_fingerprint(expression)?;
+            if runtime_model_expressions
+                .insert(name, fingerprint)
+                .is_some()
+            {
+                return Err(format!(
+                    "{LABEL} native thermal state has a duplicate model expression"
+                ));
+            }
+        }
+        if runtime_model_numeric_bits != model_numeric_bits
+            || runtime_model_expressions != model_expressions
+            || state.base_context.get("A1").map(Value::to_bits) != Some(1.0e-5f64.to_bits())
+            || state.base_context.has_parameter_binding("A1") != is_local_parameter
+        {
+            return Err(format!(
+                "{LABEL} native thermal state lost the copper model or A1 namespace semantics"
+            ));
+        }
+        let runtime_resistor = XyceThermalResistorRuntimeFingerprint {
+            name: runtime_name.to_ascii_lowercase(),
+            length_bits: state.length.to_bits(),
+            area_bits: state.area.to_bits(),
+            thermal_length_bits: state.thermal_length.to_bits(),
+            thermal_area_bits: state.thermal_area.to_bits(),
+            multiplicity_bits: state.multiplicity.to_bits(),
+            scale_bits: state.scale.to_bits(),
+            temperature_celsius_bits: state.temperature_celsius.to_bits(),
+            resistivity_bits: state.resistivity.to_bits(),
+            heat_capacity_bits: state.heat_capacity.to_bits(),
+            thermal_heat_capacity_bits: state.thermal_heat_capacity.to_bits(),
+            reported_resistance_bits: state.reported_resistance.to_bits(),
+            output_resistance_bits: state.output_resistance.to_bits(),
+            output_conductance_bits: state.output_conductance.to_bits(),
+            tnom_celsius_bits: state.tnom_celsius.to_bits(),
+            model_numeric_bits: runtime_model_numeric_bits,
+            model_expressions: runtime_model_expressions,
+        };
+
+        Ok(XyceBug1826ThermalParameterSnapshot {
+            representation,
+            title: netlist.title.trim().to_string(),
+            parameter_name: "a1".to_string(),
+            parameter_bits: 1.0e-5f64.to_bits(),
+            elements,
+            model_name: model.name.trim().to_ascii_lowercase(),
+            model_type: model.model_type.trim().to_ascii_lowercase(),
+            model_numeric_bits,
+            model_expressions,
+            runtime_resistor,
+            tran_step_bits: step.to_bits(),
+            tran_stop_bits: stop.to_bits(),
+            ordered_probes,
         })
     }
 
