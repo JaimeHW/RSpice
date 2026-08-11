@@ -47,6 +47,22 @@ impl ElementNameRegistry {
         Ok(())
     }
 
+    pub(super) fn register_generated_helpers(
+        &mut self,
+        owner: &str,
+        elements: &[Element],
+        scope: &str,
+        line: usize,
+    ) -> Result<(), ParseError> {
+        for element in elements
+            .iter()
+            .filter(|element| !element.name.eq_ignore_ascii_case(owner))
+        {
+            self.register(std::slice::from_ref(element), None, scope, line)?;
+        }
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(super) fn contains_canonical(&self, name: &str) -> bool {
         self.origins.contains_key(name)
@@ -90,6 +106,12 @@ pub(super) struct ParseState {
     pub(super) output_requests: Vec<OutputRequest>,
     pub(super) options: super::SimulationOptions,
     pub(super) diagnostics: Vec<ParseDiagnostic>,
+    /// Number of successfully parsed, authored PSpice E/G CHEBYSHEV cards.
+    ///
+    /// This is parser-owned metadata: a single card can lower into multiple
+    /// dynamic helper elements, so the synthesized element count cannot
+    /// recover the authored-source cardinality.
+    pub(super) pspice_chebyshev_source_count: usize,
     /// Xyce warns and ignores an unmatched top-level `.ENDS`; other dialects
     /// retain the strict parser error for this malformed subcircuit card.
     pub(super) allow_unmatched_subckt_ends: bool,
@@ -130,6 +152,7 @@ impl ParseState {
             output_requests: Vec::new(),
             options: super::SimulationOptions::default(),
             diagnostics: Vec::new(),
+            pspice_chebyshev_source_count: 0,
             allow_unmatched_subckt_ends: false,
             enforce_subckt_end_names: true,
             subckt_stack: Vec::new(),
@@ -196,6 +219,7 @@ impl ParseState {
             veriloga_includes: self.veriloga_includes,
             spef_includes: self.spef_includes,
             diagnostics: self.diagnostics,
+            pspice_chebyshev_source_count: self.pspice_chebyshev_source_count,
             source_text: Some(input.to_string()),
             source_path: None,
         };
@@ -305,6 +329,7 @@ pub(super) struct ParseLineContext<'a> {
     pub(super) output_requests: &'a mut Vec<OutputRequest>,
     pub(super) options: &'a mut super::SimulationOptions,
     pub(super) diagnostics: &'a mut Vec<ParseDiagnostic>,
+    pub(super) pspice_chebyshev_source_count: &'a mut usize,
     pub(super) spef_includes: &'a mut Vec<String>,
     pub(super) origin: &'a NetlistSourceLocation,
     pub(super) deferred_body_params: Option<&'a mut Vec<(String, String)>>,

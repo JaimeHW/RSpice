@@ -5353,6 +5353,12 @@ impl Engine {
                         element.name
                     )));
                 }
+                ElementKind::PspiceChebyshev { .. } => {
+                    return Err(SimulationError::Circuit(format!(
+                        "CHEBYSHEV source '{}' still has unresolved parameter scope after flattening",
+                        element.name
+                    )));
+                }
                 ElementKind::Diode {
                     model,
                     instance_params,

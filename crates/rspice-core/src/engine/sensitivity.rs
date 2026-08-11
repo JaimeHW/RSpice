@@ -974,7 +974,9 @@ impl Engine {
             ElementKind::TransmissionLine { .. } => ElementType::TransmissionLine,
             ElementKind::Coupling { .. } => ElementType::Coupling,
             ElementKind::Xspice { .. } => ElementType::Xspice,
-            ElementKind::Subcircuit { .. } => ElementType::Other,
+            ElementKind::Subcircuit { .. } | ElementKind::PspiceChebyshev { .. } => {
+                ElementType::Other
+            }
         }
     }
 

@@ -358,6 +358,7 @@ pub(super) fn process_line(
                     output_requests,
                     options,
                     diagnostics,
+                    pspice_chebyshev_source_count: &mut state.pspice_chebyshev_source_count,
                     spef_includes,
                     origin,
                     deferred_body_params: Some(&mut frame.def.body_expr_params),
@@ -414,6 +415,7 @@ pub(super) fn process_line(
             output_requests: &mut state.output_requests,
             options: &mut state.options,
             diagnostics: &mut state.diagnostics,
+            pspice_chebyshev_source_count: &mut state.pspice_chebyshev_source_count,
             spef_includes: &mut state.spef_includes,
             origin,
             deferred_body_params: None,
@@ -460,6 +462,7 @@ pub(super) fn parse_line(
         output_requests,
         options,
         diagnostics,
+        pspice_chebyshev_source_count,
         spef_includes,
         origin,
         deferred_body_params,
@@ -590,7 +593,12 @@ pub(super) fn parse_line(
             elements,
             params,
             defer_simple_param_refs,
-        ),
+        )
+        .map(|kind| {
+            if kind == VoltageControlledSourceParseKind::PspiceChebyshev {
+                *pspice_chebyshev_source_count += 1;
+            }
+        }),
         'F' => parse_cccs(
             &mut stream,
             line_num,
@@ -604,7 +612,12 @@ pub(super) fn parse_line(
             elements,
             params,
             defer_simple_param_refs,
-        ),
+        )
+        .map(|kind| {
+            if kind == VoltageControlledSourceParseKind::PspiceChebyshev {
+                *pspice_chebyshev_source_count += 1;
+            }
+        }),
         'H' => parse_ccvs(
             &mut stream,
             line_num,

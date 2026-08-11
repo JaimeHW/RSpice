@@ -182,7 +182,9 @@ pub fn analyze_dc_ground_paths(
         union.collect_element_nodes(element);
         let synthesized = matches!(
             element.provenance,
-            crate::netlist::ElementProvenance::SynthesizedTransferState { .. }
+            crate::netlist::ElementProvenance::GeneratedDynamicStateDerivative { .. }
+                | crate::netlist::ElementProvenance::GeneratedDynamicInternalNode { .. }
+                | crate::netlist::ElementProvenance::SynthesizedTransferState { .. }
         );
         for node in connectivity_terminal_nodes(element)? {
             if !synthesized {
@@ -255,7 +257,8 @@ fn dc_conduction_groups(element: &Element) -> Result<Vec<Vec<&str>>, Connectivit
         ElementKind::Vcvs { .. } | ElementKind::VSwitch { .. } => all(),
         ElementKind::Subcircuit { .. }
         | ElementKind::VoltageSourceDeferred(_)
-        | ElementKind::CurrentSourceDeferred(_) => {
+        | ElementKind::CurrentSourceDeferred(_)
+        | ElementKind::PspiceChebyshev { .. } => {
             return Err(ConnectivityAnalysisError {
                 element: element.name.clone(),
                 reason: "element must be resolved during flattening".to_string(),
@@ -338,7 +341,8 @@ fn xyce_dc_lead_groups(element: &Element) -> Result<Vec<Vec<&str>>, Connectivity
         ElementKind::Coupling { .. } => Vec::new(),
         ElementKind::Subcircuit { .. }
         | ElementKind::VoltageSourceDeferred(_)
-        | ElementKind::CurrentSourceDeferred(_) => {
+        | ElementKind::CurrentSourceDeferred(_)
+        | ElementKind::PspiceChebyshev { .. } => {
             return Err(ConnectivityAnalysisError {
                 element: element.name.clone(),
                 reason: "element must be resolved during flattening".to_string(),
