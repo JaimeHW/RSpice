@@ -117,14 +117,22 @@ fn fixture_dir(label: &str) -> PathBuf {
     directory
 }
 
-fn runnable_state() -> AppState {
+/// A runnable design whose project owns no technology. The contract admits
+/// this: a technology is required only when the project has one or the plan
+/// demands one.
+fn technology_free_runnable_state() -> AppState {
     let mut state = AppState::default();
-    state.provision_test_project_technology_contract();
     crate::workbench::examples::load_example("Voltage Divider", &mut state.schematic);
     let mut drc = DrcResult::new();
     drc.completed = true;
     state.dialogs.drc_results = Some(drc);
     state.dialogs.drc_checked_version = state.schematic.topology_version();
+    state
+}
+
+fn runnable_state() -> AppState {
+    let mut state = technology_free_runnable_state();
+    state.provision_test_project_technology_contract();
     state
 }
 
@@ -1132,4 +1140,168 @@ fn repeated_authorize_and_dispatch_cycles_never_expire_an_unchanged_run() {
                 panic!("attempt {attempt}: unchanged run was rejected: {error:?}")
             });
     }
+}
+
+/// Insert an enabled analysis draft at the end of the state's stable plan.
+fn insert_enabled_draft(
+    state: &mut AppState,
+    draft: crate::simulation::plan::AnalysisDraft,
+) -> crate::product::AnalysisInstanceId {
+    let plan = state
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .expect("test state owns a stable plan");
+    let position = plan.instances().len();
+    plan.insert_draft_with_id(
+        crate::product::AnalysisInstanceId::new(),
+        draft,
+        true,
+        position,
+    )
+    .expect("an appended analysis has no prerequisites")
+    .0
+}
+
+fn manual_deck_state(deck: &str) -> AppState {
+    let mut state = AppState::default();
+    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.workspace.netlist_source = Some(deck.to_owned());
+    state
+}
+
+#[test]
+fn a_project_without_a_technology_prepares_its_run_set_against_the_plain_model_library() {
+    let state = technology_free_runnable_state();
+    let mut controller = SimulationController::new();
+    let metadata = controller
+        .prepare_run_set_for_preflight(&state)
+        .expect("a project owing nothing to a technology prepares its run set");
+    let snapshot = controller
+        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+        .expect("the same technology-free contract rebuilds");
+    let executable = snapshot.executable_netlist();
+    assert!(!executable.contains("nmos_demo"), "{executable}");
+    assert!(!executable.contains("demo180"), "{executable}");
+
+    let attached = runnable_state();
+    let with_technology = controller
+        .build_prepared_snapshot(&attached, SimulationRunIntent::SimulateRunSet)
+        .expect("the same design prepares with a technology attached");
+    assert!(with_technology.executable_netlist().contains("demo180"));
+    assert!(
+        metadata.model_identity_count < with_technology.metadata().model_identity_count,
+        "the signed PDK identity must not reach a run set prepared without a technology"
+    );
+}
+
+#[test]
+fn an_enabled_corner_analysis_without_a_technology_blocks_preparation() {
+    let mut state = technology_free_runnable_state();
+    let instance = insert_enabled_draft(
+        &mut state,
+        crate::simulation::plan::AnalysisDraft::Corner(
+            crate::simulation::dialog::corner::CornerDialogState::default(),
+        ),
+    );
+
+    let mut controller = SimulationController::new();
+    let error = controller
+        .prepare_run_set_for_preflight(&state)
+        .expect_err("non-typical corner sections demand an attached technology");
+    assert_eq!(error.stage(), PreparationStage::ModelBindings);
+    assert!(
+        error
+            .message()
+            .contains("requires an attached project technology"),
+        "{error}"
+    );
+    assert!(error.message().contains(&instance.to_string()), "{error}");
+}
+
+#[test]
+fn a_technology_binding_without_an_audit_receipt_blocks_preparation() {
+    let mut state = runnable_state();
+    // A copy keeps the binding and starts a fresh audit history, which is
+    // exactly the shape the reattach contract refuses.
+    state.workspace.project = state
+        .workspace
+        .project
+        .fork_copy_at(PathBuf::from("forked").join("copy.rsproj"));
+    assert!(state.workspace.project.technology_binding().is_some());
+    assert!(!state.project_technology_in_effect());
+
+    let mut controller = SimulationController::new();
+    let error = controller
+        .prepare_run_set_for_preflight(&state)
+        .expect_err("a binding without receipts is an invalid technology, not an absent one");
+    assert_eq!(error.stage(), PreparationStage::ModelBindings);
+    assert!(
+        error
+            .message()
+            .contains("predates checkpoint-backed authority receipts"),
+        "{error}"
+    );
+}
+
+#[test]
+fn an_unresolved_device_model_is_named_at_prepare_rather_than_at_dispatch() {
+    let state = manual_deck_state(
+        "manual model check\nV1 d 0 1\nM1 d g 0 0 nch_missing\nR1 g 0 1k\n.op\n.end\n",
+    );
+    let mut controller = SimulationController::new();
+    let error = controller
+        .validate_manual_deck_document(&state)
+        .expect_err("a device naming an undefined model cannot be prepared");
+    assert_eq!(error.stage(), PreparationStage::ModelBindings);
+    let named = error.message().to_ascii_lowercase();
+    assert!(named.contains("nch_missing"), "{error}");
+    assert!(named.contains("m1"), "{error}");
+    assert!(named.contains("mosfet"), "{error}");
+    assert!(
+        error
+            .message()
+            .contains("No project technology is attached"),
+        "{error}"
+    );
+}
+
+#[test]
+fn builder_resolvable_model_names_prepare_without_any_card() {
+    for deck in [
+        // A bare type name binds a MOSFET with no card at all.
+        "manual model check\nV1 d 0 1\nM1 d g 0 0 NMOS\nR1 g 0 1k\n.op\n.end\n",
+        // The embedded diode library carries this part.
+        "manual model check\nV1 a 0 1\nD1 a 0 1N4148\n.op\n.end\n",
+        // Nothing instantiates the subcircuit, so the builder never binds it.
+        "manual model check\n.subckt unused a k\nD1 a k missing_d\n.ends\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n",
+    ] {
+        let state = manual_deck_state(deck);
+        let mut controller = SimulationController::new();
+        if let Err(error) = controller.validate_manual_deck_document(&state) {
+            panic!("a deck the builder resolves was rejected: {deck}: {error}");
+        }
+    }
+}
+
+#[test]
+fn a_generated_run_set_names_its_unresolved_device_models() {
+    let mut state = technology_free_runnable_state();
+    let bound = state
+        .schematic
+        .components
+        .iter_mut()
+        .find(|component| component.name == "R1")
+        .expect("the divider fixture owns R1");
+    bound.kind = crate::state::ComponentType::Diode;
+    bound.name = "D1".to_owned();
+    bound.value = "d_missing".to_owned();
+
+    let mut controller = SimulationController::new();
+    let error = controller
+        .prepare_run_set_for_preflight(&state)
+        .expect_err("a generated deck naming an undefined model cannot be prepared");
+    assert_eq!(error.stage(), PreparationStage::ModelBindings);
+    let named = error.message().to_ascii_lowercase();
+    assert!(named.contains("d_missing"), "{error}");
+    assert!(named.contains("diode"), "{error}");
 }

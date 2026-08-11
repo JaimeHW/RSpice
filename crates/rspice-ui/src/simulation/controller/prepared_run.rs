@@ -97,8 +97,7 @@ impl SimulationController {
             ));
         }
 
-        let has_project_technology = state.workspace.project.technology_binding().is_some()
-            && !state.workspace.project.technology_change_audit().is_empty();
+        let has_project_technology = state.project_technology_in_effect();
         let sealed_models = if has_project_technology {
             state.seal_project_execution_model_sources()
         } else {
@@ -389,9 +388,19 @@ impl SimulationController {
                 ),
             )
         })?;
-        let sealed_models = state
-            .seal_project_execution_model_sources()
+        // A project need not have a technology; if it has one it must be
+        // valid; if the plan needs one it must have one. A project that owes
+        // nothing to a technology seals the plain model library instead.
+        state
+            .technology_gate_block_reason()
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+        let has_project_technology = state.project_technology_in_effect();
+        let sealed_models = if has_project_technology {
+            state.seal_project_execution_model_sources()
+        } else {
+            state.model_library_manager.seal_execution_sources()
+        }
+        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         let tasks = self
             .build_queue_from_plan(state, &plan, &sealed_models)
             .map_err(|errors| {
@@ -467,6 +476,7 @@ impl SimulationController {
             &project_veriloga_runtimes,
         )?;
         validate_prepared_periodic_sources(&tasks, &netlist)?;
+        reject_unresolved_device_models(&netlist, has_project_technology)?;
         let project_model_sources = prepared_project_model_sources(state, &netlist)?;
 
         let source_digest =
@@ -575,8 +585,7 @@ impl SimulationController {
         } else {
             source.to_owned()
         };
-        let has_project_technology = state.workspace.project.technology_binding().is_some()
-            && !state.workspace.project.technology_change_audit().is_empty();
+        let has_project_technology = state.project_technology_in_effect();
         let sealed_models = if has_project_technology {
             state.seal_project_execution_model_sources()
         } else {
@@ -613,6 +622,7 @@ impl SimulationController {
         }
         let (expanded, canonical_origin, sealed_source_dependencies) =
             expand_manual_dependencies(&composed, origin, &sealed_models)?;
+        reject_unresolved_device_models(&expanded, has_project_technology)?;
         let project_model_sources = prepared_project_model_sources(state, &expanded)?;
         let project_veriloga_runtimes = project_veriloga_runtimes_referenced_by(state, &expanded)?
             .try_extend(pdk_veriloga_runtimes.iter().cloned())
@@ -854,6 +864,59 @@ fn validate_prepared_periodic_sources(
             })?;
     }
     Ok(())
+}
+
+/// Refuse a prepared source whose instantiated devices name models nothing
+/// defines.
+///
+/// The builder rejects these at bind time, which surfaces them as an engine
+/// failure after dispatch. Asking the same question here puts the answer in
+/// preflight, next to the technology that would have supplied the missing
+/// cards.
+fn reject_unresolved_device_models(
+    executable_netlist: &str,
+    technology_in_effect: bool,
+) -> Result<(), PreparationError> {
+    // Parseability and hierarchy resolution belong to earlier stages, which
+    // report them in their own words; this check contributes nothing when
+    // either fails.
+    let Ok(parsed) = rspice_core::netlist::parse_netlist(executable_netlist) else {
+        return Ok(());
+    };
+    let Ok(unresolved) = rspice_core::netlist::unresolved_device_model_references(&parsed) else {
+        return Ok(());
+    };
+    if unresolved.is_empty() {
+        return Ok(());
+    }
+
+    const LISTED_REFERENCES: usize = 5;
+    let listed = unresolved
+        .iter()
+        .take(LISTED_REFERENCES)
+        .map(|reference| {
+            format!(
+                "{} ({}) references unknown model '{}'",
+                reference.element, reference.device_kind, reference.model
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    let remaining = unresolved.len().saturating_sub(LISTED_REFERENCES);
+    let truncation = if remaining == 0 {
+        String::new()
+    } else {
+        format!("; … and {remaining} more")
+    };
+    let remedy = if technology_in_effect {
+        "The attached technology does not define these models."
+    } else {
+        "No project technology is attached; attach one that defines these models, or add .MODEL/.subckt definitions to the design."
+    };
+    Err(PreparationError::new(
+        PreparationStage::ModelBindings,
+        format!("{listed}{truncation}. {remedy}"),
+    ))
 }
 
 fn prepared_configuration_veriloga_runtimes(

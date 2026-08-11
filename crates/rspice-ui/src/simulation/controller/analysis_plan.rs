@@ -41,7 +41,14 @@ impl SimulationController {
                 return invalid_saved_output_reports(outputs.len(), errors.join("; "));
             }
         };
-        let sealed_models = match state.seal_project_execution_model_sources() {
+        // Rendering an output table is not authorization to run, so a project
+        // without an attached technology compiles it from the model library.
+        let sealed_sources = if state.project_technology_in_effect() {
+            state.seal_project_execution_model_sources()
+        } else {
+            state.model_library_manager.seal_execution_sources()
+        };
+        let sealed_models = match sealed_sources {
             Ok(sealed) => sealed,
             Err(error) => {
                 return invalid_saved_output_reports(outputs.len(), error);
