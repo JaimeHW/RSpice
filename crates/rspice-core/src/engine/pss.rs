@@ -2509,7 +2509,9 @@ impl Engine {
             max_step,
             self.config.spice_dialect,
             &mut breakpoints,
-        );
+            abort,
+            self.config.resource_limits.max_analysis_points,
+        )?;
         let mut lte_estimator =
             LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
         let mut trapgear = TrapGearController::new();

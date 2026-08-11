@@ -612,7 +612,13 @@ pub(super) fn parse_line(
             params,
             defer_simple_param_refs,
         ),
-        'B' => parse_behavioral(&mut stream, line_num, elements, params),
+        'B' => parse_behavioral(
+            &mut stream,
+            line_num,
+            elements,
+            params,
+            defer_simple_param_refs,
+        ),
         // Coupling and switches
         'K' => parse_coupling(&mut stream, line_num, elements, params),
         'S' => parse_vswitch(&mut stream, line_num, elements),

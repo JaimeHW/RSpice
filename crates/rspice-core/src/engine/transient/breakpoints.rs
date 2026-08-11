@@ -173,6 +173,17 @@ impl Engine {
                     );
 
                 let per_valid = per.is_finite() && per > 0.0;
+                // Xyce applies its modulo path for every nonzero period.  A
+                // negative period maps every nonnegative simulation time to a
+                // nonpositive local time, so PulseData remains at V1 and has
+                // no physical source edges to schedule.
+                if dialect == crate::engine::SpiceDialect::Xyce && per.is_finite() && per < 0.0 {
+                    return Self::check_source_breakpoint_collection(
+                        breakpoints,
+                        abort,
+                        max_points,
+                    );
+                }
                 let phase_time = if per_valid {
                     let phase_cycles = (phase / 360.0).rem_euclid(1.0);
                     if phase_cycles > 0.0 {
@@ -183,38 +194,69 @@ impl Engine {
                 } else {
                     0.0
                 };
-                let requested_cycles = if per_valid {
-                    (((tstop - td - phase_time).max(0.0) / per).ceil() as usize).saturating_add(1)
-                } else {
-                    1
-                };
-                if max_points != usize::MAX && requested_cycles > 1_000_000 {
-                    return Err(crate::engine::SimulationError::Circuit(format!(
-                        "transient source-event schedule requires {requested_cycles} PULSE cycles, exceeding the exact enumeration limit 1000000"
-                    )));
-                }
-                let max_cycles = requested_cycles.min(1_000_000);
 
-                for cycle in 0..max_cycles {
+                let edge_offsets = [0.0, tr, tr + pw, tr + pw + tf];
+                let minimum_offset = edge_offsets
+                    .iter()
+                    .copied()
+                    .fold(Value::INFINITY, Value::min);
+                let maximum_offset = edge_offsets
+                    .iter()
+                    .copied()
+                    .fold(Value::NEG_INFINITY, Value::max);
+                let base_cycle_start = td - phase_time;
+                let first_cycle_start = if per_valid {
+                    let earliest_relevant_start = -maximum_offset;
+                    if base_cycle_start >= earliest_relevant_start {
+                        base_cycle_start
+                    } else {
+                        let phase = (base_cycle_start - earliest_relevant_start).rem_euclid(per);
+                        earliest_relevant_start + phase
+                    }
+                } else {
+                    base_cycle_start
+                };
+                let last_relevant_start = tstop - minimum_offset;
+                let mut previous_cycle_start = None;
+
+                // Test each computed cycle time directly instead of deriving
+                // a floating count. Decimal inputs can make
+                // floor((last-first)/PER) one too small even when the final
+                // fused cycle start is representably inside the interval.
+                for cycle in 0..=1_000_000_usize {
                     if cycle % 1024 == 0 {
                         Self::check_source_breakpoint_collection(breakpoints, abort, max_points)?;
                     }
                     let cycle_start = if per_valid {
-                        td - phase_time + per * cycle as Value
+                        per.mul_add(cycle as Value, first_cycle_start)
                     } else {
-                        td
+                        first_cycle_start
                     };
-                    if cycle_start > tstop {
+                    if !cycle_start.is_finite() {
+                        return Err(crate::engine::SimulationError::Circuit(format!(
+                            "transient PULSE source-event cycle {cycle} is not finite"
+                        )));
+                    }
+                    if !last_relevant_start.is_finite() || cycle_start > last_relevant_start {
                         break;
                     }
-                    Self::add_breakpoint_if_in_range(breakpoints, cycle_start, tstop);
-                    Self::add_breakpoint_if_in_range(breakpoints, cycle_start + tr, tstop);
-                    Self::add_breakpoint_if_in_range(breakpoints, cycle_start + tr + pw, tstop);
-                    Self::add_breakpoint_if_in_range(
-                        breakpoints,
-                        cycle_start + tr + pw + tf,
-                        tstop,
-                    );
+                    if cycle == 1_000_000 {
+                        return Err(crate::engine::SimulationError::Circuit(
+                            "transient source-event schedule exceeds the exact enumeration limit of 1000000 PULSE cycles"
+                                .to_string(),
+                        ));
+                    }
+                    if let Some(previous) = previous_cycle_start {
+                        if cycle_start <= previous {
+                            return Err(crate::engine::SimulationError::Circuit(format!(
+                                "transient PULSE period {per:.17e} cannot advance an exactly representable source-event schedule near {previous:.17e}"
+                            )));
+                        }
+                    }
+                    previous_cycle_start = Some(cycle_start);
+                    for offset in edge_offsets {
+                        Self::add_breakpoint_if_in_range(breakpoints, cycle_start + offset, tstop);
+                    }
                     if !per_valid {
                         break;
                     }
@@ -511,7 +553,9 @@ impl Engine {
         tstep_hint: Value,
         dialect: crate::engine::SpiceDialect,
         breakpoints: &mut BreakpointManager,
-    ) {
+        abort: &dyn crate::abort_signal::AbortSignal,
+        max_points: usize,
+    ) -> Result<(), crate::engine::SimulationError> {
         Self::collect_independent_source_breakpoints(
             circuit,
             tstop,
@@ -519,10 +563,9 @@ impl Engine {
             dialect,
             None,
             breakpoints,
-            &crate::abort_signal::NoAbort,
-            usize::MAX,
-        )
-        .expect("unbounded non-cancellable breakpoint collection cannot fail");
+            abort,
+            max_points,
+        )?;
 
         for switch in &circuit.generic_switches {
             for &time in switch.time_breakpoints() {
@@ -553,6 +596,8 @@ impl Engine {
                 }
             }
         }
+
+        Self::check_source_breakpoint_collection(breakpoints, abort, max_points)
     }
 
     /// Collect authored independent-source events, optionally restricted to a
@@ -978,6 +1023,119 @@ mod tests {
     }
 
     #[test]
+    fn xyce_explicit_zero_pulse_edges_do_not_gain_tstep_ramps() {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
+        let spec = crate::netlist::SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 20.0,
+            delay: 0.0,
+            rise: 0.0,
+            fall: 0.0,
+            width: 0.2,
+            period: 0.4,
+            phase: 0.0,
+            width_defaults_to_zero: false,
+        };
+
+        Engine::add_source_spec_breakpoints(
+            &mut breakpoints,
+            &spec,
+            0.8,
+            0.02,
+            crate::engine::SpiceDialect::Xyce,
+        );
+
+        assert_delays_close(breakpoints.times(), &[0.0, 0.2, 0.4, 0.6, 0.8]);
+    }
+
+    #[test]
+    fn xyce_far_negative_pulse_delay_skips_historical_cycles() {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
+        let spec = crate::netlist::SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 1.0,
+            delay: -2_000_000.0,
+            rise: 0.0,
+            fall: 0.0,
+            width: 0.25,
+            period: 1.0,
+            phase: 0.0,
+            width_defaults_to_zero: false,
+        };
+
+        Engine::add_source_spec_breakpoints_with_pwl(
+            &mut breakpoints,
+            &spec,
+            None,
+            2.0,
+            0.1,
+            crate::engine::SpiceDialect::Xyce,
+            &crate::abort_signal::NoAbort,
+            64,
+        )
+        .expect("only in-range cycles should count toward the exact schedule");
+
+        assert_delays_close(breakpoints.times(), &[0.0, 0.25, 1.0, 1.25, 2.0]);
+    }
+
+    #[test]
+    fn xyce_fractional_period_includes_representable_final_cycle() {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
+        let spec = crate::netlist::SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 1.0,
+            delay: 0.001,
+            rise: 0.0,
+            fall: 0.0,
+            width: 0.0,
+            period: 0.001,
+            phase: 0.0,
+            width_defaults_to_zero: false,
+        };
+
+        Engine::add_source_spec_breakpoints(
+            &mut breakpoints,
+            &spec,
+            0.011,
+            0.0001,
+            crate::engine::SpiceDialect::Xyce,
+        );
+
+        assert_delays_close(
+            breakpoints.times(),
+            &[
+                0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.010, 0.011,
+            ],
+        );
+    }
+
+    #[test]
+    fn xyce_negative_pulse_period_has_no_nonnegative_edges() {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
+        let spec = crate::netlist::SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 1.0,
+            delay: 0.0,
+            rise: 0.0,
+            fall: 0.0,
+            width: 0.2,
+            period: -0.4,
+            phase: 0.0,
+            width_defaults_to_zero: false,
+        };
+
+        Engine::add_source_spec_breakpoints(
+            &mut breakpoints,
+            &spec,
+            0.8,
+            0.02,
+            crate::engine::SpiceDialect::Xyce,
+        );
+
+        assert!(breakpoints.times().is_empty());
+    }
+
+    #[test]
     fn ngspice_pulse_omitted_period_breakpoints_repeat_after_waveform_duration() {
         let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
         let spec = crate::netlist::SourceSpec::Pulse {
@@ -1106,7 +1264,10 @@ mod tests {
             1.0e-9,
             crate::engine::SpiceDialect::BestAvailable,
             &mut breakpoints,
-        );
+            &crate::abort_signal::NoAbort,
+            usize::MAX,
+        )
+        .expect("bounded source breakpoint collection");
 
         assert_delays_close(
             breakpoints.times(),

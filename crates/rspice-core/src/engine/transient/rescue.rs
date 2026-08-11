@@ -159,7 +159,7 @@ impl Engine {
                     needs_constraint_projection = true;
                 }
                 if needs_constraint_projection {
-                    circuit.enforce_ideal_voltage_constraints(&mut sol, time);
+                    circuit.enforce_ideal_voltage_constraints(&mut sol, time)?;
                 }
 
                 // Merit line search on the deformed system (the DC gmin

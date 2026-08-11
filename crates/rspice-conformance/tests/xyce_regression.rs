@@ -9113,6 +9113,187 @@ fn test_xyce_age_cap_relational_oracles() {
 }
 
 #[test]
+fn test_xyce_params1_parameter_equivalence_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, wrapper_origin) in [
+        (
+            "Netlists/PARAMS1/params_a.cir",
+            "params1_parameter_equivalence_wrapper_owner",
+            true,
+        ),
+        (
+            "Netlists/PARAMS1/params_a0.cir",
+            "params1_parameter_equivalence_literal_baseline",
+            false,
+        ),
+        (
+            "Netlists/PARAMS1/params_a1.cir",
+            "params1_parameter_equivalence_parameterized_member",
+            false,
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            wrapper_origin,
+            "{relative} wrapper provenance changed"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should satisfy strict literal/parameterized transient equivalence, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should satisfy the Release 7.10 interpolated RMS comparison"
+        );
+    }
+}
+
+#[test]
+fn test_xyce_naked_algebra_parameter_equivalence_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, wrapper_origin) in [
+        (
+            "Netlists/PARSER/nakedAlgebra.cir",
+            "naked_algebra_parameter_equivalence_wrapper_owner",
+            true,
+        ),
+        (
+            "Netlists/PARSER/nakedAlgebraBaseline.cir",
+            "naked_algebra_parameter_equivalence_braced_baseline",
+            false,
+        ),
+        (
+            "Netlists/PARSER/nakedAlgebraGlobal.cir",
+            "naked_algebra_parameter_equivalence_global_member",
+            false,
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            wrapper_origin,
+            "{relative} wrapper provenance changed"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should satisfy strict braced/mixed local/global parameter equivalence, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should satisfy the Release 7.10 interpolated RMS comparison"
+        );
+    }
+}
+
+#[test]
+fn test_xyce_bug1826_thermal_parameter_scope_equivalence_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, wrapper_origin) in [
+        (
+            "Netlists/Certification_Tests/BUG_1826/linear_simple.cir",
+            "bug1826_thermal_parameter_scope_wrapper_owner",
+            true,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1826/linear_simple_global.cir",
+            "bug1826_thermal_parameter_scope_global_baseline",
+            false,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1826/linear_simple_param.cir",
+            "bug1826_thermal_parameter_scope_local_member",
+            false,
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            wrapper_origin,
+            "{relative} wrapper provenance changed"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should satisfy strict global/local thermal-parameter equivalence, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should satisfy the directional Release 7.10 interpolated RMS comparison"
+        );
+    }
+}
+
+#[test]
+fn test_xyce_bsrc_vccs_source_multiplicity_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let families: &[(&str, &[&str])] = &[
+        ("BSRC", &["bsrc1_m", "bsrc2_m", "bsrc3_m", "bsrc4_m"]),
+        (
+            "VCCS",
+            &[
+                "vccs_m",
+                "vccs_nl1_m",
+                "vccs_nl2_m",
+                "vccs_nl3_m",
+                "vccs_nl4_m",
+                "vccs_tran_m",
+            ],
+        ),
+    ];
+    let mut executed = 0usize;
+    for (directory, stems) in families {
+        for stem in *stems {
+            for baseline in [false, true] {
+                let file = if baseline {
+                    format!("{stem}_baseline.cir")
+                } else {
+                    format!("{stem}.cir")
+                };
+                let relative = format!("Netlists/{directory}/{file}");
+                assert_eq!(
+                    runner.requires_upstream_wrapper(&relative),
+                    !baseline,
+                    "{relative} wrapper ownership changed"
+                );
+                let result = runner.run_test(root.join(&relative));
+                assert!(
+                    result.passed && !result.expected_unsupported && !result.upstream_excluded,
+                    "{relative} should satisfy the typed source-M relational oracle, got {result:?}"
+                );
+                assert_eq!(
+                    result.contract,
+                    if baseline {
+                        "source_multiplicity_family_baseline"
+                    } else {
+                        "source_multiplicity_family_wrapper"
+                    }
+                );
+                assert!(
+                    result.mismatches.is_empty(),
+                    "{relative} should satisfy owner-GOODFILE/baseline-TESTFILE xyce_verify ordering"
+                );
+                executed += 1;
+            }
+        }
+    }
+    assert_eq!(executed, 20, "source-M family census changed");
+}
+
+#[test]
 fn test_xyce_switch_initial_state_case_relational_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
@@ -9406,6 +9587,41 @@ fn test_xyce_legacy_bjt_dtemp_relational_oracles() {
         assert!(
             result.passed && !result.expected_unsupported && !result.upstream_excluded,
             "{relative} should satisfy the exact native legacy BJT TEMP/DTEMP relational contract, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.error.is_none());
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
+fn test_xyce_sydney_level1_jfet_dtemp_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        (
+            "Netlists/DTEMP/njfet_dtemp.cir",
+            "xyce_sydney_level1_jfet_dtemp_relational_wrapper_owner",
+        ),
+        (
+            "Netlists/DTEMP/njfet_ref.cir",
+            "xyce_sydney_level1_jfet_dtemp_relational_wrapper_reference",
+        ),
+        (
+            "Netlists/DTEMP/pjfet_dtemp.cir",
+            "xyce_sydney_level1_jfet_dtemp_relational_wrapper_owner",
+        ),
+        (
+            "Netlists/DTEMP/pjfet_ref.cir",
+            "xyce_sydney_level1_jfet_dtemp_relational_wrapper_reference",
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should satisfy the exact native Xyce Sydney level-1 JFET TEMP/DTEMP relational contract, got {result:?}"
         );
         assert_eq!(result.contract, expected_contract);
         assert!(result.error.is_none());

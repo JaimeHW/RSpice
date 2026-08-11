@@ -5,8 +5,9 @@
 //! parallel. Every test below checks that property (or composition of the
 //! factor through subcircuit hierarchy) at the operating point.
 
+use rspice_core::config::{ExpressionDialect, SpiceDialect};
 use rspice_core::engine::{Engine, SimulationConfig};
-use rspice_core::netlist::Netlist;
+use rspice_core::netlist::{ElementKind, Netlist, NetlistParseOptions, flatten_netlist};
 
 fn op_voltage(deck: &str, node: &str) -> f64 {
     let netlist = Netlist::parse(deck).expect("deck parses");
@@ -18,6 +19,43 @@ fn op_voltage(deck: &str, node: &str) -> f64 {
         .position(|name| name.eq_ignore_ascii_case(node))
         .unwrap_or_else(|| panic!("node {node} missing from OP result"));
     op.node_voltages[idx]
+}
+
+fn xyce_netlist(deck: &str) -> Netlist {
+    Netlist::parse_with_options(
+        deck,
+        NetlistParseOptions {
+            expression_dialect: ExpressionDialect::Xyce,
+            ..NetlistParseOptions::default()
+        },
+    )
+    .expect("Xyce deck parses")
+}
+
+fn xyce_op_voltage(deck: &str, node: &str) -> f64 {
+    let netlist = xyce_netlist(deck);
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    let op = engine.run_dc_op(&netlist).expect("operating point solves");
+    let idx = op
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(node))
+        .unwrap_or_else(|| panic!("node {node} missing from OP result"));
+    op.node_voltages[idx]
+}
+
+fn xyce_ac_magnitude(deck: &str, node: &str, frequency: f64) -> f64 {
+    let netlist = xyce_netlist(deck);
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    let result = engine
+        .run_ac(&netlist, &[frequency])
+        .expect("AC analysis solves");
+    let idx = result[0]
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(node))
+        .unwrap_or_else(|| panic!("node {node} missing from AC result"));
+    result[0].voltages[idx].norm()
 }
 
 fn resistor_conductance(deck: &str, name: &str) -> f64 {
@@ -298,5 +336,213 @@ l1 a 0 10m m=5
     assert!(
         (l - 2e-3).abs() < 1e-15,
         "inductor m=5 must divide inductance to 2mH, got {l}"
+    );
+}
+
+#[test]
+fn xyce_vccs_and_behavioral_current_multiplicity_scale_the_complete_source() {
+    let linear = "\
+* linear VCCS multiplicity
+vctrl ctrl 0 dc 1
+g1 out 0 ctrl 0 2m m=4
+r1 out 0 1k
+.op
+.end
+";
+    let behavioral = "\
+* behavioral current multiplicity
+vctrl ctrl 0 dc 1
+b1 out 0 i={2m*v(ctrl)} m=4
+r1 out 0 1k
+.op
+.end
+";
+    let expression_vccs = "\
+* expression VCCS multiplicity
+vctrl ctrl 0 dc 1
+g1 out 0 cur='2m*v(ctrl)' m=4
+r1 out 0 1k
+.op
+.end
+";
+
+    for (label, deck) in [
+        ("linear G", linear),
+        ("behavioral B", behavioral),
+        ("expression G", expression_vccs),
+    ] {
+        let voltage = xyce_op_voltage(deck, "out");
+        assert!(
+            (voltage + 8.0).abs() < 1e-10,
+            "{label} M=4 must scale both source value and derivatives: {voltage}"
+        );
+    }
+}
+
+#[test]
+fn xyce_x_multiplicity_is_independent_of_a_formal_m_parameter() {
+    let deck = "\
+* Xyce reserved X-line M with explicit child M
+vctrl ctrl 0 dc 1
+x1 out 0 ctrl 0 cell m=10
+r1 out 0 1k
+.subckt cell p n cp cn m=1
+b1 p n i={2m*v(cp,cn)} m='m'
+.ends
+.op
+.end
+";
+    let netlist = xyce_netlist(deck);
+    let flattened = flatten_netlist(&netlist).expect("hierarchy flattens");
+    let source = flattened
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("x1.b1"))
+        .expect("flattened B source exists");
+    let ElementKind::BehavioralCurrent { multiplicity, .. } = &source.kind else {
+        panic!("expected behavioral current, got {:?}", source.kind);
+    };
+    assert!(multiplicity.given, "the authored child M must be retained");
+    assert_eq!(multiplicity.value_expr, None);
+    assert_eq!(multiplicity.value, 10.0);
+    assert!((xyce_op_voltage(deck, "out") + 20.0).abs() < 1e-10);
+}
+
+#[test]
+fn xyce_x_multiplicity_is_inherited_and_composes_through_nested_instances() {
+    let implicit = "\
+* omitted child M inherits X M
+x1 out 0 ctrl 0 cell m=10
+vctrl ctrl 0 dc 1
+r1 out 0 1k
+.subckt cell p n cp cn m=1
+g1 p n cp cn 2m
+.ends
+.op
+.end
+";
+    let nested = "\
+* nested X M factors compose
+xouter out 0 ctrl 0 outer m=5
+vctrl ctrl 0 dc 1
+r1 out 0 1k
+.subckt outer p n cp cn m=1
+xinner p n cp cn inner m=2
+.ends
+.subckt inner p n cp cn m=1
+g1 p n cur='2m*v(cp,cn)'
+.ends
+.op
+.end
+";
+
+    for deck in [implicit, nested] {
+        let netlist = xyce_netlist(deck);
+        let flattened = flatten_netlist(&netlist).expect("hierarchy flattens");
+        let multiplicity = flattened
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Vccs { multiplicity, .. }
+                | ElementKind::BehavioralCurrent { multiplicity, .. } => Some(multiplicity),
+                _ => None,
+            })
+            .expect("flattened current-producing source exists");
+        assert_eq!(multiplicity.value, 10.0);
+        assert!(!multiplicity.given, "the child source omitted M");
+        assert!((xyce_op_voltage(deck, "out") + 20.0).abs() < 1e-10);
+    }
+}
+
+#[test]
+fn xyce_source_multiplicity_must_be_finite_and_strictly_positive() {
+    for line in [
+        "b1 out 0 i={1} m=0",
+        "b1 out 0 i={1} m=-1",
+        "g1 out 0 ctrl 0 1m m=0",
+        "g1 out 0 cur='v(ctrl)' m=-1",
+        "g1 out 0 ctrl 0 1m m=1e999",
+    ] {
+        let deck = format!("invalid source multiplicity\n{line}\n.end\n");
+        let error = Netlist::parse_with_options(
+            &deck,
+            NetlistParseOptions {
+                expression_dialect: ExpressionDialect::Xyce,
+                ..NetlistParseOptions::default()
+            },
+        )
+        .expect_err("invalid Xyce source M must fail");
+        assert!(
+            error.to_string().contains("multiplicity"),
+            "unexpected diagnostic for '{line}': {error}"
+        );
+    }
+}
+
+#[test]
+fn behavioral_voltage_m_follows_the_selected_dialect() {
+    let deck = "\
+* B-voltage M differs between ngspice and Xyce
+b1 out 0 v={1} m=3
+r1 out 0 1k
+.op
+.end
+";
+    assert!((op_voltage(deck, "out") - 3.0).abs() < 1e-12);
+    assert!((xyce_op_voltage(deck, "out") - 1.0).abs() < 1e-12);
+}
+
+#[test]
+fn xyce_source_multiplicity_scales_ac_small_signal_derivatives() {
+    let linear = "\
+* linear VCCS AC multiplicity
+vctrl ctrl 0 dc 0 ac 1
+g1 out 0 ctrl 0 2m m=4
+r1 out 0 1k
+.ac lin 1 1k 1k
+.end
+";
+    let behavioral = "\
+* behavioral-current AC multiplicity
+vctrl ctrl 0 dc 0 ac 1
+b1 out 0 i={2m*v(ctrl)} m=4
+r1 out 0 1k
+.ac lin 1 1k 1k
+.end
+";
+    for (label, deck) in [("linear G", linear), ("behavioral B", behavioral)] {
+        let magnitude = xyce_ac_magnitude(deck, "out", 1.0e3);
+        assert!(
+            (magnitude - 8.0).abs() < 1e-9,
+            "{label} AC gain must include M in the Jacobian: {magnitude}"
+        );
+    }
+}
+
+#[test]
+fn xyce_vccs_multiplicity_scales_transient_current() {
+    let deck = "\
+* VCCS transient multiplicity
+vctrl ctrl 0 pwl(0 0 1u 1)
+g1 out 0 ctrl 0 2m m=4
+r1 out 0 1k
+.tran 10n 1u
+.end
+";
+    let netlist = xyce_netlist(deck);
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    let result = engine
+        .run_tran(&netlist, 1.0e-6, 1.0e-8)
+        .expect("transient solves");
+    let idx = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .expect("out node exists");
+    let final_voltage = result.voltages[idx]
+        .last()
+        .copied()
+        .expect("transient emitted samples");
+    assert!(
+        (final_voltage + 8.0).abs() < 1e-6,
+        "transient source current must include M: {final_voltage}"
     );
 }

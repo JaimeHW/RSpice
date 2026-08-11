@@ -3276,6 +3276,184 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    pub(super) fn validate_xyce_sydney_level1_jfet_dtemp_provenance(
+        &self,
+        contract: &XyceSydneyLevel1JfetDtempContract,
+    ) -> Result<(), String> {
+        const LABEL: &str = "Xyce Sydney level-1 JFET TEMP/DTEMP family";
+        let parent = contract
+            .owner_path
+            .parent()
+            .ok_or_else(|| format!("{LABEL} owner has no parent directory"))?;
+        if contract.reference_path.parent() != Some(parent) {
+            return Err(format!("{LABEL} contract paths do not share one directory"));
+        }
+        let exclusions = self
+            .upstream_exclusions
+            .as_ref()
+            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
+        let entries = fs::read_dir(parent)
+            .map_err(|error| format!("failed to read {LABEL} directory: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("failed to enumerate {LABEL}: {error}"))?;
+
+        let mut candidate_paths = BTreeMap::<String, PathBuf>::new();
+        for entry in entries {
+            let path = entry.path();
+            let relative = self.relative_key(&path);
+            if XyceSydneyLevel1JfetDtempRole::for_record(&relative).is_none() {
+                continue;
+            }
+            let metadata = fs::symlink_metadata(&path)
+                .map_err(|error| format!("failed to inspect {LABEL} candidate: {error}"))?;
+            if metadata.file_type().is_symlink()
+                || !metadata.file_type().is_file()
+                || metadata.len() == 0
+            {
+                return Err(format!(
+                    "{LABEL} candidate '{}' must be a nonempty regular non-symlink file",
+                    self.display_path(&path)
+                ));
+            }
+            let key = Self::normalize_manifest_key(&relative);
+            if candidate_paths.insert(key, path).is_some() {
+                return Err(format!(
+                    "{LABEL} candidate census contains a path collision"
+                ));
+            }
+        }
+
+        let owner_relative = self.relative_key(&contract.owner_path);
+        let reference_relative = self.relative_key(&contract.reference_path);
+        let owner_key = Self::normalize_manifest_key(&owner_relative);
+        let reference_key = Self::normalize_manifest_key(&reference_relative);
+        let expected_owner_key = format!("netlists/dtemp/{}", contract.family.owner_file());
+        let expected_reference_key = format!("netlists/dtemp/{}", contract.family.reference_file());
+        if owner_key != expected_owner_key
+            || reference_key != expected_reference_key
+            || !candidate_paths.contains_key(&owner_key)
+            || !candidate_paths.contains_key(&reference_key)
+            || XyceSydneyLevel1JfetDtempRole::for_record(&owner_relative)
+                != Some((contract.family, XyceSydneyLevel1JfetDtempRole::Owner))
+            || XyceSydneyLevel1JfetDtempRole::for_record(&reference_relative)
+                != Some((contract.family, XyceSydneyLevel1JfetDtempRole::Reference))
+        {
+            return Err(format!(
+                "requested {LABEL} deck or its exact relational sibling is outside the qualified census"
+            ));
+        }
+
+        let mut owner_manifest_rows = Vec::new();
+        let mut historical_exclusion_rows = Vec::new();
+        for (key, path) in &candidate_paths {
+            let relative = self.relative_key(path);
+            let Some((_, role)) = XyceSydneyLevel1JfetDtempRole::for_record(&relative) else {
+                return Err(format!("{LABEL} candidate role became ambiguous"));
+            };
+            match role {
+                XyceSydneyLevel1JfetDtempRole::Owner => {
+                    if !self.requires_upstream_wrapper(&relative) || exclusions.contains_key(key) {
+                        return Err(format!(
+                            "{LABEL} owner '{relative}' lost its exclusive wrapper provenance"
+                        ));
+                    }
+                    owner_manifest_rows
+                        .push(format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"));
+                }
+                XyceSydneyLevel1JfetDtempRole::Reference => {
+                    let exclusion = exclusions.get(key).ok_or_else(|| {
+                        format!(
+                            "{LABEL} reference '{relative}' lost its historical exclusion provenance"
+                        )
+                    })?;
+                    if !matches!(
+                        &exclusion.disposition,
+                        XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                            expected_contract,
+                        } if expected_contract == XYCE_SYDNEY_LEVEL1_JFET_DTEMP_REFERENCE_CONTRACT
+                    ) || self.requires_upstream_wrapper(&relative)
+                    {
+                        return Err(format!(
+                            "{LABEL} reference '{relative}' does not carry the exact independent qualification"
+                        ));
+                    }
+                    historical_exclusion_rows.push(format!(
+                        "{relative}\t{}\tupstream_excluded",
+                        exclusion.source
+                    ));
+                }
+            }
+        }
+
+        let mut candidates = Vec::with_capacity(candidate_paths.len());
+        let mut candidate_content = Vec::with_capacity(candidate_paths.len());
+        for path in candidate_paths.values() {
+            let relative = self.relative_key(path);
+            let bytes = fs::read(path).map_err(|error| {
+                format!("failed to read {LABEL} candidate '{relative}': {error}")
+            })?;
+            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
+            candidates.push(relative.clone());
+            candidate_content.push(format!("{relative}\t{}", blake3::hash(&canonical).to_hex()));
+            self.reject_wrapper_output_artifacts(path)?;
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| format!("{LABEL} candidate filename is not UTF-8"))?;
+            for suffix in ["prn", "res", "prn.gs", "res.gs", "csv", "csd"] {
+                let sidecar = path.with_file_name(format!("{file_name}.{suffix}"));
+                match fs::symlink_metadata(&sidecar) {
+                    Ok(_) => {
+                        return Err(format!(
+                            "{LABEL} candidate must not have source-side output artifact '{}'",
+                            self.display_path(&sidecar)
+                        ));
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        return Err(format!(
+                            "failed to inspect {LABEL} sidecar '{}': {error}",
+                            self.display_path(&sidecar)
+                        ));
+                    }
+                }
+            }
+        }
+
+        candidates.sort();
+        candidate_content.sort();
+        owner_manifest_rows.sort();
+        historical_exclusion_rows.sort();
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(candidate_content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let owner_hash = blake3::hash(owner_manifest_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let exclusion_hash = blake3::hash(historical_exclusion_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if candidates.len() != XYCE_SYDNEY_LEVEL1_JFET_DTEMP_CANDIDATE_COUNT
+            || candidate_hash != XYCE_SYDNEY_LEVEL1_JFET_DTEMP_CANDIDATE_BLAKE3
+            || content_hash != XYCE_SYDNEY_LEVEL1_JFET_DTEMP_CONTENT_BLAKE3
+            || owner_manifest_rows.len() != XYCE_SYDNEY_LEVEL1_JFET_DTEMP_OWNER_COUNT
+            || owner_hash != XYCE_SYDNEY_LEVEL1_JFET_DTEMP_OWNER_MANIFEST_BLAKE3
+            || historical_exclusion_rows.len() != XYCE_SYDNEY_LEVEL1_JFET_DTEMP_EXCLUSION_COUNT
+            || exclusion_hash != XYCE_SYDNEY_LEVEL1_JFET_DTEMP_HISTORICAL_EXCLUSION_BLAKE3
+        {
+            return Err(format!(
+                "{LABEL} provenance changed: candidates={}/{candidate_hash}/{content_hash}, owners={}/{owner_hash}, exclusions={}/{exclusion_hash}",
+                candidates.len(),
+                owner_manifest_rows.len(),
+                historical_exclusion_rows.len()
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn validate_nonlinear_core_model_step_provenance(
         &self,
         contract: &XyceNonlinearCoreModelStepReferenceContract,
@@ -4189,6 +4367,414 @@ impl XyceTestRunner {
         })
     }
 
+    pub(super) fn source_multiplicity_family_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<XyceSourceMultiplicitySnapshot, String> {
+        const LABEL: &str = "BSRC/VCCS source multiplicity";
+        if !netlist.diagnostics.is_empty()
+            || !netlist.models.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || netlist.device_initial_conditions.is_some()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+            || print.probes != ["V(1)".to_string(), "V(2)".to_string(), "V(3)".to_string()]
+        {
+            return Err(format!(
+                "{LABEL} requires a diagnostic-free circuit with only its typed source hierarchy and ordered V(1), V(2), V(3) probes"
+            ));
+        }
+        let analysis = match netlist.analyses.as_slice() {
+            [AnalysisCommand::Dc { .. }] => XyceSourceMultiplicityAnalysis::Dc,
+            [AnalysisCommand::Tran { .. }] => XyceSourceMultiplicityAnalysis::Tran,
+            _ => return Err(format!("{LABEL} requires exactly one DC or TRAN analysis")),
+        };
+
+        fn collect_authored_state(
+            elements: &[rspice_core::netlist::Element],
+            sources: &mut Vec<(String, u64, bool, Option<String>)>,
+            hierarchy: &mut Vec<u64>,
+        ) -> Result<(), String> {
+            for element in elements {
+                match &element.kind {
+                    ElementKind::Vccs { multiplicity, .. } => sources.push((
+                        "linear".to_string(),
+                        multiplicity.value.to_bits(),
+                        multiplicity.given,
+                        multiplicity.value_expr.clone(),
+                    )),
+                    ElementKind::BehavioralCurrent { multiplicity, .. } => sources.push((
+                        if element.name.trim().to_ascii_lowercase().starts_with('g') {
+                            "expression"
+                        } else {
+                            "behavioral"
+                        }
+                        .to_string(),
+                        multiplicity.value.to_bits(),
+                        multiplicity.given,
+                        multiplicity.value_expr.clone(),
+                    )),
+                    ElementKind::Subcircuit { params, .. } => {
+                        let multiplier = params
+                            .iter()
+                            .filter(|(name, _)| name.eq_ignore_ascii_case("M"))
+                            .map(|(_, value)| value.as_value())
+                            .collect::<Vec<_>>();
+                        if multiplier.len() != 1 || multiplier[0].is_none() {
+                            return Err(
+                                "source-multiplicity hierarchy requires one resolved M on every X instance"
+                                    .to_string(),
+                            );
+                        }
+                        hierarchy.push(multiplier[0].expect("checked resolved M").to_bits());
+                    }
+                    _ => {}
+                }
+            }
+            Ok(())
+        }
+
+        let mut authored_sources = Vec::new();
+        let mut hierarchy_multiplicity_bits = Vec::new();
+        collect_authored_state(
+            &netlist.elements,
+            &mut authored_sources,
+            &mut hierarchy_multiplicity_bits,
+        )?;
+        fn walk_subcircuits(
+            definitions: &[SubcircuitDef],
+            sources: &mut Vec<(String, u64, bool, Option<String>)>,
+            hierarchy: &mut Vec<u64>,
+        ) -> Result<(), String> {
+            for definition in definitions {
+                collect_authored_state(&definition.elements, sources, hierarchy)?;
+                walk_subcircuits(&definition.nested_subcircuits, sources, hierarchy)?;
+            }
+            Ok(())
+        }
+        walk_subcircuits(
+            &netlist.subcircuits,
+            &mut authored_sources,
+            &mut hierarchy_multiplicity_bits,
+        )?;
+        let [(authored_kind, authored_multiplicity_bits, authored_given, authored_expr)] =
+            authored_sources.as_slice()
+        else {
+            return Err(format!(
+                "{LABEL} requires exactly one authored current-producing source"
+            ));
+        };
+
+        let representation = match (
+            authored_kind.as_str(),
+            *authored_multiplicity_bits,
+            *authored_given,
+            authored_expr.as_deref(),
+            hierarchy_multiplicity_bits.as_slice(),
+        ) {
+            ("linear", bits, false, None, []) if bits == 1.0f64.to_bits() => {
+                XyceSourceMultiplicityRepresentation::LinearBaseline
+            }
+            ("linear", bits, true, None, []) if bits == 10.0f64.to_bits() => {
+                XyceSourceMultiplicityRepresentation::LinearDirect
+            }
+            ("behavioral", bits, true, None, []) if bits == 10.0f64.to_bits() => {
+                XyceSourceMultiplicityRepresentation::BehavioralDirect
+            }
+            ("behavioral", bits, true, Some(expr), [ten])
+                if bits == 1.0f64.to_bits()
+                    && expr.trim().eq_ignore_ascii_case("M")
+                    && *ten == 10.0f64.to_bits() =>
+            {
+                XyceSourceMultiplicityRepresentation::BehavioralFormal
+            }
+            ("behavioral", bits, false, None, [ten])
+                if bits == 1.0f64.to_bits() && *ten == 10.0f64.to_bits() =>
+            {
+                XyceSourceMultiplicityRepresentation::BehavioralInherited
+            }
+            ("behavioral", bits, false, None, [five, two])
+                if bits == 1.0f64.to_bits()
+                    && *five == 5.0f64.to_bits()
+                    && *two == 2.0f64.to_bits() =>
+            {
+                XyceSourceMultiplicityRepresentation::BehavioralNested
+            }
+            ("expression", bits, true, None, []) if bits == 10.0f64.to_bits() => {
+                XyceSourceMultiplicityRepresentation::ExpressionDirect
+            }
+            ("expression", bits, true, Some(expr), [ten])
+                if bits == 1.0f64.to_bits()
+                    && expr.trim().eq_ignore_ascii_case("M")
+                    && *ten == 10.0f64.to_bits() =>
+            {
+                XyceSourceMultiplicityRepresentation::ExpressionFormal
+            }
+            ("expression", bits, false, None, [ten])
+                if bits == 1.0f64.to_bits() && *ten == 10.0f64.to_bits() =>
+            {
+                XyceSourceMultiplicityRepresentation::ExpressionInherited
+            }
+            ("expression", bits, false, None, [five, two])
+                if bits == 1.0f64.to_bits()
+                    && *five == 5.0f64.to_bits()
+                    && *two == 2.0f64.to_bits() =>
+            {
+                XyceSourceMultiplicityRepresentation::ExpressionNested
+            }
+            _ => {
+                return Err(format!(
+                    "{LABEL} source M and hierarchy do not match a qualified direct, formal, inherited, nested, or baseline representation"
+                ));
+            }
+        };
+
+        let flattened = flatten_netlist(netlist)
+            .map_err(|error| format!("{LABEL} hierarchy could not be flattened: {error}"))?;
+        if flattened.len() != 6 {
+            return Err(format!(
+                "{LABEL} requires exactly six flattened elements, found {}",
+                flattened.len()
+            ));
+        }
+        let mut flattened_elements = BTreeMap::new();
+        let mut effective_gain_bits = None;
+        let mut source_nodes = None;
+        let mut control_nodes = None;
+        let mut flattened_multiplicity = None;
+        for element in &flattened {
+            let name = element.name.trim().to_ascii_lowercase();
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| node.trim().to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            let (key, fingerprint) = match &element.kind {
+                ElementKind::Resistor { value, .. } => (
+                    name.clone(),
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    },
+                ),
+                ElementKind::VoltageSource(spec) => {
+                    let (kind, numeric_bits) = match spec {
+                        rspice_core::netlist::SourceSpec::Dc(value) => {
+                            ("V:DC".to_string(), vec![value.to_bits()])
+                        }
+                        rspice_core::netlist::SourceSpec::DcTransient {
+                            dc_value,
+                            transient,
+                        } => {
+                            let rspice_core::netlist::SourceSpec::Pwl {
+                                points,
+                                delay,
+                                repeat_from,
+                            } = transient.as_ref()
+                            else {
+                                return Err(format!("{LABEL} transient VIN must use PWL"));
+                            };
+                            let mut bits = vec![dc_value.to_bits(), delay.to_bits()];
+                            bits.push(repeat_from.map(Value::to_bits).unwrap_or(u64::MAX));
+                            bits.extend(
+                                points
+                                    .iter()
+                                    .flat_map(|(time, value)| [time.to_bits(), value.to_bits()]),
+                            );
+                            ("V:DC+PWL".to_string(), bits)
+                        }
+                        rspice_core::netlist::SourceSpec::Pwl {
+                            points,
+                            delay,
+                            repeat_from,
+                        } => {
+                            let mut bits = vec![delay.to_bits()];
+                            bits.push(repeat_from.map(Value::to_bits).unwrap_or(u64::MAX));
+                            bits.extend(
+                                points
+                                    .iter()
+                                    .flat_map(|(time, value)| [time.to_bits(), value.to_bits()]),
+                            );
+                            ("V:PWL".to_string(), bits)
+                        }
+                        _ => return Err(format!("{LABEL} VIN waveform is outside DC/PWL")),
+                    };
+                    (
+                        name.clone(),
+                        XyceRelationalElementFingerprint {
+                            kind,
+                            nodes,
+                            numeric_bits,
+                            text: Vec::new(),
+                        },
+                    )
+                }
+                ElementKind::Vccs {
+                    transconductance,
+                    transconductance_expr,
+                    multiplicity,
+                    control_nodes: controls,
+                } => {
+                    if transconductance_expr.is_some() || multiplicity.value_expr.is_some() {
+                        return Err(format!("{LABEL} flattened linear G remains deferred"));
+                    }
+                    let gain = *transconductance * multiplicity.value;
+                    effective_gain_bits = Some(gain.to_bits());
+                    source_nodes = Some(nodes.clone());
+                    control_nodes = Some([
+                        controls.0.trim().to_ascii_lowercase(),
+                        controls.1.trim().to_ascii_lowercase(),
+                    ]);
+                    flattened_multiplicity =
+                        Some((multiplicity.value.to_bits(), multiplicity.given));
+                    (
+                        "source".to_string(),
+                        XyceRelationalElementFingerprint {
+                            kind: "I=GAIN*V".to_string(),
+                            nodes,
+                            numeric_bits: vec![gain.to_bits()],
+                            text: vec![
+                                controls.0.trim().to_ascii_lowercase(),
+                                controls.1.trim().to_ascii_lowercase(),
+                            ],
+                        },
+                    )
+                }
+                ElementKind::BehavioralCurrent {
+                    expression,
+                    tc1,
+                    tc2,
+                    multiplicity,
+                } => {
+                    if tc1.to_bits() != 0.0f64.to_bits()
+                        || tc2.to_bits() != 0.0f64.to_bits()
+                        || multiplicity.value_expr.is_some()
+                    {
+                        return Err(format!(
+                            "{LABEL} flattened behavioral current retains TC or deferred M state"
+                        ));
+                    }
+                    let prepared = prepare_behavioral_expression(expression, &netlist.params)
+                        .map_err(|error| {
+                            format!("{LABEL} expression resolution failed: {error}")
+                        })?;
+                    let ast = parse_expression_strict(&prepared)
+                        .map_err(|error| format!("{LABEL} expression parse failed: {error}"))?;
+                    fn voltage_pair(expr: &Expr) -> Option<[String; 2]> {
+                        match expr {
+                            Expr::NodeVoltage(node) => {
+                                Some([node.trim().to_ascii_lowercase(), "0".to_string()])
+                            }
+                            Expr::Binary {
+                                op: BinaryOp::Sub,
+                                left,
+                                right,
+                            } => match (left.as_ref(), right.as_ref()) {
+                                (Expr::NodeVoltage(pos), Expr::NodeVoltage(neg)) => Some([
+                                    pos.trim().to_ascii_lowercase(),
+                                    neg.trim().to_ascii_lowercase(),
+                                ]),
+                                _ => None,
+                            },
+                            _ => None,
+                        }
+                    }
+                    let (coefficient, controls) = match ast {
+                        Expr::Binary {
+                            op: BinaryOp::Mul,
+                            left,
+                            right,
+                        } => match (left.as_ref(), right.as_ref()) {
+                            (Expr::Const(value), expression) | (expression, Expr::Const(value)) => {
+                                (*value, voltage_pair(expression))
+                            }
+                            _ => (Value::NAN, None),
+                        },
+                        _ => (Value::NAN, None),
+                    };
+                    let controls = controls.ok_or_else(|| {
+                        format!("{LABEL} behavioral current is not coefficient*V(control)")
+                    })?;
+                    let gain = coefficient * multiplicity.value;
+                    effective_gain_bits = Some(gain.to_bits());
+                    source_nodes = Some(nodes.clone());
+                    control_nodes = Some(controls.clone());
+                    flattened_multiplicity =
+                        Some((multiplicity.value.to_bits(), multiplicity.given));
+                    (
+                        "source".to_string(),
+                        XyceRelationalElementFingerprint {
+                            kind: "I=GAIN*V".to_string(),
+                            nodes,
+                            numeric_bits: vec![gain.to_bits()],
+                            text: controls.to_vec(),
+                        },
+                    )
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} flattened element '{}' is outside VIN/R/G/B topology",
+                        element.name
+                    ));
+                }
+            };
+            if flattened_elements
+                .insert(key.clone(), fingerprint)
+                .is_some()
+            {
+                return Err(format!(
+                    "{LABEL} normalized flattened key '{key}' is duplicated"
+                ));
+            }
+        }
+        let effective_gain_bits = effective_gain_bits
+            .filter(|bits| *bits == 0.2f64.to_bits())
+            .ok_or_else(|| format!("{LABEL} effective current gain is not exactly 0.2 S"))?;
+        let source_nodes = source_nodes
+            .filter(|nodes| nodes.as_slice() == ["3", "0"])
+            .ok_or_else(|| format!("{LABEL} current source must connect from node 3 to 0"))?;
+        let control_nodes = control_nodes
+            .filter(|nodes| nodes.as_slice() == ["2", "0"])
+            .ok_or_else(|| format!("{LABEL} current law must sense V(2,0)"))?;
+        let (flattened_multiplicity_bits, flattened_multiplicity_given) =
+            flattened_multiplicity.ok_or_else(|| format!("{LABEL} has no flattened source M"))?;
+        let expected_flattened_m =
+            if representation == XyceSourceMultiplicityRepresentation::LinearBaseline {
+                1.0f64.to_bits()
+            } else {
+                10.0f64.to_bits()
+            };
+        if flattened_multiplicity_bits != expected_flattened_m {
+            return Err(format!(
+                "{LABEL} flattened M is not the qualified effective value"
+            ));
+        }
+        Ok(XyceSourceMultiplicitySnapshot {
+            analysis,
+            representation,
+            flattened_elements,
+            effective_gain_bits,
+            source_nodes: source_nodes
+                .try_into()
+                .expect("qualified two-terminal source"),
+            control_nodes,
+            authored_multiplicity_bits: *authored_multiplicity_bits,
+            authored_multiplicity_given: *authored_given,
+            flattened_multiplicity_bits,
+            flattened_multiplicity_given,
+            hierarchy_multiplicity_bits,
+            ordered_probes: print.probes.clone(),
+        })
+    }
+
     pub(super) fn strict_ac_family_snapshot(
         kind: XyceBaselineFamilyKind,
         netlist: &Netlist,
@@ -4238,6 +4824,10 @@ impl XyceTestRunner {
             XyceBaselineFamilyKind::NestedIncludeIdentity => {
                 Self::nested_include_identity_family_snapshot(netlist, plan)
                     .map(XyceStrictDcFamilySnapshot::NestedIncludeIdentity)
+            }
+            XyceBaselineFamilyKind::SourceMultiplicity => {
+                Self::source_multiplicity_family_snapshot(netlist, &plan.print)
+                    .map(XyceStrictDcFamilySnapshot::SourceMultiplicity)
             }
             other => Err(format!(
                 "family kind {} has no qualified exact-DC semantic snapshot",
@@ -4837,6 +5427,20 @@ impl XyceTestRunner {
                 Self::param_expression_family_snapshot(netlist, print)
                     .map(XyceStrictTransientFamilySnapshot::ParamExpression)
             }
+            XyceBaselineFamilyKind::Params1 => Self::params1_family_snapshot(netlist, print)
+                .map(XyceStrictTransientFamilySnapshot::Params1),
+            XyceBaselineFamilyKind::NakedAlgebra => {
+                Self::naked_algebra_family_snapshot(netlist, print)
+                    .map(XyceStrictTransientFamilySnapshot::NakedAlgebra)
+            }
+            XyceBaselineFamilyKind::Bug1826ThermalParameter => {
+                Self::bug1826_thermal_parameter_family_snapshot(netlist, print)
+                    .map(XyceStrictTransientFamilySnapshot::Bug1826ThermalParameter)
+            }
+            XyceBaselineFamilyKind::SourceMultiplicity => {
+                Self::source_multiplicity_family_snapshot(netlist, print)
+                    .map(XyceStrictTransientFamilySnapshot::SourceMultiplicity)
+            }
             XyceBaselineFamilyKind::PassiveCapPrimaryValue => {
                 Self::passive_cap_primary_snapshot(netlist, print)
                     .map(XyceStrictTransientFamilySnapshot::PassivePrimaryValue)
@@ -4854,6 +5458,1020 @@ impl XyceTestRunner {
                 other.name()
             )),
         }
+    }
+
+    pub(super) fn params1_family_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<XyceParams1Snapshot, String> {
+        const LABEL: &str = "PARAMS1 parameter equivalence";
+        const TITLE: &str = "Test of PARAMS Functionality";
+        let source = netlist
+            .source_text
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} requires original source text"))?;
+        let representation = Self::params1_source_qualification(source)?;
+
+        let [
+            AnalysisCommand::Tran {
+                step,
+                stop,
+                start,
+                max_step,
+                uic,
+            },
+        ] = netlist.analyses.as_slice()
+        else {
+            return Err(format!("{LABEL} requires exactly one transient analysis"));
+        };
+        if step.to_bits() != 0.02f64.to_bits()
+            || stop.to_bits() != 0.8f64.to_bits()
+            || start.is_some()
+            || max_step.is_some()
+            || *uic
+        {
+            return Err(format!(
+                "{LABEL} requires exact '.TRAN 0.02 0.8' semantics without START, MAXSTEP, or UIC"
+            ));
+        }
+        if netlist.title.trim() != TITLE
+            || !netlist.diagnostics.is_empty()
+            || netlist.lin_analysis.is_some()
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.models.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || netlist.device_initial_conditions.is_some()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires the canonical title and one flat diagnostic-free circuit without models, hierarchy, auxiliary analyses, startup state, string parameters, or functions"
+            ));
+        }
+
+        let mut parameter_bits = BTreeMap::new();
+        for (name, value) in netlist.params.all_params() {
+            let name = name.trim().to_ascii_lowercase();
+            if name.is_empty()
+                || !value.is_finite()
+                || parameter_bits
+                    .insert(name.clone(), value.to_bits())
+                    .is_some()
+            {
+                return Err(format!(
+                    "{LABEL} contains an empty, duplicate, or non-finite parameter '{name}'"
+                ));
+            }
+        }
+        let expected_parameters = BTreeMap::from([
+            ("cvalue".to_string(), 2.0e-6f64.to_bits()),
+            ("rvalue".to_string(), 22_000.0f64.to_bits()),
+        ]);
+        match representation {
+            XyceParams1Representation::LiteralValues if !parameter_bits.is_empty() => {
+                return Err(format!(
+                    "{LABEL} literal baseline does not admit parameter bindings"
+                ));
+            }
+            XyceParams1Representation::GlobalParameters
+                if parameter_bits != expected_parameters =>
+            {
+                return Err(format!(
+                    "{LABEL} parameterized member requires exactly RVALUE=22K and CVALUE=2UF"
+                ));
+            }
+            XyceParams1Representation::LiteralValues
+            | XyceParams1Representation::GlobalParameters => {}
+        }
+
+        let voltage_probe = match print.probes.as_slice() {
+            [probe] => Self::parse_voltage_probe(probe)
+                .ok_or_else(|| format!("{LABEL} requires one atomic voltage probe"))?,
+            _ => return Err(format!("{LABEL} requires exactly one ordered probe")),
+        };
+        if voltage_probe.accessor != XyceVoltageAccessor::Value
+            || voltage_probe.node_pos.trim() != "2"
+            || voltage_probe.node_neg.is_some()
+        {
+            return Err(format!(
+                "{LABEL} requires the single-ended voltage-value probe V(2)"
+            ));
+        }
+        let ordered_probes = print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+
+        let mut elements = BTreeMap::new();
+        for element in &netlist.elements {
+            let name = element.name.trim().to_ascii_lowercase();
+            if name.is_empty()
+                || !matches!(element.provenance, ElementProvenance::Authored)
+                || elements.contains_key(&name)
+            {
+                return Err(format!(
+                    "{LABEL} contains an empty, duplicate, or generated element '{}'",
+                    element.name
+                ));
+            }
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| node.trim().to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            if nodes.iter().any(String::is_empty) {
+                return Err(format!(
+                    "{LABEL} element '{}' contains an empty node",
+                    element.name
+                ));
+            }
+
+            let fingerprint = match (name.as_str(), &element.kind) {
+                (
+                    "v1",
+                    ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Pulse {
+                        v1,
+                        v2,
+                        delay,
+                        rise,
+                        fall,
+                        width,
+                        period,
+                        phase,
+                        width_defaults_to_zero,
+                    }),
+                ) if nodes == ["1", "0"]
+                    && !*width_defaults_to_zero
+                    && [*v1, *v2, *delay, *rise, *fall, *width, *period, *phase]
+                        .into_iter()
+                        .all(Value::is_finite)
+                    && [
+                        v1.to_bits(),
+                        v2.to_bits(),
+                        delay.to_bits(),
+                        rise.to_bits(),
+                        fall.to_bits(),
+                        width.to_bits(),
+                        period.to_bits(),
+                        phase.to_bits(),
+                    ] == [
+                        0.0f64.to_bits(),
+                        20.0f64.to_bits(),
+                        0.0f64.to_bits(),
+                        0.0f64.to_bits(),
+                        0.0f64.to_bits(),
+                        0.2f64.to_bits(),
+                        0.4f64.to_bits(),
+                        0.0f64.to_bits(),
+                    ] =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "V:PULSE".to_string(),
+                        nodes,
+                        numeric_bits: vec![
+                            v1.to_bits(),
+                            v2.to_bits(),
+                            delay.to_bits(),
+                            rise.to_bits(),
+                            fall.to_bits(),
+                            width.to_bits(),
+                            period.to_bits(),
+                            phase.to_bits(),
+                        ],
+                        text: vec!["EXPLICIT_WIDTH_PERIOD".to_string()],
+                    }
+                }
+                ("v2", ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Dc(value)))
+                    if nodes == ["3", "0"]
+                        && value.is_finite()
+                        && value.to_bits() == 6.0f64.to_bits() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "V:DC".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                (
+                    "r1" | "r2",
+                    ElementKind::Resistor {
+                        value,
+                        value_expr,
+                        model,
+                        instance_params,
+                        deferred_params,
+                    },
+                ) if value.is_finite()
+                    && value.to_bits() == 22_000.0f64.to_bits()
+                    && value_expr.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty()
+                    && ((name == "r1" && nodes == ["1", "2"])
+                        || (name == "r2" && nodes == ["2", "3"])) =>
+                {
+                    let effective = Self::effective_resistor_value(netlist, &element.name)?
+                        .ok_or_else(|| {
+                            format!("{LABEL} could not resolve resistor '{}'", element.name)
+                        })?;
+                    if !effective.is_finite() || effective.to_bits() != 22_000.0f64.to_bits() {
+                        return Err(format!(
+                            "{LABEL} resistor '{}' did not resolve to 22K",
+                            element.name
+                        ));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits(), effective.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                (
+                    "c",
+                    ElementKind::Capacitor {
+                        value,
+                        value_expr,
+                        initial_voltage,
+                        model,
+                        instance_params,
+                        deferred_params,
+                    },
+                ) if nodes == ["2", "0"]
+                    && value.is_finite()
+                    && value.to_bits() == 2.0e-6f64.to_bits()
+                    && value_expr.is_none()
+                    && initial_voltage.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    let effective = Engine::new(SimulationConfig {
+                        spice_dialect: SpiceDialect::Xyce,
+                        ..SimulationConfig::default()
+                    })
+                    .resolved_capacitor_value(netlist, &element.name)
+                    .map_err(|error| {
+                        format!(
+                            "{LABEL} capacitor '{}' resolution failed: {error}",
+                            element.name
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        format!("{LABEL} could not resolve capacitor '{}'", element.name)
+                    })?;
+                    if !effective.is_finite() || effective.to_bits() != 2.0e-6f64.to_bits() {
+                        return Err(format!(
+                            "{LABEL} capacitor '{}' did not resolve to 2uF",
+                            element.name
+                        ));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: "C".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits(), effective.to_bits()],
+                        text: vec!["NO_IC".to_string()],
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} element '{}' is outside the exact five-element topology/value envelope",
+                        element.name
+                    ));
+                }
+            };
+            elements.insert(name, fingerprint);
+        }
+        if elements.keys().map(String::as_str).collect::<BTreeSet<_>>()
+            != BTreeSet::from(["c", "r1", "r2", "v1", "v2"])
+        {
+            return Err(format!("{LABEL} requires exactly V1, V2, R1, R2, and C"));
+        }
+
+        Ok(XyceParams1Snapshot {
+            representation,
+            title: netlist.title.trim().to_string(),
+            elements,
+            tran_step_bits: step.to_bits(),
+            tran_stop_bits: stop.to_bits(),
+            ordered_probes,
+        })
+    }
+
+    pub(super) fn naked_algebra_family_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<XyceNakedAlgebraSnapshot, String> {
+        const LABEL: &str = "nakedAlgebra parameter equivalence";
+        let source = netlist
+            .source_text
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} requires original source text"))?;
+        let representation = Self::naked_algebra_source_qualification(source)?;
+
+        let [
+            AnalysisCommand::Tran {
+                step,
+                stop,
+                start,
+                max_step,
+                uic,
+            },
+        ] = netlist.analyses.as_slice()
+        else {
+            return Err(format!("{LABEL} requires exactly one transient analysis"));
+        };
+        if step.to_bits() != (0.1f64 * 1.0e-9).to_bits()
+            || stop.to_bits() != (100.0f64 * 1.0e-12).to_bits()
+            || start.is_some()
+            || max_step.is_some()
+            || *uic
+        {
+            return Err(format!(
+                "{LABEL} requires exact '.TRAN 0.1ns 100ps' semantics without START, MAXSTEP, or UIC"
+            ));
+        }
+
+        let expected_title = match representation {
+            XyceNakedAlgebraRepresentation::BracedLocalBaseline => {
+                "Test of expression version of SPICE pulse, with very fast (<1ps) rise times"
+            }
+            XyceNakedAlgebraRepresentation::MixedLocalParameters
+            | XyceNakedAlgebraRepresentation::MixedGlobalParameters => {
+                "* This is a test for issue 195, to see if .param with expressions can"
+            }
+        };
+        if netlist.title.trim() != expected_title
+            || !netlist.diagnostics.is_empty()
+            || netlist.lin_analysis.is_some()
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.models.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || netlist.device_initial_conditions.is_some()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires its canonical role title and one flat diagnostic-free circuit without models, hierarchy, auxiliary analyses, startup state, string parameters, or functions"
+            ));
+        }
+
+        let mut parsed_parameter_bits = BTreeMap::new();
+        for (name, value) in netlist.params.all_params() {
+            let name = name.trim().to_ascii_lowercase();
+            if name.is_empty()
+                || !value.is_finite()
+                || parsed_parameter_bits
+                    .insert(name.clone(), value.to_bits())
+                    .is_some()
+            {
+                return Err(format!(
+                    "{LABEL} contains an empty, duplicate, or non-finite parameter '{name}'"
+                ));
+            }
+        }
+        let resolved_parameter_bits = BTreeMap::from([
+            ("pw".to_string(), (10.0f64 * 1.0e-12).to_bits()),
+            ("td".to_string(), (0.5f64 * 1.0e-12).to_bits()),
+            ("tf".to_string(), (0.4f64 * 1.0e-12).to_bits()),
+            ("tr".to_string(), (0.3f64 * 1.0e-12).to_bits()),
+            ("v1".to_string(), 1.1f64.to_bits()),
+            ("v2".to_string(), 2.0f64.to_bits()),
+        ]);
+        let expected_parameter_bits = match representation {
+            XyceNakedAlgebraRepresentation::BracedLocalBaseline => resolved_parameter_bits.clone(),
+            XyceNakedAlgebraRepresentation::MixedLocalParameters
+            | XyceNakedAlgebraRepresentation::MixedGlobalParameters => {
+                let mut expected = resolved_parameter_bits.clone();
+                expected.extend([
+                    ("test1".to_string(), 1.0f64.to_bits()),
+                    ("test2".to_string(), 1.0f64.to_bits()),
+                    ("test3".to_string(), (1.0f64 * 1.0e-12).to_bits()),
+                    ("test4".to_string(), (1.0f64 * 1.0e-12).to_bits()),
+                    ("test5".to_string(), (1.0f64 * 1.0e-12).to_bits()),
+                    ("test6".to_string(), (1.0f64 * 1.0e-12).to_bits()),
+                ]);
+                expected
+            }
+        };
+        if parsed_parameter_bits != expected_parameter_bits {
+            return Err(format!(
+                "{LABEL} role has unexpected parameter names or resolved values"
+            ));
+        }
+
+        let voltage_probe = match print.probes.as_slice() {
+            [probe] => Self::parse_voltage_probe(probe)
+                .ok_or_else(|| format!("{LABEL} requires one atomic voltage probe"))?,
+            _ => return Err(format!("{LABEL} requires exactly one ordered probe")),
+        };
+        if voltage_probe.accessor != XyceVoltageAccessor::Value
+            || voltage_probe.node_pos.trim() != "1"
+            || voltage_probe.node_neg.is_some()
+        {
+            return Err(format!(
+                "{LABEL} requires the single-ended voltage-value probe V(1)"
+            ));
+        }
+        let ordered_probes = print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+
+        let expected_pulse_bits = [
+            1.1f64.to_bits(),
+            2.0f64.to_bits(),
+            (0.5f64 * 1.0e-12).to_bits(),
+            (0.3f64 * 1.0e-12).to_bits(),
+            (0.4f64 * 1.0e-12).to_bits(),
+            (10.0f64 * 1.0e-12).to_bits(),
+        ];
+        let mut elements = BTreeMap::new();
+        for element in &netlist.elements {
+            let name = element.name.trim().to_ascii_lowercase();
+            if name.is_empty()
+                || !matches!(element.provenance, ElementProvenance::Authored)
+                || elements.contains_key(&name)
+            {
+                return Err(format!(
+                    "{LABEL} contains an empty, duplicate, or generated element '{}'",
+                    element.name
+                ));
+            }
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| node.trim().to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            let fingerprint = match (name.as_str(), &element.kind) {
+                (
+                    "b1",
+                    ElementKind::BehavioralVoltage {
+                        expression,
+                        tc1,
+                        tc2,
+                        multiplicity,
+                    },
+                ) if nodes == ["1", "0"]
+                    && tc1.to_bits() == 0.0f64.to_bits()
+                    && tc2.to_bits() == 0.0f64.to_bits()
+                    && multiplicity.value.to_bits() == 1.0f64.to_bits()
+                    && multiplicity.value_expr.is_none()
+                    && !multiplicity.given =>
+                {
+                    let prepared = prepare_behavioral_expression(expression, &netlist.params)
+                        .map_err(|error| {
+                            format!("{LABEL} could not resolve B1 behavioral expression: {error}")
+                        })?;
+                    let ast = parse_expression_strict(&prepared).map_err(|error| {
+                        format!("{LABEL} could not parse resolved B1 expression: {error}")
+                    })?;
+                    let Expr::Function {
+                        func: rspice_core::expr::Function::SpicePulse,
+                        args,
+                    } = ast
+                    else {
+                        return Err(format!(
+                            "{LABEL} B1 must be one direct SPICE_PULSE expression"
+                        ));
+                    };
+                    let [v1, v2, td, tr, tf, pw] = args.as_slice() else {
+                        return Err(format!(
+                            "{LABEL} B1 must use exactly six SPICE_PULSE arguments; resolved expression was '{prepared}' with arguments {args:?}"
+                        ));
+                    };
+                    fn constant_arithmetic_value(expression: &Expr) -> Option<Value> {
+                        match expression {
+                            Expr::Const(value) if value.is_finite() => Some(*value),
+                            Expr::Binary { op, left, right } => {
+                                let left = constant_arithmetic_value(left)?;
+                                let right = constant_arithmetic_value(right)?;
+                                let value = match op {
+                                    BinaryOp::Add => left + right,
+                                    BinaryOp::Mul => left * right,
+                                    _ => return None,
+                                };
+                                value.is_finite().then_some(value)
+                            }
+                            _ => None,
+                        }
+                    }
+                    let actual_values = [v1, v2, td, tr, tf, pw]
+                        .map(constant_arithmetic_value)
+                        .into_iter()
+                        .collect::<Option<Vec<_>>>()
+                        .ok_or_else(|| {
+                            format!(
+                                "{LABEL} B1 SPICE_PULSE arguments must resolve through finite constant addition/multiplication only"
+                            )
+                        })?;
+                    let actual_bits = actual_values
+                        .iter()
+                        .map(|value| value.to_bits())
+                        .collect::<Vec<_>>();
+                    if actual_bits.as_slice() != expected_pulse_bits {
+                        return Err(format!("{LABEL} B1 resolved SPICE_PULSE arguments changed"));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: "B:V:SPICE_PULSE".to_string(),
+                        nodes,
+                        numeric_bits: actual_bits
+                            .into_iter()
+                            .chain([tc1.to_bits(), tc2.to_bits()])
+                            .collect(),
+                        text: vec!["SIX_ARGUMENT_NONPERIODIC".to_string()],
+                    }
+                }
+                (
+                    "r1",
+                    ElementKind::Resistor {
+                        value,
+                        value_expr,
+                        model,
+                        instance_params,
+                        deferred_params,
+                    },
+                ) if nodes == ["1", "0"]
+                    && value.is_finite()
+                    && value.to_bits() == 1_000.0f64.to_bits()
+                    && value_expr.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    let effective = Self::effective_resistor_value(netlist, &element.name)?
+                        .ok_or_else(|| format!("{LABEL} could not resolve R1"))?;
+                    if !effective.is_finite() || effective.to_bits() != 1_000.0f64.to_bits() {
+                        return Err(format!("{LABEL} R1 did not resolve to 1K"));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits(), effective.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} element '{}' is outside the exact B1/R1 topology and value envelope",
+                        element.name
+                    ));
+                }
+            };
+            elements.insert(name, fingerprint);
+        }
+        if elements.keys().map(String::as_str).collect::<BTreeSet<_>>()
+            != BTreeSet::from(["b1", "r1"])
+        {
+            return Err(format!("{LABEL} requires exactly B1 and R1"));
+        }
+
+        let option_directives = Self::logical_netlist_lines(source)
+            .into_iter()
+            .map(|line| {
+                Self::strip_netlist_comment(&line)
+                    .trim()
+                    .to_ascii_lowercase()
+            })
+            .filter(|line| {
+                line.split_whitespace()
+                    .next()
+                    .is_some_and(|command| command == ".options")
+            })
+            .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect::<Vec<_>>();
+        if option_directives != [".options timeint reltol=1e-3"]
+            || netlist.options.timeint_reltol.map(Value::to_bits) != Some(1.0e-3f64.to_bits())
+        {
+            return Err(format!(
+                "{LABEL} requires only the canonical TIMEINT RELTOL=1e-3 directive"
+            ));
+        }
+
+        Ok(XyceNakedAlgebraSnapshot {
+            representation,
+            title: netlist.title.trim().to_string(),
+            parameter_bits: resolved_parameter_bits,
+            elements,
+            tran_step_bits: step.to_bits(),
+            tran_stop_bits: stop.to_bits(),
+            ordered_probes,
+            option_directives,
+        })
+    }
+
+    pub(super) fn bug1826_thermal_parameter_family_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<XyceBug1826ThermalParameterSnapshot, String> {
+        const LABEL: &str = "BUG 1826 thermal-parameter-scope equivalence";
+        let source = netlist
+            .source_text
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} requires original source text"))?;
+        let representation = Self::bug1826_thermal_parameter_source_qualification(source)?;
+
+        let [
+            AnalysisCommand::Tran {
+                step,
+                stop,
+                start,
+                max_step,
+                uic,
+            },
+        ] = netlist.analyses.as_slice()
+        else {
+            return Err(format!("{LABEL} requires exactly one transient analysis"));
+        };
+        if step.to_bits() != 0.0f64.to_bits()
+            || stop.to_bits() != 1.0f64.to_bits()
+            || start.is_some()
+            || max_step.is_some()
+            || *uic
+        {
+            return Err(format!(
+                "{LABEL} requires exact '.TRAN 0 1' semantics without START, MAXSTEP, or UIC"
+            ));
+        }
+        let diagnostics_are_canonical = matches!(
+            netlist.diagnostics.as_slice(),
+            [diagnostic]
+                if diagnostic.line == 4
+                    && diagnostic.code == "xyce_resistor_model_missing_value"
+                    && diagnostic.severity
+                        == rspice_core::netlist::DiagnosticSeverity::Warning
+                    && diagnostic.message.contains("Resistor 'R1'")
+                    && diagnostic.origin.as_ref().is_some_and(|origin| {
+                        origin.line == 4
+                            && match (&origin.path, &netlist.source_path) {
+                                (Some(origin), Some(source)) => Self::same_path(origin, source),
+                                _ => false,
+                            }
+                    })
+        );
+        if !netlist.title.trim().is_empty()
+            || !diagnostics_are_canonical
+            || netlist.lin_analysis.is_some()
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || netlist.device_initial_conditions.is_some()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+            || !netlist.params.all_parameter_expressions().is_empty()
+            || !netlist.params.all_global_expressions().is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires the canonical untitled flat transient circuit, its single model-value warning, and no auxiliary analysis or startup state"
+            ));
+        }
+
+        let parameters = netlist
+            .params
+            .all_params()
+            .into_iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+            .collect::<BTreeMap<_, _>>();
+        let expected_parameters = BTreeMap::from([("a1".to_string(), 1.0e-5f64.to_bits())]);
+        if parameters != expected_parameters || !netlist.params.has_any_parameter_binding("A1") {
+            return Err(format!("{LABEL} requires exactly A1=1e-5"));
+        }
+        let is_local_parameter = netlist.params.has_parameter_binding("A1");
+        match representation {
+            XyceBug1826ThermalParameterRepresentation::GlobalParameter if is_local_parameter => {
+                return Err(format!(
+                    "{LABEL} global baseline placed A1 in the ordinary parameter namespace"
+                ));
+            }
+            XyceBug1826ThermalParameterRepresentation::LocalParameter if !is_local_parameter => {
+                return Err(format!(
+                    "{LABEL} local member did not retain A1 in the ordinary parameter namespace"
+                ));
+            }
+            XyceBug1826ThermalParameterRepresentation::GlobalParameter
+            | XyceBug1826ThermalParameterRepresentation::LocalParameter => {}
+        }
+
+        let ordered_probes = print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        if ordered_probes != ["r1:r", "r1:temp", "i(r1)", "r1:a"] {
+            return Err(format!("{LABEL} ordered probe contract changed"));
+        }
+        for probe in &print.probes {
+            Self::validate_tran_probe(probe, netlist)
+                .map_err(|error| format!("{LABEL} probe '{probe}' is not executable: {error}"))?;
+        }
+        validate_output_symbols(netlist)
+            .map_err(|error| format!("{LABEL} has an unresolved output dependency: {error}"))?;
+
+        let element_fingerprint = |element: &rspice_core::netlist::Element| {
+            let name = element.name.trim().to_ascii_lowercase();
+            if name.is_empty() || !matches!(element.provenance, ElementProvenance::Authored) {
+                return Err(format!(
+                    "{LABEL} contains an empty or generated element '{}'",
+                    element.name
+                ));
+            }
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| node.trim().to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            let fingerprint = match (name.as_str(), &element.kind) {
+                (
+                    "r1",
+                    ElementKind::Resistor {
+                        value,
+                        value_expr,
+                        model,
+                        instance_params,
+                        deferred_params,
+                    },
+                ) if nodes == ["1", "0"]
+                    && value.to_bits() == 0.0f64.to_bits()
+                    && value_expr.is_none()
+                    && model
+                        .as_deref()
+                        .is_some_and(|name| name.eq_ignore_ascii_case("copper"))
+                    && deferred_params.is_empty() =>
+                {
+                    let length = Self::instance_param(instance_params, &["L", "LENGTH"])
+                        .ok_or_else(|| format!("{LABEL} R1 is missing L/LENGTH"))?;
+                    let area = Self::instance_param(instance_params, &["A", "AREA"])
+                        .ok_or_else(|| format!("{LABEL} R1 is missing A/AREA"))?;
+                    let actual_params = instance_params
+                        .iter()
+                        .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+                        .collect::<BTreeMap<_, _>>();
+                    let expected_params = BTreeMap::from([
+                        ("l".to_string(), 0.1f64.to_bits()),
+                        ("a".to_string(), 1.0e-5f64.to_bits()),
+                        (
+                            rspice_core::netlist::XYCE_DEFAULT_RESISTOR_VALUE_MARKER
+                                .to_ascii_lowercase(),
+                            1.0f64.to_bits(),
+                        ),
+                    ]);
+                    if instance_params.len() != expected_params.len()
+                        || actual_params != expected_params
+                        || length.to_bits() != 0.1f64.to_bits()
+                        || area.to_bits() != 1.0e-5f64.to_bits()
+                    {
+                        return Err(format!("{LABEL} R1 requires only L=0.1 and A=1e-5"));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: "R:LEVEL2_THERMAL".to_string(),
+                        nodes,
+                        numeric_bits: vec![length.to_bits(), area.to_bits()],
+                        text: vec!["copper".to_string()],
+                    }
+                }
+                ("v1", ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Dc(value)))
+                    if nodes == ["1", "0"]
+                        && value.is_finite()
+                        && value.to_bits() == 5.0f64.to_bits() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "V:DC".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} element '{}' is outside the exact R1/V1 topology and value envelope",
+                        element.name
+                    ));
+                }
+            };
+            Ok((name, fingerprint))
+        };
+
+        let mut elements = BTreeMap::new();
+        for element in &netlist.elements {
+            let (name, fingerprint) = element_fingerprint(element)?;
+            if elements.insert(name, fingerprint).is_some() {
+                return Err(format!("{LABEL} contains a duplicate element"));
+            }
+        }
+        if elements.keys().map(String::as_str).collect::<BTreeSet<_>>()
+            != BTreeSet::from(["r1", "v1"])
+        {
+            return Err(format!("{LABEL} requires exactly R1 and V1"));
+        }
+
+        let flattened = flatten_netlist_with_models(netlist)
+            .map_err(|error| format!("{LABEL} flattening failed: {error}"))?;
+        if !flattened.scoped_models.is_empty()
+            || !flattened.scoped_initial_conditions.is_empty()
+            || !flattened.scoped_node_sets.is_empty()
+            || !flattened.scoped_startup_directives.is_empty()
+            || !flattened.xspice_auto_bridge_node_hints.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} does not admit hierarchy-derived models, startup state, or XSPICE bridge hints"
+            ));
+        }
+        let mut flattened_elements = BTreeMap::new();
+        for element in &flattened.elements {
+            let (name, fingerprint) = element_fingerprint(element)?;
+            if flattened_elements.insert(name, fingerprint).is_some() {
+                return Err(format!("{LABEL} flattening produced a duplicate element"));
+            }
+        }
+        if flattened_elements != elements {
+            return Err(format!(
+                "{LABEL} flattening changed authored element identity, topology, or values"
+            ));
+        }
+
+        let [model] = netlist.models.as_slice() else {
+            return Err(format!(
+                "{LABEL} requires exactly one copper resistor model"
+            ));
+        };
+        if !model.name.eq_ignore_ascii_case("copper")
+            || !model.model_type.eq_ignore_ascii_case("r")
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires one scalar/expression-only copper R model"
+            ));
+        }
+        let mut model_numeric_bits = model
+            .params
+            .iter()
+            .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.to_bits()))
+            .collect::<Vec<_>>();
+        model_numeric_bits.sort();
+        if model_numeric_bits != [("level".to_string(), 2.0f64.to_bits())] {
+            return Err(format!(
+                "{LABEL} copper model requires only LEVEL=2 numerically"
+            ));
+        }
+        let mut model_expressions = BTreeMap::new();
+        for (name, expression) in &model.expr_params {
+            let name = name.trim().to_ascii_lowercase();
+            let fingerprint = Self::parse_expression_fingerprint(expression)?;
+            if model_expressions.insert(name, fingerprint).is_some() {
+                return Err(format!("{LABEL} copper model has a duplicate expression"));
+            }
+        }
+        if model_expressions
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>()
+            != BTreeSet::from(["heatcapacity", "resistivity"])
+        {
+            return Err(format!(
+                "{LABEL} copper model requires the dynamic RESISTIVITY and HEATCAPACITY expressions"
+            ));
+        }
+
+        let circuit = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        })
+        .build_circuit(netlist)
+        .map_err(|error| format!("{LABEL} native circuit build failed: {error}"))?;
+        let storage = circuit.resistor_storage();
+        let [runtime_name] = storage.names.as_slice() else {
+            return Err(format!("{LABEL} must build exactly one native resistor"));
+        };
+        let [Some(state)] = storage.thermal.as_slice() else {
+            return Err(format!(
+                "{LABEL} R1 did not build a native LEVEL=2 self-consistent thermal state"
+            ));
+        };
+        if storage.conductances.len() != 1
+            || storage.small_signal_conductances.len() != 1
+            || !runtime_name.eq_ignore_ascii_case("r1")
+            || state.length.to_bits() != 0.1f64.to_bits()
+            || state.area.to_bits() != 1.0e-5f64.to_bits()
+            || state.thermal_length.to_bits() != 0.0f64.to_bits()
+            || state.thermal_area.to_bits() != 0.0f64.to_bits()
+            || state.multiplicity.to_bits() != 1.0f64.to_bits()
+            || state.scale.to_bits() != 1.0f64.to_bits()
+            || state.tnom_celsius.to_bits() != 27.0f64.to_bits()
+            || state.instance_resistivity.is_some()
+            || state.instance_heat_capacity.is_some()
+            || state.instance_thermal_heat_capacity.is_some()
+            || state.output_resistance.to_bits() != state.reported_resistance.to_bits()
+            || state.thermal_heat_capacity.to_bits() != state.heat_capacity.to_bits()
+            || state.output_conductance.to_bits() != storage.conductances[0].to_bits()
+            || state.output_conductance.to_bits() != storage.small_signal_conductances[0].to_bits()
+            || state.reported_resistance.to_bits()
+                != (state.resistivity * state.length / state.area).to_bits()
+            || [
+                state.temperature_celsius,
+                state.resistivity,
+                state.heat_capacity,
+                state.thermal_heat_capacity,
+                state.reported_resistance,
+                state.output_resistance,
+                state.output_conductance,
+            ]
+            .into_iter()
+            .any(|value| !value.is_finite() || value <= 0.0)
+        {
+            return Err(format!(
+                "{LABEL} native thermal resistor geometry, material state, or defaults changed"
+            ));
+        }
+        let mut runtime_model_numeric_bits = state
+            .model_params
+            .iter()
+            .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.to_bits()))
+            .collect::<Vec<_>>();
+        runtime_model_numeric_bits.sort();
+        let mut runtime_model_expressions = BTreeMap::new();
+        for (name, expression) in &state.model_expr_params {
+            let name = name.trim().to_ascii_lowercase();
+            let fingerprint = Self::parse_expression_fingerprint(expression)?;
+            if runtime_model_expressions
+                .insert(name, fingerprint)
+                .is_some()
+            {
+                return Err(format!(
+                    "{LABEL} native thermal state has a duplicate model expression"
+                ));
+            }
+        }
+        if runtime_model_numeric_bits != model_numeric_bits
+            || runtime_model_expressions != model_expressions
+            || state.base_context.get("A1").map(Value::to_bits) != Some(1.0e-5f64.to_bits())
+            || state.base_context.has_parameter_binding("A1") != is_local_parameter
+        {
+            return Err(format!(
+                "{LABEL} native thermal state lost the copper model or A1 namespace semantics"
+            ));
+        }
+        let runtime_resistor = XyceThermalResistorRuntimeFingerprint {
+            name: runtime_name.to_ascii_lowercase(),
+            length_bits: state.length.to_bits(),
+            area_bits: state.area.to_bits(),
+            thermal_length_bits: state.thermal_length.to_bits(),
+            thermal_area_bits: state.thermal_area.to_bits(),
+            multiplicity_bits: state.multiplicity.to_bits(),
+            scale_bits: state.scale.to_bits(),
+            temperature_celsius_bits: state.temperature_celsius.to_bits(),
+            resistivity_bits: state.resistivity.to_bits(),
+            heat_capacity_bits: state.heat_capacity.to_bits(),
+            thermal_heat_capacity_bits: state.thermal_heat_capacity.to_bits(),
+            reported_resistance_bits: state.reported_resistance.to_bits(),
+            output_resistance_bits: state.output_resistance.to_bits(),
+            output_conductance_bits: state.output_conductance.to_bits(),
+            tnom_celsius_bits: state.tnom_celsius.to_bits(),
+            model_numeric_bits: runtime_model_numeric_bits,
+            model_expressions: runtime_model_expressions,
+        };
+
+        Ok(XyceBug1826ThermalParameterSnapshot {
+            representation,
+            title: netlist.title.trim().to_string(),
+            parameter_name: "a1".to_string(),
+            parameter_bits: 1.0e-5f64.to_bits(),
+            elements,
+            model_name: model.name.trim().to_ascii_lowercase(),
+            model_type: model.model_type.trim().to_ascii_lowercase(),
+            model_numeric_bits,
+            model_expressions,
+            runtime_resistor,
+            tran_step_bits: step.to_bits(),
+            tran_stop_bits: stop.to_bits(),
+            ordered_probes,
+        })
     }
 
     pub(super) fn passive_temperature_override_snapshot(
@@ -6647,6 +8265,7 @@ impl XyceTestRunner {
                     expression,
                     tc1,
                     tc2,
+                    multiplicity,
                 } => {
                     if source.is_some() {
                         return Err("exact SIN/SPICE_SIN parity requires exactly one excitation"
@@ -6655,6 +8274,9 @@ impl XyceTestRunner {
                     if nodes.len() != 2
                         || tc1.to_bits() != 0.0f64.to_bits()
                         || tc2.to_bits() != 0.0f64.to_bits()
+                        || multiplicity.value.to_bits() != 1.0f64.to_bits()
+                        || multiplicity.value_expr.is_some()
+                        || multiplicity.given
                     {
                         return Err(format!(
                             "behavioral source '{}' must be two-terminal with exact +0 TC1 and TC2",
@@ -6883,7 +8505,13 @@ impl XyceTestRunner {
                 expression,
                 tc1,
                 tc2,
-            } if tc1.to_bits() == 0.0f64.to_bits() && tc2.to_bits() == 0.0f64.to_bits() => {
+                multiplicity,
+            } if tc1.to_bits() == 0.0f64.to_bits()
+                && tc2.to_bits() == 0.0f64.to_bits()
+                && multiplicity.value.to_bits() == 1.0f64.to_bits()
+                && multiplicity.value_expr.is_none()
+                && !multiplicity.given =>
+            {
                 Self::qualify_raw_param_expression(
                     expression,
                     parameter_name,
@@ -7148,9 +8776,13 @@ impl XyceTestRunner {
                     expression,
                     tc1,
                     tc2,
+                    multiplicity,
                 } if nodes == [signal_nodes[0].clone(), "0".to_string()]
                     && tc1.to_bits() == 0.0f64.to_bits()
                     && tc2.to_bits() == 0.0f64.to_bits()
+                    && multiplicity.value.to_bits() == 1.0f64.to_bits()
+                    && multiplicity.value_expr.is_none()
+                    && !multiplicity.given
                     && flattened_behavioral_count == 0 =>
                 {
                     Self::qualify_prepared_param_expression(
@@ -9965,6 +11597,520 @@ impl XyceTestRunner {
         if bjt_count != 1 {
             return Err(format!(
                 "{LABEL} materialization produced {bjt_count} BJT instances instead of one"
+            ));
+        }
+        Ok(normalized)
+    }
+
+    pub(super) fn xyce_sydney_level1_jfet_dtemp_snapshot(
+        plan: &XyceStaticDcPlan,
+        netlist: &Netlist,
+        family: XyceSydneyLevel1JfetDtempFamily,
+        role: XyceSydneyLevel1JfetDtempRole,
+    ) -> Result<XyceSydneyLevel1JfetDtempSnapshot, String> {
+        const LABEL: &str = "Xyce Sydney level-1 JFET TEMP/DTEMP family";
+        if plan.expression_dialect != ExpressionDialect::Xyce
+            || plan.execution_dir.is_some()
+            || plan.dc_data.is_some()
+            || plan.print_format.is_some()
+            || !plan.diagnostics.is_empty()
+            || plan.steps.len() != 1
+            || !matches!(plan.dc.mode, DcSweepMode::Linear)
+            || plan.print.probes.len() != 3
+        {
+            return Err(format!(
+                "{LABEL} requires one diagnostic-free LIST STEP, one two-source linear DC analysis, and one default three-probe PRN output"
+            ));
+        }
+        let dc_count = netlist
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Dc { .. }))
+            .count();
+        let step_count = netlist
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Step(_)))
+            .count();
+        if netlist.analyses.len() != 2
+            || dc_count != 1
+            || step_count != 1
+            || netlist.lin_analysis.is_some()
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || netlist.device_initial_conditions.is_some()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || netlist.output_requests.len() != 1
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+            || netlist.models.len() != 1
+        {
+            return Err(format!(
+                "{LABEL} admits only authored V/J elements, one native scalar model, one DC analysis, one STEP analysis, and one output request"
+            ));
+        }
+
+        let step = &plan.steps[0];
+        let StepSweep::List(step_values) = &step.sweep else {
+            return Err(format!("{LABEL} requires a three-value LIST sweep"));
+        };
+        let canonical_temperatures = [15.0f64, 25.0, 35.0];
+        let effective_temperatures = match role {
+            XyceSydneyLevel1JfetDtempRole::Owner => {
+                if step.target != StepTarget::Param
+                    || !step.name.eq_ignore_ascii_case("dtempParam")
+                    || step.param_name.is_some()
+                    || netlist.options.temp.map(Value::to_bits) != Some(25.0f64.to_bits())
+                    || step_values
+                        .iter()
+                        .map(|value| value.to_bits())
+                        .ne([-10.0f64, 0.0, 10.0].into_iter().map(Value::to_bits))
+                {
+                    return Err(format!(
+                        "{LABEL} owner must hold circuit TEMP=25 C and STEP dtempParam through -10, 0, 10 C; observed target={:?}, name='{}', param_name={:?}, TEMP={:?}, values={step_values:?}",
+                        step.target, step.name, step.param_name, netlist.options.temp
+                    ));
+                }
+                step_values
+                    .iter()
+                    .map(|dtemp| 25.0 + dtemp)
+                    .collect::<Vec<_>>()
+            }
+            XyceSydneyLevel1JfetDtempRole::Reference => {
+                if step.target != StepTarget::Param
+                    || !step.name.eq_ignore_ascii_case("tempParam")
+                    || step.param_name.is_some()
+                    || netlist.options.temp.is_some()
+                    || step_values
+                        .iter()
+                        .map(|value| value.to_bits())
+                        .ne(canonical_temperatures.into_iter().map(Value::to_bits))
+                {
+                    return Err(format!(
+                        "{LABEL} reference must retain no circuit TEMP override and STEP absolute tempParam through 15, 25, 35 C; observed target={:?}, name='{}', param_name={:?}, TEMP={:?}, values={step_values:?}",
+                        step.target, step.name, step.param_name, netlist.options.temp
+                    ));
+                }
+                step_values.clone()
+            }
+        };
+        if effective_temperatures
+            .iter()
+            .map(|value| value.to_bits())
+            .ne(canonical_temperatures.into_iter().map(Value::to_bits))
+        {
+            return Err(format!(
+                "{LABEL} TEMP and circuit-TEMP-plus-DTEMP grids are not identical"
+            ));
+        }
+
+        let explicit_params = netlist
+            .params
+            .all_params()
+            .into_iter()
+            .filter(|(name, _)| {
+                !matches!(name.to_ascii_uppercase().as_str(), "TEMP" | "TEMPER" | "VT")
+            })
+            .collect::<Vec<_>>();
+        let (expected_parameter, expected_initial): (&str, Value) = match role {
+            XyceSydneyLevel1JfetDtempRole::Owner => ("dtempParam", 10.0),
+            XyceSydneyLevel1JfetDtempRole::Reference => match family {
+                XyceSydneyLevel1JfetDtempFamily::Njf => ("tempParam", 15.0),
+                XyceSydneyLevel1JfetDtempFamily::Pjf => ("tempParam", 10.0),
+            },
+        };
+        if explicit_params.len() != 1
+            || !explicit_params[0]
+                .0
+                .eq_ignore_ascii_case(expected_parameter)
+            || explicit_params[0].1.to_bits() != expected_initial.to_bits()
+        {
+            return Err(format!(
+                "{LABEL} admits only {expected_parameter}={expected_initial}, got {explicit_params:?}"
+            ));
+        }
+
+        let model = &netlist.models[0];
+        if !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return Err(format!("{LABEL} requires one native scalar JFET model"));
+        }
+        let (expected_model_name, expected_model_type, mut expected_model_params) = match family {
+            XyceSydneyLevel1JfetDtempFamily::Njf => (
+                "sa2109",
+                "njf",
+                vec![
+                    ("af".to_string(), 1.0f64.to_bits()),
+                    ("b".to_string(), 0.605f64.to_bits()),
+                    ("beta".to_string(), 0.00002690f64.to_bits()),
+                    ("cgd".to_string(), 0.0f64.to_bits()),
+                    ("cgs".to_string(), 0.0f64.to_bits()),
+                    ("fc".to_string(), 0.5f64.to_bits()),
+                    ("is".to_string(), 1.393e-10f64.to_bits()),
+                    ("kf".to_string(), 0.05f64.to_bits()),
+                    ("lambda".to_string(), 0.0181f64.to_bits()),
+                    ("level".to_string(), 1.0f64.to_bits()),
+                    ("pb".to_string(), 1.07f64.to_bits()),
+                    ("rd".to_string(), 338.0f64.to_bits()),
+                    ("rs".to_string(), 232.0f64.to_bits()),
+                    ("vto".to_string(), (-3.795f64).to_bits()),
+                ],
+            ),
+            XyceSydneyLevel1JfetDtempFamily::Pjf => (
+                "sa2108",
+                "pjf",
+                vec![
+                    ("af".to_string(), 1.0f64.to_bits()),
+                    ("b".to_string(), 0.590f64.to_bits()),
+                    ("beta".to_string(), 0.000278f64.to_bits()),
+                    ("cgd".to_string(), 0.0f64.to_bits()),
+                    ("cgs".to_string(), 0.0f64.to_bits()),
+                    ("fc".to_string(), 0.5f64.to_bits()),
+                    ("is".to_string(), 1.393e-10f64.to_bits()),
+                    ("kf".to_string(), 0.05f64.to_bits()),
+                    ("lambda".to_string(), 0.0055f64.to_bits()),
+                    ("level".to_string(), 1.0f64.to_bits()),
+                    ("pb".to_string(), 0.265f64.to_bits()),
+                    ("rd".to_string(), 302.5f64.to_bits()),
+                    ("rs".to_string(), 0.0f64.to_bits()),
+                    ("vto".to_string(), (-2.10f64).to_bits()),
+                ],
+            ),
+        };
+        expected_model_params.sort();
+        let mut model_params = model
+            .params
+            .iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+            .collect::<Vec<_>>();
+        model_params.sort();
+        if !model.name.eq_ignore_ascii_case(expected_model_name)
+            || !model.model_type.eq_ignore_ascii_case(expected_model_type)
+            || model_params != expected_model_params
+        {
+            return Err(format!(
+                "{LABEL} {} must retain its exact native LEVEL=1 Sydney model card",
+                family.label()
+            ));
+        }
+
+        let mut elements = BTreeMap::new();
+        let mut jfet_count = 0usize;
+        for element in &netlist.elements {
+            if !matches!(element.provenance, ElementProvenance::Authored) {
+                return Err(format!(
+                    "{LABEL} element '{}' is not authored source topology",
+                    element.name
+                ));
+            }
+            let name = element.name.to_ascii_lowercase();
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| Self::canonical_param_expression_node_name(node))
+                .collect::<Vec<_>>();
+            let fingerprint = match &element.kind {
+                ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Dc(value))
+                    if nodes.len() == 2 && value.is_finite() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "V:DC".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::Jfet {
+                    model: instance_model,
+                    jfet_type: _,
+                    instance_params,
+                    deferred_params,
+                } if nodes.len() == 3
+                    && deferred_params.is_empty()
+                    && instance_model.eq_ignore_ascii_case(expected_model_name) =>
+                {
+                    jfet_count += 1;
+                    let mut temp = None;
+                    let mut dtemp = None;
+                    let mut ordinary_params = Vec::new();
+                    for (parameter, value) in instance_params {
+                        if parameter.eq_ignore_ascii_case("TEMP") {
+                            if temp.replace(*value).is_some() {
+                                return Err(format!("{LABEL} JFET repeats TEMP"));
+                            }
+                        } else if parameter.eq_ignore_ascii_case("DTEMP") {
+                            if dtemp.replace(*value).is_some() {
+                                return Err(format!("{LABEL} JFET repeats DTEMP"));
+                            }
+                        } else {
+                            ordinary_params.push((parameter.to_ascii_lowercase(), value.to_bits()));
+                        }
+                    }
+                    ordinary_params.sort();
+                    if !ordinary_params.is_empty() {
+                        return Err(format!(
+                            "{LABEL} JFET admits no instance parameters besides its one temperature selector"
+                        ));
+                    }
+                    match role {
+                        XyceSydneyLevel1JfetDtempRole::Owner
+                            if temp.is_none()
+                                && dtemp.map(Value::to_bits)
+                                    == Some(expected_initial.to_bits()) => {}
+                        XyceSydneyLevel1JfetDtempRole::Reference
+                            if dtemp.is_none()
+                                && temp.map(Value::to_bits) == Some(expected_initial.to_bits()) => {
+                        }
+                        _ => {
+                            return Err(format!(
+                                "{LABEL} owner must carry only DTEMP and reference only TEMP"
+                            ));
+                        }
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: format!("J:{}:XYCE_SYDNEY_LEVEL1", family.label()),
+                        nodes,
+                        numeric_bits: Vec::new(),
+                        text: vec![instance_model.to_ascii_lowercase()],
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} element '{}' with nodes {nodes:?} and kind {:?} is outside the exact authored V/native-JFET envelope",
+                        element.name, element.kind
+                    ));
+                }
+            };
+            if elements.insert(name.clone(), fingerprint).is_some() {
+                return Err(format!("{LABEL} contains duplicate element name '{name}'"));
+            }
+        }
+        if jfet_count != 1 {
+            return Err(format!(
+                "{LABEL} requires exactly one native JFET, found {jfet_count}"
+            ));
+        }
+
+        let fingerprint = |kind: &str, nodes: &[&str], numeric: &[Value], text: &[&str]| {
+            XyceRelationalElementFingerprint {
+                kind: kind.to_string(),
+                nodes: nodes.iter().map(|node| (*node).to_string()).collect(),
+                numeric_bits: numeric.iter().map(|value| value.to_bits()).collect(),
+                text: text.iter().map(|value| (*value).to_string()).collect(),
+            }
+        };
+        let expected_elements = BTreeMap::from([
+            (
+                "jtest".to_string(),
+                fingerprint(
+                    &format!("J:{}:XYCE_SYDNEY_LEVEL1", family.label()),
+                    &["1a", "2a", "3"],
+                    &[],
+                    &[expected_model_name],
+                ),
+            ),
+            (
+                "vds".to_string(),
+                fingerprint("V:DC", &["1", "0"], &[0.0], &[]),
+            ),
+            (
+                "vgs".to_string(),
+                fingerprint("V:DC", &["2", "0"], &[0.0], &[]),
+            ),
+            (
+                "vidmon".to_string(),
+                fingerprint("V:DC", &["1", "1a"], &[0.0], &[]),
+            ),
+            (
+                "vigmon".to_string(),
+                fingerprint("V:DC", &["2", "2a"], &[0.0], &[]),
+            ),
+            (
+                "vismon".to_string(),
+                fingerprint("V:DC", &["0", "3"], &[0.0], &[]),
+            ),
+        ]);
+        if elements != expected_elements {
+            return Err(format!(
+                "{LABEL} {} topology or authored values changed",
+                family.label()
+            ));
+        }
+
+        let probes = plan
+            .print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        let dc_primary = (
+            plan.dc.source.to_ascii_lowercase(),
+            plan.dc.start.to_bits(),
+            plan.dc.stop.to_bits(),
+            plan.dc.step.to_bits(),
+        );
+        let dc_secondary = plan.dc.sweep2.as_ref().map(|sweep| {
+            (
+                sweep.source.to_ascii_lowercase(),
+                sweep.start.to_bits(),
+                sweep.stop.to_bits(),
+                sweep.step.to_bits(),
+            )
+        });
+        let (expected_primary, expected_secondary) = match family {
+            XyceSydneyLevel1JfetDtempFamily::Njf => (
+                (
+                    "vgs".to_string(),
+                    0.0f64.to_bits(),
+                    (-1.875f64).to_bits(),
+                    (-0.625f64).to_bits(),
+                ),
+                Some((
+                    "vds".to_string(),
+                    0.0f64.to_bits(),
+                    15.0f64.to_bits(),
+                    1.0f64.to_bits(),
+                )),
+            ),
+            XyceSydneyLevel1JfetDtempFamily::Pjf => (
+                (
+                    "vgs".to_string(),
+                    0.0f64.to_bits(),
+                    1.5f64.to_bits(),
+                    0.5f64.to_bits(),
+                ),
+                Some((
+                    "vds".to_string(),
+                    (-15.0f64).to_bits(),
+                    0.0f64.to_bits(),
+                    1.0f64.to_bits(),
+                )),
+            ),
+        };
+        let expected_probes = vec!["v(1)", "v(2)", "i(vidmon)"];
+        if dc_primary != expected_primary
+            || dc_secondary != expected_secondary
+            || probes != expected_probes
+            || !matches!(
+                plan.dc.sweep2.as_ref().map(|sweep| &sweep.mode),
+                Some(&DcSweepMode::Linear)
+            )
+        {
+            return Err(format!(
+                "{LABEL} {} sweep domain, sweep order, or ordered probe set changed",
+                family.label()
+            ));
+        }
+
+        Ok(XyceSydneyLevel1JfetDtempSnapshot {
+            elements,
+            model_name: model.name.to_ascii_lowercase(),
+            model_type: model.model_type.to_ascii_lowercase(),
+            model_params,
+            dc_primary,
+            dc_secondary,
+            probes,
+            effective_temperature_bits: effective_temperatures
+                .into_iter()
+                .map(Value::to_bits)
+                .collect(),
+        })
+    }
+
+    pub(super) fn normalize_xyce_sydney_level1_jfet_dtemp_materialization(
+        netlist: &Netlist,
+        family: XyceSydneyLevel1JfetDtempFamily,
+        role: XyceSydneyLevel1JfetDtempRole,
+        expected_coordinate: Value,
+        expected_effective_temperature: Value,
+    ) -> Result<Netlist, String> {
+        const LABEL: &str = "Xyce Sydney level-1 JFET TEMP/DTEMP family";
+        if !expected_coordinate.is_finite() || !expected_effective_temperature.is_finite() {
+            return Err(format!("{LABEL} materialization coordinate is non-finite"));
+        }
+        let (parameter_name, instance_parameter, canonical_initial, effective_temperature): (
+            &str,
+            &str,
+            Value,
+            Value,
+        ) = match role {
+            XyceSydneyLevel1JfetDtempRole::Owner => (
+                "dtempParam",
+                "DTEMP",
+                10.0,
+                netlist.options.temp.unwrap_or(25.0) + expected_coordinate,
+            ),
+            XyceSydneyLevel1JfetDtempRole::Reference => (
+                "tempParam",
+                "TEMP",
+                match family {
+                    XyceSydneyLevel1JfetDtempFamily::Njf => 15.0,
+                    XyceSydneyLevel1JfetDtempFamily::Pjf => 10.0,
+                },
+                expected_coordinate,
+            ),
+        };
+        if netlist.params.get(parameter_name).map(Value::to_bits)
+            != Some(expected_coordinate.to_bits())
+            || effective_temperature.to_bits() != expected_effective_temperature.to_bits()
+        {
+            return Err(format!(
+                "{LABEL} materialization lost its exact parameter coordinate or effective temperature"
+            ));
+        }
+
+        let mut normalized = netlist.clone();
+        normalized.params.set(parameter_name, canonical_initial);
+        let mut jfet_count = 0usize;
+        for element in &mut normalized.elements {
+            let ElementKind::Jfet {
+                instance_params, ..
+            } = &mut element.kind
+            else {
+                continue;
+            };
+            jfet_count += 1;
+            let mut matching = 0usize;
+            for (name, value) in instance_params {
+                if name.eq_ignore_ascii_case(instance_parameter) {
+                    matching += 1;
+                    if value.to_bits() != expected_coordinate.to_bits() {
+                        return Err(format!(
+                            "{LABEL} materialized {instance_parameter} differs from its STEP coordinate"
+                        ));
+                    }
+                    *value = canonical_initial;
+                } else if (matches!(role, XyceSydneyLevel1JfetDtempRole::Owner)
+                    && name.eq_ignore_ascii_case("TEMP"))
+                    || (matches!(role, XyceSydneyLevel1JfetDtempRole::Reference)
+                        && name.eq_ignore_ascii_case("DTEMP"))
+                {
+                    return Err(format!(
+                        "{LABEL} materialization introduced conflicting TEMP/DTEMP state"
+                    ));
+                }
+            }
+            if matching != 1 {
+                return Err(format!(
+                    "{LABEL} materialized JFET requires exactly one {instance_parameter} value"
+                ));
+            }
+        }
+        if jfet_count != 1 {
+            return Err(format!(
+                "{LABEL} materialization produced {jfet_count} JFET instances instead of one"
             ));
         }
         Ok(normalized)

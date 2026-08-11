@@ -558,12 +558,19 @@ impl XyceTestRunner {
                     expression,
                     tc1,
                     tc2,
+                    multiplicity,
                 }
                 | ElementKind::BehavioralCurrent {
                     expression,
                     tc1,
                     tc2,
-                } if tc1.is_finite() && tc2.is_finite() => {
+                    multiplicity,
+                } if tc1.is_finite()
+                    && tc2.is_finite()
+                    && multiplicity.value.is_finite()
+                    && multiplicity.value > 0.0
+                    && multiplicity.value_expr.is_none() =>
+                {
                     Self::validate_ac_behavioral_expression(
                         &element.name,
                         expression,

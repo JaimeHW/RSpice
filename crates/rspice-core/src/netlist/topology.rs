@@ -586,23 +586,27 @@ impl NodeUnion {
                 expression,
                 tc1,
                 tc2,
+                multiplicity,
             } => ElementKind::BehavioralVoltage {
                 expression: remap_behavioral_voltage_probes(&expression, |node| {
                     self.remap_node(node)
                 }),
                 tc1,
                 tc2,
+                multiplicity,
             },
             ElementKind::BehavioralCurrent {
                 expression,
                 tc1,
                 tc2,
+                multiplicity,
             } => ElementKind::BehavioralCurrent {
                 expression: remap_behavioral_voltage_probes(&expression, |node| {
                     self.remap_node(node)
                 }),
                 tc1,
                 tc2,
+                multiplicity,
             },
             ElementKind::Vcvs {
                 gain,
@@ -619,10 +623,12 @@ impl NodeUnion {
             ElementKind::Vccs {
                 transconductance,
                 transconductance_expr,
+                multiplicity,
                 control_nodes,
             } => ElementKind::Vccs {
                 transconductance,
                 transconductance_expr,
+                multiplicity,
                 control_nodes: (
                     self.remap_node(&control_nodes.0),
                     self.remap_node(&control_nodes.1),

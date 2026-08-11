@@ -185,7 +185,7 @@ impl Engine {
         force_accept_delta_limit: Value,
         protected_nodes: &[bool],
         ideal_output_pairs: &[(crate::NodeId, crate::NodeId)],
-    ) -> Vec<Value> {
+    ) -> Result<Vec<Value>, SimulationError> {
         let mut bounded = candidate_solution.to_vec();
         for i in 0..num_nodes {
             if protected_nodes.get(i).copied().unwrap_or(false) {
@@ -197,7 +197,7 @@ impl Engine {
                 bounded[i] = old + delta.signum() * force_accept_delta_limit;
             }
         }
-        circuit.enforce_ideal_voltage_constraints(&mut bounded, accepted_time);
+        circuit.enforce_ideal_voltage_constraints(&mut bounded, accepted_time)?;
         // Force-accept is a last-resort recovery path, so keep every ideal
         // output supernode close to the previous accepted common mode instead of
         // letting protected source nodes drag a nonphysical midpoint into the
@@ -214,7 +214,7 @@ impl Engine {
             &mut bounded,
             num_nodes,
         );
-        bounded
+        Ok(bounded)
     }
 
     #[inline]

@@ -500,10 +500,14 @@ impl CircuitData {
     /// Re-project all ideal voltage-output equations after a force-accepted
     /// timestep so the accepted state remains consistent with independent and
     /// controlled source constraints.
-    pub fn enforce_ideal_voltage_constraints(&self, solution: &mut [Value], time: Value) -> bool {
-        let mut changed = self.enforce_prescribed_transient_voltage_constraints(solution, time);
+    pub fn enforce_ideal_voltage_constraints(
+        &self,
+        solution: &mut [Value],
+        time: Value,
+    ) -> Result<bool, CircuitError> {
+        let mut changed = self.enforce_prescribed_transient_voltage_constraints(solution, time)?;
         changed |= self.enforce_dependent_voltage_constraints(solution);
-        changed
+        Ok(changed)
     }
 
     /// Re-project prescribed transient voltage equations without altering
@@ -512,12 +516,12 @@ impl CircuitData {
         &self,
         solution: &mut [Value],
         time: Value,
-    ) -> bool {
+    ) -> Result<bool, CircuitError> {
         let mut changed = self
             .voltage_sources
-            .enforce_voltage_constraints(solution, time);
+            .enforce_voltage_constraints(solution, time)?;
         changed |= self.enforce_prescribed_behavioral_voltage_constraints(solution, time);
-        changed
+        Ok(changed)
     }
 
     /// Re-project exact, solution-independent behavioral voltage equations.
@@ -550,12 +554,15 @@ impl CircuitData {
     /// Re-project ideal voltage-output equations for a DC operating-point
     /// iterate, using independent source DC values rather than any transient
     /// waveform value at t=0.
-    pub fn enforce_dc_ideal_voltage_constraints(&self, solution: &mut [Value]) -> bool {
+    pub fn enforce_dc_ideal_voltage_constraints(
+        &self,
+        solution: &mut [Value],
+    ) -> Result<bool, CircuitError> {
         let mut changed = self
             .voltage_sources
-            .enforce_dc_voltage_constraints(solution);
+            .enforce_dc_voltage_constraints(solution)?;
         changed |= self.enforce_dependent_voltage_constraints(solution);
-        changed
+        Ok(changed)
     }
 
     /// Re-project ideal voltage-output equations for source-stepping DC solves.
@@ -563,12 +570,12 @@ impl CircuitData {
         &self,
         solution: &mut [Value],
         source_scale: Value,
-    ) -> bool {
+    ) -> Result<bool, CircuitError> {
         let mut changed = self
             .voltage_sources
-            .enforce_scaled_dc_voltage_constraints(solution, source_scale);
+            .enforce_scaled_dc_voltage_constraints(solution, source_scale)?;
         changed |= self.enforce_dependent_voltage_constraints(solution);
-        changed
+        Ok(changed)
     }
 
     fn enforce_dependent_voltage_constraints(&self, solution: &mut [Value]) -> bool {
@@ -644,10 +651,14 @@ mod tests {
         assert_eq!(circuit.voltage_sources.node_pos, vec![input]);
         assert_eq!(circuit.voltage_sources.node_neg, vec![0]);
 
-        circuit.enforce_scaled_dc_ideal_voltage_constraints(&mut solution, 1.0);
+        circuit
+            .enforce_scaled_dc_ideal_voltage_constraints(&mut solution, 1.0)
+            .expect("DC source projection succeeds");
         assert!((solution[input - 1] - 0.55).abs() <= 1.0e-15);
 
-        circuit.enforce_ideal_voltage_constraints(&mut solution, 0.0);
+        circuit
+            .enforce_ideal_voltage_constraints(&mut solution, 0.0)
+            .expect("transient source projection succeeds");
         assert!((solution[input - 1] - 0.3).abs() <= 1.0e-15);
     }
 
@@ -714,7 +725,9 @@ mod tests {
 
         circuit.behavioral_sources.add_voltage(source);
         let mut solution = vec![reconstructed, 0.0];
-        circuit.enforce_ideal_voltage_constraints(&mut solution, time);
+        circuit
+            .enforce_ideal_voltage_constraints(&mut solution, time)
+            .expect("behavioral source projection succeeds");
 
         assert_eq!(solution[out - 1].to_bits(), target.to_bits());
     }

@@ -123,6 +123,12 @@ pub enum SimulationError {
     Aborted,
 }
 
+impl From<crate::circuit::CircuitError> for SimulationError {
+    fn from(error: crate::circuit::CircuitError) -> Self {
+        Self::Circuit(error.to_string())
+    }
+}
+
 /// The device layer cannot name this type, so the conversion lives here.
 ///
 /// `device` is ranked below `engine`, which means the generated Verilog-A

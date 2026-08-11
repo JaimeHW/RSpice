@@ -489,6 +489,34 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.xyce_sydney_level1_jfet_dtemp_relational_contract(deck) {
+            let role = XyceSydneyLevel1JfetDtempRole::for_record(&deck.relative_path)
+                .expect("Xyce Sydney level-1 JFET DTEMP detector selected a recognized record")
+                .1;
+            let result = match contract {
+                Ok(contract) => self
+                    .run_xyce_sydney_level1_jfet_dtemp_relational_contract(deck, contract, start),
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    role.result_contract(),
+                    format!(
+                        "Xyce Sydney level-1 JFET DTEMP relational qualification failed: {reason}"
+                    ),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.level2_diode_dtemp_relational_contract(deck) {
             let role = XyceLevel2DiodeDtempRole::for_record(&deck.relative_path)
                 .expect("Level-2 diode DTEMP detector selected a recognized record");
@@ -845,6 +873,118 @@ impl XyceTestRunner {
         if let Some(contract) = self.subckt_parameter_resolution_family_contract(deck) {
             let result =
                 self.run_subckt_parameter_resolution_family_contract(deck, contract, start);
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.params1_family_contract(deck) {
+            let result = match contract {
+                Ok(contract) => self.run_params1_family_contract(deck, contract, start),
+                Err(reason) => {
+                    let role = XyceParams1Role::for_record(&deck.relative_path).expect(
+                        "PARAMS1 family detection must only select a recognized family record",
+                    );
+                    self.failure_result(
+                        deck,
+                        start,
+                        role.result_contract(),
+                        format!("PARAMS1 family provenance qualification failed: {reason}"),
+                        Vec::new(),
+                    )
+                }
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.naked_algebra_family_contract(deck) {
+            let result = match contract {
+                Ok(contract) => self.run_naked_algebra_family_contract(deck, contract, start),
+                Err(reason) => {
+                    let role = XyceNakedAlgebraRole::for_record(&deck.relative_path).expect(
+                        "nakedAlgebra family detection must only select a recognized family record",
+                    );
+                    self.failure_result(
+                        deck,
+                        start,
+                        role.result_contract(),
+                        format!("nakedAlgebra family provenance qualification failed: {reason}"),
+                        Vec::new(),
+                    )
+                }
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.bug1826_thermal_parameter_family_contract(deck) {
+            let result = match contract {
+                Ok(contract) => {
+                    self.run_bug1826_thermal_parameter_family_contract(deck, contract, start)
+                }
+                Err(reason) => {
+                    let role = XyceBug1826ThermalParameterRole::for_record(&deck.relative_path)
+                        .expect(
+                            "BUG 1826 family detection must only select a recognized family record",
+                        );
+                    self.failure_result(
+                        deck,
+                        start,
+                        role.result_contract(),
+                        format!("BUG 1826 family provenance qualification failed: {reason}"),
+                        Vec::new(),
+                    )
+                }
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.source_multiplicity_family_contract(deck) {
+            let result = match contract {
+                Ok(contract) => self.run_source_multiplicity_family_contract(deck, contract, start),
+                Err(reason) => {
+                    let (_, role) = XyceSourceMultiplicityRole::for_record(&deck.relative_path)
+                        .expect("source-multiplicity detection selects only recognized records");
+                    self.failure_result(
+                        deck,
+                        start,
+                        role.result_contract(),
+                        format!(
+                            "source-multiplicity family provenance qualification failed: {reason}"
+                        ),
+                        Vec::new(),
+                    )
+                }
+            };
             if self.config.verbose {
                 println!(
                     "{} [{}] {}",
@@ -6763,6 +6903,390 @@ impl XyceTestRunner {
         }
     }
 
+    pub(super) fn run_xyce_sydney_level1_jfet_dtemp_relational_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceSydneyLevel1JfetDtempContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        const LABEL: &str = "Xyce Sydney level-1 JFET TEMP/DTEMP family";
+        let result_contract = contract.role.result_contract();
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let qualification = (|| {
+            self.validate_xyce_sydney_level1_jfet_dtemp_provenance(&contract)?;
+            let parse = |plan: &XyceStaticDcPlan, role: &str| {
+                Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
+                    &plan.source,
+                    &plan.deck_path,
+                    plan.expression_dialect,
+                    plan.parameter_redefinition_policy,
+                    plan.execution_dir.as_deref(),
+                )
+                .map_err(|error| format!("{LABEL} {role} parse failed: {error}"))
+            };
+            let owner_netlist = parse(&contract.owner_plan, "owner")?;
+            let reference_netlist = parse(&contract.reference_plan, "reference")?;
+            let owner_snapshot = Self::xyce_sydney_level1_jfet_dtemp_snapshot(
+                &contract.owner_plan,
+                &owner_netlist,
+                contract.family,
+                XyceSydneyLevel1JfetDtempRole::Owner,
+            )?;
+            let reference_snapshot = Self::xyce_sydney_level1_jfet_dtemp_snapshot(
+                &contract.reference_plan,
+                &reference_netlist,
+                contract.family,
+                XyceSydneyLevel1JfetDtempRole::Reference,
+            )?;
+            if owner_snapshot != reference_snapshot {
+                return Err(format!(
+                    "{LABEL} {} base owner/reference topology or analysis semantics differ",
+                    contract.family.label()
+                ));
+            }
+
+            let expansion_engine = self.create_dc_engine();
+            let owner_runs = Self::nested_step_runs_for_commands_with_limits_and_abort(
+                &expansion_engine,
+                &owner_netlist,
+                &contract.owner_plan.steps,
+                xyce_step_plan_limits(),
+                &abort,
+            )
+            .map_err(|error| format!("{LABEL} owner STEP expansion failed: {error}"))?;
+            let reference_runs = Self::nested_step_runs_for_commands_with_limits_and_abort(
+                &expansion_engine,
+                &reference_netlist,
+                &contract.reference_plan.steps,
+                xyce_step_plan_limits(),
+                &abort,
+            )
+            .map_err(|error| format!("{LABEL} reference STEP expansion failed: {error}"))?;
+            let owner_coordinates: [Value; 3] = [-10.0, 0.0, 10.0];
+            let reference_coordinates: [Value; 3] = [15.0, 25.0, 35.0];
+            if owner_runs.len() != owner_coordinates.len()
+                || reference_runs.len() != reference_coordinates.len()
+            {
+                return Err(format!(
+                    "{LABEL} requires three owner and three reference materializations, found {}/{}",
+                    owner_runs.len(),
+                    reference_runs.len()
+                ));
+            }
+            for (index, (((owner_run, reference_run), owner_coordinate), reference_coordinate)) in
+                owner_runs
+                    .iter()
+                    .zip(&reference_runs)
+                    .zip(owner_coordinates)
+                    .zip(reference_coordinates)
+                    .enumerate()
+            {
+                let [owner_step_value] = owner_run.step_values.as_slice() else {
+                    return Err(format!(
+                        "{LABEL} owner materialization {index} lost its one STEP coordinate"
+                    ));
+                };
+                let [reference_step_value] = reference_run.step_values.as_slice() else {
+                    return Err(format!(
+                        "{LABEL} reference materialization {index} lost its one STEP coordinate"
+                    ));
+                };
+                if owner_step_value.to_bits() != owner_coordinate.to_bits()
+                    || reference_step_value.to_bits() != reference_coordinate.to_bits()
+                {
+                    return Err(format!(
+                        "{LABEL} materialization {index} changed its ordered STEP coordinates"
+                    ));
+                }
+                let normalized_owner =
+                    Self::normalize_xyce_sydney_level1_jfet_dtemp_materialization(
+                        &owner_run.netlist,
+                        contract.family,
+                        XyceSydneyLevel1JfetDtempRole::Owner,
+                        owner_coordinate,
+                        reference_coordinate,
+                    )?;
+                let normalized_reference =
+                    Self::normalize_xyce_sydney_level1_jfet_dtemp_materialization(
+                        &reference_run.netlist,
+                        contract.family,
+                        XyceSydneyLevel1JfetDtempRole::Reference,
+                        reference_coordinate,
+                        reference_coordinate,
+                    )?;
+                let materialized_owner_snapshot = Self::xyce_sydney_level1_jfet_dtemp_snapshot(
+                    &contract.owner_plan,
+                    &normalized_owner,
+                    contract.family,
+                    XyceSydneyLevel1JfetDtempRole::Owner,
+                )?;
+                let materialized_reference_snapshot = Self::xyce_sydney_level1_jfet_dtemp_snapshot(
+                    &contract.reference_plan,
+                    &normalized_reference,
+                    contract.family,
+                    XyceSydneyLevel1JfetDtempRole::Reference,
+                )?;
+                if materialized_owner_snapshot != owner_snapshot
+                    || materialized_reference_snapshot != reference_snapshot
+                    || materialized_owner_snapshot != materialized_reference_snapshot
+                {
+                    return Err(format!(
+                        "{LABEL} materialization {index} changed non-temperature topology or analysis semantics"
+                    ));
+                }
+            }
+            Ok((owner_runs, reference_runs))
+        })();
+        let (owner_runs, reference_runs) = match qualification {
+            Ok(runs) => runs,
+            Err(reason) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!(
+                        "{LABEL} {} qualification failed: {reason}",
+                        contract.family.label()
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let simulate = |plan: &XyceStaticDcPlan,
+                        runs: &[XyceStepRun],
+                        role: &str|
+         -> Result<Vec<XycePrnTable>, String> {
+            let engine = self.create_dc_engine();
+            let mut batch_plan = plan.clone();
+            batch_plan.steps.clear();
+            let expected_columns = ["Index", "v(1)", "v(2)", "i(vidmon)"];
+            let mut tables = Vec::with_capacity(runs.len());
+            for (step_index, run) in runs.iter().enumerate() {
+                let results = engine
+                    .run_dc_sweep2_spec_with_report_and_abort(
+                        &run.netlist,
+                        &plan.dc.source,
+                        &plan.dc.primary_spec(),
+                        plan.dc.sweep2.as_ref(),
+                        &abort,
+                    )
+                    .map_err(|error| {
+                        format!("{LABEL} {role} step {step_index} simulation failed: {error}")
+                    })?;
+                let table = self
+                    .dc_results_to_prn_table(&batch_plan, &run.netlist, &results)
+                    .map_err(|error| {
+                        format!("{LABEL} {role} step {step_index} output failed: {error}")
+                    })?;
+                if table.columns != expected_columns || table.rows.len() != 64 {
+                    return Err(format!(
+                        "{LABEL} {role} step {step_index} produced schema {:?} with {} rows, expected {expected_columns:?} with 64",
+                        table.columns,
+                        table.rows.len()
+                    ));
+                }
+                for (row_index, values) in table.rows.iter().enumerate() {
+                    if values.len() != table.columns.len()
+                        || values[0].to_bits() != (row_index as Value).to_bits()
+                        || values.iter().any(|value| !value.is_finite())
+                    {
+                        return Err(format!(
+                            "{LABEL} {role} step {step_index} row {row_index} is malformed: {values:?}"
+                        ));
+                    }
+                    let primary_index = row_index % 4;
+                    let secondary_index = row_index / 4;
+                    let (expected_vds, expected_vgs) = match contract.family {
+                        XyceSydneyLevel1JfetDtempFamily::Njf => (
+                            secondary_index as Value,
+                            [0.0, -0.625, -1.25, -1.875][primary_index],
+                        ),
+                        XyceSydneyLevel1JfetDtempFamily::Pjf => (
+                            -15.0 + secondary_index as Value,
+                            0.5 * primary_index as Value,
+                        ),
+                    };
+                    if values[1].to_bits() != expected_vds.to_bits()
+                        || values[2].to_bits() != expected_vgs.to_bits()
+                    {
+                        return Err(format!(
+                            "{LABEL} {role} step {step_index} row {row_index} lost canonical primary-fast DC traversal: {values:?}"
+                        ));
+                    }
+                }
+                tables.push(table);
+            }
+            Ok(tables)
+        };
+
+        // Preserve the historical wrapper's process order: the live reference
+        // deck runs to completion before the DTEMP owner deck. Each execution
+        // emits three 64-row default-precision PRN batches.
+        let reference_tables =
+            match simulate(&contract.reference_plan, &reference_runs, "reference") {
+                Ok(tables) => tables,
+                Err(reason) => {
+                    return self.failure_result(deck, start, result_contract, reason, Vec::new());
+                }
+            };
+        let owner_tables = match simulate(&contract.owner_plan, &owner_runs, "owner") {
+            Ok(tables) => tables,
+            Err(reason) => {
+                return self.failure_result(deck, start, result_contract, reason, Vec::new());
+            }
+        };
+
+        let causal = (|| -> Result<bool, String> {
+            for pair in owner_tables.windows(2) {
+                for (left, right) in pair[0].rows.iter().zip(&pair[1].rows) {
+                    if Self::xyce_default_prn_text(left[3])?
+                        != Self::xyce_default_prn_text(right[3])?
+                    {
+                        return Ok(true);
+                    }
+                }
+            }
+            Ok(false)
+        })();
+        let causal = match causal {
+            Ok(causal) => causal,
+            Err(reason) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("{LABEL} drain-current serialization failed: {reason}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if !causal {
+            return self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!(
+                    "{LABEL} {} drain current is temperature-invariant at default PRN precision",
+                    contract.family.label()
+                ),
+                Vec::new(),
+            );
+        }
+
+        // Independent Xyce 7.10 anchors prevent a mutually wrong
+        // owner/reference pair from satisfying only the relational equality.
+        // Row numbering follows Xyce's primary-sweep-fast traversal.
+        let anchors: Vec<(usize, &'static str, [Value; 3])> = match contract.family {
+            XyceSydneyLevel1JfetDtempFamily::Njf => vec![
+                (
+                    60,
+                    "VDS=15,VGS=0",
+                    [4.21529620e-4, 4.21709025e-4, 4.21893183e-4],
+                ),
+                (
+                    63,
+                    "VDS=15,VGS=-1.875",
+                    [9.34645375e-5, 9.34898878e-5, 9.35161183e-5],
+                ),
+            ],
+            XyceSydneyLevel1JfetDtempFamily::Pjf => vec![
+                (
+                    0,
+                    "VDS=-15,VGS=0",
+                    [-1.25565313e-3, -1.26233291e-3, -1.26923501e-3],
+                ),
+                (
+                    63,
+                    "VDS=0,VGS=1.5",
+                    [-2.30892692e-11, -9.85396713e-11, -3.96063757e-10],
+                ),
+            ],
+        };
+        for (row_index, bias_label, expected_by_temperature) in anchors {
+            for (step_index, (&expected, table)) in expected_by_temperature
+                .iter()
+                .zip(&owner_tables)
+                .enumerate()
+            {
+                let actual_text = match Self::xyce_default_prn_text(table.rows[row_index][3]) {
+                    Ok(value) => value,
+                    Err(reason) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            result_contract,
+                            format!("{LABEL} anchor serialization failed: {reason}"),
+                            Vec::new(),
+                        );
+                    }
+                };
+                let expected_text = Self::xyce_default_prn_text(expected)
+                    .expect("finite locked Xyce Sydney level-1 JFET anchor");
+                if actual_text != expected_text {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!(
+                            "{LABEL} {} step {step_index} {bias_label} i(vidmon) is {actual_text} (raw {:.17e}), expected Xyce 7.10 {expected_text}",
+                            contract.family.label(),
+                            table.rows[row_index][3],
+                        ),
+                        Vec::new(),
+                    );
+                }
+            }
+        }
+
+        let mut mismatches = Vec::new();
+        let mut row_offset = 0usize;
+        for (step_index, (reference, owner)) in
+            reference_tables.iter().zip(&owner_tables).enumerate()
+        {
+            let mut step_mismatches = match self
+                .compare_serialized_default_prn_tables(reference, owner)
+            {
+                Ok(found) => found,
+                Err(reason) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!(
+                            "{LABEL} exact historical diff adapter failed for step {step_index}: {reason}"
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            for mismatch in &mut step_mismatches {
+                mismatch.row += row_offset;
+                mismatch.probe = format!("step {step_index}: {}", mismatch.probe);
+            }
+            row_offset += owner.rows.len();
+            mismatches.extend(step_mismatches);
+            if mismatches.len() >= self.config.max_mismatches {
+                mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, result_contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!(
+                    "{} {LABEL} exact serialized PRN mismatch(es)",
+                    mismatches.len()
+                ),
+                mismatches,
+            )
+        }
+    }
+
     pub(super) fn level2_diode_dtemp_tables_are_temperature_causal(
         tables: &[XycePrnTable],
         stop: Value,
@@ -9433,6 +9957,141 @@ impl XyceTestRunner {
         result
     }
 
+    pub(super) fn run_params1_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceParams1FamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.role.result_contract();
+        if let Err(reason) = self.validate_params1_provenance(&contract) {
+            return self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("PARAMS1 family provenance changed before execution: {reason}"),
+                Vec::new(),
+            );
+        }
+
+        let mut result =
+            self.run_baseline_family_contract(deck, contract.relational.clone(), start);
+        if result.passed && !result.expected_unsupported {
+            if let Err(reason) = self.validate_params1_provenance(&contract) {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("PARAMS1 family provenance changed during execution: {reason}"),
+                    Vec::new(),
+                );
+            }
+            result.contract = result_contract.to_string();
+        }
+        result
+    }
+
+    pub(super) fn run_naked_algebra_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceNakedAlgebraFamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.role.result_contract();
+        if let Err(reason) = self.validate_naked_algebra_provenance(&contract) {
+            return self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("nakedAlgebra family provenance changed before execution: {reason}"),
+                Vec::new(),
+            );
+        }
+
+        let mut result =
+            self.run_baseline_family_contract(deck, contract.relational.clone(), start);
+        if result.passed && !result.expected_unsupported {
+            if let Err(reason) = self.validate_naked_algebra_provenance(&contract) {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("nakedAlgebra family provenance changed during execution: {reason}"),
+                    Vec::new(),
+                );
+            }
+            result.contract = result_contract.to_string();
+        }
+        result
+    }
+
+    pub(super) fn run_bug1826_thermal_parameter_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceBug1826ThermalParameterFamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.role.result_contract();
+        if let Err(reason) = self.validate_bug1826_thermal_parameter_provenance(&contract) {
+            return self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("BUG 1826 family provenance changed before execution: {reason}"),
+                Vec::new(),
+            );
+        }
+
+        let mut result =
+            self.run_baseline_family_contract(deck, contract.relational.clone(), start);
+        if result.passed && !result.expected_unsupported {
+            if let Err(reason) = self.validate_bug1826_thermal_parameter_provenance(&contract) {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG 1826 family provenance changed during execution: {reason}"),
+                    Vec::new(),
+                );
+            }
+            result.contract = result_contract.to_string();
+        }
+        result
+    }
+
+    pub(super) fn run_source_multiplicity_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceSourceMultiplicityFamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.role.result_contract();
+        if let Err(reason) = self.validate_source_multiplicity_provenance(&contract) {
+            return self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("source-multiplicity provenance changed before execution: {reason}"),
+                Vec::new(),
+            );
+        }
+        let mut result =
+            self.run_baseline_family_contract(deck, contract.relational.clone(), start);
+        if result.passed && !result.expected_unsupported {
+            if let Err(reason) = self.validate_source_multiplicity_provenance(&contract) {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("source-multiplicity provenance changed during execution: {reason}"),
+                    Vec::new(),
+                );
+            }
+            result.contract = result_contract.to_string();
+        }
+        result
+    }
+
     pub(super) fn run_switch_state_case_family_contract(
         &self,
         deck: &XyceDeck,
@@ -9564,6 +10223,9 @@ impl XyceTestRunner {
             contract.kind,
             XyceBaselineFamilyKind::AgeCap
                 | XyceBaselineFamilyKind::DiodeModelAlias
+                | XyceBaselineFamilyKind::Params1
+                | XyceBaselineFamilyKind::NakedAlgebra
+                | XyceBaselineFamilyKind::Bug1826ThermalParameter
                 | XyceBaselineFamilyKind::SwitchStateCase
                 | XyceBaselineFamilyKind::SinExpression
                 | XyceBaselineFamilyKind::ParamExpression
@@ -9629,6 +10291,20 @@ impl XyceTestRunner {
                 );
             }
         };
+        if contract.kind == XyceBaselineFamilyKind::SourceMultiplicity
+            && let Err(reason) = Self::validate_source_multiplicity_dc_plan(&baseline_plan)
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline DC qualification failed: {reason}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
         if contract.comparison.compares_waveforms_exactly() {
             return self.run_exact_dc_baseline_family_contract(
                 deck,
@@ -9675,6 +10351,28 @@ impl XyceTestRunner {
                     Vec::new(),
                 );
             }
+        };
+        let baseline_source_multiplicity_snapshot = if contract.kind
+            == XyceBaselineFamilyKind::SourceMultiplicity
+        {
+            match Self::source_multiplicity_family_snapshot(&baseline_netlist, &baseline_plan.print)
+            {
+                Ok(snapshot) => Some(snapshot),
+                Err(reason) => {
+                    return self.failure_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            format!(
+                                "{kind_name} family '{}' baseline semantic qualification failed: {reason}",
+                                contract.family
+                            ),
+                            Vec::new(),
+                        );
+                }
+            }
+        } else {
+            None
         };
         if contract.kind.compares_baseline_oracle()
             && let Some(reference_path) = self.static_prn_reference_path(&contract.baseline_path)
@@ -9783,6 +10481,21 @@ impl XyceTestRunner {
                     );
                 }
             };
+            if contract.kind == XyceBaselineFamilyKind::SourceMultiplicity
+                && let Err(reason) = Self::validate_source_multiplicity_dc_plan(&target_plan)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} DC qualification failed: {reason}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
             let (target_netlist, target_results) = match self
                 .run_static_dc_results(&target_plan, start)
             {
@@ -9828,14 +10541,85 @@ impl XyceTestRunner {
                 }
             };
 
-            let mut mismatches = match self.compare_dc_prn_reference(
-                &baseline_table,
-                &target_plan.print,
-                &target_netlist,
-                &baseline_plan.source,
-                &target_plan.dc,
-                &target_results,
-            ) {
+            if let Some(baseline_snapshot) = baseline_source_multiplicity_snapshot.as_ref() {
+                let target_snapshot = match Self::source_multiplicity_family_snapshot(
+                    &target_netlist,
+                    &target_plan.print,
+                ) {
+                    Ok(snapshot) => snapshot,
+                    Err(reason) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            format!(
+                                "{kind_name} family '{}' member {} semantic qualification failed: {reason}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                };
+                if let Err(reason) =
+                    Self::compare_source_multiplicity_snapshots(baseline_snapshot, &target_snapshot)
+                {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' member {} changes semantics outside source M composition: {reason}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            }
+
+            let target_table = if contract.kind == XyceBaselineFamilyKind::SourceMultiplicity {
+                match self.dc_results_to_prn_table(&target_plan, &target_netlist, &target_results) {
+                    Ok(table) => Some(table),
+                    Err(error) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            format!(
+                                "{kind_name} family '{}' member {} output conversion failed: {error}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                }
+            } else {
+                None
+            };
+            let comparison = if let Some(target_table) = target_table.as_ref() {
+                // Every removed wrapper passed owner.prn as GOODFILE and
+                // baseline.prn as TESTFILE. The normalized-RMS denominator
+                // makes this ordering observable and therefore contractual.
+                self.compare_release_7_10_xyce_verify_dc_tables(
+                    "source multiplicity",
+                    target_table,
+                    &baseline_table,
+                    &target_results,
+                    &baseline_results,
+                )
+            } else {
+                self.compare_dc_prn_reference(
+                    &baseline_table,
+                    &target_plan.print,
+                    &target_netlist,
+                    &baseline_plan.source,
+                    &target_plan.dc,
+                    &target_results,
+                )
+            };
+            let mut mismatches = match comparison {
                 Ok(mismatches) => mismatches,
                 Err(err) => {
                     return self.failure_result(
@@ -10653,6 +11437,63 @@ impl XyceTestRunner {
                 Vec::new(),
             );
         }
+        if contract.kind == XyceBaselineFamilyKind::Params1
+            && let Err(err) = Self::validate_params1_transient_plan(&baseline_plan)
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline qualification failed: {err}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
+        if contract.kind == XyceBaselineFamilyKind::NakedAlgebra
+            && let Err(err) = Self::validate_naked_algebra_transient_plan(&baseline_plan)
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline qualification failed: {err}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
+        if contract.kind == XyceBaselineFamilyKind::Bug1826ThermalParameter
+            && let Err(err) =
+                Self::validate_bug1826_thermal_parameter_transient_plan(&baseline_plan)
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline qualification failed: {err}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
+        if contract.kind == XyceBaselineFamilyKind::SourceMultiplicity
+            && let Err(err) = Self::validate_source_multiplicity_transient_plan(&baseline_plan)
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline qualification failed: {err}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
         if contract.kind == XyceBaselineFamilyKind::PassiveCapPrimaryValue
             && let Err(err) = Self::validate_passive_cap_primary_transient_plan(&baseline_plan)
         {
@@ -11009,6 +11850,67 @@ impl XyceTestRunner {
                     Vec::new(),
                 );
             }
+            if contract.kind == XyceBaselineFamilyKind::Params1
+                && let Err(err) = Self::validate_params1_transient_plan(&target_plan)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} qualification failed: {err}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+            if contract.kind == XyceBaselineFamilyKind::NakedAlgebra
+                && let Err(err) = Self::validate_naked_algebra_transient_plan(&target_plan)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} qualification failed: {err}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+            if contract.kind == XyceBaselineFamilyKind::Bug1826ThermalParameter
+                && let Err(err) =
+                    Self::validate_bug1826_thermal_parameter_transient_plan(&target_plan)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} qualification failed: {err}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+            if contract.kind == XyceBaselineFamilyKind::SourceMultiplicity
+                && let Err(err) = Self::validate_source_multiplicity_transient_plan(&target_plan)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} qualification failed: {err}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
             if contract.kind == XyceBaselineFamilyKind::PassiveCapPrimaryValue
                 && let Err(err) = Self::validate_passive_cap_primary_transient_plan(&target_plan)
             {
@@ -11320,7 +12222,11 @@ impl XyceTestRunner {
                         );
                     }
                 };
-                match self.compare_xyce_verify_transient_tables(&baseline_table, &target_table) {
+                match self.compare_baseline_family_xyce_verify_tables(
+                    contract.kind,
+                    &baseline_table,
+                    &target_table,
+                ) {
                     Ok(mismatches) => mismatches,
                     Err(err) => {
                         return self.failure_result(

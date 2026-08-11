@@ -5574,9 +5574,13 @@ fn collect_numeric_tail(
     line_num: usize,
     params: &ParamContext,
     element_label: &str,
+    stop_at_multiplicity: bool,
 ) -> Result<Vec<Value>, ParseError> {
     let mut values = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        if stop_at_multiplicity && source_multiplicity_assignment(stream) {
+            break;
+        }
         match &stream.peek().kind {
             TokenKind::Comma | TokenKind::LParen | TokenKind::RParen => {
                 stream.advance();
@@ -5665,10 +5669,58 @@ fn collect_expression_argument(
     Ok(expression)
 }
 
+/// Reconstruct a controlled-source expression while leaving a trailing
+/// current-source `M=` assignment for the typed instance-parameter parser.
+fn collect_source_expression_argument(
+    stream: &mut TokenStream,
+    line_num: usize,
+    terminator: Option<&TokenKind>,
+    stop_at_multiplicity: bool,
+) -> Result<String, ParseError> {
+    if let TokenKind::Expression(inner) = &stream.peek().kind {
+        let inner = inner.clone();
+        stream.advance();
+        return Ok(inner);
+    }
+
+    let mut expression = String::new();
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        if stop_at_multiplicity && source_multiplicity_assignment(stream) {
+            break;
+        }
+        if let Some(term) = terminator
+            && std::mem::discriminant(&stream.peek().kind) == std::mem::discriminant(term)
+        {
+            break;
+        }
+        append_behavioral_expr_token(&mut expression, &stream.peek().kind);
+        stream.advance();
+    }
+
+    let expression = expression.trim().to_string();
+    if expression.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Controlled source requires a non-empty expression".to_string(),
+        });
+    }
+    Ok(expression)
+}
+
+fn source_multiplicity_assignment(stream: &TokenStream) -> bool {
+    matches!(
+        &stream.peek().kind,
+        TokenKind::Ident(name)
+            if name.eq_ignore_ascii_case("M")
+                && matches!(stream.peek_n(1).kind, TokenKind::Equals)
+    )
+}
+
 fn try_controlled_source_behavioral_assignment(
     stream: &mut TokenStream,
     line_num: usize,
     is_voltage_output: bool,
+    stop_at_multiplicity: bool,
 ) -> Result<Option<String>, ParseError> {
     let TokenKind::Ident(raw) = &stream.peek().kind else {
         return Ok(None);
@@ -5695,9 +5747,10 @@ fn try_controlled_source_behavioral_assignment(
     stream.advance();
     let expression = if inline_expr.is_empty() {
         stream.consume(&TokenKind::Equals);
-        collect_expression_argument(stream, line_num, None)?
+        collect_source_expression_argument(stream, line_num, None, stop_at_multiplicity)?
     } else {
-        let tail = collect_expression_argument(stream, line_num, None).unwrap_or_default();
+        let tail = collect_source_expression_argument(stream, line_num, None, stop_at_multiplicity)
+            .unwrap_or_default();
         if tail.is_empty() {
             inline_expr
         } else {
@@ -5877,6 +5930,87 @@ fn reject_unexpected_controlled_source_tail(
     })
 }
 
+fn parse_source_multiplicity_tail(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    defer_simple_param_refs: bool,
+    element_label: &str,
+    supported: bool,
+) -> Result<SourceMultiplicity, ParseError> {
+    let mut multiplicity = SourceMultiplicity::default();
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+
+        let parameter = expect_ident(stream, line_num)?;
+        if !stream.consume(&TokenKind::Equals) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Unexpected trailing token in {element_label} source specification: {parameter}"
+                ),
+            });
+        }
+        if !supported || !parameter.eq_ignore_ascii_case("M") {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unsupported {element_label} instance parameter '{parameter}'"),
+            });
+        }
+
+        let parsed =
+            take_deferrable_value(stream, params, defer_simple_param_refs).ok_or_else(|| {
+                ParseError::Syntax {
+                    line: line_num,
+                    message: format!("{element_label} M requires a numeric value or expression"),
+                }
+            })?;
+        multiplicity = match parsed {
+            DeferrableValue::Resolved(value) => SourceMultiplicity {
+                value,
+                value_expr: None,
+                given: true,
+            },
+            DeferrableValue::Deferred(expression) => SourceMultiplicity {
+                value: 1.0,
+                value_expr: Some(expression),
+                given: true,
+            },
+        };
+        validate_resolved_source_multiplicity(
+            &multiplicity,
+            params.expression_dialect(),
+            line_num,
+            element_label,
+        )?;
+    }
+    Ok(multiplicity)
+}
+
+fn validate_resolved_source_multiplicity(
+    multiplicity: &SourceMultiplicity,
+    dialect: crate::config::ExpressionDialect,
+    line_num: usize,
+    element_label: &str,
+) -> Result<(), ParseError> {
+    if multiplicity.value_expr.is_none()
+        && (!multiplicity.value.is_finite()
+            || dialect == crate::config::ExpressionDialect::Xyce && multiplicity.value <= 0.0)
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "{element_label} has invalid multiplicity M={}",
+                multiplicity.value
+            ),
+        });
+    }
+    Ok(())
+}
+
 /// Shared implementation for E (VCVS) and G (VCCS) parsing, covering the
 /// linear, POLY, VALUE, and TABLE forms. Extended forms lower onto the
 /// behavioral-source engine, which provides Newton linearization, AC
@@ -5899,28 +6033,41 @@ fn parse_voltage_controlled_source(
         "G (VCCS)"
     };
 
-    let lower_behavioral = |expression: String| -> ElementKind {
+    let lower_behavioral = |expression: String, multiplicity: SourceMultiplicity| -> ElementKind {
         if is_voltage_output {
             ElementKind::BehavioralVoltage {
                 expression,
                 tc1: 0.0,
                 tc2: 0.0,
+                multiplicity,
             }
         } else {
             ElementKind::BehavioralCurrent {
                 expression,
                 tc1: 0.0,
                 tc2: 0.0,
+                multiplicity,
             }
         }
     };
 
-    if let Some(expression) =
-        try_controlled_source_behavioral_assignment(stream, line_num, is_voltage_output)?
-    {
+    if let Some(expression) = try_controlled_source_behavioral_assignment(
+        stream,
+        line_num,
+        is_voltage_output,
+        !is_voltage_output,
+    )? {
+        let multiplicity = parse_source_multiplicity_tail(
+            stream,
+            line_num,
+            params,
+            defer_simple_param_refs,
+            element_label,
+            !is_voltage_output,
+        )?;
         elements.push(Element {
             name,
-            kind: lower_behavioral(expression),
+            kind: lower_behavioral(expression, multiplicity),
             nodes: vec![node_pos, node_neg],
             provenance: crate::netlist::ElementProvenance::Authored,
         });
@@ -5934,7 +6081,8 @@ fn parse_voltage_controlled_source(
                 let (cp, cn) = expect_poly_controlling_pair(stream, line_num)?;
                 vars.push(format!("V({},{})", cp, cn));
             }
-            let coeffs = collect_numeric_tail(stream, line_num, params, element_label)?;
+            let coeffs =
+                collect_numeric_tail(stream, line_num, params, element_label, !is_voltage_output)?;
             if coeffs.is_empty() {
                 return Err(ParseError::Syntax {
                     line: line_num,
@@ -5944,18 +6092,35 @@ fn parse_voltage_controlled_source(
                     ),
                 });
             }
+            let multiplicity = parse_source_multiplicity_tail(
+                stream,
+                line_num,
+                params,
+                defer_simple_param_refs,
+                element_label,
+                !is_voltage_output,
+            )?;
             elements.push(Element {
                 name,
-                kind: lower_behavioral(poly_expression(&vars, &coeffs)),
+                kind: lower_behavioral(poly_expression(&vars, &coeffs), multiplicity),
                 nodes: vec![node_pos, node_neg],
                 provenance: crate::netlist::ElementProvenance::Authored,
             });
         }
         Some(ControlledSourceForm::Value) => {
-            let expression = collect_expression_argument(stream, line_num, None)?;
+            let expression =
+                collect_source_expression_argument(stream, line_num, None, !is_voltage_output)?;
+            let multiplicity = parse_source_multiplicity_tail(
+                stream,
+                line_num,
+                params,
+                defer_simple_param_refs,
+                element_label,
+                !is_voltage_output,
+            )?;
             elements.push(Element {
                 name,
-                kind: lower_behavioral(expression),
+                kind: lower_behavioral(expression, multiplicity),
                 nodes: vec![node_pos, node_neg],
                 provenance: crate::netlist::ElementProvenance::Authored,
             });
@@ -5964,7 +6129,8 @@ fn parse_voltage_controlled_source(
             let input_expr =
                 collect_expression_argument(stream, line_num, Some(&TokenKind::Equals))?;
             stream.consume(&TokenKind::Equals);
-            let flat = collect_numeric_tail(stream, line_num, params, element_label)?;
+            let flat =
+                collect_numeric_tail(stream, line_num, params, element_label, !is_voltage_output)?;
             if flat.len() < 4 || !flat.len().is_multiple_of(2) {
                 return Err(ParseError::Syntax {
                     line: line_num,
@@ -5972,9 +6138,20 @@ fn parse_voltage_controlled_source(
                 });
             }
             let pairs: Vec<(Value, Value)> = flat.chunks_exact(2).map(|c| (c[0], c[1])).collect();
+            let multiplicity = parse_source_multiplicity_tail(
+                stream,
+                line_num,
+                params,
+                defer_simple_param_refs,
+                element_label,
+                !is_voltage_output,
+            )?;
             elements.push(Element {
                 name,
-                kind: lower_behavioral(table_transfer_expression(&input_expr, &pairs)),
+                kind: lower_behavioral(
+                    table_transfer_expression(&input_expr, &pairs),
+                    multiplicity,
+                ),
                 nodes: vec![node_pos, node_neg],
                 provenance: crate::netlist::ElementProvenance::Authored,
             });
@@ -5986,8 +6163,17 @@ fn parse_voltage_controlled_source(
             let input_expr =
                 collect_expression_argument(stream, line_num, Some(&TokenKind::Equals))?;
             stream.consume(&TokenKind::Equals);
-            let rational_text = collect_expression_argument(stream, line_num, None)?;
-            let synthesized = synthesize_laplace(
+            let rational_text =
+                collect_source_expression_argument(stream, line_num, None, !is_voltage_output)?;
+            let multiplicity = parse_source_multiplicity_tail(
+                stream,
+                line_num,
+                params,
+                defer_simple_param_refs,
+                element_label,
+                !is_voltage_output,
+            )?;
+            let mut synthesized = synthesize_laplace(
                 &name,
                 &node_pos,
                 &node_neg,
@@ -5996,6 +6182,21 @@ fn parse_voltage_controlled_source(
                 is_voltage_output,
                 line_num,
             )?;
+            for element in &mut synthesized {
+                if element.name.eq_ignore_ascii_case(&name) {
+                    match &mut element.kind {
+                        ElementKind::BehavioralVoltage {
+                            multiplicity: target,
+                            ..
+                        }
+                        | ElementKind::BehavioralCurrent {
+                            multiplicity: target,
+                            ..
+                        } => *target = multiplicity.clone(),
+                        _ => {}
+                    }
+                }
+            }
             elements.extend(synthesized);
         }
         Some(ControlledSourceForm::Freq) => {
@@ -6020,6 +6221,14 @@ fn parse_voltage_controlled_source(
                 defer_simple_param_refs,
                 element_label,
             )?;
+            let multiplicity = parse_source_multiplicity_tail(
+                stream,
+                line_num,
+                params,
+                defer_simple_param_refs,
+                element_label,
+                !is_voltage_output,
+            )?;
             let kind = if is_voltage_output {
                 ElementKind::Vcvs {
                     gain,
@@ -6030,10 +6239,10 @@ fn parse_voltage_controlled_source(
                 ElementKind::Vccs {
                     transconductance: gain,
                     transconductance_expr: gain_expr,
+                    multiplicity,
                     control_nodes: (ctrl_pos, ctrl_neg),
                 }
             };
-            reject_unexpected_controlled_source_tail(stream, line_num, element_label)?;
             elements.push(Element {
                 name,
                 kind,
@@ -6191,7 +6400,7 @@ fn parse_current_controlled_source(
                 let source = expect_ident(stream, line_num)?;
                 vars.push(format!("I({})", source));
             }
-            let coeffs = collect_numeric_tail(stream, line_num, params, element_label)?;
+            let coeffs = collect_numeric_tail(stream, line_num, params, element_label, false)?;
             if coeffs.is_empty() {
                 return Err(ParseError::Syntax {
                     line: line_num,
@@ -6207,12 +6416,14 @@ fn parse_current_controlled_source(
                     expression,
                     tc1: 0.0,
                     tc2: 0.0,
+                    multiplicity: SourceMultiplicity::default(),
                 }
             } else {
                 ElementKind::BehavioralCurrent {
                     expression,
                     tc1: 0.0,
                     tc2: 0.0,
+                    multiplicity: SourceMultiplicity::default(),
                 }
             };
             elements.push(Element {
@@ -6367,6 +6578,7 @@ pub(super) fn parse_behavioral(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
@@ -6409,6 +6621,7 @@ pub(super) fn parse_behavioral(
 
     let mut tc1 = 0.0;
     let mut tc2 = 0.0;
+    let mut multiplicity = SourceMultiplicity::default();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
         if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
@@ -6417,13 +6630,51 @@ pub(super) fn parse_behavioral(
 
         let param_name = expect_ident(stream, line_num)?;
         if !stream.consume(&TokenKind::Equals) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Unexpected trailing token in behavioral source specification: {param_name}"
+                ),
+            });
+        }
+        if param_name.eq_ignore_ascii_case("M") {
+            let parsed = take_deferrable_value(stream, params, defer_simple_param_refs)
+                .ok_or_else(|| ParseError::Syntax {
+                    line: line_num,
+                    message: "Behavioral source M requires a numeric value or expression"
+                        .to_string(),
+                })?;
+            multiplicity = match parsed {
+                DeferrableValue::Resolved(value) => SourceMultiplicity {
+                    value,
+                    value_expr: None,
+                    given: true,
+                },
+                DeferrableValue::Deferred(expression) => SourceMultiplicity {
+                    value: 1.0,
+                    value_expr: Some(expression),
+                    given: true,
+                },
+            };
+            validate_resolved_source_multiplicity(
+                &multiplicity,
+                params.expression_dialect(),
+                line_num,
+                "Behavioral source",
+            )?;
             continue;
         }
+
         let param_value = expect_value(stream, line_num, params)?;
-        match param_name.as_str() {
-            "TC1" => tc1 = param_value,
-            "TC2" => tc2 = param_value,
-            _ => {}
+        if param_name.eq_ignore_ascii_case("TC1") {
+            tc1 = param_value;
+        } else if param_name.eq_ignore_ascii_case("TC2") {
+            tc2 = param_value;
+        } else {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unsupported behavioral source instance parameter '{param_name}'"),
+            });
         }
     }
 
@@ -6432,11 +6683,13 @@ pub(super) fn parse_behavioral(
             expression,
             tc1,
             tc2,
+            multiplicity,
         },
         "I" => ElementKind::BehavioralCurrent {
             expression,
             tc1,
             tc2,
+            multiplicity,
         },
         _ => {
             return Err(ParseError::Syntax {
@@ -6479,7 +6732,7 @@ fn lower_behavioral_table_expression(
     stream.advance();
     let input_expr = collect_expression_argument(&mut stream, line_num, None)?;
     stream.consume(&TokenKind::Equals);
-    let flat = collect_numeric_tail(&mut stream, line_num, params, "Behavioral TABLE")?;
+    let flat = collect_numeric_tail(&mut stream, line_num, params, "Behavioral TABLE", false)?;
     if flat.len() < 4 || !flat.len().is_multiple_of(2) {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -6498,7 +6751,9 @@ pub(super) fn behavioral_trailing_assignment(stream: &TokenStream) -> bool {
     matches!(
         &stream.peek().kind,
         TokenKind::Ident(name)
-            if (name.eq_ignore_ascii_case("TC1") || name.eq_ignore_ascii_case("TC2"))
+            if (name.eq_ignore_ascii_case("TC1")
+                || name.eq_ignore_ascii_case("TC2")
+                || name.eq_ignore_ascii_case("M"))
                 && matches!(stream.peek_n(1).kind, TokenKind::Equals)
     )
 }

@@ -93,7 +93,7 @@ impl AcVoltageConstraintProjection {
             let root_neg = root(&mut parents, node_neg);
             if root_pos == root_neg {
                 return Err(SolverError::InvalidCircuit(format!(
-                    "independent voltage source '{}' closes an ideal-source loop; its branch current is not uniquely determined",
+                    "independent voltage source '{}' closes a singular ideal-source loop; its branch current is not uniquely determined",
                     sources.names[index]
                 ))
                 .into());

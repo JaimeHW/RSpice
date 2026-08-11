@@ -679,8 +679,14 @@ impl Engine {
             ElementKind::Vcvs { .. } | ElementKind::Cccs { .. } => {
                 alias!(&["GAIN", "VALUE"], "GAIN")
             }
-            ElementKind::Vccs { .. } => alias!(&["GM", "TRANSCONDUCTANCE", "VALUE"], "GM"),
+            ElementKind::Vccs { .. } => alias!(&["GM", "TRANSCONDUCTANCE", "VALUE"], "GM")
+                .or_else(|| alias!(&["M", "MULT"], "M")),
             ElementKind::Ccvs { .. } => alias!(&["RM", "TRANSRESISTANCE", "VALUE"], "RM"),
+            ElementKind::BehavioralVoltage { .. } | ElementKind::BehavioralCurrent { .. } => {
+                alias!(&["M", "MULT"], "M")
+                    .or_else(|| alias!(&["TC", "TC1"], "TC1"))
+                    .or_else(|| alias!(&["TC2"], "TC2"))
+            }
             ElementKind::Coupling { .. } => alias!(&["K", "COUPLING", "VALUE"], "K"),
             ElementKind::TransmissionLine { .. } => {
                 alias!(&["Z0", "VALUE"], "Z0").or_else(|| alias!(&["F", "FREQ"], "FREQ"))
@@ -1715,15 +1721,21 @@ impl Engine {
             ElementKind::Vccs {
                 transconductance,
                 transconductance_expr,
+                multiplicity,
                 ..
             } => {
-                if !matches_param(&["GM", "TRANSCONDUCTANCE", "VALUE"]) {
+                if matches_param(&["M", "MULT"]) {
+                    multiplicity.value = value;
+                    multiplicity.value_expr = None;
+                    multiplicity.given = true;
+                } else if matches_param(&["GM", "TRANSCONDUCTANCE", "VALUE"]) {
+                    *transconductance = value;
+                    *transconductance_expr = None;
+                } else {
                     return Err(SimulationError::Circuit(
-                        "Unsupported VCCS step parameter; use GM".to_string(),
+                        "Unsupported VCCS step parameter; use GM or M".to_string(),
                     ));
                 }
-                *transconductance = value;
-                *transconductance_expr = None;
                 Ok(())
             }
             ElementKind::Ccvs {
@@ -1738,6 +1750,34 @@ impl Engine {
                 }
                 *transresistance = value;
                 *transresistance_expr = None;
+                Ok(())
+            }
+            ElementKind::BehavioralVoltage {
+                tc1,
+                tc2,
+                multiplicity,
+                ..
+            }
+            | ElementKind::BehavioralCurrent {
+                tc1,
+                tc2,
+                multiplicity,
+                ..
+            } => {
+                if matches_param(&["M", "MULT"]) {
+                    multiplicity.value = value;
+                    multiplicity.value_expr = None;
+                    multiplicity.given = true;
+                } else if matches_param(&["TC", "TC1"]) {
+                    *tc1 = value;
+                } else if matches_param(&["TC2"]) {
+                    *tc2 = value;
+                } else {
+                    return Err(SimulationError::Circuit(
+                        "Unsupported behavioral-source step parameter; use M, TC1, or TC2"
+                            .to_string(),
+                    ));
+                }
                 Ok(())
             }
             ElementKind::Coupling { coefficient, .. } => {

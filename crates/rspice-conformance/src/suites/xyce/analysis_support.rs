@@ -688,8 +688,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         kind: XyceBaselineFamilyKind,
         path: &Path,
     ) -> XyceStaticTranPlanPurpose {
-        if kind == XyceBaselineFamilyKind::TransientAnalysisExpression
-            && self.requires_upstream_wrapper(&self.relative_key(path))
+        if matches!(
+            kind,
+            XyceBaselineFamilyKind::TransientAnalysisExpression
+                | XyceBaselineFamilyKind::NakedAlgebra
+                | XyceBaselineFamilyKind::SourceMultiplicity
+        ) && self.requires_upstream_wrapper(&self.relative_key(path))
         {
             XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily
         } else {
@@ -2986,6 +2990,21 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         )
                     })
                 }
+            }
+            parameter
+                if Self::resistor_instance_parameter_probe_is_supported(
+                    netlist,
+                    element_name,
+                    parameter,
+                ) =>
+            {
+                Self::resistor_instance_parameter_value(netlist, element_name, parameter)?
+                    .ok_or_else(|| {
+                        format!(
+                            "resistor parameter probe '{}:{}' could not resolve an instance value",
+                            element_name, parameter
+                        )
+                    })
             }
             _ => Err(format!(
                 "device parameter probe '{}:{}' is not supported in transient output",

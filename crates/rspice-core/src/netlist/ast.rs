@@ -117,6 +117,32 @@ impl From<Value> for ParametricValue {
     }
 }
 
+/// Parallel multiplicity attached to a current-producing source instance.
+///
+/// The authored flag is retained independently from the effective value so
+/// hierarchy elaboration can distinguish an explicit device `M=1` from the
+/// default while still composing an inherited X-line multiplier exactly once.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceMultiplicity {
+    /// Resolved multiplicity. This remains `1` while `value_expr` is deferred.
+    pub value: Value,
+    /// Parameter expression captured in a subcircuit body and resolved in the
+    /// concrete instance scope during flattening.
+    pub value_expr: Option<String>,
+    /// Whether the source line explicitly supplied `M=`.
+    pub given: bool,
+}
+
+impl Default for SourceMultiplicity {
+    fn default() -> Self {
+        Self {
+            value: 1.0,
+            value_expr: None,
+            given: false,
+        }
+    }
+}
+
 //=============================================================================
 // Circuit Elements
 //=============================================================================
@@ -365,6 +391,9 @@ pub enum ElementKind {
         /// Transconductance expression captured inside subcircuits and resolved
         /// when the instance parameter scope is known.
         transconductance_expr: Option<String>,
+        /// Parallel multiplier applied to current, derivatives, and current
+        /// observables.
+        multiplicity: SourceMultiplicity,
         control_nodes: (String, String),
     },
 
@@ -385,6 +414,9 @@ pub enum ElementKind {
         expression: String,
         tc1: Value,
         tc2: Value,
+        /// Accepted and range-checked for dialect compatibility. Xyce does
+        /// not apply this multiplier to the voltage-form behavioral source.
+        multiplicity: SourceMultiplicity,
     },
 
     /// Behavioral current source: B1 n+ n- I=expr
@@ -392,6 +424,9 @@ pub enum ElementKind {
         expression: String,
         tc1: Value,
         tc2: Value,
+        /// Parallel multiplier applied to current, derivatives, and current
+        /// observables.
+        multiplicity: SourceMultiplicity,
     },
 
     //-------------------------------------------------------------------------

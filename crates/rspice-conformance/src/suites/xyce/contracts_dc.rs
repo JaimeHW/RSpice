@@ -798,6 +798,29 @@ impl XyceTestRunner {
         }
     }
 
+    pub(super) fn validate_source_multiplicity_dc_plan(
+        plan: &XyceStaticDcPlan,
+    ) -> Result<(), String> {
+        if !plan.steps.is_empty()
+            || plan.dc_data.is_some()
+            || plan.print_format.is_some()
+            || plan.dc.sweep2.is_some()
+            || !matches!(plan.dc.mode, DcSweepMode::Linear)
+            || !plan.diagnostics.is_empty()
+            || !plan.dc.source.eq_ignore_ascii_case("VIN")
+            || plan.dc.start.to_bits() != 1.0f64.to_bits()
+            || plan.dc.stop.to_bits() != 12.0f64.to_bits()
+            || plan.dc.step.to_bits() != 1.0f64.to_bits()
+            || plan.print.probes != ["V(1)".to_string(), "V(2)".to_string(), "V(3)".to_string()]
+        {
+            return Err(
+                "source multiplicity requires one diagnostic-free, unstepped '.DC VIN 1 12 1' analysis with ordered V(1), V(2), V(3) default-PRN probes"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
     pub(super) fn validate_passive_res_primary_dc_plan(
         plan: &XyceStaticDcPlan,
     ) -> Result<(), String> {
@@ -3296,6 +3319,7 @@ impl XyceTestRunner {
                 expression,
                 tc1,
                 tc2,
+                multiplicity,
             } = &element.kind
             else {
                 continue;
@@ -3314,6 +3338,9 @@ impl XyceTestRunner {
             if output_ground != "0"
                 || tc1.to_bits() != 0.0f64.to_bits()
                 || tc2.to_bits() != 0.0f64.to_bits()
+                || multiplicity.value.to_bits() != 1.0f64.to_bits()
+                || multiplicity.value_expr.is_some()
+                || multiplicity.given
             {
                 return Err(format!(
                     "behavioral source '{}' changed topology or temperature coefficients",
