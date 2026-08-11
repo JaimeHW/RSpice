@@ -98,6 +98,11 @@ use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::Workspace;
 use crate::workbench::{AppState, RSpiceApp};
 
+/// One axis interval, low then high, in data space.
+pub(crate) type AxisExtent = (f64, f64);
+/// The X and Y intervals one plot last drew.
+pub(crate) type DrawnAxes = (AxisExtent, AxisExtent);
+
 pub type WaveformSeries = (SharedWaveformValues, SharedWaveformValues);
 pub type WaveformSeriesResult = Result<WaveformSeries, String>;
 type WindowStatsKey = (u64, u64, u64);
@@ -1000,7 +1005,7 @@ pub struct ResultsState {
     /// it reports its panes through `active_pane_facts`, which knows which
     /// of several panes is active — something a last-drawn record cannot.
     /// Transient.
-    pub(crate) drawn_axes: std::collections::HashMap<ResultViewer, ((f64, f64), (f64, f64))>,
+    pub(crate) drawn_axes: std::collections::HashMap<ResultViewer, DrawnAxes>,
     /// A viewport gesture asked for from outside the drawing pass.
     ///
     /// Menus, the command palette and shortcuts all reach the workspace

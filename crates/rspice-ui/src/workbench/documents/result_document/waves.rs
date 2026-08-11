@@ -2492,11 +2492,7 @@ pub(crate) struct ActivePaneFacts {
     pub pinned: Option<bool>,
 }
 
-pub(crate) fn active_pane_facts(
-    ctx: &egui::Context,
-    tokens: &Tokens,
-    state: &mut AppState,
-) -> ActivePaneFacts {
+pub(crate) fn active_pane_facts(tokens: &Tokens, state: &mut AppState) -> ActivePaneFacts {
     // The viewport the pane is actually showing, whether the user pinned it
     // or it is fitting the retained data. The mockup states the interval
     // either way: "automatic" alone does not tell a reader what they see.
@@ -2651,7 +2647,7 @@ fn active_pane_identity(
 fn active_pane_extents(
     tokens: &Tokens,
     state: &mut AppState,
-) -> (Option<(f64, f64)>, Option<(f64, f64)>) {
+) -> (Option<super::AxisExtent>, Option<super::AxisExtent>) {
     let Some(key) = state.ui.results.active_wave_pane.clone() else {
         return (None, None);
     };
