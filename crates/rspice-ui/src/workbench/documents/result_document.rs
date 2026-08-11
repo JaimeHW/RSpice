@@ -3211,21 +3211,18 @@ fn viewer_tabs_filtered(
     let current = state.ui.results.viewer;
     let mut clicked: Option<ResultViewer> = None;
 
-    for viewer in ResultViewer::PRIMARY {
-        let availability = viewer_availability(state, viewer);
-        if !include(viewer) || !availability.available {
+    // The strip lists only the sheets this dataset can feed. With 22 viewers
+    // and a typical run feeding a handful, a full row of disabled tabs would
+    // bury the ones that work; the Visualization Studio catalog is where every
+    // viewer and its requirements are published.
+    for viewer in ResultViewer::PRIMARY
+        .into_iter()
+        .chain(ResultViewer::DATASET_NATIVE)
+    {
+        if !include(viewer) || !viewer_availability(state, viewer).available {
             continue;
         }
-        if viewer_tab(ui, viewer, current == viewer, availability) {
-            clicked = Some(viewer);
-        }
-    }
-    for viewer in ResultViewer::DATASET_NATIVE {
-        let availability = viewer_availability(state, viewer);
-        if !include(viewer) || !availability.available {
-            continue;
-        }
-        if viewer_tab(ui, viewer, current == viewer, availability) {
+        if viewer_tab(ui, viewer, current == viewer) {
             clicked = Some(viewer);
         }
     }
@@ -3512,12 +3509,12 @@ fn specialized_availability(state: &AppState, viewer: ActiveViewer) -> ViewerAva
 
 /// One viewer tab, per the mockup: full-strip hit target, compact horizontal
 /// padding, hover fill, and a 2 px bottom rule when active.
-fn viewer_tab(
-    ui: &mut Ui,
-    viewer: ResultViewer,
-    active: bool,
-    availability: ViewerAvailability,
-) -> bool {
+///
+/// Every tab drawn is a tab that can be opened. The strip lists only the
+/// sheets the active dataset can feed (see [`viewer_tabs_filtered`]), so there
+/// is no disabled state to paint here — the Visualization Studio catalog is
+/// where the full set of viewers and their requirements are published.
+fn viewer_tab(ui: &mut Ui, viewer: ResultViewer, active: bool) -> bool {
     use crate::ui::theme::mix;
 
     let t = Tokens::get(ui.ctx());
@@ -3544,16 +3541,12 @@ fn viewer_tab(
             galley.size().x + horizontal_padding + icon_width + icon_gap,
             height,
         ),
-        if availability.available {
-            egui::Sense::click()
-        } else {
-            egui::Sense::hover()
-        },
+        egui::Sense::click(),
     );
     response.widget_info(|| {
         WidgetInfo::labeled(
             WidgetType::SelectableLabel,
-            availability.available && ui.is_enabled(),
+            ui.is_enabled(),
             viewer.tab_label(),
         )
     });
@@ -3571,13 +3564,11 @@ fn viewer_tab(
 
     let hover = ui.ctx().animate_bool_with_time(
         response.id,
-        availability.available && !active && response.hovered(),
+        !active && response.hovered(),
         ui.style().animation_time,
     );
     let (fill, text_color) = if active {
         (egui::Color32::TRANSPARENT, c.text)
-    } else if !availability.available {
-        (egui::Color32::TRANSPARENT, c.text_faint)
     } else {
         (
             mix(egui::Color32::TRANSPARENT, c.bg_hover, hover),
@@ -3618,10 +3609,6 @@ fn viewer_tab(
 
     theme::paint_focus_ring(ui, &response, rect);
 
-    if !availability.available {
-        response.on_hover_text(availability.reason);
-        return false;
-    }
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .clicked()
@@ -4380,6 +4367,103 @@ mod availability_tests {
     fn a_transient_without_event_nodes_offers_no_event_sheet() {
         let state = transient_state();
         assert!(!viewer_availability(&state, ResultViewer::Events).available);
+    }
+
+    /// Render the real tab strip and read the accessibility tree it publishes.
+    ///
+    /// The contract is that a sheet gets a tab exactly when the dataset can
+    /// feed it — so each new sheet has to appear on its own evidence and stay
+    /// out of the strip on everyone else's. Availability alone would not catch
+    /// a viewer that is gated correctly but never drawn.
+    fn rendered_tab_labels(analysis: AnalysisResult) -> Vec<String> {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut state = state_with_analysis(analysis);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_680.0, 1_020.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| viewer_tabs(ui, &mut state));
+            },
+        );
+        output
+            .platform_output
+            .accesskit_update
+            .expect("the viewer tab strip publishes an accessibility tree")
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == egui::accesskit::Role::Tab)
+            .filter_map(|(_, node)| node.label().map(str::to_owned))
+            .collect()
+    }
+
+    #[test]
+    fn each_new_sheet_gets_a_tab_on_its_own_evidence_and_only_then() {
+        let cases = [
+            (soa_analysis(), "SOA"),
+            (reliability_analysis(), "Ageing"),
+            (optimization_analysis(), "Optimization"),
+            (events_analysis(), "Events"),
+        ];
+        for (analysis, expected) in &cases {
+            let labels = rendered_tab_labels(analysis.clone());
+            assert!(
+                labels.iter().any(|label| label == expected),
+                "{expected} has no tab on its own dataset; strip is {labels:?}"
+            );
+            for (_, other) in cases.iter().filter(|(_, other)| other != expected) {
+                assert!(
+                    !labels.iter().any(|label| label == other),
+                    "{other} offered itself on the {expected} dataset; strip is {labels:?}"
+                );
+            }
+        }
+    }
+
+    /// Every tab the strip draws opens; the strip filters the rest out rather
+    /// than painting them disabled. A tab that reported itself unavailable
+    /// would mean `viewer_tab` had grown a state its only caller excludes.
+    #[test]
+    fn every_tab_the_strip_draws_can_be_opened() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut state = state_with_analysis(soa_analysis());
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_680.0, 1_020.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| viewer_tabs(ui, &mut state));
+            },
+        );
+        let nodes = output
+            .platform_output
+            .accesskit_update
+            .expect("the viewer tab strip publishes an accessibility tree")
+            .nodes;
+        let tabs = nodes
+            .iter()
+            .filter(|(_, node)| node.role() == egui::accesskit::Role::Tab)
+            .collect::<Vec<_>>();
+        assert!(!tabs.is_empty(), "the strip drew no tabs at all");
+        for (_, node) in tabs {
+            assert!(
+                !node.is_disabled(),
+                "the strip drew a disabled tab: {:?}",
+                node.label()
+            );
+        }
     }
 
     /// Draw each newly reachable sheet through a real frame and tessellate it.
