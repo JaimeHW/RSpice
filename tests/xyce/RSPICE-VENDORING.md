@@ -60,7 +60,7 @@ reported separately from `expected_unsupported`.
 
 Some upstream exclusions are helper, baseline, or control decks tested by an
 upstream wrapper owner. RSpice has independently reconstructed and qualified
-exact native contracts for 187 such decks. Those rows use
+exact native contracts for 189 such decks. Those rows use
 `rspice_independently_qualified` and name the exact expected native contract.
 The adapter executes them, preserves their upstream provenance on the result,
 and fails closed if execution becomes unsupported, fails, or selects a
@@ -68,10 +68,10 @@ different contract. A removed-wrapper marker by itself is not a promotion.
 
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
-and verifier identities. The PARAMS1 parameter-equivalence family pins the
-Release-7.10.0 regression commit, its removed `params_a.cir.sh`, and the
-`xyce_verify.pl` implementation that defines the fallback integrated-RMS
-comparison.
+and verifier identities. The PARAMS1 and PARSER nakedAlgebra
+parameter-equivalence families pin the Release-7.10.0 regression commit,
+their removed wrapper scripts, and the `xyce_verify.pl` implementation that
+defines the fallback integrated-RMS comparison.
 
 The complete inventory and promotions are reproduced by
 `tools/xyce/sync_upstream_exclusions.py`. The checked-in manifest pins the

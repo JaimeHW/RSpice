@@ -2063,6 +2063,10 @@ impl XyceTestRunner {
                 XyceStrictTransientFamilySnapshot::Params1(target),
             ) => Self::compare_params1_family_snapshots(baseline, target),
             (
+                XyceStrictTransientFamilySnapshot::NakedAlgebra(baseline),
+                XyceStrictTransientFamilySnapshot::NakedAlgebra(target),
+            ) => Self::compare_naked_algebra_family_snapshots(baseline, target),
+            (
                 XyceStrictTransientFamilySnapshot::PassivePrimaryValue(baseline),
                 XyceStrictTransientFamilySnapshot::PassivePrimaryValue(target),
             ) => Self::compare_passive_primary_snapshots(baseline, target),
@@ -2232,6 +2236,36 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    pub(super) fn compare_naked_algebra_family_snapshots(
+        baseline: &XyceNakedAlgebraSnapshot,
+        target: &XyceNakedAlgebraSnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XyceNakedAlgebraRepresentation::BracedLocalBaseline
+            || !matches!(
+                target.representation,
+                XyceNakedAlgebraRepresentation::MixedLocalParameters
+                    | XyceNakedAlgebraRepresentation::MixedGlobalParameters
+            )
+        {
+            return Err(
+                "family must compare the braced-literal local baseline with a canonical mixed-expression local/global member"
+                    .to_string(),
+            );
+        }
+        let mut baseline = baseline.clone();
+        let mut target = target.clone();
+        baseline.representation = XyceNakedAlgebraRepresentation::BracedLocalBaseline;
+        target.representation = XyceNakedAlgebraRepresentation::BracedLocalBaseline;
+        target.title.clone_from(&baseline.title);
+        if baseline != target {
+            return Err(
+                "resolved parameter values, behavioral SPICE_PULSE semantics, topology, transient analysis, TIMEINT options, or ordered probes differ outside the admitted parameter representation and non-semantic title/comments"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
     pub(super) fn compare_bjt_external_node_family_snapshots(
         baseline: &XyceBjtExternalNodeFamilySnapshot,
         target: &XyceBjtExternalNodeFamilySnapshot,
@@ -2278,6 +2312,19 @@ impl XyceTestRunner {
             XyceVerifyTransientTolerance::release_7_10_default(),
             XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
         )
+    }
+
+    pub(super) fn compare_baseline_family_xyce_verify_tables(
+        &self,
+        kind: XyceBaselineFamilyKind,
+        baseline: &XycePrnTable,
+        member: &XycePrnTable,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if kind.xyce_verify_member_is_good_waveform() {
+            self.compare_xyce_verify_transient_tables(member, baseline)
+        } else {
+            self.compare_xyce_verify_transient_tables(baseline, member)
+        }
     }
 
     pub(super) fn compare_xyce_verify_transient_tables_with_tolerance(

@@ -58,15 +58,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 187;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 189;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "e2918a36c29a141a2f0d1426a12b2d269b5ec6ef774597f3c4cdd3d2d51cc1fc";
+    "d54d989a3392df3bcdada4d18e73cf8b064050bdda296b14140ca10e52726274";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "d948607e9f0a2ce4620c1b183922ba3f73c219cf675ef1cf5b6401b7fa67e293";
+    "d6567ee60da98668ffe138540533234a50d33e0f6357c3d1bdd4211f3e711474";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "5563162de504b4e804389587e43e1d126251f400ad64df728f69a6e44f509aa1";
+    "54d8c758c7fff5eb2b86854c882f04340b7e3a3a30293b5b9b83e20cc8026adf";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -256,6 +256,48 @@ const XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3: &str =
 const XYCE_PARAMS1_HISTORICAL_ORACLE_RECORD_COUNT: usize = 2;
 const XYCE_PARAMS1_HISTORICAL_ORACLE_BLAKE3: &str =
     "b085c4d44ae81be36abe39da9b70c41a32411d8f3671bd2b9a47353a64a44744";
+// The removed Release 7.10 nakedAlgebra wrapper used byte comparisons as
+// fast paths, then accepted both mixed-expression parameter spellings through
+// default `xyce_verify`. The native reconstruction binds the three canonical
+// sources and applies the same strict default-tolerance relational oracle.
+const XYCE_NAKED_ALGEBRA_WRAPPER_OWNER_CONTRACT: &str =
+    "naked_algebra_parameter_equivalence_wrapper_owner";
+const XYCE_NAKED_ALGEBRA_BRACED_BASELINE_CONTRACT: &str =
+    "naked_algebra_parameter_equivalence_braced_baseline";
+const XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_CONTRACT: &str =
+    "naked_algebra_parameter_equivalence_global_member";
+const XYCE_NAKED_ALGEBRA_OWNER_RECORD: &str = "netlists/parser/nakedalgebra.cir";
+const XYCE_NAKED_ALGEBRA_BRACED_BASELINE_RECORD: &str = "netlists/parser/nakedalgebrabaseline.cir";
+const XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_RECORD: &str = "netlists/parser/nakedalgebraglobal.cir";
+const XYCE_NAKED_ALGEBRA_OWNER_CONTENT_BLAKE3: &str =
+    "f0f94c056f62bee96b49b46f1a1bc693b6bfc79d7e0a699741fc90334579a094";
+const XYCE_NAKED_ALGEBRA_BRACED_BASELINE_CONTENT_BLAKE3: &str =
+    "112fac431981b869aad379659da705edfbe28f0f5a2ab4f3119fe2e6bfa7e8ee";
+const XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_CONTENT_BLAKE3: &str =
+    "3161ad78989d933ea20e80abb61165ade9a932c90c17604721439b1b1c530f65";
+const XYCE_NAKED_ALGEBRA_CANDIDATE_COUNT: usize = 3;
+const XYCE_NAKED_ALGEBRA_CANDIDATE_BLAKE3: &str =
+    "5c299428d945e9d2d617d6cb803982b9edd78d532d0f1a7a3887fed061148cc6";
+const XYCE_NAKED_ALGEBRA_CANDIDATE_CONTENT_BLAKE3: &str =
+    "cc328d723a5681e6b677a558870cd506d65fd0b3b0720ec3932a402c89403206";
+const XYCE_NAKED_ALGEBRA_OWNER_COUNT: usize = 1;
+const XYCE_NAKED_ALGEBRA_OWNER_MANIFEST_BLAKE3: &str =
+    "f585384fb812bdb6dcdc8fe5468ab75a66d00cb9cc947ee605408856c5cf28cd";
+const XYCE_NAKED_ALGEBRA_EXCLUSION_COUNT: usize = 2;
+const XYCE_NAKED_ALGEBRA_HISTORICAL_EXCLUSION_BLAKE3: &str =
+    "a217cc15c973d4ac5654aa1a20d314cf429a29e7397d2e787220d23bb61c88e9";
+const XYCE_NAKED_ALGEBRA_UPSTREAM_REGRESSION_COMMIT: &str =
+    "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_NAKED_ALGEBRA_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_PATH: &str = "Netlists/PARSER/nakedAlgebra.cir.sh";
+const XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_BYTES: usize = 2_026;
+const XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_SHA256: &str =
+    "938f88ab56ab023d93a0cde882cb98391320d769087666b61bc7a4ed212b3e30";
+const XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_BLAKE3: &str =
+    "70e79ac1632a283e8af23bb303da9797ef1974f4adbd7af0948378863810dfe0";
+const XYCE_NAKED_ALGEBRA_HISTORICAL_ORACLE_RECORD_COUNT: usize = 2;
+const XYCE_NAKED_ALGEBRA_HISTORICAL_ORACLE_BLAKE3: &str =
+    "0c56df6d66baca7083b8ef80ab6db52cc82d92c1087b8aff9e5eb8cad6c956c3";
 const XYCE_LEVEL2_DIODE_DTEMP_WRAPPER_CONTRACT: &str =
     "level2_diode_dtemp_relational_wrapper_owner";
 const XYCE_LEVEL2_DIODE_DTEMP_REFERENCE_CONTRACT: &str =
@@ -5247,6 +5289,13 @@ struct XyceParams1FamilyContract {
 }
 
 #[derive(Debug, Clone)]
+struct XyceNakedAlgebraFamilyContract {
+    relational: XyceBaselineFamilyContract,
+    owner_path: PathBuf,
+    role: XyceNakedAlgebraRole,
+}
+
+#[derive(Debug, Clone)]
 struct XyceSwitchStateCaseFamilyContract {
     relational: XyceBaselineFamilyContract,
     role: XyceSwitchStateCaseFamilyRole,
@@ -5327,6 +5376,32 @@ impl XyceParams1Role {
             XYCE_PARAMS1_OWNER_RECORD => Some(Self::WrapperOwner),
             XYCE_PARAMS1_LITERAL_BASELINE_RECORD => Some(Self::LiteralBaseline),
             XYCE_PARAMS1_PARAMETERIZED_MEMBER_RECORD => Some(Self::ParameterizedMember),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceNakedAlgebraRole {
+    WrapperOwner,
+    BracedBaseline,
+    GlobalMember,
+}
+
+impl XyceNakedAlgebraRole {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::WrapperOwner => XYCE_NAKED_ALGEBRA_WRAPPER_OWNER_CONTRACT,
+            Self::BracedBaseline => XYCE_NAKED_ALGEBRA_BRACED_BASELINE_CONTRACT,
+            Self::GlobalMember => XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_CONTRACT,
+        }
+    }
+
+    fn for_record(relative_path: &str) -> Option<Self> {
+        match XyceTestRunner::normalize_manifest_key(relative_path).as_str() {
+            XYCE_NAKED_ALGEBRA_OWNER_RECORD => Some(Self::WrapperOwner),
+            XYCE_NAKED_ALGEBRA_BRACED_BASELINE_RECORD => Some(Self::BracedBaseline),
+            XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_RECORD => Some(Self::GlobalMember),
             _ => None,
         }
     }
@@ -5805,6 +5880,18 @@ struct XyceParams1Snapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceNakedAlgebraSnapshot {
+    representation: XyceNakedAlgebraRepresentation,
+    title: String,
+    parameter_bits: BTreeMap<String, u64>,
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    tran_step_bits: u64,
+    tran_stop_bits: u64,
+    ordered_probes: Vec<String>,
+    option_directives: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct XyceAgeCapFamilySnapshot {
     representation: XyceAgeCapRepresentation,
     elements: BTreeMap<String, XyceRelationalElementFingerprint>,
@@ -5952,6 +6039,7 @@ enum XyceStrictTransientFamilySnapshot {
     SinExpression(XyceSinExpressionFamilySnapshot),
     ParamExpression(XyceParamExpressionFamilySnapshot),
     Params1(XyceParams1Snapshot),
+    NakedAlgebra(XyceNakedAlgebraSnapshot),
     PassivePrimaryValue(XycePassivePrimaryValueSnapshot),
     PassiveTemperatureOverride(XycePassiveTemperatureOverrideSnapshot),
     TransientAnalysisExpression(XyceTransientAnalysisExpressionSnapshot),
@@ -6044,6 +6132,13 @@ enum XyceParamExpressionRepresentation {
 enum XyceParams1Representation {
     LiteralValues,
     GlobalParameters,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceNakedAlgebraRepresentation {
+    BracedLocalBaseline,
+    MixedLocalParameters,
+    MixedGlobalParameters,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -6158,6 +6253,7 @@ enum XyceBaselineFamilyKind {
     SinExpression,
     ParamExpression,
     Params1,
+    NakedAlgebra,
     PassiveCapPrimaryValue,
     PassiveResPrimaryValue,
     PassiveTemperatureOverride,
@@ -6244,6 +6340,7 @@ impl XyceBaselineFamilyKind {
             Self::SinExpression => "SIN_EXPRESSION",
             Self::ParamExpression => "PARAM_EXPRESSION",
             Self::Params1 => "PARAMS1_PARAMETER_EQUIVALENCE",
+            Self::NakedAlgebra => "NAKED_ALGEBRA_PARAMETER_EQUIVALENCE",
             Self::PassiveCapPrimaryValue => "PASSIVE_CAP_PRIMARY_VALUE",
             Self::PassiveResPrimaryValue => "PASSIVE_RES_PRIMARY_VALUE",
             Self::PassiveTemperatureOverride => "PASSIVE_TEMPERATURE_OVERRIDE",
@@ -6269,6 +6366,7 @@ impl XyceBaselineFamilyKind {
             Self::SinExpression => "sin_expression_family_wrapper",
             Self::ParamExpression => "param_expression_family_wrapper",
             Self::Params1 => XYCE_PARAMS1_WRAPPER_OWNER_CONTRACT,
+            Self::NakedAlgebra => XYCE_NAKED_ALGEBRA_WRAPPER_OWNER_CONTRACT,
             Self::PassiveCapPrimaryValue => "passive_primary_value_capacitor_tran_wrapper",
             Self::PassiveResPrimaryValue => "passive_primary_value_resistor_dc_wrapper",
             Self::PassiveTemperatureOverride => "passive_temperature_override_family_wrapper",
@@ -6294,6 +6392,7 @@ impl XyceBaselineFamilyKind {
             Self::SinExpression => "sin_expression_family_baseline",
             Self::ParamExpression => "param_expression_family_baseline",
             Self::Params1 => XYCE_PARAMS1_LITERAL_BASELINE_CONTRACT,
+            Self::NakedAlgebra => XYCE_NAKED_ALGEBRA_BRACED_BASELINE_CONTRACT,
             Self::PassiveCapPrimaryValue => "passive_primary_value_capacitor_tran_baseline",
             Self::PassiveResPrimaryValue => "passive_primary_value_resistor_dc_baseline",
             Self::PassiveTemperatureOverride => "passive_temperature_override_family_baseline",
@@ -6317,6 +6416,14 @@ impl XyceBaselineFamilyKind {
         matches!(self, Self::PassiveTemperatureOverride)
     }
 
+    fn xyce_verify_member_is_good_waveform(self) -> bool {
+        // Release 7.10's nakedAlgebra wrapper invokes xyce_verify with each
+        // mixed-expression member as GOODFILE and the braced baseline as
+        // TESTFILE. The normalized RMS denominator is directional, so this
+        // ordering is part of the oracle rather than an interchangeable pair.
+        matches!(self, Self::NakedAlgebra)
+    }
+
     fn transient_plan_purpose(self) -> XyceStaticTranPlanPurpose {
         match self {
             Self::ScopedModel => XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
@@ -6329,6 +6436,7 @@ impl XyceBaselineFamilyKind {
             | Self::SinExpression
             | Self::ParamExpression
             | Self::Params1
+            | Self::NakedAlgebra
             | Self::PassiveCapPrimaryValue
             | Self::PassiveTemperatureOverride
             | Self::TransientAnalysisExpression

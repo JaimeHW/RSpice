@@ -862,8 +862,8 @@ Netlists/PARAMS1/params_a1.cir	Netlists/PARAMS1/exclude	rspice_independently_qua
 Netlists/PARAM_REFACTOR/paramDc1.cir	Netlists/PARAM_REFACTOR/exclude	rspice_independently_qualified	static_prn_dc
 Netlists/PARAM_REFACTOR/sensCapGear_baseline.cir	Netlists/PARAM_REFACTOR/exclude	upstream_excluded
 Netlists/PARSER/aAsAmp.cir	Netlists/PARSER/exclude	upstream_excluded
-Netlists/PARSER/nakedAlgebraBaseline.cir	Netlists/PARSER/exclude	upstream_excluded
-Netlists/PARSER/nakedAlgebraGlobal.cir	Netlists/PARSER/exclude	upstream_excluded
+Netlists/PARSER/nakedAlgebraBaseline.cir	Netlists/PARSER/exclude	rspice_independently_qualified	naked_algebra_parameter_equivalence_braced_baseline
+Netlists/PARSER/nakedAlgebraGlobal.cir	Netlists/PARSER/exclude	rspice_independently_qualified	naked_algebra_parameter_equivalence_global_member
 Netlists/PARSER/separator1Ref.cir	Netlists/PARSER/exclude	upstream_excluded
 Netlists/PARSER/separator2Ref.cir	Netlists/PARSER/exclude	upstream_excluded
 Netlists/PARSER/separator3Ref.cir	Netlists/PARSER/exclude	upstream_excluded

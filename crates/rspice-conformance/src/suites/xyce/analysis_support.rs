@@ -688,8 +688,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         kind: XyceBaselineFamilyKind,
         path: &Path,
     ) -> XyceStaticTranPlanPurpose {
-        if kind == XyceBaselineFamilyKind::TransientAnalysisExpression
-            && self.requires_upstream_wrapper(&self.relative_key(path))
+        if matches!(
+            kind,
+            XyceBaselineFamilyKind::TransientAnalysisExpression
+                | XyceBaselineFamilyKind::NakedAlgebra
+        ) && self.requires_upstream_wrapper(&self.relative_key(path))
         {
             XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily
         } else {

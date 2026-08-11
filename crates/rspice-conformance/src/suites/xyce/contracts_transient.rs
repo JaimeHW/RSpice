@@ -1993,6 +1993,13 @@ impl XyceTestRunner {
                     XyceStaticTranContract::WrapperStatic
                 )
             ),
+            XyceBaselineFamilyKind::NakedAlgebra => matches!(
+                (baseline, target),
+                (
+                    XyceStaticTranContract::PlainStatic,
+                    XyceStaticTranContract::PlainStatic | XyceStaticTranContract::WrapperStatic
+                )
+            ),
         }
     }
 
@@ -2273,6 +2280,109 @@ impl XyceTestRunner {
             }
             XyceParams1Representation::GlobalParameters => {
                 XYCE_PARAMS1_PARAMETERIZED_MEMBER_CONTENT_BLAKE3
+            }
+        };
+        if actual_hash != expected_hash {
+            return Err(format!(
+                "{LABEL} captured execution source identity changed: expected {expected_hash}, got {actual_hash}"
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn naked_algebra_source_qualification(
+        source: &str,
+    ) -> Result<XyceNakedAlgebraRepresentation, String> {
+        const LABEL: &str = "nakedAlgebra parameter equivalence";
+        if Self::source_has_comp_directive(source) {
+            return Err(format!(
+                "{LABEL} uses the canonical Release 7.10 xyce_verify tolerance and does not admit *COMP"
+            ));
+        }
+        let canonical = Self::canonical_lf_text_identity(LABEL, source.as_bytes())?;
+        let source_hash = blake3::hash(&canonical).to_hex().to_string();
+        match source_hash.as_str() {
+            XYCE_NAKED_ALGEBRA_OWNER_CONTENT_BLAKE3 => {
+                Ok(XyceNakedAlgebraRepresentation::MixedLocalParameters)
+            }
+            XYCE_NAKED_ALGEBRA_BRACED_BASELINE_CONTENT_BLAKE3 => {
+                Ok(XyceNakedAlgebraRepresentation::BracedLocalBaseline)
+            }
+            XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_CONTENT_BLAKE3 => {
+                Ok(XyceNakedAlgebraRepresentation::MixedGlobalParameters)
+            }
+            _ => Err(format!(
+                "{LABEL} source identity is not one of the three canonical Release 7.10 representations: {source_hash}"
+            )),
+        }
+    }
+
+    pub(super) fn validate_naked_algebra_transient_plan(
+        plan: &XyceStaticTranPlan,
+    ) -> Result<(), String> {
+        const LABEL: &str = "nakedAlgebra parameter equivalence";
+        if !matches!(plan.oracle, XyceStaticTranOracle::None)
+            || plan.comparison_mode != XyceStaticTranComparisonMode::Pointwise
+            || !plan.steps.is_empty()
+            || plan.output_override
+            || plan.timeint_conststep
+            || plan.wrapper_tolerance.is_some()
+        {
+            return Err(format!(
+                "{LABEL} requires one ordinary unstepped adaptive default .prn relational plan without a file oracle or tolerance override"
+            ));
+        }
+        if plan.tran.step.to_bits() != (0.1f64 * 1.0e-9).to_bits()
+            || plan.tran.stop.to_bits() != (100.0f64 * 1.0e-12).to_bits()
+            || plan.tran.start.is_some()
+            || plan.tran.max_step.is_some()
+            || plan.tran.uic
+        {
+            return Err(format!(
+                "{LABEL} requires exact '.TRAN 0.1ns 100ps' semantics without START, MAXSTEP, or UIC"
+            ));
+        }
+        let print = plan.require_print("nakedAlgebra transient validation")?;
+        let [probe] = print.probes.as_slice() else {
+            return Err(format!("{LABEL} requires exactly one ordered probe"));
+        };
+        let voltage = Self::parse_voltage_probe(probe)
+            .ok_or_else(|| format!("{LABEL} probe '{probe}' is not an atomic voltage probe"))?;
+        if voltage.accessor != XyceVoltageAccessor::Value
+            || voltage.node_pos.trim() != "1"
+            || voltage.node_neg.is_some()
+        {
+            return Err(format!(
+                "{LABEL} requires the single-ended voltage-value probe V(1)"
+            ));
+        }
+        let representation = Self::naked_algebra_source_qualification(&plan.source)?;
+        let expected_contract = match representation {
+            XyceNakedAlgebraRepresentation::MixedLocalParameters => {
+                XyceStaticTranContract::WrapperStatic
+            }
+            XyceNakedAlgebraRepresentation::BracedLocalBaseline
+            | XyceNakedAlgebraRepresentation::MixedGlobalParameters => {
+                XyceStaticTranContract::PlainStatic
+            }
+        };
+        if plan.contract != expected_contract {
+            return Err(format!(
+                "{LABEL} representation requires {expected_contract:?} output provenance, got {:?}",
+                plan.contract
+            ));
+        }
+        let canonical = Self::canonical_lf_text_identity(LABEL, plan.source.as_bytes())?;
+        let actual_hash = blake3::hash(&canonical).to_hex().to_string();
+        let expected_hash = match representation {
+            XyceNakedAlgebraRepresentation::BracedLocalBaseline => {
+                XYCE_NAKED_ALGEBRA_BRACED_BASELINE_CONTENT_BLAKE3
+            }
+            XyceNakedAlgebraRepresentation::MixedLocalParameters => {
+                XYCE_NAKED_ALGEBRA_OWNER_CONTENT_BLAKE3
+            }
+            XyceNakedAlgebraRepresentation::MixedGlobalParameters => {
+                XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_CONTENT_BLAKE3
             }
         };
         if actual_hash != expected_hash {

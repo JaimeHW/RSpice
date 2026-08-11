@@ -14672,6 +14672,504 @@ fn params1_malformed_fixed_records_route_to_executed_failures() {
     }
 }
 
+fn naked_algebra_corpus_sources() -> [String; 3] {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    [
+        fs::read_to_string(corpus.join("Netlists/PARSER/nakedAlgebra.cir"))
+            .expect("read nakedAlgebra wrapper owner"),
+        fs::read_to_string(corpus.join("Netlists/PARSER/nakedAlgebraBaseline.cir"))
+            .expect("read nakedAlgebra braced baseline"),
+        fs::read_to_string(corpus.join("Netlists/PARSER/nakedAlgebraGlobal.cir"))
+            .expect("read nakedAlgebra global member"),
+    ]
+}
+
+fn naked_algebra_fixture(
+    label: &str,
+    sources: [&str; 3],
+) -> (PathBuf, [XyceDeck; 3], XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-naked-algebra-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = root.join("Netlists/PARSER");
+    fs::create_dir_all(&family).expect("create nakedAlgebra fixture directory");
+    let records = [
+        "Netlists/PARSER/nakedAlgebra.cir",
+        "Netlists/PARSER/nakedAlgebraBaseline.cir",
+        "Netlists/PARSER/nakedAlgebraGlobal.cir",
+    ];
+    let decks = std::array::from_fn(|index| {
+        let path = root.join(records[index]);
+        fs::write(&path, sources[index]).expect("write nakedAlgebra fixture source");
+        XyceDeck {
+            path,
+            relative_path: records[index].to_string(),
+            section: XyceDeckSection::Netlists,
+        }
+    });
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n", records[0]),
+    )
+    .expect("write nakedAlgebra wrapper provenance");
+    fs::write(
+        root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[
+            &format!(
+                "{}\tNetlists/PARSER/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_NAKED_ALGEBRA_BRACED_BASELINE_CONTRACT}",
+                records[1]
+            ),
+            &format!(
+                "{}\tNetlists/PARSER/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_CONTRACT}",
+                records[2]
+            ),
+        ]),
+    )
+    .expect("write nakedAlgebra exclusion provenance");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    (root, decks, runner)
+}
+
+#[test]
+fn naked_algebra_candidate_census_is_an_exact_three_record_bijection() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&corpus, XyceRunnerConfig::default());
+    let selected = runner
+        .discover_tests()
+        .iter()
+        .filter_map(|deck| {
+            runner.naked_algebra_family_contract(deck).map(|contract| {
+                let contract = contract.unwrap_or_else(|error| {
+                    panic!("nakedAlgebra candidate failed qualification: {error}")
+                });
+                (
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                    contract.role,
+                )
+            })
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(selected.len(), XYCE_NAKED_ALGEBRA_CANDIDATE_COUNT);
+    assert_eq!(
+        selected,
+        BTreeMap::from([
+            (
+                XYCE_NAKED_ALGEBRA_OWNER_RECORD.to_string(),
+                XyceNakedAlgebraRole::WrapperOwner,
+            ),
+            (
+                XYCE_NAKED_ALGEBRA_BRACED_BASELINE_RECORD.to_string(),
+                XyceNakedAlgebraRole::BracedBaseline,
+            ),
+            (
+                XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_RECORD.to_string(),
+                XyceNakedAlgebraRole::GlobalMember,
+            ),
+        ])
+    );
+}
+
+#[test]
+fn naked_algebra_family_is_role_typed_relational_and_provenance_bound() {
+    let sources = naked_algebra_corpus_sources();
+    let (root, decks, runner) = naked_algebra_fixture(
+        "qualification",
+        [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+        ],
+    );
+    for (deck, role) in decks.iter().zip([
+        XyceNakedAlgebraRole::WrapperOwner,
+        XyceNakedAlgebraRole::BracedBaseline,
+        XyceNakedAlgebraRole::GlobalMember,
+    ]) {
+        let contract = runner
+            .naked_algebra_family_contract(deck)
+            .expect("exact nakedAlgebra record is selected")
+            .expect("exact nakedAlgebra family qualifies");
+        assert_eq!(contract.role, role);
+        assert_eq!(
+            contract.relational.kind,
+            XyceBaselineFamilyKind::NakedAlgebra
+        );
+        assert_eq!(
+            contract.relational.comparison,
+            XyceBaselineFamilyComparison::TolerancedStrict
+        );
+        assert!(XyceTestRunner::same_path(
+            &contract.relational.baseline_path,
+            &decks[1].path
+        ));
+        assert_eq!(contract.relational.member_paths.len(), 3);
+        runner
+            .validate_naked_algebra_provenance(&contract)
+            .expect("exact shared nakedAlgebra provenance validates");
+        assert_eq!(
+            role.result_contract(),
+            match role {
+                XyceNakedAlgebraRole::WrapperOwner => {
+                    XYCE_NAKED_ALGEBRA_WRAPPER_OWNER_CONTRACT
+                }
+                XyceNakedAlgebraRole::BracedBaseline => {
+                    XYCE_NAKED_ALGEBRA_BRACED_BASELINE_CONTRACT
+                }
+                XyceNakedAlgebraRole::GlobalMember => {
+                    XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_CONTRACT
+                }
+            }
+        );
+    }
+    fs::remove_dir_all(root).expect("remove nakedAlgebra qualification fixture");
+}
+
+#[test]
+fn naked_algebra_historical_wrapper_and_default_verifier_provenance_is_exact() {
+    let records = XyceTestRunner::naked_algebra_historical_oracle_provenance_records();
+    assert_eq!(
+        records.len(),
+        XYCE_NAKED_ALGEBRA_HISTORICAL_ORACLE_RECORD_COUNT
+    );
+    assert!(records.contains(&format!(
+        "{XYCE_NAKED_ALGEBRA_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_NAKED_ALGEBRA_UPSTREAM_RELEASE_TAG}\t{XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_PATH}\t{XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_BYTES}\t{XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_SHA256}\t{XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_BLAKE3}"
+    )));
+    assert!(records.contains(&format!(
+        "{XYCE_NAKED_ALGEBRA_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_NAKED_ALGEBRA_UPSTREAM_RELEASE_TAG}\t{XYCE_RELEASE_710_XYCE_VERIFY_PATH}\t{XYCE_RELEASE_710_XYCE_VERIFY_BYTES}\t{XYCE_RELEASE_710_XYCE_VERIFY_SHA256}\t{XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3}"
+    )));
+    XyceTestRunner::validate_naked_algebra_historical_oracle_provenance().expect(
+        "nakedAlgebra Release-7.10 wrapper/xyce_verify provenance is internally consistent",
+    );
+}
+
+#[test]
+fn naked_algebra_preserves_directional_release_710_xyce_verify_order() {
+    let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+    let table = |value: Value| XycePrnTable {
+        columns: vec!["Index".to_string(), "TIME".to_string(), "V(1)".to_string()],
+        rows: vec![
+            vec![0.0, 0.0, value],
+            vec![1.0, 0.5, value],
+            vec![2.0, 1.0, value],
+        ],
+    };
+    let member_good = table(100.0);
+    let braced_baseline_test = table(99.005);
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables(&member_good, &braced_baseline_test)
+            .expect("member-good comparison is structurally valid")
+            .is_empty(),
+        "Release 7.10 accepts the asymmetric boundary in wrapper order"
+    );
+    assert!(
+        !runner
+            .compare_xyce_verify_transient_tables(&braced_baseline_test, &member_good)
+            .expect("reversed comparison is structurally valid")
+            .is_empty()
+    );
+    assert!(
+        runner
+            .compare_baseline_family_xyce_verify_tables(
+                XyceBaselineFamilyKind::NakedAlgebra,
+                &braced_baseline_test,
+                &member_good,
+            )
+            .expect("nakedAlgebra family comparison is structurally valid")
+            .is_empty(),
+        "nakedAlgebra must preserve member-good/baseline-test wrapper ordering"
+    );
+    assert!(
+        !runner
+            .compare_baseline_family_xyce_verify_tables(
+                XyceBaselineFamilyKind::Params1,
+                &braced_baseline_test,
+                &member_good,
+            )
+            .expect("ordinary baseline-good family comparison is structurally valid")
+            .is_empty()
+    );
+}
+
+#[test]
+fn naked_algebra_semantic_snapshot_proves_local_and_global_expression_equivalence() {
+    let sources = naked_algebra_corpus_sources();
+    let local = Netlist::parse(&sources[0]).expect("parse nakedAlgebra local member");
+    let baseline = Netlist::parse(&sources[1]).expect("parse nakedAlgebra braced baseline");
+    let global = Netlist::parse(&sources[2]).expect("parse nakedAlgebra global member");
+    let print = XycePrintRequest {
+        probes: vec!["V(1)".to_string()],
+    };
+    let local_snapshot = XyceTestRunner::naked_algebra_family_snapshot(&local, &print)
+        .expect("mixed-local nakedAlgebra snapshot qualifies");
+    let baseline_snapshot = XyceTestRunner::naked_algebra_family_snapshot(&baseline, &print)
+        .expect("braced nakedAlgebra snapshot qualifies");
+    let global_snapshot = XyceTestRunner::naked_algebra_family_snapshot(&global, &print)
+        .expect("mixed-global nakedAlgebra snapshot qualifies");
+    assert_eq!(
+        local_snapshot.representation,
+        XyceNakedAlgebraRepresentation::MixedLocalParameters
+    );
+    assert_eq!(
+        baseline_snapshot.representation,
+        XyceNakedAlgebraRepresentation::BracedLocalBaseline
+    );
+    assert_eq!(
+        global_snapshot.representation,
+        XyceNakedAlgebraRepresentation::MixedGlobalParameters
+    );
+    XyceTestRunner::compare_naked_algebra_family_snapshots(&baseline_snapshot, &local_snapshot)
+        .expect("braced and mixed-local nakedAlgebra semantics are identical");
+    XyceTestRunner::compare_naked_algebra_family_snapshots(&baseline_snapshot, &global_snapshot)
+        .expect("braced and mixed-global nakedAlgebra semantics are identical");
+    assert!(
+        XyceTestRunner::compare_naked_algebra_family_snapshots(
+            &baseline_snapshot,
+            &baseline_snapshot,
+        )
+        .is_err(),
+        "two braced baselines do not exercise representation equivalence"
+    );
+
+    let mut changed_resistor = baseline.clone();
+    let ElementKind::Resistor { value, .. } = &mut changed_resistor.elements[1].kind else {
+        panic!("nakedAlgebra R1 remains a resistor");
+    };
+    *value = 2_000.0;
+    assert!(
+        XyceTestRunner::naked_algebra_family_snapshot(&changed_resistor, &print).is_err(),
+        "resolved resistance is part of the semantic contract"
+    );
+    let mut changed_behavior = baseline.clone();
+    let ElementKind::BehavioralVoltage { expression, .. } = &mut changed_behavior.elements[0].kind
+    else {
+        panic!("nakedAlgebra B1 remains behavioral");
+    };
+    *expression = "spice_pulse(v1,v2,td,tr,tf,pw+1p)".to_string();
+    assert!(
+        XyceTestRunner::naked_algebra_family_snapshot(&changed_behavior, &print).is_err(),
+        "resolved behavioral expression is part of the semantic contract"
+    );
+    let mut changed_analysis = baseline.clone();
+    let AnalysisCommand::Tran { stop, .. } = &mut changed_analysis.analyses[0] else {
+        panic!("nakedAlgebra analysis remains transient");
+    };
+    *stop = 2.0e-10;
+    assert!(
+        XyceTestRunner::naked_algebra_family_snapshot(&changed_analysis, &print).is_err(),
+        "transient analysis values are part of the semantic contract"
+    );
+    let wrong_print = XycePrintRequest {
+        probes: vec!["V(0)".to_string()],
+    };
+    assert!(
+        XyceTestRunner::naked_algebra_family_snapshot(&baseline, &wrong_print).is_err(),
+        "the ordered V(1) probe is part of the semantic contract"
+    );
+    for mutation in [
+        sources[0].replace("test1+0.1", "test1+0.2"),
+        sources[1].replace("V1={1.1}", "V1={1.2}"),
+        sources[2].replace(".global_param", ".param"),
+    ] {
+        assert!(
+            XyceTestRunner::naked_algebra_source_qualification(&mutation).is_err(),
+            "canonical source identity drift must fail closed"
+        );
+    }
+}
+
+#[test]
+fn naked_algebra_transient_plan_rejects_analysis_output_and_source_mutations() {
+    let sources = naked_algebra_corpus_sources();
+    let (root, decks, runner) = naked_algebra_fixture(
+        "plan",
+        [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+        ],
+    );
+    for deck in &decks {
+        let purpose = runner.transient_family_plan_purpose_for_path(
+            XyceBaselineFamilyKind::NakedAlgebra,
+            &deck.path,
+        );
+        let plan = runner
+            .static_tran_family_plan_for_path(&deck.path, purpose)
+            .expect("build canonical nakedAlgebra transient plan");
+        XyceTestRunner::validate_naked_algebra_transient_plan(&plan)
+            .expect("canonical nakedAlgebra transient plan qualifies");
+    }
+    let plan = runner
+        .static_tran_family_plan_for_path(
+            &decks[1].path,
+            XyceStaticTranPlanPurpose::RelationalFamily,
+        )
+        .expect("build nakedAlgebra baseline transient plan");
+    let mut source_identity = plan.clone();
+    source_identity.source = source_identity.source.replace(
+        "The old expression library",
+        "The historical expression library",
+    );
+    assert!(
+        XyceTestRunner::validate_naked_algebra_transient_plan(&source_identity).is_err(),
+        "captured execution source must retain exact canonical-LF identity"
+    );
+    let mut comp = plan.clone();
+    comp.source = comp.source.replace(".tran", "*COMP V(1) RELTOL=1\n.tran");
+    assert!(XyceTestRunner::validate_naked_algebra_transient_plan(&comp).is_err());
+    let mut extra_probe = plan.clone();
+    extra_probe
+        .print
+        .as_mut()
+        .expect("nakedAlgebra plan has a print request")
+        .probes
+        .push("V(0)".to_string());
+    assert!(XyceTestRunner::validate_naked_algebra_transient_plan(&extra_probe).is_err());
+    let mut max_step = plan.clone();
+    max_step.tran.max_step = Some(1.0e-12);
+    assert!(XyceTestRunner::validate_naked_algebra_transient_plan(&max_step).is_err());
+    let mut output_override = plan.clone();
+    output_override.output_override = true;
+    assert!(XyceTestRunner::validate_naked_algebra_transient_plan(&output_override).is_err());
+    let mut wrong_contract = plan;
+    wrong_contract.contract = XyceStaticTranContract::WrapperStatic;
+    assert!(
+        XyceTestRunner::validate_naked_algebra_transient_plan(&wrong_contract).is_err(),
+        "non-wrapper representations cannot acquire wrapper output provenance"
+    );
+    fs::remove_dir_all(root).expect("remove nakedAlgebra plan fixture");
+}
+
+#[test]
+fn naked_algebra_provenance_rejects_content_directory_manifest_and_artifact_drift() {
+    let sources = naked_algebra_corpus_sources();
+    let source_refs = [
+        sources[0].as_str(),
+        sources[1].as_str(),
+        sources[2].as_str(),
+    ];
+    for (index, mutation, reason) in [
+        (
+            0usize,
+            sources[0].replace("test1+0.1", "test1+0.2"),
+            "local source content",
+        ),
+        (1, String::new(), "empty baseline source"),
+        (
+            2,
+            sources[2].replace(".global_param", ".param"),
+            "global source content",
+        ),
+    ] {
+        let (root, decks, runner) = naked_algebra_fixture(reason, source_refs);
+        fs::write(&decks[index].path, mutation).expect("write nakedAlgebra content mutation");
+        assert!(
+            runner
+                .naked_algebra_family_contract(&decks[0])
+                .expect("fixed nakedAlgebra owner remains selected")
+                .is_err(),
+            "{reason} drift must fail shared provenance"
+        );
+        fs::remove_dir_all(root).expect("remove nakedAlgebra content fixture");
+    }
+
+    let (root, decks, runner) = naked_algebra_fixture("manifest", source_refs);
+    fs::write(root.join(HARNESS_MANIFEST_FILE), "")
+        .expect("remove nakedAlgebra wrapper manifest row");
+    assert!(
+        runner
+            .naked_algebra_family_contract(&decks[0])
+            .expect("fixed nakedAlgebra owner remains selected")
+            .is_err(),
+        "on-disk wrapper-manifest drift must invalidate a pre-existing runner"
+    );
+    fs::remove_dir_all(root).expect("remove nakedAlgebra manifest fixture");
+
+    let (root, decks, runner) = naked_algebra_fixture("directory", source_refs);
+    fs::write(
+        root.join("Netlists/PARSER/nakedAlgebraExtra.cir"),
+        &sources[1],
+    )
+    .expect("write additional nakedAlgebra circuit");
+    assert!(
+        runner
+            .naked_algebra_family_contract(&decks[0])
+            .expect("fixed nakedAlgebra owner remains selected")
+            .is_err(),
+        "additional prefixed circuit siblings must fail the exact candidate census"
+    );
+    fs::remove_dir_all(root).expect("remove nakedAlgebra directory fixture");
+
+    let (root, decks, runner) = naked_algebra_fixture("source-artifact", source_refs);
+    fs::write(
+        root.join("Netlists/PARSER/nakedAlgebraBaseline.cir.PRN"),
+        "forbidden source-side artifact\n",
+    )
+    .expect("write nakedAlgebra source-side output artifact");
+    assert!(
+        runner
+            .naked_algebra_family_contract(&decks[0])
+            .expect("fixed nakedAlgebra owner remains selected")
+            .is_err(),
+        "case-insensitive source-side output artifacts must fail closed"
+    );
+    fs::remove_dir_all(root).expect("remove nakedAlgebra source-artifact fixture");
+
+    let (root, decks, runner) = naked_algebra_fixture("output-artifact", source_refs);
+    let output = root.join("OutputData/PARSER");
+    fs::create_dir_all(&output).expect("create nakedAlgebra OutputData fixture directory");
+    fs::write(
+        output.join("nakedAlgebraGlobal.cir.prn"),
+        "forbidden checked-in oracle\n",
+    )
+    .expect("write nakedAlgebra checked-in output artifact");
+    assert!(
+        runner
+            .naked_algebra_family_contract(&decks[0])
+            .expect("fixed nakedAlgebra owner remains selected")
+            .is_err(),
+        "checked-in worker output artifacts must fail relational ownership"
+    );
+    fs::remove_dir_all(root).expect("remove nakedAlgebra output-artifact fixture");
+}
+
+#[test]
+fn naked_algebra_malformed_fixed_records_route_to_executed_failures() {
+    let sources = naked_algebra_corpus_sources();
+    let source_refs = [
+        sources[0].as_str(),
+        sources[1].as_str(),
+        sources[2].as_str(),
+    ];
+    for (index, expected_contract) in [
+        (0usize, XYCE_NAKED_ALGEBRA_WRAPPER_OWNER_CONTRACT),
+        (2, "upstream_exclusion_promotion_mismatch"),
+    ] {
+        let (root, decks, runner) = naked_algebra_fixture("routing", source_refs);
+        fs::write(
+            &decks[index].path,
+            "recognized malformed nakedAlgebra record\n",
+        )
+        .expect("write malformed fixed nakedAlgebra record");
+        let result = runner.run_discovered_test(&decks[index]);
+        assert!(
+            !result.passed,
+            "malformed fixed record must fail: {result:?}"
+        );
+        assert!(!result.expected_unsupported);
+        assert!(!result.upstream_excluded);
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.error.is_some());
+        fs::remove_dir_all(root).expect("remove nakedAlgebra routing fixture");
+    }
+}
+
 #[test]
 fn sin_expression_snapshot_proves_only_three_argument_representation_parity() {
     let baseline = Netlist::parse(

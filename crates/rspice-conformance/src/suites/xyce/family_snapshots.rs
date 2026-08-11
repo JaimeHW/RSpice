@@ -5017,6 +5017,10 @@ impl XyceTestRunner {
             }
             XyceBaselineFamilyKind::Params1 => Self::params1_family_snapshot(netlist, print)
                 .map(XyceStrictTransientFamilySnapshot::Params1),
+            XyceBaselineFamilyKind::NakedAlgebra => {
+                Self::naked_algebra_family_snapshot(netlist, print)
+                    .map(XyceStrictTransientFamilySnapshot::NakedAlgebra)
+            }
             XyceBaselineFamilyKind::PassiveCapPrimaryValue => {
                 Self::passive_cap_primary_snapshot(netlist, print)
                     .map(XyceStrictTransientFamilySnapshot::PassivePrimaryValue)
@@ -5340,6 +5344,312 @@ impl XyceTestRunner {
             tran_step_bits: step.to_bits(),
             tran_stop_bits: stop.to_bits(),
             ordered_probes,
+        })
+    }
+
+    pub(super) fn naked_algebra_family_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<XyceNakedAlgebraSnapshot, String> {
+        const LABEL: &str = "nakedAlgebra parameter equivalence";
+        let source = netlist
+            .source_text
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} requires original source text"))?;
+        let representation = Self::naked_algebra_source_qualification(source)?;
+
+        let [
+            AnalysisCommand::Tran {
+                step,
+                stop,
+                start,
+                max_step,
+                uic,
+            },
+        ] = netlist.analyses.as_slice()
+        else {
+            return Err(format!("{LABEL} requires exactly one transient analysis"));
+        };
+        if step.to_bits() != (0.1f64 * 1.0e-9).to_bits()
+            || stop.to_bits() != (100.0f64 * 1.0e-12).to_bits()
+            || start.is_some()
+            || max_step.is_some()
+            || *uic
+        {
+            return Err(format!(
+                "{LABEL} requires exact '.TRAN 0.1ns 100ps' semantics without START, MAXSTEP, or UIC"
+            ));
+        }
+
+        let expected_title = match representation {
+            XyceNakedAlgebraRepresentation::BracedLocalBaseline => {
+                "Test of expression version of SPICE pulse, with very fast (<1ps) rise times"
+            }
+            XyceNakedAlgebraRepresentation::MixedLocalParameters
+            | XyceNakedAlgebraRepresentation::MixedGlobalParameters => {
+                "* This is a test for issue 195, to see if .param with expressions can"
+            }
+        };
+        if netlist.title.trim() != expected_title
+            || !netlist.diagnostics.is_empty()
+            || netlist.lin_analysis.is_some()
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.models.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || netlist.device_initial_conditions.is_some()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires its canonical role title and one flat diagnostic-free circuit without models, hierarchy, auxiliary analyses, startup state, string parameters, or functions"
+            ));
+        }
+
+        let mut parsed_parameter_bits = BTreeMap::new();
+        for (name, value) in netlist.params.all_params() {
+            let name = name.trim().to_ascii_lowercase();
+            if name.is_empty()
+                || !value.is_finite()
+                || parsed_parameter_bits
+                    .insert(name.clone(), value.to_bits())
+                    .is_some()
+            {
+                return Err(format!(
+                    "{LABEL} contains an empty, duplicate, or non-finite parameter '{name}'"
+                ));
+            }
+        }
+        let resolved_parameter_bits = BTreeMap::from([
+            ("pw".to_string(), (10.0f64 * 1.0e-12).to_bits()),
+            ("td".to_string(), (0.5f64 * 1.0e-12).to_bits()),
+            ("tf".to_string(), (0.4f64 * 1.0e-12).to_bits()),
+            ("tr".to_string(), (0.3f64 * 1.0e-12).to_bits()),
+            ("v1".to_string(), 1.1f64.to_bits()),
+            ("v2".to_string(), 2.0f64.to_bits()),
+        ]);
+        let expected_parameter_bits = match representation {
+            XyceNakedAlgebraRepresentation::BracedLocalBaseline => resolved_parameter_bits.clone(),
+            XyceNakedAlgebraRepresentation::MixedLocalParameters
+            | XyceNakedAlgebraRepresentation::MixedGlobalParameters => {
+                let mut expected = resolved_parameter_bits.clone();
+                expected.extend([
+                    ("test1".to_string(), 1.0f64.to_bits()),
+                    ("test2".to_string(), 1.0f64.to_bits()),
+                    ("test3".to_string(), (1.0f64 * 1.0e-12).to_bits()),
+                    ("test4".to_string(), (1.0f64 * 1.0e-12).to_bits()),
+                    ("test5".to_string(), (1.0f64 * 1.0e-12).to_bits()),
+                    ("test6".to_string(), (1.0f64 * 1.0e-12).to_bits()),
+                ]);
+                expected
+            }
+        };
+        if parsed_parameter_bits != expected_parameter_bits {
+            return Err(format!(
+                "{LABEL} role has unexpected parameter names or resolved values"
+            ));
+        }
+
+        let voltage_probe = match print.probes.as_slice() {
+            [probe] => Self::parse_voltage_probe(probe)
+                .ok_or_else(|| format!("{LABEL} requires one atomic voltage probe"))?,
+            _ => return Err(format!("{LABEL} requires exactly one ordered probe")),
+        };
+        if voltage_probe.accessor != XyceVoltageAccessor::Value
+            || voltage_probe.node_pos.trim() != "1"
+            || voltage_probe.node_neg.is_some()
+        {
+            return Err(format!(
+                "{LABEL} requires the single-ended voltage-value probe V(1)"
+            ));
+        }
+        let ordered_probes = print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+
+        let expected_pulse_bits = [
+            1.1f64.to_bits(),
+            2.0f64.to_bits(),
+            (0.5f64 * 1.0e-12).to_bits(),
+            (0.3f64 * 1.0e-12).to_bits(),
+            (0.4f64 * 1.0e-12).to_bits(),
+            (10.0f64 * 1.0e-12).to_bits(),
+        ];
+        let mut elements = BTreeMap::new();
+        for element in &netlist.elements {
+            let name = element.name.trim().to_ascii_lowercase();
+            if name.is_empty()
+                || !matches!(element.provenance, ElementProvenance::Authored)
+                || elements.contains_key(&name)
+            {
+                return Err(format!(
+                    "{LABEL} contains an empty, duplicate, or generated element '{}'",
+                    element.name
+                ));
+            }
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| node.trim().to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            let fingerprint = match (name.as_str(), &element.kind) {
+                (
+                    "b1",
+                    ElementKind::BehavioralVoltage {
+                        expression,
+                        tc1,
+                        tc2,
+                    },
+                ) if nodes == ["1", "0"]
+                    && tc1.to_bits() == 0.0f64.to_bits()
+                    && tc2.to_bits() == 0.0f64.to_bits() =>
+                {
+                    let prepared = prepare_behavioral_expression(expression, &netlist.params)
+                        .map_err(|error| {
+                            format!("{LABEL} could not resolve B1 behavioral expression: {error}")
+                        })?;
+                    let ast = parse_expression_strict(&prepared).map_err(|error| {
+                        format!("{LABEL} could not parse resolved B1 expression: {error}")
+                    })?;
+                    let Expr::Function {
+                        func: rspice_core::expr::Function::SpicePulse,
+                        args,
+                    } = ast
+                    else {
+                        return Err(format!(
+                            "{LABEL} B1 must be one direct SPICE_PULSE expression"
+                        ));
+                    };
+                    let [v1, v2, td, tr, tf, pw] = args.as_slice() else {
+                        return Err(format!(
+                            "{LABEL} B1 must use exactly six SPICE_PULSE arguments; resolved expression was '{prepared}' with arguments {args:?}"
+                        ));
+                    };
+                    fn constant_arithmetic_value(expression: &Expr) -> Option<Value> {
+                        match expression {
+                            Expr::Const(value) if value.is_finite() => Some(*value),
+                            Expr::Binary { op, left, right } => {
+                                let left = constant_arithmetic_value(left)?;
+                                let right = constant_arithmetic_value(right)?;
+                                let value = match op {
+                                    BinaryOp::Add => left + right,
+                                    BinaryOp::Mul => left * right,
+                                    _ => return None,
+                                };
+                                value.is_finite().then_some(value)
+                            }
+                            _ => None,
+                        }
+                    }
+                    let actual_values = [v1, v2, td, tr, tf, pw]
+                        .map(constant_arithmetic_value)
+                        .into_iter()
+                        .collect::<Option<Vec<_>>>()
+                        .ok_or_else(|| {
+                            format!(
+                                "{LABEL} B1 SPICE_PULSE arguments must resolve through finite constant addition/multiplication only"
+                            )
+                        })?;
+                    let actual_bits = actual_values
+                        .iter()
+                        .map(|value| value.to_bits())
+                        .collect::<Vec<_>>();
+                    if actual_bits.as_slice() != expected_pulse_bits {
+                        return Err(format!("{LABEL} B1 resolved SPICE_PULSE arguments changed"));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: "B:V:SPICE_PULSE".to_string(),
+                        nodes,
+                        numeric_bits: actual_bits
+                            .into_iter()
+                            .chain([tc1.to_bits(), tc2.to_bits()])
+                            .collect(),
+                        text: vec!["SIX_ARGUMENT_NONPERIODIC".to_string()],
+                    }
+                }
+                (
+                    "r1",
+                    ElementKind::Resistor {
+                        value,
+                        value_expr,
+                        model,
+                        instance_params,
+                        deferred_params,
+                    },
+                ) if nodes == ["1", "0"]
+                    && value.is_finite()
+                    && value.to_bits() == 1_000.0f64.to_bits()
+                    && value_expr.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    let effective = Self::effective_resistor_value(netlist, &element.name)?
+                        .ok_or_else(|| format!("{LABEL} could not resolve R1"))?;
+                    if !effective.is_finite() || effective.to_bits() != 1_000.0f64.to_bits() {
+                        return Err(format!("{LABEL} R1 did not resolve to 1K"));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits(), effective.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} element '{}' is outside the exact B1/R1 topology and value envelope",
+                        element.name
+                    ));
+                }
+            };
+            elements.insert(name, fingerprint);
+        }
+        if elements.keys().map(String::as_str).collect::<BTreeSet<_>>()
+            != BTreeSet::from(["b1", "r1"])
+        {
+            return Err(format!("{LABEL} requires exactly B1 and R1"));
+        }
+
+        let option_directives = Self::logical_netlist_lines(source)
+            .into_iter()
+            .map(|line| {
+                Self::strip_netlist_comment(&line)
+                    .trim()
+                    .to_ascii_lowercase()
+            })
+            .filter(|line| {
+                line.split_whitespace()
+                    .next()
+                    .is_some_and(|command| command == ".options")
+            })
+            .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect::<Vec<_>>();
+        if option_directives != [".options timeint reltol=1e-3"]
+            || netlist.options.timeint_reltol.map(Value::to_bits) != Some(1.0e-3f64.to_bits())
+        {
+            return Err(format!(
+                "{LABEL} requires only the canonical TIMEINT RELTOL=1e-3 directive"
+            ));
+        }
+
+        Ok(XyceNakedAlgebraSnapshot {
+            representation,
+            title: netlist.title.trim().to_string(),
+            parameter_bits: resolved_parameter_bits,
+            elements,
+            tran_step_bits: step.to_bits(),
+            tran_stop_bits: stop.to_bits(),
+            ordered_probes,
+            option_directives,
         })
     }
 

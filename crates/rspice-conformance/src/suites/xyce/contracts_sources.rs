@@ -2678,6 +2678,439 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    pub(super) fn naked_algebra_historical_oracle_provenance_records() -> Vec<String> {
+        [
+            (
+                XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_PATH,
+                XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_BYTES,
+                XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_SHA256,
+                XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_BLAKE3,
+            ),
+            (
+                XYCE_RELEASE_710_XYCE_VERIFY_PATH,
+                XYCE_RELEASE_710_XYCE_VERIFY_BYTES,
+                XYCE_RELEASE_710_XYCE_VERIFY_SHA256,
+                XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3,
+            ),
+        ]
+        .into_iter()
+        .map(|(path, bytes, sha256, content_blake3)| {
+            format!(
+                "{XYCE_NAKED_ALGEBRA_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_NAKED_ALGEBRA_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
+            )
+        })
+        .collect()
+    }
+
+    pub(super) fn validate_naked_algebra_historical_oracle_provenance() -> Result<(), String> {
+        let mut records = Self::naked_algebra_historical_oracle_provenance_records();
+        records.sort();
+        let provenance_hash = blake3::hash(records.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if records.len() != XYCE_NAKED_ALGEBRA_HISTORICAL_ORACLE_RECORD_COUNT
+            || provenance_hash != XYCE_NAKED_ALGEBRA_HISTORICAL_ORACLE_BLAKE3
+        {
+            return Err(format!(
+                "nakedAlgebra Release-7.10 wrapper/xyce_verify provenance changed: records={}/{provenance_hash}",
+                records.len()
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn naked_algebra_current_wrapper_manifest_rows(
+        &self,
+    ) -> Result<Vec<String>, String> {
+        const LABEL: &str = "nakedAlgebra wrapper manifest";
+        let path = self.root.join(HARNESS_MANIFEST_FILE);
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| format!("failed to inspect {LABEL}: {error}"))?;
+        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+            return Err(format!(
+                "{LABEL} '{}' must be a regular non-symlink file",
+                self.display_path(&path)
+            ));
+        }
+        let bytes = fs::read(&path).map_err(|error| format!("failed to read {LABEL}: {error}"))?;
+        let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
+        let source = std::str::from_utf8(&canonical)
+            .map_err(|error| format!("{LABEL} is not UTF-8: {error}"))?;
+        let expected =
+            format!("Netlists/PARSER/nakedAlgebra.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}");
+        let mut rows = Vec::new();
+        for (line_index, line) in source.lines().enumerate() {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some((raw_path, _)) = line.split_once('\t') else {
+                if line.to_ascii_lowercase().contains("nakedalgebra") {
+                    return Err(format!(
+                        "{LABEL} line {} mentioning nakedAlgebra is not tab-delimited",
+                        line_index + 1
+                    ));
+                }
+                continue;
+            };
+            if Self::normalize_manifest_key(raw_path).starts_with("netlists/parser/nakedalgebra") {
+                if line != expected {
+                    return Err(format!(
+                        "{LABEL} line {} is not the exact removed-wrapper owner row",
+                        line_index + 1
+                    ));
+                }
+                rows.push(line.to_string());
+            }
+        }
+        if rows != [expected] {
+            return Err(format!(
+                "{LABEL} requires exactly the canonical nakedAlgebra.cir owner row"
+            ));
+        }
+        Ok(rows)
+    }
+
+    pub(super) fn naked_algebra_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceNakedAlgebraFamilyContract, String>> {
+        let relative = Self::normalize_manifest_key(&deck.relative_path);
+        let role = XyceNakedAlgebraRole::for_record(&relative)?;
+        Some((|| {
+            const LABEL: &str = "nakedAlgebra parameter-equivalence family";
+            if deck.section != XyceDeckSection::Netlists {
+                return Err(format!(
+                    "recognized {LABEL} record '{}' is not classified as a Netlists deck",
+                    deck.relative_path
+                ));
+            }
+            if Self::normalize_manifest_key(&self.relative_key(&deck.path)) != relative {
+                return Err(format!(
+                    "recognized {LABEL} record '{}' does not match its physical deck path",
+                    deck.relative_path
+                ));
+            }
+
+            let parent = deck
+                .path
+                .parent()
+                .ok_or_else(|| format!("recognized {LABEL} record has no sibling directory"))?;
+            let owner_path = parent.join("nakedAlgebra.cir");
+            let braced_baseline_path = parent.join("nakedAlgebraBaseline.cir");
+            let global_member_path = parent.join("nakedAlgebraGlobal.cir");
+            let expected_target = match role {
+                XyceNakedAlgebraRole::WrapperOwner => &owner_path,
+                XyceNakedAlgebraRole::BracedBaseline => &braced_baseline_path,
+                XyceNakedAlgebraRole::GlobalMember => &global_member_path,
+            };
+            if !Self::same_path(&deck.path, expected_target) {
+                return Err(format!(
+                    "recognized {LABEL} role {role:?} is not backed by its exact canonical path"
+                ));
+            }
+
+            let target_path = match role {
+                XyceNakedAlgebraRole::WrapperOwner => None,
+                XyceNakedAlgebraRole::BracedBaseline => Some(braced_baseline_path.clone()),
+                XyceNakedAlgebraRole::GlobalMember => Some(global_member_path.clone()),
+            };
+            let contract = XyceNakedAlgebraFamilyContract {
+                relational: XyceBaselineFamilyContract {
+                    kind: XyceBaselineFamilyKind::NakedAlgebra,
+                    comparison: XyceBaselineFamilyComparison::TolerancedStrict,
+                    family: "nakedAlgebra".to_string(),
+                    baseline_path: braced_baseline_path.clone(),
+                    member_paths: vec![
+                        owner_path.clone(),
+                        braced_baseline_path,
+                        global_member_path,
+                    ],
+                    target_path,
+                },
+                owner_path,
+                role,
+            };
+            self.validate_naked_algebra_provenance(&contract)?;
+            Ok(contract)
+        })())
+    }
+
+    pub(super) fn validate_naked_algebra_provenance(
+        &self,
+        contract: &XyceNakedAlgebraFamilyContract,
+    ) -> Result<(), String> {
+        const LABEL: &str = "nakedAlgebra parameter-equivalence family";
+        Self::validate_naked_algebra_historical_oracle_provenance()?;
+        let parent = contract
+            .owner_path
+            .parent()
+            .ok_or_else(|| format!("{LABEL} owner has no parent directory"))?;
+        let parent_metadata = fs::symlink_metadata(parent)
+            .map_err(|error| format!("failed to inspect {LABEL} directory: {error}"))?;
+        if parent_metadata.file_type().is_symlink() || !parent_metadata.file_type().is_dir() {
+            return Err(format!(
+                "{LABEL} directory '{}' must be a regular non-symlink directory",
+                self.display_path(parent)
+            ));
+        }
+
+        let braced_baseline_path = parent.join("nakedAlgebraBaseline.cir");
+        let global_member_path = parent.join("nakedAlgebraGlobal.cir");
+        let expected_member_paths = [
+            &contract.owner_path,
+            &braced_baseline_path,
+            &global_member_path,
+        ];
+        let member_paths_match = contract.relational.member_paths.len()
+            == expected_member_paths.len()
+            && contract
+                .relational
+                .member_paths
+                .iter()
+                .zip(expected_member_paths)
+                .all(|(actual, expected)| Self::same_path(actual, expected));
+        let target_matches = match (contract.relational.target_path.as_ref(), contract.role) {
+            (None, XyceNakedAlgebraRole::WrapperOwner) => true,
+            (Some(actual), XyceNakedAlgebraRole::BracedBaseline) => {
+                Self::same_path(actual, &braced_baseline_path)
+            }
+            (Some(actual), XyceNakedAlgebraRole::GlobalMember) => {
+                Self::same_path(actual, &global_member_path)
+            }
+            _ => false,
+        };
+        if contract.relational.kind != XyceBaselineFamilyKind::NakedAlgebra
+            || contract.relational.comparison != XyceBaselineFamilyComparison::TolerancedStrict
+            || contract.relational.family != "nakedAlgebra"
+            || !Self::same_path(&contract.relational.baseline_path, &braced_baseline_path)
+            || !member_paths_match
+            || !target_matches
+        {
+            return Err(format!(
+                "{LABEL} contract is not the exact toleranced-strict baseline/local/global relational contract"
+            ));
+        }
+
+        let expected_records = [
+            (&contract.owner_path, XYCE_NAKED_ALGEBRA_OWNER_RECORD),
+            (
+                &braced_baseline_path,
+                XYCE_NAKED_ALGEBRA_BRACED_BASELINE_RECORD,
+            ),
+            (&global_member_path, XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_RECORD),
+        ];
+        for (path, expected_record) in expected_records {
+            if Self::normalize_manifest_key(&self.relative_key(path)) != expected_record {
+                return Err(format!(
+                    "{LABEL} path '{}' is not canonical record '{expected_record}'",
+                    self.display_path(path)
+                ));
+            }
+        }
+
+        let expected_role_record = match contract.role {
+            XyceNakedAlgebraRole::WrapperOwner => XYCE_NAKED_ALGEBRA_OWNER_RECORD,
+            XyceNakedAlgebraRole::BracedBaseline => XYCE_NAKED_ALGEBRA_BRACED_BASELINE_RECORD,
+            XyceNakedAlgebraRole::GlobalMember => XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_RECORD,
+        };
+        let actual_role_record = match contract.relational.target_path.as_ref() {
+            Some(path) => Self::normalize_manifest_key(&self.relative_key(path)),
+            None => Self::normalize_manifest_key(&self.relative_key(&contract.owner_path)),
+        };
+        if actual_role_record != expected_role_record {
+            return Err(format!(
+                "{LABEL} role {:?} is not bound to its exact canonical record",
+                contract.role
+            ));
+        }
+
+        let exclusions = Self::load_upstream_exclusions(&self.root)
+            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
+        let owner_manifest_rows = self.naked_algebra_current_wrapper_manifest_rows()?;
+        let current_wrapper_records = Self::load_upstream_wrapper_decks(&self.root);
+        let entries = fs::read_dir(parent)
+            .map_err(|error| format!("failed to read {LABEL} directory: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("failed to enumerate {LABEL}: {error}"))?;
+
+        let mut directory_names = BTreeMap::<String, PathBuf>::new();
+        let mut candidate_paths = BTreeMap::<String, PathBuf>::new();
+        for entry in &entries {
+            let path = entry.path();
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or_else(|| format!("{LABEL} directory contains a non-UTF-8 entry"))?
+                .to_string();
+            let normalized_name = name.to_ascii_lowercase();
+            if directory_names
+                .insert(normalized_name.clone(), path.clone())
+                .is_some()
+            {
+                return Err(format!(
+                    "{LABEL} directory contains a case-colliding entry '{name}'"
+                ));
+            }
+            if !normalized_name.starts_with("nakedalgebra")
+                || !path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+            {
+                continue;
+            }
+            let metadata = fs::symlink_metadata(&path)
+                .map_err(|error| format!("failed to inspect {LABEL} candidate: {error}"))?;
+            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+                return Err(format!(
+                    "{LABEL} candidate '{}' must be a regular non-symlink file",
+                    self.display_path(&path)
+                ));
+            }
+            let relative = self.relative_key(&path);
+            let key = Self::normalize_manifest_key(&relative);
+            if candidate_paths.insert(key, path).is_some() {
+                return Err(format!(
+                    "{LABEL} candidate census contains a normalized-path collision"
+                ));
+            }
+        }
+
+        let expected_candidate_keys = BTreeSet::from([
+            XYCE_NAKED_ALGEBRA_OWNER_RECORD.to_string(),
+            XYCE_NAKED_ALGEBRA_BRACED_BASELINE_RECORD.to_string(),
+            XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_RECORD.to_string(),
+        ]);
+        let actual_candidate_keys = candidate_paths.keys().cloned().collect::<BTreeSet<_>>();
+        if actual_candidate_keys != expected_candidate_keys {
+            return Err(format!(
+                "{LABEL} must contain exactly its three canonical nakedAlgebra*.cir records, got {actual_candidate_keys:?}"
+            ));
+        }
+
+        let mut candidates = Vec::with_capacity(candidate_paths.len());
+        let mut candidate_content = Vec::with_capacity(candidate_paths.len());
+        let mut historical_exclusion_rows = Vec::new();
+        for (key, path) in &candidate_paths {
+            let relative = self.relative_key(path);
+            let role = XyceNakedAlgebraRole::for_record(&relative)
+                .ok_or_else(|| format!("{LABEL} candidate role became ambiguous"))?;
+            let bytes = fs::read(path).map_err(|error| {
+                format!("failed to read {LABEL} candidate '{relative}': {error}")
+            })?;
+            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
+            if canonical.is_empty() {
+                return Err(format!("{LABEL} candidate '{relative}' must be nonempty"));
+            }
+            let content_hash = blake3::hash(&canonical).to_hex().to_string();
+            let expected_content_hash = match role {
+                XyceNakedAlgebraRole::WrapperOwner => XYCE_NAKED_ALGEBRA_OWNER_CONTENT_BLAKE3,
+                XyceNakedAlgebraRole::BracedBaseline => {
+                    XYCE_NAKED_ALGEBRA_BRACED_BASELINE_CONTENT_BLAKE3
+                }
+                XyceNakedAlgebraRole::GlobalMember => {
+                    XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_CONTENT_BLAKE3
+                }
+            };
+            if content_hash != expected_content_hash {
+                return Err(format!(
+                    "{LABEL} candidate '{relative}' canonical source identity changed: expected {expected_content_hash}, got {content_hash}"
+                ));
+            }
+            candidates.push(relative.clone());
+            candidate_content.push(format!("{relative}\t{content_hash}"));
+
+            match role {
+                XyceNakedAlgebraRole::WrapperOwner => {
+                    if !self.requires_upstream_wrapper(&relative)
+                        || !current_wrapper_records.contains(key)
+                        || exclusions.contains_key(key)
+                    {
+                        return Err(format!(
+                            "{LABEL} owner '{relative}' lost its exclusive wrapper provenance"
+                        ));
+                    }
+                }
+                XyceNakedAlgebraRole::BracedBaseline | XyceNakedAlgebraRole::GlobalMember => {
+                    if self.requires_upstream_wrapper(&relative)
+                        || current_wrapper_records.contains(key)
+                    {
+                        return Err(format!(
+                            "{LABEL} executable member '{relative}' must not own the wrapper"
+                        ));
+                    }
+                    let exclusion = exclusions.get(key).ok_or_else(|| {
+                        format!(
+                            "{LABEL} executable member '{relative}' lost its historical exclusion provenance"
+                        )
+                    })?;
+                    if !matches!(
+                        &exclusion.disposition,
+                        XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                            expected_contract,
+                        } if expected_contract == role.result_contract()
+                    ) {
+                        return Err(format!(
+                            "{LABEL} executable member '{relative}' does not carry its exact independent qualification contract"
+                        ));
+                    }
+                    historical_exclusion_rows.push(format!(
+                        "{relative}\t{}\t{UPSTREAM_EXCLUDED_DISPOSITION}",
+                        exclusion.source
+                    ));
+                }
+            }
+
+            self.reject_wrapper_output_artifacts(path)
+                .map_err(|error| format!("{LABEL} candidate '{relative}' {error}"))?;
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| format!("{LABEL} candidate filename is not UTF-8"))?;
+            for suffix in ["prn", "res", "prn.gs", "res.gs", "csv", "csd"] {
+                let sidecar_name = format!("{file_name}.{suffix}").to_ascii_lowercase();
+                if let Some(sidecar) = directory_names.get(&sidecar_name) {
+                    return Err(format!(
+                        "{LABEL} candidate must not have source-side output artifact '{}'",
+                        self.display_path(sidecar)
+                    ));
+                }
+            }
+        }
+
+        candidates.sort();
+        candidate_content.sort();
+        historical_exclusion_rows.sort();
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(candidate_content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let owner_hash = blake3::hash(owner_manifest_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let exclusion_hash = blake3::hash(historical_exclusion_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if candidates.len() != XYCE_NAKED_ALGEBRA_CANDIDATE_COUNT
+            || candidate_hash != XYCE_NAKED_ALGEBRA_CANDIDATE_BLAKE3
+            || content_hash != XYCE_NAKED_ALGEBRA_CANDIDATE_CONTENT_BLAKE3
+            || owner_manifest_rows.len() != XYCE_NAKED_ALGEBRA_OWNER_COUNT
+            || owner_hash != XYCE_NAKED_ALGEBRA_OWNER_MANIFEST_BLAKE3
+            || historical_exclusion_rows.len() != XYCE_NAKED_ALGEBRA_EXCLUSION_COUNT
+            || exclusion_hash != XYCE_NAKED_ALGEBRA_HISTORICAL_EXCLUSION_BLAKE3
+        {
+            return Err(format!(
+                "{LABEL} provenance changed: candidates={}/{candidate_hash}/{content_hash}, owners={}/{owner_hash}, exclusions={}/{exclusion_hash}",
+                candidates.len(),
+                owner_manifest_rows.len(),
+                historical_exclusion_rows.len()
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn param_expression_family_contract(
         &self,
         deck: &XyceDeck,
