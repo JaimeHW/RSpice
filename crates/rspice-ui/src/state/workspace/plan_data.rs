@@ -111,27 +111,6 @@ impl ProjectWorkspace {
         Ok(())
     }
 
-    /// Add an imported set of design variables as one transaction.
-    ///
-    /// Per-variable field and case-insensitive name checks reuse the ordinary
-    /// add path. A complete configuration validation then catches stable-ID
-    /// collisions (including collisions with another plan) before assignment.
-    /// No prefix of the import is observable if any record is rejected.
-    pub fn add_design_variables(
-        &mut self,
-        plan_id: SimulationPlanId,
-        variables: Vec<DesignVariable>,
-    ) -> Result<(), SimulationConfigurationError> {
-        let mut candidate = self.clone();
-        for variable in variables {
-            candidate.add_design_variable(plan_id, variable)?;
-        }
-        candidate.validate_simulation_configuration()?;
-
-        *self = candidate;
-        Ok(())
-    }
-
     /// Replace the expression of one plan-owned design variable as a single
     /// validated workspace transaction.
     ///
