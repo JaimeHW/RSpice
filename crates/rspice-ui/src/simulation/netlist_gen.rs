@@ -1025,6 +1025,74 @@ mod tests {
         );
     }
 
+    /// Positional tails are emitted only as far as the last field that carries
+    /// information, so adding PHASE to the pulse sheet cannot append ` 0` to
+    /// every deck RSpice has ever written.
+    #[test]
+    fn optional_waveform_tails_appear_only_when_they_are_set() {
+        let schematic = SchematicState::default();
+        let generator = NetlistGenerator::new(&schematic);
+
+        let mut pulse = Component::new(1, ComponentType::VoltageSourcePulse, Point::origin())
+            .with_name_value("VPULSE", "0");
+        pulse.params = "v2=1.8 td=0 tr=1n tf=1n pw=5n per=10n phase=90".to_owned();
+        assert_eq!(
+            generator.format_source_value(&pulse),
+            "PULSE(0 1.8 0 1n 1n 5n 10n 90)"
+        );
+
+        let mut sffm = Component::new(2, ComponentType::CurrentSourceSffm, Point::origin())
+            .with_name_value("ISFFM", "0");
+        sffm.params = "va=1m fc=1Meg mdi=3 fs=1k".to_owned();
+        assert_eq!(
+            generator.format_source_value(&sffm),
+            "SFFM(0 1m 1Meg 3 1k)",
+            "an unset delay and phases leave the classic five-argument form"
+        );
+        sffm.params = "va=1m fc=1Meg mdi=3 fs=1k phasec=45".to_owned();
+        assert_eq!(
+            generator.format_source_value(&sffm),
+            "SFFM(0 1m 1Meg 3 1k 0 0 45)",
+            "a set carrier phase drags its positional predecessors along"
+        );
+    }
+
+    /// AM and PAT are the two families the engine has always parsed but no
+    /// schematic component could produce.
+    #[test]
+    fn modulated_and_pattern_sources_emit_their_engine_spelling() {
+        let schematic = SchematicState::default();
+        let generator = NetlistGenerator::new(&schematic);
+
+        let mut am = Component::new(1, ComponentType::VoltageSourceAm, Point::origin())
+            .with_name_value("VAM", "0");
+        am.params = "vmo=1 vma=0.5 fm=1k fc=1Meg".to_owned();
+        assert_eq!(generator.format_source_value(&am), "AM(0 1 0.5 1k 1Meg)");
+
+        let mut pat = Component::new(2, ComponentType::VoltageSourcePat, Point::origin())
+            .with_name_value("VPAT", "1.8");
+        pat.params = "vlo=0 td=1n tr=100p tf=100p tsample=2n data=1011".to_owned();
+        assert_eq!(
+            generator.format_source_value(&pat),
+            "PAT(1.8 0 1n 100p 100p 2n b1011)",
+            "a bit string typed without its leading B is normalized, not rejected"
+        );
+
+        pat.params.push_str(" repeat_count=-1");
+        assert_eq!(
+            generator.format_source_value(&pat),
+            "PAT(1.8 0 1n 100p 100p 2n b1011 R=-1)"
+        );
+
+        let mut noise = Component::new(3, ComponentType::VoltageSourceNoise, Point::origin())
+            .with_name_value("VNOISE", "10n");
+        noise.params = "nt=1u nalpha=0 namp=0 dc=0".to_owned();
+        assert_eq!(
+            generator.format_source_value(&noise),
+            "DC 0 TRNOISE(10n 1u 0 0)"
+        );
+    }
+
     #[test]
     fn transient_source_formatter_preserves_legacy_waveform_literals_once() {
         let schematic = SchematicState::default();
@@ -1574,13 +1642,14 @@ mod tests {
         assert!(line.starts_with("A1 ["), "{netlist}");
         assert!(line.contains("] ["), "{netlist}");
         assert!(line.ends_with(" a1_model"), "{netlist}");
-        assert!(
-            netlist.contains(".MODEL a1_model d_and (rise_delay=1n fall_delay=1n)"),
-            "{netlist}"
-        );
+        // The gate declares no required parameters, so an untouched block
+        // restates none of the code model's defaults back at it.
+        assert!(netlist.contains(".MODEL a1_model d_and\n"), "{netlist}");
     }
 
-    /// The limiter's required output limits always reach its card.
+    /// The limiter's required output limits always reach its card, carrying the
+    /// code model's own defaults rather than a value invented by the emitter —
+    /// the property sheet shows the same two numbers.
     #[test]
     fn xspice_limiter_card_carries_required_limits() {
         let mut limiter = Component::new(1, ComponentType::XspiceLimiter, Point::origin())
@@ -1589,7 +1658,7 @@ mod tests {
         let netlist = netlist_for(vec![limiter]);
         assert!(
             netlist.contains(
-                ".MODEL a1_model limit (gain=1 out_lower_limit=-1 out_upper_limit=5 limit_range=1e-6)"
+                ".MODEL a1_model limit (out_lower_limit=-1000000000000 out_upper_limit=5)"
             ),
             "{netlist}"
         );
@@ -1725,9 +1794,93 @@ mod tests {
             .find(|l| l.starts_with("YMEMRISTOR MR1 "))
             .expect("memristor line");
         assert!(line.ends_with(" mem_MR1"), "{netlist}");
+        // A device left at its defaults restates none of them: the sheet's
+        // defaults are the engine's, so writing them out could only ever drift
+        // away from the values the engine would have used anyway.
         assert!(
-            netlist.contains(".MODEL mem_MR1 MEMRISTOR (LEVEL=2 RON=50 ROFF=1k)"),
+            netlist.contains(".MODEL mem_MR1 MEMRISTOR (LEVEL=2)"),
             "{netlist}"
+        );
+    }
+
+    /// Every TEAM field the sheet offers reaches the card, and IVRELATION —
+    /// the memristor's only instance parameter — reaches the instance line.
+    #[test]
+    fn memristor_carries_its_configured_team_parameters() {
+        let mut memristor =
+            Component::new(1, ComponentType::Memristor, Point::origin()).with_name_value("MR1", "");
+        memristor.params =
+            "ron=100 roff=10k xon=1n xoff=5n wt=2 alphaon=4 wc=2p ivrelation=1".to_owned();
+        let netlist = netlist_for(vec![memristor]);
+
+        assert!(
+            netlist.contains(
+                ".MODEL mem_MR1 MEMRISTOR (LEVEL=2 RON=100 ROFF=10k XON=1n XOFF=5n \
+                 ALPHAON=4 WT=2 WC=2p)"
+            ),
+            "{netlist}"
+        );
+        assert!(
+            netlist
+                .lines()
+                .any(|line| line.starts_with("YMEMRISTOR MR1 ") && line.ends_with(" IVRELATION=1")),
+            "{netlist}"
+        );
+    }
+
+    /// A B line accepts M, TC1, and TC2 and rejects the deck on anything else,
+    /// so the emitter forwards exactly those three and nothing more.
+    #[test]
+    fn behavioral_source_carries_its_multiplier_and_temperature_coefficients() {
+        let mut plain = Component::new(1, ComponentType::BehavioralSource, Point::origin())
+            .with_name_value("B1", "I=V(in)/100");
+        plain.params = String::new();
+        let netlist = netlist_for(vec![plain]);
+        assert!(
+            netlist
+                .lines()
+                .any(|line| line.starts_with("B1 ") && line.ends_with("I=V(in)/100")),
+            "{netlist}"
+        );
+
+        let mut configured = Component::new(1, ComponentType::BehavioralSource, Point::origin())
+            .with_name_value("B1", "I=V(in)/100");
+        configured.params = "m=4 tc1=1m tc2=2u".to_owned();
+        let netlist = netlist_for(vec![configured]);
+        assert!(
+            netlist
+                .lines()
+                .any(|line| line.ends_with("I=V(in)/100 M=4 TC1=1m TC2=2u")),
+            "{netlist}"
+        );
+    }
+
+    /// TD and F/NL are alternative specifications of the same lossless line
+    /// and the engine takes TD as authoritative when both are present, so a
+    /// card must never carry both — the reference frequency would be an input
+    /// the editor accepts and the solver ignores.
+    #[test]
+    fn lossless_line_accepts_either_delay_or_electrical_length() {
+        let mut delayed = Component::new(1, ComponentType::TransmissionLine, Point::origin())
+            .with_name_value("T1", "");
+        delayed.params = "z0=75 td=2n".to_owned();
+        let netlist = netlist_for(vec![delayed]);
+        assert!(
+            netlist
+                .lines()
+                .any(|line| line.starts_with("T1 ") && line.ends_with("Z0=75 TD=2n")),
+            "{netlist}"
+        );
+
+        let mut electrical = Component::new(1, ComponentType::TransmissionLine, Point::origin())
+            .with_name_value("T1", "");
+        electrical.params = "z0=50 td=2n f=1G nl=0.25".to_owned();
+        let netlist = netlist_for(vec![electrical]);
+        assert!(
+            netlist
+                .lines()
+                .any(|line| line.starts_with("T1 ") && line.ends_with("Z0=50 F=1G NL=0.25")),
+            "a set reference frequency replaces the delay rather than joining it: {netlist}"
         );
     }
 
@@ -1752,6 +1905,33 @@ mod tests {
                 .lines()
                 .any(|l| l.starts_with("P2 ") && l.ends_with("PORT=2 Z0=75 AC 1")),
             "{netlist}"
+        );
+    }
+
+    /// A driven port's phase rides behind its magnitude — and only behind it,
+    /// since a bare phase has nothing to shift.
+    #[test]
+    fn rf_port_ac_phase_follows_its_magnitude() {
+        let mut shifted =
+            Component::new(1, ComponentType::RfPort, Point::origin()).with_name_value("P1", "");
+        shifted.params = "port=1 z0=50 ac_mag=1 ac_phase=90".to_owned();
+        let netlist = netlist_for(vec![shifted]);
+        assert!(
+            netlist
+                .lines()
+                .any(|l| l.starts_with("P1 ") && l.ends_with("PORT=1 Z0=50 AC 1 90")),
+            "{netlist}"
+        );
+
+        let mut phase_only =
+            Component::new(1, ComponentType::RfPort, Point::origin()).with_name_value("P1", "");
+        phase_only.params = "port=1 z0=50 ac_phase=90".to_owned();
+        let netlist = netlist_for(vec![phase_only]);
+        assert!(
+            netlist
+                .lines()
+                .any(|l| l.starts_with("P1 ") && l.ends_with("PORT=1 Z0=50")),
+            "an unmagnitudinal phase is not an excitation: {netlist}"
         );
     }
 

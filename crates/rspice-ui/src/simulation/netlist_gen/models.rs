@@ -5,6 +5,25 @@
 
 use super::*;
 
+/// A ` NAME=value` fragment for a switch model parameter the user left blank,
+/// or nothing at all.
+///
+/// Omission is not the same as a written default here: the engine's own
+/// default for SMOOTH differs between the voltage and current switches, so
+/// writing one would silently retune every deck that never asked for it.
+fn optional_model_param(
+    params: &std::collections::HashMap<String, String>,
+    key: &str,
+    card_name: &str,
+) -> String {
+    params
+        .get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| format!(" {card_name}={value}"))
+        .unwrap_or_default()
+}
+
 impl<'a> NetlistGenerator<'a> {
     pub(super) fn get_bjt_model(
         &mut self,
@@ -147,11 +166,49 @@ impl<'a> NetlistGenerator<'a> {
             let ih = Self::get_param_owned(&params, "ih", "", "0");
             let ron = Self::get_param_owned(&params, "ron", "", "1");
             let roff = Self::get_param_owned(&params, "roff", "", "1meg");
+            let smooth = optional_model_param(&params, "smooth", "SMOOTH");
             self.models.insert(
                 model_name.clone(),
                 format!(
-                    ".MODEL {} CSW (IT={} IH={} RON={} ROFF={})",
-                    model_name, it, ih, ron, roff
+                    ".MODEL {} CSW (IT={} IH={} RON={} ROFF={}{})",
+                    model_name, it, ih, ron, roff, smooth
+                ),
+            );
+        }
+
+        model_name
+    }
+
+    /// Get an expression-controlled switch model card.
+    ///
+    /// Deliberately not the `SW` card the voltage switch synthesizes: the
+    /// generic-switch builder only honours ON/OFF/ONH/OFFH/RON/ROFF and
+    /// silently drops everything else, so a VT/VH card would leave the
+    /// device on its default 0..1 control window whatever the user typed.
+    pub(super) fn get_generic_switch_model(
+        &mut self,
+        component: &Component,
+        explicit_model: Option<&str>,
+    ) -> String {
+        if let Some(model_name) = explicit_model.map(str::trim).filter(|s| !s.is_empty()) {
+            return model_name.to_string();
+        }
+
+        let model_name = format!("sw_{}", component.name);
+
+        if !self.models.contains_key(&model_name) {
+            let params = crate::state::parse_params_string(&component.params);
+            let on = Self::get_param_owned(&params, "on", "", "1");
+            let off = Self::get_param_owned(&params, "off", "", "0");
+            let ron = Self::get_param_owned(&params, "ron", "", "1");
+            let roff = Self::get_param_owned(&params, "roff", "", "1e12");
+            let onh = optional_model_param(&params, "onh", "ONH");
+            let offh = optional_model_param(&params, "offh", "OFFH");
+            self.models.insert(
+                model_name.clone(),
+                format!(
+                    ".MODEL {} SW (ON={} OFF={} RON={} ROFF={}{}{})",
+                    model_name, on, off, ron, roff, onh, offh
                 ),
             );
         }
@@ -255,15 +312,20 @@ impl<'a> NetlistGenerator<'a> {
 
         if !self.models.contains_key(&model_name) {
             let params = crate::state::parse_params_string(&component.params);
-            let ron = Self::get_param_owned(&params, "ron", "", "50");
-            let roff = Self::get_param_owned(&params, "roff", "", "1k");
-            self.models.insert(
-                model_name.clone(),
-                format!(
-                    ".MODEL {} MEMRISTOR (LEVEL=2 RON={} ROFF={})",
-                    model_name, ron, roff
-                ),
-            );
+            // The engine rejects a TEAM card carrying any key outside its own
+            // set, so only the keys it reads may be forwarded — and every one
+            // it reads is offered on the sheet. Blank fields are omitted so the
+            // engine's default stands rather than being restated here, where it
+            // could drift.
+            let mut card = format!(".MODEL {model_name} MEMRISTOR (LEVEL=2");
+            for key in [
+                "ron", "roff", "xon", "xoff", "xscaling", "kon", "koff", "alphaon", "alphaoff",
+                "ion", "ioff", "wt", "d", "p", "j", "aon", "aoff", "wc",
+            ] {
+                card.push_str(&optional_model_param(&params, key, &key.to_uppercase()));
+            }
+            card.push(')');
+            self.models.insert(model_name.clone(), card);
         }
 
         model_name
@@ -429,11 +491,12 @@ impl<'a> NetlistGenerator<'a> {
             let vh = Self::get_param_owned(&params, "vh", "", "0");
             let ron = Self::get_param_owned(&params, "ron", "", "1");
             let roff = Self::get_param_owned(&params, "roff", "", "1e12");
+            let smooth = optional_model_param(&params, "smooth", "SMOOTH");
             self.models.insert(
                 model_name.clone(),
                 format!(
-                    ".MODEL {} SW (VT={} VH={} RON={} ROFF={})",
-                    model_name, vt, vh, ron, roff
+                    ".MODEL {} SW (VT={} VH={} RON={} ROFF={}{})",
+                    model_name, vt, vh, ron, roff, smooth
                 ),
             );
         }

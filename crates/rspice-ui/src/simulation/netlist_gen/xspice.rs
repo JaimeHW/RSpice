@@ -9,98 +9,6 @@
 
 use super::*;
 
-/// Per-kind emission spec: registered code-model type, and the default
-/// model-card parameters (user `params` values override by key).
-struct XspiceSpec {
-    defaults: &'static [(&'static str, &'static str)],
-}
-
-fn xspice_spec(kind: ComponentType) -> Option<XspiceSpec> {
-    let spec = match kind {
-        ComponentType::XspiceGain => XspiceSpec {
-            defaults: &[("gain", "1"), ("in_offset", "0"), ("out_offset", "0")],
-        },
-        ComponentType::XspiceSummer => XspiceSpec {
-            defaults: &[("out_gain", "1"), ("out_offset", "0")],
-        },
-        ComponentType::XspiceMultiplier => XspiceSpec {
-            defaults: &[("out_gain", "1"), ("out_offset", "0")],
-        },
-        ComponentType::XspiceDivider => XspiceSpec {
-            defaults: &[
-                ("num_gain", "1"),
-                ("den_gain", "1"),
-                ("den_lower_limit", "1e-10"),
-            ],
-        },
-        // `limit`, `int`, and `d_dt` REQUIRE both output limits on the card.
-        ComponentType::XspiceLimiter => XspiceSpec {
-            defaults: &[
-                ("gain", "1"),
-                ("out_lower_limit", "-1"),
-                ("out_upper_limit", "1"),
-                ("limit_range", "1e-6"),
-            ],
-        },
-        ComponentType::XspiceIntegrator => XspiceSpec {
-            defaults: &[
-                ("gain", "1"),
-                ("out_lower_limit", "-1e12"),
-                ("out_upper_limit", "1e12"),
-                ("out_ic", "0"),
-            ],
-        },
-        ComponentType::XspiceDifferentiator => XspiceSpec {
-            defaults: &[
-                ("gain", "1"),
-                ("out_lower_limit", "-1e12"),
-                ("out_upper_limit", "1e12"),
-            ],
-        },
-        ComponentType::XspiceBuffer => XspiceSpec {
-            defaults: &[("rise_delay", "1n"), ("fall_delay", "1n")],
-        },
-        ComponentType::XspiceInverter => XspiceSpec {
-            defaults: &[("rise_delay", "1n"), ("fall_delay", "1n")],
-        },
-        ComponentType::XspiceAndGate => XspiceSpec {
-            defaults: &[("rise_delay", "1n"), ("fall_delay", "1n")],
-        },
-        ComponentType::XspiceOrGate => XspiceSpec {
-            defaults: &[("rise_delay", "1n"), ("fall_delay", "1n")],
-        },
-        ComponentType::XspiceNandGate => XspiceSpec {
-            defaults: &[("rise_delay", "1n"), ("fall_delay", "1n")],
-        },
-        ComponentType::XspiceNorGate => XspiceSpec {
-            defaults: &[("rise_delay", "1n"), ("fall_delay", "1n")],
-        },
-        ComponentType::XspiceXorGate => XspiceSpec {
-            defaults: &[("rise_delay", "1n"), ("fall_delay", "1n")],
-        },
-        ComponentType::XspiceTristate => XspiceSpec {
-            defaults: &[("delay", "1n")],
-        },
-        ComponentType::XspiceDFlipFlop => XspiceSpec {
-            defaults: &[("ic", "0"), ("rise_delay", "1n"), ("fall_delay", "1n")],
-        },
-        ComponentType::XspiceJkFlipFlop => XspiceSpec {
-            defaults: &[("ic", "0"), ("rise_delay", "1n"), ("fall_delay", "1n")],
-        },
-        ComponentType::XspiceSrLatch => XspiceSpec {
-            defaults: &[("ic", "0"), ("rise_delay", "1n"), ("fall_delay", "1n")],
-        },
-        ComponentType::XspiceAdcBridge => XspiceSpec {
-            defaults: &[("in_low", "1.0"), ("in_high", "2.0")],
-        },
-        ComponentType::XspiceDacBridge => XspiceSpec {
-            defaults: &[("out_low", "0"), ("out_high", "3.3")],
-        },
-        _ => return None,
-    };
-    Some(spec)
-}
-
 /// Shape the port list to the code model's port specs. `nodes` follows
 /// `terminal_offsets()` order.
 fn xspice_ports(kind: ComponentType, nodes: &[String]) -> Option<String> {
@@ -304,10 +212,11 @@ impl<'a> NetlistGenerator<'a> {
             ));
             return None;
         };
-        let Some(spec) = xspice_spec(component.kind) else {
+        let registry = rspice_core::xspice::CodeModelRegistry::with_builtins();
+        let Some(model) = registry.get(model_type) else {
             self.errors.push(format!(
-                "{} '{}' has no XSPICE parameter schema",
-                component.kind.display_name(),
+                "Built-in XSPICE model '{model_type}' required by '{}' is unavailable in this \
+                 build",
                 component.name
             ));
             return None;
@@ -327,28 +236,85 @@ impl<'a> NetlistGenerator<'a> {
         let model_name = format!("{}_model", instance_name.to_lowercase());
 
         if !self.models.contains_key(&model_name) {
-            let user_params = crate::state::parse_params_string(&component.params);
-            let card_params = spec
-                .defaults
+            // The card is built from the code model's own parameter list, so
+            // every field the property sheet offers reaches the deck and
+            // nothing the model does not declare can. Optional parameters the
+            // user left alone are omitted rather than restated, which keeps the
+            // engine's default authoritative; required ones must be present, so
+            // their catalog default is supplied when the editor has no override.
+            let raw = supply_required_xspice_defaults(model.parameters(), &component.params);
+            let order = model
+                .parameters()
                 .iter()
-                .map(|(key, default)| {
-                    let value = user_params
-                        .get(*key)
-                        .map(String::as_str)
-                        .filter(|v| !v.is_empty())
-                        .unwrap_or(default);
-                    format!("{}={}", key, value)
-                })
-                .collect::<Vec<_>>()
-                .join(" ");
-            self.models.insert(
-                model_name.clone(),
-                format!(".MODEL {} {} ({})", model_name, model_type, card_params),
-            );
+                .map(|parameter| parameter.name.clone())
+                .collect::<Vec<_>>();
+            let card_params =
+                match format_builtin_xspice_parameters(model.parameters(), &order, &raw) {
+                    Ok(parameters) => parameters,
+                    Err(error) => {
+                        self.errors.push(format!(
+                            "{} '{}' has invalid model parameters: {error}",
+                            component.kind.display_name(),
+                            component.name
+                        ));
+                        return None;
+                    }
+                };
+            let card = if card_params.is_empty() {
+                format!(".MODEL {model_name} {model_type}")
+            } else {
+                format!(".MODEL {model_name} {model_type} ({card_params})")
+            };
+            self.models.insert(model_name.clone(), card);
         }
 
         Some(format!("{} {} {}", instance_name, ports, model_name))
     }
+}
+
+/// Add each required code-model parameter the editor did not set, using the
+/// catalog's own default.
+///
+/// A required parameter has no engine-side fallback — the card must carry it —
+/// but the property bridge only persists values that differ from the sheet
+/// default, so an untouched required field is simply absent from `raw`. The
+/// catalog default is the same value the sheet shows, which is what makes
+/// filling it here a restatement rather than a guess.
+fn supply_required_xspice_defaults(
+    specifications: &[rspice_core::xspice::ParamSpec],
+    raw: &str,
+) -> String {
+    use rspice_core::xspice::ParamType;
+
+    let present = crate::state::parse_params_string(raw);
+    let mut supplied = raw.trim().to_owned();
+    for specification in specifications.iter().filter(|parameter| parameter.required) {
+        if present
+            .iter()
+            .any(|(key, value)| key.eq_ignore_ascii_case(&specification.name) && !value.is_empty())
+        {
+            continue;
+        }
+        let default = match specification.param_type {
+            ParamType::Boolean => {
+                if specification.default != 0.0 {
+                    "1".to_owned()
+                } else {
+                    "0".to_owned()
+                }
+            }
+            ParamType::String => specification.string_default.clone().unwrap_or_default(),
+            _ => specification.default.to_string(),
+        };
+        if default.is_empty() {
+            continue;
+        }
+        if !supplied.is_empty() {
+            supplied.push(' ');
+        }
+        supplied.push_str(&format!("{}={default}", specification.name));
+    }
+    supplied
 }
 
 fn format_builtin_xspice_parameters(
@@ -546,17 +512,21 @@ mod descriptor_contract_tests {
 
     use super::*;
 
+    /// The emitter no longer carries a per-kind parameter schema of its own —
+    /// it builds the card from the code model named by the descriptor — so what
+    /// has to hold is that every descriptor names a model this build registers.
     #[test]
-    fn every_legacy_xspice_descriptor_has_an_emitter_schema() {
+    fn every_legacy_xspice_descriptor_names_a_registered_code_model() {
+        let registry = rspice_core::xspice::CodeModelRegistry::with_builtins();
         for kind in ComponentType::ALL {
-            let is_xspice_descriptor = matches!(
-                kind.descriptor().implementation,
-                crate::state::DeviceImplementation::Xspice { .. }
-            );
-            assert_eq!(
-                xspice_spec(kind).is_some(),
-                is_xspice_descriptor,
-                "XSPICE descriptor/emitter drift for {}",
+            let crate::state::DeviceImplementation::Xspice { model_type } =
+                kind.descriptor().implementation
+            else {
+                continue;
+            };
+            assert!(
+                registry.get(model_type).is_some(),
+                "XSPICE descriptor/registry drift for {}: no code model '{model_type}'",
                 kind.descriptor().stable_id
             );
         }
