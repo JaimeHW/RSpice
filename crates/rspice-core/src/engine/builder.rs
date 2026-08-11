@@ -6763,6 +6763,7 @@ impl Engine {
                 }
                 ElementKind::Vccs {
                     transconductance,
+                    multiplicity,
                     control_nodes,
                     ..
                 } => {
@@ -6770,9 +6771,22 @@ impl Engine {
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     let cp = circuit.get_or_create_node(&control_nodes.0);
                     let cn = circuit.get_or_create_node(&control_nodes.1);
-                    circuit
-                        .vccs
-                        .add(element.name.clone(), np, nn, cp, cn, *transconductance);
+                    let xyce_source_semantics = self.config.spice_dialect == SpiceDialect::Xyce
+                        || netlist.params.expression_dialect()
+                            == crate::config::ExpressionDialect::Xyce;
+                    let multiplicity = resolved_source_multiplicity(
+                        &element.name,
+                        multiplicity,
+                        xyce_source_semantics,
+                    )?;
+                    circuit.vccs.add(
+                        element.name.clone(),
+                        np,
+                        nn,
+                        cp,
+                        cn,
+                        *transconductance * multiplicity,
+                    );
                 }
                 ElementKind::Cccs {
                     gain,
@@ -6808,6 +6822,7 @@ impl Engine {
                     expression,
                     tc1,
                     tc2,
+                    multiplicity,
                 } => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
@@ -6826,6 +6841,19 @@ impl Engine {
                             element.name, e
                         ))
                     })?;
+                    let xyce_source_semantics = self.config.spice_dialect == SpiceDialect::Xyce
+                        || netlist.params.expression_dialect()
+                            == crate::config::ExpressionDialect::Xyce;
+                    let multiplicity = resolved_source_multiplicity(
+                        &element.name,
+                        multiplicity,
+                        xyce_source_semantics,
+                    )?;
+                    let prepared_expression = if xyce_source_semantics {
+                        prepared_expression
+                    } else {
+                        scale_behavioral_expression(prepared_expression, multiplicity)
+                    };
 
                     let mut bvs =
                         crate::device::BehavioralVoltageSource::new_with_source_path_and_limits(
@@ -6849,6 +6877,7 @@ impl Engine {
                     expression,
                     tc1,
                     tc2,
+                    multiplicity,
                 } => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
@@ -6866,6 +6895,16 @@ impl Engine {
                             element.name, e
                         ))
                     })?;
+                    let xyce_source_semantics = self.config.spice_dialect == SpiceDialect::Xyce
+                        || netlist.params.expression_dialect()
+                            == crate::config::ExpressionDialect::Xyce;
+                    let multiplicity = resolved_source_multiplicity(
+                        &element.name,
+                        multiplicity,
+                        xyce_source_semantics,
+                    )?;
+                    let prepared_expression =
+                        scale_behavioral_expression(prepared_expression, multiplicity);
 
                     let mut bcs =
                         crate::device::BehavioralCurrentSource::new_with_source_path_and_limits(

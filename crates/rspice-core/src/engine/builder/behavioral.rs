@@ -1,6 +1,38 @@
 use super::*;
 use crate::Value;
 
+pub(in crate::engine::builder) fn resolved_source_multiplicity(
+    element_name: &str,
+    multiplicity: &crate::netlist::SourceMultiplicity,
+    xyce_semantics: bool,
+) -> Result<Value, SimulationError> {
+    if let Some(expression) = &multiplicity.value_expr {
+        return Err(SimulationError::Circuit(format!(
+            "Source '{}' has unresolved multiplicity expression '{}'",
+            element_name, expression
+        )));
+    }
+    let value = multiplicity.value;
+    if !value.is_finite() || xyce_semantics && value <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Source '{}' has invalid multiplicity M={}",
+            element_name, value
+        )));
+    }
+    Ok(value)
+}
+
+pub(in crate::engine::builder) fn scale_behavioral_expression(
+    expression: String,
+    multiplicity: Value,
+) -> String {
+    if multiplicity == 1.0 {
+        expression
+    } else {
+        format!("(({})*{})", expression, multiplicity)
+    }
+}
+
 pub(in crate::engine::builder) fn expression_references_circuit_state(expression: &str) -> bool {
     crate::netlist::expr::behavioral_expression_references_runtime_quantity(expression)
 }

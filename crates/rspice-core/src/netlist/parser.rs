@@ -28,11 +28,11 @@ use super::{
     OutputRequest, ParamContext, ParameterRedefinitionPolicy, ParametricValue, ParseDiagnostic,
     ParseError, ParseWithAbortError, PoleZeroAnalysisType, PoleZeroTransferType, PspiceUTiming,
     PspiceUTimingMode, RemoveUnusedDeviceType, RemoveUnusedPolicy, SaveSet, SaveSignal,
-    SensitivityAcSweep, SimulationOptions, SourceRfPort, SourceSpec, StartupDiagnosticCode,
-    StartupDirectiveDisposition, StartupDirectiveEntry, StartupDirectiveKind,
-    StartupDirectiveRecord, StartupDirectiveScope, StatisticalParamMode, StepCommand, StepSweep,
-    StepTarget, SubcircuitDef, SwitchState, VerilogAInclude, XyceAddResistorMode,
-    XyceAddResistorSpec, XyceAddResistorsPolicy, ensure_parse_not_aborted,
+    SensitivityAcSweep, SimulationOptions, SourceMultiplicity, SourceRfPort, SourceSpec,
+    StartupDiagnosticCode, StartupDirectiveDisposition, StartupDirectiveEntry,
+    StartupDirectiveKind, StartupDirectiveRecord, StartupDirectiveScope, StatisticalParamMode,
+    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
+    XyceAddResistorMode, XyceAddResistorSpec, XyceAddResistorsPolicy, ensure_parse_not_aborted,
     finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
     validate_startup_directives_with_abort,
 };
@@ -2576,12 +2576,14 @@ fn resolve_top_level_source_kind(
                     expression: expression.to_string(),
                     tc1: 0.0,
                     tc2: 0.0,
+                    multiplicity: SourceMultiplicity::default(),
                 })
             } else {
                 Ok(ElementKind::BehavioralCurrent {
                     expression: expression.to_string(),
                     tc1: 0.0,
                     tc2: 0.0,
+                    multiplicity: SourceMultiplicity::default(),
                 })
             }
         }

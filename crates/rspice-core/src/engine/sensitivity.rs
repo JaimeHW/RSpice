@@ -19,6 +19,7 @@ enum AcSensitivityElementField {
     CccsGain,
     VccsTransconductance,
     CcvsTransresistance,
+    SourceMultiplicity,
     BehavioralTc1,
     BehavioralTc2,
     TransmissionZ0,
@@ -1262,12 +1263,21 @@ impl Engine {
                     add_field(AcSensitivityElementField::CccsGain, "GAIN", *gain);
                 }
                 ElementKind::Vccs {
-                    transconductance, ..
-                } => add_field(
-                    AcSensitivityElementField::VccsTransconductance,
-                    "GM",
-                    *transconductance,
-                ),
+                    transconductance,
+                    multiplicity,
+                    ..
+                } => {
+                    add_field(
+                        AcSensitivityElementField::VccsTransconductance,
+                        "GM",
+                        *transconductance,
+                    );
+                    add_field(
+                        AcSensitivityElementField::SourceMultiplicity,
+                        "M",
+                        multiplicity.value,
+                    );
+                }
                 ElementKind::Ccvs {
                     transresistance, ..
                 } => add_field(
@@ -1275,8 +1285,33 @@ impl Engine {
                     "RM",
                     *transresistance,
                 ),
-                ElementKind::BehavioralVoltage { tc1, tc2, .. }
-                | ElementKind::BehavioralCurrent { tc1, tc2, .. } => {
+                ElementKind::BehavioralVoltage {
+                    tc1,
+                    tc2,
+                    multiplicity,
+                    ..
+                }
+                | ElementKind::BehavioralCurrent {
+                    tc1,
+                    tc2,
+                    multiplicity,
+                    ..
+                } => {
+                    Self::add_ac_sensitivity_target(
+                        &mut targets,
+                        &mut seen,
+                        AcSensitivityTarget {
+                            vector_name: format!("{name}_M"),
+                            element: name.clone(),
+                            element_type,
+                            parameter: "M".to_string(),
+                            nominal_value: multiplicity.value,
+                            location: AcSensitivityLocation::ElementField {
+                                element_index,
+                                field: AcSensitivityElementField::SourceMultiplicity,
+                            },
+                        },
+                    );
                     Self::add_ac_sensitivity_target(
                         &mut targets,
                         &mut seen,
@@ -1719,6 +1754,16 @@ impl Engine {
                     ) => {
                         *transresistance = value;
                         *transresistance_expr = None;
+                    }
+                    (
+                        AcSensitivityElementField::SourceMultiplicity,
+                        ElementKind::Vccs { multiplicity, .. }
+                        | ElementKind::BehavioralVoltage { multiplicity, .. }
+                        | ElementKind::BehavioralCurrent { multiplicity, .. },
+                    ) => {
+                        multiplicity.value = value;
+                        multiplicity.value_expr = None;
+                        multiplicity.given = true;
                     }
                     (
                         AcSensitivityElementField::BehavioralTc1,
