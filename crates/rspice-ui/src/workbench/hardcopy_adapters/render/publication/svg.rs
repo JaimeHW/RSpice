@@ -88,11 +88,7 @@ pub(super) fn render_page_svg(
 pub(super) fn write_embedded_svg_fonts(output: &mut String) {
     let encoded = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
     output.push_str("<style>");
-    for (family, weight, bytes) in [
-        ("RSpice Plex Sans", "400", IBM_PLEX_SANS_REGULAR),
-        ("RSpice Plex Sans", "600", IBM_PLEX_SANS_SEMIBOLD),
-        ("RSpice Plex Mono", "400", IBM_PLEX_MONO_REGULAR),
-    ] {
+    for (family, weight, bytes) in PUBLICATION_FACES {
         write!(
             output,
             "@font-face{{font-family:'{family}';font-style:normal;font-weight:{weight};src:url(data:font/ttf;base64,{}) format('truetype');}}",
@@ -386,9 +382,9 @@ pub(super) fn write_svg_fill(output: &mut String, plan: &HardcopyPlan, fill: Opt
 
 pub(super) fn svg_font(font: SceneFont) -> (&'static str, &'static str) {
     match font {
-        SceneFont::Sans => ("RSpice Plex Sans", "400"),
-        SceneFont::SansSemibold => ("RSpice Plex Sans", "600"),
-        SceneFont::Monospace => ("RSpice Plex Mono", "400"),
+        SceneFont::Sans => (PUBLICATION_SANS, "400"),
+        SceneFont::SansSemibold => (PUBLICATION_SANS, "600"),
+        SceneFont::Monospace => (PUBLICATION_MONO, "400"),
     }
 }
 
@@ -421,7 +417,7 @@ pub(super) fn write_svg_decorations(
         let page_right = printable.x.micrometres() + printable.width.micrometres();
         write!(
             output,
-            "<text x=\"{}\" y=\"{baseline}\" fill=\"{ink}\" font-family=\"RSpice Plex Sans\" font-weight=\"600\" font-size=\"{DECORATION_TEXT_UM}\">",
+            "<text x=\"{}\" y=\"{baseline}\" fill=\"{ink}\" font-family=\"{PUBLICATION_SANS}\" font-weight=\"600\" font-size=\"{DECORATION_TEXT_UM}\">",
             printable.x.micrometres()
         )
         .expect("write to string");
@@ -429,7 +425,7 @@ pub(super) fn write_svg_decorations(
         output.push_str("</text>");
         write!(
             output,
-            "<text x=\"{page_right}\" y=\"{baseline}\" fill=\"{secondary}\" font-family=\"RSpice Plex Mono\" font-size=\"{DECORATION_TEXT_UM}\" text-anchor=\"end\">"
+            "<text x=\"{page_right}\" y=\"{baseline}\" fill=\"{secondary}\" font-family=\"{PUBLICATION_MONO}\" font-size=\"{DECORATION_TEXT_UM}\" text-anchor=\"end\">"
         )
         .expect("write to string");
         escape_xml_into(
@@ -447,7 +443,7 @@ pub(super) fn write_svg_decorations(
             let center = printable.x.micrometres() + printable.width.micrometres() / 2;
             write!(
                 output,
-                "<text x=\"{center}\" y=\"{baseline}\" fill=\"{secondary}\" font-family=\"RSpice Plex Sans\" font-size=\"{DECORATION_TEXT_UM}\" text-anchor=\"middle\">"
+                "<text x=\"{center}\" y=\"{baseline}\" fill=\"{secondary}\" font-family=\"{PUBLICATION_SANS}\" font-size=\"{DECORATION_TEXT_UM}\" text-anchor=\"middle\">"
             )
             .expect("write to string");
             escape_xml_into(line, output);
@@ -458,7 +454,7 @@ pub(super) fn write_svg_decorations(
         let baseline = printable.y.micrometres() + printable.height.micrometres() - 2_000;
         write!(
             output,
-            "<text x=\"{}\" y=\"{baseline}\" fill=\"{secondary}\" font-family=\"RSpice Plex Mono\" font-size=\"2200\">",
+            "<text x=\"{}\" y=\"{baseline}\" fill=\"{secondary}\" font-family=\"{PUBLICATION_MONO}\" font-size=\"2200\">",
             printable.x.micrometres()
         )
         .expect("write to string");
@@ -533,7 +529,7 @@ pub(super) fn write_svg_decorations(
             }
             write!(
                 output,
-                "<text x=\"{}\" y=\"{}\" fill=\"{ink}\" font-family=\"RSpice Plex Sans\" font-size=\"2600\">",
+                "<text x=\"{}\" y=\"{}\" fill=\"{ink}\" font-family=\"{PUBLICATION_SANS}\" font-size=\"2600\">",
                 x + 15_000,
                 y + 900
             )
@@ -602,7 +598,7 @@ pub(super) fn write_svg_watermark(
     let size = width.micrometres().min(height.micrometres()) / 10;
     write!(
         output,
-        "<text x=\"{cx}\" y=\"{cy}\" fill=\"{ink}\" fill-opacity=\"0.16\" font-family=\"RSpice Plex Sans\" font-weight=\"600\" font-size=\"{size}\" text-anchor=\"middle\" transform=\"rotate(-35 {cx} {cy})\">"
+        "<text x=\"{cx}\" y=\"{cy}\" fill=\"{ink}\" fill-opacity=\"0.16\" font-family=\"{PUBLICATION_SANS}\" font-weight=\"600\" font-size=\"{size}\" text-anchor=\"middle\" transform=\"rotate(-35 {cx} {cy})\">"
     )
     .expect("write to string");
     escape_xml_into(text, output);
@@ -637,7 +633,7 @@ pub(super) fn write_svg_registration_marks(
     }
     write!(
         output,
-        "<text x=\"{}\" y=\"{}\" fill=\"{color}\" font-family=\"RSpice Plex Mono\" font-size=\"2200\">{}</text>",
+        "<text x=\"{}\" y=\"{}\" fill=\"{color}\" font-family=\"{PUBLICATION_MONO}\" font-size=\"2200\">{}</text>",
         left + 2_500,
         top + 3_000,
         page.coordinate()

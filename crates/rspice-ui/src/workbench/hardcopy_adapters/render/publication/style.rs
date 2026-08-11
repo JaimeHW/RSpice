@@ -5,6 +5,25 @@
 
 use super::*;
 
+/// The family names a publication puts on its text, and the face each one is
+/// published from.
+///
+/// The names are deliberately not the vendor's, so that an artifact lays out
+/// from the face it carries rather than from whatever face of the same name
+/// happens to be installed where it is opened. That only holds while every
+/// side agrees on the spelling: a family the writers name and the rasteriser
+/// cannot resolve is not an error anywhere — the text is silently dropped —
+/// so both sides read the names from here.
+pub(super) const PUBLICATION_SANS: &str = "RSpice Plex Sans";
+/// See [`PUBLICATION_SANS`].
+pub(super) const PUBLICATION_MONO: &str = "RSpice Plex Mono";
+/// Every publishable face, as family, CSS weight, and face data.
+pub(super) const PUBLICATION_FACES: [(&str, &str, &[u8]); 3] = [
+    (PUBLICATION_SANS, "400", IBM_PLEX_SANS_REGULAR),
+    (PUBLICATION_SANS, "600", IBM_PLEX_SANS_SEMIBOLD),
+    (PUBLICATION_MONO, "400", IBM_PLEX_MONO_REGULAR),
+];
+
 pub(super) fn page_primitives<'a>(
     scene: &'a HardcopyScene,
     page: &PreviewPage,

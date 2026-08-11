@@ -2482,6 +2482,6 @@ fn validate_aggregate_pagination(
 mod style;
 pub(super) use style::auto_trace_pattern;
 use style::{
-    ResolvedStroke, background_color, page_primitives, page_transform, resolve_color,
-    resolve_stroke, svg_color,
+    PUBLICATION_FACES, PUBLICATION_MONO, PUBLICATION_SANS, ResolvedStroke, background_color,
+    page_primitives, page_transform, resolve_color, resolve_stroke, svg_color,
 };

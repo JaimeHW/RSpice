@@ -6,6 +6,8 @@
 //! attempted and killed. Soft-proof preview is applied to the copy that is
 //! displayed, never to the bytes that are written out.
 
+use std::sync::{Arc, OnceLock};
+
 use super::*;
 
 #[derive(Debug)]
@@ -110,6 +112,36 @@ pub(super) fn aggregate_raster_pixels(
     Ok((total, largest))
 }
 
+/// The faces the rasteriser lays a page's text out from, filed under the
+/// families the writers put on that text rather than under the families the
+/// vendor's name table declares.
+///
+/// The rasteriser matches text to a face by family name and treats a name it
+/// cannot match as nothing to draw, so a database that only answers the vendor
+/// names loses every word on the page without failing anything. Built once:
+/// the faces are fixed for the life of the process, and a page is not the unit
+/// at which a font database should be parsed.
+fn publication_fontdb() -> Arc<usvg::fontdb::Database> {
+    static DATABASE: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
+    Arc::clone(DATABASE.get_or_init(|| {
+        let mut database = usvg::fontdb::Database::new();
+        for (family, _, data) in PUBLICATION_FACES {
+            for id in database.load_font_source(usvg::fontdb::Source::Binary(Arc::new(data))) {
+                let Some(mut face) = database.face(id).cloned() else {
+                    continue;
+                };
+                face.families = vec![(
+                    family.to_owned(),
+                    usvg::fontdb::Language::English_UnitedStates,
+                )];
+                database.push_face_info(face);
+                database.remove_face(id);
+            }
+        }
+        Arc::new(database)
+    }))
+}
+
 pub(super) fn rasterize_page(
     plan: &HardcopyPlan,
     scene: &HardcopyScene,
@@ -129,20 +161,12 @@ pub(super) fn rasterize_page_at_dimensions(
     height: u32,
 ) -> Result<RasterPage, HardcopyRenderError> {
     let svg = render_page_svg(plan, scene, page)?;
-    let mut options = usvg::Options {
+    let options = usvg::Options {
         dpi: f32::from(dpi),
-        font_family: "RSpice Plex Sans".to_owned(),
+        font_family: PUBLICATION_SANS.to_owned(),
+        fontdb: publication_fontdb(),
         ..usvg::Options::default()
     };
-    options
-        .fontdb_mut()
-        .load_font_data(IBM_PLEX_SANS_REGULAR.to_vec());
-    options
-        .fontdb_mut()
-        .load_font_data(IBM_PLEX_SANS_SEMIBOLD.to_vec());
-    options
-        .fontdb_mut()
-        .load_font_data(IBM_PLEX_MONO_REGULAR.to_vec());
     let tree = usvg::Tree::from_str(&svg, &options)
         .map_err(|error| HardcopyRenderError::SvgParse(error.to_string()))?;
     let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)

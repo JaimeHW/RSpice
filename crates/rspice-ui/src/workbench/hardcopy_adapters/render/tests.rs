@@ -94,6 +94,10 @@ fn source() -> ActiveHardcopySource {
 }
 
 fn setup(format: OutputFormat, tiled: bool) -> HardcopySetup {
+    setup_with_watermark(format, tiled, Watermark::Draft)
+}
+
+fn setup_with_watermark(format: OutputFormat, tiled: bool, watermark: Watermark) -> HardcopySetup {
     let target = match format {
         OutputFormat::NativePrinter => RenderTarget::SystemPrinter {
             printer_id: "test-printer".to_owned(),
@@ -136,7 +140,7 @@ fn setup(format: OutputFormat, tiled: bool) -> HardcopySetup {
             true,
         )
         .unwrap(),
-        DecorationSetup::try_new(true, true, true, Watermark::Draft).unwrap(),
+        DecorationSetup::try_new(true, true, true, watermark).unwrap(),
         PrintMappingTable::try_new(
             PrintMappingSaveScope::Document,
             vec![
@@ -163,10 +167,14 @@ fn setup(format: OutputFormat, tiled: bool) -> HardcopySetup {
 }
 
 fn plan(format: OutputFormat, content: ContentExtent, tiled: bool) -> HardcopyPlan {
+    plan_from_setup(setup(format, tiled), content)
+}
+
+fn plan_from_setup(setup: HardcopySetup, content: ContentExtent) -> HardcopyPlan {
     HardcopyPlan::compile_with_id(
         HardcopyPlanId::try_from_uuid(Uuid::from_u128(2)).unwrap(),
         source(),
-        setup(format, tiled),
+        setup,
         content,
     )
     .unwrap()
@@ -303,9 +311,11 @@ fn aggregate_plan_and_scene(format: OutputFormat) -> (HardcopyPlan, HardcopyScen
 }
 
 fn scene(content: ContentExtent) -> HardcopyScene {
-    let mut metadata =
-        HardcopySceneMetadata::try_new("Precision sensor & verification", "RSpice hardcopy tests")
-            .unwrap();
+    scene_titled(content, "Precision sensor & verification")
+}
+
+fn scene_titled(content: ContentExtent, title: &str) -> HardcopyScene {
+    let mut metadata = HardcopySceneMetadata::try_new(title, "RSpice hardcopy tests").unwrap();
     metadata.set_publication_timestamp(
         HardcopyPublicationTimestamp::try_new(2026, 7, 22, 12, 30, 0).unwrap(),
     );
@@ -928,6 +938,90 @@ fn native_printer_pages_are_opaque_and_share_canonical_pagination() {
     assert_eq!(page.page_number(), 1);
     assert_eq!(page.dpi(), 72);
     assert!(page.rgba().chunks_exact(4).all(|pixel| pixel[3] == 255));
+}
+
+/// Every rasterised page — printer, PNG, TIFF, dialog preview — is laid out
+/// from the SVG the vector writers emit, so any word the rasteriser cannot set
+/// disappears from the printed copy while the exported artifact still shows
+/// it. The page title reaches the raster through the header and through
+/// nothing else, which makes it a probe for the whole class.
+#[test]
+fn page_text_reaches_the_rasterised_page() {
+    let content = extent(100_000, 60_000);
+    let plan = plan(OutputFormat::NativePrinter, content, false);
+    let titled = |title: &str| {
+        HardcopyRenderer::render_printer_pages(&plan, &scene_titled(content, title), 72)
+            .unwrap()
+            .pages()[0]
+            .rgba()
+            .to_vec()
+    };
+    assert!(
+        titled("Precision sensor & verification") != titled("Bias network"),
+        "the rasteriser set no text on the page"
+    );
+}
+
+/// A draft marking that survives export but not printing is worse than none:
+/// it is the mechanism an unreleased sheet is kept from passing as a released
+/// one. It has to be a wash over the drawing rather than a bar across it, so
+/// what it marks stays readable — hence the bound on how far it may move any
+/// channel, which is what the writers' fill opacity allows and no more.
+#[test]
+fn the_watermark_reaches_every_rasterised_page() {
+    let content = extent(100_000, 60_000);
+    let ink = |format, watermark| {
+        let plan = plan_from_setup(setup_with_watermark(format, false, watermark), content);
+        match format {
+            OutputFormat::NativePrinter => {
+                HardcopyRenderer::render_printer_pages(&plan, &scene(content), 72)
+                    .unwrap()
+                    .pages()[0]
+                    .rgba()
+                    .to_vec()
+            }
+            _ => HardcopyRenderer::render(&plan, &scene(content))
+                .unwrap()
+                .single_part()
+                .unwrap()
+                .bytes()
+                .to_vec(),
+        }
+    };
+    for format in [
+        OutputFormat::NativePrinter,
+        OutputFormat::Png { dpi: 72 },
+        OutputFormat::Tiff { dpi: 72 },
+    ] {
+        assert!(
+            ink(format, Watermark::Draft) != ink(format, Watermark::None),
+            "{format:?} published a watermarked plan as an unmarked page"
+        );
+    }
+
+    let marked = ink(OutputFormat::NativePrinter, Watermark::Draft);
+    let plain = ink(OutputFormat::NativePrinter, Watermark::None);
+    let marked_pixels = marked.chunks_exact(4).count();
+    let differing = marked
+        .chunks_exact(4)
+        .zip(plain.chunks_exact(4))
+        .filter(|(under_mark, unmarked)| under_mark != unmarked)
+        .count();
+    assert!(
+        differing * 500 > marked_pixels,
+        "a mark on {differing} of {marked_pixels} pixels is too small to read"
+    );
+    let heaviest = marked
+        .iter()
+        .zip(plain.iter())
+        .map(|(under_mark, unmarked)| i16::from(*under_mark) - i16::from(*unmarked))
+        .map(i16::abs)
+        .max()
+        .unwrap_or_default();
+    assert!(
+        heaviest <= 42,
+        "the watermark moved a channel by {heaviest}, which is a bar over the drawing rather than a wash"
+    );
 }
 
 #[test]
