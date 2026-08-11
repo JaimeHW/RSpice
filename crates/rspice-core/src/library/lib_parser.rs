@@ -564,15 +564,22 @@ impl LibParser {
             }
 
             // Handle .subckt start
-            if upper.starts_with(".SUBCKT") {
-                if let Some(mut subckt) = self.parse_subckt_start(line, line_number) {
-                    subckt.description = if last_comment.is_empty() {
-                        None
-                    } else {
-                        Some(last_comment.clone())
-                    };
-                    subckt.source_file = self.current_file.clone();
-                    subckt_content = Some((subckt, vec![line.to_string()], line_number));
+            if Self::directive_rest(line, ".subckt").is_some() {
+                match self.parse_subckt_start(line, line_number) {
+                    Ok(mut subckt) => {
+                        subckt.description = if last_comment.is_empty() {
+                            None
+                        } else {
+                            Some(last_comment.clone())
+                        };
+                        subckt.source_file = self.current_file.clone();
+                        subckt_content = Some((subckt, vec![line.to_string()], line_number));
+                    }
+                    Err(message) => self.errors.push(ParseError {
+                        message,
+                        file: self.current_file.clone(),
+                        line: Some(line_number),
+                    }),
                 }
                 last_comment.clear();
                 continue;
@@ -957,36 +964,90 @@ impl LibParser {
     }
 
     /// Parse .subckt start line
-    fn parse_subckt_start(&self, line: &str, line_number: usize) -> Option<ParsedSubcircuit> {
+    fn parse_subckt_start(
+        &self,
+        line: &str,
+        line_number: usize,
+    ) -> Result<ParsedSubcircuit, String> {
         // Format: .SUBCKT name pin1 pin2 ... [param1=val1 ...]
-        let mut directive_and_rest = line.trim().splitn(2, char::is_whitespace);
-        if !directive_and_rest
-            .next()
-            .is_some_and(|directive| directive.eq_ignore_ascii_case(".subckt"))
-        {
-            return None;
+        let rest = Self::directive_rest(line, ".subckt")
+            .ok_or_else(|| "Expected a .subckt directive".to_owned())?;
+        let header = super::parser::split_library_subcircuit_header(rest)
+            .map_err(|message| format!(".subckt {message}"))?;
+        let name = header.name;
+        if header.parenthesized_ports.is_none() && header.tail.is_empty() {
+            return Err(format!(".subckt '{name}' is missing its formal-port list"));
         }
-        let fields = Self::tokenize_subcircuit_header(directive_and_rest.next()?.trim());
-        let name = fields.first()?.to_string();
+
+        let mut fields = vec![name.to_owned()];
+        let parenthesized_port_count = if let Some(formals) = header.parenthesized_ports {
+            let formal_fields = Self::tokenize_subcircuit_header(formals);
+            let count = formal_fields.len();
+            fields.extend(formal_fields);
+            fields.extend(Self::tokenize_subcircuit_header(header.tail));
+            Some(count)
+        } else {
+            fields.extend(Self::tokenize_subcircuit_header(header.tail));
+            None
+        };
+        let name = fields[0].to_string();
 
         let mut pins = Vec::new();
         let mut params = HashMap::new();
         let mut parameter_defaults = HashMap::new();
-        let mut parameter_mode = false;
         let mut index = 1;
+        if let Some(port_count) = parenthesized_port_count {
+            for field in fields.iter().skip(1).take(port_count) {
+                if super::parser::is_subcircuit_params_marker(field)
+                    || super::parser::is_subcircuit_optional_marker(field)
+                    || field.contains(['=', '(', ')'])
+                {
+                    return Err(format!(
+                        ".subckt '{name}' parenthesized formal-port list may contain only ports"
+                    ));
+                }
+                pins.push(field.to_string());
+            }
+            index += port_count;
+        } else {
+            while index < fields.len() {
+                let field = fields[index].as_str();
+                if super::parser::is_subcircuit_params_marker(field)
+                    || super::parser::is_subcircuit_optional_marker(field)
+                    || field.contains('=')
+                    || matches!(fields.get(index + 1).map(String::as_str), Some("="))
+                {
+                    break;
+                }
+                if field.contains(['(', ')']) {
+                    return Err(format!(
+                        ".subckt '{name}' parentheses around formal ports must form one balanced outer pair"
+                    ));
+                }
+                pins.push(field.to_string());
+                index += 1;
+            }
+        }
+
+        let mut optional_mode = false;
         while index < fields.len() {
             let field = fields[index].as_str();
-            if field.eq_ignore_ascii_case("params:")
-                || field.eq_ignore_ascii_case("param:")
-                || field.eq_ignore_ascii_case("parameters:")
-            {
-                parameter_mode = true;
+            if super::parser::is_subcircuit_params_marker(field) {
+                optional_mode = false;
+                index += 1;
+                continue;
+            }
+            if super::parser::is_subcircuit_optional_marker(field) {
+                optional_mode = true;
+                index += 1;
+                continue;
+            }
+            if optional_mode {
                 index += 1;
                 continue;
             }
 
             let assignment = if let Some((key, value)) = field.split_once('=') {
-                parameter_mode = true;
                 if value.is_empty() && index + 1 < fields.len() {
                     index += 1;
                     Some((key, fields[index].as_str()))
@@ -994,7 +1055,6 @@ impl LibParser {
                     Some((key, value))
                 }
             } else if index + 2 < fields.len() && fields[index + 1] == "=" {
-                parameter_mode = true;
                 let value = fields[index + 2].as_str();
                 index += 2;
                 Some((field, value))
@@ -1011,8 +1071,6 @@ impl LibParser {
                         params.insert(key.to_string(), value);
                     }
                 }
-            } else if !parameter_mode {
-                pins.push(field.to_string());
             }
             index += 1;
         }
@@ -1021,7 +1079,7 @@ impl LibParser {
         subckt.parameters = params;
         subckt.parameter_defaults = parameter_defaults;
         subckt.source_line = Some(line_number);
-        Some(subckt)
+        Ok(subckt)
     }
 
     /// Split one folded `.SUBCKT` header while keeping quoted, braced, and
@@ -1073,7 +1131,11 @@ impl LibParser {
                     paren_depth = paren_depth.saturating_sub(1);
                     current.push(character);
                 }
-                character if character.is_whitespace() && brace_depth == 0 && paren_depth == 0 => {
+                character
+                    if (character.is_whitespace() || character == ',')
+                        && brace_depth == 0
+                        && paren_depth == 0 =>
+                {
                     if !current.is_empty() {
                         fields.push(std::mem::take(&mut current));
                     }
@@ -1705,6 +1767,152 @@ mod tests {
             Some((2e-3_f64).to_bits())
         );
         assert_eq!(subcircuit.source_line, Some(3));
+    }
+
+    #[test]
+    fn parenthesized_subcircuit_interface_preserves_parameter_expressions() {
+        let mut parser = LibParser::new(".");
+        let result = parser.parse_string(
+            ".SuBcKt precision_filter (input, output, reference) OPTIONAL: substrate=0\n\
+             + PARAMS: CURVE=lookup(1, 2) SCALE={pow(GAIN, 2)}\n\
+             r1 input output 1k\n\
+             .ends precision_filter\n",
+        );
+
+        assert!(result.is_ok(), "{:?}", result.errors);
+        let subcircuit = result
+            .top_level_subcircuits
+            .first()
+            .expect("one top-level subcircuit");
+        assert_eq!(subcircuit.name, "precision_filter");
+        assert_eq!(subcircuit.pins, ["input", "output", "reference"]);
+        assert_eq!(
+            subcircuit
+                .parameter_defaults
+                .get("CURVE")
+                .map(String::as_str),
+            Some("lookup(1, 2)")
+        );
+        assert_eq!(
+            subcircuit
+                .parameter_defaults
+                .get("SCALE")
+                .map(String::as_str),
+            Some("{pow(GAIN, 2)}")
+        );
+        assert!(
+            !subcircuit.parameter_defaults.contains_key("substrate"),
+            "OPTIONAL terminal defaults are not ordinary subcircuit parameters"
+        );
+        assert!(!subcircuit.parameters.contains_key("substrate"));
+    }
+
+    #[test]
+    fn subcircuit_names_retain_internal_parentheses() {
+        let mut parser = LibParser::new(".");
+        let result = parser.parse_string(
+            ".subckt S861(C1)_5000/SIE input output\n\
+             .ends S861(C1)_5000/SIE\n",
+        );
+
+        assert!(result.is_ok(), "{:?}", result.errors);
+        let subcircuit = result
+            .top_level_subcircuits
+            .first()
+            .expect("one top-level subcircuit");
+        assert_eq!(subcircuit.name, "S861(C1)_5000/SIE");
+        assert_eq!(subcircuit.pins, ["input", "output"]);
+    }
+
+    #[test]
+    fn subckt_prefix_lookalike_is_not_a_declaration() {
+        let mut parser = LibParser::new(".");
+        let result = parser.parse_string(
+            ".SUBCKTfoo vendor extension\n\
+             .model visible D\n",
+        );
+
+        assert!(result.is_ok(), "{:?}", result.errors);
+        assert!(result.top_level_subcircuits.is_empty());
+        assert!(result.find_model("visible").is_some());
+    }
+
+    #[test]
+    fn plain_subcircuit_interfaces_stop_at_optional_params_and_bare_assignments() {
+        for source in [
+            ".subckt optional input output OPTIONAL: reference=0 PARAMS: GAIN=(1+2)\n\
+             .ends optional\n",
+            ".subckt bare input output GAIN=(1+2)\n.ends bare\n",
+            ".subckt param input output PARAM GAIN=(1+2)\n.ends param\n",
+            ".subckt param_colon input output PARAM: GAIN=(1+2)\n.ends param_colon\n",
+            ".subckt parameters input output PARAMETERS GAIN=(1+2)\n.ends parameters\n",
+            ".subckt parameters_colon input output PARAMETERS: GAIN=(1+2)\n\
+             .ends parameters_colon\n",
+        ] {
+            let mut parser = LibParser::new(".");
+            let result = parser.parse_string(source);
+            assert!(result.is_ok(), "{source:?}: {:?}", result.errors);
+            let subcircuit = result
+                .top_level_subcircuits
+                .first()
+                .expect("one top-level subcircuit");
+            assert_eq!(subcircuit.pins, ["input", "output"]);
+            assert_eq!(
+                subcircuit
+                    .parameter_defaults
+                    .get("GAIN")
+                    .map(String::as_str),
+                Some("(1+2)")
+            );
+            assert!(!subcircuit.parameter_defaults.contains_key("reference"));
+            assert!(!subcircuit.parameters.contains_key("reference"));
+        }
+    }
+
+    #[test]
+    fn malformed_parenthesized_subcircuit_interfaces_are_diagnostic() {
+        for (source, expected) in [
+            (
+                ".subckt empty ()\n.ends empty\n",
+                "formal-port list cannot be empty",
+            ),
+            (
+                ".subckt nested ((input output))\n.ends nested\n",
+                "nested parentheses",
+            ),
+            (
+                ".subckt unclosed (input output\n.ends unclosed\n",
+                "missing its closing ')'",
+            ),
+            (
+                ".subckt trailing (input output) reference\n.ends trailing\n",
+                "only OPTIONAL or parameter declarations may follow",
+            ),
+            (
+                ".subckt assigned (input GAIN=1)\n.ends assigned\n",
+                "may contain only ports",
+            ),
+            (
+                ".subckt adjacent(input output)\n.ends adjacent\n",
+                "balanced outer pair",
+            ),
+        ] {
+            let mut parser = LibParser::new(".");
+            let result = parser.parse_string(source);
+            assert!(!result.is_ok(), "{source:?} must fail");
+            assert!(
+                result
+                    .errors
+                    .iter()
+                    .any(|error| { error.message.contains(expected) && error.line == Some(1) }),
+                "{source:?} should report {expected:?}: {:?}",
+                result.errors
+            );
+            assert!(
+                result.top_level_subcircuits.is_empty(),
+                "{source:?} must not publish a partial interface"
+            );
+        }
     }
 
     #[test]

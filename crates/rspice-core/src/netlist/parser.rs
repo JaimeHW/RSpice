@@ -3677,6 +3677,199 @@ fn scan_options_tokens_for_seed(
 //=============================================================================
 
 #[cfg(test)]
+mod parenthesized_subckt_port_tests {
+    use super::*;
+    use crate::netlist::flatten_netlist_with_models;
+
+    fn xyce_options() -> NetlistParseOptions {
+        NetlistParseOptions {
+            expression_dialect: ExpressionDialect::Xyce,
+            ..NetlistParseOptions::default()
+        }
+    }
+
+    fn deck(header: &str) -> String {
+        format!("parenthesized subcircuit ports\n{header}\nR1 1 2 10\n.ENDS R\nX1 in 0 R\n.END\n")
+    }
+
+    #[test]
+    fn balanced_outer_port_parentheses_bind_like_plain_form() {
+        let plain = Netlist::parse_with_options(&deck(".SUBCKT R 1 2"), xyce_options())
+            .expect("plain formal ports parse");
+        for header in [".SUBCKT R (1 2)", ".SUBCKT R ( 1 2 )"] {
+            let parenthesized = Netlist::parse_with_options(&deck(header), xyce_options())
+                .unwrap_or_else(|error| panic!("{header} should parse: {error}"));
+            assert_eq!(parenthesized.subcircuits[0].ports, ["1", "2"]);
+
+            let plain_flat = flatten_netlist_with_models(&plain).expect("plain form flattens");
+            let parenthesized_flat =
+                flatten_netlist_with_models(&parenthesized).expect("parenthesized form flattens");
+            let snapshot = |elements: &[Element]| {
+                elements
+                    .iter()
+                    .map(|element| {
+                        (
+                            element.name.clone(),
+                            element.nodes.clone(),
+                            format!("{:?}", element.kind),
+                            element.provenance.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                snapshot(&parenthesized_flat.elements),
+                snapshot(&plain_flat.elements)
+            );
+        }
+    }
+
+    #[test]
+    fn continued_outer_port_parentheses_and_following_parameters_parse() {
+        let source = "continued parenthesized ports\n\
+                      .SUBCKT R\n\
+                      + (\n\
+                      + 1 2\n\
+                      + )\n\
+                      + PARAMS: SCALE=(1+2)*3\n\
+                      R1 1 2 {10*SCALE}\n\
+                      .ENDS R\n\
+                      X1 in 0 R\n\
+                      .END\n";
+        let parsed = Netlist::parse_with_options(source, xyce_options())
+            .expect("continued formal-port wrapper parses as one logical declaration");
+        assert_eq!(parsed.subcircuits[0].ports, ["1", "2"]);
+        assert!(parsed.subcircuits[0].params.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("SCALE") && value.to_bits() == 9.0f64.to_bits()
+        }));
+    }
+
+    #[test]
+    fn parameter_expression_parentheses_are_not_formal_port_syntax() {
+        for header in [
+            ".SUBCKT R 1 2 PARAMS: SCALE=(1+2)*3",
+            ".SUBCKT R (1 2) PARAMS: SCALE=(1+2)*3",
+            ".SUBCKT R (1 2) SCALE=(1+2)*3",
+        ] {
+            let parsed = Netlist::parse_with_options(&deck(header), xyce_options())
+                .unwrap_or_else(|error| panic!("{header} should preserve its expression: {error}"));
+            assert!(parsed.subcircuits[0].params.iter().any(|(name, value)| {
+                name.eq_ignore_ascii_case("SCALE") && value.to_bits() == 9.0f64.to_bits()
+            }));
+        }
+    }
+
+    #[test]
+    fn comma_bearing_parameter_functions_remain_one_expression() {
+        for header in [
+            ".SUBCKT R 1 2 PARAMS: SCALE=pow(2, 3)",
+            ".SUBCKT R (1 2) PARAMS: SCALE=pow(2, 3)",
+            ".SUBCKT R (1 2) SCALE=pow(2, 3)",
+        ] {
+            let parsed = Netlist::parse_with_options(&deck(header), xyce_options())
+                .unwrap_or_else(|error| panic!("{header} should preserve its expression: {error}"));
+            assert!(
+                parsed.subcircuits[0]
+                    .expr_params
+                    .iter()
+                    .any(|(name, expression)| {
+                        name.eq_ignore_ascii_case("SCALE") && expression == "pow(2, 3)"
+                    })
+            );
+        }
+    }
+
+    #[test]
+    fn non_xyce_parameter_marker_aliases_remain_supported() {
+        for header in [
+            ".SUBCKT R (1 2) PARAM: SCALE=(1+2)*3",
+            ".SUBCKT R (1 2) PARAMETERS SCALE=(1+2)*3",
+            ".SUBCKT R (1 2) OPTIONAL: REF=0 PARAMS: SCALE=(1+2)*3",
+        ] {
+            let parsed = Netlist::parse(&deck(header))
+                .unwrap_or_else(|error| panic!("{header} should parse: {error}"));
+            assert_eq!(parsed.subcircuits[0].ports, ["1", "2"]);
+            assert!(parsed.subcircuits[0].params.iter().any(|(name, value)| {
+                name.eq_ignore_ascii_case("SCALE") && value.to_bits() == 9.0f64.to_bits()
+            }));
+        }
+    }
+
+    #[test]
+    fn xyce_parenthesized_ports_accept_only_the_canonical_parameter_marker() {
+        for header in [
+            ".SUBCKT R (1 2) PARAM: SCALE=1",
+            ".SUBCKT R (1 2) PARAMETERS: SCALE=1",
+            ".SUBCKT R (1 2) OPTIONAL: REF=0 PARAMS: SCALE=1",
+        ] {
+            let error = Netlist::parse_with_options(&deck(header), xyce_options())
+                .expect_err("Xyce recognizes only PARAMS: after a formal-port wrapper");
+            assert!(matches!(error, ParseError::Syntax { line: 2, message }
+                if message.contains("unexpected token")));
+        }
+    }
+
+    #[test]
+    fn malformed_parenthesized_formal_port_lists_fail_closed() {
+        for header in [
+            ".SUBCKT R (1 2",
+            ".SUBCKT R 1 2)",
+            ".SUBCKT R ((1 2))",
+            ".SUBCKT (R) 1 2",
+            ".SUBCKT R (1 2 PARAMS: P=1)",
+            ".SUBCKT R (1 2) 3",
+            ".SUBCKT R (1, 2)",
+            ".SUBCKT R(1 2)",
+            ".SUBCKT R,(1 2)",
+            ".SUBCKT R , (1 2)",
+            ".SUBCKT , R (1 2)",
+            ".SUBCKT R (1 2)PARAMS: P=1",
+            ".SUBCKT R (1 2),PARAMS: P=1",
+            ".SUBCKT R ()",
+            ".SUBCKT R () PARAMS: P=1",
+        ] {
+            let error = Netlist::parse_with_options(&deck(header), xyce_options())
+                .expect_err("malformed parenthesized formal ports must be rejected");
+            assert!(
+                matches!(error, ParseError::Syntax { .. }),
+                "{header} returned {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parentheses_inside_a_non_xyce_subcircuit_name_remain_name_characters() {
+        let source = "parentheses in a library subcircuit name\n\
+                      .SUBCKT S861(C1)_5000/SIE 1 2\n\
+                      R1 1 2 10\n\
+                      .ENDS S861(C1)_5000/SIE\n\
+                      .END\n";
+        let parsed = Netlist::parse(source).expect("non-Xyce parenthesized name parses unchanged");
+        assert_eq!(parsed.subcircuits[0].name, "S861(C1)_5000/SIE");
+        assert_eq!(parsed.subcircuits[0].ports, ["1", "2"]);
+
+        let error = Netlist::parse_with_options(source, xyce_options())
+            .expect_err("Xyce tokenization does not preserve parentheses inside names");
+        assert!(matches!(error, ParseError::Syntax { line: 2, message }
+            if message.contains("name cannot contain parentheses")));
+    }
+
+    #[test]
+    fn subcircuit_instance_actual_nodes_do_not_gain_parenthesis_syntax() {
+        let source = "instance parentheses remain nodes\n\
+                      .SUBCKT R 1 2\n\
+                      R1 1 2 10\n\
+                      .ENDS R\n\
+                      X1 (in 0) R\n\
+                      .END\n";
+        let error = Netlist::parse_with_options(source, xyce_options())
+            .expect_err("parentheses on an X line must not be normalized into actual nodes");
+        assert!(matches!(error, ParseError::Syntax { line: 5, message }
+            if message.contains("subcircuit-instance actual nodes")));
+    }
+}
+
+#[cfg(test)]
 mod cancellation_tests {
     use super::*;
 

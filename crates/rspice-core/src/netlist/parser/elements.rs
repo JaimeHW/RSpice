@@ -5456,6 +5456,17 @@ pub(super) fn parse_subcircuit_instance(
     }
 
     let subckt_name = fields[param_start - 1].clone();
+    if params_ctx.expression_dialect() == ExpressionDialect::Xyce
+        && fields[1..param_start - 1]
+            .iter()
+            .any(|field| field.contains(['(', ')']))
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "parentheses around subcircuit-instance actual nodes are not supported"
+                .to_string(),
+        });
+    }
     let nodes = fields[1..param_start - 1]
         .iter()
         .map(|field| field.to_ascii_uppercase())
@@ -6829,7 +6840,12 @@ pub(super) fn parse_subckt_def(
     line_num: usize,
     params_ctx: &ParamContext,
 ) -> Result<SubcircuitDef, ParseError> {
-    let fields = split_spice_fields(line);
+    let expression_dialect = params_ctx.expression_dialect();
+    let (fields, parenthesized_port_count) = split_subckt_definition_fields(
+        line,
+        line_num,
+        expression_dialect == ExpressionDialect::Xyce,
+    )?;
     if fields.len() < 2 {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -6838,25 +6854,69 @@ pub(super) fn parse_subckt_def(
     }
 
     let name = fields[1].clone();
+    if params_ctx.expression_dialect() == ExpressionDialect::Xyce && name.contains(['(', ')']) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: ".SUBCKT name cannot contain parentheses in Xyce syntax".to_string(),
+        });
+    }
     let mut ports = Vec::new();
 
     let mut idx = 2usize;
-    while idx < fields.len() {
-        let field = &fields[idx];
-        if is_subckt_params_marker(field) {
+    if let Some(port_count) = parenthesized_port_count {
+        for field in fields.iter().skip(2).take(port_count) {
+            if is_subckt_params_marker(field, expression_dialect)
+                || is_subckt_optional_marker(field, expression_dialect)
+                || field.contains('=')
+            {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "parenthesized .SUBCKT formal-port list may contain only ports"
+                        .to_string(),
+                });
+            }
+            ports.push(field.to_ascii_uppercase());
+        }
+        idx += port_count;
+        if let Some(field) = fields.get(idx)
+            && !is_subckt_params_marker(field, expression_dialect)
+            && !is_subckt_optional_marker(field, expression_dialect)
+            && !field.contains('=')
+            && !matches!(fields.get(idx + 1).map(String::as_str), Some("="))
+        {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "unexpected token '{field}' after parenthesized .SUBCKT formal-port list"
+                ),
+            });
+        }
+    } else {
+        while idx < fields.len() {
+            let field = &fields[idx];
+            if is_subckt_params_marker(field, expression_dialect) {
+                idx += 1;
+                break;
+            }
+            if is_subckt_optional_marker(field, expression_dialect) {
+                idx += 1;
+                skip_subckt_optional_defaults(&fields, &mut idx, expression_dialect);
+                continue;
+            }
+            if field.contains('=') || matches!(fields.get(idx + 1).map(String::as_str), Some("=")) {
+                break;
+            }
+            if field.contains(['(', ')']) {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message:
+                        "parentheses around .SUBCKT formal ports must form one balanced outer pair"
+                            .to_string(),
+                });
+            }
+            ports.push(field.to_ascii_uppercase());
             idx += 1;
-            break;
         }
-        if is_subckt_optional_marker(field) {
-            idx += 1;
-            skip_subckt_optional_defaults(&fields, &mut idx);
-            continue;
-        }
-        if field.contains('=') || matches!(fields.get(idx + 1).map(String::as_str), Some("=")) {
-            break;
-        }
-        ports.push(field.to_ascii_uppercase());
-        idx += 1;
     }
 
     // Parse default parameters: NAME=VALUE pairs. Defaults may reference
@@ -6864,13 +6924,13 @@ pub(super) fn parse_subckt_def(
     let mut assignments = Vec::new();
     while idx < fields.len() {
         let field = &fields[idx];
-        if is_subckt_params_marker(field) {
+        if is_subckt_params_marker(field, expression_dialect) {
             idx += 1;
             continue;
         }
-        if is_subckt_optional_marker(field) {
+        if is_subckt_optional_marker(field, expression_dialect) {
             idx += 1;
-            skip_subckt_optional_defaults(&fields, &mut idx);
+            skip_subckt_optional_defaults(&fields, &mut idx, expression_dialect);
             continue;
         }
 
@@ -6926,18 +6986,258 @@ pub(super) fn parse_subckt_def(
     })
 }
 
-fn is_subckt_params_marker(field: &str) -> bool {
-    field.eq_ignore_ascii_case("PARAMS") || field.eq_ignore_ascii_case("PARAMS:")
+/// Split a `.SUBCKT` declaration while recognizing the HSpice-compatible
+/// `name (port ...)` form as one structural formal-port list.
+///
+/// Only the outer formal-port delimiters are removed. Parentheses in default
+/// parameter expressions remain byte-for-byte intact for the expression
+/// parser, and malformed/nested lists are rejected rather than inheriting
+/// Xyce's historical blanket deletion of standalone parenthesis tokens.
+fn split_subckt_definition_fields(
+    line: &str,
+    line_num: usize,
+    xyce_syntax: bool,
+) -> Result<(Vec<String>, Option<usize>), ParseError> {
+    let trimmed = line.trim_start();
+    let directive_end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
+    let directive = &trimmed[..directive_end];
+    let mut cursor = directive_end;
+    let directive_separator_start = cursor;
+    cursor = skip_subckt_header_separators(trimmed, cursor);
+    if trimmed[directive_separator_start..cursor].contains(',') {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: ".SUBCKT name must be separated from the directive by whitespace only"
+                .to_string(),
+        });
+    }
+
+    if cursor >= trimmed.len() {
+        return Ok((split_spice_fields(line), None));
+    }
+    let name_start = cursor;
+    while cursor < trimmed.len() {
+        let character = trimmed[cursor..]
+            .chars()
+            .next()
+            .expect("cursor remains on a character boundary");
+        if character.is_whitespace() || character == ',' {
+            break;
+        }
+        cursor += character.len_utf8();
+    }
+    let name = &trimmed[name_start..cursor];
+    let separator_start = cursor;
+    let wrapper_may_follow = trimmed[cursor..]
+        .chars()
+        .next()
+        .is_some_and(char::is_whitespace);
+    cursor = skip_subckt_header_separators(trimmed, cursor);
+
+    let Some(first_after_name) = trimmed[cursor..].chars().next() else {
+        return Ok((
+            assemble_unwrapped_subckt_definition_fields(directive, name, ""),
+            None,
+        ));
+    };
+    if first_after_name == ')' {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "closing ')' has no matching parenthesized .SUBCKT formal-port list"
+                .to_string(),
+        });
+    }
+    if first_after_name != '(' || !wrapper_may_follow {
+        return Ok((
+            assemble_unwrapped_subckt_definition_fields(
+                directive,
+                name,
+                &trimmed[separator_start..],
+            ),
+            None,
+        ));
+    }
+    if trimmed[separator_start..cursor].contains(',') {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "a parenthesized .SUBCKT formal-port list must be separated from its name by whitespace only"
+                .to_string(),
+        });
+    }
+
+    let open = cursor;
+    cursor += first_after_name.len_utf8();
+    let mut close = None;
+    while cursor < trimmed.len() {
+        let character = trimmed[cursor..]
+            .chars()
+            .next()
+            .expect("cursor remains on a character boundary");
+        match character {
+            '(' => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "nested parentheses are not allowed in a .SUBCKT formal-port list"
+                        .to_string(),
+                });
+            }
+            ')' => {
+                close = Some(cursor);
+                break;
+            }
+            _ => cursor += character.len_utf8(),
+        }
+    }
+    let Some(close) = close else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "unterminated parenthesized .SUBCKT formal-port list".to_string(),
+        });
+    };
+
+    let formal_port_source = &trimmed[open + 1..close];
+    if xyce_syntax && formal_port_source.contains(',') {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "commas are not separators in a Xyce parenthesized .SUBCKT formal-port list"
+                .to_string(),
+        });
+    }
+    let formal_ports = split_spice_fields(formal_port_source);
+    if formal_ports.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "parenthesized .SUBCKT formal-port list cannot be empty".to_string(),
+        });
+    }
+
+    let mut fields = Vec::with_capacity(2 + formal_ports.len());
+    fields.push(directive.to_string());
+    fields.push(name.to_string());
+    fields.extend(formal_ports.iter().cloned());
+    let after_close = close + ')'.len_utf8();
+    if let Some(character) = trimmed[after_close..].chars().next()
+        && !character.is_whitespace()
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "content after a parenthesized .SUBCKT formal-port list must be separated by whitespace"
+                .to_string(),
+        });
+    }
+    fields.extend(split_subckt_header_tail_fields(&trimmed[after_close..]));
+    Ok((fields, Some(formal_ports.len())))
 }
 
-fn is_subckt_optional_marker(field: &str) -> bool {
-    field.eq_ignore_ascii_case("OPTIONAL") || field.eq_ignore_ascii_case("OPTIONAL:")
+fn assemble_unwrapped_subckt_definition_fields(
+    directive: &str,
+    name: &str,
+    tail: &str,
+) -> Vec<String> {
+    let mut fields = Vec::new();
+    fields.push(directive.to_string());
+    fields.push(name.to_string());
+    fields.extend(split_subckt_header_tail_fields(tail));
+    fields
 }
 
-fn skip_subckt_optional_defaults(fields: &[String], idx: &mut usize) {
+/// Split the non-structural portion of a `.SUBCKT` header without breaking
+/// commas or whitespace inside parameter-expression function calls.
+///
+/// The ordinary SPICE field splitter deliberately treats commas as top-level
+/// separators. Subcircuit defaults additionally permit unbraced expressions
+/// such as `CURVE=lookup(1, 2)`, so their tail needs balanced-parenthesis
+/// awareness. Structural formal-port parentheses are consumed before this
+/// helper is called and are never normalized here.
+fn split_subckt_header_tail_fields(source: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut current = String::new();
+    let mut single_quote = false;
+    let mut double_quote = false;
+    let mut brace_depth = 0usize;
+    let mut parenthesis_depth = 0usize;
+
+    for character in source.chars() {
+        match character {
+            '\'' if !double_quote => {
+                single_quote = !single_quote;
+                current.push(character);
+            }
+            '"' if !single_quote => {
+                double_quote = !double_quote;
+                current.push(character);
+            }
+            '{' if !single_quote && !double_quote => {
+                brace_depth += 1;
+                current.push(character);
+            }
+            '}' if !single_quote && !double_quote => {
+                brace_depth = brace_depth.saturating_sub(1);
+                current.push(character);
+            }
+            '(' if !single_quote && !double_quote && brace_depth == 0 => {
+                parenthesis_depth += 1;
+                current.push(character);
+            }
+            ')' if !single_quote && !double_quote && brace_depth == 0 => {
+                parenthesis_depth = parenthesis_depth.saturating_sub(1);
+                current.push(character);
+            }
+            ',' | ' ' | '\t'
+                if !single_quote && !double_quote && brace_depth == 0 && parenthesis_depth == 0 =>
+            {
+                if !current.is_empty() {
+                    fields.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(character),
+        }
+    }
+
+    if !current.is_empty() {
+        fields.push(current);
+    }
+
+    fields
+}
+
+fn skip_subckt_header_separators(source: &str, mut cursor: usize) -> usize {
+    while cursor < source.len() {
+        let character = source[cursor..]
+            .chars()
+            .next()
+            .expect("cursor remains on a character boundary");
+        if !character.is_whitespace() && character != ',' {
+            break;
+        }
+        cursor += character.len_utf8();
+    }
+    cursor
+}
+
+fn is_subckt_params_marker(field: &str, expression_dialect: ExpressionDialect) -> bool {
+    if expression_dialect == ExpressionDialect::Xyce {
+        return field.eq_ignore_ascii_case("PARAMS:");
+    }
+    matches!(
+        field.to_ascii_uppercase().as_str(),
+        "PARAM" | "PARAM:" | "PARAMS" | "PARAMS:" | "PARAMETERS" | "PARAMETERS:"
+    )
+}
+
+fn is_subckt_optional_marker(field: &str, expression_dialect: ExpressionDialect) -> bool {
+    expression_dialect != ExpressionDialect::Xyce
+        && (field.eq_ignore_ascii_case("OPTIONAL") || field.eq_ignore_ascii_case("OPTIONAL:"))
+}
+
+fn skip_subckt_optional_defaults(
+    fields: &[String],
+    idx: &mut usize,
+    expression_dialect: ExpressionDialect,
+) {
     while *idx < fields.len() {
         let field = &fields[*idx];
-        if is_subckt_params_marker(field) {
+        if is_subckt_params_marker(field, expression_dialect) {
             break;
         }
 
