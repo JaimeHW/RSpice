@@ -3724,6 +3724,7 @@ mod availability_tests {
         AnalysisResultSourceDomain, AnalysisType, SensitivityResultMode, SensitivityResultRow,
         SimulationRun, WaveformData,
     };
+    use crate::workbench::app_state::SpecializedViewerCacheProvenance;
 
     fn state_with_analysis(analysis: AnalysisResult) -> AppState {
         let mut state = AppState::default();
@@ -4573,7 +4574,345 @@ mod availability_tests {
                     parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
                 });
             }
-            draw_sheet_and_tessellate(&mut state, viewer);
+            let mut app = RSpiceApp::test_instance();
+            app.state = state;
+            draw_sheet_and_tessellate(&mut app, viewer);
+        }
+    }
+
+    /// Every sheet, painted on evidence that sheet declares itself able to
+    /// draw.
+    ///
+    /// The fixture has to satisfy the sheet's own `viewer_availability`
+    /// contract, so this cannot pass by painting an empty state and calling it
+    /// coverage. Fourteen of the twenty-two sheets had never been through a
+    /// real frame in any test; their module tests derive and format values
+    /// without ever painting them, and a value that escapes an axis mapping
+    /// does not fail an assert — it becomes a vertex at infinity.
+    #[test]
+    fn every_sheet_draws_the_evidence_it_claims() {
+        for viewer in ResultViewer::every() {
+            let mut app = app_showing(viewer);
+            assert!(
+                viewer_availability(&app.state, viewer).available,
+                "the {viewer:?} fixture does not satisfy the sheet's own contract: {}",
+                viewer_availability(&app.state, viewer).reason
+            );
+            draw_sheet_and_tessellate(&mut app, viewer);
+        }
+    }
+
+    /// A dataset each sheet reports itself able to draw. Built from retained
+    /// evidence and, where a sheet reads a derived cache, through the same
+    /// derivation the controller runs after a completed analysis — never by
+    /// asserting a capability the data does not support.
+    fn app_showing(viewer: ResultViewer) -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        let analysis = match viewer {
+            ResultViewer::Waves
+            | ResultViewer::Table
+            | ResultViewer::Manifest
+            | ResultViewer::Eye
+            | ResultViewer::Fft => transient_analysis(),
+            ResultViewer::DcSweep => AnalysisResult::new(1, AnalysisType::DcSweep, "DC")
+                .with_waveforms(vec![WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 0.5, 1.0, 1.5],
+                    vec![0.0, 0.4, 0.9, 1.2],
+                    "#00aaff",
+                )]),
+            ResultViewer::Bode | ResultViewer::Nyquist | ResultViewer::Smith => ac_analysis(),
+            ResultViewer::HarmonicBalance => {
+                AnalysisResult::new(1, AnalysisType::HarmonicBalance, "HB").with_waveforms(vec![
+                    WaveformData::new(
+                        "V(out)",
+                        vec![0.0, 1.0e9, 2.0e9],
+                        vec![1.0, 0.1, 0.01],
+                        "#00aaff",
+                    )
+                    .with_complex_components(
+                        "V(out)",
+                        vec![1.0, 0.1, 0.01],
+                        vec![0.0, 0.02, 0.001],
+                    ),
+                ])
+            }
+            ResultViewer::PhaseNoise => AnalysisResult::new(1, AnalysisType::Pnoise, "PNOISE")
+                .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::PeriodicNoise {
+                    output_quantity: crate::state::PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz,
+                    carrier_frequency_hz: Some(2.4e9),
+                })
+                .with_waveforms(vec![WaveformData::new(
+                    "phase_noise",
+                    vec![1.0e3, 1.0e4, 1.0e5],
+                    vec![-80.0, -100.0, -120.0],
+                    "#00aaff",
+                )]),
+            ResultViewer::Hist => monte_carlo_analysis(),
+            ResultViewer::Op => AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_device_op(
+                rspice_core::circuit::DeviceOpReport {
+                    entries: vec![rspice_core::circuit::DeviceOpEntry {
+                        name: "M1".to_owned(),
+                        device_kind: "MOSFET",
+                        region: Some("saturation"),
+                        params: Vec::new(),
+                    }],
+                },
+            ),
+            ResultViewer::NoiseContrib => AnalysisResult::new(1, AnalysisType::Noise, "NOISE")
+                .with_waveforms(vec![WaveformData::new(
+                    "inoise",
+                    vec![1.0, 10.0, 100.0],
+                    vec![1.0e-9, 2.0e-9, 4.0e-9],
+                    "#00aaff",
+                )]),
+            ResultViewer::Contribution => AnalysisResult::new(1, AnalysisType::Sensitivity, "SENS")
+                .with_result_payload(AnalysisResultPayload::Sensitivity {
+                    output: "V(out)".to_owned(),
+                    result_mode: SensitivityResultMode::Dc,
+                    rows: vec![
+                        SensitivityResultRow {
+                            parameter: "r1".to_owned(),
+                            raw: 0.25,
+                            normalized: 0.5,
+                        },
+                        SensitivityResultRow {
+                            parameter: "r2".to_owned(),
+                            raw: -0.125,
+                            normalized: -0.25,
+                        },
+                    ],
+                }),
+            ResultViewer::TransferFunction => transfer_function_analysis(),
+            ResultViewer::Specs => {
+                app.state.workspace.specs.push(crate::state::SpecEntry {
+                    measurement: "V(out)".to_owned(),
+                    expression: String::new(),
+                    min: Some(-2.0),
+                    max: Some(5.0),
+                    unit: "V".to_owned(),
+                });
+                transient_analysis()
+            }
+            ResultViewer::PoleZero => AnalysisResult::new(1, AnalysisType::PoleZero, "PZ")
+                .with_result_payload(AnalysisResultPayload::PoleZero {
+                    poles: vec![crate::state::ComplexResultValue {
+                        real: -1.0e3,
+                        imaginary: 2.0e3,
+                    }],
+                    zeros: vec![crate::state::ComplexResultValue {
+                        real: -5.0e3,
+                        imaginary: 0.0,
+                    }],
+                    gain: 10.0,
+                }),
+            ResultViewer::Events => events_analysis(),
+            ResultViewer::Soa => soa_analysis(),
+            ResultViewer::Reliability => reliability_analysis(),
+            ResultViewer::Optimization => optimization_analysis(),
+        };
+
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(analysis);
+        app.state.simulation.runs = vec![run];
+        assert!(app.state.simulation.select_run(0));
+        assert!(app.state.simulation.select_analysis(0));
+
+        // Three sheets read a cache the controller fills after a run rather
+        // than the retained analysis itself. Derive it exactly as the
+        // controller's post-processing does, so the fixture cannot claim a
+        // capability the data would not actually produce.
+        match viewer {
+            ResultViewer::Nyquist => derive_nyquist(&mut app),
+            ResultViewer::Smith => derive_smith(&mut app),
+            ResultViewer::Hist => derive_histogram(&mut app),
+            _ => {}
+        }
+
+        if viewer == ResultViewer::Soa {
+            // The stress trace is the sheet's only plot; a card that never
+            // opens is a card this test never covers.
+            app.state.ui.results.soa_stress_trace_open = true;
+            app.state.ui.results.selected_soa_rule = Some(SoaRuleSelection {
+                analysis: active_analysis_key(&app.state),
+                device_id: "M1".to_owned(),
+                parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
+            });
+        }
+        app
+    }
+
+    fn transient_analysis() -> AnalysisResult {
+        let time: Vec<f64> = (0..64).map(|index| index as f64 * 1.0e-9).collect();
+        let values: Vec<f64> = time
+            .iter()
+            .map(|t| (t * 1.0e9 * std::f64::consts::TAU / 8.0).sin())
+            .collect();
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![WaveformData::new("V(out)", time, values, "#00aaff")])
+    }
+
+    fn ac_analysis() -> AnalysisResult {
+        let frequency = vec![1.0e3, 1.0e4, 1.0e5, 1.0e6];
+        let magnitude = vec![10.0, 7.0, 1.0, 0.1];
+        let imaginary = vec![0.0, -3.0, -0.9, -0.05];
+        AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
+            WaveformData::new("|V(out)|", frequency.clone(), magnitude.clone(), "#00aaff")
+                .with_complex_components("V(out)", magnitude, imaginary),
+            WaveformData::new(
+                "phase(V(out))",
+                frequency,
+                vec![0.0, -23.2, -83.0, -178.0],
+                "#ffaa00",
+            ),
+        ])
+    }
+
+    fn monte_carlo_analysis() -> AnalysisResult {
+        AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC").with_waveforms(vec![
+            WaveformData::new(
+                "V(out)",
+                vec![0.0, 1.0, 2.0, 3.0],
+                vec![0.95, 1.02, 0.98, 1.05],
+                "#00aaff",
+            ),
+        ])
+    }
+
+    fn transfer_function_analysis() -> AnalysisResult {
+        use crate::state::{
+            TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
+            TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
+        };
+        AnalysisResult::new(1, AnalysisType::Tf, "XF").with_result_payload(
+            AnalysisResultPayload::TransferFunction {
+                input_source: "vin".to_owned(),
+                output_expression: "V(out)".to_owned(),
+                input_quantity: TransferFunctionQuantityEvidence::Voltage,
+                output_quantity: TransferFunctionQuantityEvidence::Voltage,
+                input_unit: "V".to_owned(),
+                output_unit: "V".to_owned(),
+                normalization: TransferFunctionNormalizationEvidence::None,
+                accuracy: TransferFunctionAccuracyEvidence::Balanced,
+                gain: Some(TransferFunctionScalarEvidence::Finite(-12.5)),
+                input_resistance: Some(TransferFunctionScalarEvidence::Finite(1.0e6)),
+                output_resistance: Some(TransferFunctionScalarEvidence::Finite(50.0)),
+                nominal_input: None,
+                nominal_output: None,
+            },
+        )
+    }
+
+    fn in_flight_cache_provenance(app: &RSpiceApp) -> SpecializedViewerCacheProvenance {
+        let run = app
+            .state
+            .simulation
+            .active_run()
+            .expect("the fixture retained one run");
+        let dataset_id = run.dataset_id;
+        let analysis = app
+            .state
+            .simulation
+            .active_analysis()
+            .expect("the fixture selected one analysis");
+        SpecializedViewerCacheProvenance::for_analysis(dataset_id, analysis)
+    }
+
+    fn ac_complex_trace(app: &RSpiceApp) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        let analysis = app
+            .state
+            .simulation
+            .active_analysis()
+            .expect("the fixture selected one analysis");
+        let waveform = analysis
+            .waveforms
+            .iter()
+            .find(|waveform| waveform.complex.is_some())
+            .expect("the AC fixture retains one complex trace");
+        let complex = waveform
+            .complex
+            .as_ref()
+            .expect("the trace was selected for its complex components");
+        (
+            waveform.x.to_vec(),
+            complex.real.to_vec(),
+            complex.imag.to_vec(),
+        )
+    }
+
+    fn derive_nyquist(app: &mut RSpiceApp) {
+        let (frequency, real, imaginary) = ac_complex_trace(app);
+        let provenance = in_flight_cache_provenance(app);
+        app.state.analysis.nyquist_state.load_data(
+            crate::analysis::nyquist::data::NyquistData::from_arrays(
+                "V(out)", &frequency, &real, &imaginary,
+            ),
+        );
+        app.state
+            .bind_specialized_viewer_cache(ActiveViewer::Nyquist, provenance);
+    }
+
+    fn derive_smith(app: &mut RSpiceApp) {
+        let (frequency, real, imaginary) = ac_complex_trace(app);
+        let provenance = in_flight_cache_provenance(app);
+        app.state
+            .analysis
+            .smith_chart_state
+            .load_sparam_data("S11", &frequency, &real, &imaginary);
+        app.state
+            .bind_specialized_viewer_cache(ActiveViewer::SmithChart, provenance);
+    }
+
+    fn derive_histogram(app: &mut RSpiceApp) {
+        use crate::analysis::histogram::data::{Histogram, HistogramBin};
+
+        let counts = [2_usize, 5, 9, 4];
+        let edges = [0.90_f64, 0.95, 1.00, 1.05, 1.10];
+        let bins: Vec<HistogramBin> = counts
+            .iter()
+            .enumerate()
+            .map(|(index, count)| HistogramBin {
+                lower: edges[index],
+                upper: edges[index + 1],
+                count: *count,
+                weight: *count as f64,
+            })
+            .collect();
+        let total_count: usize = counts.iter().sum();
+        let provenance = in_flight_cache_provenance(app);
+        app.state
+            .analysis
+            .histogram_state
+            .load_histogram(Histogram {
+                name: "V(out)".to_owned(),
+                bins,
+                total_count,
+                total_weight: total_count as f64,
+                underflow: 0,
+                overflow: 0,
+                data_min: edges[0],
+                data_max: edges[edges.len() - 1],
+            });
+        app.state
+            .bind_specialized_viewer_cache(ActiveViewer::Histogram, provenance);
+    }
+
+    /// Every sheet, painted with no retained dataset at all.
+    ///
+    /// That is the workspace's state before the first run and the one a user
+    /// meets first, and it is where a plot divides by a zero-width axis span or
+    /// reads the first of an empty series. Fourteen of the twenty-two sheets had
+    /// never been through a real frame in any test — their module tests derive
+    /// and format values without ever painting them.
+    #[test]
+    fn every_sheet_paints_an_empty_dataset() {
+        for viewer in ResultViewer::every() {
+            let mut app = RSpiceApp::test_instance();
+            draw_sheet_and_tessellate(&mut app, viewer);
+            assert_eq!(
+                app.state.ui.results.viewer, viewer,
+                "{viewer:?} did not stay selected across its own frame"
+            );
         }
     }
 
@@ -4581,7 +4920,11 @@ mod availability_tests {
     /// assert every mesh vertex is finite. A value that escapes an axis
     /// mapping does not panic — it becomes a vertex at infinity and
     /// degenerates the whole draw call.
-    fn draw_sheet_and_tessellate(state: &mut AppState, viewer: ResultViewer) {
+    ///
+    /// Painted through `show_persistent_pane_viewer`, the same dispatch the
+    /// workbench itself paints through, so no sheet can pass here by a route
+    /// the product never takes.
+    fn draw_sheet_and_tessellate(app: &mut RSpiceApp, viewer: ResultViewer) {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let input = egui::RawInput {
@@ -4595,14 +4938,9 @@ mod availability_tests {
         // reader actually spends their time on.
         for _ in 0..2 {
             let output = ctx.run_ui(input.clone(), |ctx| {
-                egui::Panel::right("inspector").show(ctx, |ui| right_panel(ui, state));
-                egui::CentralPanel::default().show(ctx, |ui| match viewer {
-                    ResultViewer::Soa => soa::show(ui, state),
-                    ResultViewer::Reliability => reliability::show(ui, state),
-                    ResultViewer::Optimization => optimization::show(ui, state),
-                    ResultViewer::Events => events::show(ui, state),
-                    other => unreachable!("{other:?} is not covered by this harness"),
-                });
+                egui::Panel::right("inspector").show(ctx, |ui| right_panel(ui, &mut app.state));
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| show_persistent_pane_viewer(ui, app, viewer));
             });
             for primitive in ctx.tessellate(output.shapes, output.pixels_per_point) {
                 let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive else {
