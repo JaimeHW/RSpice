@@ -21,6 +21,7 @@ use super::page_kit::{
     Tone, card, card_body, card_head_row, card_note, card_row, card_with_head, field_pair,
     ledger_head, ledger_row, rule_row,
 };
+use super::workflows::{commit_plan_change, unique_copy_name};
 
 const REGISTRY_COLUMNS: [f32; 5] = [0.20, 0.13, 0.28, 0.17, 0.22];
 
@@ -72,11 +73,16 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
         .map(|output| (output.id, output.name.clone()));
     let mut pick = None;
     let mut remove = false;
+    let mut duplicate = false;
     card_with_head(
         ui,
         |ui| {
             card_head_row(ui, "Saved outputs", Some((status.as_str(), tone)), |ui| {
                 remove = Button::new("Remove")
+                    .enabled(selected_output.is_some())
+                    .show(ui)
+                    .clicked();
+                duplicate = Button::new("Duplicate")
                     .enabled(selected_output.is_some())
                     .show(ui)
                     .clicked();
@@ -129,17 +135,48 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
             );
         },
     );
-    if remove
-        && let Some((output_id, name)) = selected_output
+    if let Some((output_id, name)) = selected_output
         && let Ok(plan_id) = app
             .state
             .sim_setup
             .stable_analysis_plan()
             .map(|plan| plan.id())
     {
-        let detail = format!("Removed saved output {name}.");
-        remove_output(app, plan_id, output_id, &detail);
-        app.state.workbench.selected_saved_output = None;
+        if duplicate {
+            let copy = unique_copy_name(&name, |candidate| {
+                outputs
+                    .iter()
+                    .any(|output| output.name.eq_ignore_ascii_case(candidate))
+            });
+            let detail = format!("Duplicated saved output {name} as {copy}.");
+            let committed = copy.clone();
+            if commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
+                workspace
+                    .duplicate_saved_output(plan_id, output_id, copy)
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            }) {
+                // Selecting the copy is what makes duplicating useful: every
+                // capture decision is already carried over, so the record
+                // editor opens on the one field the copy exists to change.
+                app.state.workbench.saved_output_name_draft = None;
+                app.state.workbench.saved_output_expression_draft = None;
+                app.state.workbench.selected_saved_output = Some(committed);
+            }
+        } else if remove {
+            let detail = format!("Removed saved output {name}.");
+            // A refused removal leaves the record in the registry, so the
+            // selection has to survive with it — clearing regardless would
+            // close the editor on a row that is still there.
+            if commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
+                workspace
+                    .remove_saved_output(plan_id, output_id)
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            }) {
+                app.state.workbench.selected_saved_output = None;
+            }
+        }
     }
     if let Some(name) = pick {
         // A draft belongs to the row it was typed into. Selecting another row
@@ -489,30 +526,12 @@ fn replace_output(
         return false;
     };
     apply(&mut replacement);
-
-    let mut workspace = app.state.workspace.clone();
-    let mut setup = app.state.sim_setup.clone();
-    let outcome = workspace
-        .replace_saved_output(plan_id, output_id, replacement)
-        .map_err(|error| error.to_string())
-        .and_then(|_| {
-            setup
-                .commit_active_plan_configuration_change(detail.to_owned())
-                .map_err(|error| error.to_string())
-        });
-    match outcome {
-        Ok(receipt) => {
-            app.state.workspace = workspace;
-            app.state.sim_setup = setup;
-            app.invalidate_simulation_preflight();
-            app.state.workbench.analysis_lifecycle_status = receipt.status_line();
-            true
-        }
-        Err(error) => {
-            app.state.workbench.analysis_lifecycle_status = error;
-            false
-        }
-    }
+    commit_plan_change(app, plan_id, detail, move |workspace, plan_id| {
+        workspace
+            .replace_saved_output(plan_id, output_id, replacement)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    })
 }
 
 /// What a run will retain, summed from the same per-output preflight reports
@@ -580,33 +599,5 @@ fn format_bytes(bytes: u64) -> String {
         format!("{mib:.2} MiB")
     } else {
         format!("{:.1} KiB", bytes as f64 / 1024.0)
-    }
-}
-
-/// Remove one saved output as a single plan-configuration transaction.
-fn remove_output(
-    app: &mut RSpiceApp,
-    plan_id: SimulationPlanId,
-    output_id: crate::product::SavedOutputId,
-    detail: &str,
-) {
-    let mut workspace = app.state.workspace.clone();
-    let mut setup = app.state.sim_setup.clone();
-    let outcome = workspace
-        .remove_saved_output(plan_id, output_id)
-        .map_err(|error| error.to_string())
-        .and_then(|_| {
-            setup
-                .commit_active_plan_configuration_change(detail.to_owned())
-                .map_err(|error| error.to_string())
-        });
-    match outcome {
-        Ok(receipt) => {
-            app.state.workspace = workspace;
-            app.state.sim_setup = setup;
-            app.invalidate_simulation_preflight();
-            app.state.workbench.analysis_lifecycle_status = receipt.status_line();
-        }
-        Err(error) => app.state.workbench.analysis_lifecycle_status = error,
     }
 }

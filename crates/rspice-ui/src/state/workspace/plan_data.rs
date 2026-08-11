@@ -465,6 +465,44 @@ impl ProjectWorkspace {
         Ok(removed)
     }
 
+    /// Duplicate one plan-owned saved output under a caller-supplied unique
+    /// name.
+    ///
+    /// The copy receives a fresh stable identity and starts at the initial
+    /// revision, so it is a new record rather than a second reference to the
+    /// existing one. Every capture decision — kind, scope, save policy, stored
+    /// precision, streaming — is retained, which is the point: the expression
+    /// is what the caller intends to change afterwards. The existing add path
+    /// supplies field and case-insensitive name validation, and the returned
+    /// identity allows callers to select the committed copy immediately.
+    pub fn duplicate_saved_output(
+        &mut self,
+        plan_id: SimulationPlanId,
+        output_id: SavedOutputId,
+        name: impl Into<String>,
+    ) -> Result<SavedOutputId, SimulationConfigurationError> {
+        let source = self
+            .active_plan_data(plan_id)
+            .ok_or(SimulationConfigurationError::PlanPayloadMissing { plan_id })?
+            .saved_outputs
+            .iter()
+            .find(|output| output.id == output_id)
+            .cloned()
+            .ok_or(SimulationConfigurationError::SavedOutputNotFound { plan_id, output_id })?;
+        let mut duplicate = source;
+        duplicate.id = SavedOutputId::new();
+        duplicate.revision = ObjectRevision::INITIAL;
+        duplicate.name = name.into();
+        let duplicate_id = duplicate.id;
+
+        let mut candidate = self.clone();
+        candidate.add_saved_output(plan_id, duplicate)?;
+        candidate.validate_simulation_configuration()?;
+
+        *self = candidate;
+        Ok(duplicate_id)
+    }
+
     /// Copy or initialize the payload for a newly cloned plan. The insertion
     /// is atomic with respect to validation: no target record is created on
     /// any error.

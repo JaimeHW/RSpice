@@ -463,6 +463,123 @@ fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
     );
 }
 
+/// Duplicating exists so a second signal can inherit a capture contract that
+/// was already tuned — the expression is the one thing the copy is meant to
+/// change. If the copy shared the original's identity it would be a second
+/// reference rather than a new record, and renaming one would rename both.
+#[test]
+fn a_duplicated_saved_output_inherits_everything_but_its_identity_and_name() {
+    use crate::product::{ObjectRevision, SavedOutputId};
+    use crate::state::{
+        SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
+        SavedOutputPrecision, SavedOutputStreaming,
+    };
+
+    let mut app = RSpiceApp::test_instance();
+    let plan_id = plan_id(&app);
+    // Deliberately non-default capture decisions: a copy that silently reset
+    // them to the defaults would still pass a weaker assertion.
+    let output = SavedOutput::new(
+        SavedOutputKind::RawVoltageOrCurrent,
+        "vout",
+        "V(out)",
+        SavedOutputCompatibility::AllCompatibleAnalyses,
+        SavedOutputPolicy::ALL[SavedOutputPolicy::ALL.len() - 1],
+        SavedOutputPrecision::ALL[SavedOutputPrecision::ALL.len() - 1],
+        SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
+    )
+    .expect("valid saved output");
+    let output_id = output.id;
+    let source = output.clone();
+    app.state
+        .workspace
+        .add_saved_output(plan_id, output)
+        .expect("the plan accepts a valid output");
+
+    let copy_id = app
+        .state
+        .workspace
+        .duplicate_saved_output(plan_id, output_id, "vout_copy")
+        .expect("a free name duplicates");
+    assert!(copy_id != output_id, "the copy is its own record");
+
+    let payload = app
+        .state
+        .workspace
+        .active_plan_data(plan_id)
+        .expect("payload");
+    assert_eq!(payload.saved_outputs.len(), 2);
+    let copy = payload
+        .saved_outputs
+        .iter()
+        .find(|output| output.id == copy_id)
+        .expect("the committed copy is in the registry");
+    assert_eq!(copy.name, "vout_copy");
+    assert!(copy.revision == ObjectRevision::INITIAL);
+    // Comparing the whole record, rather than listing the fields, is what keeps
+    // this honest when SavedOutput grows another capture decision.
+    let mut expected = source;
+    expected.id = copy.id;
+    expected.revision = copy.revision;
+    expected.name.clone_from(&copy.name);
+    assert!(
+        *copy == expected,
+        "the copy differs from its source only in identity and name"
+    );
+
+    // The registry validates uniqueness case-insensitively, so a differently
+    // cased collision has to be refused too — and refused atomically.
+    assert!(
+        app.state
+            .workspace
+            .duplicate_saved_output(plan_id, output_id, "VOUT")
+            .is_err()
+    );
+    assert!(
+        app.state
+            .workspace
+            .duplicate_saved_output(plan_id, SavedOutputId::new(), "orphan")
+            .is_err()
+    );
+    assert_eq!(
+        app.state
+            .workspace
+            .active_plan_data(plan_id)
+            .expect("payload")
+            .saved_outputs
+            .len(),
+        2,
+        "a refused duplicate leaves the registry exactly as it was"
+    );
+}
+
+/// Both registries derive the copy's name rather than opening a dialog over a
+/// table that is about to change, so the derivation has to agree with the
+/// case-insensitive uniqueness rule the plan itself enforces.
+#[test]
+fn a_duplicate_name_skips_every_name_the_registry_already_holds() {
+    use super::workflows::unique_copy_name;
+
+    let held = |names: &'static [&'static str]| {
+        move |candidate: &str| {
+            names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(candidate))
+        }
+    };
+
+    assert_eq!(unique_copy_name("vout", held(&[])), "vout_copy");
+    assert_eq!(unique_copy_name("vout", held(&["vout"])), "vout_copy");
+    assert_eq!(
+        unique_copy_name("vout", held(&["vout", "vout_copy"])),
+        "vout_copy_2"
+    );
+    assert_eq!(
+        unique_copy_name("vout", held(&["VOUT_COPY", "vout_copy_2"])),
+        "vout_copy_3"
+    );
+}
+
 /// Authoring belongs to the specification editor in Results, so this page's
 /// selection has to survive that list being edited underneath it. Keyed by row
 /// index it could not: removing one requirement re-points the selection at
