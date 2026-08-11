@@ -693,6 +693,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             XyceBaselineFamilyKind::TransientAnalysisExpression
                 | XyceBaselineFamilyKind::NakedAlgebra
                 | XyceBaselineFamilyKind::SourceMultiplicity
+                | XyceBaselineFamilyKind::Bug38SubcktFormalParentheses
         ) && self.requires_upstream_wrapper(&self.relative_key(path))
         {
             XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily

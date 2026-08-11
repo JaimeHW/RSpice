@@ -6035,8 +6035,9 @@ impl XyceTestRunner {
     pub(super) fn strict_transient_family_snapshot(
         contract: &XyceBaselineFamilyContract,
         netlist: &Netlist,
-        print: &XycePrintRequest,
+        plan: &XyceStaticTranPlan,
     ) -> Result<XyceStrictTransientFamilySnapshot, String> {
+        let print = plan.require_print("strict transient family snapshot")?;
         match contract.kind {
             XyceBaselineFamilyKind::AgeCap => Self::age_cap_family_snapshot(netlist, print)
                 .map(XyceStrictTransientFamilySnapshot::AgeCap),
@@ -6088,6 +6089,10 @@ impl XyceTestRunner {
             XyceBaselineFamilyKind::TransientAnalysisExpression => {
                 Self::transient_analysis_expression_snapshot(netlist, print)
                     .map(XyceStrictTransientFamilySnapshot::TransientAnalysisExpression)
+            }
+            XyceBaselineFamilyKind::Bug38SubcktFormalParentheses => {
+                Self::bug38_family_snapshot(netlist, plan)
+                    .map(XyceStrictTransientFamilySnapshot::Bug38)
             }
             other => Err(format!(
                 "strict transient family kind {} has no semantic snapshot contract",

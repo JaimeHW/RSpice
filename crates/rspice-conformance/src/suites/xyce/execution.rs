@@ -1021,6 +1021,34 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.bug38_family_contract(deck) {
+            let result = match contract {
+                Ok(contract) => self.run_bug38_family_contract(deck, contract, start),
+                Err(reason) => {
+                    let role = XyceBug38Role::for_record(&deck.relative_path)
+                        .expect("BUG_38_SON detection selects only recognized records");
+                    self.failure_result(
+                        deck,
+                        start,
+                        role.result_contract(),
+                        format!(
+                            "BUG_38_SON formal-parentheses family provenance qualification failed: {reason}"
+                        ),
+                        Vec::new(),
+                    )
+                }
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.source_multiplicity_family_contract(deck) {
             let result = match contract {
                 Ok(contract) => self.run_source_multiplicity_family_contract(deck, contract, start),
@@ -10281,6 +10309,39 @@ impl XyceTestRunner {
         result
     }
 
+    pub(super) fn run_bug38_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceBug38FamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.role.result_contract();
+        if let Err(reason) = self.validate_bug38_provenance(&contract) {
+            return self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("BUG_38_SON provenance changed before execution: {reason}"),
+                Vec::new(),
+            );
+        }
+        let mut result =
+            self.run_baseline_family_contract(deck, contract.relational.clone(), start);
+        if result.passed && !result.expected_unsupported {
+            if let Err(reason) = self.validate_bug38_provenance(&contract) {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG_38_SON provenance changed during execution: {reason}"),
+                    Vec::new(),
+                );
+            }
+            result.contract = result_contract.to_string();
+        }
+        result
+    }
+
     pub(super) fn run_abm_frequency_family_contract(
         &self,
         deck: &XyceDeck,
@@ -10457,6 +10518,7 @@ impl XyceTestRunner {
                 | XyceBaselineFamilyKind::PassiveCapPrimaryValue
                 | XyceBaselineFamilyKind::PassiveTemperatureOverride
                 | XyceBaselineFamilyKind::TransientAnalysisExpression
+                | XyceBaselineFamilyKind::Bug38SubcktFormalParentheses
         ) && analysis != XyceBaselineFamilyAnalysis::Tran
         {
             return self.failure_result(
@@ -11829,6 +11891,23 @@ impl XyceTestRunner {
                 Vec::new(),
             );
         }
+        if contract.kind == XyceBaselineFamilyKind::Bug38SubcktFormalParentheses
+            && let Err(err) = Self::validate_bug38_transient_plan(
+                &baseline_plan,
+                XyceBug38Role::ParenthesizedControl,
+            )
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline qualification failed: {err}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
 
         let (baseline_netlist, baseline_result) = match self.run_transient_family_plan(
             &baseline_plan,
@@ -11878,7 +11957,7 @@ impl XyceTestRunner {
             match Self::strict_transient_family_snapshot(
                 &contract,
                 &baseline_netlist,
-                baseline_print,
+                &baseline_plan,
             ) {
                 Ok(snapshot) => Some(snapshot),
                 Err(err) => {
@@ -12249,6 +12328,22 @@ impl XyceTestRunner {
                     Vec::new(),
                 );
             }
+            if contract.kind == XyceBaselineFamilyKind::Bug38SubcktFormalParentheses
+                && let Err(err) =
+                    Self::validate_bug38_transient_plan(&target_plan, XyceBug38Role::WrapperOwner)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} qualification failed: {err}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
             if !Self::baseline_family_tran_contracts_compatible(
                 contract.kind,
                 baseline_plan.contract,
@@ -12411,7 +12506,7 @@ impl XyceTestRunner {
                 let target_snapshot = match Self::strict_transient_family_snapshot(
                     &contract,
                     &target_netlist,
-                    target_print,
+                    &target_plan,
                 ) {
                     Ok(snapshot) => snapshot,
                     Err(err) => {
@@ -12467,7 +12562,12 @@ impl XyceTestRunner {
                         );
                     }
                 };
-                let comparison = if contract.comparison.compares_serialized_prn_exactly() {
+                let comparison = if contract.comparison.compares_prn_case_insensitively() {
+                    self.compare_serialized_default_prn_tables_case_insensitive(
+                        &baseline_table,
+                        &target_table,
+                    )
+                } else if contract.comparison.compares_serialized_prn_exactly() {
                     self.compare_serialized_default_prn_tables(&baseline_table, &target_table)
                 } else {
                     self.compare_exact_prn_tables(

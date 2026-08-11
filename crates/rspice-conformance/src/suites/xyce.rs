@@ -58,15 +58,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 207;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 208;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "c6e46fb6ee3946d7a3cd67f2f4623b88af0103eef4c59704185f43b36f7746b4";
+    "18f773adfbd8325c9ad1afaf312c34dc7d5853d0edd7f3a7cb0465e844452c1a";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "51c47578798f6126f4dd6a21511b9c77f8b133758cb7ff11bdcd0fef2e80337d";
+    "dc93435915cd1df203c6df7e91646505600a8ca8804d8a8084c52ef2cb412979";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "200d066fb12c4b7eef89ff2498cf7358f8189e0f2f875bf2b3c3d7d92891f585";
+    "ad2b2c0c83a9396f535fea3b889e0b2f2bcf7705bce40e09ae6743a5d1567d03";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -459,6 +459,89 @@ const XYCE_ABM_LOOKUP_ORDER_HISTORICAL_ORACLE_BLAKE3: &str =
     "897989a3f58c9339b2dcf88fc3333987ec1b1b57988cd6a78c54d1f56db88277";
 const XYCE_ABM_LOOKUP_ORDER_GRID: [Value; 11] =
     [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
+
+// Release 7.10's BUG_38_SON wrapper executes the ordinary SUBCKT-formal
+// spelling and the HSpice-compatible parenthesized spelling independently,
+// then applies `diff -i` to their default PRN files. Bind the exact retained
+// pair and the historical README/wrapper/exclude artifacts before reproducing
+// that relational oracle natively.
+const XYCE_BUG38_WRAPPER_OWNER_CONTRACT: &str = "bug38_subckt_formal_parentheses_wrapper_owner";
+const XYCE_BUG38_PARENTHESIZED_CONTROL_CONTRACT: &str = "bug38_subckt_formal_parentheses_control";
+const XYCE_BUG38_PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
+const XYCE_BUG38_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG38_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG38_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_38_SON/bug_38_son.cir";
+const XYCE_BUG38_CONTROL_PATH: &str = "Netlists/Certification_Tests/BUG_38_SON/bug_38_son_p.cir";
+const XYCE_BUG38_OWNER_RECORD: &str = "netlists/certification_tests/bug_38_son/bug_38_son.cir";
+const XYCE_BUG38_CONTROL_RECORD: &str = "netlists/certification_tests/bug_38_son/bug_38_son_p.cir";
+const XYCE_BUG38_OWNER_CONTENT_BLAKE3: &str =
+    "92ee9edf950c7f319c7d73bb3307b8792f5fad512f3127fd20149fc28e392a57";
+const XYCE_BUG38_CONTROL_CONTENT_BLAKE3: &str =
+    "15f55cf395f52fcb1a9f36bfe8819e26bc66616d1ca781af0792331d0cbec9e5";
+const XYCE_BUG38_HISTORICAL_EXCLUDE_PATH: &str = "Netlists/Certification_Tests/BUG_38_SON/exclude";
+const XYCE_BUG38_CANDIDATE_COUNT: usize = 2;
+const XYCE_BUG38_CANDIDATE_BLAKE3: &str =
+    "c1dda42002414671ded07873bba2c55d4efd8b8a3267eb02cff9e7d8597d6d8a";
+const XYCE_BUG38_CANDIDATE_CONTENT_BLAKE3: &str =
+    "2ec24f64a38c27dd2c73416783c24c40fd816ac97dd1b12e736939454db2c172";
+const XYCE_BUG38_OWNER_MANIFEST_BLAKE3: &str =
+    "7ee59f89e3bb85ece40a4dc090b518349194913e7a8c898b0046e4cef58b6615";
+const XYCE_BUG38_HISTORICAL_EXCLUSION_BLAKE3: &str =
+    "c106473166f096b0fd22fff4d50c18902a59f93dccb1d71e77b21f7d7f465c4a";
+const XYCE_BUG38_REQUIRED_ORACLE_RECORD_COUNT: usize = 6;
+const XYCE_BUG38_REQUIRED_ORACLE_BYTES: usize = 1_447;
+const XYCE_BUG38_REQUIRED_ORACLE_SHA256: &str =
+    "1b7cc7a326fb07591388a4e3c81bf2adc667616f32d88ef5e9f7c894866f0347";
+const XYCE_BUG38_REQUIRED_ORACLE_BLAKE3: &str =
+    "f15a0c610efd2b5def26fc489522c555f685653924554bbd659b1f26b30d2de1";
+const XYCE_BUG38_HISTORICAL_ORACLE_RECORD_COUNT: usize = 7;
+const XYCE_BUG38_HISTORICAL_ORACLE_BLAKE3: &str =
+    "b3aad59f1109003205077dc418a34d40426a3332c9e39770b72b90d4b77fde52";
+
+const XYCE_BUG38_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
+    (
+        "Netlists/Certification_Tests/BUG_38_SON/README",
+        630,
+        "13e535a162d5218d0e53fb1274617f34e9d5b7715d0a86a8fe8b05b49ba9432e",
+        "d8c7340d9e24ded977e7aedb7838937f09497508cbc5eb67bc8e163356780869",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_38_SON/Manifest.txt",
+        70,
+        "2f2ae96c7842a02c48cd8a5ca935eaeba94bd74604a958a5dd884fc706799f1b",
+        "07497706a574f62298ef5e4dbf83872f20b027f145ff9b4c149d680ef91f7094",
+    ),
+    (
+        XYCE_BUG38_OWNER_PATH,
+        187,
+        "f9a56497613ef618fcbf552c755a51fa460a1e61c430e3331b8cb0348ccd0a62",
+        XYCE_BUG38_OWNER_CONTENT_BLAKE3,
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_38_SON/bug_38_son.cir.sh",
+        1_445,
+        "47ff59fa3801f4c8291e03e4029d78b75bebc56357993014afc570bb1b495b7e",
+        "bfa2c5f0b5f735b699177726dad357a4c5cc1cb1c5c2cbd8d07c467ccc2b0fb9",
+    ),
+    (
+        XYCE_BUG38_CONTROL_PATH,
+        203,
+        "ba92a6d955a1179bab285d4eddd583e4fbc8d70ac56e83d37b0bd0d9912cfb05",
+        XYCE_BUG38_CONTROL_CONTENT_BLAKE3,
+    ),
+    (
+        XYCE_BUG38_HISTORICAL_EXCLUDE_PATH,
+        17,
+        "8c51a1344c808cf7ef0acb904d45c10f54a223817cfc77a08cd3d499aca3b347",
+        "802378e620d5e2c38b752ff311e969fccef89cad2324a5269f3c0107defa4cee",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct XyceAbmLookupOrderCaseSpec {
@@ -5855,6 +5938,37 @@ struct XyceAbmLookupOrderFamilyContract {
     role: XyceAbmLookupOrderRole,
 }
 
+#[derive(Debug, Clone)]
+struct XyceBug38FamilyContract {
+    relational: XyceBaselineFamilyContract,
+    owner_path: PathBuf,
+    control_path: PathBuf,
+    role: XyceBug38Role,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBug38Role {
+    WrapperOwner,
+    ParenthesizedControl,
+}
+
+impl XyceBug38Role {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::WrapperOwner => XYCE_BUG38_WRAPPER_OWNER_CONTRACT,
+            Self::ParenthesizedControl => XYCE_BUG38_PARENTHESIZED_CONTROL_CONTRACT,
+        }
+    }
+
+    fn for_record(relative_path: &str) -> Option<Self> {
+        match XyceTestRunner::normalize_manifest_key(relative_path).as_str() {
+            XYCE_BUG38_OWNER_RECORD => Some(Self::WrapperOwner),
+            XYCE_BUG38_CONTROL_RECORD => Some(Self::ParenthesizedControl),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceAbmLookupOrderRole {
     WrapperOwner,
@@ -6833,6 +6947,27 @@ enum XyceStrictTransientFamilySnapshot {
     PassivePrimaryValue(XycePassivePrimaryValueSnapshot),
     PassiveTemperatureOverride(XycePassiveTemperatureOverrideSnapshot),
     TransientAnalysisExpression(XyceTransientAnalysisExpressionSnapshot),
+    Bug38(XyceBug38FamilySnapshot),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceBug38FamilySnapshot {
+    representation: XyceBug38SubcktRepresentation,
+    semantic_source: Vec<String>,
+    top_level_elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    subcircuit_name: String,
+    subcircuit_ports: Vec<String>,
+    subcircuit_elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    flattened_elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    tran_step_bits: u64,
+    tran_stop_bits: u64,
+    ordered_probes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBug38SubcktRepresentation {
+    BareFormals,
+    ParenthesizedFormals,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -7088,6 +7223,7 @@ enum XyceBaselineFamilyKind {
     SubcktParameterPrecedence,
     SubcktParameterResolution,
     NestedIncludeIdentity,
+    Bug38SubcktFormalParentheses,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -7179,6 +7315,7 @@ impl XyceBaselineFamilyKind {
             Self::SubcktParameterPrecedence => "SUBCKT_PARAMETER_PRECEDENCE",
             Self::SubcktParameterResolution => "SUBCKT_PARAMETER_RESOLUTION",
             Self::NestedIncludeIdentity => "NESTED_INCLUDE_IDENTITY",
+            Self::Bug38SubcktFormalParentheses => "BUG38_SUBCKT_FORMAL_PARENTHESES",
         }
     }
 
@@ -7209,6 +7346,7 @@ impl XyceBaselineFamilyKind {
             Self::SubcktParameterPrecedence => "subckt_parameter_precedence_wrapper",
             Self::SubcktParameterResolution => "subckt_parameter_resolution_family_wrapper",
             Self::NestedIncludeIdentity => "nested_include_identity_family_anchor",
+            Self::Bug38SubcktFormalParentheses => XYCE_BUG38_WRAPPER_OWNER_CONTRACT,
         }
     }
 
@@ -7243,6 +7381,7 @@ impl XyceBaselineFamilyKind {
             Self::NestedIncludeIdentity => {
                 "nested_include_identity_family_repeated_target_baseline"
             }
+            Self::Bug38SubcktFormalParentheses => XYCE_BUG38_PARENTHESIZED_CONTROL_CONTRACT,
         }
     }
 
@@ -7300,6 +7439,7 @@ impl XyceBaselineFamilyKind {
             | Self::SubcktParameterResolution => XyceStaticTranPlanPurpose::RelationalFamily,
             Self::NestedIncludeIdentity => XyceStaticTranPlanPurpose::RelationalFamily,
             Self::SwitchStateCase => XyceStaticTranPlanPurpose::RelationalFamily,
+            Self::Bug38SubcktFormalParentheses => XyceStaticTranPlanPurpose::RelationalFamily,
         }
     }
 }
@@ -7990,6 +8130,7 @@ impl AbortSignal for DeadlineAbort {
 mod analysis_support;
 mod comparison;
 mod contracts;
+mod contracts_bug38;
 mod contracts_dc;
 mod contracts_frequency;
 mod contracts_sources;

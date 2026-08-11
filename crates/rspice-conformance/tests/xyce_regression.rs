@@ -9351,6 +9351,35 @@ fn test_xyce_abm_splines_inline_lookup_order_relational_oracles() {
 }
 
 #[test]
+fn test_xyce_bug38_subckt_formal_parentheses_relational_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        (
+            "Netlists/Certification_Tests/BUG_38_SON/bug_38_son.cir",
+            "bug38_subckt_formal_parentheses_wrapper_owner",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_38_SON/bug_38_son_p.cir",
+            "bug38_subckt_formal_parentheses_control",
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should execute independently through the exact BUG_38_SON diff-i relation, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should serialize the same default PRN table modulo header case"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_switch_initial_state_case_relational_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

@@ -2254,6 +2254,10 @@ impl XyceTestRunner {
                 XyceStrictTransientFamilySnapshot::TransientAnalysisExpression(baseline),
                 XyceStrictTransientFamilySnapshot::TransientAnalysisExpression(target),
             ) => Self::compare_transient_analysis_expression_snapshots(baseline, target),
+            (
+                XyceStrictTransientFamilySnapshot::Bug38(baseline),
+                XyceStrictTransientFamilySnapshot::Bug38(target),
+            ) => Self::compare_bug38_family_snapshots(baseline, target),
             _ => Err("baseline and target use different strict family snapshot kinds".to_string()),
         }
     }

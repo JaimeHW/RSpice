@@ -28510,3 +28510,213 @@ fn abm_lookup_order_four_record_provenance_and_execution_fail_closed() {
         "contract member ordering must preserve owner/control provenance"
     );
 }
+
+fn bug38_fixture() -> (tempfile::TempDir, String, String) {
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let root = tempfile::tempdir().expect("create BUG_38_SON fixture");
+    for relative in [XYCE_BUG38_OWNER_PATH, XYCE_BUG38_CONTROL_PATH] {
+        let target = root.path().join(relative);
+        fs::create_dir_all(target.parent().expect("BUG38 record has parent"))
+            .expect("create BUG38 fixture family");
+        fs::copy(source_root.join(relative), target).expect("copy canonical BUG38 record");
+    }
+    let readme_relative = "Netlists/Certification_Tests/BUG_38_SON/README";
+    fs::copy(
+        source_root.join(readme_relative),
+        root.path().join(readme_relative),
+    )
+    .expect("copy canonical BUG38 README");
+    let wrapper_row = format!("{XYCE_BUG38_OWNER_PATH}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}");
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{wrapper_row}\n"),
+    )
+    .expect("write BUG38 wrapper ownership");
+    let exclusion_row = format!(
+        "{XYCE_BUG38_CONTROL_PATH}\t{XYCE_BUG38_HISTORICAL_EXCLUDE_PATH}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_BUG38_PARENTHESIZED_CONTROL_CONTRACT}"
+    );
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[&exclusion_row]),
+    )
+    .expect("write BUG38 control qualification");
+    (root, wrapper_row, exclusion_row)
+}
+
+#[test]
+fn bug38_release_710_oracle_and_source_qualification_are_exact() {
+    let records = XyceTestRunner::bug38_historical_oracle_provenance_records();
+    assert_eq!(records.len(), XYCE_BUG38_HISTORICAL_ORACLE_RECORD_COUNT);
+    assert_eq!(
+        blake3::hash(records.join("\n").as_bytes())
+            .to_hex()
+            .to_string(),
+        XYCE_BUG38_HISTORICAL_ORACLE_BLAKE3
+    );
+    assert!(records.iter().all(|record| record.starts_with(&format!(
+        "{XYCE_BUG38_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG38_UPSTREAM_RELEASE_TAG}\t"
+    ))));
+    assert!(records.iter().any(|record| {
+        record.contains("\tNetlists/Certification_Tests/BUG_38_SON/Manifest.txt\t70\t")
+    }));
+    assert!(
+        records
+            .iter()
+            .any(|record| { record.contains("\tTestScripts/XyceRegression/Tools.pm\t68108\t") })
+    );
+    XyceTestRunner::validate_bug38_historical_oracle_provenance()
+        .expect("BUG38 Release-7.10 source/README/wrapper/exclude identities remain bound");
+
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let owner =
+        fs::read_to_string(source_root.join(XYCE_BUG38_OWNER_PATH)).expect("read BUG38 owner");
+    let control =
+        fs::read_to_string(source_root.join(XYCE_BUG38_CONTROL_PATH)).expect("read BUG38 control");
+    let (owner_representation, owner_semantics) =
+        XyceTestRunner::bug38_source_qualification(&owner).expect("qualify bare formals");
+    let (control_representation, control_semantics) =
+        XyceTestRunner::bug38_source_qualification(&control)
+            .expect("qualify parenthesized formals");
+    assert_eq!(
+        owner_representation,
+        XyceBug38SubcktRepresentation::BareFormals
+    );
+    assert_eq!(
+        control_representation,
+        XyceBug38SubcktRepresentation::ParenthesizedFormals
+    );
+    assert_eq!(owner_semantics, control_semantics);
+
+    for malformed in [
+        control.replace("(1 2)", "((1 2))"),
+        control.replace("(1 2)", "(1 2 3)"),
+        control.replace(".tran 1ns 1us", ".tran 2ns 1us"),
+        control.replace("I(v1)", "I(x1)"),
+    ] {
+        assert!(
+            XyceTestRunner::bug38_source_qualification(&malformed).is_err(),
+            "BUG38 source admission must reject any syntax or semantic drift"
+        );
+    }
+}
+
+#[test]
+fn bug38_typed_source_netlist_and_plan_snapshots_admit_only_formal_parentheses() {
+    let (root, _, _) = bug38_fixture();
+    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    let owner_path = root.path().join(XYCE_BUG38_OWNER_PATH);
+    let control_path = root.path().join(XYCE_BUG38_CONTROL_PATH);
+    let owner_plan = runner
+        .static_tran_family_plan_for_path(
+            &owner_path,
+            XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily,
+        )
+        .expect("build BUG38 owner plan");
+    let control_plan = runner
+        .static_tran_family_plan_for_path(
+            &control_path,
+            XyceStaticTranPlanPurpose::RelationalFamily,
+        )
+        .expect("build BUG38 parenthesized-control plan");
+    XyceTestRunner::validate_bug38_transient_plan(&owner_plan, XyceBug38Role::WrapperOwner)
+        .expect("owner has exact wrapper plan");
+    XyceTestRunner::validate_bug38_transient_plan(
+        &control_plan,
+        XyceBug38Role::ParenthesizedControl,
+    )
+    .expect("control has exact ordinary plan");
+    let owner_netlist = XyceTestRunner::parse_xyce_netlist(&owner_plan.source, &owner_path)
+        .expect("parse BUG38 owner");
+    let control_netlist = XyceTestRunner::parse_xyce_netlist(&control_plan.source, &control_path)
+        .expect("parse BUG38 control");
+    let owner_snapshot = XyceTestRunner::bug38_family_snapshot(&owner_netlist, &owner_plan)
+        .expect("snapshot BUG38 owner");
+    let control_snapshot = XyceTestRunner::bug38_family_snapshot(&control_netlist, &control_plan)
+        .expect("snapshot BUG38 control");
+    XyceTestRunner::compare_bug38_family_snapshots(&control_snapshot, &owner_snapshot)
+        .expect("formal parentheses preserve exact typed circuit semantics");
+    assert!(
+        XyceTestRunner::compare_bug38_family_snapshots(&owner_snapshot, &control_snapshot).is_err(),
+        "BUG38 snapshot comparison preserves control/owner direction"
+    );
+
+    let mut changed_topology = owner_snapshot.clone();
+    changed_topology
+        .top_level_elements
+        .get_mut("x1")
+        .expect("owner has X1")
+        .nodes[0] = "2".to_string();
+    let mut changed_tran = owner_snapshot.clone();
+    changed_tran.tran_step_bits = 2.0e-9f64.to_bits();
+    let mut changed_print = owner_snapshot.clone();
+    changed_print.ordered_probes.swap(0, 1);
+    for changed in [changed_topology, changed_tran, changed_print] {
+        assert!(
+            XyceTestRunner::compare_bug38_family_snapshots(&control_snapshot, &changed).is_err()
+        );
+    }
+}
+
+#[test]
+fn bug38_two_record_provenance_and_independent_execution_fail_closed() {
+    let (root, wrapper_row, exclusion_row) = bug38_fixture();
+    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    let decks = runner.discover_netlist_tests();
+    assert_eq!(decks.len(), XYCE_BUG38_CANDIDATE_COUNT);
+    for deck in &decks {
+        let role = XyceBug38Role::for_record(&deck.relative_path)
+            .expect("fixture contains only the exact BUG38 pair");
+        let result = runner.run_test(&deck.path);
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{} must execute independently through the BUG38 diff-i relation: {result:?}",
+            deck.relative_path
+        );
+        assert_eq!(result.contract, role.result_contract());
+        assert!(result.mismatches.is_empty());
+    }
+
+    let owner = decks
+        .iter()
+        .find(|deck| {
+            XyceTestRunner::normalize_manifest_key(&deck.relative_path) == XYCE_BUG38_OWNER_RECORD
+        })
+        .expect("fixture has BUG38 owner");
+    let contract = runner
+        .bug38_family_contract(owner)
+        .expect("owner is selected")
+        .expect("canonical BUG38 pair qualifies");
+    runner
+        .validate_bug38_provenance(&contract)
+        .expect("canonical BUG38 pair revalidates");
+
+    let mutation_path = root.path().join(XYCE_BUG38_CONTROL_PATH);
+    let original = fs::read(&mutation_path).expect("read BUG38 mutation target");
+    fs::write(&mutation_path, "BUG38 mutation\n.end\n").expect("mutate BUG38 control");
+    assert!(runner.validate_bug38_provenance(&contract).is_err());
+    fs::write(&mutation_path, original).expect("restore BUG38 control");
+
+    let extra = mutation_path.with_file_name("extra.cir");
+    fs::write(&extra, "unexpected BUG38 sibling\n.end\n").expect("write extra BUG38 record");
+    assert!(runner.validate_bug38_provenance(&contract).is_err());
+    fs::remove_file(extra).expect("remove extra BUG38 record");
+
+    fs::write(root.path().join(HARNESS_MANIFEST_FILE), "").expect("remove BUG38 wrapper row");
+    assert!(runner.validate_bug38_provenance(&contract).is_err());
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{wrapper_row}\n"),
+    )
+    .expect("restore BUG38 wrapper row");
+
+    let wrong_exclusion = exclusion_row.replace(
+        XYCE_BUG38_PARENTHESIZED_CONTROL_CONTRACT,
+        "wrong_bug38_contract",
+    );
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[&wrong_exclusion]),
+    )
+    .expect("mutate BUG38 control qualification");
+    assert!(runner.validate_bug38_provenance(&contract).is_err());
+}
