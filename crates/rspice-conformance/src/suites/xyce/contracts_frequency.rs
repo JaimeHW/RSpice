@@ -778,6 +778,412 @@ impl XyceTestRunner {
         Self::validate_ac_complex_probe(call, netlist)
     }
 
+    pub(super) fn abm_frequency_ac_comparator_tolerance() -> XyceAcComparatorTolerance {
+        XyceAcComparatorTolerance::new(6.0e-5, 1.0e-4, 1.0e-6, 1.0e-6)
+            .expect("Release 7.10 ABM_FREQ ACComparator tolerance is valid")
+    }
+
+    pub(super) fn abm_frequency_historical_oracle_provenance_records() -> Vec<String> {
+        let mut records = XYCE_ABM_FREQUENCY_CASES
+            .iter()
+            .map(|spec| {
+                (
+                    spec.wrapper_path,
+                    spec.wrapper_bytes,
+                    spec.wrapper_sha256,
+                    spec.wrapper_blake3,
+                )
+            })
+            .chain([
+                (
+                    XYCE_ABM_FREQUENCY_HISTORICAL_EXCLUDE_PATH,
+                    XYCE_ABM_FREQUENCY_HISTORICAL_EXCLUDE_BYTES,
+                    XYCE_ABM_FREQUENCY_HISTORICAL_EXCLUDE_SHA256,
+                    XYCE_ABM_FREQUENCY_HISTORICAL_EXCLUDE_BLAKE3,
+                ),
+                (
+                    XYCE_ABM_FREQUENCY_AC_COMPARATOR_PATH,
+                    XYCE_ABM_FREQUENCY_AC_COMPARATOR_BYTES,
+                    XYCE_ABM_FREQUENCY_AC_COMPARATOR_SHA256,
+                    XYCE_ABM_FREQUENCY_AC_COMPARATOR_BLAKE3,
+                ),
+            ])
+            .map(|(path, bytes, sha256, content_blake3)| {
+                format!(
+                    "{XYCE_ABM_FREQUENCY_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_ABM_FREQUENCY_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
+                )
+            })
+            .collect::<Vec<_>>();
+        records.sort();
+        records
+    }
+
+    pub(super) fn validate_abm_frequency_historical_oracle_records(
+        records: &[String],
+    ) -> Result<(), String> {
+        let provenance_hash = blake3::hash(records.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if XYCE_ABM_FREQUENCY_PRETRIM_COMMIT != UPSTREAM_EXCLUSIONS_SOURCE_COMMIT
+            || records.len() != XYCE_ABM_FREQUENCY_HISTORICAL_ORACLE_RECORD_COUNT
+            || provenance_hash != XYCE_ABM_FREQUENCY_HISTORICAL_ORACLE_BLAKE3
+        {
+            return Err(format!(
+                "ABM_FREQ Release-7.10 wrapper/exclude/ACComparator provenance changed: pretrim={XYCE_ABM_FREQUENCY_PRETRIM_COMMIT}, records={}/{provenance_hash}",
+                records.len()
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn validate_abm_frequency_historical_oracle_provenance() -> Result<(), String> {
+        Self::validate_abm_frequency_historical_oracle_records(
+            &Self::abm_frequency_historical_oracle_provenance_records(),
+        )
+    }
+
+    pub(super) fn validate_abm_frequency_ac_plan(
+        plan: &XyceRelationalAcPlan,
+    ) -> Result<(), String> {
+        const LABEL: &str = "ABM_FREQ relational family";
+        let expected_frequencies = if plan.frequency_bound {
+            Self::xyce_ac_sweep_frequencies(FreqVariation::Dec, 1, 1.0, 1.0e5)
+        } else {
+            XYCE_ABM_FREQUENCY_GRID.to_vec()
+        };
+        let expected_frequency_bits = expected_frequencies
+            .iter()
+            .copied()
+            .map(Value::to_bits)
+            .collect::<Vec<_>>();
+        let frequency_bits = plan
+            .ac
+            .frequencies
+            .iter()
+            .copied()
+            .map(Value::to_bits)
+            .collect::<Vec<_>>();
+        if frequency_bits != expected_frequency_bits {
+            return Err(format!(
+                "{LABEL} requires the exact six-point 1 Hz through 100 kHz decade grid, got {:?}",
+                plan.ac.frequencies
+            ));
+        }
+        let netlist = Self::relational_ac_plan_netlist(plan)?;
+        match (
+            plan.frequency_bound,
+            plan.ac.data_points(),
+            netlist.analyses.as_slice(),
+        ) {
+            (
+                true,
+                None,
+                [
+                    AnalysisCommand::Ac {
+                        variation: FreqVariation::Dec,
+                        points: 1,
+                        start_freq,
+                        stop_freq,
+                    },
+                ],
+            ) if start_freq.to_bits() == 1.0f64.to_bits()
+                && stop_freq.to_bits() == 1.0e5f64.to_bits() => {}
+            (false, Some(points), [AnalysisCommand::AcData { .. }])
+                if points.len() == XYCE_ABM_FREQUENCY_GRID.len() => {}
+            _ => {
+                return Err(format!(
+                    "{LABEL} requires one frequency-bound DEC owner or one six-row DATA control"
+                ));
+            }
+        }
+        let normalized = plan
+            .print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        let common = ["v(1)", "vr(1)", "vi(1)", "vm(1)", "vp(1)", "vdb(1)"];
+        if normalized.len() != 7
+            || !normalized[..6].iter().map(String::as_str).eq(common)
+            || !matches!(normalized[6].as_str(), "{res}" | "{r1:r}")
+        {
+            return Err(format!(
+                "{LABEL} ordered .PRINT AC probe schema is not the exact seven-column owner/control schema"
+            ));
+        }
+        Self::abm_frequency_family_snapshot(plan, &netlist).map(|_| ())
+    }
+
+    pub(super) fn validate_baseline_family_ac_plan(
+        kind: XyceBaselineFamilyKind,
+        plan: &XyceRelationalAcPlan,
+    ) -> Result<(), String> {
+        match kind {
+            XyceBaselineFamilyKind::AbmFrequency => Self::validate_abm_frequency_ac_plan(plan),
+            XyceBaselineFamilyKind::AcAnalysisExpression => {
+                Self::validate_ac_analysis_expression_plan(plan)
+            }
+            other => Err(format!(
+                "family kind {} has no qualified AC plan validator",
+                other.name()
+            )),
+        }
+    }
+
+    pub(super) fn abm_frequency_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceAbmFrequencyFamilyContract, String>> {
+        let (spec, role) = XyceAbmFrequencyRole::for_record(&deck.relative_path)?;
+        Some((|| {
+            const LABEL: &str = "ABM_FREQ relational family";
+            if deck.section != XyceDeckSection::Netlists
+                || Self::normalize_manifest_key(&self.relative_key(&deck.path))
+                    != Self::normalize_manifest_key(&deck.relative_path)
+            {
+                return Err(format!(
+                    "recognized {LABEL} record '{}' is not backed by its exact Netlists path",
+                    deck.relative_path
+                ));
+            }
+            let owner_path = self.root.join(spec.owner_path);
+            let control_path = self.root.join(spec.control_path);
+            let expected_path = match role {
+                XyceAbmFrequencyRole::WrapperOwner => &owner_path,
+                XyceAbmFrequencyRole::DataControl => &control_path,
+            };
+            if !Self::same_path(&deck.path, expected_path) {
+                return Err(format!(
+                    "recognized {LABEL} role {role:?} is not backed by its canonical path"
+                ));
+            }
+            let contract = XyceAbmFrequencyFamilyContract {
+                relational: XyceBaselineFamilyContract {
+                    kind: XyceBaselineFamilyKind::AbmFrequency,
+                    comparison: XyceBaselineFamilyComparison::AcComparator(
+                        Self::abm_frequency_ac_comparator_tolerance(),
+                    ),
+                    family: spec.family.to_string(),
+                    baseline_path: control_path.clone(),
+                    member_paths: vec![owner_path.clone(), control_path.clone()],
+                    target_path: Some(expected_path.clone()),
+                },
+                owner_path,
+                control_path,
+                spec,
+                role,
+            };
+            self.validate_abm_frequency_provenance(&contract)?;
+            Ok(contract)
+        })())
+    }
+
+    pub(super) fn validate_abm_frequency_provenance(
+        &self,
+        contract: &XyceAbmFrequencyFamilyContract,
+    ) -> Result<(), String> {
+        const LABEL: &str = "ABM_FREQ relational family";
+        Self::validate_abm_frequency_historical_oracle_provenance()?;
+        let expected_target = match contract.role {
+            XyceAbmFrequencyRole::WrapperOwner => &contract.owner_path,
+            XyceAbmFrequencyRole::DataControl => &contract.control_path,
+        };
+        if contract.relational.kind != XyceBaselineFamilyKind::AbmFrequency
+            || contract.relational.comparison
+                != XyceBaselineFamilyComparison::AcComparator(
+                    Self::abm_frequency_ac_comparator_tolerance(),
+                )
+            || contract.relational.family != contract.spec.family
+            || !Self::same_path(&contract.relational.baseline_path, &contract.control_path)
+            || contract.relational.member_paths.len() != 2
+            || !Self::same_path(&contract.relational.member_paths[0], &contract.owner_path)
+            || !Self::same_path(&contract.relational.member_paths[1], &contract.control_path)
+            || !contract
+                .relational
+                .target_path
+                .as_ref()
+                .is_some_and(|path| Self::same_path(path, expected_target))
+            || !contract
+                .relational
+                .kind
+                .ac_comparator_member_is_good_waveform()
+        {
+            return Err(format!(
+                "{LABEL} contract is not the exact owner-GOODFILE/DATA-control-TESTFILE pair"
+            ));
+        }
+
+        let exclusions = Self::load_upstream_exclusions(&self.root)
+            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
+        let wrapper_records = Self::load_upstream_wrapper_decks(&self.root);
+        let mut candidates = Vec::with_capacity(XYCE_ABM_FREQUENCY_CANDIDATE_COUNT);
+        let mut candidate_content = Vec::with_capacity(XYCE_ABM_FREQUENCY_CANDIDATE_COUNT);
+        let mut owner_rows = Vec::with_capacity(XYCE_ABM_FREQUENCY_OWNER_COUNT);
+        let mut historical_exclusion_rows = Vec::with_capacity(XYCE_ABM_FREQUENCY_EXCLUSION_COUNT);
+
+        for spec in &XYCE_ABM_FREQUENCY_CASES {
+            for (relative_path, record, expected_hash, role) in [
+                (
+                    spec.owner_path,
+                    spec.owner_record,
+                    spec.owner_content_blake3,
+                    XyceAbmFrequencyRole::WrapperOwner,
+                ),
+                (
+                    spec.control_path,
+                    spec.control_record,
+                    spec.control_content_blake3,
+                    XyceAbmFrequencyRole::DataControl,
+                ),
+            ] {
+                let path = self.root.join(relative_path);
+                let relative = self.relative_key(&path);
+                if Self::normalize_manifest_key(&relative) != record {
+                    return Err(format!("{LABEL} canonical path '{record}' is unavailable"));
+                }
+                let metadata = fs::symlink_metadata(&path).map_err(|error| {
+                    format!("failed to inspect {LABEL} record '{relative}': {error}")
+                })?;
+                if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+                    return Err(format!(
+                        "{LABEL} record '{relative}' must be a regular non-symlink file"
+                    ));
+                }
+                let bytes = fs::read(&path)
+                    .map_err(|error| format!("failed to read {LABEL} record: {error}"))?;
+                let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
+                let content_hash = blake3::hash(&canonical).to_hex().to_string();
+                if canonical.is_empty() || content_hash != expected_hash {
+                    return Err(format!(
+                        "{LABEL} record '{relative}' identity changed: expected {expected_hash}, got {content_hash}"
+                    ));
+                }
+                let key = Self::normalize_manifest_key(&relative);
+                candidates.push(relative.clone());
+                candidate_content.push(format!("{relative}\t{content_hash}"));
+                match role {
+                    XyceAbmFrequencyRole::WrapperOwner => {
+                        if !self.requires_upstream_wrapper(&relative)
+                            || !wrapper_records.contains(&key)
+                            || exclusions.contains_key(&key)
+                        {
+                            return Err(format!(
+                                "{LABEL} owner '{relative}' lost exclusive removed-wrapper provenance"
+                            ));
+                        }
+                        owner_rows
+                            .push(format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"));
+                    }
+                    XyceAbmFrequencyRole::DataControl => {
+                        if self.requires_upstream_wrapper(&relative)
+                            || wrapper_records.contains(&key)
+                        {
+                            return Err(format!(
+                                "{LABEL} DATA control '{relative}' must not own a wrapper"
+                            ));
+                        }
+                        let exclusion = exclusions.get(&key).ok_or_else(|| {
+                            format!("{LABEL} DATA control '{relative}' lost exclusion provenance")
+                        })?;
+                        if !matches!(
+                            &exclusion.disposition,
+                            XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified { expected_contract }
+                                if expected_contract == XYCE_ABM_FREQUENCY_DATA_CONTROL_CONTRACT
+                        ) {
+                            return Err(format!(
+                                "{LABEL} DATA control '{relative}' lacks its exact independent qualification contract"
+                            ));
+                        }
+                        historical_exclusion_rows.push(format!(
+                            "{relative}\t{}\t{UPSTREAM_EXCLUDED_DISPOSITION}",
+                            exclusion.source
+                        ));
+                    }
+                }
+                self.reject_wrapper_output_artifacts(&path)
+                    .map_err(|error| format!("{LABEL} record '{relative}' {error}"))?;
+            }
+        }
+
+        let family_dir = self.root.join("Netlists/ABM_FREQ");
+        let selected_paths = fs::read_dir(&family_dir)
+            .map_err(|error| format!("failed to inspect {LABEL} directory: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("failed to enumerate {LABEL} directory: {error}"))?
+            .into_iter()
+            .filter_map(|entry| {
+                let path = entry.path();
+                path.extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+                    .then(|| self.relative_key(&path))
+            })
+            .collect::<BTreeSet<_>>();
+        let expected_paths = candidates.iter().cloned().collect::<BTreeSet<_>>();
+        if selected_paths != expected_paths {
+            return Err(format!(
+                "{LABEL} directory no longer contains exactly its eight selected circuit records"
+            ));
+        }
+
+        candidates.sort();
+        candidate_content.sort();
+        owner_rows.sort();
+        historical_exclusion_rows.sort();
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(candidate_content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let owner_hash = blake3::hash(owner_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let exclusion_hash = blake3::hash(historical_exclusion_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if candidates.len() != XYCE_ABM_FREQUENCY_CANDIDATE_COUNT
+            || candidate_hash != XYCE_ABM_FREQUENCY_CANDIDATE_BLAKE3
+            || content_hash != XYCE_ABM_FREQUENCY_CANDIDATE_CONTENT_BLAKE3
+            || owner_rows.len() != XYCE_ABM_FREQUENCY_OWNER_COUNT
+            || owner_hash != XYCE_ABM_FREQUENCY_OWNER_MANIFEST_BLAKE3
+            || historical_exclusion_rows.len() != XYCE_ABM_FREQUENCY_EXCLUSION_COUNT
+            || exclusion_hash != XYCE_ABM_FREQUENCY_HISTORICAL_EXCLUSION_BLAKE3
+        {
+            return Err(format!(
+                "{LABEL} provenance changed: candidates={}/{candidate_hash}/{content_hash}, owners={}/{owner_hash}, exclusions={}/{exclusion_hash}",
+                candidates.len(),
+                owner_rows.len(),
+                historical_exclusion_rows.len()
+            ));
+        }
+
+        let owner_plan = self
+            .abm_frequency_relational_ac_plan_for_path(&contract.owner_path)
+            .map_err(|error| format!("{LABEL} owner plan failed: {error}"))?;
+        let control_plan = self
+            .abm_frequency_relational_ac_plan_for_path(&contract.control_path)
+            .map_err(|error| format!("{LABEL} DATA-control plan failed: {error}"))?;
+        Self::validate_abm_frequency_ac_plan(&owner_plan)?;
+        Self::validate_abm_frequency_ac_plan(&control_plan)?;
+        let owner_netlist = Self::relational_ac_plan_netlist(&owner_plan)?;
+        let control_netlist = Self::relational_ac_plan_netlist(&control_plan)?;
+        let owner_snapshot = Self::abm_frequency_family_snapshot(&owner_plan, &owner_netlist)?;
+        let control_snapshot =
+            Self::abm_frequency_family_snapshot(&control_plan, &control_netlist)?;
+        if owner_snapshot.kind != contract.spec.kind
+            || owner_snapshot.variable != contract.spec.variable
+            || control_snapshot.kind != contract.spec.kind
+            || control_snapshot.variable != contract.spec.variable
+        {
+            return Err(format!(
+                "{LABEL} '{}' no longer has its typed ABM/axis identity",
+                contract.spec.family
+            ));
+        }
+        Self::compare_abm_frequency_snapshots(&control_snapshot, &owner_snapshot)
+    }
+
     pub(super) fn ac_analysis_expression_family_contract(
         &self,
         deck: &XyceDeck,

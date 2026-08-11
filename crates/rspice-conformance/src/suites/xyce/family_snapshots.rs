@@ -4775,11 +4775,448 @@ impl XyceTestRunner {
         })
     }
 
+    pub(super) fn abm_frequency_expression_parameters(
+        expression: &rspice_core::netlist::expr::Expr,
+        names: &mut BTreeSet<String>,
+    ) {
+        use rspice_core::netlist::expr::Expr as NetExpr;
+        match expression {
+            NetExpr::Param(name) => {
+                names.insert(name.trim().to_ascii_lowercase());
+            }
+            NetExpr::BinOp { left, right, .. } => {
+                Self::abm_frequency_expression_parameters(left, names);
+                Self::abm_frequency_expression_parameters(right, names);
+            }
+            NetExpr::UnaryOp { operand, .. } => {
+                Self::abm_frequency_expression_parameters(operand, names);
+            }
+            NetExpr::FnCall { args, .. } => {
+                for argument in args {
+                    Self::abm_frequency_expression_parameters(argument, names);
+                }
+            }
+            NetExpr::Number(_) | NetExpr::ComplexNumber(_) | NetExpr::StringLiteral(_) => {}
+        }
+    }
+
+    pub(super) fn abm_frequency_variable_from_expression(
+        expression: &str,
+    ) -> Result<(XyceAbmFrequencyVariable, XyceExpressionAstFingerprint), String> {
+        let ast = rspice_core::netlist::expr::parse_expression(expression)
+            .map_err(|err| format!("ABM_FREQ expression '{expression}' is invalid: {err}"))?;
+        let mut parameters = BTreeSet::new();
+        Self::abm_frequency_expression_parameters(&ast, &mut parameters);
+        let variable = if parameters.len() == 1 && parameters.contains("freq") {
+            XyceAbmFrequencyVariable::Freq
+        } else if parameters.len() == 1 && parameters.contains("hertz") {
+            XyceAbmFrequencyVariable::Hertz
+        } else {
+            return Err(format!(
+                "ABM_FREQ runtime expression must reference exactly one FREQ/HERTZ axis, got {parameters:?}"
+            ));
+        };
+        Ok((variable, Self::expression_ast_fingerprint(&ast)))
+    }
+
+    pub(super) fn abm_frequency_source_fingerprint(
+        spec: &rspice_core::netlist::SourceSpec,
+    ) -> Result<([u64; 2], [u64; 6]), String> {
+        use rspice_core::netlist::SourceSpec;
+        let SourceSpec::DcAcTransient {
+            dc_value,
+            ac_magnitude,
+            ac_phase,
+            transient,
+        } = spec
+        else {
+            return Err(
+                "ABM_FREQ current source must retain its combined AC/SIN specification".to_string(),
+            );
+        };
+        let SourceSpec::Sin {
+            offset,
+            amplitude,
+            frequency,
+            delay,
+            damping,
+            phase,
+        } = transient.as_ref()
+        else {
+            return Err("ABM_FREQ current source transient waveform must be SIN".to_string());
+        };
+        let expected: [Value; 6] = [0.0, 1.0, 1.0e5, 0.0, 0.0, 0.0];
+        let actual = [*offset, *amplitude, *frequency, *delay, *damping, *phase];
+        if dc_value.to_bits() != 0.0f64.to_bits()
+            || ac_magnitude.to_bits() != 1.0f64.to_bits()
+            || ac_phase.to_bits() != 0.0f64.to_bits()
+            || !actual
+                .iter()
+                .zip(expected)
+                .all(|(actual, expected)| actual.to_bits() == expected.to_bits())
+        {
+            return Err("ABM_FREQ current-source DC/AC/SIN tuple changed".to_string());
+        }
+        Ok((
+            [ac_magnitude.to_bits(), ac_phase.to_bits()],
+            actual.map(Value::to_bits),
+        ))
+    }
+
+    pub(super) fn abm_frequency_family_snapshot(
+        plan: &XyceRelationalAcPlan,
+        netlist: &Netlist,
+    ) -> Result<XyceAbmFrequencySnapshot, String> {
+        const LABEL: &str = "ABM_FREQ relational family";
+        if netlist.title.trim().is_empty()
+            || netlist.elements.len() != 3
+            || netlist.analyses.len() != 1
+            || !netlist.models.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires one flat three-element diagnostic-free AC circuit without auxiliary state"
+            ));
+        }
+
+        let mut elements = netlist
+            .elements
+            .iter()
+            .map(|element| (Self::normalize_device_instance_name(&element.name), element))
+            .collect::<BTreeMap<_, _>>();
+        if elements.len() != 3 {
+            return Err(format!("{LABEL} contains duplicate element identities"));
+        }
+        let source = elements
+            .remove("isrc")
+            .ok_or_else(|| format!("{LABEL} has no canonical Isrc"))?;
+        let source_nodes = source
+            .nodes
+            .iter()
+            .map(|node| node.trim().to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        let ElementKind::CurrentSource(source_spec) = &source.kind else {
+            return Err(format!("{LABEL} Isrc is not an independent current source"));
+        };
+        if source_nodes != ["1", "0"] {
+            return Err(format!(
+                "{LABEL} Isrc must connect node 1 to literal ground"
+            ));
+        }
+        let (source_ac_bits, source_transient_bits) =
+            Self::abm_frequency_source_fingerprint(source_spec)?;
+
+        let capacitor = elements
+            .remove("c1")
+            .ok_or_else(|| format!("{LABEL} has no canonical C1"))?;
+        let capacitor_nodes = capacitor
+            .nodes
+            .iter()
+            .map(|node| node.trim().to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        let ElementKind::Capacitor {
+            value,
+            value_expr,
+            initial_voltage,
+            model,
+            instance_params,
+            deferred_params,
+        } = &capacitor.kind
+        else {
+            return Err(format!("{LABEL} C1 is not a capacitor"));
+        };
+        if capacitor_nodes != ["1", "0"]
+            || value.to_bits() != 2.0e-6f64.to_bits()
+            || value_expr.is_some()
+            || initial_voltage.is_some()
+            || model.is_some()
+            || !instance_params.is_empty()
+            || !deferred_params.is_empty()
+        {
+            return Err(format!("{LABEL} C1 topology or value changed"));
+        }
+
+        let load = elements
+            .pop_first()
+            .map(|(_, element)| element)
+            .ok_or_else(|| format!("{LABEL} has no load element"))?;
+        if !elements.is_empty() {
+            return Err(format!("{LABEL} has an unqualified extra element"));
+        }
+        let load_nodes = load
+            .nodes
+            .iter()
+            .map(|node| node.trim().to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        if load_nodes != ["1", "0"] {
+            return Err(format!(
+                "{LABEL} load must connect node 1 to literal ground"
+            ));
+        }
+
+        let representation = if plan.frequency_bound {
+            XyceAbmFrequencyRepresentation::RuntimeDecadeExpression
+        } else {
+            XyceAbmFrequencyRepresentation::DataTableControl
+        };
+        let (kind, variable, runtime_expression) = match representation {
+            XyceAbmFrequencyRepresentation::RuntimeDecadeExpression => match &load.kind {
+                ElementKind::BehavioralCurrent {
+                    expression,
+                    tc1,
+                    tc2,
+                    multiplicity,
+                } => {
+                    if Self::normalize_device_instance_name(&load.name) != "b1"
+                        || tc1.to_bits() != 0.0f64.to_bits()
+                        || tc2.to_bits() != 0.0f64.to_bits()
+                        || multiplicity.value.to_bits() != 1.0f64.to_bits()
+                        || multiplicity.value_expr.is_some()
+                        || multiplicity.given
+                    {
+                        return Err(format!("{LABEL} behavioral load state changed"));
+                    }
+                    let global_expressions = netlist.params.all_global_expressions();
+                    let [(name, resistance_expression)] = global_expressions.as_slice() else {
+                        return Err(format!(
+                            "{LABEL} behavioral owner requires exactly one RES global expression"
+                        ));
+                    };
+                    if !name.eq_ignore_ascii_case("res") {
+                        return Err(format!("{LABEL} behavioral owner global must be RES"));
+                    }
+                    let (variable, global_fingerprint) =
+                        Self::abm_frequency_variable_from_expression(resistance_expression)?;
+                    let body = rspice_core::netlist::expr::parse_expression(expression)
+                        .map_err(|err| format!("{LABEL} B1 expression is invalid: {err}"))?;
+                    let body_fingerprint = Self::expression_ast_fingerprint(&body);
+                    let expected_body_fingerprint = XyceExpressionAstFingerprint::Binary(
+                        rspice_core::netlist::expr::BinOpKind::Div,
+                        Box::new(XyceExpressionAstFingerprint::Function(
+                            "v".to_string(),
+                            vec![XyceExpressionAstFingerprint::Parameter("1".to_string())],
+                        )),
+                        Box::new(XyceExpressionAstFingerprint::Parameter("res".to_string())),
+                    );
+                    if body_fingerprint != expected_body_fingerprint {
+                        return Err(format!(
+                            "{LABEL} B1 expression must be the exact V(1)/RES load relation"
+                        ));
+                    }
+                    (
+                        XyceAbmFrequencyKind::BehavioralCurrent,
+                        variable,
+                        Some(XyceExpressionAstFingerprint::Function(
+                            "abm_resistance".to_string(),
+                            vec![global_fingerprint, body_fingerprint],
+                        )),
+                    )
+                }
+                ElementKind::Resistor {
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                    ..
+                } => {
+                    if Self::normalize_device_instance_name(&load.name) != "r1"
+                        || model.is_some()
+                        || !instance_params.is_empty()
+                        || !deferred_params.is_empty()
+                    {
+                        return Err(format!("{LABEL} runtime resistor state changed"));
+                    }
+                    let expression = value_expr.as_deref().ok_or_else(|| {
+                        format!("{LABEL} runtime resistor lost its FREQ/HERTZ expression")
+                    })?;
+                    let (variable, fingerprint) =
+                        Self::abm_frequency_variable_from_expression(expression)?;
+                    (XyceAbmFrequencyKind::Resistor, variable, Some(fingerprint))
+                }
+                _ => return Err(format!("{LABEL} runtime owner has an unqualified load")),
+            },
+            XyceAbmFrequencyRepresentation::DataTableControl => {
+                let ElementKind::Resistor {
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                    ..
+                } = &load.kind
+                else {
+                    return Err(format!("{LABEL} DATA control load is not R1"));
+                };
+                if Self::normalize_device_instance_name(&load.name) != "r1"
+                    || value_expr.as_deref().is_none_or(|expr| {
+                        !expr
+                            .trim()
+                            .trim_matches(|character| character == '{' || character == '}')
+                            .eq_ignore_ascii_case("res")
+                    })
+                    || model.is_some()
+                    || !instance_params.is_empty()
+                    || !deferred_params.is_empty()
+                {
+                    return Err(format!("{LABEL} DATA-control R1 state changed"));
+                }
+                let variable = plan
+                    .ac
+                    .data_points()
+                    .and_then(|points| points.first())
+                    .and_then(|point| point.overrides.first())
+                    .map(|(name, _)| name.as_str())
+                    .and_then(|name| {
+                        if name.eq_ignore_ascii_case("freq") {
+                            Some(XyceAbmFrequencyVariable::Freq)
+                        } else if name.eq_ignore_ascii_case("hertz") {
+                            Some(XyceAbmFrequencyVariable::Hertz)
+                        } else {
+                            None
+                        }
+                    })
+                    .ok_or_else(|| format!("{LABEL} DATA control has no FREQ/HERTZ axis"))?;
+                let kind = match plan
+                    .print
+                    .probes
+                    .last()
+                    .map(|probe| Self::normalize_probe(probe))
+                {
+                    Some(probe) if probe == "{res}" => XyceAbmFrequencyKind::BehavioralCurrent,
+                    Some(probe) if probe == "{r1:r}" => XyceAbmFrequencyKind::Resistor,
+                    _ => return Err(format!("{LABEL} DATA control has an unknown load probe")),
+                };
+                (kind, variable, None)
+            }
+        };
+
+        let raw_frequency_bits = plan
+            .ac
+            .frequencies
+            .iter()
+            .copied()
+            .map(Value::to_bits)
+            .collect::<Vec<_>>();
+        let expected_raw_frequency_bits = if plan.frequency_bound {
+            Self::xyce_ac_sweep_frequencies(FreqVariation::Dec, 1, 1.0, 1.0e5)
+        } else {
+            XYCE_ABM_FREQUENCY_GRID.to_vec()
+        }
+        .into_iter()
+        .map(Value::to_bits)
+        .collect::<Vec<_>>();
+        let frequency_bits = XYCE_ABM_FREQUENCY_GRID
+            .iter()
+            .copied()
+            .map(Value::to_bits)
+            .collect::<Vec<_>>();
+        let effective_resistance_bits = frequency_bits.clone();
+        if raw_frequency_bits != expected_raw_frequency_bits {
+            return Err(format!("{LABEL} frequency/resistance grid changed"));
+        }
+
+        let data_overrides = match representation {
+            XyceAbmFrequencyRepresentation::RuntimeDecadeExpression => {
+                if !netlist.data_tables.is_empty() || plan.ac.data_points().is_some() {
+                    return Err(format!("{LABEL} runtime owner unexpectedly has DATA state"));
+                }
+                Vec::new()
+            }
+            XyceAbmFrequencyRepresentation::DataTableControl => {
+                let [table] = netlist.data_tables.as_slice() else {
+                    return Err(format!("{LABEL} DATA control requires exactly one table"));
+                };
+                if !table.name.eq_ignore_ascii_case("table")
+                    || table.params.len() != 2
+                    || !table.params[0].eq_ignore_ascii_case(variable.name())
+                    || !table.params[1].eq_ignore_ascii_case("res")
+                    || table.rows.len() != XYCE_ABM_FREQUENCY_GRID.len()
+                    || netlist
+                        .params
+                        .get("res")
+                        .is_none_or(|value| value.to_bits() != 1.0e3f64.to_bits())
+                    || !netlist.params.all_global_expressions().is_empty()
+                    || !netlist.params.all_parameter_expressions().is_empty()
+                {
+                    return Err(format!("{LABEL} DATA table or RES default changed"));
+                }
+                let points = plan
+                    .ac
+                    .data_points()
+                    .ok_or_else(|| format!("{LABEL} DATA control lost its points"))?;
+                let mut overrides = Vec::with_capacity(points.len());
+                for (index, (point, expected)) in
+                    points.iter().zip(XYCE_ABM_FREQUENCY_GRID).enumerate()
+                {
+                    if point.frequency.to_bits() != expected.to_bits()
+                        || point.overrides.len() != 2
+                        || !point.overrides[0].0.eq_ignore_ascii_case(variable.name())
+                        || point.overrides[0].1.to_bits() != expected.to_bits()
+                        || !point.overrides[1].0.eq_ignore_ascii_case("res")
+                        || point.overrides[1].1.to_bits() != expected.to_bits()
+                        || table.rows[index]
+                            .iter()
+                            .zip([expected, expected])
+                            .any(|(actual, expected)| actual.to_bits() != expected.to_bits())
+                    {
+                        return Err(format!("{LABEL} DATA row {} changed", index + 1));
+                    }
+                    overrides.push(
+                        point
+                            .overrides
+                            .iter()
+                            .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+                            .collect(),
+                    );
+                }
+                overrides
+            }
+        };
+
+        Ok(XyceAbmFrequencySnapshot {
+            kind,
+            variable,
+            representation,
+            frequency_bits,
+            effective_resistance_bits,
+            source_nodes: source_nodes
+                .try_into()
+                .expect("qualified two-terminal Isrc"),
+            source_ac_bits,
+            source_transient_bits,
+            load_nodes: load_nodes.try_into().expect("qualified two-terminal load"),
+            capacitance_bits: value.to_bits(),
+            runtime_expression,
+            data_overrides,
+            ordered_probes: plan
+                .print
+                .probes
+                .iter()
+                .map(|probe| Self::normalize_probe(probe))
+                .collect(),
+        })
+    }
+
     pub(super) fn strict_ac_family_snapshot(
         kind: XyceBaselineFamilyKind,
         netlist: &Netlist,
+        plan: &XyceRelationalAcPlan,
     ) -> Result<XyceStrictAcFamilySnapshot, String> {
         match kind {
+            XyceBaselineFamilyKind::AbmFrequency => {
+                Self::abm_frequency_family_snapshot(plan, netlist)
+                    .map(Box::new)
+                    .map(XyceStrictAcFamilySnapshot::AbmFrequency)
+            }
             XyceBaselineFamilyKind::AcAnalysisExpression => {
                 Self::ac_analysis_expression_snapshot(netlist)
                     .map(XyceStrictAcFamilySnapshot::AcAnalysisExpression)

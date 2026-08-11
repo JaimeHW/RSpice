@@ -1993,7 +1993,8 @@ impl XyceTestRunner {
                     XyceStaticTranContract::WrapperStatic
                 )
             ),
-            XyceBaselineFamilyKind::AcAnalysisExpression
+            XyceBaselineFamilyKind::AbmFrequency
+            | XyceBaselineFamilyKind::AcAnalysisExpression
             | XyceBaselineFamilyKind::BjtExternalNode
             | XyceBaselineFamilyKind::DcAnalysisExpression
             | XyceBaselineFamilyKind::DelimitedExpression

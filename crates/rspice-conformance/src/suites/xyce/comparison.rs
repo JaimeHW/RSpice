@@ -1778,10 +1778,54 @@ impl XyceTestRunner {
     ) -> Result<(), String> {
         match (baseline, target) {
             (
+                XyceStrictAcFamilySnapshot::AbmFrequency(baseline),
+                XyceStrictAcFamilySnapshot::AbmFrequency(target),
+            ) => Self::compare_abm_frequency_snapshots(baseline, target),
+            (
                 XyceStrictAcFamilySnapshot::AcAnalysisExpression(baseline),
                 XyceStrictAcFamilySnapshot::AcAnalysisExpression(target),
             ) => Self::compare_ac_analysis_expression_snapshots(baseline, target),
+            _ => Err("baseline and target use different exact-AC snapshot kinds".to_string()),
         }
+    }
+
+    pub(super) fn compare_abm_frequency_snapshots(
+        baseline: &XyceAbmFrequencySnapshot,
+        target: &XyceAbmFrequencySnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XyceAbmFrequencyRepresentation::DataTableControl
+            || target.representation != XyceAbmFrequencyRepresentation::RuntimeDecadeExpression
+        {
+            return Err(
+                "ABM_FREQ must compare one DATA control against one runtime DEC owner".to_string(),
+            );
+        }
+        if baseline.kind != target.kind
+            || baseline.variable != target.variable
+            || baseline.frequency_bits != target.frequency_bits
+            || baseline.effective_resistance_bits != target.effective_resistance_bits
+            || baseline.source_nodes != target.source_nodes
+            || baseline.source_ac_bits != target.source_ac_bits
+            || baseline.source_transient_bits != target.source_transient_bits
+            || baseline.load_nodes != target.load_nodes
+            || baseline.capacitance_bits != target.capacitance_bits
+            || baseline.ordered_probes != target.ordered_probes
+        {
+            return Err(
+                "ABM_FREQ owner/control changes its axis, topology, effective load, source, or ordered probes"
+                    .to_string(),
+            );
+        }
+        if baseline.runtime_expression.is_some()
+            || baseline.data_overrides.len() != XYCE_ABM_FREQUENCY_GRID.len()
+            || target.runtime_expression.is_none()
+            || !target.data_overrides.is_empty()
+        {
+            return Err(
+                "ABM_FREQ runtime-expression and DATA-row provenance is not canonical".to_string(),
+            );
+        }
+        Ok(())
     }
 
     pub(super) fn compare_strict_dc_family_snapshots(

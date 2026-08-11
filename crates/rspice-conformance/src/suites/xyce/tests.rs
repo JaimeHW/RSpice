@@ -27753,3 +27753,259 @@ fn source_multiplicity_snapshot_rejects_m_topology_probe_and_analysis_drift() {
         "typed parsing must reject an M=9 owner before waveform execution"
     );
 }
+
+fn abm_frequency_fixture() -> (tempfile::TempDir, Vec<String>, Vec<String>) {
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let root = tempfile::tempdir().expect("create ABM_FREQ fixture");
+    let mut wrapper_rows = Vec::new();
+    let mut exclusion_rows = Vec::new();
+    for spec in XYCE_ABM_FREQUENCY_CASES {
+        for relative in [spec.owner_path, spec.control_path] {
+            let source = source_root.join(relative);
+            let target = root.path().join(relative);
+            fs::create_dir_all(target.parent().expect("ABM_FREQ candidate has parent"))
+                .expect("create ABM_FREQ directory");
+            fs::copy(source, target).expect("copy canonical ABM_FREQ candidate");
+        }
+        wrapper_rows.push(format!(
+            "{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}",
+            spec.owner_path
+        ));
+        exclusion_rows.push(format!(
+            "{}\t{XYCE_ABM_FREQUENCY_HISTORICAL_EXCLUDE_PATH}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_ABM_FREQUENCY_DATA_CONTROL_CONTRACT}",
+            spec.control_path
+        ));
+    }
+    wrapper_rows.sort();
+    exclusion_rows.sort();
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{}\n", wrapper_rows.join("\n")),
+    )
+    .expect("write ABM_FREQ wrapper ownership");
+    let exclusion_refs = exclusion_rows
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&exclusion_refs),
+    )
+    .expect("write ABM_FREQ independent qualifications");
+    (root, wrapper_rows, exclusion_rows)
+}
+
+#[test]
+fn abm_frequency_release_710_oracle_and_direction_are_exact() {
+    let records = XyceTestRunner::abm_frequency_historical_oracle_provenance_records();
+    XyceTestRunner::validate_abm_frequency_historical_oracle_records(&records)
+        .expect("four wrappers, exclude, and ACComparator remain provenance-bound");
+    assert_eq!(
+        records.len(),
+        XYCE_ABM_FREQUENCY_HISTORICAL_ORACLE_RECORD_COUNT
+    );
+    assert!(records.iter().all(|record| {
+        record.starts_with(&format!(
+            "{XYCE_ABM_FREQUENCY_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_ABM_FREQUENCY_UPSTREAM_RELEASE_TAG}\t"
+        ))
+    }));
+    assert!(
+        records
+            .iter()
+            .any(|record| record.contains(XYCE_ABM_FREQUENCY_AC_COMPARATOR_SHA256))
+    );
+    let mut changed_records = records.clone();
+    changed_records[0].push('x');
+    assert!(
+        XyceTestRunner::validate_abm_frequency_historical_oracle_records(&changed_records).is_err(),
+        "one historical identity mutation must fail closed"
+    );
+
+    let runner = XyceTestRunner::new(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce"),
+        XyceRunnerConfig::default(),
+    );
+    let owner = XycePrnTable {
+        columns: vec!["Index".to_string(), "FREQ".to_string(), "V".to_string()],
+        rows: vec![vec![0.0, 1.0, 0.500_050_002]],
+    };
+    let control = XycePrnTable {
+        columns: owner.columns.clone(),
+        rows: vec![vec![0.0, 1.0, 0.5]],
+    };
+    let tolerance = XyceTestRunner::abm_frequency_ac_comparator_tolerance();
+    assert!(XyceBaselineFamilyKind::AbmFrequency.ac_comparator_member_is_good_waveform());
+    assert!(
+        runner
+            .compare_ac_comparator_tables_with_tolerance(&owner, &control, tolerance)
+            .expect("owner GOODFILE comparison is valid")
+            .is_empty(),
+        "Release direction must accept this denominator-sensitive pair"
+    );
+    assert!(
+        !runner
+            .compare_ac_comparator_tables_with_tolerance(&control, &owner, tolerance)
+            .expect("reversed comparison is structurally valid")
+            .is_empty(),
+        "reversing GOODFILE/TESTFILE must remain observably different"
+    );
+}
+
+#[test]
+fn abm_frequency_plans_and_snapshots_are_strict_typed_pairs() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for spec in XYCE_ABM_FREQUENCY_CASES {
+        let owner_plan = runner
+            .abm_frequency_relational_ac_plan_for_path(&root.join(spec.owner_path))
+            .expect("build ABM_FREQ owner plan");
+        let control_plan = runner
+            .abm_frequency_relational_ac_plan_for_path(&root.join(spec.control_path))
+            .expect("build ABM_FREQ DATA-control plan");
+        XyceTestRunner::validate_abm_frequency_ac_plan(&owner_plan)
+            .expect("owner has exact DEC plan");
+        XyceTestRunner::validate_abm_frequency_ac_plan(&control_plan)
+            .expect("control has exact DATA plan");
+        assert!(owner_plan.frequency_bound);
+        assert!(control_plan.ac.data_points().is_some());
+        assert_eq!(
+            owner_plan.ac.frequencies,
+            XyceTestRunner::xyce_ac_sweep_frequencies(FreqVariation::Dec, 1, 1.0, 1.0e5)
+        );
+        assert_eq!(control_plan.ac.frequencies, XYCE_ABM_FREQUENCY_GRID);
+
+        let owner_netlist =
+            XyceTestRunner::relational_ac_plan_netlist(&owner_plan).expect("parse owner plan");
+        let control_netlist =
+            XyceTestRunner::relational_ac_plan_netlist(&control_plan).expect("parse control plan");
+        let owner_snapshot =
+            XyceTestRunner::abm_frequency_family_snapshot(&owner_plan, &owner_netlist)
+                .expect("snapshot owner");
+        let control_snapshot =
+            XyceTestRunner::abm_frequency_family_snapshot(&control_plan, &control_netlist)
+                .expect("snapshot DATA control");
+        assert_eq!(owner_snapshot.kind, spec.kind);
+        assert_eq!(owner_snapshot.variable, spec.variable);
+        assert_eq!(control_snapshot.kind, spec.kind);
+        assert_eq!(control_snapshot.variable, spec.variable);
+        XyceTestRunner::compare_abm_frequency_snapshots(&control_snapshot, &owner_snapshot)
+            .expect("runtime owner and DATA control have the same typed AC semantics");
+        assert!(
+            XyceTestRunner::compare_abm_frequency_snapshots(&owner_snapshot, &control_snapshot)
+                .is_err(),
+            "snapshot comparison must preserve DATA-baseline/runtime-owner roles"
+        );
+
+        let mut changed_grid = owner_plan.clone();
+        changed_grid.ac.frequencies[3] = 1001.0;
+        assert!(XyceTestRunner::validate_abm_frequency_ac_plan(&changed_grid).is_err());
+        let mut changed_probes = owner_plan.clone();
+        changed_probes.print.probes.swap(1, 2);
+        assert!(XyceTestRunner::validate_abm_frequency_ac_plan(&changed_probes).is_err());
+        let mut changed_data = control_plan.clone();
+        changed_data
+            .ac
+            .data_points
+            .as_mut()
+            .expect("control has DATA points")[2]
+            .overrides[1]
+            .1 = 101.0;
+        assert!(XyceTestRunner::validate_abm_frequency_ac_plan(&changed_data).is_err());
+
+        let mut changed_axis = owner_snapshot.clone();
+        changed_axis.variable = match changed_axis.variable {
+            XyceAbmFrequencyVariable::Freq => XyceAbmFrequencyVariable::Hertz,
+            XyceAbmFrequencyVariable::Hertz => XyceAbmFrequencyVariable::Freq,
+        };
+        let mut changed_topology = owner_snapshot.clone();
+        changed_topology.load_nodes[0] = "2".to_string();
+        let mut changed_probe_snapshot = owner_snapshot.clone();
+        changed_probe_snapshot.ordered_probes.swap(1, 2);
+        for changed in [changed_axis, changed_topology, changed_probe_snapshot] {
+            assert!(
+                XyceTestRunner::compare_abm_frequency_snapshots(&control_snapshot, &changed)
+                    .is_err()
+            );
+        }
+    }
+}
+
+#[test]
+fn abm_frequency_eight_record_provenance_and_execution_fail_closed() {
+    let (root, wrapper_rows, exclusion_rows) = abm_frequency_fixture();
+    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    let decks = runner.discover_netlist_tests();
+    assert_eq!(decks.len(), XYCE_ABM_FREQUENCY_CANDIDATE_COUNT);
+    let mut role_counts = [0usize; 2];
+    for deck in &decks {
+        let (_, role) = XyceAbmFrequencyRole::for_record(&deck.relative_path)
+            .expect("each fixture deck has one exact ABM_FREQ role");
+        role_counts[usize::from(role == XyceAbmFrequencyRole::DataControl)] += 1;
+        let result = runner.run_test(&deck.path);
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{} must execute through the ABM_FREQ relational contract: {result:?}",
+            deck.relative_path
+        );
+        assert_eq!(result.contract, role.result_contract());
+    }
+    assert_eq!(role_counts, [4, 4]);
+
+    let owner = decks
+        .iter()
+        .find(|deck| {
+            XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                == XYCE_ABM_FREQUENCY_CASES[0].owner_record
+        })
+        .expect("fixture contains first ABM_FREQ owner");
+    let contract = runner
+        .abm_frequency_family_contract(owner)
+        .expect("owner is selected")
+        .expect("canonical eight-record family qualifies");
+    runner
+        .validate_abm_frequency_provenance(&contract)
+        .expect("canonical family revalidates");
+
+    let mutation_path = root.path().join(XYCE_ABM_FREQUENCY_CASES[3].control_path);
+    let original = fs::read(&mutation_path).expect("read ABM_FREQ mutation target");
+    fs::write(&mutation_path, "ABM_FREQ mutation\n.end\n").expect("mutate candidate");
+    assert!(runner.validate_abm_frequency_provenance(&contract).is_err());
+    fs::write(&mutation_path, original).expect("restore candidate");
+
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{}\n", wrapper_rows[1..].join("\n")),
+    )
+    .expect("remove wrapper row");
+    assert!(runner.validate_abm_frequency_provenance(&contract).is_err());
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{}\n", wrapper_rows.join("\n")),
+    )
+    .expect("restore wrapper rows");
+
+    let mut wrong_exclusions = exclusion_rows.clone();
+    wrong_exclusions[0] = wrong_exclusions[0].replace(
+        XYCE_ABM_FREQUENCY_DATA_CONTROL_CONTRACT,
+        "wrong_abm_frequency_contract",
+    );
+    let wrong_refs = wrong_exclusions
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&wrong_refs),
+    )
+    .expect("mutate DATA-control qualification");
+    assert!(runner.validate_abm_frequency_provenance(&contract).is_err());
+
+    let mut wrong_direction = contract.clone();
+    wrong_direction.relational.member_paths.swap(0, 1);
+    assert!(
+        runner
+            .validate_abm_frequency_provenance(&wrong_direction)
+            .is_err(),
+        "contract member ordering must preserve owner-GOODFILE provenance"
+    );
+}

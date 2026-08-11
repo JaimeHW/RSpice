@@ -34,12 +34,12 @@ use rspice_core::netlist::expr::{
 use rspice_core::netlist::{
     AnalysisCommand, DcSecondSweep, DcSweepMode, DeviceInitialConditionError,
     DeviceInitialConditionSource, DuplicateSubcircuitPortBindingError, ElementKind,
-    ElementProvenance, MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError, Netlist,
-    NetlistParseOptions, OutputDirectiveKind, OutputSymbolKind, ParameterRedefinitionPolicy,
-    ParametricValue, ParseError, StartupDiagnosticCode, StartupDiagnosticStage,
-    StartupDirectiveKind, StartupDirectiveScope, StatisticalParamMode, StepCommand, StepSweep,
-    StepTarget, SubcircuitDef, XYCE_DEFAULT_ZERO_RESISTANCE_TOL, flatten_netlist,
-    flatten_netlist_with_models, validate_output_symbols,
+    ElementProvenance, FreqVariation, MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError,
+    Netlist, NetlistParseOptions, OutputDirectiveKind, OutputSymbolKind,
+    ParameterRedefinitionPolicy, ParametricValue, ParseError, StartupDiagnosticCode,
+    StartupDiagnosticStage, StartupDirectiveKind, StartupDirectiveScope, StatisticalParamMode,
+    StepCommand, StepSweep, StepTarget, SubcircuitDef, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
+    flatten_netlist, flatten_netlist_with_models, validate_output_symbols,
 };
 use rspice_core::numerics::integration::TransientLteReference;
 use rspice_core::{Complex64, Engine, Value};
@@ -58,15 +58,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 201;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 205;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "4fde490e2daa608c27d5a2566fcfcc51ce8ad6b55c3732dc5e46707058db8734";
+    "7d1f5d891ed2dd17ecf12d1aae2af75f8d23c24c8828f3a0a7a68f8dcc2e7dad";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "103fed91c30ff097942e014f5610b45bb73878876bd9d98c7b04919b00ab11b7";
+    "5fca4ba74ead83729030655cc9dd6079ce2f9463dfa642259363e2bb4a900d78";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "76f4faa275f30e0a1682933115e1c404fd9a0b450c3895fe334032645e8dae5c";
+    "95bbe371ead3c003c503266ff7c2c4947fee5d189499c7cbd9d7d325f4579644";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -383,6 +383,125 @@ const XYCE_SOURCE_MULTIPLICITY_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
 const XYCE_SOURCE_MULTIPLICITY_HISTORICAL_ORACLE_RECORD_COUNT: usize = 13;
 const XYCE_SOURCE_MULTIPLICITY_HISTORICAL_ORACLE_BLAKE3: &str =
     "04535bab1b5685bb32d586a8c9456413b62b18252d988de73b35c972fb1f6493";
+
+// Release 7.10's four ABM_FREQ wrappers run the authored FREQ/HERTZ deck as
+// ACComparator's directional GOODFILE and the corresponding .AC DATA deck as
+// TESTFILE.  The selected current corpus, the removed wrappers/exclude file,
+// and the exact comparator implementation are all bound to RSpice's pinned
+// pre-trim source tree before native relational execution is admitted.
+const XYCE_ABM_FREQUENCY_WRAPPER_OWNER_CONTRACT: &str = "abm_frequency_relational_wrapper_owner";
+const XYCE_ABM_FREQUENCY_DATA_CONTROL_CONTRACT: &str = "abm_frequency_relational_data_control";
+const XYCE_ABM_FREQUENCY_PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
+const XYCE_ABM_FREQUENCY_UPSTREAM_REGRESSION_COMMIT: &str =
+    "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_ABM_FREQUENCY_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_ABM_FREQUENCY_CANDIDATE_COUNT: usize = 8;
+const XYCE_ABM_FREQUENCY_CANDIDATE_BLAKE3: &str =
+    "7efc124b0af802d1376d54a8afc39362c79ee194cb187ed33ecb995c77e536ec";
+const XYCE_ABM_FREQUENCY_CANDIDATE_CONTENT_BLAKE3: &str =
+    "72b7c09c288f0b9747c3f38bfb981e5f8d4c147fe846e4d0c4a0fe05497114e6";
+const XYCE_ABM_FREQUENCY_OWNER_COUNT: usize = 4;
+const XYCE_ABM_FREQUENCY_OWNER_MANIFEST_BLAKE3: &str =
+    "5ec62eef7013051119a34cc59f57685045cba5a3e68b37db753a7f5e2b291047";
+const XYCE_ABM_FREQUENCY_EXCLUSION_COUNT: usize = 4;
+const XYCE_ABM_FREQUENCY_HISTORICAL_EXCLUSION_BLAKE3: &str =
+    "80cf056fce5978e4f1a11342f3ec96d2d064c87eca98777496288f47bb6acd47";
+const XYCE_ABM_FREQUENCY_HISTORICAL_EXCLUDE_PATH: &str = "Netlists/ABM_FREQ/exclude";
+const XYCE_ABM_FREQUENCY_HISTORICAL_EXCLUDE_BYTES: usize = 86;
+const XYCE_ABM_FREQUENCY_HISTORICAL_EXCLUDE_SHA256: &str =
+    "66ec2ffe0a69ab047be056920a56e45ccdab2b7884f81e49c131b0c383678b92";
+const XYCE_ABM_FREQUENCY_HISTORICAL_EXCLUDE_BLAKE3: &str =
+    "4843fb1c7996364566527b5bb18fcb9c733be24053bb95fa69120aba5697a9a0";
+const XYCE_ABM_FREQUENCY_AC_COMPARATOR_PATH: &str = "TestScripts/ACComparator.pl";
+const XYCE_ABM_FREQUENCY_AC_COMPARATOR_BYTES: usize = 14_308;
+const XYCE_ABM_FREQUENCY_AC_COMPARATOR_SHA256: &str =
+    "265c0c24ac886ad44bf3827f2cbe0c0f1c75c80971d5bdb3429e8048b36e1571";
+const XYCE_ABM_FREQUENCY_AC_COMPARATOR_BLAKE3: &str =
+    "6a1c8fdfa65116f6729343a759d172be939eb81a8617cea5a52f3572577ba926";
+const XYCE_ABM_FREQUENCY_HISTORICAL_ORACLE_RECORD_COUNT: usize = 6;
+const XYCE_ABM_FREQUENCY_HISTORICAL_ORACLE_BLAKE3: &str =
+    "e08dd112070ff4b275d29c41cb5cc623c81687dda49aeb40460a4092c4655676";
+const XYCE_ABM_FREQUENCY_GRID: [Value; 6] = [1.0, 10.0, 100.0, 1.0e3, 1.0e4, 1.0e5];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct XyceAbmFrequencyCaseSpec {
+    family: &'static str,
+    owner_path: &'static str,
+    control_path: &'static str,
+    owner_record: &'static str,
+    control_record: &'static str,
+    owner_content_blake3: &'static str,
+    control_content_blake3: &'static str,
+    wrapper_path: &'static str,
+    wrapper_bytes: usize,
+    wrapper_sha256: &'static str,
+    wrapper_blake3: &'static str,
+    kind: XyceAbmFrequencyKind,
+    variable: XyceAbmFrequencyVariable,
+}
+
+const XYCE_ABM_FREQUENCY_CASES: [XyceAbmFrequencyCaseSpec; 4] = [
+    XyceAbmFrequencyCaseSpec {
+        family: "ABM_FREQ/abmfreq1",
+        owner_path: "Netlists/ABM_FREQ/abmfreq1.cir",
+        control_path: "Netlists/ABM_FREQ/abmfreq1_data.cir",
+        owner_record: "netlists/abm_freq/abmfreq1.cir",
+        control_record: "netlists/abm_freq/abmfreq1_data.cir",
+        owner_content_blake3: "a702b96fb4dd7772b74316c0ea3479e81bebb06a1982436cdeb857d461411099",
+        control_content_blake3: "8bc43c93af51247e02dad6a271d3252d656a52851b0985dae7f34332cb2e32d0",
+        wrapper_path: "Netlists/ABM_FREQ/abmfreq1.cir.sh",
+        wrapper_bytes: 2_790,
+        wrapper_sha256: "6e1662faee760fadac28bb36eea179d3e95f274b9d18d8b2b85febd800a131d7",
+        wrapper_blake3: "22c4ed967cfc47ec81ca28dfbadc990bf9005a4177168960ed7e8b51d3c0d4c0",
+        kind: XyceAbmFrequencyKind::BehavioralCurrent,
+        variable: XyceAbmFrequencyVariable::Freq,
+    },
+    XyceAbmFrequencyCaseSpec {
+        family: "ABM_FREQ/abmhertz1",
+        owner_path: "Netlists/ABM_FREQ/abmhertz1.cir",
+        control_path: "Netlists/ABM_FREQ/abmhertz1_data.cir",
+        owner_record: "netlists/abm_freq/abmhertz1.cir",
+        control_record: "netlists/abm_freq/abmhertz1_data.cir",
+        owner_content_blake3: "c0e1ec2e949796a5a15d894c5ed601bf2b6aa5ea1a5882afacc05ef7edfec298",
+        control_content_blake3: "69323efca8360bbcbef2c9395d6612d3213cc0c770e603336f2702c9fdb7a06e",
+        wrapper_path: "Netlists/ABM_FREQ/abmhertz1.cir.sh",
+        wrapper_bytes: 2_792,
+        wrapper_sha256: "5e04c31574e5d7a9cebbe77243dc71b0bae9894272aaadf92d03ba56a0de39dc",
+        wrapper_blake3: "d5d21c88b6eadd045ab7045b9f0d078b0979ba2e7cf5123a0a3aea6fd65db1c7",
+        kind: XyceAbmFrequencyKind::BehavioralCurrent,
+        variable: XyceAbmFrequencyVariable::Hertz,
+    },
+    XyceAbmFrequencyCaseSpec {
+        family: "ABM_FREQ/RC_simple",
+        owner_path: "Netlists/ABM_FREQ/RC_simple.cir",
+        control_path: "Netlists/ABM_FREQ/RC_data.cir",
+        owner_record: "netlists/abm_freq/rc_simple.cir",
+        control_record: "netlists/abm_freq/rc_data.cir",
+        owner_content_blake3: "0fba61011546c024c009d5c3206bff30d2ec36c65993115bc7f3f362a1aa2249",
+        control_content_blake3: "09b2d92fd9bdc87751052bdc3707402206c51b449616f915d6ce510ea37eda8c",
+        wrapper_path: "Netlists/ABM_FREQ/RC_simple.cir.sh",
+        wrapper_bytes: 2_785,
+        wrapper_sha256: "dbef44efb30c9fff33bf4bd1e9d60adcfcc664835164d55a06819a20b0790443",
+        wrapper_blake3: "f5eb8df6e647999d8f597e91cff6dc5b617fb96e42fed1fa87fb791cee382e14",
+        kind: XyceAbmFrequencyKind::Resistor,
+        variable: XyceAbmFrequencyVariable::Freq,
+    },
+    XyceAbmFrequencyCaseSpec {
+        family: "ABM_FREQ/RC_simple_hertz",
+        owner_path: "Netlists/ABM_FREQ/RC_simple_hertz.cir",
+        control_path: "Netlists/ABM_FREQ/RC_data_hertz.cir",
+        owner_record: "netlists/abm_freq/rc_simple_hertz.cir",
+        control_record: "netlists/abm_freq/rc_data_hertz.cir",
+        owner_content_blake3: "b972b03e5f444fdad0271531cdb3d75a549c705dbdf0f5869e96249f8f219929",
+        control_content_blake3: "320de333e3ebf9a965bea123f15a44e7f5c4df55ccaa62e811574cc82f4fe8ae",
+        wrapper_path: "Netlists/ABM_FREQ/RC_simple_hertz.cir.sh",
+        wrapper_bytes: 2_797,
+        wrapper_sha256: "680a73dfc6979be0e58e95cac84265a0a1684e1cffa54f5db15aa7163c38e313",
+        wrapper_blake3: "01fc0372d1f8e1cece405eff20fe3f01f69e4184931f72451590fdb4483b06da",
+        kind: XyceAbmFrequencyKind::Resistor,
+        variable: XyceAbmFrequencyVariable::Hertz,
+    },
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct XyceSourceMultiplicityCaseSpec {
@@ -5059,6 +5178,7 @@ struct XyceRelationalAcPlan {
     source: String,
     print: XycePrintRequest,
     ac: XyceAcAnalysis,
+    frequency_bound: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -5576,6 +5696,43 @@ struct XyceSourceMultiplicityFamilyContract {
     baseline_path: PathBuf,
     spec: &'static XyceSourceMultiplicityCaseSpec,
     role: XyceSourceMultiplicityRole,
+}
+
+#[derive(Debug, Clone)]
+struct XyceAbmFrequencyFamilyContract {
+    relational: XyceBaselineFamilyContract,
+    owner_path: PathBuf,
+    control_path: PathBuf,
+    spec: &'static XyceAbmFrequencyCaseSpec,
+    role: XyceAbmFrequencyRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAbmFrequencyRole {
+    WrapperOwner,
+    DataControl,
+}
+
+impl XyceAbmFrequencyRole {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::WrapperOwner => XYCE_ABM_FREQUENCY_WRAPPER_OWNER_CONTRACT,
+            Self::DataControl => XYCE_ABM_FREQUENCY_DATA_CONTROL_CONTRACT,
+        }
+    }
+
+    fn for_record(relative_path: &str) -> Option<(&'static XyceAbmFrequencyCaseSpec, Self)> {
+        let relative = XyceTestRunner::normalize_manifest_key(relative_path);
+        XYCE_ABM_FREQUENCY_CASES.iter().find_map(|spec| {
+            if relative == spec.owner_record {
+                Some((spec, Self::WrapperOwner))
+            } else if relative == spec.control_record {
+                Some((spec, Self::DataControl))
+            } else {
+                None
+            }
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -6281,6 +6438,50 @@ struct XyceSourceMultiplicitySnapshot {
     ordered_probes: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAbmFrequencyKind {
+    BehavioralCurrent,
+    Resistor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAbmFrequencyVariable {
+    Freq,
+    Hertz,
+}
+
+impl XyceAbmFrequencyVariable {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Freq => "freq",
+            Self::Hertz => "hertz",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAbmFrequencyRepresentation {
+    RuntimeDecadeExpression,
+    DataTableControl,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceAbmFrequencySnapshot {
+    kind: XyceAbmFrequencyKind,
+    variable: XyceAbmFrequencyVariable,
+    representation: XyceAbmFrequencyRepresentation,
+    frequency_bits: Vec<u64>,
+    effective_resistance_bits: Vec<u64>,
+    source_nodes: [String; 2],
+    source_ac_bits: [u64; 2],
+    source_transient_bits: [u64; 6],
+    load_nodes: [String; 2],
+    capacitance_bits: u64,
+    runtime_expression: Option<XyceExpressionAstFingerprint>,
+    data_overrides: Vec<Vec<(String, u64)>>,
+    ordered_probes: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct XyceThermalResistorRuntimeFingerprint {
     name: String,
@@ -6506,6 +6707,7 @@ struct XyceNestedIncludeSubcircuitFingerprint {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum XyceStrictAcFamilySnapshot {
     AcAnalysisExpression(XyceAcAnalysisExpressionSnapshot),
+    AbmFrequency(Box<XyceAbmFrequencySnapshot>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -6663,6 +6865,7 @@ enum XyceBjtExternalNodeRepresentation {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceBaselineFamilyKind {
+    AbmFrequency,
     AgeCap,
     DiodeModelAlias,
     SwitchStateCase,
@@ -6752,6 +6955,7 @@ impl XyceBaselineFamilyComparison {
 impl XyceBaselineFamilyKind {
     fn name(self) -> &'static str {
         match self {
+            Self::AbmFrequency => "ABM_FREQUENCY_RELATIONAL",
             Self::AgeCap => "AGE_CAP_EQUIVALENCE",
             Self::DiodeModelAlias => "DIODE_MODEL_ALIAS_EQUIVALENCE",
             Self::SwitchStateCase => "SWITCH_STATE_CASE_EQUIVALENCE",
@@ -6780,6 +6984,7 @@ impl XyceBaselineFamilyKind {
 
     fn wrapper_contract(self) -> &'static str {
         match self {
+            Self::AbmFrequency => XYCE_ABM_FREQUENCY_WRAPPER_OWNER_CONTRACT,
             Self::AgeCap => "age_cap_family_anchor",
             Self::DiodeModelAlias => "diode_model_alias_family_anchor",
             Self::SwitchStateCase => "switch_state_case_family_anchor",
@@ -6808,6 +7013,7 @@ impl XyceBaselineFamilyKind {
 
     fn baseline_contract(self) -> &'static str {
         match self {
+            Self::AbmFrequency => XYCE_ABM_FREQUENCY_DATA_CONTROL_CONTRACT,
             Self::AgeCap => "age_cap_family_aged_baseline",
             Self::DiodeModelAlias => "diode_model_alias_family_canonical_baseline",
             Self::SwitchStateCase => "switch_state_case_family_uppercase_baseline",
@@ -6854,11 +7060,20 @@ impl XyceBaselineFamilyKind {
         matches!(self, Self::NakedAlgebra | Self::SourceMultiplicity)
     }
 
+    /// Whether ACComparator's non-baseline member is the directional
+    /// GOODFILE.  ABM_FREQ's Release 7.10 wrappers invoke the comparator as
+    /// `owner.FD.prn data-control.FD.prn`; the relative denominator, zero
+    /// handling, and frequency clauses make this ordering observable.
+    fn ac_comparator_member_is_good_waveform(self) -> bool {
+        matches!(self, Self::AbmFrequency)
+    }
+
     fn transient_plan_purpose(self) -> XyceStaticTranPlanPurpose {
         match self {
             Self::ScopedModel => XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
             Self::AgeCap => XyceStaticTranPlanPurpose::AgeCapRelationalFamily,
-            Self::AcAnalysisExpression
+            Self::AbmFrequency
+            | Self::AcAnalysisExpression
             | Self::BjtExternalNode
             | Self::DcAnalysisExpression
             | Self::DelimitedExpression

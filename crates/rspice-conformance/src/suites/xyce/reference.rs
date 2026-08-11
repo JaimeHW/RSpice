@@ -1405,8 +1405,31 @@ impl XyceTestRunner {
         netlist: &Netlist,
         results: &[AcResult],
     ) -> Result<XycePrnTable, String> {
-        let first = results
+        let points = results
+            .iter()
+            .map(|result| (netlist, result))
+            .collect::<Vec<_>>();
+        Self::ac_family_points_to_prn_table(print, &points)
+    }
+
+    pub(super) fn ac_family_data_points_to_prn_table(
+        print: &XycePrintRequest,
+        points: &[XyceAcDataPointResult],
+    ) -> Result<XycePrnTable, String> {
+        let points = points
+            .iter()
+            .map(|point| (&point.netlist, &point.result))
+            .collect::<Vec<_>>();
+        Self::ac_family_points_to_prn_table(print, &points)
+    }
+
+    pub(super) fn ac_family_points_to_prn_table(
+        print: &XycePrintRequest,
+        points: &[(&Netlist, &AcResult)],
+    ) -> Result<XycePrnTable, String> {
+        let (first_netlist, first) = points
             .first()
+            .copied()
             .ok_or_else(|| "relational AC simulation produced no points".to_string())?;
         let mut expansions = Vec::with_capacity(print.probes.len());
         let mut columns = vec!["Index".to_string(), "FREQ".to_string()];
@@ -1417,7 +1440,7 @@ impl XyceTestRunner {
                 || Self::parse_ac_current_probe(&normalized)
                     .is_some_and(|probe| probe.accessor == XyceCurrentAccessor::Value);
             if is_direct_complex {
-                let value = Self::evaluate_ac_complex_probe(probe, netlist, first)?;
+                let value = Self::evaluate_ac_complex_probe(probe, first_netlist, first)?;
                 if !value.re.is_finite() || !value.im.is_finite() {
                     return Err(format!(
                         "relational AC probe '{probe}' produced a non-finite complex value"
@@ -1428,7 +1451,7 @@ impl XyceTestRunner {
                 columns.push(format!("Im({probe})"));
                 continue;
             }
-            match Self::evaluate_ac_probe(probe, netlist, first, false) {
+            match Self::evaluate_ac_probe(probe, first_netlist, first, false) {
                 Ok(value) if value.is_finite() => {
                     expansions.push(XyceAcCsdColumnExpansion::Scalar);
                     columns.push(probe.clone());
@@ -1439,7 +1462,7 @@ impl XyceTestRunner {
                     ));
                 }
                 Err(_) => {
-                    let value = Self::evaluate_ac_complex_probe(probe, netlist, first)?;
+                    let value = Self::evaluate_ac_complex_probe(probe, first_netlist, first)?;
                     if !value.re.is_finite() || !value.im.is_finite() {
                         return Err(format!(
                             "relational AC probe '{probe}' produced a non-finite complex value"
@@ -1452,8 +1475,8 @@ impl XyceTestRunner {
             }
         }
 
-        let mut rows = Vec::with_capacity(results.len());
-        for (row_index, result) in results.iter().enumerate() {
+        let mut rows = Vec::with_capacity(points.len());
+        for (row_index, (netlist, result)) in points.iter().copied().enumerate() {
             let mut row = Vec::with_capacity(columns.len());
             row.push(row_index as Value);
             row.push(

@@ -60,7 +60,7 @@ reported separately from `expected_unsupported`.
 
 Some upstream exclusions are helper, baseline, or control decks tested by an
 upstream wrapper owner. RSpice has independently reconstructed and qualified
-exact native contracts for 201 such decks. Those rows use
+exact native contracts for 205 such decks. Those rows use
 `rspice_independently_qualified` and name the exact expected native contract.
 The adapter executes them, preserves their upstream provenance on the result,
 and fails closed if execution becomes unsupported, fails, or selects a
@@ -78,6 +78,13 @@ selected owner/baseline decks, all ten removed owner wrappers, both historical
 exclusion-list blobs, and the verifier. Their relational oracle preserves the
 upstream direction: the authored multiplier owner is GOODFILE and the explicit
 0.2-Siemens baseline is TESTFILE.
+
+The four ABM_FREQ families also pin the Release-7.10.0 wrappers, historical
+exclusion-list blob, and `ACComparator.pl`. Their native relational oracle
+preserves the wrapper's directional invocation: the authored FREQ/HERTZ DEC
+owner is GOODFILE, the corresponding `.AC DATA` control is TESTFILE, and the
+comparison uses the exact upstream absolute, relative, zero, and frequency
+tolerances.
 
 The complete inventory and promotions are reproduced by
 `tools/xyce/sync_upstream_exclusions.py`. The checked-in manifest pins the
