@@ -58,15 +58,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 205;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 207;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "7d1f5d891ed2dd17ecf12d1aae2af75f8d23c24c8828f3a0a7a68f8dcc2e7dad";
+    "c6e46fb6ee3946d7a3cd67f2f4623b88af0103eef4c59704185f43b36f7746b4";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "5fca4ba74ead83729030655cc9dd6079ce2f9463dfa642259363e2bb4a900d78";
+    "51c47578798f6126f4dd6a21511b9c77f8b133758cb7ff11bdcd0fef2e80337d";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "9c53cc0fdb7eb2a56b8ef8f62265c8a413a449b76379dba0f8c3586931c53fad";
+    "5ff4f21c84ac1e4fb253e6fa7f497821e67a751fafcedc95688176883a467a48";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -423,6 +423,89 @@ const XYCE_ABM_FREQUENCY_HISTORICAL_ORACLE_BLAKE3: &str =
     "e08dd112070ff4b275d29c41cb5cc623c81687dda49aeb40460a4092c4655676";
 const XYCE_ABM_FREQUENCY_GRID: [Value; 6] = [1.0, 10.0, 100.0, 1.0e3, 1.0e4, 1.0e5];
 const XYCE_ABM_FREQUENCY_GRID_RELATIVE_ROUNDOFF: Value = 64.0 * f64::EPSILON;
+
+// Release 7.10's ABM_SPLINES ordering wrappers run each authored out-of-order
+// inline lookup deck first, then its ordered control, and require their default
+// PRN files to be byte-identical. Bind the exact four retained sources and the
+// removed wrappers/exclude/xyce_verify artifacts before reproducing that
+// directional pair contract natively.
+const XYCE_ABM_LOOKUP_ORDER_WRAPPER_OWNER_CONTRACT: &str =
+    "abm_splines_inline_lookup_order_wrapper_owner";
+const XYCE_ABM_LOOKUP_ORDER_SORTED_CONTROL_CONTRACT: &str =
+    "abm_splines_inline_lookup_order_sorted_control";
+const XYCE_ABM_LOOKUP_ORDER_PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
+const XYCE_ABM_LOOKUP_ORDER_UPSTREAM_REGRESSION_COMMIT: &str =
+    "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_ABM_LOOKUP_ORDER_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_ABM_LOOKUP_ORDER_CANDIDATE_COUNT: usize = 4;
+const XYCE_ABM_LOOKUP_ORDER_CANDIDATE_BLAKE3: &str =
+    "9ee216508da63b2a0a0abcdfca52cb029c64c7bf947754689241327cfcf791cd";
+const XYCE_ABM_LOOKUP_ORDER_CANDIDATE_CONTENT_BLAKE3: &str =
+    "be2a4505167a38bad432fcbbf100e88e59da0b598c685834bd67fb1d3fb0c691";
+const XYCE_ABM_LOOKUP_ORDER_OWNER_COUNT: usize = 2;
+const XYCE_ABM_LOOKUP_ORDER_OWNER_MANIFEST_BLAKE3: &str =
+    "286412075c19ef51b86d1e30d368c7b58cd7e610dc5fc5aa80d8edf1ff010d9d";
+const XYCE_ABM_LOOKUP_ORDER_EXCLUSION_COUNT: usize = 2;
+const XYCE_ABM_LOOKUP_ORDER_HISTORICAL_EXCLUSION_BLAKE3: &str =
+    "bcddcc20cfa2a46933f6598d047cb685b2a93f200a881d8e0bd0d51cea2beb72";
+const XYCE_ABM_LOOKUP_ORDER_HISTORICAL_EXCLUDE_PATH: &str = "Netlists/ABM_SPLINES/exclude";
+const XYCE_ABM_LOOKUP_ORDER_HISTORICAL_EXCLUDE_BYTES: usize = 59;
+const XYCE_ABM_LOOKUP_ORDER_HISTORICAL_EXCLUDE_SHA256: &str =
+    "4ab0d89ccf9cd4348d3fd0290c511d6a32e6ab0fe988751bd5c78bc8bea94402";
+const XYCE_ABM_LOOKUP_ORDER_HISTORICAL_EXCLUDE_BLAKE3: &str =
+    "16c24099b5b183a50760d0780895488630fc6681fa56919fff9c423871946f58";
+const XYCE_ABM_LOOKUP_ORDER_HISTORICAL_ORACLE_RECORD_COUNT: usize = 4;
+const XYCE_ABM_LOOKUP_ORDER_HISTORICAL_ORACLE_BLAKE3: &str =
+    "897989a3f58c9339b2dcf88fc3333987ec1b1b57988cd6a78c54d1f56db88277";
+const XYCE_ABM_LOOKUP_ORDER_GRID: [Value; 11] =
+    [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct XyceAbmLookupOrderCaseSpec {
+    family: &'static str,
+    owner_path: &'static str,
+    control_path: &'static str,
+    owner_record: &'static str,
+    control_record: &'static str,
+    owner_content_blake3: &'static str,
+    control_content_blake3: &'static str,
+    wrapper_path: &'static str,
+    wrapper_bytes: usize,
+    wrapper_sha256: &'static str,
+    wrapper_blake3: &'static str,
+    kind: XyceAbmLookupKind,
+}
+
+const XYCE_ABM_LOOKUP_ORDER_CASES: [XyceAbmLookupOrderCaseSpec; 2] = [
+    XyceAbmLookupOrderCaseSpec {
+        family: "ABM_SPLINES/akimaOutOfOrder",
+        owner_path: "Netlists/ABM_SPLINES/akimaOutOfOrder.cir",
+        control_path: "Netlists/ABM_SPLINES/akimaOutOfOrder_baseline.cir",
+        owner_record: "netlists/abm_splines/akimaoutoforder.cir",
+        control_record: "netlists/abm_splines/akimaoutoforder_baseline.cir",
+        owner_content_blake3: "351e7255510860fc041b6519fdfad5bf860b0256199789d5406994cf67dcb7cf",
+        control_content_blake3: "c6c9d2f35af02f9d42b00117baadedb3f41fb9ba396360e8bd2977848ae20ca4",
+        wrapper_path: "Netlists/ABM_SPLINES/akimaOutOfOrder.cir.sh",
+        wrapper_bytes: 1_523,
+        wrapper_sha256: "d5618b6591666512ee1d7074217643118e08e6756f4dddc22781b1b7d0e96e3b",
+        wrapper_blake3: "bba4bda064e9d9073b5815500edc57a3a6ebfccfb0d44357d7fbe988dbf0f17d",
+        kind: XyceAbmLookupKind::Akima,
+    },
+    XyceAbmLookupOrderCaseSpec {
+        family: "ABM_SPLINES/tableOutOfOrder2",
+        owner_path: "Netlists/ABM_SPLINES/tableOutOfOrder2.cir",
+        control_path: "Netlists/ABM_SPLINES/tableOutOfOrder2_baseline.cir",
+        owner_record: "netlists/abm_splines/tableoutoforder2.cir",
+        control_record: "netlists/abm_splines/tableoutoforder2_baseline.cir",
+        owner_content_blake3: "2299905d9cbb3addbf77738748dee112c21e3cce71271a546e4f0943a40d2da5",
+        control_content_blake3: "7570b3e44aeb9343c721fecc93be83a3169fb80f1750c1fbe5bea814ad0fadfd",
+        wrapper_path: "Netlists/ABM_SPLINES/tableOutOfOrder2.cir.sh",
+        wrapper_bytes: 1_525,
+        wrapper_sha256: "2e12a860cd86c530caceee6744697e73292bbaaba3c12bdc068e26726f5eaed8",
+        wrapper_blake3: "299a94323e811a857b82857201c7c990ebc93f289e69a55dfc91e93212648312",
+        kind: XyceAbmLookupKind::Table,
+    },
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct XyceAbmFrequencyCaseSpec {
@@ -5763,6 +5846,43 @@ struct XyceAbmFrequencyFamilyContract {
     role: XyceAbmFrequencyRole,
 }
 
+#[derive(Debug, Clone)]
+struct XyceAbmLookupOrderFamilyContract {
+    relational: XyceBaselineFamilyContract,
+    owner_path: PathBuf,
+    control_path: PathBuf,
+    spec: &'static XyceAbmLookupOrderCaseSpec,
+    role: XyceAbmLookupOrderRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAbmLookupOrderRole {
+    WrapperOwner,
+    SortedControl,
+}
+
+impl XyceAbmLookupOrderRole {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::WrapperOwner => XYCE_ABM_LOOKUP_ORDER_WRAPPER_OWNER_CONTRACT,
+            Self::SortedControl => XYCE_ABM_LOOKUP_ORDER_SORTED_CONTROL_CONTRACT,
+        }
+    }
+
+    fn for_record(relative_path: &str) -> Option<(&'static XyceAbmLookupOrderCaseSpec, Self)> {
+        let relative = XyceTestRunner::normalize_manifest_key(relative_path);
+        XYCE_ABM_LOOKUP_ORDER_CASES.iter().find_map(|spec| {
+            if relative == spec.owner_record {
+                Some((spec, Self::WrapperOwner))
+            } else if relative == spec.control_record {
+                Some((spec, Self::SortedControl))
+            } else {
+                None
+            }
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceAbmFrequencyRole {
     WrapperOwner,
@@ -6735,6 +6855,7 @@ enum XyceDiodeModelAliasRepresentation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum XyceStrictDcFamilySnapshot {
+    AbmLookupOrder(XyceAbmLookupOrderSnapshot),
     BjtExternalNode(XyceBjtExternalNodeFamilySnapshot),
     DcAnalysisExpression(XyceDcAnalysisExpressionSnapshot),
     DelimitedExpression(XyceDelimitedExpressionFamilySnapshot),
@@ -6743,6 +6864,27 @@ enum XyceStrictDcFamilySnapshot {
     SubcktParameterResolution(XyceSubcktParameterResolutionSnapshot),
     NestedIncludeIdentity(XyceNestedIncludeIdentityFamilySnapshot),
     SourceMultiplicity(XyceSourceMultiplicitySnapshot),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceAbmLookupOrderSnapshot {
+    kind: XyceAbmLookupKind,
+    representation: XyceAbmLookupRepresentation,
+    authored_points_bits: Vec<(u64, u64)>,
+    canonical_points_bits: Vec<(u64, u64)>,
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAbmLookupKind {
+    Akima,
+    Table,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAbmLookupRepresentation {
+    OutOfOrderOwner,
+    SortedControl,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -6922,6 +7064,7 @@ enum XyceBjtExternalNodeRepresentation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceBaselineFamilyKind {
     AbmFrequency,
+    AbmLookupOrder,
     AgeCap,
     DiodeModelAlias,
     SwitchStateCase,
@@ -7012,6 +7155,7 @@ impl XyceBaselineFamilyKind {
     fn name(self) -> &'static str {
         match self {
             Self::AbmFrequency => "ABM_FREQUENCY_RELATIONAL",
+            Self::AbmLookupOrder => "ABM_SPLINES_INLINE_LOOKUP_ORDER",
             Self::AgeCap => "AGE_CAP_EQUIVALENCE",
             Self::DiodeModelAlias => "DIODE_MODEL_ALIAS_EQUIVALENCE",
             Self::SwitchStateCase => "SWITCH_STATE_CASE_EQUIVALENCE",
@@ -7041,6 +7185,7 @@ impl XyceBaselineFamilyKind {
     fn wrapper_contract(self) -> &'static str {
         match self {
             Self::AbmFrequency => XYCE_ABM_FREQUENCY_WRAPPER_OWNER_CONTRACT,
+            Self::AbmLookupOrder => XYCE_ABM_LOOKUP_ORDER_WRAPPER_OWNER_CONTRACT,
             Self::AgeCap => "age_cap_family_anchor",
             Self::DiodeModelAlias => "diode_model_alias_family_anchor",
             Self::SwitchStateCase => "switch_state_case_family_anchor",
@@ -7070,6 +7215,7 @@ impl XyceBaselineFamilyKind {
     fn baseline_contract(self) -> &'static str {
         match self {
             Self::AbmFrequency => XYCE_ABM_FREQUENCY_DATA_CONTROL_CONTRACT,
+            Self::AbmLookupOrder => XYCE_ABM_LOOKUP_ORDER_SORTED_CONTROL_CONTRACT,
             Self::AgeCap => "age_cap_family_aged_baseline",
             Self::DiodeModelAlias => "diode_model_alias_family_canonical_baseline",
             Self::SwitchStateCase => "switch_state_case_family_uppercase_baseline",
@@ -7113,7 +7259,10 @@ impl XyceBaselineFamilyKind {
         // mixed-expression member as GOODFILE and the braced baseline as
         // TESTFILE. The normalized RMS denominator is directional, so this
         // ordering is part of the oracle rather than an interchangeable pair.
-        matches!(self, Self::NakedAlgebra | Self::SourceMultiplicity)
+        matches!(
+            self,
+            Self::AbmLookupOrder | Self::NakedAlgebra | Self::SourceMultiplicity
+        )
     }
 
     /// Whether ACComparator's non-baseline member is the directional
@@ -7129,6 +7278,7 @@ impl XyceBaselineFamilyKind {
             Self::ScopedModel => XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
             Self::AgeCap => XyceStaticTranPlanPurpose::AgeCapRelationalFamily,
             Self::AbmFrequency
+            | Self::AbmLookupOrder
             | Self::AcAnalysisExpression
             | Self::BjtExternalNode
             | Self::DcAnalysisExpression
@@ -7843,6 +7993,7 @@ mod contracts;
 mod contracts_dc;
 mod contracts_frequency;
 mod contracts_sources;
+mod contracts_splines;
 mod contracts_transient;
 mod discovery;
 mod execution;

@@ -770,6 +770,7 @@ impl XyceTestRunner {
         plan: &XyceStaticDcPlan,
     ) -> Result<(), String> {
         match kind {
+            XyceBaselineFamilyKind::AbmLookupOrder => Self::validate_abm_lookup_order_dc_plan(plan),
             XyceBaselineFamilyKind::BjtExternalNode => {
                 Self::validate_bjt_external_node_dc_plan(plan)
             }
@@ -796,6 +797,33 @@ impl XyceTestRunner {
                 other.name()
             )),
         }
+    }
+
+    pub(super) fn validate_abm_lookup_order_dc_plan(plan: &XyceStaticDcPlan) -> Result<(), String> {
+        let exact_grid = matches!(
+            &plan.dc.mode,
+            DcSweepMode::List(values)
+                if values.len() == XYCE_ABM_LOOKUP_ORDER_GRID.len()
+                    && values
+                        .iter()
+                        .zip(XYCE_ABM_LOOKUP_ORDER_GRID)
+                        .all(|(actual, expected)| actual.to_bits() == expected.to_bits())
+        );
+        if !plan.steps.is_empty()
+            || plan.dc_data.is_some()
+            || plan.print_format.is_some()
+            || plan.dc.sweep2.is_some()
+            || !plan.diagnostics.is_empty()
+            || !plan.dc.source.eq_ignore_ascii_case("VA")
+            || !exact_grid
+            || plan.print.probes != ["V(1)".to_string()]
+        {
+            return Err(
+                "ABM_SPLINES lookup ordering requires one diagnostic-free, unstepped '.DC VA LIST 0.0 0.1 ... 1.0' analysis with sole ordered V(1) default-PRN probe"
+                    .to_string(),
+            );
+        }
+        Ok(())
     }
 
     pub(super) fn validate_source_multiplicity_dc_plan(

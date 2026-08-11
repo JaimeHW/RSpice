@@ -4034,9 +4034,9 @@ impl XyceTestRunner {
             Expr::Function { args, .. } => args
                 .iter()
                 .any(Self::expression_depends_on_solution_quantity),
+            Expr::LookupTable { input, .. } => Self::expression_depends_on_solution_quantity(input),
             Expr::Const(_)
             | Expr::StringLiteral(_)
-            | Expr::LookupTable(_)
             | Expr::Time
             | Expr::Frequency
             | Expr::Temperature
@@ -4056,9 +4056,11 @@ impl XyceTestRunner {
             Expr::Function { args, .. } => args
                 .iter()
                 .any(Self::expression_depends_on_ac_runtime_quantity),
+            Expr::LookupTable { input, .. } => {
+                Self::expression_depends_on_ac_runtime_quantity(input)
+            }
             Expr::Const(_)
             | Expr::StringLiteral(_)
-            | Expr::LookupTable(_)
             | Expr::NodeVoltage(_)
             | Expr::BranchCurrent(_)
             | Expr::Temperature
@@ -4076,9 +4078,9 @@ impl XyceTestRunner {
                     || Self::expression_depends_on_frequency(right)
             }
             Expr::Function { args, .. } => args.iter().any(Self::expression_depends_on_frequency),
+            Expr::LookupTable { input, .. } => Self::expression_depends_on_frequency(input),
             Expr::Const(_)
             | Expr::StringLiteral(_)
-            | Expr::LookupTable(_)
             | Expr::NodeVoltage(_)
             | Expr::BranchCurrent(_)
             | Expr::Time
@@ -4093,7 +4095,6 @@ impl XyceTestRunner {
             Expr::Const(_) | Expr::StringLiteral(_) | Expr::Temperature => false,
             Expr::NodeVoltage(_)
             | Expr::BranchCurrent(_)
-            | Expr::LookupTable(_)
             | Expr::Time
             | Expr::Frequency
             | Expr::ThermalVoltage
@@ -4108,6 +4109,9 @@ impl XyceTestRunner {
             Expr::Function { args, .. } => args
                 .iter()
                 .any(Self::passive_value_expression_depends_on_runtime_quantity),
+            Expr::LookupTable { input, .. } => {
+                Self::passive_value_expression_depends_on_runtime_quantity(input)
+            }
         }
     }
 
@@ -4381,11 +4385,11 @@ impl XyceTestRunner {
             Expr::Binary { left, right, .. } => {
                 Self::expression_contains_sdt(left) || Self::expression_contains_sdt(right)
             }
+            Expr::LookupTable { input, .. } => Self::expression_contains_sdt(input),
             Expr::Const(_)
             | Expr::NodeVoltage(_)
             | Expr::BranchCurrent(_)
             | Expr::StringLiteral(_)
-            | Expr::LookupTable(_)
             | Expr::Time
             | Expr::Frequency
             | Expr::Temperature

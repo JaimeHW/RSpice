@@ -5219,6 +5219,10 @@ impl XyceTestRunner {
         plan: &XyceStaticDcPlan,
     ) -> Result<XyceStrictDcFamilySnapshot, String> {
         match kind {
+            XyceBaselineFamilyKind::AbmLookupOrder => {
+                Self::abm_lookup_order_snapshot(netlist, plan)
+                    .map(XyceStrictDcFamilySnapshot::AbmLookupOrder)
+            }
             XyceBaselineFamilyKind::BjtExternalNode => {
                 Self::bjt_external_node_family_snapshot(netlist, &plan.print)
                     .map(XyceStrictDcFamilySnapshot::BjtExternalNode)
@@ -5256,6 +5260,216 @@ impl XyceTestRunner {
                 other.name()
             )),
         }
+    }
+
+    pub(super) fn abm_lookup_order_snapshot(
+        netlist: &Netlist,
+        plan: &XyceStaticDcPlan,
+    ) -> Result<XyceAbmLookupOrderSnapshot, String> {
+        const LABEL: &str = "ABM_SPLINES inline lookup-order parity";
+
+        Self::validate_abm_lookup_order_dc_plan(plan)?;
+        if !netlist.title.trim().is_empty()
+            || !netlist.diagnostics.is_empty()
+            || !matches!(netlist.analyses.as_slice(), [AnalysisCommand::Dc { .. }])
+            || netlist.elements.len() != 4
+            || !netlist.models.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.params.all_params().is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+            || !netlist.params.all_global_expressions().is_empty()
+            || !netlist.params.all_parameter_expressions().is_empty()
+            || netlist.lin_analysis.is_some()
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || netlist.device_initial_conditions.is_some()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires the exact flat, parameter-free, diagnostic-free four-element DC topology"
+            ));
+        }
+
+        let mut elements = BTreeMap::new();
+        let mut lookup = None;
+        for element in &netlist.elements {
+            if element.provenance != ElementProvenance::Authored {
+                return Err(format!(
+                    "{LABEL} element '{}' is not authored source state",
+                    element.name
+                ));
+            }
+            let name = Self::normalize_device_instance_name(&element.name);
+            if !matches!(name.as_str(), "va" | "ra" | "b1" | "r1") || elements.contains_key(&name) {
+                return Err(format!(
+                    "{LABEL} contains an unknown or duplicate element '{}'",
+                    element.name
+                ));
+            }
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| node.trim().to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            let fingerprint = match (name.as_str(), &element.kind) {
+                ("va", ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Dc(value)))
+                    if nodes == ["a", "0"] && value.to_bits() == 1.0f64.to_bits() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "V:DC".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                (
+                    "ra" | "r1",
+                    ElementKind::Resistor {
+                        value,
+                        value_expr,
+                        model,
+                        instance_params,
+                        deferred_params,
+                    },
+                ) if value.to_bits() == 1.0f64.to_bits()
+                    && value_expr.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty()
+                    && ((name == "ra" && nodes == ["b", "0"])
+                        || (name == "r1" && nodes == ["1", "0"])) =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                (
+                    "b1",
+                    ElementKind::BehavioralVoltage {
+                        expression,
+                        tc1,
+                        tc2,
+                        multiplicity,
+                    },
+                ) if nodes == ["1", "0"]
+                    && tc1.to_bits() == 0.0f64.to_bits()
+                    && tc2.to_bits() == 0.0f64.to_bits()
+                    && multiplicity.value.to_bits() == 1.0f64.to_bits()
+                    && multiplicity.value_expr.is_none()
+                    && !multiplicity.given =>
+                {
+                    let prepared = prepare_behavioral_expression(expression, &netlist.params)
+                        .map_err(|error| format!("{LABEL} B1 preparation failed: {error}"))?;
+                    let ast = parse_expression_strict(&prepared)
+                        .map_err(|error| format!("{LABEL} B1 parsing failed: {error}"))?;
+                    let Expr::Function { func, args } = ast else {
+                        return Err(format!("{LABEL} B1 must be one inline TABLE or AKIMA call"));
+                    };
+                    let kind = match func {
+                        rspice_core::expr::Function::Akima => XyceAbmLookupKind::Akima,
+                        rspice_core::expr::Function::Table => XyceAbmLookupKind::Table,
+                        _ => {
+                            return Err(format!("{LABEL} B1 uses an unqualified lookup function"));
+                        }
+                    };
+                    let [input, point_args @ ..] = args.as_slice() else {
+                        return Err(format!("{LABEL} B1 has no lookup input"));
+                    };
+                    let Expr::NodeVoltage(input_node) = input else {
+                        return Err(format!("{LABEL} B1 input must be V(A)"));
+                    };
+                    if !input_node.trim().eq_ignore_ascii_case("a") || point_args.len() != 6 {
+                        return Err(format!(
+                            "{LABEL} B1 requires V(A) and exactly three inline point pairs"
+                        ));
+                    }
+                    let mut authored_points = Vec::with_capacity(3);
+                    for pair in point_args.chunks_exact(2) {
+                        let [Expr::Const(x), Expr::Const(y)] = pair else {
+                            return Err(format!(
+                                "{LABEL} B1 point coordinates must be finite constants"
+                            ));
+                        };
+                        if !x.is_finite() || !y.is_finite() {
+                            return Err(format!(
+                                "{LABEL} B1 point coordinates must be finite constants"
+                            ));
+                        }
+                        authored_points.push((*x, *y));
+                    }
+                    let expected_canonical = match kind {
+                        XyceAbmLookupKind::Akima => [(0.0, 1.0), (0.5, 2.25), (1.0, 4.0)],
+                        XyceAbmLookupKind::Table => [(0.0, 1.0), (0.5, 2.0), (1.0, 3.0)],
+                    };
+                    let sorted = expected_canonical.to_vec();
+                    let reversed = expected_canonical.iter().rev().copied().collect::<Vec<_>>();
+                    let representation = if authored_points == sorted {
+                        XyceAbmLookupRepresentation::SortedControl
+                    } else if authored_points == reversed {
+                        XyceAbmLookupRepresentation::OutOfOrderOwner
+                    } else {
+                        return Err(format!(
+                            "{LABEL} B1 authored points are not the canonical sorted control or reverse-order owner"
+                        ));
+                    };
+                    let authored_points_bits = authored_points
+                        .iter()
+                        .map(|(x, y)| (x.to_bits(), y.to_bits()))
+                        .collect::<Vec<_>>();
+                    let canonical_points_bits = expected_canonical
+                        .iter()
+                        .map(|(x, y)| (x.to_bits(), y.to_bits()))
+                        .collect::<Vec<_>>();
+                    lookup = Some((
+                        kind,
+                        representation,
+                        authored_points_bits,
+                        canonical_points_bits.clone(),
+                    ));
+                    XyceRelationalElementFingerprint {
+                        kind: match kind {
+                            XyceAbmLookupKind::Akima => "BV:AKIMA",
+                            XyceAbmLookupKind::Table => "BV:TABLE",
+                        }
+                        .to_string(),
+                        nodes,
+                        numeric_bits: canonical_points_bits
+                            .iter()
+                            .flat_map(|(x, y)| [*x, *y])
+                            .collect(),
+                        text: vec!["a".to_string()],
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} element '{}' changed kind, topology, numeric state, or source defaults",
+                        element.name
+                    ));
+                }
+            };
+            elements.insert(name, fingerprint);
+        }
+        if elements.len() != 4 {
+            return Err(format!("{LABEL} is missing a canonical element"));
+        }
+        let (kind, representation, authored_points_bits, canonical_points_bits) =
+            lookup.ok_or_else(|| format!("{LABEL} has no canonical B1 lookup"))?;
+        Ok(XyceAbmLookupOrderSnapshot {
+            kind,
+            representation,
+            authored_points_bits,
+            canonical_points_bits,
+            elements,
+        })
     }
 
     pub(super) fn subckt_parameter_precedence_snapshot(

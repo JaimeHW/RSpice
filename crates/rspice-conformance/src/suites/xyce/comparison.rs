@@ -1881,6 +1881,10 @@ impl XyceTestRunner {
     ) -> Result<(), String> {
         match (baseline, target) {
             (
+                XyceStrictDcFamilySnapshot::AbmLookupOrder(baseline),
+                XyceStrictDcFamilySnapshot::AbmLookupOrder(target),
+            ) => Self::compare_abm_lookup_order_snapshots(baseline, target),
+            (
                 XyceStrictDcFamilySnapshot::BjtExternalNode(baseline),
                 XyceStrictDcFamilySnapshot::BjtExternalNode(target),
             ) => Self::compare_bjt_external_node_family_snapshots(baseline, target),
@@ -1944,6 +1948,36 @@ impl XyceTestRunner {
             ) => Self::compare_source_multiplicity_snapshots(baseline, target),
             _ => Err("baseline and target use different exact-DC snapshot kinds".to_string()),
         }
+    }
+
+    pub(super) fn compare_abm_lookup_order_snapshots(
+        baseline: &XyceAbmLookupOrderSnapshot,
+        target: &XyceAbmLookupOrderSnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XyceAbmLookupRepresentation::SortedControl
+            || target.representation != XyceAbmLookupRepresentation::OutOfOrderOwner
+        {
+            return Err(
+                "ABM_SPLINES lookup ordering must compare a sorted control against its reverse-order wrapper owner"
+                    .to_string(),
+            );
+        }
+        if baseline.kind != target.kind
+            || baseline.canonical_points_bits != target.canonical_points_bits
+            || baseline.elements != target.elements
+        {
+            return Err(
+                "ABM_SPLINES lookup owner/control changes interpolation kind, canonical points, topology, input, or numeric state"
+                    .to_string(),
+            );
+        }
+        if baseline.authored_points_bits == target.authored_points_bits {
+            return Err(
+                "ABM_SPLINES lookup owner/control no longer exercise distinct point orderings"
+                    .to_string(),
+            );
+        }
+        Ok(())
     }
 
     pub(super) fn compare_source_multiplicity_snapshots(
