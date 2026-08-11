@@ -5327,6 +5327,7 @@ fn parse_xyce_port(
     let node_neg = expect_node(stream, line_num)?;
 
     let mut z0 = 50.0;
+    let mut portnum = None;
     let mut source_tokens = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
@@ -5352,6 +5353,16 @@ fn parse_xyce_port(
                         });
                     }
                     z0 = value;
+                } else if value < 1.0 || !value.is_finite() || value.fract().abs() > 1e-12 {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "Xyce port '{}' requires a positive integer {} value",
+                            name, upper
+                        ),
+                    });
+                } else {
+                    portnum = Some(value as usize);
                 }
                 continue;
             }
@@ -5364,26 +5375,35 @@ fn parse_xyce_port(
         stream.advance();
     }
 
-    if source_tokens.is_empty() {
-        elements.push(Element {
-            name,
-            kind: ElementKind::Resistor {
-                value: z0,
-                value_expr: None,
-                model: None,
-                instance_params: Vec::new(),
-                deferred_params: Vec::new(),
-            },
-            nodes: vec![node_pos, node_neg],
-            provenance: crate::netlist::ElementProvenance::Authored,
-        });
-        return Ok(());
-    }
-
-    let source_text = source_tokens.join(" ");
-    let source_spec = parse_source_spec_text(&source_text, line_num, params)?;
+    // A port with no source tokens still gets a generator, just a silent one.
+    // An ideal 0 V source is a short, so the circuit is the bare Z0 it was
+    // before; what it buys is a branch S-parameter analysis can drive, which a
+    // plain resistor could never offer.
+    let source_spec = if source_tokens.is_empty() {
+        SourceSpec::Dc(0.0)
+    } else {
+        parse_source_spec_text(&source_tokens.join(" "), line_num, params)?
+    };
     let internal_node = format!("__RSPICE_{}_PORT", name.to_ascii_uppercase());
     let resistor_name = format!("__RSPICE_{}_Z0", name.to_ascii_uppercase());
+
+    // The generator sits behind the reference impedance, so its own terminal is
+    // one resistor short of the plane an S-parameter is measured at. Recording
+    // the true plane here is what lets port discovery measure the right node.
+    let source_spec = match portnum {
+        Some(portnum) => SourceSpec::RfPort {
+            inner: Box::new(source_spec),
+            port: crate::netlist::SourceRfPort {
+                portnum,
+                z0,
+                power: None,
+                frequency: None,
+                phase: None,
+                reference_plane: Some(node_pos.clone()),
+            },
+        },
+        None => source_spec,
+    };
 
     elements.push(Element {
         name,

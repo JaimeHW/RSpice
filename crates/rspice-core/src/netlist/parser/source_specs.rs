@@ -402,6 +402,8 @@ impl SourceRfPortBuilder {
             power: self.power,
             frequency: self.frequency,
             phase: self.phase,
+            // An annotated source drives its port node directly.
+            reference_plane: None,
         })
     }
 }

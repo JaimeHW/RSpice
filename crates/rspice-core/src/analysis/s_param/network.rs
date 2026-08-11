@@ -158,6 +158,58 @@ pub fn invert_complex_matrix_with_abort(
     ))
 }
 
+/// One column of the scattering matrix, read straight off the port voltages of
+/// a driven network.
+///
+/// With every port terminated in its own reference impedance and port `excited`
+/// driven by a 1 V generator behind `Z0`, the wave amplitudes follow from the
+/// port voltages alone:
+///
+/// ```text
+/// S[j][k] = 2 * V[j] * sqrt(Z0[k] / Z0[j])     for j != k
+/// S[k][k] = 2 * V[k] - 1
+/// ```
+///
+/// The incident wave is fixed at `1 / (2*sqrt(Z0[k]))` by the generator, and
+/// every undriven port is matched, so its voltage is purely the wave leaving
+/// the network. No branch currents and no matrix inversion are involved, which
+/// is why this works on networks that have no admittance representation at all
+/// — the ones [`s_from_y`] can only report as a singular matrix.
+///
+/// `voltages[j]` is the complex voltage across port `j` at one frequency, taken
+/// at its reference plane. Ports must be normalized to their Thevenin form
+/// first, or an ideal source will hold its node at the generator value and
+/// every reflection will read as zero.
+pub fn s_column_from_port_voltages(
+    voltages: &[Complex64],
+    excited: usize,
+    reference_impedances: &[Value],
+) -> Result<Vec<Complex64>, NetworkError> {
+    let size = voltages.len();
+    if size == 0 || reference_impedances.len() != size || excited >= size {
+        return Err(NetworkError::MalformedAdmittance {
+            rows: size,
+            impedances: reference_impedances.len(),
+        });
+    }
+    for (port, &z0) in reference_impedances.iter().enumerate() {
+        if !z0.is_finite() || z0 <= 0.0 {
+            return Err(NetworkError::InvalidReferenceImpedance { port, z0 });
+        }
+    }
+
+    let excited_z0 = reference_impedances[excited];
+    Ok((0..size)
+        .map(|row| {
+            if row == excited {
+                voltages[row] * 2.0 - Complex64::new(1.0, 0.0)
+            } else {
+                voltages[row] * 2.0 * (excited_z0 / reference_impedances[row]).sqrt()
+            }
+        })
+        .collect())
+}
+
 /// Convert an N-port admittance matrix to scattering parameters.
 ///
 /// `admittance` is indexed `[row][column]`; `reference_impedances` gives one
@@ -251,6 +303,78 @@ mod tests {
         assert!((s[0][1].re - 2.0 * c / total).abs() < 1e-12);
         // The value an unnormalized implementation would produce.
         assert!((2.0 * c / total - 2.0 * b / total).abs() > 0.1);
+    }
+
+    /// The two extractions must agree wherever both are defined.
+    ///
+    /// Driving a series resistor between two terminated ports is a circuit with
+    /// a closed-form solution, so the port voltages here are exact rather than
+    /// simulated: `1 V` behind `Z1`, through `R`, into `Z2`. Feeding those to
+    /// the wave formula must reproduce, column for column, what inverting the
+    /// admittance matrix produces — otherwise the new path is measuring a
+    /// different network from the one the old path measured.
+    #[test]
+    fn wave_extraction_agrees_with_the_admittance_route() {
+        let r = 50.0;
+        let (z1, z2) = (75.0, 50.0);
+        let y = vec![
+            vec![Complex64::new(1.0 / r, 0.0), Complex64::new(-1.0 / r, 0.0)],
+            vec![Complex64::new(-1.0 / r, 0.0), Complex64::new(1.0 / r, 0.0)],
+        ];
+        let expected = s_from_y(&y, &[z1, z2]).expect("conversion succeeds");
+
+        let total = z1 + r + z2;
+        // Port voltages with port 1 driven, then with port 2 driven.
+        let driven = [
+            [(r + z2) / total, z2 / total],
+            [z1 / total, (r + z1) / total],
+        ];
+
+        for (excited, voltages) in driven.iter().enumerate() {
+            let column = s_column_from_port_voltages(
+                &voltages.map(|v| Complex64::new(v, 0.0)),
+                excited,
+                &[z1, z2],
+            )
+            .expect("wave extraction succeeds");
+            for (row, value) in column.iter().enumerate() {
+                assert!(
+                    (value - expected[row][excited]).norm() < 1e-12,
+                    "S[{row}][{excited}]: wave {value} vs admittance {}",
+                    expected[row][excited]
+                );
+            }
+        }
+    }
+
+    /// A network with no admittance representation still has scattering
+    /// parameters, and the wave route is the one that can reach them.
+    ///
+    /// An ideal series voltage source between the ports forces `V1 - V2` to a
+    /// constant whatever current flows, so no finite `Y` exists — the case the
+    /// admittance route can only report as a singular matrix.
+    #[test]
+    fn wave_extraction_handles_a_network_with_no_admittance_matrix() {
+        let (z1, z2) = (50.0, 50.0);
+        // 1 V behind z1, a 0 V series source, then z2: the loop current is
+        // 1/(z1+z2) and both planes sit at the resulting divider voltage.
+        let current = 1.0 / (z1 + z2);
+        let voltages = [
+            Complex64::new(1.0 - current * z1, 0.0),
+            Complex64::new(current * z2, 0.0),
+        ];
+
+        let column =
+            s_column_from_port_voltages(&voltages, 0, &[z1, z2]).expect("wave extraction succeeds");
+
+        // A through-connection with matched terminations: no reflection, full
+        // transmission.
+        assert!(column[0].norm() < 1e-12, "S11 = {}", column[0]);
+        assert!(
+            (column[1] - Complex64::new(1.0, 0.0)).norm() < 1e-12,
+            "S21 = {}",
+            column[1]
+        );
     }
 
     #[test]

@@ -22,12 +22,30 @@ pub struct SParameterPort {
     pub number: usize,
     /// Name of the voltage source carrying the annotation.
     pub source_name: String,
-    /// Positive terminal node.
+    /// Node the port is measured at — its reference plane.
     pub node_pos: String,
     /// Negative terminal node.
     pub node_neg: String,
     /// Reference impedance in ohms; always positive and finite.
     pub z0: Value,
+    /// Whether `z0` is already a resistor in the circuit.
+    pub realization: PortRealization,
+}
+
+/// How a port's reference impedance is represented in the netlist.
+///
+/// The distinction decides what a driven port's node voltage means, so it
+/// cannot be inferred later: an ideal source pins its node to the source value
+/// no matter what the network does, while a Thevenin generator lets the network
+/// divide against Z0 — which is the whole measurement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PortRealization {
+    /// A `portnum=`-annotated ideal source sits directly at the reference
+    /// plane; `z0` is a normalization constant, not a component.
+    Ideal,
+    /// A Thevenin generator drives the plane through a real `z0` resistor, as
+    /// Xyce's `P` element does.
+    Thevenin,
 }
 
 /// Why a deck's `.SP` port declarations could not be used.
@@ -108,12 +126,19 @@ pub fn collect_ports(netlist: &Netlist) -> Result<Vec<SParameterPort>, PortError
                 z0: port.z0,
             });
         }
+        // A Thevenin port declares the plane it feeds, because the generator's
+        // own terminal is the far side of the reference resistor.
+        let (node_pos, realization) = match port.reference_plane.as_ref() {
+            Some(plane) => (plane.clone(), PortRealization::Thevenin),
+            None => (element.nodes[0].clone(), PortRealization::Ideal),
+        };
         ports.push(SParameterPort {
             number: port.portnum,
             source_name: element.name.clone(),
-            node_pos: element.nodes[0].clone(),
+            node_pos,
             node_neg: element.nodes[1].clone(),
             z0: port.z0,
+            realization,
         });
     }
 
@@ -133,6 +158,89 @@ pub fn collect_ports(netlist: &Netlist) -> Result<Vec<SParameterPort>, PortError
         }
     }
     Ok(ports)
+}
+
+/// Give every port a real reference impedance, so one extraction serves both
+/// declaration styles.
+///
+/// An annotated ideal source pins its node to whatever it is driving, which
+/// tells you nothing about the network: the reflected wave has nowhere to
+/// develop. Moving that source behind a `z0` resistor turns it into the same
+/// Thevenin generator Xyce's `P` element already is, and then a port voltage
+/// carries the reflection.
+///
+/// This mutates the netlist and is meant for the analysis's own copy. The
+/// change is confined to S-parameter extraction; the deck the user wrote still
+/// means what it said under `.tran`, `.ac`, and `.op`.
+///
+/// Returns the ports restated as Thevenin, in the same order.
+pub fn normalize_ports(
+    netlist: &mut Netlist,
+    ports: &[SParameterPort],
+) -> Result<Vec<SParameterPort>, PortError> {
+    let mut normalized = Vec::with_capacity(ports.len());
+    for port in ports {
+        if port.realization == PortRealization::Thevenin {
+            normalized.push(port.clone());
+            continue;
+        }
+
+        let internal_node = format!("__RSPICE_SP_{}_PORT", port.source_name.to_ascii_uppercase());
+        let resistor_name = format!("__RSPICE_SP_{}_Z0", port.source_name.to_ascii_uppercase());
+        if netlist
+            .elements
+            .iter()
+            .any(|element| element.name.eq_ignore_ascii_case(&resistor_name))
+        {
+            return Err(PortError::PortSourceUnusable {
+                source_name: port.source_name.clone(),
+                reason: format!("collides with an existing element named '{resistor_name}'"),
+            });
+        }
+
+        let element = netlist
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case(&port.source_name))
+            .ok_or_else(|| PortError::PortSourceUnusable {
+                source_name: port.source_name.clone(),
+                reason: "disappeared from the netlist".to_string(),
+            })?;
+        if !matches!(element.kind, ElementKind::VoltageSource(_)) {
+            return Err(PortError::PortSourceUnusable {
+                source_name: port.source_name.clone(),
+                reason: "is not a voltage source".to_string(),
+            });
+        }
+        // The source retreats behind the new resistor; the plane keeps its
+        // name, so everything already measuring this port still measures it.
+        element.nodes[0] = internal_node.clone();
+
+        netlist.elements.push(crate::netlist::Element {
+            name: resistor_name,
+            kind: ElementKind::Resistor {
+                value: port.z0,
+                value_expr: None,
+                model: None,
+                instance_params: Vec::new(),
+                deferred_params: Vec::new(),
+            },
+            nodes: vec![port.node_pos.clone(), internal_node],
+            // It is exactly what the name says: a series resistance belonging
+            // to this source, so it is attributed to it rather than posing as
+            // something the user authored.
+            provenance: crate::netlist::ElementProvenance::GeneratedPassiveHelper {
+                owner: port.source_name.clone(),
+                role: crate::netlist::GeneratedPassiveHelperRole::SeriesResistance,
+            },
+        });
+
+        normalized.push(SParameterPort {
+            realization: PortRealization::Thevenin,
+            ..port.clone()
+        });
+    }
+    Ok(normalized)
 }
 
 /// Rewrite a source's AC excitation to `magnitude` at zero phase, preserving
@@ -231,6 +339,44 @@ mod tests {
         );
     }
 
+    /// Xyce's `P` element declares a port too, and the plane it declares is its
+    /// own terminal — not the generator node hidden behind the reference
+    /// resistor the parser lowers it to.
+    #[test]
+    fn xyce_port_elements_declare_ports_at_their_own_terminals() {
+        let deck = "* p elements\n\
+                    P1 p1 0 PORT=1 Z0=50 AC 1\n\
+                    R1 p1 p2 25\n\
+                    P2 p2 0 PORT=2 Z0=75\n\
+                    .end\n";
+        let ports = collect_ports(&parse(deck)).expect("ports collect");
+
+        assert_eq!(ports.len(), 2);
+        assert_eq!(ports[0].source_name, "P1");
+        assert_eq!(ports[0].node_pos, "P1");
+        assert_eq!(ports[0].z0, 50.0);
+        assert_eq!(ports[0].realization, PortRealization::Thevenin);
+        // A port with no source tokens is still a port: it is terminated, not
+        // absent, and S-parameters are measured at every port including the
+        // ones that are never driven.
+        assert_eq!(ports[1].source_name, "P2");
+        assert_eq!(ports[1].node_pos, "P2");
+        assert_eq!(ports[1].z0, 75.0);
+        assert_eq!(ports[1].realization, PortRealization::Thevenin);
+    }
+
+    /// An annotated ideal source is at its own reference plane, so it must not
+    /// be mistaken for the Thevenin form.
+    #[test]
+    fn annotated_sources_stay_ideal_ports() {
+        let ports = collect_ports(&parse(TWO_PORT)).expect("ports collect");
+        assert!(
+            ports
+                .iter()
+                .all(|port| port.realization == PortRealization::Ideal)
+        );
+    }
+
     #[test]
     fn a_deck_without_annotations_is_rejected() {
         let deck = "* no ports\nV1 a 0 AC 1\nR1 a 0 50\n.end\n";
@@ -252,6 +398,64 @@ mod tests {
                 source_name: "V2".to_string(),
             })
         );
+    }
+
+    /// Normalization moves an annotated ideal source behind a real resistor,
+    /// leaving the reference plane where every other reference to the port
+    /// already points.
+    #[test]
+    fn normalization_gives_an_annotated_port_a_real_reference_impedance() {
+        let mut netlist = parse(TWO_PORT);
+        let ports = collect_ports(&netlist).expect("ports collect");
+        let normalized = normalize_ports(&mut netlist, &ports).expect("normalizes");
+
+        assert!(
+            normalized
+                .iter()
+                .all(|port| port.realization == PortRealization::Thevenin)
+        );
+        // The planes are untouched; only what sits behind them changed.
+        assert_eq!(normalized[0].node_pos, "P1");
+        assert_eq!(normalized[1].node_pos, "P2");
+
+        let source = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "V1")
+            .expect("port source survives");
+        assert_eq!(source.nodes[0], "__RSPICE_SP_V1_PORT");
+
+        let resistor = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "__RSPICE_SP_V1_Z0")
+            .expect("reference impedance is now a component");
+        match &resistor.kind {
+            ElementKind::Resistor { value, .. } => assert_eq!(*value, 50.0),
+            other => panic!("expected a Z0 resistor, got {other:?}"),
+        }
+        assert_eq!(
+            resistor.nodes,
+            vec!["P1".to_string(), "__RSPICE_SP_V1_PORT".to_string()]
+        );
+    }
+
+    /// A `P` element is already Thevenin, so normalization must leave it be
+    /// rather than stacking a second reference impedance in front of it.
+    #[test]
+    fn normalization_leaves_an_already_physical_port_alone() {
+        let deck = "* p element\n\
+                    P1 p1 0 PORT=1 Z0=50 AC 1\n\
+                    R1 p1 0 25\n\
+                    .end\n";
+        let mut netlist = parse(deck);
+        let ports = collect_ports(&netlist).expect("ports collect");
+        let before = netlist.elements.len();
+
+        let normalized = normalize_ports(&mut netlist, &ports).expect("normalizes");
+
+        assert_eq!(netlist.elements.len(), before);
+        assert_eq!(normalized, ports);
     }
 
     #[test]

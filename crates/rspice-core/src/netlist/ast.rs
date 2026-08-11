@@ -1429,6 +1429,16 @@ pub struct SourceRfPort {
     pub frequency: Option<Value>,
     /// Optional RF source phase annotation in degrees.
     pub phase: Option<Value>,
+    /// Node the port's reference plane sits at, when the source reaches it
+    /// through a real reference-impedance resistor instead of driving it
+    /// directly.
+    ///
+    /// A `portnum=`-annotated ideal source has none: it *is* at the reference
+    /// plane, and its `z0` is a number to normalize against rather than a
+    /// component in the circuit. Xyce's `P` element has one, because it lowers
+    /// to a Thevenin generator sitting behind a physical Z0, so its own
+    /// terminal is one resistor short of the plane being measured.
+    pub reference_plane: Option<String>,
 }
 
 /// One independent-source excitation used by small-signal Volterra

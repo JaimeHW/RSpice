@@ -8690,44 +8690,42 @@ mod tests {
         )
         .expect("Xyce RF port cards parse");
 
-        let driven = netlist
-            .elements
-            .iter()
-            .find(|element| element.name == "P1")
-            .expect("driven port keeps source name");
-        match &driven.kind {
-            ElementKind::VoltageSource(SourceSpec::Dc(value)) => assert_eq!(*value, 2.0),
-            other => panic!("expected driven port voltage source, got {other:?}"),
-        }
-        assert_eq!(
-            driven.nodes,
-            vec!["__RSPICE_P1_PORT".to_string(), "0".to_string()]
-        );
+        // Every port lowers the same way, driven or not: a generator behind the
+        // reference impedance, carrying the declared port number and the node
+        // its reference plane sits at. A silent port gets a 0 V generator,
+        // which is a short and so leaves the circuit exactly as the bare
+        // termination did, but gives S-parameter analysis a branch to drive.
+        for (name, node, dc, portnum, z0) in
+            [("P1", "OUT", 2.0, 1, 75.0), ("P2", "LOAD", 0.0, 2, 100.0)]
+        {
+            let internal = format!("__RSPICE_{name}_PORT");
+            let element = netlist
+                .elements
+                .iter()
+                .find(|element| element.name == name)
+                .unwrap_or_else(|| panic!("{name} keeps its port name"));
+            match &element.kind {
+                ElementKind::VoltageSource(SourceSpec::RfPort { inner, port }) => {
+                    assert!(matches!(**inner, SourceSpec::Dc(value) if value == dc));
+                    assert_eq!(port.portnum, portnum);
+                    assert_eq!(port.z0, z0);
+                    assert_eq!(port.reference_plane.as_deref(), Some(node));
+                }
+                other => panic!("expected {name} port generator, got {other:?}"),
+            }
+            assert_eq!(element.nodes, vec![internal.clone(), "0".to_string()]);
 
-        let series = netlist
-            .elements
-            .iter()
-            .find(|element| element.name == "__RSPICE_P1_Z0")
-            .expect("driven port has series Z0 resistor");
-        match &series.kind {
-            ElementKind::Resistor { value, .. } => assert_eq!(*value, 75.0),
-            other => panic!("expected driven port Z0 resistor, got {other:?}"),
+            let series = netlist
+                .elements
+                .iter()
+                .find(|element| element.name == format!("__RSPICE_{name}_Z0"))
+                .unwrap_or_else(|| panic!("{name} has a series Z0 resistor"));
+            match &series.kind {
+                ElementKind::Resistor { value, .. } => assert_eq!(*value, z0),
+                other => panic!("expected {name} Z0 resistor, got {other:?}"),
+            }
+            assert_eq!(series.nodes, vec![node.to_string(), internal]);
         }
-        assert_eq!(
-            series.nodes,
-            vec!["OUT".to_string(), "__RSPICE_P1_PORT".to_string()]
-        );
-
-        let passive = netlist
-            .elements
-            .iter()
-            .find(|element| element.name == "P2")
-            .expect("passive port keeps port name");
-        match &passive.kind {
-            ElementKind::Resistor { value, .. } => assert_eq!(*value, 100.0),
-            other => panic!("expected passive port Z0 termination, got {other:?}"),
-        }
-        assert_eq!(passive.nodes, vec!["LOAD".to_string(), "0".to_string()]);
     }
 
     #[test]

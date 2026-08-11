@@ -50,11 +50,13 @@ pub use matching::{
 };
 pub use matrix::{Port, SMatrix, SParameterResult};
 pub use network::{
-    NetworkError, invert_complex_matrix, invert_complex_matrix_with_abort, s_from_y,
-    s_from_y_with_abort,
+    NetworkError, invert_complex_matrix, invert_complex_matrix_with_abort,
+    s_column_from_port_voltages, s_from_y, s_from_y_with_abort,
 };
 pub use noise_params::{TwoPortNoise, derive_two_port_noise};
-pub use ports::{PortError, SParameterPort, collect_ports, set_excitations};
+pub use ports::{
+    PortError, PortRealization, SParameterPort, collect_ports, normalize_ports, set_excitations,
+};
 pub use stability::{GainAnalysis, StabilityAnalysis};
 pub use touchstone::{
     TouchstoneFormat, TouchstoneFrequencyUnit, TouchstoneInput, touchstone, touchstone_extension,
