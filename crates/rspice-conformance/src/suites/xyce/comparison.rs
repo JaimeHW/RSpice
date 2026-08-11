@@ -2059,6 +2059,10 @@ impl XyceTestRunner {
                 XyceStrictTransientFamilySnapshot::ParamExpression(target),
             ) => Self::compare_param_expression_family_snapshots(baseline, target),
             (
+                XyceStrictTransientFamilySnapshot::Params1(baseline),
+                XyceStrictTransientFamilySnapshot::Params1(target),
+            ) => Self::compare_params1_family_snapshots(baseline, target),
+            (
                 XyceStrictTransientFamilySnapshot::PassivePrimaryValue(baseline),
                 XyceStrictTransientFamilySnapshot::PassivePrimaryValue(target),
             ) => Self::compare_passive_primary_snapshots(baseline, target),
@@ -2198,6 +2202,31 @@ impl XyceTestRunner {
         if baseline.flattened_elements != target.flattened_elements {
             return Err(
                 "flattened element identity, topology, or numeric state differs".to_string(),
+            );
+        }
+        Ok(())
+    }
+
+    pub(super) fn compare_params1_family_snapshots(
+        baseline: &XyceParams1Snapshot,
+        target: &XyceParams1Snapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XyceParams1Representation::LiteralValues
+            || target.representation != XyceParams1Representation::GlobalParameters
+        {
+            return Err(
+                "family must compare the direct-literal PARAMS1 baseline with the direct-global-parameter member"
+                    .to_string(),
+            );
+        }
+        let mut baseline = baseline.clone();
+        let mut target = target.clone();
+        baseline.representation = XyceParams1Representation::LiteralValues;
+        target.representation = XyceParams1Representation::LiteralValues;
+        if baseline != target {
+            return Err(
+                "circuit title, exact topology, resolved values, transient analysis, or ordered probes differ outside the admitted literal/global-parameter spelling"
+                    .to_string(),
             );
         }
         Ok(())

@@ -9113,6 +9113,47 @@ fn test_xyce_age_cap_relational_oracles() {
 }
 
 #[test]
+fn test_xyce_params1_parameter_equivalence_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, wrapper_origin) in [
+        (
+            "Netlists/PARAMS1/params_a.cir",
+            "params1_parameter_equivalence_wrapper_owner",
+            true,
+        ),
+        (
+            "Netlists/PARAMS1/params_a0.cir",
+            "params1_parameter_equivalence_literal_baseline",
+            false,
+        ),
+        (
+            "Netlists/PARAMS1/params_a1.cir",
+            "params1_parameter_equivalence_parameterized_member",
+            false,
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            wrapper_origin,
+            "{relative} wrapper provenance changed"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should satisfy strict literal/parameterized transient equivalence, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should satisfy the Release 7.10 interpolated RMS comparison"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_switch_initial_state_case_relational_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

@@ -1981,6 +1981,7 @@ impl XyceTestRunner {
             | XyceBaselineFamilyKind::SwitchStateCase
             | XyceBaselineFamilyKind::SinExpression
             | XyceBaselineFamilyKind::ParamExpression
+            | XyceBaselineFamilyKind::Params1
             | XyceBaselineFamilyKind::PassiveCapPrimaryValue
             | XyceBaselineFamilyKind::PassiveTemperatureOverride
             | XyceBaselineFamilyKind::Subckt
@@ -1993,6 +1994,293 @@ impl XyceTestRunner {
                 )
             ),
         }
+    }
+
+    pub(super) fn params1_source_qualification(
+        source: &str,
+    ) -> Result<XyceParams1Representation, String> {
+        const LABEL: &str = "PARAMS1 parameter equivalence";
+        const TITLE: &str = "Test of PARAMS Functionality";
+
+        if Self::source_has_comp_directive(source) {
+            return Err(format!(
+                "{LABEL} uses the canonical Release 7.10 xyce_verify tolerance and does not admit *COMP"
+            ));
+        }
+        let lines = Self::logical_netlist_lines(source);
+        if lines.first().map(|line| line.trim()) != Some(TITLE) {
+            return Err(format!("{LABEL} requires the canonical circuit title"));
+        }
+
+        let direct_value = |field: &str, context: &str| -> Result<Value, String> {
+            let value = Self::single_spice_numeric_literal_value(field)
+                .map_err(|error| format!("{LABEL} {context}: {error}"))?;
+            if !value.is_finite() {
+                return Err(format!("{LABEL} {context} must be finite"));
+            }
+            Ok(value)
+        };
+        let exact_value = |field: &str, expected: Value, context: &str| -> Result<(), String> {
+            let value = direct_value(field, context)?;
+            if value.to_bits() != expected.to_bits() {
+                return Err(format!(
+                    "{LABEL} {context} must resolve to {expected}, got {value}"
+                ));
+            }
+            Ok(())
+        };
+
+        let mut parameters = BTreeMap::<String, u64>::new();
+        let mut elements = BTreeMap::<String, Vec<String>>::new();
+        let mut tran_count = 0usize;
+        let mut print_count = 0usize;
+        let mut end_count = 0usize;
+        let mut end_seen = false;
+        for line in lines.iter().skip(1) {
+            let stripped = Self::strip_netlist_comment(line).trim();
+            let Some(command) = stripped.split_whitespace().next() else {
+                continue;
+            };
+            if end_seen {
+                return Err(format!("{LABEL} does not admit content after .END"));
+            }
+            if command.starts_with('.') {
+                match command.to_ascii_lowercase().as_str() {
+                    ".param" => {
+                        let rest = stripped[command.len()..].trim();
+                        let Some((name, expression)) = rest.split_once('=') else {
+                            return Err(format!(
+                                "{LABEL} requires one direct assignment per .PARAM"
+                            ));
+                        };
+                        let name = name.trim().to_ascii_lowercase();
+                        let expression = expression.trim();
+                        let inner = Self::print_expression_inner(expression).ok_or_else(|| {
+                            format!(
+                                "{LABEL} parameter '{name}' must use one braced numeric literal"
+                            )
+                        })?;
+                        if expression.contains('=')
+                            || !Self::is_single_spice_identifier(&name)
+                            || parameters.contains_key(&name)
+                        {
+                            return Err(format!(
+                                "{LABEL} contains a malformed or duplicate .PARAM assignment"
+                            ));
+                        }
+                        let value = direct_value(inner, &format!("parameter '{name}'"))?;
+                        if Self::parse_expression_fingerprint(inner)?
+                            != XyceExpressionAstFingerprint::Number(value.to_bits())
+                        {
+                            return Err(format!(
+                                "{LABEL} parameter '{name}' is not one direct numeric AST"
+                            ));
+                        }
+                        parameters.insert(name, value.to_bits());
+                    }
+                    ".tran" => {
+                        tran_count += 1;
+                        let fields = Self::split_grouped_whitespace_fields(
+                            stripped,
+                            "PARAMS1 .TRAN statement",
+                        )?;
+                        if fields.len() != 3 {
+                            return Err(format!("{LABEL} requires exact '.TRAN step stop' syntax"));
+                        }
+                        exact_value(&fields[1], 0.02, ".TRAN step")?;
+                        exact_value(&fields[2], 0.8, ".TRAN stop")?;
+                    }
+                    ".print" => {
+                        print_count += 1;
+                        let fields = Self::split_print_fields(stripped)?;
+                        if fields.len() != 3 || !fields[1].eq_ignore_ascii_case("TRAN") {
+                            return Err(format!(
+                                "{LABEL} requires exact '.PRINT TRAN V(2)' syntax"
+                            ));
+                        }
+                        let probe = Self::parse_voltage_probe(&fields[2]).ok_or_else(|| {
+                            format!("{LABEL} requires one atomic voltage-value probe")
+                        })?;
+                        if probe.accessor != XyceVoltageAccessor::Value
+                            || probe.node_pos.trim() != "2"
+                            || probe.node_neg.is_some()
+                        {
+                            return Err(format!(
+                                "{LABEL} requires the single-ended voltage-value probe V(2)"
+                            ));
+                        }
+                    }
+                    ".end" if stripped.eq_ignore_ascii_case(".end") => {
+                        end_count += 1;
+                        end_seen = true;
+                    }
+                    ".end" => return Err(format!("{LABEL} requires a bare .END")),
+                    other => return Err(format!("{LABEL} does not admit directive '{other}'")),
+                }
+                continue;
+            }
+
+            let fields =
+                Self::split_grouped_whitespace_fields(stripped, "PARAMS1 element statement")?;
+            let name = fields
+                .first()
+                .map(|field| field.trim().to_ascii_lowercase())
+                .filter(|name| !name.is_empty())
+                .ok_or_else(|| format!("{LABEL} contains an empty element statement"))?;
+            if elements.insert(name.clone(), fields).is_some() {
+                return Err(format!("{LABEL} contains duplicate element '{name}'"));
+            }
+        }
+
+        if (tran_count, print_count, end_count) != (1, 1, 1) {
+            return Err(format!(
+                "{LABEL} requires exactly one .TRAN, .PRINT, and .END; found ({tran_count}, {print_count}, {end_count})"
+            ));
+        }
+        let expected_names = BTreeSet::from([
+            "v1".to_string(),
+            "v2".to_string(),
+            "r1".to_string(),
+            "r2".to_string(),
+            "c".to_string(),
+        ]);
+        if elements.keys().cloned().collect::<BTreeSet<_>>() != expected_names {
+            return Err(format!("{LABEL} requires exactly V1, V2, R1, R2, and C"));
+        }
+
+        let require_element = |name: &str| -> Result<&Vec<String>, String> {
+            elements
+                .get(name)
+                .ok_or_else(|| format!("{LABEL} is missing element '{name}'"))
+        };
+        let v1 = require_element("v1")?;
+        if v1.len() != 4 || v1[1] != "1" || v1[2] != "0" {
+            return Err(format!("{LABEL} V1 topology or source form changed"));
+        }
+        let pulse = v1[3].trim();
+        let pulse_inner = pulse
+            .get(..6)
+            .filter(|prefix| prefix.eq_ignore_ascii_case("PULSE("))
+            .and_then(|_| pulse.strip_suffix(')'))
+            .and_then(|body| body.get(6..))
+            .ok_or_else(|| format!("{LABEL} V1 must use one direct PULSE(...) field"))?;
+        let pulse_fields = pulse_inner
+            .split(|ch: char| ch.is_whitespace() || ch == ',')
+            .filter(|field| !field.is_empty())
+            .collect::<Vec<_>>();
+        let expected_pulse = [0.0, 20.0, 0.0, 0.0, 0.0, 0.2, 0.4];
+        if pulse_fields.len() != expected_pulse.len() {
+            return Err(format!(
+                "{LABEL} V1 must provide exactly seven PULSE values"
+            ));
+        }
+        for (index, (field, expected)) in pulse_fields.iter().zip(expected_pulse).enumerate() {
+            exact_value(field, expected, &format!("V1 PULSE field {index}"))?;
+        }
+
+        let v2 = require_element("v2")?;
+        if v2.len() != 4 || v2[1] != "3" || v2[2] != "0" {
+            return Err(format!("{LABEL} V2 topology or source form changed"));
+        }
+        exact_value(&v2[3], 6.0, "V2 DC value")?;
+
+        for (name, nodes) in [("r1", ["1", "2"]), ("r2", ["2", "3"])] {
+            let fields = require_element(name)?;
+            if fields.len() != 4 || fields[1] != nodes[0] || fields[2] != nodes[1] {
+                return Err(format!("{LABEL} {name} topology or source form changed"));
+            }
+        }
+        let capacitor = require_element("c")?;
+        if capacitor.len() != 4 || capacitor[1] != "2" || capacitor[2] != "0" {
+            return Err(format!("{LABEL} C topology or source form changed"));
+        }
+
+        let expected_parameters = BTreeMap::from([
+            ("cvalue".to_string(), 2.0e-6f64.to_bits()),
+            ("rvalue".to_string(), 22_000.0f64.to_bits()),
+        ]);
+        if parameters.is_empty() {
+            exact_value(&require_element("r1")?[3], 22_000.0, "R1 literal value")?;
+            exact_value(&require_element("r2")?[3], 22_000.0, "R2 literal value")?;
+            exact_value(&capacitor[3], 2.0e-6, "C literal value")?;
+            return Ok(XyceParams1Representation::LiteralValues);
+        }
+        if parameters != expected_parameters {
+            return Err(format!(
+                "{LABEL} parameterized member requires only RVALUE=22K and CVALUE=2UF"
+            ));
+        }
+        for (element, parameter) in [("r1", "rvalue"), ("r2", "rvalue"), ("c", "cvalue")] {
+            let field = &require_element(element)?[3];
+            let inner = Self::print_expression_inner(field).ok_or_else(|| {
+                format!("{LABEL} {element} must use one braced parameter reference")
+            })?;
+            if Self::parse_expression_fingerprint(inner)?
+                != XyceExpressionAstFingerprint::Parameter(parameter.to_string())
+            {
+                return Err(format!(
+                    "{LABEL} {element} must use the direct single-parameter AST '{parameter}'"
+                ));
+            }
+        }
+        Ok(XyceParams1Representation::GlobalParameters)
+    }
+
+    pub(super) fn validate_params1_transient_plan(plan: &XyceStaticTranPlan) -> Result<(), String> {
+        const LABEL: &str = "PARAMS1 parameter equivalence";
+        if plan.contract != XyceStaticTranContract::PlainStatic
+            || !matches!(plan.oracle, XyceStaticTranOracle::None)
+            || plan.comparison_mode != XyceStaticTranComparisonMode::Pointwise
+            || !plan.steps.is_empty()
+            || plan.output_override
+            || plan.timeint_conststep
+            || plan.wrapper_tolerance.is_some()
+        {
+            return Err(format!(
+                "{LABEL} requires one ordinary unstepped adaptive default .prn relational plan without a file oracle or tolerance override"
+            ));
+        }
+        if plan.tran.step.to_bits() != 0.02f64.to_bits()
+            || plan.tran.stop.to_bits() != 0.8f64.to_bits()
+            || plan.tran.start.is_some()
+            || plan.tran.max_step.is_some()
+            || plan.tran.uic
+        {
+            return Err(format!(
+                "{LABEL} requires exact '.TRAN 0.02 0.8' semantics without START, MAXSTEP, or UIC"
+            ));
+        }
+        let print = plan.require_print("PARAMS1 transient validation")?;
+        let [probe] = print.probes.as_slice() else {
+            return Err(format!("{LABEL} requires exactly one ordered probe"));
+        };
+        let voltage = Self::parse_voltage_probe(probe)
+            .ok_or_else(|| format!("{LABEL} probe '{probe}' is not an atomic voltage probe"))?;
+        if voltage.accessor != XyceVoltageAccessor::Value
+            || voltage.node_pos.trim() != "2"
+            || voltage.node_neg.is_some()
+        {
+            return Err(format!(
+                "{LABEL} requires the single-ended voltage-value probe V(2)"
+            ));
+        }
+        let representation = Self::params1_source_qualification(&plan.source)?;
+        let canonical = Self::canonical_lf_text_identity(LABEL, plan.source.as_bytes())?;
+        let actual_hash = blake3::hash(&canonical).to_hex().to_string();
+        let expected_hash = match representation {
+            XyceParams1Representation::LiteralValues => {
+                XYCE_PARAMS1_LITERAL_BASELINE_CONTENT_BLAKE3
+            }
+            XyceParams1Representation::GlobalParameters => {
+                XYCE_PARAMS1_PARAMETERIZED_MEMBER_CONTENT_BLAKE3
+            }
+        };
+        if actual_hash != expected_hash {
+            return Err(format!(
+                "{LABEL} captured execution source identity changed: expected {expected_hash}, got {actual_hash}"
+            ));
+        }
+        Ok(())
     }
 
     pub(super) fn validate_noindex_tran_prn_header(first_line: &str) -> Result<(), String> {

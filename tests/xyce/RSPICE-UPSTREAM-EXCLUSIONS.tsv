@@ -857,8 +857,8 @@ Netlists/Output/SPARAMS/yparams-ts1-2port.cir	Netlists/Output/SPARAMS/exclude	up
 Netlists/Output/SPARAMS/zparams-ts1-1port.cir	Netlists/Output/SPARAMS/exclude	upstream_excluded
 Netlists/Output/SPARAMS/zparams-ts1-2port.cir	Netlists/Output/SPARAMS/exclude	upstream_excluded
 Netlists/Output/TRAN/tran-prn2.cir	Netlists/Output/TRAN/exclude	upstream_excluded
-Netlists/PARAMS1/params_a0.cir	Netlists/PARAMS1/exclude	upstream_excluded
-Netlists/PARAMS1/params_a1.cir	Netlists/PARAMS1/exclude	upstream_excluded
+Netlists/PARAMS1/params_a0.cir	Netlists/PARAMS1/exclude	rspice_independently_qualified	params1_parameter_equivalence_literal_baseline
+Netlists/PARAMS1/params_a1.cir	Netlists/PARAMS1/exclude	rspice_independently_qualified	params1_parameter_equivalence_parameterized_member
 Netlists/PARAM_REFACTOR/paramDc1.cir	Netlists/PARAM_REFACTOR/exclude	rspice_independently_qualified	static_prn_dc
 Netlists/PARAM_REFACTOR/sensCapGear_baseline.cir	Netlists/PARAM_REFACTOR/exclude	upstream_excluded
 Netlists/PARSER/aAsAmp.cir	Netlists/PARSER/exclude	upstream_excluded

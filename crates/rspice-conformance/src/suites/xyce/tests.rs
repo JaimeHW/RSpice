@@ -14085,6 +14085,593 @@ Rload out 0 1\n\
     );
 }
 
+fn params1_corpus_sources() -> [String; 3] {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    [
+        fs::read_to_string(corpus.join("Netlists/PARAMS1/params_a.cir"))
+            .expect("read PARAMS1 wrapper owner"),
+        fs::read_to_string(corpus.join("Netlists/PARAMS1/params_a0.cir"))
+            .expect("read PARAMS1 literal baseline"),
+        fs::read_to_string(corpus.join("Netlists/PARAMS1/params_a1.cir"))
+            .expect("read PARAMS1 parameterized member"),
+    ]
+}
+
+fn params1_fixture(label: &str, sources: [&str; 3]) -> (PathBuf, [XyceDeck; 3], XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-params1-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = root.join("Netlists/PARAMS1");
+    fs::create_dir_all(&family).expect("create PARAMS1 fixture directory");
+    let records = [
+        "Netlists/PARAMS1/params_a.cir",
+        "Netlists/PARAMS1/params_a0.cir",
+        "Netlists/PARAMS1/params_a1.cir",
+    ];
+    let decks = std::array::from_fn(|index| {
+        let path = root.join(records[index]);
+        fs::write(&path, sources[index]).expect("write PARAMS1 fixture source");
+        XyceDeck {
+            path,
+            relative_path: records[index].to_string(),
+            section: XyceDeckSection::Netlists,
+        }
+    });
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n", records[0]),
+    )
+    .expect("write PARAMS1 wrapper provenance");
+    fs::write(
+        root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[
+            &format!(
+                "{}\tNetlists/PARAMS1/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_PARAMS1_LITERAL_BASELINE_CONTRACT}",
+                records[1]
+            ),
+            &format!(
+                "{}\tNetlists/PARAMS1/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_PARAMS1_PARAMETERIZED_MEMBER_CONTRACT}",
+                records[2]
+            ),
+        ]),
+    )
+    .expect("write PARAMS1 exclusion provenance");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    (root, decks, runner)
+}
+
+#[test]
+fn params1_candidate_census_is_an_exact_three_record_bijection() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&corpus, XyceRunnerConfig::default());
+    let selected = runner
+        .discover_tests()
+        .iter()
+        .filter_map(|deck| {
+            runner.params1_family_contract(deck).map(|contract| {
+                let contract = contract.unwrap_or_else(|error| {
+                    panic!("PARAMS1 candidate failed qualification: {error}")
+                });
+                (
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                    contract.role,
+                )
+            })
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(selected.len(), XYCE_PARAMS1_CANDIDATE_COUNT);
+    assert_eq!(
+        selected,
+        BTreeMap::from([
+            (
+                XYCE_PARAMS1_OWNER_RECORD.to_string(),
+                XyceParams1Role::WrapperOwner,
+            ),
+            (
+                XYCE_PARAMS1_LITERAL_BASELINE_RECORD.to_string(),
+                XyceParams1Role::LiteralBaseline,
+            ),
+            (
+                XYCE_PARAMS1_PARAMETERIZED_MEMBER_RECORD.to_string(),
+                XyceParams1Role::ParameterizedMember,
+            ),
+        ])
+    );
+}
+
+#[test]
+fn params1_family_is_role_typed_relational_and_provenance_bound() {
+    let sources = params1_corpus_sources();
+    let (root, decks, runner) = params1_fixture(
+        "qualification",
+        [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+        ],
+    );
+    for (deck, role) in decks.iter().zip([
+        XyceParams1Role::WrapperOwner,
+        XyceParams1Role::LiteralBaseline,
+        XyceParams1Role::ParameterizedMember,
+    ]) {
+        let contract = runner
+            .params1_family_contract(deck)
+            .expect("exact PARAMS1 record is selected")
+            .expect("exact PARAMS1 family qualifies");
+        assert_eq!(contract.role, role);
+        assert_eq!(contract.relational.kind, XyceBaselineFamilyKind::Params1);
+        assert_eq!(
+            contract.relational.comparison,
+            XyceBaselineFamilyComparison::TolerancedStrict
+        );
+        assert!(XyceTestRunner::same_path(
+            &contract.relational.baseline_path,
+            &decks[1].path
+        ));
+        assert_eq!(contract.relational.member_paths.len(), 2);
+        runner
+            .validate_params1_provenance(&contract)
+            .expect("exact shared PARAMS1 provenance validates");
+        assert_eq!(
+            role.result_contract(),
+            match role {
+                XyceParams1Role::WrapperOwner => XYCE_PARAMS1_WRAPPER_OWNER_CONTRACT,
+                XyceParams1Role::LiteralBaseline => XYCE_PARAMS1_LITERAL_BASELINE_CONTRACT,
+                XyceParams1Role::ParameterizedMember => {
+                    XYCE_PARAMS1_PARAMETERIZED_MEMBER_CONTRACT
+                }
+            }
+        );
+    }
+    fs::remove_dir_all(root).expect("remove PARAMS1 qualification fixture");
+}
+
+#[test]
+fn params1_historical_wrapper_and_default_verifier_provenance_is_exact() {
+    let records = XyceTestRunner::params1_historical_oracle_provenance_records();
+    assert_eq!(records.len(), XYCE_PARAMS1_HISTORICAL_ORACLE_RECORD_COUNT);
+    assert!(records.contains(&format!(
+        "{XYCE_PARAMS1_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_PARAMS1_UPSTREAM_RELEASE_TAG}\t{XYCE_PARAMS1_HISTORICAL_WRAPPER_PATH}\t{XYCE_PARAMS1_HISTORICAL_WRAPPER_BYTES}\t{XYCE_PARAMS1_HISTORICAL_WRAPPER_SHA256}\t{XYCE_PARAMS1_HISTORICAL_WRAPPER_BLAKE3}"
+    )));
+    assert!(records.contains(&format!(
+        "{XYCE_PARAMS1_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_PARAMS1_UPSTREAM_RELEASE_TAG}\t{XYCE_RELEASE_710_XYCE_VERIFY_PATH}\t{XYCE_RELEASE_710_XYCE_VERIFY_BYTES}\t{XYCE_RELEASE_710_XYCE_VERIFY_SHA256}\t{XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3}"
+    )));
+    XyceTestRunner::validate_params1_historical_oracle_provenance()
+        .expect("PARAMS1 Release-7.10 wrapper/xyce_verify provenance is internally consistent");
+}
+
+#[test]
+fn params1_semantic_snapshot_proves_only_literal_to_global_parameter_equivalence() {
+    let sources = params1_corpus_sources();
+    let literal = Netlist::parse(&sources[1]).expect("parse PARAMS1 literal baseline");
+    let parameterized = Netlist::parse(&sources[2]).expect("parse PARAMS1 parameterized member");
+    let print = XycePrintRequest {
+        probes: vec!["V(2)".to_string()],
+    };
+    let literal_snapshot = XyceTestRunner::params1_family_snapshot(&literal, &print)
+        .expect("literal PARAMS1 snapshot qualifies");
+    let parameterized_snapshot = XyceTestRunner::params1_family_snapshot(&parameterized, &print)
+        .expect("parameterized PARAMS1 snapshot qualifies");
+    assert_eq!(
+        literal_snapshot.representation,
+        XyceParams1Representation::LiteralValues
+    );
+    assert_eq!(
+        parameterized_snapshot.representation,
+        XyceParams1Representation::GlobalParameters
+    );
+    XyceTestRunner::compare_params1_family_snapshots(&literal_snapshot, &parameterized_snapshot)
+        .expect("literal and parameterized PARAMS1 semantics are identical");
+    assert!(
+        XyceTestRunner::compare_params1_family_snapshots(&literal_snapshot, &literal_snapshot,)
+            .is_err(),
+        "two literal decks do not exercise parameter equivalence"
+    );
+
+    let mutations = [
+        (
+            1usize,
+            sources[1].replace("R1 1 2 22K", "R1 1 2 23K"),
+            "R1 value",
+        ),
+        (
+            1,
+            sources[1].replace("C  2 0 2U", "C  2 0 3U"),
+            "capacitance",
+        ),
+        (
+            1,
+            sources[1].replace("PULSE(0 20", "PULSE(0 19"),
+            "pulse high level",
+        ),
+        (1, sources[1].replace("0.2 0.4", "0.2 0.5"), "pulse period"),
+        (1, sources[1].replace("V2 3 0 6", "V2 3 0 7"), "bias source"),
+        (1, sources[1].replace("R2 2 3", "R2 2 4"), "topology"),
+        (
+            1,
+            sources[1].replace(".TRAN 0.02 0.8", ".TRAN 0.03 0.8"),
+            "transient step",
+        ),
+        (
+            1,
+            sources[1].replace(".TRAN 0.02 0.8", ".TRAN 0.02 0.9"),
+            "transient stop",
+        ),
+        (
+            1,
+            sources[1].replace(".END", "R3 2 0 1MEG\n.END"),
+            "additional element",
+        ),
+        (
+            1,
+            sources[1].replace(".END", ".MODEL EXTRA R R=1\n.END"),
+            "additional model",
+        ),
+        (
+            1,
+            sources[1].replace(".END", ".SUBCKT EXTRA A B\nRLOCAL A B 1\n.ENDS EXTRA\n.END"),
+            "additional hierarchy",
+        ),
+        (
+            2,
+            sources[2].replace("RVALUE = {22K}", "RVALUE = {23K}"),
+            "RVALUE definition",
+        ),
+        (
+            2,
+            sources[2].replace("CVALUE = {2UF}", "CVALUE = {3UF}"),
+            "CVALUE definition",
+        ),
+        (
+            2,
+            sources[2].replace("{RVALUE}", "{RVALUE+0}"),
+            "non-direct resistor parameter AST",
+        ),
+        (
+            2,
+            sources[2].replace("{CVALUE}", "{CVALUE*1}"),
+            "non-direct capacitor parameter AST",
+        ),
+        (
+            2,
+            sources[2].replace(".PARAM CVALUE", ".PARAM EXTRA={1}\n.PARAM CVALUE"),
+            "additional global parameter",
+        ),
+        (
+            2,
+            sources[2]
+                .replace("RVALUE = {22K}", "RESISTANCE = {22K}")
+                .replace("{RVALUE}", "{RESISTANCE}"),
+            "renamed global parameter",
+        ),
+    ];
+    for (role_index, mutated_source, reason) in mutations {
+        let parsed = Netlist::parse(&mutated_source);
+        let rejected = match parsed {
+            Err(_) => true,
+            Ok(netlist) => match XyceTestRunner::params1_family_snapshot(&netlist, &print) {
+                Err(_) => true,
+                Ok(snapshot) if role_index == 1 => {
+                    XyceTestRunner::compare_params1_family_snapshots(
+                        &snapshot,
+                        &parameterized_snapshot,
+                    )
+                    .is_err()
+                }
+                Ok(snapshot) => {
+                    XyceTestRunner::compare_params1_family_snapshots(&literal_snapshot, &snapshot)
+                        .is_err()
+                }
+            },
+        };
+        assert!(rejected, "{reason} mutation must fail closed");
+    }
+
+    let wrong_print = XycePrintRequest {
+        probes: vec!["V(3)".to_string()],
+    };
+    assert!(
+        XyceTestRunner::params1_family_snapshot(&literal, &wrong_print).is_err(),
+        "the ordered V(2) probe is part of the semantic contract"
+    );
+}
+
+#[test]
+fn params1_transient_plan_rejects_analysis_and_output_mutations() {
+    let sources = params1_corpus_sources();
+    let (root, decks, runner) = params1_fixture(
+        "plan",
+        [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+        ],
+    );
+    let plan = runner
+        .static_tran_family_plan_for_path(
+            &decks[1].path,
+            XyceStaticTranPlanPurpose::RelationalFamily,
+        )
+        .expect("build PARAMS1 literal transient plan");
+    XyceTestRunner::validate_params1_transient_plan(&plan)
+        .expect("canonical PARAMS1 transient plan qualifies");
+    let parameterized_plan = runner
+        .static_tran_family_plan_for_path(
+            &decks[2].path,
+            XyceStaticTranPlanPurpose::RelationalFamily,
+        )
+        .expect("build PARAMS1 parameterized transient plan");
+    XyceTestRunner::validate_params1_transient_plan(&parameterized_plan)
+        .expect("parameterized PARAMS1 transient plan qualifies");
+
+    let mut option = plan.clone();
+    option.source = option
+        .source
+        .replace(".TRAN", ".OPTIONS RELTOL=1e-6\n.TRAN");
+    assert!(XyceTestRunner::validate_params1_transient_plan(&option).is_err());
+    let mut source_identity = plan.clone();
+    source_identity.source = source_identity.source.replace(
+        "* This test is the base line case.",
+        "* This comment changes only historical source identity.",
+    );
+    assert!(
+        XyceTestRunner::validate_params1_transient_plan(&source_identity).is_err(),
+        "the captured execution source must retain exact canonical-LF identity"
+    );
+    let mut comp = plan.clone();
+    comp.source = comp.source.replace(".TRAN", "*COMP V(2) RELTOL=1\n.TRAN");
+    assert!(XyceTestRunner::validate_params1_transient_plan(&comp).is_err());
+    let mut step = plan.clone();
+    step.source = step.source.replace(".TRAN", ".STEP R1 1 2 1\n.TRAN");
+    assert!(XyceTestRunner::validate_params1_transient_plan(&step).is_err());
+    let mut extra_probe = plan.clone();
+    extra_probe
+        .print
+        .as_mut()
+        .expect("PARAMS1 plan has a print request")
+        .probes
+        .push("V(1)".to_string());
+    assert!(XyceTestRunner::validate_params1_transient_plan(&extra_probe).is_err());
+    let mut start = plan.clone();
+    start.tran.start = Some(0.1);
+    assert!(XyceTestRunner::validate_params1_transient_plan(&start).is_err());
+    let mut max_step = plan.clone();
+    max_step.tran.max_step = Some(0.01);
+    assert!(XyceTestRunner::validate_params1_transient_plan(&max_step).is_err());
+    let mut uic = plan.clone();
+    uic.tran.uic = true;
+    assert!(XyceTestRunner::validate_params1_transient_plan(&uic).is_err());
+    let mut output_override = plan.clone();
+    output_override.output_override = true;
+    assert!(XyceTestRunner::validate_params1_transient_plan(&output_override).is_err());
+    let mut constant_step = plan.clone();
+    constant_step.timeint_conststep = true;
+    assert!(XyceTestRunner::validate_params1_transient_plan(&constant_step).is_err());
+    let mut csv = plan;
+    csv.contract = XyceStaticTranContract::PlainCsv;
+    assert!(XyceTestRunner::validate_params1_transient_plan(&csv).is_err());
+
+    fs::remove_dir_all(root).expect("remove PARAMS1 plan fixture");
+}
+
+#[test]
+fn params1_provenance_rejects_content_directory_and_manifest_drift() {
+    let sources = params1_corpus_sources();
+    let source_refs = [
+        sources[0].as_str(),
+        sources[1].as_str(),
+        sources[2].as_str(),
+    ];
+
+    for (index, mutation, reason) in [
+        (
+            0usize,
+            "nonempty wrapper owner\n".to_string(),
+            "owner content",
+        ),
+        (
+            1,
+            sources[1].replace("R1 1 2 22K", "R1 1 2 23K"),
+            "literal content",
+        ),
+        (1, String::new(), "empty literal worker"),
+        (
+            2,
+            sources[2].replace("RVALUE = {22K}", "RVALUE = {23K}"),
+            "parameterized content",
+        ),
+    ] {
+        let (root, decks, runner) = params1_fixture(reason, source_refs);
+        fs::write(&decks[index].path, mutation).expect("write PARAMS1 content mutation");
+        assert!(
+            runner
+                .params1_family_contract(&decks[0])
+                .expect("fixed PARAMS1 owner remains selected")
+                .is_err(),
+            "{reason} drift must fail shared provenance"
+        );
+        fs::remove_dir_all(root).expect("remove PARAMS1 content fixture");
+    }
+
+    let (root, decks, cached_runner) = params1_fixture("manifest", source_refs);
+    fs::write(root.join(HARNESS_MANIFEST_FILE), "").expect("remove PARAMS1 owner manifest row");
+    assert!(
+        cached_runner
+            .params1_family_contract(&decks[0])
+            .expect("fixed PARAMS1 owner remains selected")
+            .is_err(),
+        "on-disk wrapper-manifest drift must invalidate a pre-existing runner"
+    );
+    let unowned = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    assert!(
+        unowned
+            .params1_family_contract(&decks[0])
+            .expect("fixed PARAMS1 owner remains selected")
+            .is_err(),
+        "missing wrapper ownership must fail closed"
+    );
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!(
+            "{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n",
+            decks[0].relative_path
+        ),
+    )
+    .expect("restore PARAMS1 owner manifest row");
+    fs::write(
+        root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[&format!(
+            "{}\tNetlists/PARAMS1/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_PARAMS1_LITERAL_BASELINE_CONTRACT}",
+            decks[1].relative_path
+        )]),
+    )
+    .expect("remove PARAMS1 parameterized promotion row");
+    assert!(
+        cached_runner
+            .params1_family_contract(&decks[0])
+            .expect("fixed PARAMS1 owner remains selected")
+            .is_err(),
+        "on-disk exclusion-manifest drift must invalidate a pre-existing runner"
+    );
+    let incomplete = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    assert!(
+        incomplete
+            .params1_family_contract(&decks[0])
+            .expect("fixed PARAMS1 owner remains selected")
+            .is_err(),
+        "incomplete historical-exclusion provenance must fail closed"
+    );
+    fs::remove_dir_all(root).expect("remove PARAMS1 manifest fixture");
+
+    let (root, decks, runner) = params1_fixture("directory", source_refs);
+    fs::write(root.join("Netlists/PARAMS1/unqualified.cir"), &sources[1])
+        .expect("write additional PARAMS1 circuit");
+    assert!(
+        runner
+            .params1_family_contract(&decks[0])
+            .expect("fixed PARAMS1 owner remains selected")
+            .is_err(),
+        "additional circuit siblings must fail the exact candidate census"
+    );
+    fs::remove_dir_all(root).expect("remove PARAMS1 directory fixture");
+
+    let (root, decks, runner) = params1_fixture("renamed-worker", source_refs);
+    fs::rename(&decks[2].path, root.join("Netlists/PARAMS1/params_a2.cir"))
+        .expect("rename PARAMS1 parameterized worker");
+    assert!(
+        runner
+            .params1_family_contract(&decks[0])
+            .expect("fixed PARAMS1 owner remains selected")
+            .is_err(),
+        "a renamed worker must fail both the path and content census"
+    );
+    fs::remove_dir_all(root).expect("remove PARAMS1 renamed-worker fixture");
+
+    for (label, literal_source, literal_contract) in [
+        (
+            "wrong-exclusion-source",
+            "Netlists/PARAMS1/alternate_exclude",
+            XYCE_PARAMS1_LITERAL_BASELINE_CONTRACT,
+        ),
+        (
+            "wrong-promotion-contract",
+            "Netlists/PARAMS1/exclude",
+            "static_prn_tran",
+        ),
+    ] {
+        let (root, decks, _) = params1_fixture(label, source_refs);
+        fs::write(
+            root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+            upstream_exclusion_manifest(&[
+                &format!(
+                    "{}\t{literal_source}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{literal_contract}",
+                    decks[1].relative_path
+                ),
+                &format!(
+                    "{}\tNetlists/PARAMS1/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_PARAMS1_PARAMETERIZED_MEMBER_CONTRACT}",
+                    decks[2].relative_path
+                ),
+            ]),
+        )
+        .expect("write mutated PARAMS1 exclusion provenance");
+        let changed = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        assert!(
+            changed
+                .params1_family_contract(&decks[0])
+                .expect("fixed PARAMS1 owner remains selected")
+                .is_err(),
+            "{label} must fail closed"
+        );
+        fs::remove_dir_all(root).expect("remove PARAMS1 exclusion mutation fixture");
+    }
+
+    let (root, decks, runner) = params1_fixture("source-artifact", source_refs);
+    fs::write(
+        root.join("Netlists/PARAMS1/params_a0.cir.PRN"),
+        "forbidden source-side artifact\n",
+    )
+    .expect("write PARAMS1 source-side output artifact");
+    assert!(
+        runner
+            .params1_family_contract(&decks[0])
+            .expect("fixed PARAMS1 owner remains selected")
+            .is_err(),
+        "case-insensitive source-side output artifacts must fail closed"
+    );
+    fs::remove_dir_all(root).expect("remove PARAMS1 source-artifact fixture");
+
+    let (root, decks, runner) = params1_fixture("output-artifact", source_refs);
+    let output = root.join("OutputData/PARAMS1");
+    fs::create_dir_all(&output).expect("create PARAMS1 OutputData fixture directory");
+    fs::write(
+        output.join("params_a1.cir.prn"),
+        "forbidden checked-in oracle\n",
+    )
+    .expect("write PARAMS1 checked-in output artifact");
+    assert!(
+        runner
+            .params1_family_contract(&decks[0])
+            .expect("fixed PARAMS1 owner remains selected")
+            .is_err(),
+        "checked-in worker output artifacts must fail relational ownership"
+    );
+    fs::remove_dir_all(root).expect("remove PARAMS1 output-artifact fixture");
+}
+
+#[test]
+fn params1_malformed_fixed_records_route_to_executed_failures() {
+    let sources = params1_corpus_sources();
+    let source_refs = [
+        sources[0].as_str(),
+        sources[1].as_str(),
+        sources[2].as_str(),
+    ];
+    for (index, expected_contract) in [
+        (0usize, XYCE_PARAMS1_WRAPPER_OWNER_CONTRACT),
+        (2, "upstream_exclusion_promotion_mismatch"),
+    ] {
+        let (root, decks, runner) = params1_fixture("routing", source_refs);
+        fs::write(&decks[index].path, "recognized malformed PARAMS1 record\n")
+            .expect("write malformed fixed PARAMS1 record");
+        let result = runner.run_discovered_test(&decks[index]);
+        assert!(
+            !result.passed,
+            "malformed fixed record must fail: {result:?}"
+        );
+        assert!(!result.expected_unsupported);
+        assert!(!result.upstream_excluded);
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.error.is_some());
+        fs::remove_dir_all(root).expect("remove PARAMS1 routing fixture");
+    }
+}
+
 #[test]
 fn sin_expression_snapshot_proves_only_three_argument_representation_parity() {
     let baseline = Netlist::parse(

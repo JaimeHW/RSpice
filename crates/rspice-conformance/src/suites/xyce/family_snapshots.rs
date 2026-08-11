@@ -5015,6 +5015,8 @@ impl XyceTestRunner {
                 Self::param_expression_family_snapshot(netlist, print)
                     .map(XyceStrictTransientFamilySnapshot::ParamExpression)
             }
+            XyceBaselineFamilyKind::Params1 => Self::params1_family_snapshot(netlist, print)
+                .map(XyceStrictTransientFamilySnapshot::Params1),
             XyceBaselineFamilyKind::PassiveCapPrimaryValue => {
                 Self::passive_cap_primary_snapshot(netlist, print)
                     .map(XyceStrictTransientFamilySnapshot::PassivePrimaryValue)
@@ -5032,6 +5034,313 @@ impl XyceTestRunner {
                 other.name()
             )),
         }
+    }
+
+    pub(super) fn params1_family_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<XyceParams1Snapshot, String> {
+        const LABEL: &str = "PARAMS1 parameter equivalence";
+        const TITLE: &str = "Test of PARAMS Functionality";
+        let source = netlist
+            .source_text
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} requires original source text"))?;
+        let representation = Self::params1_source_qualification(source)?;
+
+        let [
+            AnalysisCommand::Tran {
+                step,
+                stop,
+                start,
+                max_step,
+                uic,
+            },
+        ] = netlist.analyses.as_slice()
+        else {
+            return Err(format!("{LABEL} requires exactly one transient analysis"));
+        };
+        if step.to_bits() != 0.02f64.to_bits()
+            || stop.to_bits() != 0.8f64.to_bits()
+            || start.is_some()
+            || max_step.is_some()
+            || *uic
+        {
+            return Err(format!(
+                "{LABEL} requires exact '.TRAN 0.02 0.8' semantics without START, MAXSTEP, or UIC"
+            ));
+        }
+        if netlist.title.trim() != TITLE
+            || !netlist.diagnostics.is_empty()
+            || netlist.lin_analysis.is_some()
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.models.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || netlist.device_initial_conditions.is_some()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires the canonical title and one flat diagnostic-free circuit without models, hierarchy, auxiliary analyses, startup state, string parameters, or functions"
+            ));
+        }
+
+        let mut parameter_bits = BTreeMap::new();
+        for (name, value) in netlist.params.all_params() {
+            let name = name.trim().to_ascii_lowercase();
+            if name.is_empty()
+                || !value.is_finite()
+                || parameter_bits
+                    .insert(name.clone(), value.to_bits())
+                    .is_some()
+            {
+                return Err(format!(
+                    "{LABEL} contains an empty, duplicate, or non-finite parameter '{name}'"
+                ));
+            }
+        }
+        let expected_parameters = BTreeMap::from([
+            ("cvalue".to_string(), 2.0e-6f64.to_bits()),
+            ("rvalue".to_string(), 22_000.0f64.to_bits()),
+        ]);
+        match representation {
+            XyceParams1Representation::LiteralValues if !parameter_bits.is_empty() => {
+                return Err(format!(
+                    "{LABEL} literal baseline does not admit parameter bindings"
+                ));
+            }
+            XyceParams1Representation::GlobalParameters
+                if parameter_bits != expected_parameters =>
+            {
+                return Err(format!(
+                    "{LABEL} parameterized member requires exactly RVALUE=22K and CVALUE=2UF"
+                ));
+            }
+            XyceParams1Representation::LiteralValues
+            | XyceParams1Representation::GlobalParameters => {}
+        }
+
+        let voltage_probe = match print.probes.as_slice() {
+            [probe] => Self::parse_voltage_probe(probe)
+                .ok_or_else(|| format!("{LABEL} requires one atomic voltage probe"))?,
+            _ => return Err(format!("{LABEL} requires exactly one ordered probe")),
+        };
+        if voltage_probe.accessor != XyceVoltageAccessor::Value
+            || voltage_probe.node_pos.trim() != "2"
+            || voltage_probe.node_neg.is_some()
+        {
+            return Err(format!(
+                "{LABEL} requires the single-ended voltage-value probe V(2)"
+            ));
+        }
+        let ordered_probes = print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+
+        let mut elements = BTreeMap::new();
+        for element in &netlist.elements {
+            let name = element.name.trim().to_ascii_lowercase();
+            if name.is_empty()
+                || !matches!(element.provenance, ElementProvenance::Authored)
+                || elements.contains_key(&name)
+            {
+                return Err(format!(
+                    "{LABEL} contains an empty, duplicate, or generated element '{}'",
+                    element.name
+                ));
+            }
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| node.trim().to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            if nodes.iter().any(String::is_empty) {
+                return Err(format!(
+                    "{LABEL} element '{}' contains an empty node",
+                    element.name
+                ));
+            }
+
+            let fingerprint = match (name.as_str(), &element.kind) {
+                (
+                    "v1",
+                    ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Pulse {
+                        v1,
+                        v2,
+                        delay,
+                        rise,
+                        fall,
+                        width,
+                        period,
+                        phase,
+                        width_defaults_to_zero,
+                    }),
+                ) if nodes == ["1", "0"]
+                    && !*width_defaults_to_zero
+                    && [*v1, *v2, *delay, *rise, *fall, *width, *period, *phase]
+                        .into_iter()
+                        .all(Value::is_finite)
+                    && [
+                        v1.to_bits(),
+                        v2.to_bits(),
+                        delay.to_bits(),
+                        rise.to_bits(),
+                        fall.to_bits(),
+                        width.to_bits(),
+                        period.to_bits(),
+                        phase.to_bits(),
+                    ] == [
+                        0.0f64.to_bits(),
+                        20.0f64.to_bits(),
+                        0.0f64.to_bits(),
+                        0.0f64.to_bits(),
+                        0.0f64.to_bits(),
+                        0.2f64.to_bits(),
+                        0.4f64.to_bits(),
+                        0.0f64.to_bits(),
+                    ] =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "V:PULSE".to_string(),
+                        nodes,
+                        numeric_bits: vec![
+                            v1.to_bits(),
+                            v2.to_bits(),
+                            delay.to_bits(),
+                            rise.to_bits(),
+                            fall.to_bits(),
+                            width.to_bits(),
+                            period.to_bits(),
+                            phase.to_bits(),
+                        ],
+                        text: vec!["EXPLICIT_WIDTH_PERIOD".to_string()],
+                    }
+                }
+                ("v2", ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Dc(value)))
+                    if nodes == ["3", "0"]
+                        && value.is_finite()
+                        && value.to_bits() == 6.0f64.to_bits() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "V:DC".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                (
+                    "r1" | "r2",
+                    ElementKind::Resistor {
+                        value,
+                        value_expr,
+                        model,
+                        instance_params,
+                        deferred_params,
+                    },
+                ) if value.is_finite()
+                    && value.to_bits() == 22_000.0f64.to_bits()
+                    && value_expr.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty()
+                    && ((name == "r1" && nodes == ["1", "2"])
+                        || (name == "r2" && nodes == ["2", "3"])) =>
+                {
+                    let effective = Self::effective_resistor_value(netlist, &element.name)?
+                        .ok_or_else(|| {
+                            format!("{LABEL} could not resolve resistor '{}'", element.name)
+                        })?;
+                    if !effective.is_finite() || effective.to_bits() != 22_000.0f64.to_bits() {
+                        return Err(format!(
+                            "{LABEL} resistor '{}' did not resolve to 22K",
+                            element.name
+                        ));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits(), effective.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                (
+                    "c",
+                    ElementKind::Capacitor {
+                        value,
+                        value_expr,
+                        initial_voltage,
+                        model,
+                        instance_params,
+                        deferred_params,
+                    },
+                ) if nodes == ["2", "0"]
+                    && value.is_finite()
+                    && value.to_bits() == 2.0e-6f64.to_bits()
+                    && value_expr.is_none()
+                    && initial_voltage.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    let effective = Engine::new(SimulationConfig {
+                        spice_dialect: SpiceDialect::Xyce,
+                        ..SimulationConfig::default()
+                    })
+                    .resolved_capacitor_value(netlist, &element.name)
+                    .map_err(|error| {
+                        format!(
+                            "{LABEL} capacitor '{}' resolution failed: {error}",
+                            element.name
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        format!("{LABEL} could not resolve capacitor '{}'", element.name)
+                    })?;
+                    if !effective.is_finite() || effective.to_bits() != 2.0e-6f64.to_bits() {
+                        return Err(format!(
+                            "{LABEL} capacitor '{}' did not resolve to 2uF",
+                            element.name
+                        ));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: "C".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits(), effective.to_bits()],
+                        text: vec!["NO_IC".to_string()],
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} element '{}' is outside the exact five-element topology/value envelope",
+                        element.name
+                    ));
+                }
+            };
+            elements.insert(name, fingerprint);
+        }
+        if elements.keys().map(String::as_str).collect::<BTreeSet<_>>()
+            != BTreeSet::from(["c", "r1", "r2", "v1", "v2"])
+        {
+            return Err(format!("{LABEL} requires exactly V1, V2, R1, R2, and C"));
+        }
+
+        Ok(XyceParams1Snapshot {
+            representation,
+            title: netlist.title.trim().to_string(),
+            elements,
+            tran_step_bits: step.to_bits(),
+            tran_stop_bits: stop.to_bits(),
+            ordered_probes,
+        })
     }
 
     pub(super) fn passive_temperature_override_snapshot(

@@ -58,15 +58,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 185;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 187;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "2c75c2b98e7ecddac1febe0917c6982f59edcfc3e89a3028fcff16cc72d4b25d";
+    "e2918a36c29a141a2f0d1426a12b2d269b5ec6ef774597f3c4cdd3d2d51cc1fc";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "284f62413e33715a2537de52ae645040cd18c278a13d59ee1b3b3f03af575de9";
+    "d948607e9f0a2ce4620c1b183922ba3f73c219cf675ef1cf5b6401b7fa67e293";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "ed266b639da09a149b971a0a60e7a3919130bcecef1d070fd5e7ee5ed4e1cd0f";
+    "42e8569c59fa3b2debafbb8e66d0c3468cbb4701f8f4e06c90967d3bf7ac92e5";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -209,6 +209,53 @@ const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_OWNER_MANIFEST_BLAKE3: &str =
 const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_EXCLUSION_COUNT: usize = 2;
 const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_HISTORICAL_EXCLUSION_BLAKE3: &str =
     "cab5d8a6b0743784cdc19c143d5068ccee23569733ec7ae6c61eb3f51971dfa4";
+// The removed Release 7.10 PARAMS1 wrapper used a byte comparison only as a
+// fast path, then accepted the pair through default `xyce_verify`. The native
+// reconstruction therefore binds these exact sources and applies the strict
+// default-tolerance relational comparator rather than making serialized PRN
+// identity the final oracle.
+const XYCE_PARAMS1_WRAPPER_OWNER_CONTRACT: &str = "params1_parameter_equivalence_wrapper_owner";
+const XYCE_PARAMS1_LITERAL_BASELINE_CONTRACT: &str =
+    "params1_parameter_equivalence_literal_baseline";
+const XYCE_PARAMS1_PARAMETERIZED_MEMBER_CONTRACT: &str =
+    "params1_parameter_equivalence_parameterized_member";
+const XYCE_PARAMS1_OWNER_RECORD: &str = "netlists/params1/params_a.cir";
+const XYCE_PARAMS1_LITERAL_BASELINE_RECORD: &str = "netlists/params1/params_a0.cir";
+const XYCE_PARAMS1_PARAMETERIZED_MEMBER_RECORD: &str = "netlists/params1/params_a1.cir";
+const XYCE_PARAMS1_OWNER_CONTENT_BLAKE3: &str =
+    "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262";
+const XYCE_PARAMS1_LITERAL_BASELINE_CONTENT_BLAKE3: &str =
+    "c8c470a5f69c608d8a1b6dfceb6f74cd000e5f10279c16f7361ac10e3a618e04";
+const XYCE_PARAMS1_PARAMETERIZED_MEMBER_CONTENT_BLAKE3: &str =
+    "ff7f4422bab651a252c2a1f26d85de3f5dcb2283c80abaaa409d6b7d6bfcf27d";
+const XYCE_PARAMS1_CANDIDATE_COUNT: usize = 3;
+const XYCE_PARAMS1_CANDIDATE_BLAKE3: &str =
+    "906ea8fd3d5f23664e117e5cc94db1764bd2c0f9428fe32d29f584ab7434c7de";
+const XYCE_PARAMS1_CANDIDATE_CONTENT_BLAKE3: &str =
+    "6f736f2fba7684dc732344f3a11febf3ce2565db27d4ae701ce58d20887ccc92";
+const XYCE_PARAMS1_OWNER_COUNT: usize = 1;
+const XYCE_PARAMS1_OWNER_MANIFEST_BLAKE3: &str =
+    "8d99d169acdd490904026dab9fb0c4567b2bbec6b997d23fc3779894406ae084";
+const XYCE_PARAMS1_EXCLUSION_COUNT: usize = 2;
+const XYCE_PARAMS1_HISTORICAL_EXCLUSION_BLAKE3: &str =
+    "bd29860b038fefd235030eafe83743f181dc811345fa62f6066f6c103fe25fea";
+const XYCE_PARAMS1_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_PARAMS1_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_PARAMS1_HISTORICAL_WRAPPER_PATH: &str = "Netlists/PARAMS1/params_a.cir.sh";
+const XYCE_PARAMS1_HISTORICAL_WRAPPER_BYTES: usize = 2_131;
+const XYCE_PARAMS1_HISTORICAL_WRAPPER_SHA256: &str =
+    "3e0d4db14de269d0b717f2ebdca11497f7e55c5c945c7f12765a96b87d4a8d56";
+const XYCE_PARAMS1_HISTORICAL_WRAPPER_BLAKE3: &str =
+    "a4322707a6b38e60db47b6b2524b69452846562e44e98531d5932bb401de057b";
+const XYCE_RELEASE_710_XYCE_VERIFY_PATH: &str = "TestScripts/xyce_verify.pl";
+const XYCE_RELEASE_710_XYCE_VERIFY_BYTES: usize = 59_566;
+const XYCE_RELEASE_710_XYCE_VERIFY_SHA256: &str =
+    "6e5f84b1646b30d0e12879848d7653584b39472d640a14916ae8fda6e1df12b3";
+const XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3: &str =
+    "5eadb6dab06ed3091ea114146bd4a574de83784f87be9843ad7b721b0a793665";
+const XYCE_PARAMS1_HISTORICAL_ORACLE_RECORD_COUNT: usize = 2;
+const XYCE_PARAMS1_HISTORICAL_ORACLE_BLAKE3: &str =
+    "b085c4d44ae81be36abe39da9b70c41a32411d8f3671bd2b9a47353a64a44744";
 const XYCE_LEVEL2_DIODE_DTEMP_WRAPPER_CONTRACT: &str =
     "level2_diode_dtemp_relational_wrapper_owner";
 const XYCE_LEVEL2_DIODE_DTEMP_REFERENCE_CONTRACT: &str =
@@ -5193,6 +5240,13 @@ struct XyceAgeCapFamilyContract {
 }
 
 #[derive(Debug, Clone)]
+struct XyceParams1FamilyContract {
+    relational: XyceBaselineFamilyContract,
+    owner_path: PathBuf,
+    role: XyceParams1Role,
+}
+
+#[derive(Debug, Clone)]
 struct XyceSwitchStateCaseFamilyContract {
     relational: XyceBaselineFamilyContract,
     role: XyceSwitchStateCaseFamilyRole,
@@ -5250,6 +5304,32 @@ enum XyceAgeCapFamilyRole {
     Anchor,
     AgedBaseline,
     EquivalentMember,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceParams1Role {
+    WrapperOwner,
+    LiteralBaseline,
+    ParameterizedMember,
+}
+
+impl XyceParams1Role {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::WrapperOwner => XYCE_PARAMS1_WRAPPER_OWNER_CONTRACT,
+            Self::LiteralBaseline => XYCE_PARAMS1_LITERAL_BASELINE_CONTRACT,
+            Self::ParameterizedMember => XYCE_PARAMS1_PARAMETERIZED_MEMBER_CONTRACT,
+        }
+    }
+
+    fn for_record(relative_path: &str) -> Option<Self> {
+        match XyceTestRunner::normalize_manifest_key(relative_path).as_str() {
+            XYCE_PARAMS1_OWNER_RECORD => Some(Self::WrapperOwner),
+            XYCE_PARAMS1_LITERAL_BASELINE_RECORD => Some(Self::LiteralBaseline),
+            XYCE_PARAMS1_PARAMETERIZED_MEMBER_RECORD => Some(Self::ParameterizedMember),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -5715,6 +5795,16 @@ struct XyceParamExpressionFamilySnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceParams1Snapshot {
+    representation: XyceParams1Representation,
+    title: String,
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    tran_step_bits: u64,
+    tran_stop_bits: u64,
+    ordered_probes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct XyceAgeCapFamilySnapshot {
     representation: XyceAgeCapRepresentation,
     elements: BTreeMap<String, XyceRelationalElementFingerprint>,
@@ -5861,6 +5951,7 @@ enum XyceStrictTransientFamilySnapshot {
     ScopedModel(XyceScopedModelFamilySnapshot),
     SinExpression(XyceSinExpressionFamilySnapshot),
     ParamExpression(XyceParamExpressionFamilySnapshot),
+    Params1(XyceParams1Snapshot),
     PassivePrimaryValue(XycePassivePrimaryValueSnapshot),
     PassiveTemperatureOverride(XycePassiveTemperatureOverrideSnapshot),
     TransientAnalysisExpression(XyceTransientAnalysisExpressionSnapshot),
@@ -5947,6 +6038,12 @@ enum XyceSinExpressionRepresentation {
 enum XyceParamExpressionRepresentation {
     ParameterCoefficient,
     LiteralCoefficient,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceParams1Representation {
+    LiteralValues,
+    GlobalParameters,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -6060,6 +6157,7 @@ enum XyceBaselineFamilyKind {
     DelimitedExpression,
     SinExpression,
     ParamExpression,
+    Params1,
     PassiveCapPrimaryValue,
     PassiveResPrimaryValue,
     PassiveTemperatureOverride,
@@ -6145,6 +6243,7 @@ impl XyceBaselineFamilyKind {
             Self::DelimitedExpression => "DELIMITED_EXPRESSION",
             Self::SinExpression => "SIN_EXPRESSION",
             Self::ParamExpression => "PARAM_EXPRESSION",
+            Self::Params1 => "PARAMS1_PARAMETER_EQUIVALENCE",
             Self::PassiveCapPrimaryValue => "PASSIVE_CAP_PRIMARY_VALUE",
             Self::PassiveResPrimaryValue => "PASSIVE_RES_PRIMARY_VALUE",
             Self::PassiveTemperatureOverride => "PASSIVE_TEMPERATURE_OVERRIDE",
@@ -6169,6 +6268,7 @@ impl XyceBaselineFamilyKind {
             Self::DelimitedExpression => "delimited_expression_family_wrapper",
             Self::SinExpression => "sin_expression_family_wrapper",
             Self::ParamExpression => "param_expression_family_wrapper",
+            Self::Params1 => XYCE_PARAMS1_WRAPPER_OWNER_CONTRACT,
             Self::PassiveCapPrimaryValue => "passive_primary_value_capacitor_tran_wrapper",
             Self::PassiveResPrimaryValue => "passive_primary_value_resistor_dc_wrapper",
             Self::PassiveTemperatureOverride => "passive_temperature_override_family_wrapper",
@@ -6193,6 +6293,7 @@ impl XyceBaselineFamilyKind {
             Self::DelimitedExpression => "delimited_expression_family_baseline",
             Self::SinExpression => "sin_expression_family_baseline",
             Self::ParamExpression => "param_expression_family_baseline",
+            Self::Params1 => XYCE_PARAMS1_LITERAL_BASELINE_CONTRACT,
             Self::PassiveCapPrimaryValue => "passive_primary_value_capacitor_tran_baseline",
             Self::PassiveResPrimaryValue => "passive_primary_value_resistor_dc_baseline",
             Self::PassiveTemperatureOverride => "passive_temperature_override_family_baseline",
@@ -6227,6 +6328,7 @@ impl XyceBaselineFamilyKind {
             | Self::DiodeModelAlias
             | Self::SinExpression
             | Self::ParamExpression
+            | Self::Params1
             | Self::PassiveCapPrimaryValue
             | Self::PassiveTemperatureOverride
             | Self::TransientAnalysisExpression
