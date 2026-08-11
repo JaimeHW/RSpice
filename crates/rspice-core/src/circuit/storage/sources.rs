@@ -7,6 +7,9 @@
 //! waveform.
 
 use super::*;
+use crate::circuit::{CircuitError, projection_changed};
+use std::cell::Cell;
+use std::collections::VecDeque;
 
 #[derive(Debug, Default, Clone)]
 pub struct VoltageSources {
@@ -31,6 +34,57 @@ pub struct VoltageSources {
     csc_indices: Vec<[Option<CscIndex>; 4]>,
     /// Optional transient context used to resolve source defaults.
     transient_context: Option<TransientSourceContext>,
+    /// Validated independent-source topology and allocation-free projection
+    /// scratch, finalized after circuit node identities are stable.
+    constraint_projection: VoltageConstraintProjectionState,
+}
+
+#[derive(Debug, Default, Clone)]
+enum VoltageConstraintProjectionState {
+    #[default]
+    Uninitialized,
+    Ready(VoltageConstraintProjection),
+    Invalid(String),
+}
+
+#[derive(Debug, Clone)]
+struct VoltageConstraintProjection {
+    constraints: Vec<VoltageConstraintTopology>,
+    components: Vec<VoltageConstraintProjectionComponent>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct VoltageConstraintTopology {
+    node_pos: NodeId,
+    node_neg: NodeId,
+}
+
+#[derive(Debug, Clone)]
+struct VoltageConstraintProjectionComponent {
+    grounded: bool,
+    /// Breadth-first forest order. Every non-root entry refers to an earlier
+    /// parent, so projection can publish the complete affine component without
+    /// allocating per Newton iteration.
+    nodes: Vec<VoltageConstraintProjectionNode>,
+}
+
+#[derive(Debug, Clone)]
+struct VoltageConstraintProjectionNode {
+    node: NodeId,
+    parent: Option<VoltageConstraintProjectionParent>,
+    /// Per-call scratch. Components are immutable after finalization and each
+    /// worker owns a circuit clone, so interior mutation avoids hot-path
+    /// allocation without introducing shared state.
+    relative: Cell<Value>,
+    signed_target: Cell<Value>,
+    projected: Cell<Value>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct VoltageConstraintProjectionParent {
+    node_index: usize,
+    source_index: usize,
+    target_sign: Value,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -38,6 +92,11 @@ struct TransientSourceContext {
     tstep: Value,
     tstop: Value,
     dialect: crate::config::SpiceDialect,
+    /// Xyce `SolverState::bpTol_` from the current accepted transient state.
+    /// `None` is reserved for stateless waveform previews, which have no
+    /// integration controller and derive the closest available fallback from
+    /// their evaluation time.
+    xyce_breakpoint_tolerance: Option<Value>,
     resource_limits: crate::resource::ResourceLimits,
 }
 
@@ -129,6 +188,7 @@ impl VoltageSources {
         self.source_specs.push(None);
         self.pwl_waveforms.push(None);
         self.csc_indices.push([None; 4]);
+        self.invalidate_constraint_projection();
     }
 
     /// Add voltage source with full AC and transient specification
@@ -178,6 +238,7 @@ impl VoltageSources {
         self.source_specs.push(source_spec);
         self.pwl_waveforms.push(pwl_waveform);
         self.csc_indices.push([None; 4]);
+        self.invalidate_constraint_projection();
     }
 
     /// Set transient context used to resolve waveform defaults.
@@ -225,8 +286,20 @@ impl VoltageSources {
             tstep: step,
             tstop: stop,
             dialect,
+            xyce_breakpoint_tolerance: (dialect == crate::config::SpiceDialect::Xyce)
+                .then_some(0.0),
             resource_limits,
         });
+    }
+
+    /// Publish Xyce's accepted-state breakpoint tolerance to source devices.
+    pub(crate) fn set_xyce_breakpoint_tolerance(&mut self, tolerance: Value) {
+        if let Some(context) = self.transient_context.as_mut()
+            && context.dialect == crate::config::SpiceDialect::Xyce
+        {
+            context.xyce_breakpoint_tolerance =
+                (tolerance.is_finite() && tolerance >= 0.0).then_some(tolerance);
+        }
     }
 
     /// Clear transient context and use static waveform defaults.
@@ -329,6 +402,355 @@ impl VoltageSources {
                 self.csc_indices[i][3] = matrix.get_index(nn - 1, br - 1);
             }
         }
+        if matches!(
+            self.constraint_projection,
+            VoltageConstraintProjectionState::Uninitialized
+        ) {
+            let num_nodes = self
+                .node_pos
+                .iter()
+                .chain(&self.node_neg)
+                .copied()
+                .max()
+                .unwrap_or(0);
+            let _ = self.finalize_constraint_projection(num_nodes);
+        }
+    }
+
+    pub(crate) fn invalidate_constraint_projection(&mut self) {
+        self.constraint_projection = VoltageConstraintProjectionState::Uninitialized;
+    }
+
+    /// Finalize the independent voltage-source graph after node remapping.
+    ///
+    /// A connected source component is projected as one affine system. Ideal
+    /// source loops are rejected because their branch currents are not unique;
+    /// silently reverting to pairwise snapping would make the result depend on
+    /// source insertion order.
+    pub(crate) fn finalize_constraint_projection(
+        &mut self,
+        num_nodes: usize,
+    ) -> Result<(), CircuitError> {
+        match self.build_constraint_projection(num_nodes) {
+            Ok(projection) => {
+                self.constraint_projection = VoltageConstraintProjectionState::Ready(projection);
+                Ok(())
+            }
+            Err(error) => {
+                let message = match error {
+                    CircuitError::InvalidComponent(message) => message,
+                    other => other.to_string(),
+                };
+                self.constraint_projection =
+                    VoltageConstraintProjectionState::Invalid(message.clone());
+                Err(CircuitError::InvalidComponent(message))
+            }
+        }
+    }
+
+    fn build_constraint_projection(
+        &self,
+        num_nodes: usize,
+    ) -> Result<VoltageConstraintProjection, CircuitError> {
+        let source_count = self.names.len();
+        if self.node_pos.len() != source_count
+            || self.node_neg.len() != source_count
+            || self.branch_indices.len() != source_count
+            || self.dc_values.len() != source_count
+            || self.ac_magnitudes.len() != source_count
+            || self.ac_phases.len() != source_count
+            || self.source_specs.len() != source_count
+            || self.pwl_waveforms.len() != source_count
+            || self.csc_indices.len() != source_count
+        {
+            return Err(CircuitError::InvalidComponent(
+                "independent voltage-source storage is internally inconsistent".to_string(),
+            ));
+        }
+
+        let mut parents = (0..=num_nodes).collect::<Vec<_>>();
+        let mut ranks = vec![0_u8; num_nodes + 1];
+        let mut constraints = Vec::with_capacity(source_count);
+        let mut adjacency = vec![Vec::<(NodeId, usize, Value)>::new(); num_nodes + 1];
+
+        fn root(parents: &mut [usize], mut node: usize) -> usize {
+            let mut representative = node;
+            while parents[representative] != representative {
+                representative = parents[representative];
+            }
+            while parents[node] != node {
+                let next = parents[node];
+                parents[node] = representative;
+                node = next;
+            }
+            representative
+        }
+
+        for source_index in 0..source_count {
+            let node_pos = self.node_pos[source_index];
+            let node_neg = self.node_neg[source_index];
+            if node_pos > num_nodes || node_neg > num_nodes {
+                return Err(CircuitError::InvalidComponent(format!(
+                    "independent voltage source '{}' references node outside the solved system",
+                    self.names[source_index]
+                )));
+            }
+
+            let root_pos = root(&mut parents, node_pos);
+            let root_neg = root(&mut parents, node_neg);
+            if root_pos == root_neg {
+                return Err(CircuitError::InvalidComponent(format!(
+                    "independent voltage source '{}' closes a singular ideal-source loop; its branch current is not uniquely determined",
+                    self.names[source_index]
+                )));
+            }
+            if ranks[root_pos] < ranks[root_neg] {
+                parents[root_pos] = root_neg;
+            } else {
+                parents[root_neg] = root_pos;
+                if ranks[root_pos] == ranks[root_neg] {
+                    ranks[root_pos] = ranks[root_pos].saturating_add(1);
+                }
+            }
+
+            constraints.push(VoltageConstraintTopology { node_pos, node_neg });
+            // V(pos) = V(neg) + target, and conversely.
+            adjacency[node_neg].push((node_pos, source_index, 1.0));
+            adjacency[node_pos].push((node_neg, source_index, -1.0));
+        }
+
+        let mut components = Vec::new();
+        let mut visited = vec![false; num_nodes + 1];
+        let mut component_index = vec![usize::MAX; num_nodes + 1];
+        for root_node in 0..=num_nodes {
+            if visited[root_node] || adjacency[root_node].is_empty() {
+                continue;
+            }
+
+            visited[root_node] = true;
+            let mut nodes = vec![VoltageConstraintProjectionNode {
+                node: root_node,
+                parent: None,
+                relative: Cell::new(0.0),
+                signed_target: Cell::new(0.0),
+                projected: Cell::new(0.0),
+            }];
+            component_index[root_node] = 0;
+            let mut queue = VecDeque::from([root_node]);
+            while let Some(node) = queue.pop_front() {
+                let parent_index = component_index[node];
+                for &(neighbor, source_index, target_sign) in &adjacency[node] {
+                    if visited[neighbor] {
+                        continue;
+                    }
+                    visited[neighbor] = true;
+                    component_index[neighbor] = nodes.len();
+                    nodes.push(VoltageConstraintProjectionNode {
+                        node: neighbor,
+                        parent: Some(VoltageConstraintProjectionParent {
+                            node_index: parent_index,
+                            source_index,
+                            target_sign,
+                        }),
+                        relative: Cell::new(0.0),
+                        signed_target: Cell::new(0.0),
+                        projected: Cell::new(0.0),
+                    });
+                    queue.push_back(neighbor);
+                }
+            }
+            components.push(VoltageConstraintProjectionComponent {
+                grounded: root_node == 0,
+                nodes,
+            });
+        }
+
+        Ok(VoltageConstraintProjection {
+            constraints,
+            components,
+        })
+    }
+
+    fn floating_constraint_common_mode(
+        solution: &[Value],
+        component: &VoltageConstraintProjectionComponent,
+    ) -> Result<Value, CircuitError> {
+        let mut scale: Value = 0.0;
+        for entry in &component.nodes {
+            let raw = solution[entry.node - 1];
+            let sample = raw - entry.relative.get();
+            if !sample.is_finite() {
+                return Err(CircuitError::InvalidComponent(
+                    "independent voltage-source projection overflowed while preserving a floating component common mode"
+                        .to_string(),
+                ));
+            }
+            scale = scale.max(sample.abs());
+        }
+        if scale == 0.0 {
+            return Ok(0.0);
+        }
+
+        let mut sum = 0.0;
+        let mut compensation = 0.0;
+        for entry in &component.nodes {
+            let normalized = (solution[entry.node - 1] - entry.relative.get()) / scale;
+            let adjusted = normalized - compensation;
+            let next = sum + adjusted;
+            compensation = (next - sum) - adjusted;
+            sum = next;
+        }
+        let common_mode = sum / component.nodes.len() as Value * scale;
+        if !common_mode.is_finite() {
+            return Err(CircuitError::InvalidComponent(
+                "independent voltage-source projection produced a non-finite floating common mode"
+                    .to_string(),
+            ));
+        }
+        Ok(common_mode)
+    }
+
+    fn project_constraint_components(
+        &self,
+        solution: &mut [Value],
+        mut target_value: impl FnMut(usize) -> Option<Value>,
+    ) -> Result<bool, CircuitError> {
+        if self.names.is_empty() {
+            return Ok(false);
+        }
+        let projection = match &self.constraint_projection {
+            VoltageConstraintProjectionState::Ready(projection) => projection,
+            VoltageConstraintProjectionState::Invalid(message) => {
+                return Err(CircuitError::InvalidComponent(message.clone()));
+            }
+            VoltageConstraintProjectionState::Uninitialized => {
+                return Err(CircuitError::InvalidComponent(
+                    "independent voltage-source constraint topology was not finalized".to_string(),
+                ));
+            }
+        };
+
+        if projection.constraints.len() != self.names.len()
+            || self.node_pos.len() != self.names.len()
+            || self.node_neg.len() != self.names.len()
+            || self.dc_values.len() != self.names.len()
+            || self.source_specs.len() != self.names.len()
+            || self.pwl_waveforms.len() != self.names.len()
+            || projection
+                .constraints
+                .iter()
+                .zip(&self.node_pos)
+                .zip(&self.node_neg)
+                .any(|((constraint, &node_pos), &node_neg)| {
+                    constraint.node_pos != node_pos || constraint.node_neg != node_neg
+                })
+        {
+            return Err(CircuitError::InvalidComponent(
+                "independent voltage-source topology or value storage changed after finalization"
+                    .to_string(),
+            ));
+        }
+
+        // Stage every projected value before publishing any of them. A bad
+        // source, truncated/non-finite solution, or arithmetic overflow thus
+        // leaves the caller's complete candidate untouched.
+        for component in &projection.components {
+            let root = &component.nodes[0];
+            root.relative.set(0.0);
+            root.signed_target.set(0.0);
+            if root.node > 0 {
+                let Some(&raw) = solution.get(root.node - 1) else {
+                    return Err(CircuitError::InvalidComponent(format!(
+                        "independent voltage-source projection requires missing node {}",
+                        root.node
+                    )));
+                };
+                if !raw.is_finite() {
+                    return Err(CircuitError::InvalidComponent(format!(
+                        "independent voltage-source projection received a non-finite value at node {}",
+                        root.node
+                    )));
+                }
+            }
+
+            for node_index in 1..component.nodes.len() {
+                let entry = &component.nodes[node_index];
+                let parent = entry
+                    .parent
+                    .expect("finalized non-root projection node has a parent");
+                let Some(target) = target_value(parent.source_index) else {
+                    return Err(CircuitError::InvalidComponent(format!(
+                        "independent voltage source '{}' has incomplete value storage",
+                        self.names
+                            .get(parent.source_index)
+                            .map(String::as_str)
+                            .unwrap_or("<unknown>")
+                    )));
+                };
+                if !target.is_finite() {
+                    return Err(CircuitError::InvalidComponent(format!(
+                        "independent voltage source '{}' evaluated to a non-finite value",
+                        self.names[parent.source_index]
+                    )));
+                }
+                let signed_target = parent.target_sign * target;
+                let relative = component.nodes[parent.node_index].relative.get() + signed_target;
+                if !signed_target.is_finite() || !relative.is_finite() {
+                    return Err(CircuitError::InvalidComponent(format!(
+                        "independent voltage source '{}' overflowed its component projection",
+                        self.names[parent.source_index]
+                    )));
+                }
+                let Some(&raw) = solution.get(entry.node - 1) else {
+                    return Err(CircuitError::InvalidComponent(format!(
+                        "independent voltage-source projection requires missing node {}",
+                        entry.node
+                    )));
+                };
+                if !raw.is_finite() {
+                    return Err(CircuitError::InvalidComponent(format!(
+                        "independent voltage-source projection received a non-finite value at node {}",
+                        entry.node
+                    )));
+                }
+                entry.signed_target.set(signed_target);
+                entry.relative.set(relative);
+            }
+
+            let root_voltage = if component.grounded {
+                0.0
+            } else {
+                Self::floating_constraint_common_mode(solution, component)?
+            };
+            root.projected.set(root_voltage);
+            for node_index in 1..component.nodes.len() {
+                let entry = &component.nodes[node_index];
+                let parent = entry.parent.expect("validated projection parent");
+                let projected =
+                    component.nodes[parent.node_index].projected.get() + entry.signed_target.get();
+                if !projected.is_finite() {
+                    return Err(CircuitError::InvalidComponent(format!(
+                        "independent voltage-source projection overflowed at node {}",
+                        entry.node
+                    )));
+                }
+                entry.projected.set(projected);
+            }
+        }
+
+        let mut changed = false;
+        for component in &projection.components {
+            for entry in &component.nodes {
+                if entry.node == 0 {
+                    continue;
+                }
+                let value = &mut solution[entry.node - 1];
+                let projected = entry.projected.get();
+                changed |= projection_changed(*value, projected);
+                *value = projected;
+            }
+        }
+        Ok(changed)
     }
 
     /// Stamp all voltage sources using pre-baked CSC indices
@@ -652,6 +1074,7 @@ impl VoltageSources {
                 tstep: step,
                 tstop: stop,
                 dialect,
+                xyce_breakpoint_tolerance: None,
                 resource_limits: crate::resource::ResourceLimits::default(),
             }),
         )
@@ -768,51 +1191,51 @@ impl VoltageSources {
         // `pulse(0 5 2ns 2ns 2ns 80ns)`: v(1) rises at 3ns, falls at 85ns,
         // and rises again at 88ns and 172ns — a period of tr+pw+tf = 84ns,
         // not a single pulse held low to tstop.
-        let stop_time_defaults = xyce_defaults;
-
-        let td = if delay.is_finite() {
-            delay.max(0.0)
+        // Xyce keys every timing default off whether the field was authored,
+        // not off its numeric value. In particular, explicit zero rise/fall
+        // times are ideal edges and an explicit zero period is a one-shot
+        // source. ngspice instead replaces non-positive TR/TF/PER values with
+        // analysis-scaled defaults. The parser's NaN sentinels preserve the
+        // omitted-vs-authored distinction for the optional fields.
+        // Xyce 7.10 and ngspice 46 both preserve an authored finite delay,
+        // including a negative one.  A negative delay advances the waveform;
+        // clamping it would change both the initial source value and phase.
+        let td = if delay.is_finite() { delay } else { 0.0 };
+        let tr = if xyce_defaults {
+            if rise.is_nan() { step_default } else { rise }
+        } else if rise.is_finite() && rise > 0.0 {
+            rise
         } else {
-            0.0
+            step_default
         };
-        let tr = if rise.is_nan() { step_default } else { rise };
-        let tf = if fall.is_nan() { step_default } else { fall };
-        let pw = if width.is_nan() && xyce_defaults {
-            stop_default
-        } else if width.is_nan() && ngspice_defaults && !width_defaults_to_zero {
-            stop_default
-        } else if width.is_nan() {
-            0.0
+        let tf = if xyce_defaults {
+            if fall.is_nan() { step_default } else { fall }
+        } else if fall.is_finite() && fall > 0.0 {
+            fall
         } else {
+            step_default
+        };
+        let pw = if width_was_omitted && xyce_defaults {
+            stop_default
+        } else if xyce_defaults {
             width
-        };
-        let per = if period.is_nan() { 0.0 } else { period };
-
-        let tr = if tr.is_finite() && tr > 0.0 {
-            tr
-        } else {
-            step_default
-        };
-        let tf = if tf.is_finite() && tf > 0.0 {
-            tf
-        } else {
-            step_default
-        };
-        let pw = if pw.is_finite() && pw >= 0.0 {
-            pw
-        } else if width_was_omitted && xyce_defaults {
+        } else if width.is_finite() && width >= 0.0 {
+            width
+        } else if width_was_omitted && ngspice_defaults && !width_defaults_to_zero {
             stop_default
         } else {
             0.0
         };
         let per = if period_was_omitted {
-            if stop_time_defaults {
+            if xyce_defaults {
                 stop_default
             } else {
                 tr + pw + tf
             }
-        } else if per.is_finite() && per > 0.0 {
-            per
+        } else if xyce_defaults {
+            period
+        } else if period.is_finite() && period > 0.0 {
+            period
         } else {
             tr + pw + tf
         };
@@ -922,6 +1345,8 @@ impl VoltageSources {
                 phase,
                 width_defaults_to_zero,
             } => {
+                let xyce_boundaries =
+                    Self::pulse_dialect(context) == crate::config::SpiceDialect::Xyce;
                 let (delay, rise, fall, width, period) = Self::resolve_pulse_timing(
                     *delay,
                     *rise,
@@ -945,12 +1370,50 @@ impl VoltageSources {
                     0.0
                 };
                 let t_rel = time - delay + phase_time;
-                let t = if period.is_finite() && period > 0.0 && t_rel > period {
+                let repeating_period = if xyce_boundaries {
+                    period.is_finite() && period != 0.0
+                } else {
+                    period.is_finite() && period > 0.0
+                };
+                let t = if repeating_period && t_rel > period {
                     t_rel - period * (t_rel / period).floor()
                 } else {
                     t_rel
                 };
-                if t <= 0.0 || t >= rise + width + fall {
+                if xyce_boundaries {
+                    // Mirror Xyce 7.10 PulseData::updateSource branch-for-
+                    // branch. Its tolerance follows the transient hard
+                    // minimum timestep at the current accepted time and is
+                    // deliberately unrelated to the static source tstep. A
+                    // real transient supplies that accepted controller state;
+                    // only stateless waveform previews derive a target-time
+                    // fallback because they have no accepted state.
+                    let breakpoint_tolerance = context
+                        .and_then(|context| context.xyce_breakpoint_tolerance)
+                        .unwrap_or_else(|| {
+                            2.0 * crate::engine::Engine::xyce_hard_min_timestep(time)
+                        });
+                    let rise_width = rise + width;
+                    let end = rise_width + fall;
+                    if t <= 0.0 || (t > end && (t - end).abs() > breakpoint_tolerance) {
+                        *v1
+                    } else if t > rise
+                        && (t - rise).abs() > breakpoint_tolerance
+                        && (t < rise_width || (t - rise_width).abs() < breakpoint_tolerance)
+                    {
+                        *v2
+                    } else if t > 0.0 && (t < rise || (t - rise).abs() < breakpoint_tolerance) {
+                        if rise != 0.0 {
+                            v1 + (v2 - v1) * t / rise
+                        } else {
+                            *v1
+                        }
+                    } else if fall != 0.0 {
+                        v2 + (v1 - v2) * (t - rise_width) / fall
+                    } else {
+                        *v2
+                    }
+                } else if t <= 0.0 || t >= rise + width + fall {
                     *v1
                 } else if t < rise {
                     v1 + (v2 - v1) * t / rise
@@ -1180,25 +1643,25 @@ impl VoltageSources {
     /// the voltage source node values may not satisfy V(n+) - V(n-) = Vs.
     /// This method corrects the solution vector to enforce this constraint
     /// for display purposes and to prevent drift.
-    pub fn enforce_voltage_constraints(&self, solution: &mut [Value], time: Value) -> bool {
-        let mut changed = false;
-        for i in 0..self.names.len() {
-            let np = self.node_pos[i];
-            let nn = self.node_neg[i];
-
-            // Get the source value at this time
-            let v_source = match &self.source_specs[i] {
+    pub fn enforce_voltage_constraints(
+        &self,
+        solution: &mut [Value],
+        time: Value,
+    ) -> Result<bool, CircuitError> {
+        self.project_constraint_components(solution, |source_index| {
+            let dc_value = self.dc_values.get(source_index).copied()?;
+            Some(match self.source_specs.get(source_index)? {
                 Some(spec) => Self::evaluate_source_at_time_with_context_and_pwl(
                     spec,
                     time,
                     self.transient_context,
-                    self.pwl_waveforms[i].as_deref(),
+                    self.pwl_waveforms
+                        .get(source_index)
+                        .and_then(Option::as_deref),
                 ),
-                None => self.dc_values[i],
-            };
-            changed |= project_two_terminal_voltage(solution, np, nn, v_source);
-        }
-        changed
+                None => dc_value,
+            })
+        })
     }
 
     /// Enforce operating-point voltage-source constraints.
@@ -1206,17 +1669,13 @@ impl VoltageSources {
     /// Combined sources such as `DC 1.2 AC 1 SIN(...)` use their explicit DC
     /// value for OP/DC analyses; transient waveform evaluation is reserved for
     /// time-domain projection.
-    pub fn enforce_dc_voltage_constraints(&self, solution: &mut [Value]) -> bool {
-        let mut changed = false;
-        for i in 0..self.names.len() {
-            changed |= project_two_terminal_voltage(
-                solution,
-                self.node_pos[i],
-                self.node_neg[i],
-                self.dc_values[i],
-            );
-        }
-        changed
+    pub fn enforce_dc_voltage_constraints(
+        &self,
+        solution: &mut [Value],
+    ) -> Result<bool, CircuitError> {
+        self.project_constraint_components(solution, |source_index| {
+            self.dc_values.get(source_index).copied()
+        })
     }
 
     /// Enforce the scaled DC voltage-source constraints used by source stepping.
@@ -1224,18 +1683,11 @@ impl VoltageSources {
         &self,
         solution: &mut [Value],
         scale: Value,
-    ) -> bool {
-        let mut changed = false;
+    ) -> Result<bool, CircuitError> {
         let scale = if scale.is_finite() { scale } else { 1.0 };
-        for i in 0..self.names.len() {
-            changed |= project_two_terminal_voltage(
-                solution,
-                self.node_pos[i],
-                self.node_neg[i],
-                self.dc_values[i] * scale,
-            );
-        }
-        changed
+        self.project_constraint_components(solution, |source_index| {
+            self.dc_values.get(source_index).map(|value| value * scale)
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1670,8 +2122,20 @@ impl CurrentSources {
             tstep: step,
             tstop: stop,
             dialect,
+            xyce_breakpoint_tolerance: (dialect == crate::config::SpiceDialect::Xyce)
+                .then_some(0.0),
             resource_limits,
         });
+    }
+
+    /// Publish Xyce's accepted-state breakpoint tolerance to source devices.
+    pub(crate) fn set_xyce_breakpoint_tolerance(&mut self, tolerance: Value) {
+        if let Some(context) = self.transient_context.as_mut()
+            && context.dialect == crate::config::SpiceDialect::Xyce
+        {
+            context.xyce_breakpoint_tolerance =
+                (tolerance.is_finite() && tolerance >= 0.0).then_some(tolerance);
+        }
     }
 
     /// Clear transient context and use static waveform defaults.
@@ -1912,6 +2376,7 @@ mod tests {
             tstep,
             tstop,
             dialect: crate::config::SpiceDialect::BestAvailable,
+            xyce_breakpoint_tolerance: None,
             resource_limits: crate::resource::ResourceLimits::default(),
         })
     }
@@ -1921,6 +2386,7 @@ mod tests {
             tstep,
             tstop,
             dialect: crate::config::SpiceDialect::Ngspice,
+            xyce_breakpoint_tolerance: None,
             resource_limits: crate::resource::ResourceLimits::default(),
         })
     }
@@ -1930,6 +2396,7 @@ mod tests {
             tstep,
             tstop,
             dialect: crate::config::SpiceDialect::Xyce,
+            xyce_breakpoint_tolerance: Some(0.0),
             resource_limits: crate::resource::ResourceLimits::default(),
         })
     }
@@ -1959,14 +2426,244 @@ mod tests {
                 }),
             }),
         );
+        sources
+            .finalize_constraint_projection(1)
+            .expect("single-source projection topology finalizes");
 
         let mut dc_solution = vec![0.0];
-        assert!(sources.enforce_dc_voltage_constraints(&mut dc_solution));
+        assert!(
+            sources
+                .enforce_dc_voltage_constraints(&mut dc_solution)
+                .expect("DC projection succeeds")
+        );
         assert_close(dc_solution[0], 1.44);
 
         let mut transient_solution = vec![1.44];
-        assert!(sources.enforce_voltage_constraints(&mut transient_solution, 0.0));
+        assert!(
+            sources
+                .enforce_voltage_constraints(&mut transient_solution, 0.0)
+                .expect("transient projection succeeds")
+        );
         assert_close(transient_solution[0], 0.0);
+    }
+
+    #[test]
+    fn grounded_source_stack_projects_every_constraint_exactly() {
+        for reverse_order_and_orientation in [false, true] {
+            let mut sources = VoltageSources::new();
+            if reverse_order_and_orientation {
+                sources.add("vmon".to_string(), 2, 1, 2, 0.0);
+                sources.add("vdrive".to_string(), 1, 0, 1, -4.0);
+            } else {
+                sources.add("vdrive".to_string(), 1, 0, 1, -4.0);
+                sources.add("vmon".to_string(), 1, 2, 2, 0.0);
+            }
+            sources
+                .finalize_constraint_projection(2)
+                .expect("stacked source topology finalizes");
+
+            let mut solution = [-3.999_999_999_998_709, -4.000_000_000_001];
+            assert!(
+                sources
+                    .enforce_dc_voltage_constraints(&mut solution)
+                    .expect("stack projection succeeds")
+            );
+            assert_eq!(solution[0].to_bits(), (-4.0_f64).to_bits());
+            assert_eq!(solution[1].to_bits(), (-4.0_f64).to_bits());
+            assert_eq!((solution[0] - solution[1]).to_bits(), 0.0_f64.to_bits());
+        }
+    }
+
+    #[test]
+    fn grounded_source_chain_projects_in_linear_forest_order() {
+        let mut sources = VoltageSources::new();
+        sources.add("v3".to_string(), 3, 2, 3, -0.5);
+        sources.add("v1".to_string(), 1, 0, 1, 1.0);
+        sources.add("v2".to_string(), 2, 1, 2, 2.0);
+        sources
+            .finalize_constraint_projection(3)
+            .expect("three-source tree finalizes");
+
+        let mut solution = [0.9, 3.2, 2.4];
+        sources
+            .enforce_dc_voltage_constraints(&mut solution)
+            .expect("chain projection succeeds");
+
+        assert_eq!(
+            solution.map(Value::to_bits),
+            [1.0, 3.0, 2.5].map(Value::to_bits)
+        );
+    }
+
+    #[test]
+    fn floating_source_stack_preserves_least_squares_common_mode() {
+        let mut sources = VoltageSources::new();
+        sources.add("v12".to_string(), 2, 1, 1, 2.0);
+        sources.add("v23".to_string(), 3, 2, 2, -0.5);
+        sources
+            .finalize_constraint_projection(3)
+            .expect("floating source tree finalizes");
+
+        let raw = [10.0, 13.0, 11.0];
+        let expected_common_mode = (raw[0] + (raw[1] - 2.0) + (raw[2] - 1.5)) / 3.0;
+        let mut solution = raw;
+        sources
+            .enforce_dc_voltage_constraints(&mut solution)
+            .expect("floating projection succeeds");
+
+        assert_close(solution[0], expected_common_mode);
+        assert_close(solution[1] - solution[0], 2.0);
+        assert_close(solution[2] - solution[1], -0.5);
+    }
+
+    #[test]
+    fn cached_source_tree_uses_current_transient_and_scaled_dc_targets() {
+        let mut sources = VoltageSources::new();
+        sources.add_with_ac_and_spec(
+            "vdrive".to_string(),
+            1,
+            0,
+            1,
+            2.0,
+            0.0,
+            0.0,
+            Some(SourceSpec::Sin {
+                offset: 1.0,
+                amplitude: 2.0,
+                frequency: 1.0,
+                delay: 0.0,
+                damping: 0.0,
+                phase: 0.0,
+            }),
+        );
+        sources.add("vstack".to_string(), 2, 1, 2, 3.0);
+        sources
+            .finalize_constraint_projection(2)
+            .expect("dynamic source tree finalizes");
+
+        let mut solution = [0.0, 0.0];
+        sources
+            .enforce_voltage_constraints(&mut solution, 0.0)
+            .expect("initial transient projection succeeds");
+        assert_eq!(solution.map(Value::to_bits), [1.0, 4.0].map(Value::to_bits));
+
+        sources
+            .enforce_voltage_constraints(&mut solution, 0.25)
+            .expect("later transient projection succeeds");
+        assert_close(solution[0], 3.0);
+        assert_close(solution[1], 6.0);
+
+        sources
+            .enforce_scaled_dc_voltage_constraints(&mut solution, 0.5)
+            .expect("scaled DC projection succeeds");
+        assert_eq!(solution.map(Value::to_bits), [1.0, 2.5].map(Value::to_bits));
+    }
+
+    #[test]
+    fn component_projection_evaluates_each_source_once() {
+        let mut sources = VoltageSources::new();
+        sources.add("v1".to_string(), 1, 0, 1, 1.0);
+        sources.add("v2".to_string(), 2, 1, 2, 2.0);
+        sources.add("v3".to_string(), 3, 2, 3, 3.0);
+        sources
+            .finalize_constraint_projection(3)
+            .expect("source tree finalizes");
+
+        let evaluations = [Cell::new(0_usize), Cell::new(0), Cell::new(0)];
+        let mut solution = [0.0; 3];
+        sources
+            .project_constraint_components(&mut solution, |source_index| {
+                evaluations[source_index].set(evaluations[source_index].get() + 1);
+                sources.dc_values.get(source_index).copied()
+            })
+            .expect("component projection succeeds");
+
+        assert_eq!(evaluations.map(|count| count.get()), [1, 1, 1]);
+    }
+
+    #[test]
+    fn invalid_projection_input_never_partially_mutates_solution() {
+        let mut sources = VoltageSources::new();
+        sources.add("v1".to_string(), 1, 0, 1, 1.0);
+        sources.add("v2".to_string(), 2, 1, 2, 2.0);
+        sources
+            .finalize_constraint_projection(2)
+            .expect("source tree finalizes");
+
+        let mut truncated = [7.0];
+        let before = truncated.map(Value::to_bits);
+        assert!(
+            sources
+                .enforce_dc_voltage_constraints(&mut truncated)
+                .is_err()
+        );
+        assert_eq!(truncated.map(Value::to_bits), before);
+
+        let mut non_finite = [7.0, Value::NAN];
+        let before = non_finite.map(Value::to_bits);
+        assert!(
+            sources
+                .enforce_dc_voltage_constraints(&mut non_finite)
+                .is_err()
+        );
+        assert_eq!(non_finite.map(Value::to_bits), before);
+
+        sources.dc_values[1] = Value::INFINITY;
+        let mut bad_target = [7.0, 8.0];
+        let before = bad_target.map(Value::to_bits);
+        assert!(
+            sources
+                .enforce_dc_voltage_constraints(&mut bad_target)
+                .is_err()
+        );
+        assert_eq!(bad_target.map(Value::to_bits), before);
+    }
+
+    #[test]
+    fn ideal_source_loops_are_typed_topology_errors() {
+        let mut parallel = VoltageSources::new();
+        parallel.add("v1".to_string(), 1, 0, 1, 1.0);
+        parallel.add("vparallel".to_string(), 1, 0, 2, 1.0);
+        let error = parallel
+            .finalize_constraint_projection(1)
+            .expect_err("parallel ideal sources have non-unique branch currents");
+        let message = error.to_string();
+        assert!(message.contains("vparallel"));
+        assert!(message.contains("singular ideal-source loop"));
+
+        let mut self_loop = VoltageSources::new();
+        self_loop.add("vself".to_string(), 1, 1, 1, 0.0);
+        let error = self_loop
+            .finalize_constraint_projection(1)
+            .expect_err("self-loop ideal source has a non-unique branch current");
+        assert!(error.to_string().contains("vself"));
+    }
+
+    #[test]
+    fn topology_mutation_requires_explicit_projection_refinalization() {
+        let mut sources = VoltageSources::new();
+        sources.add("v1".to_string(), 1, 0, 1, 1.0);
+        sources
+            .finalize_constraint_projection(2)
+            .expect("initial source topology finalizes");
+        sources.node_pos[0] = 2;
+
+        let mut solution = [9.0, 8.0];
+        let before = solution.map(Value::to_bits);
+        let error = sources
+            .enforce_dc_voltage_constraints(&mut solution)
+            .expect_err("stale topology is rejected");
+        assert!(error.to_string().contains("changed after finalization"));
+        assert_eq!(solution.map(Value::to_bits), before);
+
+        sources.invalidate_constraint_projection();
+        sources
+            .finalize_constraint_projection(2)
+            .expect("mutated topology refinalizes");
+        sources
+            .enforce_dc_voltage_constraints(&mut solution)
+            .expect("refinalized topology projects");
+        assert_eq!(solution[1].to_bits(), 1.0_f64.to_bits());
     }
 
     #[test]
@@ -2342,6 +3039,150 @@ mod tests {
             VoltageSources::evaluate_source_at_time_with_context(&spec, 100.01208e-3, ctx),
             0.0,
         );
+    }
+
+    #[test]
+    fn xyce_pulse_defaults_only_omitted_timing_fields() {
+        let explicit = VoltageSources::resolve_pulse_timing_with_defaults(
+            -1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            false,
+            0.02,
+            0.8,
+            crate::config::SpiceDialect::Xyce,
+        );
+        assert_eq!(explicit, (-1.0, 0.0, 0.0, 0.0, 0.0));
+
+        let omitted = VoltageSources::resolve_pulse_timing_with_defaults(
+            Value::NAN,
+            Value::NAN,
+            Value::NAN,
+            Value::NAN,
+            Value::NAN,
+            false,
+            0.02,
+            0.8,
+            crate::config::SpiceDialect::Xyce,
+        );
+        assert_eq!(omitted, (0.0, 0.02, 0.02, 0.8, 0.8));
+    }
+
+    #[test]
+    fn ngspice_pulse_keeps_authored_delay_and_nonpositive_edge_compatibility() {
+        let resolved = VoltageSources::resolve_pulse_timing_with_defaults(
+            -1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            false,
+            0.02,
+            0.8,
+            crate::config::SpiceDialect::Ngspice,
+        );
+        assert_eq!(resolved, (-1.0, 0.02, 0.02, 0.0, 0.04));
+    }
+
+    #[test]
+    fn xyce_explicit_zero_pulse_edges_are_instantaneous() {
+        let spec = SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 20.0,
+            delay: 0.0,
+            rise: 0.0,
+            fall: 0.0,
+            width: 0.2,
+            period: 0.4,
+            phase: 0.0,
+            width_defaults_to_zero: false,
+        };
+        let context = xyce_transient_context(0.02, 0.8);
+
+        assert_eq!(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 0.0, context).to_bits(),
+            0.0_f64.to_bits()
+        );
+        assert_eq!(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 1.0e-12, context).to_bits(),
+            20.0_f64.to_bits()
+        );
+        assert_eq!(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 0.2, context).to_bits(),
+            20.0_f64.to_bits()
+        );
+        assert_eq!(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 0.2 + 1.0e-12, context,)
+                .to_bits(),
+            0.0_f64.to_bits()
+        );
+    }
+
+    #[test]
+    fn xyce_pulse_boundaries_use_accepted_state_breakpoint_tolerance() {
+        let spec = SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 20.0,
+            delay: 0.0,
+            rise: 0.0,
+            fall: 0.0,
+            width: 0.2,
+            period: 0.4,
+            phase: 0.0,
+            width_defaults_to_zero: false,
+        };
+        let mut context = xyce_transient_context(0.02, 0.8);
+        let tolerance = 1.0e-9;
+        context
+            .as_mut()
+            .expect("test transient context")
+            .xyce_breakpoint_tolerance = Some(tolerance);
+
+        assert_eq!(
+            VoltageSources::evaluate_source_at_time_with_context(
+                &spec,
+                0.2 + tolerance * 0.5,
+                context,
+            )
+            .to_bits(),
+            20.0_f64.to_bits()
+        );
+        assert_eq!(
+            VoltageSources::evaluate_source_at_time_with_context(
+                &spec,
+                0.2 + tolerance * 2.0,
+                context,
+            )
+            .to_bits(),
+            0.0_f64.to_bits()
+        );
+    }
+
+    #[test]
+    fn xyce_negative_pulse_period_matches_nonzero_period_wrapping() {
+        let spec = SourceSpec::Pulse {
+            v1: -2.0,
+            v2: 5.0,
+            delay: 0.0,
+            rise: 0.0,
+            fall: 0.0,
+            width: 0.2,
+            period: -0.4,
+            phase: 0.0,
+            width_defaults_to_zero: false,
+        };
+        let context = xyce_transient_context(0.02, 0.8);
+
+        for time in [0.0, 1.0e-12, 0.1, 0.4, 1.0] {
+            assert_eq!(
+                VoltageSources::evaluate_source_at_time_with_context(&spec, time, context)
+                    .to_bits(),
+                (-2.0_f64).to_bits(),
+                "time={time:.17e}"
+            );
+        }
     }
 
     #[test]

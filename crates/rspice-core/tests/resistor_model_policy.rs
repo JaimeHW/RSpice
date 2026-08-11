@@ -1,8 +1,9 @@
 //! Build-time policy for resistor model levels.
 //!
 //! Xyce `R LEVEL=2` is a thermal/semiconductor resistor family. RSpice supports
-//! the validated DC electrical subset natively and fails closed for the
-//! self-consistent thermal stateful form until that topology is implemented.
+//! the validated DC electrical subset and the self-consistent electrothermal
+//! transient state natively, while unsupported parameter combinations still
+//! fail closed during model resolution.
 
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::{AnalysisCommand, Netlist, StepCommand, StepSweep, StepTarget};

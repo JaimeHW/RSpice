@@ -1847,8 +1847,51 @@ impl XyceTestRunner {
                     Err("scope-qualified nested include semantics differ".to_string())
                 }
             }
+            (
+                XyceStrictDcFamilySnapshot::SourceMultiplicity(baseline),
+                XyceStrictDcFamilySnapshot::SourceMultiplicity(target),
+            ) => Self::compare_source_multiplicity_snapshots(baseline, target),
             _ => Err("baseline and target use different exact-DC snapshot kinds".to_string()),
         }
+    }
+
+    pub(super) fn compare_source_multiplicity_snapshots(
+        baseline: &XyceSourceMultiplicitySnapshot,
+        target: &XyceSourceMultiplicitySnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XyceSourceMultiplicityRepresentation::LinearBaseline
+            || target.representation == XyceSourceMultiplicityRepresentation::LinearBaseline
+        {
+            return Err(
+                "source multiplicity must compare an explicit 0.2-S baseline against one M=10 owner representation"
+                    .to_string(),
+            );
+        }
+        if baseline.analysis != target.analysis
+            || baseline.flattened_elements != target.flattened_elements
+            || baseline.effective_gain_bits != target.effective_gain_bits
+            || baseline.source_nodes != target.source_nodes
+            || baseline.control_nodes != target.control_nodes
+            || baseline.ordered_probes != target.ordered_probes
+        {
+            return Err(
+                "source multiplicity changes analysis, flattened topology/current law, or ordered probes"
+                    .to_string(),
+            );
+        }
+        if baseline.authored_multiplicity_bits != 1.0f64.to_bits()
+            || baseline.authored_multiplicity_given
+            || baseline.flattened_multiplicity_bits != 1.0f64.to_bits()
+            || baseline.flattened_multiplicity_given
+            || !baseline.hierarchy_multiplicity_bits.is_empty()
+            || target.flattened_multiplicity_bits != 10.0f64.to_bits()
+        {
+            return Err(
+                "source multiplicity baseline or effective owner multiplier state is not canonical"
+                    .to_string(),
+            );
+        }
+        Ok(())
     }
 
     pub(super) fn compare_passive_primary_snapshots(
@@ -2059,6 +2102,22 @@ impl XyceTestRunner {
                 XyceStrictTransientFamilySnapshot::ParamExpression(target),
             ) => Self::compare_param_expression_family_snapshots(baseline, target),
             (
+                XyceStrictTransientFamilySnapshot::Params1(baseline),
+                XyceStrictTransientFamilySnapshot::Params1(target),
+            ) => Self::compare_params1_family_snapshots(baseline, target),
+            (
+                XyceStrictTransientFamilySnapshot::NakedAlgebra(baseline),
+                XyceStrictTransientFamilySnapshot::NakedAlgebra(target),
+            ) => Self::compare_naked_algebra_family_snapshots(baseline, target),
+            (
+                XyceStrictTransientFamilySnapshot::Bug1826ThermalParameter(baseline),
+                XyceStrictTransientFamilySnapshot::Bug1826ThermalParameter(target),
+            ) => Self::compare_bug1826_thermal_parameter_family_snapshots(baseline, target),
+            (
+                XyceStrictTransientFamilySnapshot::SourceMultiplicity(baseline),
+                XyceStrictTransientFamilySnapshot::SourceMultiplicity(target),
+            ) => Self::compare_source_multiplicity_snapshots(baseline, target),
+            (
                 XyceStrictTransientFamilySnapshot::PassivePrimaryValue(baseline),
                 XyceStrictTransientFamilySnapshot::PassivePrimaryValue(target),
             ) => Self::compare_passive_primary_snapshots(baseline, target),
@@ -2203,6 +2262,86 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    pub(super) fn compare_params1_family_snapshots(
+        baseline: &XyceParams1Snapshot,
+        target: &XyceParams1Snapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XyceParams1Representation::LiteralValues
+            || target.representation != XyceParams1Representation::GlobalParameters
+        {
+            return Err(
+                "family must compare the direct-literal PARAMS1 baseline with the direct-global-parameter member"
+                    .to_string(),
+            );
+        }
+        let mut baseline = baseline.clone();
+        let mut target = target.clone();
+        baseline.representation = XyceParams1Representation::LiteralValues;
+        target.representation = XyceParams1Representation::LiteralValues;
+        if baseline != target {
+            return Err(
+                "circuit title, exact topology, resolved values, transient analysis, or ordered probes differ outside the admitted literal/global-parameter spelling"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
+    pub(super) fn compare_naked_algebra_family_snapshots(
+        baseline: &XyceNakedAlgebraSnapshot,
+        target: &XyceNakedAlgebraSnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XyceNakedAlgebraRepresentation::BracedLocalBaseline
+            || !matches!(
+                target.representation,
+                XyceNakedAlgebraRepresentation::MixedLocalParameters
+                    | XyceNakedAlgebraRepresentation::MixedGlobalParameters
+            )
+        {
+            return Err(
+                "family must compare the braced-literal local baseline with a canonical mixed-expression local/global member"
+                    .to_string(),
+            );
+        }
+        let mut baseline = baseline.clone();
+        let mut target = target.clone();
+        baseline.representation = XyceNakedAlgebraRepresentation::BracedLocalBaseline;
+        target.representation = XyceNakedAlgebraRepresentation::BracedLocalBaseline;
+        target.title.clone_from(&baseline.title);
+        if baseline != target {
+            return Err(
+                "resolved parameter values, behavioral SPICE_PULSE semantics, topology, transient analysis, TIMEINT options, or ordered probes differ outside the admitted parameter representation and non-semantic title/comments"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
+    pub(super) fn compare_bug1826_thermal_parameter_family_snapshots(
+        baseline: &XyceBug1826ThermalParameterSnapshot,
+        target: &XyceBug1826ThermalParameterSnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XyceBug1826ThermalParameterRepresentation::GlobalParameter
+            || target.representation != XyceBug1826ThermalParameterRepresentation::LocalParameter
+        {
+            return Err(
+                "family must compare the GLOBAL_PARAM baseline with the ordinary PARAM member"
+                    .to_string(),
+            );
+        }
+        let mut baseline = baseline.clone();
+        let mut target = target.clone();
+        baseline.representation = XyceBug1826ThermalParameterRepresentation::GlobalParameter;
+        target.representation = XyceBug1826ThermalParameterRepresentation::GlobalParameter;
+        if baseline != target {
+            return Err(
+                "parameter value, topology, copper material expressions, native thermal state, transient analysis, or ordered probes differ outside the admitted parameter namespace"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
     pub(super) fn compare_bjt_external_node_family_snapshots(
         baseline: &XyceBjtExternalNodeFamilySnapshot,
         target: &XyceBjtExternalNodeFamilySnapshot,
@@ -2249,6 +2388,19 @@ impl XyceTestRunner {
             XyceVerifyTransientTolerance::release_7_10_default(),
             XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
         )
+    }
+
+    pub(super) fn compare_baseline_family_xyce_verify_tables(
+        &self,
+        kind: XyceBaselineFamilyKind,
+        baseline: &XycePrnTable,
+        member: &XycePrnTable,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if kind.xyce_verify_member_is_good_waveform() {
+            self.compare_xyce_verify_transient_tables(member, baseline)
+        } else {
+            self.compare_xyce_verify_transient_tables(baseline, member)
+        }
     }
 
     pub(super) fn compare_xyce_verify_transient_tables_with_tolerance(

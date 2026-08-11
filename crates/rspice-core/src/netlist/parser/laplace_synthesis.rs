@@ -20,7 +20,7 @@
 //! by `ω₀ = a₀^(1/n)` (the geometric mean of the pole magnitudes) so state
 //! magnitudes and stamped conductances stay O(1) wherever the poles live.
 
-use super::{Element, ElementKind, ParseError};
+use super::{Element, ElementKind, ParseError, SourceMultiplicity};
 use crate::Value;
 
 //=============================================================================
@@ -477,12 +477,14 @@ pub(super) fn synthesize_laplace(
                 expression,
                 tc1: 0.0,
                 tc2: 0.0,
+                multiplicity: SourceMultiplicity::default(),
             }
         } else {
             ElementKind::BehavioralCurrent {
                 expression,
                 tc1: 0.0,
                 tc2: 0.0,
+                multiplicity: SourceMultiplicity::default(),
             }
         }
     };
@@ -546,6 +548,7 @@ pub(super) fn synthesize_laplace(
                 expression: format!("V({})", state_node(i + 1)),
                 tc1: 0.0,
                 tc2: 0.0,
+                multiplicity: SourceMultiplicity::default(),
             },
             nodes: vec!["0".to_string(), state_node(i)],
             provenance: crate::netlist::ElementProvenance::Authored,
@@ -564,6 +567,7 @@ pub(super) fn synthesize_laplace(
             expression: feedback_terms.join(" + "),
             tc1: 0.0,
             tc2: 0.0,
+            multiplicity: SourceMultiplicity::default(),
         },
         nodes: vec!["0".to_string(), state_node(n)],
         provenance: crate::netlist::ElementProvenance::Authored,

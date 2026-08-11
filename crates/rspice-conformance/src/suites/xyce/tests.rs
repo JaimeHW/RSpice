@@ -4282,6 +4282,52 @@ fn transient_resistor_power_probe_uses_recorded_branch_current() {
 }
 
 #[test]
+fn transient_resistor_instance_parameters_work_in_direct_expression_and_stateful_output() {
+    let netlist = Netlist::parse(
+        "transient resistor instance parameter probes\n\
+             R1 out 0 rmod L=0.1 A=1e-5\n\
+             .model rmod r (r=1)\n\
+             .tran 1m 1m\n\
+             .end\n",
+    )
+    .expect("resistor instance-parameter deck parses");
+    let result = TransientResult {
+        time: vec![0.0, 1.0e-3],
+        step_sizes: vec![0.0; 2],
+        voltages: vec![vec![0.0, 0.0]],
+        branch_currents: Vec::new(),
+        num_nodes: 1,
+        node_names: vec!["out".to_string()],
+        branch_names: Vec::new(),
+        digital_traces: Vec::new(),
+        real_traces: Vec::new(),
+        device_op_traces: Vec::new(),
+        store_traces: Vec::new(),
+    };
+
+    for probe in ["R1:A", "{R1:A*2}", "{SDT(R1:A)}"] {
+        XyceTestRunner::validate_tran_probe(probe, &netlist)
+            .unwrap_or_else(|error| panic!("{probe} must validate: {error}"));
+    }
+    let direct = XyceTestRunner::evaluate_tran_probe("R1:A", &netlist, &result, 1.0e-3)
+        .expect("direct instance parameter evaluates");
+    let expression = XyceTestRunner::evaluate_tran_probe("{R1:A*2}", &netlist, &result, 1.0e-3)
+        .expect("instance parameter expression evaluates");
+    let stateful = XyceTestRunner::stateful_tran_probe_waveform("{SDT(R1:A)}", &netlist, &result)
+        .expect("stateful instance parameter evaluates")
+        .expect("SDT expression produces a waveform");
+    assert_eq!(direct.to_bits(), 1.0e-5f64.to_bits());
+    assert_eq!(expression.to_bits(), 2.0e-5f64.to_bits());
+    assert_eq!(stateful.len(), result.time.len());
+    assert_eq!(stateful[0].to_bits(), 0.0f64.to_bits());
+    assert!((stateful[1] - 1.0e-8).abs() <= 1.0e-22);
+
+    assert!(XyceTestRunner::validate_tran_probe("R1:UNSET", &netlist).is_err());
+    assert!(XyceTestRunner::evaluate_tran_probe("R1:UNSET", &netlist, &result, 1.0e-3).is_err());
+    assert!(XyceTestRunner::static_transient_device_parameter_value(&netlist, "R1:UNSET").is_err());
+}
+
+#[test]
 fn transient_voltage_source_power_probe_uses_recorded_branch_current() {
     let netlist = Netlist::parse(
         "transient voltage source power probe\n\
@@ -7382,6 +7428,82 @@ fn legacy_bjt_dtemp_fixture(
     (root, decks, runner)
 }
 
+fn xyce_sydney_level1_jfet_dtemp_fixture(
+    label: &str,
+    sources: [&str; 4],
+) -> (PathBuf, [XyceDeck; 4], XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-sydney-level1-jfet-dtemp-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = root.join("Netlists/DTEMP");
+    fs::create_dir_all(&family).expect("create Xyce Sydney level-1 JFET DTEMP fixture directory");
+    let records = [
+        (
+            "Netlists/DTEMP/njfet_dtemp.cir",
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_OWNER_RECORD,
+            sources[0],
+        ),
+        (
+            "Netlists/DTEMP/njfet_ref.cir",
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_REFERENCE_RECORD,
+            sources[1],
+        ),
+        (
+            "Netlists/DTEMP/pjfet_dtemp.cir",
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_OWNER_RECORD,
+            sources[2],
+        ),
+        (
+            "Netlists/DTEMP/pjfet_ref.cir",
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_REFERENCE_RECORD,
+            sources[3],
+        ),
+    ];
+    let decks = records.map(|(relative_path, normalized_record, source)| {
+        assert_eq!(
+            XyceTestRunner::normalize_manifest_key(relative_path),
+            normalized_record,
+            "fixture source-case path must map to its qualified record"
+        );
+        let path = root.join(relative_path);
+        fs::write(&path, source).expect("write Xyce Sydney level-1 JFET DTEMP fixture source");
+        XyceDeck {
+            path,
+            relative_path: relative_path.to_string(),
+            section: XyceDeckSection::Netlists,
+        }
+    });
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!(
+            "{}\trequires_upstream_wrapper\n{}\trequires_upstream_wrapper\n",
+            decks[0].relative_path, decks[2].relative_path
+        ),
+    )
+    .expect("write Xyce Sydney level-1 JFET DTEMP wrapper provenance");
+    fs::write(
+        root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[
+            &format!(
+                "{}\tNetlists/DTEMP/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_SYDNEY_LEVEL1_JFET_DTEMP_REFERENCE_CONTRACT}",
+                decks[1].relative_path
+            ),
+            &format!(
+                "{}\tNetlists/DTEMP/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_SYDNEY_LEVEL1_JFET_DTEMP_REFERENCE_CONTRACT}",
+                decks[3].relative_path
+            ),
+        ]),
+    )
+    .expect("write Xyce Sydney level-1 JFET DTEMP exclusion provenance");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    (root, decks, runner)
+}
+
 #[test]
 fn bug647_resistor_pair_is_manifest_owned_and_structurally_qualified() {
     let (root, owner, reference, runner) = bug647_resistor_fixture(
@@ -9525,6 +9647,173 @@ fn legacy_bjt_dtemp_provenance_rejects_cross_family_candidate_mutation() {
         "a sibling-family candidate mutation must fail the shared four-record provenance census"
     );
     fs::remove_dir_all(root).expect("remove legacy BJT DTEMP provenance fixture");
+}
+
+#[test]
+fn xyce_sydney_level1_jfet_dtemp_candidate_census_is_an_exact_manifest_bijection() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_root = workspace_root.join("tests/xyce");
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    let selected = runner
+        .discover_tests()
+        .iter()
+        .filter_map(|deck| {
+            runner
+                .xyce_sydney_level1_jfet_dtemp_relational_contract(deck)
+                .map(|contract| {
+                    contract.unwrap_or_else(|error| {
+                        panic!(
+                            "Xyce Sydney level-1 JFET DTEMP candidate failed qualification: {error}"
+                        )
+                    });
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                })
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        selected,
+        BTreeSet::from([
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_OWNER_RECORD.to_string(),
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_REFERENCE_RECORD.to_string(),
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_OWNER_RECORD.to_string(),
+            XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_REFERENCE_RECORD.to_string(),
+        ])
+    );
+    assert_eq!(
+        selected.len(),
+        XYCE_SYDNEY_LEVEL1_JFET_DTEMP_CANDIDATE_COUNT
+    );
+}
+
+#[test]
+fn xyce_sydney_level1_jfet_dtemp_snapshots_reject_semantic_mutations() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let baseline = [
+        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_OWNER_RECORD))
+            .expect("read NJF DTEMP owner"),
+        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_REFERENCE_RECORD))
+            .expect("read NJF TEMP reference"),
+        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_OWNER_RECORD))
+            .expect("read PJF DTEMP owner"),
+        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_REFERENCE_RECORD))
+            .expect("read PJF TEMP reference"),
+    ];
+    let mutations = [
+        (
+            0usize,
+            "beta= 0.00002690",
+            "beta= 0.00002691",
+            XyceSydneyLevel1JfetDtempFamily::Njf,
+            XyceSydneyLevel1JfetDtempRole::Owner,
+            "NJF model transconductance",
+        ),
+        (
+            0,
+            "dtemp={dtempParam}",
+            "temp={dtempParam}",
+            XyceSydneyLevel1JfetDtempFamily::Njf,
+            XyceSydneyLevel1JfetDtempRole::Owner,
+            "NJF TEMP-versus-DTEMP ownership",
+        ),
+        (
+            1,
+            "list 15 25 35",
+            "list 15 26 35",
+            XyceSydneyLevel1JfetDtempFamily::Njf,
+            XyceSydneyLevel1JfetDtempRole::Reference,
+            "NJF effective-temperature grid",
+        ),
+        (
+            2,
+            "jtest 1a 2a 3",
+            "jtest 1a 2a 4",
+            XyceSydneyLevel1JfetDtempFamily::Pjf,
+            XyceSydneyLevel1JfetDtempRole::Owner,
+            "PJF source topology",
+        ),
+        (
+            3,
+            "vds -15 0 1",
+            "vds -14 0 1",
+            XyceSydneyLevel1JfetDtempFamily::Pjf,
+            XyceSydneyLevel1JfetDtempRole::Reference,
+            "PJF secondary sweep domain",
+        ),
+    ];
+    for (index, (deck_index, needle, replacement, family, role, reason)) in
+        mutations.into_iter().enumerate()
+    {
+        let mut sources = baseline.clone();
+        let mutated = sources[deck_index].replace(needle, replacement);
+        assert_ne!(
+            mutated, sources[deck_index],
+            "{reason} mutation must alter its fixture"
+        );
+        sources[deck_index] = mutated;
+        let source_refs = [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+            sources[3].as_str(),
+        ];
+        let (root, decks, runner) =
+            xyce_sydney_level1_jfet_dtemp_fixture(&format!("mutation-{index}"), source_refs);
+        let deck = &decks[deck_index];
+        let rejected = match runner.static_dc_plan_for_path(&deck.path, ExpressionDialect::Xyce) {
+            Err(_) => true,
+            Ok(plan) => match XyceTestRunner::parse_xyce_netlist(&plan.source, &deck.path) {
+                Err(_) => true,
+                Ok(netlist) => XyceTestRunner::xyce_sydney_level1_jfet_dtemp_snapshot(
+                    &plan, &netlist, family, role,
+                )
+                .is_err(),
+            },
+        };
+        fs::remove_dir_all(root).expect("remove Xyce Sydney level-1 JFET mutation fixture");
+        assert!(rejected, "{reason} mutation must fail closed");
+    }
+}
+
+#[test]
+fn xyce_sydney_level1_jfet_dtemp_provenance_rejects_cross_family_candidate_mutation() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let sources = [
+        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_OWNER_RECORD))
+            .expect("read NJF DTEMP owner"),
+        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_REFERENCE_RECORD))
+            .expect("read NJF TEMP reference"),
+        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_OWNER_RECORD))
+            .expect("read PJF DTEMP owner"),
+        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_REFERENCE_RECORD))
+            .expect("read PJF TEMP reference"),
+    ];
+    let (root, decks, runner) = xyce_sydney_level1_jfet_dtemp_fixture(
+        "provenance",
+        [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+            sources[3].as_str(),
+        ],
+    );
+    let contract = runner
+        .xyce_sydney_level1_jfet_dtemp_relational_contract(&decks[0])
+        .expect("NJF owner is selected")
+        .expect("unmodified four-record JFET provenance qualifies");
+    let mutation = sources[3].replace("beta= 0.000278", "beta= 0.000279");
+    assert_ne!(mutation, sources[3], "PJF mutation must alter its fixture");
+    fs::write(&decks[3].path, mutation).expect("write PJF reference mutation");
+    assert!(
+        runner
+            .validate_xyce_sydney_level1_jfet_dtemp_provenance(&contract)
+            .is_err(),
+        "a sibling-family candidate mutation must fail the shared four-record provenance census"
+    );
+    fs::remove_dir_all(root).expect("remove Xyce Sydney level-1 JFET provenance fixture");
 }
 
 #[test]
@@ -13840,6 +14129,1675 @@ Rload out 0 1\n\
         XyceTestRunner::param_expression_family_snapshot(&extra_element, &print).is_err(),
         "additional circuit elements are outside the bounded topology"
     );
+}
+
+fn params1_corpus_sources() -> [String; 3] {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    [
+        fs::read_to_string(corpus.join("Netlists/PARAMS1/params_a.cir"))
+            .expect("read PARAMS1 wrapper owner"),
+        fs::read_to_string(corpus.join("Netlists/PARAMS1/params_a0.cir"))
+            .expect("read PARAMS1 literal baseline"),
+        fs::read_to_string(corpus.join("Netlists/PARAMS1/params_a1.cir"))
+            .expect("read PARAMS1 parameterized member"),
+    ]
+}
+
+fn params1_fixture(label: &str, sources: [&str; 3]) -> (PathBuf, [XyceDeck; 3], XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-params1-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = root.join("Netlists/PARAMS1");
+    fs::create_dir_all(&family).expect("create PARAMS1 fixture directory");
+    let records = [
+        "Netlists/PARAMS1/params_a.cir",
+        "Netlists/PARAMS1/params_a0.cir",
+        "Netlists/PARAMS1/params_a1.cir",
+    ];
+    let decks = std::array::from_fn(|index| {
+        let path = root.join(records[index]);
+        fs::write(&path, sources[index]).expect("write PARAMS1 fixture source");
+        XyceDeck {
+            path,
+            relative_path: records[index].to_string(),
+            section: XyceDeckSection::Netlists,
+        }
+    });
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n", records[0]),
+    )
+    .expect("write PARAMS1 wrapper provenance");
+    fs::write(
+        root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[
+            &format!(
+                "{}\tNetlists/PARAMS1/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_PARAMS1_LITERAL_BASELINE_CONTRACT}",
+                records[1]
+            ),
+            &format!(
+                "{}\tNetlists/PARAMS1/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_PARAMS1_PARAMETERIZED_MEMBER_CONTRACT}",
+                records[2]
+            ),
+        ]),
+    )
+    .expect("write PARAMS1 exclusion provenance");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    (root, decks, runner)
+}
+
+#[test]
+fn params1_candidate_census_is_an_exact_three_record_bijection() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&corpus, XyceRunnerConfig::default());
+    let selected = runner
+        .discover_tests()
+        .iter()
+        .filter_map(|deck| {
+            runner.params1_family_contract(deck).map(|contract| {
+                let contract = contract.unwrap_or_else(|error| {
+                    panic!("PARAMS1 candidate failed qualification: {error}")
+                });
+                (
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                    contract.role,
+                )
+            })
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(selected.len(), XYCE_PARAMS1_CANDIDATE_COUNT);
+    assert_eq!(
+        selected,
+        BTreeMap::from([
+            (
+                XYCE_PARAMS1_OWNER_RECORD.to_string(),
+                XyceParams1Role::WrapperOwner,
+            ),
+            (
+                XYCE_PARAMS1_LITERAL_BASELINE_RECORD.to_string(),
+                XyceParams1Role::LiteralBaseline,
+            ),
+            (
+                XYCE_PARAMS1_PARAMETERIZED_MEMBER_RECORD.to_string(),
+                XyceParams1Role::ParameterizedMember,
+            ),
+        ])
+    );
+}
+
+#[test]
+fn params1_family_is_role_typed_relational_and_provenance_bound() {
+    let sources = params1_corpus_sources();
+    let (root, decks, runner) = params1_fixture(
+        "qualification",
+        [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+        ],
+    );
+    for (deck, role) in decks.iter().zip([
+        XyceParams1Role::WrapperOwner,
+        XyceParams1Role::LiteralBaseline,
+        XyceParams1Role::ParameterizedMember,
+    ]) {
+        let contract = runner
+            .params1_family_contract(deck)
+            .expect("exact PARAMS1 record is selected")
+            .expect("exact PARAMS1 family qualifies");
+        assert_eq!(contract.role, role);
+        assert_eq!(contract.relational.kind, XyceBaselineFamilyKind::Params1);
+        assert_eq!(
+            contract.relational.comparison,
+            XyceBaselineFamilyComparison::TolerancedStrict
+        );
+        assert!(XyceTestRunner::same_path(
+            &contract.relational.baseline_path,
+            &decks[1].path
+        ));
+        assert_eq!(contract.relational.member_paths.len(), 2);
+        runner
+            .validate_params1_provenance(&contract)
+            .expect("exact shared PARAMS1 provenance validates");
+        assert_eq!(
+            role.result_contract(),
+            match role {
+                XyceParams1Role::WrapperOwner => XYCE_PARAMS1_WRAPPER_OWNER_CONTRACT,
+                XyceParams1Role::LiteralBaseline => XYCE_PARAMS1_LITERAL_BASELINE_CONTRACT,
+                XyceParams1Role::ParameterizedMember => {
+                    XYCE_PARAMS1_PARAMETERIZED_MEMBER_CONTRACT
+                }
+            }
+        );
+    }
+    fs::remove_dir_all(root).expect("remove PARAMS1 qualification fixture");
+}
+
+#[test]
+fn params1_historical_wrapper_and_default_verifier_provenance_is_exact() {
+    let records = XyceTestRunner::params1_historical_oracle_provenance_records();
+    assert_eq!(records.len(), XYCE_PARAMS1_HISTORICAL_ORACLE_RECORD_COUNT);
+    assert!(records.contains(&format!(
+        "{XYCE_PARAMS1_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_PARAMS1_UPSTREAM_RELEASE_TAG}\t{XYCE_PARAMS1_HISTORICAL_WRAPPER_PATH}\t{XYCE_PARAMS1_HISTORICAL_WRAPPER_BYTES}\t{XYCE_PARAMS1_HISTORICAL_WRAPPER_SHA256}\t{XYCE_PARAMS1_HISTORICAL_WRAPPER_BLAKE3}"
+    )));
+    assert!(records.contains(&format!(
+        "{XYCE_PARAMS1_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_PARAMS1_UPSTREAM_RELEASE_TAG}\t{XYCE_RELEASE_710_XYCE_VERIFY_PATH}\t{XYCE_RELEASE_710_XYCE_VERIFY_BYTES}\t{XYCE_RELEASE_710_XYCE_VERIFY_SHA256}\t{XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3}"
+    )));
+    XyceTestRunner::validate_params1_historical_oracle_provenance()
+        .expect("PARAMS1 Release-7.10 wrapper/xyce_verify provenance is internally consistent");
+}
+
+#[test]
+fn params1_semantic_snapshot_proves_only_literal_to_global_parameter_equivalence() {
+    let sources = params1_corpus_sources();
+    let literal = Netlist::parse(&sources[1]).expect("parse PARAMS1 literal baseline");
+    let parameterized = Netlist::parse(&sources[2]).expect("parse PARAMS1 parameterized member");
+    let print = XycePrintRequest {
+        probes: vec!["V(2)".to_string()],
+    };
+    let literal_snapshot = XyceTestRunner::params1_family_snapshot(&literal, &print)
+        .expect("literal PARAMS1 snapshot qualifies");
+    let parameterized_snapshot = XyceTestRunner::params1_family_snapshot(&parameterized, &print)
+        .expect("parameterized PARAMS1 snapshot qualifies");
+    assert_eq!(
+        literal_snapshot.representation,
+        XyceParams1Representation::LiteralValues
+    );
+    assert_eq!(
+        parameterized_snapshot.representation,
+        XyceParams1Representation::GlobalParameters
+    );
+    XyceTestRunner::compare_params1_family_snapshots(&literal_snapshot, &parameterized_snapshot)
+        .expect("literal and parameterized PARAMS1 semantics are identical");
+    assert!(
+        XyceTestRunner::compare_params1_family_snapshots(&literal_snapshot, &literal_snapshot,)
+            .is_err(),
+        "two literal decks do not exercise parameter equivalence"
+    );
+
+    let mutations = [
+        (
+            1usize,
+            sources[1].replace("R1 1 2 22K", "R1 1 2 23K"),
+            "R1 value",
+        ),
+        (
+            1,
+            sources[1].replace("C  2 0 2U", "C  2 0 3U"),
+            "capacitance",
+        ),
+        (
+            1,
+            sources[1].replace("PULSE(0 20", "PULSE(0 19"),
+            "pulse high level",
+        ),
+        (1, sources[1].replace("0.2 0.4", "0.2 0.5"), "pulse period"),
+        (1, sources[1].replace("V2 3 0 6", "V2 3 0 7"), "bias source"),
+        (1, sources[1].replace("R2 2 3", "R2 2 4"), "topology"),
+        (
+            1,
+            sources[1].replace(".TRAN 0.02 0.8", ".TRAN 0.03 0.8"),
+            "transient step",
+        ),
+        (
+            1,
+            sources[1].replace(".TRAN 0.02 0.8", ".TRAN 0.02 0.9"),
+            "transient stop",
+        ),
+        (
+            1,
+            sources[1].replace(".END", "R3 2 0 1MEG\n.END"),
+            "additional element",
+        ),
+        (
+            1,
+            sources[1].replace(".END", ".MODEL EXTRA R R=1\n.END"),
+            "additional model",
+        ),
+        (
+            1,
+            sources[1].replace(".END", ".SUBCKT EXTRA A B\nRLOCAL A B 1\n.ENDS EXTRA\n.END"),
+            "additional hierarchy",
+        ),
+        (
+            2,
+            sources[2].replace("RVALUE = {22K}", "RVALUE = {23K}"),
+            "RVALUE definition",
+        ),
+        (
+            2,
+            sources[2].replace("CVALUE = {2UF}", "CVALUE = {3UF}"),
+            "CVALUE definition",
+        ),
+        (
+            2,
+            sources[2].replace("{RVALUE}", "{RVALUE+0}"),
+            "non-direct resistor parameter AST",
+        ),
+        (
+            2,
+            sources[2].replace("{CVALUE}", "{CVALUE*1}"),
+            "non-direct capacitor parameter AST",
+        ),
+        (
+            2,
+            sources[2].replace(".PARAM CVALUE", ".PARAM EXTRA={1}\n.PARAM CVALUE"),
+            "additional global parameter",
+        ),
+        (
+            2,
+            sources[2]
+                .replace("RVALUE = {22K}", "RESISTANCE = {22K}")
+                .replace("{RVALUE}", "{RESISTANCE}"),
+            "renamed global parameter",
+        ),
+    ];
+    for (role_index, mutated_source, reason) in mutations {
+        let parsed = Netlist::parse(&mutated_source);
+        let rejected = match parsed {
+            Err(_) => true,
+            Ok(netlist) => match XyceTestRunner::params1_family_snapshot(&netlist, &print) {
+                Err(_) => true,
+                Ok(snapshot) if role_index == 1 => {
+                    XyceTestRunner::compare_params1_family_snapshots(
+                        &snapshot,
+                        &parameterized_snapshot,
+                    )
+                    .is_err()
+                }
+                Ok(snapshot) => {
+                    XyceTestRunner::compare_params1_family_snapshots(&literal_snapshot, &snapshot)
+                        .is_err()
+                }
+            },
+        };
+        assert!(rejected, "{reason} mutation must fail closed");
+    }
+
+    let wrong_print = XycePrintRequest {
+        probes: vec!["V(3)".to_string()],
+    };
+    assert!(
+        XyceTestRunner::params1_family_snapshot(&literal, &wrong_print).is_err(),
+        "the ordered V(2) probe is part of the semantic contract"
+    );
+}
+
+#[test]
+fn params1_transient_plan_rejects_analysis_and_output_mutations() {
+    let sources = params1_corpus_sources();
+    let (root, decks, runner) = params1_fixture(
+        "plan",
+        [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+        ],
+    );
+    let plan = runner
+        .static_tran_family_plan_for_path(
+            &decks[1].path,
+            XyceStaticTranPlanPurpose::RelationalFamily,
+        )
+        .expect("build PARAMS1 literal transient plan");
+    XyceTestRunner::validate_params1_transient_plan(&plan)
+        .expect("canonical PARAMS1 transient plan qualifies");
+    let parameterized_plan = runner
+        .static_tran_family_plan_for_path(
+            &decks[2].path,
+            XyceStaticTranPlanPurpose::RelationalFamily,
+        )
+        .expect("build PARAMS1 parameterized transient plan");
+    XyceTestRunner::validate_params1_transient_plan(&parameterized_plan)
+        .expect("parameterized PARAMS1 transient plan qualifies");
+
+    let mut option = plan.clone();
+    option.source = option
+        .source
+        .replace(".TRAN", ".OPTIONS RELTOL=1e-6\n.TRAN");
+    assert!(XyceTestRunner::validate_params1_transient_plan(&option).is_err());
+    let mut source_identity = plan.clone();
+    source_identity.source = source_identity.source.replace(
+        "* This test is the base line case.",
+        "* This comment changes only historical source identity.",
+    );
+    assert!(
+        XyceTestRunner::validate_params1_transient_plan(&source_identity).is_err(),
+        "the captured execution source must retain exact canonical-LF identity"
+    );
+    let mut comp = plan.clone();
+    comp.source = comp.source.replace(".TRAN", "*COMP V(2) RELTOL=1\n.TRAN");
+    assert!(XyceTestRunner::validate_params1_transient_plan(&comp).is_err());
+    let mut step = plan.clone();
+    step.source = step.source.replace(".TRAN", ".STEP R1 1 2 1\n.TRAN");
+    assert!(XyceTestRunner::validate_params1_transient_plan(&step).is_err());
+    let mut extra_probe = plan.clone();
+    extra_probe
+        .print
+        .as_mut()
+        .expect("PARAMS1 plan has a print request")
+        .probes
+        .push("V(1)".to_string());
+    assert!(XyceTestRunner::validate_params1_transient_plan(&extra_probe).is_err());
+    let mut start = plan.clone();
+    start.tran.start = Some(0.1);
+    assert!(XyceTestRunner::validate_params1_transient_plan(&start).is_err());
+    let mut max_step = plan.clone();
+    max_step.tran.max_step = Some(0.01);
+    assert!(XyceTestRunner::validate_params1_transient_plan(&max_step).is_err());
+    let mut uic = plan.clone();
+    uic.tran.uic = true;
+    assert!(XyceTestRunner::validate_params1_transient_plan(&uic).is_err());
+    let mut output_override = plan.clone();
+    output_override.output_override = true;
+    assert!(XyceTestRunner::validate_params1_transient_plan(&output_override).is_err());
+    let mut constant_step = plan.clone();
+    constant_step.timeint_conststep = true;
+    assert!(XyceTestRunner::validate_params1_transient_plan(&constant_step).is_err());
+    let mut csv = plan;
+    csv.contract = XyceStaticTranContract::PlainCsv;
+    assert!(XyceTestRunner::validate_params1_transient_plan(&csv).is_err());
+
+    fs::remove_dir_all(root).expect("remove PARAMS1 plan fixture");
+}
+
+#[test]
+fn params1_provenance_rejects_content_directory_and_manifest_drift() {
+    let sources = params1_corpus_sources();
+    let source_refs = [
+        sources[0].as_str(),
+        sources[1].as_str(),
+        sources[2].as_str(),
+    ];
+
+    for (index, mutation, reason) in [
+        (
+            0usize,
+            "nonempty wrapper owner\n".to_string(),
+            "owner content",
+        ),
+        (
+            1,
+            sources[1].replace("R1 1 2 22K", "R1 1 2 23K"),
+            "literal content",
+        ),
+        (1, String::new(), "empty literal worker"),
+        (
+            2,
+            sources[2].replace("RVALUE = {22K}", "RVALUE = {23K}"),
+            "parameterized content",
+        ),
+    ] {
+        let (root, decks, runner) = params1_fixture(reason, source_refs);
+        fs::write(&decks[index].path, mutation).expect("write PARAMS1 content mutation");
+        assert!(
+            runner
+                .params1_family_contract(&decks[0])
+                .expect("fixed PARAMS1 owner remains selected")
+                .is_err(),
+            "{reason} drift must fail shared provenance"
+        );
+        fs::remove_dir_all(root).expect("remove PARAMS1 content fixture");
+    }
+
+    let (root, decks, cached_runner) = params1_fixture("manifest", source_refs);
+    fs::write(root.join(HARNESS_MANIFEST_FILE), "").expect("remove PARAMS1 owner manifest row");
+    assert!(
+        cached_runner
+            .params1_family_contract(&decks[0])
+            .expect("fixed PARAMS1 owner remains selected")
+            .is_err(),
+        "on-disk wrapper-manifest drift must invalidate a pre-existing runner"
+    );
+    let unowned = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    assert!(
+        unowned
+            .params1_family_contract(&decks[0])
+            .expect("fixed PARAMS1 owner remains selected")
+            .is_err(),
+        "missing wrapper ownership must fail closed"
+    );
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!(
+            "{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n",
+            decks[0].relative_path
+        ),
+    )
+    .expect("restore PARAMS1 owner manifest row");
+    fs::write(
+        root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[&format!(
+            "{}\tNetlists/PARAMS1/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_PARAMS1_LITERAL_BASELINE_CONTRACT}",
+            decks[1].relative_path
+        )]),
+    )
+    .expect("remove PARAMS1 parameterized promotion row");
+    assert!(
+        cached_runner
+            .params1_family_contract(&decks[0])
+            .expect("fixed PARAMS1 owner remains selected")
+            .is_err(),
+        "on-disk exclusion-manifest drift must invalidate a pre-existing runner"
+    );
+    let incomplete = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    assert!(
+        incomplete
+            .params1_family_contract(&decks[0])
+            .expect("fixed PARAMS1 owner remains selected")
+            .is_err(),
+        "incomplete historical-exclusion provenance must fail closed"
+    );
+    fs::remove_dir_all(root).expect("remove PARAMS1 manifest fixture");
+
+    let (root, decks, runner) = params1_fixture("directory", source_refs);
+    fs::write(root.join("Netlists/PARAMS1/unqualified.cir"), &sources[1])
+        .expect("write additional PARAMS1 circuit");
+    assert!(
+        runner
+            .params1_family_contract(&decks[0])
+            .expect("fixed PARAMS1 owner remains selected")
+            .is_err(),
+        "additional circuit siblings must fail the exact candidate census"
+    );
+    fs::remove_dir_all(root).expect("remove PARAMS1 directory fixture");
+
+    let (root, decks, runner) = params1_fixture("renamed-worker", source_refs);
+    fs::rename(&decks[2].path, root.join("Netlists/PARAMS1/params_a2.cir"))
+        .expect("rename PARAMS1 parameterized worker");
+    assert!(
+        runner
+            .params1_family_contract(&decks[0])
+            .expect("fixed PARAMS1 owner remains selected")
+            .is_err(),
+        "a renamed worker must fail both the path and content census"
+    );
+    fs::remove_dir_all(root).expect("remove PARAMS1 renamed-worker fixture");
+
+    for (label, literal_source, literal_contract) in [
+        (
+            "wrong-exclusion-source",
+            "Netlists/PARAMS1/alternate_exclude",
+            XYCE_PARAMS1_LITERAL_BASELINE_CONTRACT,
+        ),
+        (
+            "wrong-promotion-contract",
+            "Netlists/PARAMS1/exclude",
+            "static_prn_tran",
+        ),
+    ] {
+        let (root, decks, _) = params1_fixture(label, source_refs);
+        fs::write(
+            root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+            upstream_exclusion_manifest(&[
+                &format!(
+                    "{}\t{literal_source}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{literal_contract}",
+                    decks[1].relative_path
+                ),
+                &format!(
+                    "{}\tNetlists/PARAMS1/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_PARAMS1_PARAMETERIZED_MEMBER_CONTRACT}",
+                    decks[2].relative_path
+                ),
+            ]),
+        )
+        .expect("write mutated PARAMS1 exclusion provenance");
+        let changed = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        assert!(
+            changed
+                .params1_family_contract(&decks[0])
+                .expect("fixed PARAMS1 owner remains selected")
+                .is_err(),
+            "{label} must fail closed"
+        );
+        fs::remove_dir_all(root).expect("remove PARAMS1 exclusion mutation fixture");
+    }
+
+    let (root, decks, runner) = params1_fixture("source-artifact", source_refs);
+    fs::write(
+        root.join("Netlists/PARAMS1/params_a0.cir.PRN"),
+        "forbidden source-side artifact\n",
+    )
+    .expect("write PARAMS1 source-side output artifact");
+    assert!(
+        runner
+            .params1_family_contract(&decks[0])
+            .expect("fixed PARAMS1 owner remains selected")
+            .is_err(),
+        "case-insensitive source-side output artifacts must fail closed"
+    );
+    fs::remove_dir_all(root).expect("remove PARAMS1 source-artifact fixture");
+
+    let (root, decks, runner) = params1_fixture("output-artifact", source_refs);
+    let output = root.join("OutputData/PARAMS1");
+    fs::create_dir_all(&output).expect("create PARAMS1 OutputData fixture directory");
+    fs::write(
+        output.join("params_a1.cir.prn"),
+        "forbidden checked-in oracle\n",
+    )
+    .expect("write PARAMS1 checked-in output artifact");
+    assert!(
+        runner
+            .params1_family_contract(&decks[0])
+            .expect("fixed PARAMS1 owner remains selected")
+            .is_err(),
+        "checked-in worker output artifacts must fail relational ownership"
+    );
+    fs::remove_dir_all(root).expect("remove PARAMS1 output-artifact fixture");
+}
+
+#[test]
+fn params1_malformed_fixed_records_route_to_executed_failures() {
+    let sources = params1_corpus_sources();
+    let source_refs = [
+        sources[0].as_str(),
+        sources[1].as_str(),
+        sources[2].as_str(),
+    ];
+    for (index, expected_contract) in [
+        (0usize, XYCE_PARAMS1_WRAPPER_OWNER_CONTRACT),
+        (2, "upstream_exclusion_promotion_mismatch"),
+    ] {
+        let (root, decks, runner) = params1_fixture("routing", source_refs);
+        fs::write(&decks[index].path, "recognized malformed PARAMS1 record\n")
+            .expect("write malformed fixed PARAMS1 record");
+        let result = runner.run_discovered_test(&decks[index]);
+        assert!(
+            !result.passed,
+            "malformed fixed record must fail: {result:?}"
+        );
+        assert!(!result.expected_unsupported);
+        assert!(!result.upstream_excluded);
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.error.is_some());
+        fs::remove_dir_all(root).expect("remove PARAMS1 routing fixture");
+    }
+}
+
+fn naked_algebra_corpus_sources() -> [String; 3] {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    [
+        fs::read_to_string(corpus.join("Netlists/PARSER/nakedAlgebra.cir"))
+            .expect("read nakedAlgebra wrapper owner"),
+        fs::read_to_string(corpus.join("Netlists/PARSER/nakedAlgebraBaseline.cir"))
+            .expect("read nakedAlgebra braced baseline"),
+        fs::read_to_string(corpus.join("Netlists/PARSER/nakedAlgebraGlobal.cir"))
+            .expect("read nakedAlgebra global member"),
+    ]
+}
+
+fn naked_algebra_fixture(
+    label: &str,
+    sources: [&str; 3],
+) -> (PathBuf, [XyceDeck; 3], XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-naked-algebra-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = root.join("Netlists/PARSER");
+    fs::create_dir_all(&family).expect("create nakedAlgebra fixture directory");
+    let records = [
+        "Netlists/PARSER/nakedAlgebra.cir",
+        "Netlists/PARSER/nakedAlgebraBaseline.cir",
+        "Netlists/PARSER/nakedAlgebraGlobal.cir",
+    ];
+    let decks = std::array::from_fn(|index| {
+        let path = root.join(records[index]);
+        fs::write(&path, sources[index]).expect("write nakedAlgebra fixture source");
+        XyceDeck {
+            path,
+            relative_path: records[index].to_string(),
+            section: XyceDeckSection::Netlists,
+        }
+    });
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n", records[0]),
+    )
+    .expect("write nakedAlgebra wrapper provenance");
+    fs::write(
+        root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[
+            &format!(
+                "{}\tNetlists/PARSER/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_NAKED_ALGEBRA_BRACED_BASELINE_CONTRACT}",
+                records[1]
+            ),
+            &format!(
+                "{}\tNetlists/PARSER/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_CONTRACT}",
+                records[2]
+            ),
+        ]),
+    )
+    .expect("write nakedAlgebra exclusion provenance");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    (root, decks, runner)
+}
+
+#[test]
+fn naked_algebra_candidate_census_is_an_exact_three_record_bijection() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&corpus, XyceRunnerConfig::default());
+    let selected = runner
+        .discover_tests()
+        .iter()
+        .filter_map(|deck| {
+            runner.naked_algebra_family_contract(deck).map(|contract| {
+                let contract = contract.unwrap_or_else(|error| {
+                    panic!("nakedAlgebra candidate failed qualification: {error}")
+                });
+                (
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                    contract.role,
+                )
+            })
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(selected.len(), XYCE_NAKED_ALGEBRA_CANDIDATE_COUNT);
+    assert_eq!(
+        selected,
+        BTreeMap::from([
+            (
+                XYCE_NAKED_ALGEBRA_OWNER_RECORD.to_string(),
+                XyceNakedAlgebraRole::WrapperOwner,
+            ),
+            (
+                XYCE_NAKED_ALGEBRA_BRACED_BASELINE_RECORD.to_string(),
+                XyceNakedAlgebraRole::BracedBaseline,
+            ),
+            (
+                XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_RECORD.to_string(),
+                XyceNakedAlgebraRole::GlobalMember,
+            ),
+        ])
+    );
+}
+
+#[test]
+fn naked_algebra_family_is_role_typed_relational_and_provenance_bound() {
+    let sources = naked_algebra_corpus_sources();
+    let (root, decks, runner) = naked_algebra_fixture(
+        "qualification",
+        [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+        ],
+    );
+    for (deck, role) in decks.iter().zip([
+        XyceNakedAlgebraRole::WrapperOwner,
+        XyceNakedAlgebraRole::BracedBaseline,
+        XyceNakedAlgebraRole::GlobalMember,
+    ]) {
+        let contract = runner
+            .naked_algebra_family_contract(deck)
+            .expect("exact nakedAlgebra record is selected")
+            .expect("exact nakedAlgebra family qualifies");
+        assert_eq!(contract.role, role);
+        assert_eq!(
+            contract.relational.kind,
+            XyceBaselineFamilyKind::NakedAlgebra
+        );
+        assert_eq!(
+            contract.relational.comparison,
+            XyceBaselineFamilyComparison::TolerancedStrict
+        );
+        assert!(XyceTestRunner::same_path(
+            &contract.relational.baseline_path,
+            &decks[1].path
+        ));
+        assert_eq!(contract.relational.member_paths.len(), 3);
+        runner
+            .validate_naked_algebra_provenance(&contract)
+            .expect("exact shared nakedAlgebra provenance validates");
+        assert_eq!(
+            role.result_contract(),
+            match role {
+                XyceNakedAlgebraRole::WrapperOwner => {
+                    XYCE_NAKED_ALGEBRA_WRAPPER_OWNER_CONTRACT
+                }
+                XyceNakedAlgebraRole::BracedBaseline => {
+                    XYCE_NAKED_ALGEBRA_BRACED_BASELINE_CONTRACT
+                }
+                XyceNakedAlgebraRole::GlobalMember => {
+                    XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_CONTRACT
+                }
+            }
+        );
+    }
+    fs::remove_dir_all(root).expect("remove nakedAlgebra qualification fixture");
+}
+
+#[test]
+fn naked_algebra_historical_wrapper_and_default_verifier_provenance_is_exact() {
+    let records = XyceTestRunner::naked_algebra_historical_oracle_provenance_records();
+    assert_eq!(
+        records.len(),
+        XYCE_NAKED_ALGEBRA_HISTORICAL_ORACLE_RECORD_COUNT
+    );
+    assert!(records.contains(&format!(
+        "{XYCE_NAKED_ALGEBRA_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_NAKED_ALGEBRA_UPSTREAM_RELEASE_TAG}\t{XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_PATH}\t{XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_BYTES}\t{XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_SHA256}\t{XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_BLAKE3}"
+    )));
+    assert!(records.contains(&format!(
+        "{XYCE_NAKED_ALGEBRA_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_NAKED_ALGEBRA_UPSTREAM_RELEASE_TAG}\t{XYCE_RELEASE_710_XYCE_VERIFY_PATH}\t{XYCE_RELEASE_710_XYCE_VERIFY_BYTES}\t{XYCE_RELEASE_710_XYCE_VERIFY_SHA256}\t{XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3}"
+    )));
+    XyceTestRunner::validate_naked_algebra_historical_oracle_provenance().expect(
+        "nakedAlgebra Release-7.10 wrapper/xyce_verify provenance is internally consistent",
+    );
+}
+
+#[test]
+fn naked_algebra_preserves_directional_release_710_xyce_verify_order() {
+    let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+    let table = |value: Value| XycePrnTable {
+        columns: vec!["Index".to_string(), "TIME".to_string(), "V(1)".to_string()],
+        rows: vec![
+            vec![0.0, 0.0, value],
+            vec![1.0, 0.5, value],
+            vec![2.0, 1.0, value],
+        ],
+    };
+    let member_good = table(100.0);
+    let braced_baseline_test = table(99.005);
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables(&member_good, &braced_baseline_test)
+            .expect("member-good comparison is structurally valid")
+            .is_empty(),
+        "Release 7.10 accepts the asymmetric boundary in wrapper order"
+    );
+    assert!(
+        !runner
+            .compare_xyce_verify_transient_tables(&braced_baseline_test, &member_good)
+            .expect("reversed comparison is structurally valid")
+            .is_empty()
+    );
+    assert!(
+        runner
+            .compare_baseline_family_xyce_verify_tables(
+                XyceBaselineFamilyKind::NakedAlgebra,
+                &braced_baseline_test,
+                &member_good,
+            )
+            .expect("nakedAlgebra family comparison is structurally valid")
+            .is_empty(),
+        "nakedAlgebra must preserve member-good/baseline-test wrapper ordering"
+    );
+    assert!(
+        !runner
+            .compare_baseline_family_xyce_verify_tables(
+                XyceBaselineFamilyKind::Params1,
+                &braced_baseline_test,
+                &member_good,
+            )
+            .expect("ordinary baseline-good family comparison is structurally valid")
+            .is_empty()
+    );
+}
+
+#[test]
+fn naked_algebra_semantic_snapshot_proves_local_and_global_expression_equivalence() {
+    let sources = naked_algebra_corpus_sources();
+    let local = Netlist::parse(&sources[0]).expect("parse nakedAlgebra local member");
+    let baseline = Netlist::parse(&sources[1]).expect("parse nakedAlgebra braced baseline");
+    let global = Netlist::parse(&sources[2]).expect("parse nakedAlgebra global member");
+    let print = XycePrintRequest {
+        probes: vec!["V(1)".to_string()],
+    };
+    let local_snapshot = XyceTestRunner::naked_algebra_family_snapshot(&local, &print)
+        .expect("mixed-local nakedAlgebra snapshot qualifies");
+    let baseline_snapshot = XyceTestRunner::naked_algebra_family_snapshot(&baseline, &print)
+        .expect("braced nakedAlgebra snapshot qualifies");
+    let global_snapshot = XyceTestRunner::naked_algebra_family_snapshot(&global, &print)
+        .expect("mixed-global nakedAlgebra snapshot qualifies");
+    assert_eq!(
+        local_snapshot.representation,
+        XyceNakedAlgebraRepresentation::MixedLocalParameters
+    );
+    assert_eq!(
+        baseline_snapshot.representation,
+        XyceNakedAlgebraRepresentation::BracedLocalBaseline
+    );
+    assert_eq!(
+        global_snapshot.representation,
+        XyceNakedAlgebraRepresentation::MixedGlobalParameters
+    );
+    XyceTestRunner::compare_naked_algebra_family_snapshots(&baseline_snapshot, &local_snapshot)
+        .expect("braced and mixed-local nakedAlgebra semantics are identical");
+    XyceTestRunner::compare_naked_algebra_family_snapshots(&baseline_snapshot, &global_snapshot)
+        .expect("braced and mixed-global nakedAlgebra semantics are identical");
+    assert!(
+        XyceTestRunner::compare_naked_algebra_family_snapshots(
+            &baseline_snapshot,
+            &baseline_snapshot,
+        )
+        .is_err(),
+        "two braced baselines do not exercise representation equivalence"
+    );
+
+    let mut changed_resistor = baseline.clone();
+    let ElementKind::Resistor { value, .. } = &mut changed_resistor.elements[1].kind else {
+        panic!("nakedAlgebra R1 remains a resistor");
+    };
+    *value = 2_000.0;
+    assert!(
+        XyceTestRunner::naked_algebra_family_snapshot(&changed_resistor, &print).is_err(),
+        "resolved resistance is part of the semantic contract"
+    );
+    let mut changed_behavior = baseline.clone();
+    let ElementKind::BehavioralVoltage { expression, .. } = &mut changed_behavior.elements[0].kind
+    else {
+        panic!("nakedAlgebra B1 remains behavioral");
+    };
+    *expression = "spice_pulse(v1,v2,td,tr,tf,pw+1p)".to_string();
+    assert!(
+        XyceTestRunner::naked_algebra_family_snapshot(&changed_behavior, &print).is_err(),
+        "resolved behavioral expression is part of the semantic contract"
+    );
+    let mut changed_analysis = baseline.clone();
+    let AnalysisCommand::Tran { stop, .. } = &mut changed_analysis.analyses[0] else {
+        panic!("nakedAlgebra analysis remains transient");
+    };
+    *stop = 2.0e-10;
+    assert!(
+        XyceTestRunner::naked_algebra_family_snapshot(&changed_analysis, &print).is_err(),
+        "transient analysis values are part of the semantic contract"
+    );
+    let wrong_print = XycePrintRequest {
+        probes: vec!["V(0)".to_string()],
+    };
+    assert!(
+        XyceTestRunner::naked_algebra_family_snapshot(&baseline, &wrong_print).is_err(),
+        "the ordered V(1) probe is part of the semantic contract"
+    );
+    for mutation in [
+        sources[0].replace("test1+0.1", "test1+0.2"),
+        sources[1].replace("V1={1.1}", "V1={1.2}"),
+        sources[2].replace(".global_param", ".param"),
+    ] {
+        assert!(
+            XyceTestRunner::naked_algebra_source_qualification(&mutation).is_err(),
+            "canonical source identity drift must fail closed"
+        );
+    }
+}
+
+#[test]
+fn naked_algebra_transient_plan_rejects_analysis_output_and_source_mutations() {
+    let sources = naked_algebra_corpus_sources();
+    let (root, decks, runner) = naked_algebra_fixture(
+        "plan",
+        [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+        ],
+    );
+    for deck in &decks {
+        let purpose = runner.transient_family_plan_purpose_for_path(
+            XyceBaselineFamilyKind::NakedAlgebra,
+            &deck.path,
+        );
+        let plan = runner
+            .static_tran_family_plan_for_path(&deck.path, purpose)
+            .expect("build canonical nakedAlgebra transient plan");
+        XyceTestRunner::validate_naked_algebra_transient_plan(&plan)
+            .expect("canonical nakedAlgebra transient plan qualifies");
+    }
+    let plan = runner
+        .static_tran_family_plan_for_path(
+            &decks[1].path,
+            XyceStaticTranPlanPurpose::RelationalFamily,
+        )
+        .expect("build nakedAlgebra baseline transient plan");
+    let mut source_identity = plan.clone();
+    source_identity.source = source_identity.source.replace(
+        "The old expression library",
+        "The historical expression library",
+    );
+    assert!(
+        XyceTestRunner::validate_naked_algebra_transient_plan(&source_identity).is_err(),
+        "captured execution source must retain exact canonical-LF identity"
+    );
+    let mut comp = plan.clone();
+    comp.source = comp.source.replace(".tran", "*COMP V(1) RELTOL=1\n.tran");
+    assert!(XyceTestRunner::validate_naked_algebra_transient_plan(&comp).is_err());
+    let mut extra_probe = plan.clone();
+    extra_probe
+        .print
+        .as_mut()
+        .expect("nakedAlgebra plan has a print request")
+        .probes
+        .push("V(0)".to_string());
+    assert!(XyceTestRunner::validate_naked_algebra_transient_plan(&extra_probe).is_err());
+    let mut max_step = plan.clone();
+    max_step.tran.max_step = Some(1.0e-12);
+    assert!(XyceTestRunner::validate_naked_algebra_transient_plan(&max_step).is_err());
+    let mut output_override = plan.clone();
+    output_override.output_override = true;
+    assert!(XyceTestRunner::validate_naked_algebra_transient_plan(&output_override).is_err());
+    let mut wrong_contract = plan;
+    wrong_contract.contract = XyceStaticTranContract::WrapperStatic;
+    assert!(
+        XyceTestRunner::validate_naked_algebra_transient_plan(&wrong_contract).is_err(),
+        "non-wrapper representations cannot acquire wrapper output provenance"
+    );
+    fs::remove_dir_all(root).expect("remove nakedAlgebra plan fixture");
+}
+
+#[test]
+fn naked_algebra_provenance_rejects_content_directory_manifest_and_artifact_drift() {
+    let sources = naked_algebra_corpus_sources();
+    let source_refs = [
+        sources[0].as_str(),
+        sources[1].as_str(),
+        sources[2].as_str(),
+    ];
+    for (index, mutation, reason) in [
+        (
+            0usize,
+            sources[0].replace("test1+0.1", "test1+0.2"),
+            "local source content",
+        ),
+        (1, String::new(), "empty baseline source"),
+        (
+            2,
+            sources[2].replace(".global_param", ".param"),
+            "global source content",
+        ),
+    ] {
+        let (root, decks, runner) = naked_algebra_fixture(reason, source_refs);
+        fs::write(&decks[index].path, mutation).expect("write nakedAlgebra content mutation");
+        assert!(
+            runner
+                .naked_algebra_family_contract(&decks[0])
+                .expect("fixed nakedAlgebra owner remains selected")
+                .is_err(),
+            "{reason} drift must fail shared provenance"
+        );
+        fs::remove_dir_all(root).expect("remove nakedAlgebra content fixture");
+    }
+
+    let (root, decks, runner) = naked_algebra_fixture("manifest", source_refs);
+    fs::write(root.join(HARNESS_MANIFEST_FILE), "")
+        .expect("remove nakedAlgebra wrapper manifest row");
+    assert!(
+        runner
+            .naked_algebra_family_contract(&decks[0])
+            .expect("fixed nakedAlgebra owner remains selected")
+            .is_err(),
+        "on-disk wrapper-manifest drift must invalidate a pre-existing runner"
+    );
+    fs::remove_dir_all(root).expect("remove nakedAlgebra manifest fixture");
+
+    let (root, decks, runner) = naked_algebra_fixture("directory", source_refs);
+    fs::write(
+        root.join("Netlists/PARSER/nakedAlgebraExtra.cir"),
+        &sources[1],
+    )
+    .expect("write additional nakedAlgebra circuit");
+    assert!(
+        runner
+            .naked_algebra_family_contract(&decks[0])
+            .expect("fixed nakedAlgebra owner remains selected")
+            .is_err(),
+        "additional prefixed circuit siblings must fail the exact candidate census"
+    );
+    fs::remove_dir_all(root).expect("remove nakedAlgebra directory fixture");
+
+    let (root, decks, runner) = naked_algebra_fixture("source-artifact", source_refs);
+    fs::write(
+        root.join("Netlists/PARSER/nakedAlgebraBaseline.cir.PRN"),
+        "forbidden source-side artifact\n",
+    )
+    .expect("write nakedAlgebra source-side output artifact");
+    assert!(
+        runner
+            .naked_algebra_family_contract(&decks[0])
+            .expect("fixed nakedAlgebra owner remains selected")
+            .is_err(),
+        "case-insensitive source-side output artifacts must fail closed"
+    );
+    fs::remove_dir_all(root).expect("remove nakedAlgebra source-artifact fixture");
+
+    let (root, decks, runner) = naked_algebra_fixture("output-artifact", source_refs);
+    let output = root.join("OutputData/PARSER");
+    fs::create_dir_all(&output).expect("create nakedAlgebra OutputData fixture directory");
+    fs::write(
+        output.join("nakedAlgebraGlobal.cir.prn"),
+        "forbidden checked-in oracle\n",
+    )
+    .expect("write nakedAlgebra checked-in output artifact");
+    assert!(
+        runner
+            .naked_algebra_family_contract(&decks[0])
+            .expect("fixed nakedAlgebra owner remains selected")
+            .is_err(),
+        "checked-in worker output artifacts must fail relational ownership"
+    );
+    fs::remove_dir_all(root).expect("remove nakedAlgebra output-artifact fixture");
+}
+
+#[test]
+fn naked_algebra_malformed_fixed_records_route_to_executed_failures() {
+    let sources = naked_algebra_corpus_sources();
+    let source_refs = [
+        sources[0].as_str(),
+        sources[1].as_str(),
+        sources[2].as_str(),
+    ];
+    for (index, expected_contract) in [
+        (0usize, XYCE_NAKED_ALGEBRA_WRAPPER_OWNER_CONTRACT),
+        (2, "upstream_exclusion_promotion_mismatch"),
+    ] {
+        let (root, decks, runner) = naked_algebra_fixture("routing", source_refs);
+        fs::write(
+            &decks[index].path,
+            "recognized malformed nakedAlgebra record\n",
+        )
+        .expect("write malformed fixed nakedAlgebra record");
+        let result = runner.run_discovered_test(&decks[index]);
+        assert!(
+            !result.passed,
+            "malformed fixed record must fail: {result:?}"
+        );
+        assert!(!result.expected_unsupported);
+        assert!(!result.upstream_excluded);
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.error.is_some());
+        fs::remove_dir_all(root).expect("remove nakedAlgebra routing fixture");
+    }
+}
+
+fn bug1826_thermal_parameter_corpus_sources() -> [String; 4] {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let family = corpus.join("Netlists/Certification_Tests/BUG_1826");
+    [
+        fs::read_to_string(family.join("linear_simple.cir")).expect("read BUG 1826 wrapper owner"),
+        fs::read_to_string(family.join("linear_simple_global.cir"))
+            .expect("read BUG 1826 global baseline"),
+        fs::read_to_string(family.join("linear_simple_param.cir"))
+            .expect("read BUG 1826 local member"),
+        fs::read_to_string(family.join("copper.linear")).expect("read BUG 1826 copper model"),
+    ]
+}
+
+fn bug1826_thermal_parameter_fixture(
+    label: &str,
+    sources: [&str; 4],
+) -> (PathBuf, [XyceDeck; 3], PathBuf, XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-bug1826-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = root.join("Netlists/Certification_Tests/BUG_1826");
+    fs::create_dir_all(&family).expect("create BUG 1826 fixture directory");
+    let records = [
+        "Netlists/Certification_Tests/BUG_1826/linear_simple.cir",
+        "Netlists/Certification_Tests/BUG_1826/linear_simple_global.cir",
+        "Netlists/Certification_Tests/BUG_1826/linear_simple_param.cir",
+    ];
+    let decks = std::array::from_fn(|index| {
+        let path = root.join(records[index]);
+        fs::write(&path, sources[index]).expect("write BUG 1826 fixture source");
+        XyceDeck {
+            path,
+            relative_path: records[index].to_string(),
+            section: XyceDeckSection::Netlists,
+        }
+    });
+    let support_path = family.join("copper.linear");
+    fs::write(&support_path, sources[3]).expect("write BUG 1826 copper model");
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n", records[0]),
+    )
+    .expect("write BUG 1826 wrapper provenance");
+    fs::write(
+        root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[
+            &format!(
+                "{}\tNetlists/Certification_Tests/BUG_1826/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_BUG1826_THERMAL_PARAMETER_GLOBAL_BASELINE_CONTRACT}",
+                records[1]
+            ),
+            &format!(
+                "{}\tNetlists/Certification_Tests/BUG_1826/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_BUG1826_THERMAL_PARAMETER_LOCAL_MEMBER_CONTRACT}",
+                records[2]
+            ),
+        ]),
+    )
+    .expect("write BUG 1826 exclusion provenance");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    (root, decks, support_path, runner)
+}
+
+#[test]
+fn bug1826_thermal_parameter_candidate_census_is_an_exact_three_record_bijection() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&corpus, XyceRunnerConfig::default());
+    let selected = runner
+        .discover_tests()
+        .iter()
+        .filter_map(|deck| {
+            runner
+                .bug1826_thermal_parameter_family_contract(deck)
+                .map(|contract| {
+                    let contract = contract.unwrap_or_else(|error| {
+                        panic!("BUG 1826 candidate failed qualification: {error}")
+                    });
+                    (
+                        XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                        contract.role,
+                    )
+                })
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        selected.len(),
+        XYCE_BUG1826_THERMAL_PARAMETER_CANDIDATE_COUNT
+    );
+    assert_eq!(
+        selected,
+        BTreeMap::from([
+            (
+                XYCE_BUG1826_THERMAL_PARAMETER_OWNER_RECORD.to_string(),
+                XyceBug1826ThermalParameterRole::WrapperOwner,
+            ),
+            (
+                XYCE_BUG1826_THERMAL_PARAMETER_GLOBAL_BASELINE_RECORD.to_string(),
+                XyceBug1826ThermalParameterRole::GlobalBaseline,
+            ),
+            (
+                XYCE_BUG1826_THERMAL_PARAMETER_LOCAL_MEMBER_RECORD.to_string(),
+                XyceBug1826ThermalParameterRole::LocalMember,
+            ),
+        ])
+    );
+}
+
+#[test]
+fn bug1826_thermal_parameter_family_is_role_typed_directional_and_provenance_bound() {
+    let sources = bug1826_thermal_parameter_corpus_sources();
+    let (root, decks, support_path, runner) = bug1826_thermal_parameter_fixture(
+        "qualification",
+        [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+            sources[3].as_str(),
+        ],
+    );
+    for (deck, role) in decks.iter().zip([
+        XyceBug1826ThermalParameterRole::WrapperOwner,
+        XyceBug1826ThermalParameterRole::GlobalBaseline,
+        XyceBug1826ThermalParameterRole::LocalMember,
+    ]) {
+        let contract = runner
+            .bug1826_thermal_parameter_family_contract(deck)
+            .expect("exact BUG 1826 record is selected")
+            .expect("exact BUG 1826 family qualifies");
+        assert_eq!(contract.role, role);
+        assert_eq!(
+            contract.relational.kind,
+            XyceBaselineFamilyKind::Bug1826ThermalParameter
+        );
+        assert_eq!(
+            contract.relational.comparison,
+            XyceBaselineFamilyComparison::TolerancedStrict
+        );
+        assert!(XyceTestRunner::same_path(
+            &contract.relational.baseline_path,
+            &decks[1].path
+        ));
+        assert!(XyceTestRunner::same_path(
+            &contract.support_path,
+            &support_path
+        ));
+        assert_eq!(contract.relational.member_paths.len(), 2);
+        runner
+            .validate_bug1826_thermal_parameter_provenance(&contract)
+            .expect("exact shared BUG 1826 provenance validates");
+    }
+    assert!(
+        !XyceBaselineFamilyKind::Bug1826ThermalParameter.xyce_verify_member_is_good_waveform(),
+        "global baseline must remain GOODFILE and local member TESTFILE"
+    );
+    fs::remove_dir_all(root).expect("remove BUG 1826 qualification fixture");
+}
+
+#[test]
+fn bug1826_thermal_parameter_historical_wrapper_and_default_verifier_provenance_is_exact() {
+    let records = XyceTestRunner::bug1826_thermal_parameter_historical_oracle_provenance_records();
+    assert_eq!(
+        records.len(),
+        XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_ORACLE_RECORD_COUNT
+    );
+    assert!(records.contains(&format!(
+        "{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_RELEASE_TAG}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_PATH}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_BYTES}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_SHA256}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_BLAKE3}"
+    )));
+    assert!(records.contains(&format!(
+        "{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_RELEASE_TAG}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_PATH}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_BYTES}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_SHA256}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_BLAKE3}"
+    )));
+    assert!(records.contains(&format!(
+        "{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_RELEASE_TAG}\t{XYCE_RELEASE_710_XYCE_VERIFY_PATH}\t{XYCE_RELEASE_710_XYCE_VERIFY_BYTES}\t{XYCE_RELEASE_710_XYCE_VERIFY_SHA256}\t{XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3}"
+    )));
+    XyceTestRunner::validate_bug1826_thermal_parameter_historical_oracle_provenance().expect(
+        "BUG 1826 Release-7.10 wrapper/exclude/xyce_verify provenance is internally consistent",
+    );
+}
+
+#[test]
+fn bug1826_thermal_parameter_snapshot_proves_only_global_to_local_scope_equivalence() {
+    let sources = bug1826_thermal_parameter_corpus_sources();
+    let (root, decks, _, _) = bug1826_thermal_parameter_fixture(
+        "snapshot",
+        [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+            sources[3].as_str(),
+        ],
+    );
+    let global = XyceTestRunner::parse_xyce_netlist(&sources[1], &decks[1].path)
+        .expect("parse BUG 1826 global baseline");
+    let local = XyceTestRunner::parse_xyce_netlist(&sources[2], &decks[2].path)
+        .expect("parse BUG 1826 local member");
+    let print = XycePrintRequest {
+        probes: vec![
+            "R1:R".to_string(),
+            "R1:TEMP".to_string(),
+            "I(R1)".to_string(),
+            "R1:A".to_string(),
+        ],
+    };
+    let global_snapshot =
+        XyceTestRunner::bug1826_thermal_parameter_family_snapshot(&global, &print)
+            .expect("global BUG 1826 snapshot qualifies");
+    let local_snapshot = XyceTestRunner::bug1826_thermal_parameter_family_snapshot(&local, &print)
+        .expect("local BUG 1826 snapshot qualifies");
+    assert_eq!(
+        global_snapshot.representation,
+        XyceBug1826ThermalParameterRepresentation::GlobalParameter
+    );
+    assert_eq!(
+        local_snapshot.representation,
+        XyceBug1826ThermalParameterRepresentation::LocalParameter
+    );
+    XyceTestRunner::compare_bug1826_thermal_parameter_family_snapshots(
+        &global_snapshot,
+        &local_snapshot,
+    )
+    .expect("global and local parameter scopes produce identical thermal semantics");
+    assert!(
+        XyceTestRunner::compare_bug1826_thermal_parameter_family_snapshots(
+            &global_snapshot,
+            &global_snapshot,
+        )
+        .is_err(),
+        "two global decks do not exercise parameter-scope equivalence"
+    );
+
+    let mut changed_geometry = local.clone();
+    let ElementKind::Resistor {
+        instance_params, ..
+    } = &mut changed_geometry.elements[0].kind
+    else {
+        panic!("BUG 1826 first element remains R1");
+    };
+    let (_, area) = instance_params
+        .iter_mut()
+        .find(|(name, _)| name.eq_ignore_ascii_case("A"))
+        .expect("BUG 1826 R1 retains A");
+    *area = 2.0e-5;
+    assert!(
+        XyceTestRunner::bug1826_thermal_parameter_family_snapshot(&changed_geometry, &print)
+            .is_err(),
+        "typed resistor-geometry drift must fail the snapshot"
+    );
+
+    let mut changed_material = local.clone();
+    let (_, resistivity) = changed_material.models[0]
+        .expr_params
+        .iter_mut()
+        .find(|(name, _)| name.eq_ignore_ascii_case("RESISTIVITY"))
+        .expect("BUG 1826 copper model retains RESISTIVITY");
+    *resistivity = resistivity.replace("0.5e-9", "0.6e-9");
+    let changed_material_snapshot =
+        XyceTestRunner::bug1826_thermal_parameter_family_snapshot(&changed_material, &print)
+            .expect("changed material remains a valid thermal-resistor snapshot");
+    assert!(
+        XyceTestRunner::compare_bug1826_thermal_parameter_family_snapshots(
+            &global_snapshot,
+            &changed_material_snapshot,
+        )
+        .is_err(),
+        "copper material AST and runtime-state drift must fail comparison"
+    );
+
+    for (mutated, reason) in [
+        (sources[2].replace("L=0.1", "L=0.2"), "resistor geometry"),
+        (sources[2].replace("v1  1 0 5", "v1  1 0 6"), "source"),
+        (
+            sources[2].replace(".tran 0 1", ".tran 0 2"),
+            "transient stop",
+        ),
+        (
+            sources[2].replace("i(r1) r1:a", "r1:a i(r1)"),
+            "ordered probes",
+        ),
+    ] {
+        let path = decks[1]
+            .path
+            .parent()
+            .expect("BUG 1826 baseline has a family directory")
+            .join("mutated.cir");
+        fs::write(&path, &mutated).expect("write semantic mutation");
+        let rejected = XyceTestRunner::parse_xyce_netlist(&mutated, &path)
+            .ok()
+            .and_then(|netlist| {
+                XyceTestRunner::bug1826_thermal_parameter_family_snapshot(&netlist, &print).ok()
+            })
+            .is_none();
+        assert!(rejected, "{reason} mutation must fail closed");
+        fs::remove_file(path).expect("remove semantic mutation");
+    }
+    fs::remove_dir_all(root).expect("remove BUG 1826 snapshot fixture");
+}
+
+#[test]
+fn bug1826_thermal_parameter_transient_outputs_are_physically_coherent() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/xyce/Netlists/Certification_Tests/BUG_1826/linear_simple_global.cir");
+    let source = fs::read_to_string(&path).expect("read canonical BUG 1826 global baseline");
+    let netlist = XyceTestRunner::parse_xyce_netlist(&source, &path)
+        .expect("parse canonical BUG 1826 global baseline");
+    let result = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+        .run_tran(&netlist, 1.0, 0.1)
+        .expect("canonical BUG 1826 thermal transient solves");
+    let resistance = result
+        .try_device_op_waveform_named("R1", "R")
+        .expect("BUG 1826 records the R1:R waveform");
+    let temperature = result
+        .try_device_op_waveform_named("R1", "TEMP")
+        .expect("BUG 1826 records the R1:TEMP waveform");
+    let current = result
+        .try_branch_current_waveform_named("R1")
+        .expect("BUG 1826 records the I(R1) waveform");
+
+    assert!(
+        result.time.len() >= 2,
+        "thermal transient needs multiple accepted points"
+    );
+    assert!(
+        result
+            .time
+            .iter()
+            .all(|time| time.is_finite() && *time >= 0.0)
+    );
+    assert!(result.time.windows(2).all(|pair| pair[0] < pair[1]));
+    assert_eq!(resistance.len(), result.time.len());
+    assert_eq!(temperature.len(), result.time.len());
+    assert_eq!(current.len(), result.time.len());
+    assert!(
+        resistance
+            .iter()
+            .all(|value| value.is_finite() && *value > 0.0)
+    );
+    assert!(
+        temperature
+            .iter()
+            .all(|value| value.is_finite() && *value > 0.0)
+    );
+    assert!(
+        current
+            .iter()
+            .all(|value| value.is_finite() && *value > 0.0)
+    );
+    assert!(
+        temperature.windows(2).all(|pair| pair[1] >= pair[0]),
+        "Joule heating must not decrease the uncooled resistor temperature: {temperature:?}"
+    );
+    assert!(
+        temperature
+            .last()
+            .copied()
+            .expect("temperature has a final sample")
+            > temperature[0],
+        "powered thermal resistor must heat above its initial temperature"
+    );
+
+    for (index, ((&time, &resistance), &current)) in
+        result.time.iter().zip(resistance).zip(current).enumerate()
+    {
+        let voltage_drop = current.abs() * resistance;
+        assert!(
+            (voltage_drop - 5.0).abs() <= 1.0e-10 * 5.0f64.max(voltage_drop.abs()),
+            "sample {index} at t={time:.17e}: accepted I(R1)*R1:R must equal 5 V, got {voltage_drop:.17e}"
+        );
+        for (probe, expected) in [("R1:R", resistance), ("R1:TEMP", temperature[index])] {
+            let direct = XyceTestRunner::evaluate_tran_probe(probe, &netlist, &result, time)
+                .unwrap_or_else(|error| panic!("{probe} direct evaluation failed: {error}"));
+            let braced_probe = format!("{{{probe}}}");
+            let braced =
+                XyceTestRunner::evaluate_tran_probe(&braced_probe, &netlist, &result, time)
+                    .unwrap_or_else(|error| panic!("{braced_probe} evaluation failed: {error}"));
+            assert_eq!(direct.to_bits(), expected.to_bits());
+            assert_eq!(braced.to_bits(), expected.to_bits());
+        }
+    }
+}
+
+#[test]
+fn bug1826_thermal_parameter_transient_plan_rejects_analysis_and_output_mutations() {
+    let sources = bug1826_thermal_parameter_corpus_sources();
+    let (root, decks, _, runner) = bug1826_thermal_parameter_fixture(
+        "plan",
+        [
+            sources[0].as_str(),
+            sources[1].as_str(),
+            sources[2].as_str(),
+            sources[3].as_str(),
+        ],
+    );
+    for deck in &decks[1..] {
+        let plan = runner
+            .static_tran_family_plan_for_path(
+                &deck.path,
+                XyceStaticTranPlanPurpose::RelationalFamily,
+            )
+            .expect("build BUG 1826 transient plan");
+        XyceTestRunner::validate_bug1826_thermal_parameter_transient_plan(&plan)
+            .expect("canonical BUG 1826 transient plan qualifies");
+    }
+    let plan = runner
+        .static_tran_family_plan_for_path(
+            &decks[1].path,
+            XyceStaticTranPlanPurpose::RelationalFamily,
+        )
+        .expect("build BUG 1826 baseline transient plan");
+    let mut source_identity = plan.clone();
+    source_identity.source = source_identity.source.replace("L=0.1", "L=0.10");
+    assert!(
+        XyceTestRunner::validate_bug1826_thermal_parameter_transient_plan(&source_identity)
+            .is_err()
+    );
+    let mut comp = plan.clone();
+    comp.source = comp.source.replace(".tran", "*COMP R1:R RELTOL=1\n.tran");
+    assert!(XyceTestRunner::validate_bug1826_thermal_parameter_transient_plan(&comp).is_err());
+    let mut extra_probe = plan.clone();
+    extra_probe
+        .print
+        .as_mut()
+        .expect("BUG 1826 plan has a print request")
+        .probes
+        .push("V(1)".to_string());
+    assert!(
+        XyceTestRunner::validate_bug1826_thermal_parameter_transient_plan(&extra_probe).is_err()
+    );
+    let mut max_step = plan.clone();
+    max_step.tran.max_step = Some(0.01);
+    assert!(XyceTestRunner::validate_bug1826_thermal_parameter_transient_plan(&max_step).is_err());
+    let mut output_override = plan.clone();
+    output_override.output_override = true;
+    assert!(
+        XyceTestRunner::validate_bug1826_thermal_parameter_transient_plan(&output_override)
+            .is_err()
+    );
+    let mut wrong_contract = plan;
+    wrong_contract.contract = XyceStaticTranContract::PlainCsv;
+    assert!(
+        XyceTestRunner::validate_bug1826_thermal_parameter_transient_plan(&wrong_contract).is_err()
+    );
+    fs::remove_dir_all(root).expect("remove BUG 1826 plan fixture");
+}
+
+#[test]
+fn bug1826_thermal_parameter_provenance_rejects_content_directory_manifest_and_artifact_drift() {
+    let sources = bug1826_thermal_parameter_corpus_sources();
+    let source_refs = [
+        sources[0].as_str(),
+        sources[1].as_str(),
+        sources[2].as_str(),
+        sources[3].as_str(),
+    ];
+    for (index, mutation, reason) in [
+        (0usize, "nonempty owner\n".to_string(), "owner content"),
+        (
+            1,
+            sources[1].replace("a1=1e-5", "a1=2e-5"),
+            "global content",
+        ),
+        (
+            2,
+            sources[2].replace(".param", ".global_param"),
+            "local content",
+        ),
+    ] {
+        let (root, decks, _, runner) = bug1826_thermal_parameter_fixture(reason, source_refs);
+        fs::write(&decks[index].path, mutation).expect("write BUG 1826 content mutation");
+        assert!(
+            runner
+                .bug1826_thermal_parameter_family_contract(&decks[0])
+                .expect("fixed BUG 1826 owner remains selected")
+                .is_err(),
+            "{reason} drift must fail shared provenance"
+        );
+        fs::remove_dir_all(root).expect("remove BUG 1826 content fixture");
+    }
+
+    let (root, decks, support_path, runner) =
+        bug1826_thermal_parameter_fixture("support", source_refs);
+    fs::write(&support_path, sources[3].replace("0.5e-9", "0.6e-9"))
+        .expect("mutate BUG 1826 copper model");
+    assert!(
+        runner
+            .bug1826_thermal_parameter_family_contract(&decks[0])
+            .expect("fixed BUG 1826 owner remains selected")
+            .is_err(),
+        "shared copper-model drift must fail provenance"
+    );
+    fs::remove_dir_all(root).expect("remove BUG 1826 support fixture");
+
+    let (root, decks, _, runner) = bug1826_thermal_parameter_fixture("directory", source_refs);
+    fs::write(
+        root.join("Netlists/Certification_Tests/BUG_1826/unqualified.cir"),
+        &sources[1],
+    )
+    .expect("write extra BUG 1826 candidate");
+    assert!(
+        runner
+            .bug1826_thermal_parameter_family_contract(&decks[0])
+            .expect("fixed BUG 1826 owner remains selected")
+            .is_err(),
+        "additional directory entries must fail the exact census"
+    );
+    fs::remove_dir_all(root).expect("remove BUG 1826 directory fixture");
+
+    let (root, decks, _, runner) = bug1826_thermal_parameter_fixture("manifest", source_refs);
+    fs::write(root.join(HARNESS_MANIFEST_FILE), "").expect("remove BUG 1826 wrapper manifest row");
+    assert!(
+        runner
+            .bug1826_thermal_parameter_family_contract(&decks[0])
+            .expect("fixed BUG 1826 owner remains selected")
+            .is_err(),
+        "wrapper ownership drift must fail closed"
+    );
+    fs::remove_dir_all(root).expect("remove BUG 1826 manifest fixture");
+
+    let (root, decks, _, runner) = bug1826_thermal_parameter_fixture("artifact", source_refs);
+    fs::write(
+        root.join("Netlists/Certification_Tests/BUG_1826/linear_simple_param.cir.PRN"),
+        "forbidden source-side output\n",
+    )
+    .expect("write BUG 1826 output artifact");
+    assert!(
+        runner
+            .bug1826_thermal_parameter_family_contract(&decks[0])
+            .expect("fixed BUG 1826 owner remains selected")
+            .is_err(),
+        "source-side output artifacts must fail closed"
+    );
+    fs::remove_dir_all(root).expect("remove BUG 1826 artifact fixture");
+
+    let (root, decks, _, runner) =
+        bug1826_thermal_parameter_fixture("output-artifact", source_refs);
+    let output = root.join("OutputData/Certification_Tests/BUG_1826");
+    fs::create_dir_all(&output).expect("create BUG 1826 OutputData fixture directory");
+    fs::write(
+        output.join("linear_simple_global.cir.prn"),
+        "forbidden checked-in oracle\n",
+    )
+    .expect("write BUG 1826 checked-in output artifact");
+    let error = runner
+        .bug1826_thermal_parameter_family_contract(&decks[0])
+        .expect("fixed BUG 1826 owner remains selected")
+        .expect_err("checked-in worker output must invalidate provenance");
+    assert!(error.contains("must not have checked-in output artifacts"));
+    fs::remove_dir_all(root).expect("remove BUG 1826 output-artifact fixture");
+}
+
+#[test]
+fn bug1826_thermal_parameter_malformed_fixed_records_route_to_executed_failures() {
+    let sources = bug1826_thermal_parameter_corpus_sources();
+    let source_refs = [
+        sources[0].as_str(),
+        sources[1].as_str(),
+        sources[2].as_str(),
+        sources[3].as_str(),
+    ];
+    for (index, expected_contract) in [
+        (
+            0usize,
+            XYCE_BUG1826_THERMAL_PARAMETER_WRAPPER_OWNER_CONTRACT,
+        ),
+        (1, "upstream_exclusion_promotion_mismatch"),
+        (2, "upstream_exclusion_promotion_mismatch"),
+    ] {
+        let (root, decks, _, runner) = bug1826_thermal_parameter_fixture("routing", source_refs);
+        fs::write(&decks[index].path, "recognized malformed BUG 1826 record\n")
+            .expect("write malformed fixed BUG 1826 record");
+        let result = runner.run_discovered_test(&decks[index]);
+        assert!(
+            !result.passed,
+            "malformed fixed record must fail: {result:?}"
+        );
+        assert!(!result.expected_unsupported);
+        assert!(!result.upstream_excluded);
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.error.is_some());
+        fs::remove_dir_all(root).expect("remove BUG 1826 routing fixture");
+    }
 }
 
 #[test]
@@ -25484,4 +27442,314 @@ fn noise_gs_parser_preserves_frequency_at_and_failure_metadata() {
     );
     assert_eq!(rows[2].event_axis, None);
     assert_eq!(rows[2].mixed.value, XyceMeasurementReferenceValue::Failed);
+}
+
+#[test]
+fn source_multiplicity_release_710_oracle_provenance_is_exact() {
+    let records = XyceTestRunner::source_multiplicity_historical_oracle_provenance_records();
+    assert_eq!(
+        records.len(),
+        XYCE_SOURCE_MULTIPLICITY_HISTORICAL_ORACLE_RECORD_COUNT
+    );
+    XyceTestRunner::validate_source_multiplicity_historical_oracle_provenance()
+        .expect("source-multiplicity wrappers, excludes, and xyce_verify stay provenance-bound");
+    assert!(records.iter().any(|record| {
+        record.contains("Netlists/BSRC/bsrc1_m.cir.sh")
+            && record.contains(XYCE_SOURCE_MULTIPLICITY_UPSTREAM_REGRESSION_COMMIT)
+    }));
+    assert!(
+        records
+            .iter()
+            .any(|record| record.contains("Netlists/VCCS/vccs_tran_m.cir.sh"))
+    );
+    assert!(
+        records
+            .iter()
+            .any(|record| record.contains(XYCE_RELEASE_710_XYCE_VERIFY_SHA256))
+    );
+}
+
+#[test]
+fn source_multiplicity_canonical_pairs_are_typed_and_owner_is_goodfile() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let print = XycePrintRequest {
+        probes: vec!["V(1)".to_string(), "V(2)".to_string(), "V(3)".to_string()],
+    };
+    for spec in XYCE_SOURCE_MULTIPLICITY_CASES {
+        let owner_path = root.join(spec.owner_relative_path());
+        let baseline_path = root.join(spec.baseline_relative_path());
+        let owner_source = fs::read_to_string(&owner_path).expect("read canonical M= owner");
+        let baseline_source =
+            fs::read_to_string(&baseline_path).expect("read canonical explicit-gain baseline");
+        let owner = XyceTestRunner::parse_xyce_netlist(&owner_source, &owner_path)
+            .expect("parse canonical M= owner");
+        let baseline = XyceTestRunner::parse_xyce_netlist(&baseline_source, &baseline_path)
+            .expect("parse canonical explicit-gain baseline");
+        let owner_snapshot = XyceTestRunner::source_multiplicity_family_snapshot(&owner, &print)
+            .expect("owner has qualified source-M semantics");
+        let baseline_snapshot =
+            XyceTestRunner::source_multiplicity_family_snapshot(&baseline, &print)
+                .expect("baseline has qualified explicit-gain semantics");
+        assert_eq!(owner_snapshot.representation, spec.representation);
+        assert_eq!(
+            baseline_snapshot.representation,
+            XyceSourceMultiplicityRepresentation::LinearBaseline
+        );
+        assert_eq!(owner_snapshot.analysis, spec.analysis);
+        assert_eq!(baseline_snapshot.analysis, spec.analysis);
+        XyceTestRunner::compare_source_multiplicity_snapshots(&baseline_snapshot, &owner_snapshot)
+            .expect("explicit gain and composed M represent the same typed current law");
+        assert!(
+            XyceTestRunner::compare_source_multiplicity_snapshots(
+                &owner_snapshot,
+                &baseline_snapshot,
+            )
+            .is_err(),
+            "{} must preserve owner-GOODFILE/baseline-TESTFILE direction",
+            spec.family
+        );
+
+        match spec.analysis {
+            XyceSourceMultiplicityAnalysis::Dc => {
+                let owner_plan = runner
+                    .static_dc_plan_for_path(&owner_path, ExpressionDialect::Xyce)
+                    .expect("build owner DC plan");
+                let baseline_plan = runner
+                    .static_dc_plan_for_path(&baseline_path, ExpressionDialect::Xyce)
+                    .expect("build baseline DC plan");
+                XyceTestRunner::validate_source_multiplicity_dc_plan(&owner_plan)
+                    .expect("owner DC plan is exact");
+                XyceTestRunner::validate_source_multiplicity_dc_plan(&baseline_plan)
+                    .expect("baseline DC plan is exact");
+            }
+            XyceSourceMultiplicityAnalysis::Tran => {
+                let owner_plan = runner
+                    .static_tran_family_plan_for_path(
+                        &owner_path,
+                        runner.transient_family_plan_purpose_for_path(
+                            XyceBaselineFamilyKind::SourceMultiplicity,
+                            &owner_path,
+                        ),
+                    )
+                    .expect("build owner TRAN plan");
+                let baseline_plan = runner
+                    .static_tran_family_plan_for_path(
+                        &baseline_path,
+                        runner.transient_family_plan_purpose_for_path(
+                            XyceBaselineFamilyKind::SourceMultiplicity,
+                            &baseline_path,
+                        ),
+                    )
+                    .expect("build baseline TRAN plan");
+                XyceTestRunner::validate_source_multiplicity_transient_plan(&owner_plan)
+                    .expect("owner TRAN plan is exact");
+                XyceTestRunner::validate_source_multiplicity_transient_plan(&baseline_plan)
+                    .expect("baseline TRAN plan is exact");
+            }
+        }
+    }
+}
+
+#[test]
+fn source_multiplicity_provenance_is_a_fail_closed_twenty_record_bijection() {
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let root = tempfile::tempdir().expect("create source-multiplicity provenance fixture");
+    let mut wrapper_rows = Vec::new();
+    let mut exclusion_rows = Vec::new();
+    for spec in XYCE_SOURCE_MULTIPLICITY_CASES {
+        for relative in [
+            spec.owner_relative_path().to_string(),
+            spec.baseline_relative_path(),
+        ] {
+            let source = source_root.join(&relative);
+            let target = root.path().join(&relative);
+            fs::create_dir_all(target.parent().expect("candidate has parent"))
+                .expect("create candidate family directory");
+            fs::copy(source, target).expect("copy canonical source-multiplicity candidate");
+        }
+        wrapper_rows.push(format!(
+            "{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}",
+            spec.owner_relative_path()
+        ));
+        exclusion_rows.push(format!(
+            "{}\t{}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_SOURCE_MULTIPLICITY_BASELINE_CONTRACT}",
+            spec.baseline_relative_path(),
+            if spec.owner_record.starts_with("netlists/bsrc/") {
+                "Netlists/BSRC/exclude"
+            } else {
+                "Netlists/VCCS/exclude"
+            }
+        ));
+    }
+    wrapper_rows.sort();
+    exclusion_rows.sort();
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{}\n", wrapper_rows.join("\n")),
+    )
+    .expect("write canonical source-multiplicity wrapper ownership");
+    let exclusion_refs = exclusion_rows
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&exclusion_refs),
+    )
+    .expect("write canonical source-multiplicity promotions");
+
+    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    let decks = runner.discover_netlist_tests();
+    assert_eq!(decks.len(), XYCE_SOURCE_MULTIPLICITY_CANDIDATE_COUNT);
+    let role_counts = decks.iter().fold([0usize; 2], |mut counts, deck| {
+        let (_, role) = XyceSourceMultiplicityRole::for_record(&deck.relative_path)
+            .expect("every selected fixture deck has one exact source-multiplicity role");
+        counts[usize::from(role == XyceSourceMultiplicityRole::Baseline)] += 1;
+        counts
+    });
+    assert_eq!(role_counts, [10, 10]);
+    let owner = decks
+        .iter()
+        .find(|deck| {
+            XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                == XYCE_SOURCE_MULTIPLICITY_CASES[0].owner_record
+        })
+        .expect("fixture contains first wrapper owner");
+    let contract = runner
+        .source_multiplicity_family_contract(owner)
+        .expect("exact record is selected")
+        .expect("canonical twenty-record provenance qualifies");
+    runner
+        .validate_source_multiplicity_provenance(&contract)
+        .expect("complete provenance revalidates");
+    for relative in [
+        XYCE_SOURCE_MULTIPLICITY_CASES[0]
+            .owner_relative_path()
+            .to_string(),
+        XYCE_SOURCE_MULTIPLICITY_CASES[0].baseline_relative_path(),
+        XYCE_SOURCE_MULTIPLICITY_CASES[9]
+            .owner_relative_path()
+            .to_string(),
+        XYCE_SOURCE_MULTIPLICITY_CASES[9].baseline_relative_path(),
+    ] {
+        let result = runner.run_test(root.path().join(&relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} must execute natively through its relational family: {result:?}"
+        );
+        assert_eq!(
+            result.contract,
+            if relative.ends_with("_baseline.cir") {
+                XYCE_SOURCE_MULTIPLICITY_BASELINE_CONTRACT
+            } else {
+                XYCE_SOURCE_MULTIPLICITY_WRAPPER_CONTRACT
+            }
+        );
+    }
+
+    let baseline = root
+        .path()
+        .join(XYCE_SOURCE_MULTIPLICITY_CASES[9].baseline_relative_path());
+    let original = fs::read(&baseline).expect("read mutation target");
+    fs::write(
+        &baseline,
+        b"source multiplicity provenance mutation\n.end\n",
+    )
+    .expect("mutate one fixed candidate");
+    assert!(
+        runner
+            .validate_source_multiplicity_provenance(&contract)
+            .is_err(),
+        "one changed candidate identity must fail the complete family"
+    );
+    fs::write(&baseline, original).expect("restore candidate identity");
+
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{}\n", wrapper_rows[1..].join("\n")),
+    )
+    .expect("remove one wrapper owner row");
+    assert!(
+        runner
+            .validate_source_multiplicity_provenance(&contract)
+            .is_err(),
+        "missing owner provenance must fail the complete family"
+    );
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{}\n", wrapper_rows.join("\n")),
+    )
+    .expect("restore wrapper owner rows");
+    let mut wrong_exclusions = exclusion_rows.clone();
+    wrong_exclusions[0] = wrong_exclusions[0].replace(
+        XYCE_SOURCE_MULTIPLICITY_BASELINE_CONTRACT,
+        "wrong_source_multiplicity_contract",
+    );
+    let wrong_refs = wrong_exclusions
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&wrong_refs),
+    )
+    .expect("mutate one exclusion contract");
+    assert!(
+        runner
+            .validate_source_multiplicity_provenance(&contract)
+            .is_err(),
+        "one wrong baseline promotion contract must fail the complete family"
+    );
+}
+
+#[test]
+fn source_multiplicity_snapshot_rejects_m_topology_probe_and_analysis_drift() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let spec = XYCE_SOURCE_MULTIPLICITY_CASES[0];
+    let owner_path = root.join(spec.owner_relative_path());
+    let baseline_path = root.join(spec.baseline_relative_path());
+    let owner = XyceTestRunner::parse_xyce_netlist(
+        &fs::read_to_string(&owner_path).expect("read owner"),
+        &owner_path,
+    )
+    .expect("parse owner");
+    let baseline = XyceTestRunner::parse_xyce_netlist(
+        &fs::read_to_string(&baseline_path).expect("read baseline"),
+        &baseline_path,
+    )
+    .expect("parse baseline");
+    let print = XycePrintRequest {
+        probes: vec!["V(1)".to_string(), "V(2)".to_string(), "V(3)".to_string()],
+    };
+    let baseline_snapshot = XyceTestRunner::source_multiplicity_family_snapshot(&baseline, &print)
+        .expect("snapshot baseline");
+    let owner_snapshot = XyceTestRunner::source_multiplicity_family_snapshot(&owner, &print)
+        .expect("snapshot owner");
+
+    let mut changed_m = owner_snapshot.clone();
+    changed_m.flattened_multiplicity_bits = 9.0f64.to_bits();
+    let mut changed_topology = owner_snapshot.clone();
+    changed_topology.source_nodes[0] = "4".to_string();
+    let mut changed_probe = owner_snapshot.clone();
+    changed_probe.ordered_probes.swap(1, 2);
+    let mut changed_analysis = owner_snapshot.clone();
+    changed_analysis.analysis = XyceSourceMultiplicityAnalysis::Tran;
+    for changed in [changed_m, changed_topology, changed_probe, changed_analysis] {
+        assert!(
+            XyceTestRunner::compare_source_multiplicity_snapshots(&baseline_snapshot, &changed,)
+                .is_err()
+        );
+    }
+
+    let mut malformed_owner = owner.clone();
+    let ElementKind::BehavioralCurrent { multiplicity, .. } = &mut malformed_owner.elements[1].kind
+    else {
+        panic!("bsrc1 owner second element remains behavioral current");
+    };
+    multiplicity.value = 9.0;
+    assert!(
+        XyceTestRunner::source_multiplicity_family_snapshot(&malformed_owner, &print).is_err(),
+        "typed parsing must reject an M=9 owner before waveform execution"
+    );
 }

@@ -289,6 +289,7 @@ impl CircuitData {
         // Voltage sources
         Self::remap_node_slice(&mut self.voltage_sources.node_pos, old_node_id);
         Self::remap_node_slice(&mut self.voltage_sources.node_neg, old_node_id);
+        self.voltage_sources.invalidate_constraint_projection();
 
         // Branch-form resistors
         Self::remap_node_slice(&mut self.resistor_branches.node_pos, old_node_id);

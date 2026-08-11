@@ -291,6 +291,7 @@ impl NonlinearDevice for Jfet {
         let mut bypassed = false;
         let can_use_static_bypass = self.params.channel_model
             != JfetChannelModel::XyceModifiedShockley
+            && self.params.channel_model != JfetChannelModel::XyceSydney
             && (self.params.channel_model != JfetChannelModel::Hfet1 || self.params.hfet_level < 5);
         if can_use_static_bypass && self.eval_valid && vgs_prev.is_finite() && vgd_prev.is_finite()
         {
@@ -438,3 +439,35 @@ impl NonlinearDevice for Jfet {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xyce_sydney_relinearizes_nearby_static_biases() {
+        let mut jfet = Jfet::njf("j1", 1, 2, 0).enable_xyce_jfet1_model();
+        jfet.params.lambda = 0.02;
+
+        let first_bias = [15.0, -1.875];
+        jfet.update(&first_bias);
+        let first_ids = jfet.eval_ids;
+
+        // This perturbation is deliberately small enough to satisfy the
+        // generic SPICE JFET bypass tolerances. Xyce's native LEVEL=1 JFET
+        // does not implement that bypass and must evaluate the new bias.
+        let second_bias = [15.001, -1.875];
+        jfet.update(&second_bias);
+
+        let vgs = second_bias[1];
+        let vds = second_bias[0];
+        let vgd = vgs - vds;
+        let (expected_ids, ..) =
+            jfet.compute_operating_terms_with_terminals(vgs, vds, vgd, vds, 0.0);
+
+        assert_ne!(jfet.eval_ids.to_bits(), first_ids.to_bits());
+        assert_eq!(jfet.eval_ids.to_bits(), expected_ids.to_bits());
+        assert_eq!(jfet.vgs.to_bits(), vgs.to_bits());
+        assert!((jfet.vds - vds).abs() <= Value::EPSILON * vds.abs());
+    }
+}

@@ -1899,6 +1899,18 @@ impl Engine {
         // (its device-state priming is wanted), but time, solution, and the
         // reactive histories come from the checkpoint.
         let resume_time = resume.map_or(0.0, |checkpoint| checkpoint.time);
+        if self.config.spice_dialect == SpiceDialect::Xyce {
+            // A resumed source must observe the tolerance belonging to the
+            // restored accepted state before branch-current capture or any
+            // other source evaluation occurs.
+            let breakpoint_tolerance = 2.0 * Self::xyce_hard_min_timestep(resume_time);
+            circuit
+                .voltage_sources
+                .set_xyce_breakpoint_tolerance(breakpoint_tolerance);
+            circuit
+                .current_sources
+                .set_xyce_breakpoint_tolerance(breakpoint_tolerance);
+        }
         if let Some(checkpoint) = resume {
             if checkpoint.solution.len() != circuit.matrix_size() {
                 return Err(SimulationError::Circuit(format!(
@@ -2102,7 +2114,9 @@ impl Engine {
             source_step_hint,
             self.config.spice_dialect,
             &mut breakpoints,
-        );
+            abort,
+            self.config.resource_limits.max_analysis_points,
+        )?;
         Self::add_breakpoint_if_in_range(&mut breakpoints, tstop, tstop);
         let source_breakpoint_times = breakpoints.times().to_vec();
         Self::collect_transient_tline_breakpoints(
@@ -2974,7 +2988,15 @@ impl Engine {
                 // Stiff state devices can legitimately require steps far below
                 // ngspice's max-step-derived `delmin` while crossing a narrow
                 // physical boundary layer.
-                timestep.set_hard_min_dt(Self::xyce_hard_min_timestep(t));
+                let hard_min_timestep = Self::xyce_hard_min_timestep(t);
+                timestep.set_hard_min_dt(hard_min_timestep);
+                let breakpoint_tolerance = 2.0 * hard_min_timestep;
+                circuit
+                    .voltage_sources
+                    .set_xyce_breakpoint_tolerance(breakpoint_tolerance);
+                circuit
+                    .current_sources
+                    .set_xyce_breakpoint_tolerance(breakpoint_tolerance);
             }
             // Progress logging every 2 seconds
             if last_progress_log
@@ -3401,7 +3423,7 @@ impl Engine {
             } else {
                 new_solution.clone_from(&solution);
             }
-            circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
+            circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt)?;
             for (i, value) in new_solution.iter_mut().enumerate() {
                 let protected_ideal_output = i < num_nodes
                     && force_accept_protected_nodes
@@ -3443,7 +3465,7 @@ impl Engine {
                     &force_accept_protected_nodes,
                 );
                 if damped {
-                    circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
+                    circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt)?;
                 }
                 Self::clip_ideal_output_common_modes(
                     &solution,
@@ -3729,7 +3751,7 @@ impl Engine {
                                 );
                                 new_solution = trial;
                                 circuit
-                                    .enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
+                                    .enforce_ideal_voltage_constraints(&mut new_solution, t + dt)?;
                                 nonlinear_state_matches_new_solution = false;
                                 merit_backtrack = Some((search, rollback));
                                 total_merit_nanos += merit_phase_start.elapsed().as_nanos();
@@ -3775,7 +3797,7 @@ impl Engine {
                             &rollback,
                         );
                         new_solution = trial;
-                        circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
+                        circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt)?;
                         nonlinear_state_matches_new_solution = false;
                         merit_backtrack = Some((search, rollback));
                         total_merit_nanos += merit_phase_start.elapsed().as_nanos();
@@ -4055,7 +4077,7 @@ impl Engine {
                                 &force_accept_protected_nodes,
                             );
                             if damped {
-                                circuit.enforce_ideal_voltage_constraints(sol, t + dt);
+                                circuit.enforce_ideal_voltage_constraints(sol, t + dt)?;
                             }
                             Self::clip_ideal_output_common_modes(
                                 &solution,
@@ -4780,7 +4802,7 @@ impl Engine {
                         force_accept_delta_limit,
                         &force_accept_protected_nodes,
                         &ideal_output_pairs,
-                    );
+                    )?;
                     let unbounded_force_candidate = Self::is_unbounded_step(
                         &solution,
                         &bounded_force_candidate,
@@ -5864,7 +5886,7 @@ impl Engine {
                         force_accept_delta_limit,
                         &force_accept_protected_nodes,
                         &ideal_output_pairs,
-                    );
+                    )?;
                     let unbounded_force_candidate = Self::is_unbounded_step(
                         &solution,
                         &bounded_force_candidate,
@@ -6388,8 +6410,8 @@ impl Engine {
             retry_count = 0;
 
             // Keep ideal source constraints exact before LTE and state updates.
-            let projected_voltage_sources =
-                circuit.enforce_prescribed_transient_voltage_constraints(&mut new_solution, t + dt);
+            let projected_voltage_sources = circuit
+                .enforce_prescribed_transient_voltage_constraints(&mut new_solution, t + dt)?;
             if projected_voltage_sources {
                 nonlinear_state_matches_new_solution = false;
             }

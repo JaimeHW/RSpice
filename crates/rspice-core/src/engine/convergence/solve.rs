@@ -554,7 +554,7 @@ impl Engine {
             } else {
                 &mut raw_solution
             };
-            circuit.enforce_dc_ideal_voltage_constraints(new_solution);
+            circuit.enforce_dc_ideal_voltage_constraints(new_solution)?;
             // Solution limiting: prevent numerical blow-up by clamping extreme values
             // This is a critical convergence aid for circuits with strong nonlinearities
             for (i, v) in new_solution.iter_mut().enumerate() {
@@ -1553,7 +1553,7 @@ impl Engine {
             } else {
                 &mut raw_solution
             };
-            circuit.enforce_ideal_voltage_constraints(new_solution, time);
+            circuit.enforce_ideal_voltage_constraints(new_solution, time)?;
             Self::clamp_solution_to_physical_bounds(
                 circuit,
                 new_solution,

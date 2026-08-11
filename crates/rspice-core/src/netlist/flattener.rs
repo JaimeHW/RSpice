@@ -27,7 +27,7 @@ use super::{
     DeviceInitialConditionDirective, DeviceInitialConditionError, DeviceInitialConditionSource,
     DuplicateSubcircuitPortBindingError, Element, ElementKind, GlobalSubcircuitPortBindingError,
     InitialCondition, ModelDef, Netlist, NodeSet, ParamContext, ParameterRedefinitionPolicy,
-    ParametricValue, ParseError, ParseWithAbortError, RandomState, SourceSpec,
+    ParametricValue, ParseError, ParseWithAbortError, RandomState, SourceMultiplicity, SourceSpec,
     StartupDirectiveDisposition, StartupDirectiveRecord, StartupDirectiveScope, SubcircuitDef,
     ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort,
     validate_mutual_inductor_references,
@@ -655,20 +655,19 @@ impl<'a> Flattener<'a> {
             }
         }
 
-        let param_scope =
-            build_subcircuit_param_scope(subckt, caller_scope, instance_params, &self.random)?;
-
-        // X-line multiplicity: `M=` on a subcircuit instance multiplies the
-        // parallel multiplicity of every device it expands to (HSPICE/ngspice
-        // semantics), composing multiplicatively through nested hierarchy.
-        // A subcircuit that declares its own formal `M` parameter keeps
-        // ordinary parameter behavior instead — the author owns the name.
+        // X-line multiplicity composes through nested hierarchy. Xyce treats
+        // `M=` as a reserved physical multiplier even when the subcircuit has
+        // an ordinary formal parameter with the same name.
+        // Other dialects keep the existing policy in which a declared formal
+        // `M` owns the name and remains an ordinary parameter.
         let formal_declares_m = subckt
             .params
             .iter()
             .any(|(name, _)| name.eq_ignore_ascii_case("M"));
+        let xyce_implicit_multiplier = caller_scope.expression_dialect() == ExpressionDialect::Xyce;
+        let applies_as_physical_multiplier = xyce_implicit_multiplier || !formal_declares_m;
         let mut multiplicity = 1.0;
-        if !formal_declares_m {
+        if applies_as_physical_multiplier {
             for (param_index, (name, value)) in instance_params.iter().enumerate() {
                 poll_parse_abort(abort, param_index)?;
                 if name.eq_ignore_ascii_case("M") {
@@ -687,6 +686,22 @@ impl<'a> Flattener<'a> {
                 }
             }
         }
+
+        let scoped_instance_params = if xyce_implicit_multiplier {
+            instance_params
+                .iter()
+                .filter(|(name, _)| !name.eq_ignore_ascii_case("M"))
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            instance_params.to_vec()
+        };
+        let param_scope = build_subcircuit_param_scope(
+            subckt,
+            caller_scope,
+            &scoped_instance_params,
+            &self.random,
+        )?;
 
         // Expand each element in the subcircuit
         self.expansion_stack.push(subckt_name.to_owned());
@@ -868,19 +883,23 @@ impl<'a> Flattener<'a> {
                 expression,
                 tc1,
                 tc2,
+                multiplicity,
             } => ElementKind::BehavioralVoltage {
                 expression: self.remap_behavioral_expression(expression, prefix, node_map),
                 tc1: *tc1,
                 tc2: *tc2,
+                multiplicity: multiplicity.clone(),
             },
             ElementKind::BehavioralCurrent {
                 expression,
                 tc1,
                 tc2,
+                multiplicity,
             } => ElementKind::BehavioralCurrent {
                 expression: self.remap_behavioral_expression(expression, prefix, node_map),
                 tc1: *tc1,
                 tc2: *tc2,
+                multiplicity: multiplicity.clone(),
             },
             ElementKind::Vcvs {
                 gain,
@@ -897,10 +916,12 @@ impl<'a> Flattener<'a> {
             ElementKind::Vccs {
                 transconductance,
                 transconductance_expr,
+                multiplicity,
                 control_nodes,
             } => ElementKind::Vccs {
                 transconductance: *transconductance,
                 transconductance_expr: transconductance_expr.clone(),
+                multiplicity: multiplicity.clone(),
                 control_nodes: (
                     self.remap_node(&control_nodes.0, prefix, node_map),
                     self.remap_node(&control_nodes.1, prefix, node_map),
@@ -1557,6 +1578,7 @@ impl<'a> Flattener<'a> {
                 expression,
                 tc1,
                 tc2,
+                multiplicity,
             } => ElementKind::BehavioralVoltage {
                 expression: self.prepare_scoped_behavioral_expression(
                     expression,
@@ -1565,11 +1587,17 @@ impl<'a> Flattener<'a> {
                 )?,
                 tc1: *tc1,
                 tc2: *tc2,
+                multiplicity: self.resolve_source_multiplicity(
+                    multiplicity,
+                    scope,
+                    element_path,
+                )?,
             },
             ElementKind::BehavioralCurrent {
                 expression,
                 tc1,
                 tc2,
+                multiplicity,
             } => ElementKind::BehavioralCurrent {
                 expression: self.prepare_scoped_behavioral_expression(
                     expression,
@@ -1578,6 +1606,11 @@ impl<'a> Flattener<'a> {
                 )?,
                 tc1: *tc1,
                 tc2: *tc2,
+                multiplicity: self.resolve_source_multiplicity(
+                    multiplicity,
+                    scope,
+                    element_path,
+                )?,
             },
 
             // Controlled sources
@@ -1593,6 +1626,7 @@ impl<'a> Flattener<'a> {
             ElementKind::Vccs {
                 transconductance,
                 transconductance_expr,
+                multiplicity,
                 control_nodes,
             } => ElementKind::Vccs {
                 transconductance: self.resolve_optional_value_expr(
@@ -1601,6 +1635,11 @@ impl<'a> Flattener<'a> {
                     scope,
                 )?,
                 transconductance_expr: None,
+                multiplicity: self.resolve_source_multiplicity(
+                    multiplicity,
+                    scope,
+                    element_path,
+                )?,
                 control_nodes: control_nodes.clone(),
             },
             ElementKind::Cccs {
@@ -1753,6 +1792,29 @@ impl<'a> Flattener<'a> {
         }
     }
 
+    fn resolve_source_multiplicity(
+        &self,
+        multiplicity: &SourceMultiplicity,
+        scope: &ParamContext,
+        element_path: &str,
+    ) -> Result<SourceMultiplicity, ParseError> {
+        let value =
+            self.resolve_optional_value_expr(multiplicity.value, &multiplicity.value_expr, scope)?;
+        if !value.is_finite()
+            || scope.expression_dialect() == ExpressionDialect::Xyce && value <= 0.0
+        {
+            return Err(ParseError::InvalidValue(format!(
+                "source element '{}' has invalid multiplicity M={}",
+                element_path, value
+            )));
+        }
+        Ok(SourceMultiplicity {
+            value,
+            value_expr: None,
+            given: multiplicity.given,
+        })
+    }
+
     fn resolve_passive_value_expr(
         &self,
         value: Value,
@@ -1853,12 +1915,14 @@ impl<'a> Flattener<'a> {
                         expression,
                         tc1: 0.0,
                         tc2: 0.0,
+                        multiplicity: SourceMultiplicity::default(),
                     })
                 } else {
                     Ok(ElementKind::BehavioralCurrent {
                         expression,
                         tc1: 0.0,
                         tc2: 0.0,
+                        multiplicity: SourceMultiplicity::default(),
                     })
                 }
             }
@@ -3083,6 +3147,10 @@ fn apply_element_multiplicity(element: &mut Element, m: Value) {
             }
         }
         ElementKind::CurrentSource(spec) => scale_source_amplitudes(spec, m),
+        ElementKind::Vccs { multiplicity, .. }
+        | ElementKind::BehavioralCurrent { multiplicity, .. } => {
+            multiplicity.value *= m;
+        }
         _ => {}
     }
 }

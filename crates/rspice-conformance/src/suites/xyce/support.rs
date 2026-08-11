@@ -4171,6 +4171,18 @@ impl XyceTestRunner {
             "temp" => Self::resistor_temperature_value(netlist, &element_name)?.ok_or_else(|| {
                 format!("resistor parameter probe '{token}' has no finite temperature")
             }),
+            parameter
+                if Self::resistor_instance_parameter_probe_is_supported(
+                    netlist,
+                    &element_name,
+                    parameter,
+                ) =>
+            {
+                Self::resistor_instance_parameter_value(netlist, &element_name, parameter)?
+                    .ok_or_else(|| {
+                        format!("resistor parameter probe '{token}' has no finite instance value")
+                    })
+            }
             _ => Err(format!(
                 "device parameter probe '{token}' is not supported in stateful transient output"
             )),
