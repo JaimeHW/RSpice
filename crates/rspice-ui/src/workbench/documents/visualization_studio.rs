@@ -2852,6 +2852,34 @@ mod integrity_scan_tests {
         assert_eq!(app.state.workbench.visualization_studio.dock, None);
     }
 
+    /// Three sheets render `viewer-table`, so a retained pane's sheet cannot be
+    /// recovered from its viewer document — only checked against it. Reading
+    /// that check backwards would reject every retained Specs and OP pane as
+    /// having no renderer, because the inverse can only name one of the three.
+    #[test]
+    fn a_retained_pane_sharing_a_viewer_document_still_validates() {
+        let mut app = app_with_exact_source();
+        reconcile_document(&mut app);
+        let panes = &mut app.state.workbench.visualization_studio.panes;
+        let pane = panes
+            .first_mut()
+            .expect("the reconciled document has a pane");
+        pane.viewer = ResultViewer::Specs;
+        pane.viewer_document_id = ResultViewer::Specs
+            .viewer_document_id()
+            .expect("Specs renders a catalog viewer document")
+            .to_owned();
+        assert_eq!(pane.viewer_document_id, "viewer-table");
+        assert_ne!(
+            ResultViewer::from_viewer_document_id("viewer-table"),
+            Some(ResultViewer::Specs),
+            "this test is only meaningful while the inverse names a different sheet"
+        );
+
+        visualization_configuration_status(&app.state)
+            .expect("a retained Specs pane names viewer-table truthfully");
+    }
+
     #[test]
     fn configuration_status_fails_closed_when_a_retained_binding_disappears() {
         let mut app = app_with_exact_source();

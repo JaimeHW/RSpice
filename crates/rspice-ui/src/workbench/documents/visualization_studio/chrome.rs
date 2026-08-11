@@ -168,7 +168,12 @@ pub(super) fn visualization_configuration_status(state: &AppState) -> Result<(),
                 return Err(format!("Pane {:02} viewer is not registered", pane.id));
             }
         }
-        if ResultViewer::from_viewer_document_id(definition.id) != Some(pane.viewer) {
+        // A retained pane names both its sheet and its viewer document, so what
+        // has to hold is that the two agree — read forwards, from the sheet.
+        // Read backwards it would not: three sheets render `viewer-table`, and
+        // the inverse can only name one of them, so a retained Specs or OP pane
+        // would be rejected as having no renderer.
+        if pane.viewer.viewer_document_id() != Some(definition.id) {
             return Err(format!(
                 "Pane {:02} has no exact renderer for its retained viewer",
                 pane.id
