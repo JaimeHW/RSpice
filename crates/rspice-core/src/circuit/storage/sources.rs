@@ -1306,12 +1306,19 @@ impl VoltageSources {
                     pwl_waveform,
                 )
             }
-            SourceSpec::RfPort { inner, .. } => Self::evaluate_source_at_time_with_context_and_pwl(
-                inner,
-                time,
-                context,
-                pwl_waveform,
-            ),
+            // A port that declares a power or a frequency is a large-signal RF
+            // generator, and its drive rides on whatever the source itself was
+            // given. ngspice drops the source's own DC here; that would step
+            // the node by the bias between the operating point and the first
+            // transient sample, so the DC is kept.
+            SourceSpec::RfPort { inner, port } => {
+                Self::evaluate_source_at_time_with_context_and_pwl(
+                    inner,
+                    time,
+                    context,
+                    pwl_waveform,
+                ) + port.drive_at(time).unwrap_or(0.0)
+            }
             SourceSpec::Dc(v) => *v,
             SourceSpec::Ac { .. } => 0.0, // AC sources are DC=0 in transient
             // TRNOISE expands into a PWL sample train before circuit
@@ -2312,6 +2319,96 @@ mod tests {
         assert!(
             (actual - expected).abs() <= tolerance,
             "actual={actual:.17e} expected={expected:.17e} tolerance={tolerance:.17e}"
+        );
+    }
+
+    fn rf_port(power: Option<Value>, frequency: Option<Value>, phase: Option<Value>) -> SourceSpec {
+        SourceSpec::RfPort {
+            inner: Box::new(SourceSpec::DcAc {
+                dc_value: 0.0,
+                ac_magnitude: 1.0,
+                ac_phase: 0.0,
+            }),
+            port: crate::netlist::SourceRfPort {
+                portnum: 1,
+                z0: 100.0,
+                power,
+                frequency,
+                phase,
+                reference_plane: None,
+            },
+        }
+    }
+
+    /// ngspice's `examples/sp/sp1.cir` drives its first port with
+    /// `pwr 0.001 freq 2.3e9` into `z0 100`, which is a 632.4 mV peak cosine.
+    /// RSpice used to unwrap the port and evaluate only the `dc 0 ac 1` beneath
+    /// it, so the deck ran with no transient excitation at all.
+    #[test]
+    fn a_port_that_declares_power_and_frequency_drives_a_transient_cosine() {
+        let spec = rf_port(Some(0.001), Some(2.3e9), None);
+        let amplitude = 0.4_f64.sqrt();
+        let period = 1.0 / 2.3e9;
+
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 0.0, None),
+            amplitude,
+        );
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, period / 2.0, None),
+            -amplitude,
+        );
+        let quarter =
+            VoltageSources::evaluate_source_at_time_with_context(&spec, period / 4.0, None);
+        assert!(
+            quarter.abs() < 1.0e-6,
+            "quarter period should cross zero, got {quarter}"
+        );
+    }
+
+    /// Naming one of the two is enough to make the port a generator; the other
+    /// takes ngspice's default, which for power is 0 dBm.
+    #[test]
+    fn a_port_drive_fills_the_unnamed_half_from_the_defaults() {
+        let spec = rf_port(None, Some(2.0e9), None);
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 0.0, None),
+            (4.0 * 1.0e-3 * 100.0_f64).sqrt(),
+        );
+
+        let spec = rf_port(Some(0.001), None, None);
+        let default_period = 1.0 / 1.0e9;
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, default_period / 2.0, None),
+            -0.4_f64.sqrt(),
+        );
+    }
+
+    /// `portnum`/`z0` alone say how to normalize a measurement, not what to
+    /// inject. Driving such a port would corrupt every deck that declares a
+    /// reference plane and supplies its own stimulus.
+    #[test]
+    fn a_port_with_no_declared_drive_injects_nothing() {
+        let spec = rf_port(None, None, None);
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 1.0e-10, None),
+            0.0,
+        );
+    }
+
+    /// ngspice stores the phase and never applies it. A port started at 90
+    /// degrees has to start at a zero crossing.
+    #[test]
+    fn a_port_drive_starts_at_its_declared_phase() {
+        let spec = rf_port(Some(0.001), Some(2.3e9), Some(90.0));
+        let start = VoltageSources::evaluate_source_at_time_with_context(&spec, 0.0, None);
+        assert!(
+            start.abs() < 1.0e-12,
+            "90 degrees should start at zero, got {start}"
+        );
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 1.0 / (4.0 * 2.3e9), None),
+            -0.4_f64.sqrt(),
         );
     }
 

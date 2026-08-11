@@ -15,7 +15,14 @@ pub(crate) fn extract_dc_value_with_limits(
         SourceSpec::Distortion { inner, .. } => {
             extract_dc_value_with_limits(inner, resource_limits)
         }
-        SourceSpec::RfPort { inner, .. } => extract_dc_value_with_limits(inner, resource_limits),
+        // Same rule as SIN below: ngspice's TRANOP takes the `time = 0`
+        // waveform value rather than the bare DC (MODEDC covers MODETRANOP, so
+        // vsrcload.c reaches `case PORT`). Without it the transient would open
+        // at the DC bias and step to the full port amplitude on its first
+        // accepted point.
+        SourceSpec::RfPort { inner, port } => {
+            extract_dc_value_with_limits(inner, resource_limits) + port.drive_at(0.0).unwrap_or(0.0)
+        }
         SourceSpec::Dc(v) => *v,
         SourceSpec::DcAc { dc_value, .. } => *dc_value,
         SourceSpec::DcTransient { dc_value, .. } => *dc_value,

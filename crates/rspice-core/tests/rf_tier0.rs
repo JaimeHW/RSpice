@@ -340,3 +340,114 @@ fn hb_dc_component_matches_the_transient_referee_on_a_rectifier() {
         "HB DC {hb_dc} vs transient referee {referee}"
     );
 }
+
+/// An ngspice-style annotated port that names a power and a frequency is a
+/// large-signal generator, not just a measurement reference. `examples/sp/sp1.cir`
+/// ships one; RSpice used to unwrap the port annotation and run the `dc 0 ac 1`
+/// underneath it, so the deck produced a flat zero in transient.
+///
+/// The amplitude is closed form: `sqrt(4 P Z0)` is the peak that delivers `P`
+/// into a matched `Z0`, so 1 mW into 100 ohms is 632.455 mV.
+#[test]
+fn an_rf_port_drives_its_declared_power_into_the_transient() {
+    let frequency = 1.0e9;
+    let netlist = Netlist::parse(
+        "* annotated RF port as a large-signal drive\n\
+         V1 in 0 dc 0 ac 1 portnum 1 z0 100 pwr 0.001 freq 1e9\n\
+         R1 in 0 50\n\
+         .end\n",
+    )
+    .expect("deck parses");
+
+    let periods = 4.0;
+    let result = engine()
+        .run_tran(&netlist, periods / frequency, 1.0 / (frequency * 2000.0))
+        .expect("transient completes");
+    let in_node = result
+        .node_names
+        .iter()
+        .position(|n| n.eq_ignore_ascii_case("in"))
+        .expect("in node");
+
+    let expected = (4.0 * 0.001 * 100.0_f64).sqrt();
+    let peak = result.voltages[in_node]
+        .iter()
+        .fold(0.0_f64, |peak, v| peak.max(v.abs()));
+    assert!(
+        (peak - expected).abs() < 1.0e-3 * expected,
+        "port peak {peak} V, expected {expected} V"
+    );
+
+    // The waveform has to be the cosine and not a constant sitting at the peak.
+    let trough = result.voltages[in_node]
+        .iter()
+        .fold(0.0_f64, |trough, v| trough.min(*v));
+    assert!(
+        (trough + expected).abs() < 1.0e-3 * expected,
+        "port trough {trough} V, expected {} V",
+        -expected
+    );
+}
+
+/// A port that gives only `portnum`/`z0` says how to normalize a scattering
+/// measurement, not what to inject. Driving it would corrupt every deck that
+/// declares a reference plane and supplies its own stimulus.
+#[test]
+fn an_rf_port_with_no_declared_drive_leaves_its_own_waveform_alone() {
+    let netlist = Netlist::parse(
+        "* reference-only port carrying its own PULSE stimulus\n\
+         V1 in 0 dc 0 portnum 1 z0 50 pulse(0 1 0 1n 1n 10n 20n)\n\
+         R1 in 0 50\n\
+         .end\n",
+    )
+    .expect("deck parses");
+
+    let result = engine()
+        .run_tran(&netlist, 40.0e-9, 1.0e-10)
+        .expect("transient completes");
+    let in_node = result
+        .node_names
+        .iter()
+        .position(|n| n.eq_ignore_ascii_case("in"))
+        .expect("in node");
+
+    let peak = result.voltages[in_node]
+        .iter()
+        .fold(f64::NEG_INFINITY, |peak, v| peak.max(*v));
+    let trough = result.voltages[in_node]
+        .iter()
+        .fold(f64::INFINITY, |trough, v| trough.min(*v));
+    assert!(
+        (peak - 1.0).abs() < 1.0e-6 && trough.abs() < 1.0e-6,
+        "reference-only port should still be its own PULSE: {trough} .. {peak}"
+    );
+}
+
+/// The transient must open at the drive, not step into it. ngspice's TRANOP
+/// evaluates the port waveform at `time = 0` (MODEDC covers MODETRANOP), so a
+/// port that starts at its cosine peak has an operating point at that peak.
+#[test]
+fn an_rf_port_operating_point_opens_at_the_drive_rather_than_stepping_into_it() {
+    let netlist = Netlist::parse(
+        "* port bias continuity across the operating point\n\
+         V1 in 0 dc 0 portnum 1 z0 100 pwr 0.001 freq 1e9\n\
+         R1 in 0 50\n\
+         .end\n",
+    )
+    .expect("deck parses");
+
+    let expected = (4.0 * 0.001 * 100.0_f64).sqrt();
+    let op = engine()
+        .run_dc_op(&netlist)
+        .expect("operating point solves");
+    let index = op
+        .node_names
+        .iter()
+        .position(|n| n.eq_ignore_ascii_case("in"))
+        .expect("in node");
+    assert!(
+        (op.node_voltages[index] - expected).abs() < 1.0e-9,
+        "operating point {} V, expected the t=0 drive {expected} V",
+        op.node_voltages[index]
+    );
+}

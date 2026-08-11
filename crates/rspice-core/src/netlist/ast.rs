@@ -1441,6 +1441,45 @@ pub struct SourceRfPort {
     pub reference_plane: Option<String>,
 }
 
+impl SourceRfPort {
+    /// Power a port drives when it declares a drive without saying how much:
+    /// 1 mW, which is 0 dBm (ngspice `vsrctemp.c`).
+    pub const DEFAULT_DRIVE_POWER: Value = 1.0e-3;
+
+    /// Frequency a port drives at when it declares a drive without naming one.
+    pub const DEFAULT_DRIVE_FREQUENCY: Value = 1.0e9;
+
+    /// The port's large-signal drive at `time`, or `None` if it declares none.
+    ///
+    /// A port that names neither a power nor a frequency is a measurement
+    /// reference only -- `portnum` and `z0` say how to normalize a scattering
+    /// measurement, not what to inject -- so it drives nothing and its source
+    /// keeps whatever waveform it was given. Naming either one turns it into a
+    /// generator, and the other then takes its default. This is the same rule
+    /// ngspice applies by setting the source's function type to `PORT` from
+    /// `PWR` and `FREQ` alone.
+    ///
+    /// The amplitude is the peak volts that delivers `power` into a matched
+    /// `z0` load: available power `V_peak^2 / (8 Z0)` inverts to
+    /// `V_peak = sqrt(4 P Z0)`.
+    ///
+    /// One deliberate divergence: ngspice converts `phase` to radians and then
+    /// never reads it, so its ports always start at a cosine peak. A port phase
+    /// that silently does nothing is a defect rather than a specification, and
+    /// every commercial RF tool means by it what is applied here.
+    #[must_use]
+    pub fn drive_at(&self, time: Value) -> Option<Value> {
+        if self.power.is_none() && self.frequency.is_none() {
+            return None;
+        }
+        let power = self.power.unwrap_or(Self::DEFAULT_DRIVE_POWER);
+        let frequency = self.frequency.unwrap_or(Self::DEFAULT_DRIVE_FREQUENCY);
+        let amplitude = (4.0 * power * self.z0).sqrt();
+        let phase = self.phase.unwrap_or(0.0).to_radians();
+        Some(amplitude * (std::f64::consts::TAU * frequency * time + phase).cos())
+    }
+}
+
 /// One independent-source excitation used by small-signal Volterra
 /// distortion analysis.
 #[derive(Debug, Clone, Copy, PartialEq)]
