@@ -16,6 +16,7 @@ use crate::ui::widgets::{measurement_table, section_header};
 use crate::workbench::AppState;
 
 use super::strip::StripHeader;
+use super::virtual_rows::RowOffsets;
 use super::{panel_note, well_hint};
 
 const RANK_WIDTH: f32 = 44.0;
@@ -214,7 +215,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     egui::ScrollArea::both()
         .id_salt("rspice.results.sensitivity-contribution")
         .auto_shrink([false, false])
-        .show(ui, |ui| {
+        .show_viewport(ui, |ui, viewport| {
             let width = viewport_width.max(TABLE_MIN_WIDTH);
             ui.set_min_width(width);
 
@@ -289,7 +290,20 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 c.text_faint,
             );
 
-            for (rank, row) in ranked.iter().enumerate() {
+            // One row per swept parameter: a real design ranks thousands, and
+            // only the ones on screen are worth laying out.
+            let offsets = RowOffsets::from_heights(std::iter::repeat_n(ROW_HEIGHT, ranked.len()));
+            let plan = offsets.plan(egui::Rangef::new(
+                viewport.min.y - HEADER_HEIGHT,
+                viewport.max.y - HEADER_HEIGHT,
+            ));
+            ui.allocate_space(egui::vec2(width, plan.leading));
+            for (rank, row) in ranked
+                .iter()
+                .enumerate()
+                .skip(plan.first)
+                .take(plan.end - plan.first)
+            {
                 let (rect, response) =
                     ui.allocate_exact_size(egui::vec2(width, ROW_HEIGHT), Sense::hover());
                 let accessible_label = format!(
@@ -398,6 +412,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 );
                 theme::paint_focus_ring(ui, &response, rect);
             }
+            ui.allocate_space(egui::vec2(width, plan.trailing));
         });
 }
 

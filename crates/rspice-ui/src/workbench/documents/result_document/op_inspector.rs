@@ -20,6 +20,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{measurement_table, section_header};
 use crate::workbench::AppState;
 
+use super::virtual_rows::RowOffsets;
 use super::well_hint;
 
 const NAME_W: f32 = 146.0;
@@ -30,6 +31,7 @@ const ACTION_W: f32 = 82.0;
 const ROW_H: f32 = 25.0;
 const HEADER_H: f32 = 23.0;
 const GROUP_H: f32 = 24.0;
+const DEVICE_GROUP_GAP: f32 = 8.0;
 const CELL_INSET: f32 = 9.0;
 const TWO_CARD_BREAKPOINT: f32 = 840.0;
 const CARD_HEADER_H: f32 = 31.0;
@@ -796,6 +798,11 @@ fn show_node_card(
     }
 
     let table_width = ui.available_width().max(500.0);
+    // One flat row list, so the viewport plan below can address group headers
+    // and node rows alike. A retained DC solution is one row per node, and a
+    // real block has tens of thousands.
+    let flat = flatten_groups(&groups);
+    let offsets = RowOffsets::from_heights(flat.iter().map(NodeTableRow::height));
     let mut scroll = egui::ScrollArea::both()
         .id_salt("rspice.results.op.nodes")
         .auto_shrink([false, false]);
@@ -803,7 +810,7 @@ fn show_node_card(
         scroll = scroll.max_height(max_height);
     }
     let table = scroll
-        .show(ui, |ui| {
+        .show_viewport(ui, |ui, viewport| {
             ui.scope(|ui| {
             ui.set_min_width(table_width);
             column_header(
@@ -821,9 +828,22 @@ fn show_node_card(
                     (ACTION_W, "", false),
                 ],
             );
-            for (scope, rows) in groups {
-                group_header(ui, table_width, &scope, rows.len());
-                for row in rows {
+            // The header is content, not chrome, so the body's own offsets
+            // start below it.
+            let plan = offsets.plan(egui::Rangef::new(
+                viewport.min.y - HEADER_H,
+                viewport.max.y - HEADER_H,
+            ));
+            ui.allocate_space(egui::vec2(table_width, plan.leading));
+            for entry in &flat[plan.range()] {
+                let row = match entry {
+                    NodeTableRow::Group { scope, count } => {
+                        group_header(ui, table_width, scope, *count);
+                        continue;
+                    }
+                    NodeTableRow::Value(row) => *row,
+                };
+                {
                     let (rect, response) = ui
                         .allocate_exact_size(egui::vec2(table_width, ROW_H), egui::Sense::hover());
                     response.widget_info(|| {
@@ -917,6 +937,7 @@ fn show_node_card(
                     }
                 }
             }
+            ui.allocate_space(egui::vec2(table_width, plan.trailing));
             })
             .response
         });
@@ -925,6 +946,35 @@ fn show_node_card(
         node.set_label("Operating-point node voltages");
     });
     count
+}
+
+/// One drawable line of the node table: a scope heading, or a retained node.
+enum NodeTableRow<'a> {
+    Group { scope: &'a str, count: usize },
+    Value(&'a crate::state::OperatingPointValue),
+}
+
+impl NodeTableRow<'_> {
+    const fn height(&self) -> f32 {
+        match self {
+            Self::Group { .. } => GROUP_H,
+            Self::Value(_) => ROW_H,
+        }
+    }
+}
+
+fn flatten_groups<'a>(
+    groups: &'a BTreeMap<String, Vec<&'a crate::state::OperatingPointValue>>,
+) -> Vec<NodeTableRow<'a>> {
+    let mut flat = Vec::with_capacity(groups.len() + groups.values().map(Vec::len).sum::<usize>());
+    for (scope, rows) in groups {
+        flat.push(NodeTableRow::Group {
+            scope,
+            count: rows.len(),
+        });
+        flat.extend(rows.iter().copied().map(NodeTableRow::Value));
+    }
+    flat
 }
 
 fn show_device_card(
@@ -980,26 +1030,65 @@ fn show_device_card(
         return 0;
     }
 
+    // Each scope carries its own column set, so the flat list references a
+    // layout rather than repeating it per row. `save_device_op` on a real
+    // block is one row per device; drawing them all every frame is what this
+    // plan exists to stop.
+    let layouts: Vec<DeviceGroupLayout<'_>> = groups
+        .iter()
+        .map(|(scope, rows)| DeviceGroupLayout {
+            scope,
+            columns: device_columns(rows),
+            count: rows.len(),
+        })
+        .collect();
+    let flat = flatten_device_groups(&groups);
+    let offsets = RowOffsets::from_heights(flat.iter().map(DeviceTableRow::height));
     let mut scroll = egui::ScrollArea::both()
         .id_salt("rspice.results.op.devices")
         .auto_shrink([false, false]);
     if let Some(max_height) = body_max_height {
         scroll = scroll.max_height(max_height);
     }
-    let table = scroll.show(ui, |ui| {
+    let table = scroll.show_viewport(ui, |ui, viewport| {
         ui.scope(|ui| {
-            for (scope, rows) in groups {
-                let columns = device_columns(&rows);
-                let table_width =
-                    (NAME_W + KIND_W + REGION_W + columns.len() as f32 * VALUE_MIN_W + ACTION_W)
-                        .max(ui.available_width());
-                ui.set_min_width(table_width);
-                group_header(ui, table_width, &scope, rows.len());
-                if let Some(key) = device_column_header(ui, table_width, &columns, &scope, sort) {
-                    *clicked_sort = Some(key);
-                }
-
-                for entry in rows {
+            let available = ui.available_width();
+            let width_of = |layout: &DeviceGroupLayout<'_>| {
+                (NAME_W + KIND_W + REGION_W + layout.columns.len() as f32 * VALUE_MIN_W + ACTION_W)
+                    .max(available)
+            };
+            let widest = layouts.iter().map(width_of).fold(available, f32::max);
+            ui.set_min_width(widest);
+            let plan = offsets.plan(viewport.y_range());
+            ui.allocate_space(egui::vec2(widest, plan.leading));
+            for row in &flat[plan.range()] {
+                let layout = &layouts[row.layout()];
+                let table_width = width_of(layout);
+                let entry = match row {
+                    DeviceTableRow::Group(_) => {
+                        group_header(ui, table_width, layout.scope, layout.count);
+                        continue;
+                    }
+                    DeviceTableRow::ColumnHeader(_) => {
+                        if let Some(key) = device_column_header(
+                            ui,
+                            table_width,
+                            &layout.columns,
+                            layout.scope,
+                            sort,
+                        ) {
+                            *clicked_sort = Some(key);
+                        }
+                        continue;
+                    }
+                    DeviceTableRow::Gap(_) => {
+                        ui.add_space(DEVICE_GROUP_GAP);
+                        continue;
+                    }
+                    DeviceTableRow::Device { entry, .. } => *entry,
+                };
+                let columns = &layout.columns;
+                {
                     let (rect, response) = ui
                         .allocate_exact_size(egui::vec2(table_width, ROW_H), egui::Sense::hover());
                     response.widget_info(|| {
@@ -1116,8 +1205,8 @@ fn show_device_card(
                         *action = Some(OpAction::LocateDevice(component_id));
                     }
                 }
-                ui.add_space(8.0);
             }
+            ui.allocate_space(egui::vec2(widest, plan.trailing));
         })
         .response
     });
@@ -1126,6 +1215,64 @@ fn show_device_card(
         node.set_label("Device operating points");
     });
     count
+}
+
+/// The column set one device scope draws, resolved once per frame.
+struct DeviceGroupLayout<'a> {
+    scope: &'a str,
+    columns: Vec<(&'static str, &'static str)>,
+    count: usize,
+}
+
+/// One drawable line of the device table.
+enum DeviceTableRow<'a> {
+    Group(usize),
+    ColumnHeader(usize),
+    Device {
+        layout: usize,
+        entry: &'a rspice_core::circuit::DeviceOpEntry,
+    },
+    /// The breathing room between scopes. It is a row like any other here so
+    /// the plan's arithmetic stays exact — a gap left out of the offsets
+    /// drifts the viewport by 8 px per group above it.
+    Gap(usize),
+}
+
+impl DeviceTableRow<'_> {
+    const fn height(&self) -> f32 {
+        match self {
+            Self::Group(_) => GROUP_H,
+            Self::ColumnHeader(_) => HEADER_H,
+            Self::Device { .. } => ROW_H,
+            Self::Gap(_) => DEVICE_GROUP_GAP,
+        }
+    }
+
+    const fn layout(&self) -> usize {
+        match self {
+            Self::Group(layout)
+            | Self::ColumnHeader(layout)
+            | Self::Gap(layout)
+            | Self::Device { layout, .. } => *layout,
+        }
+    }
+}
+
+fn flatten_device_groups<'a>(
+    groups: &'a BTreeMap<String, Vec<&'a rspice_core::circuit::DeviceOpEntry>>,
+) -> Vec<DeviceTableRow<'a>> {
+    let mut flat = Vec::new();
+    for (layout, rows) in groups.values().enumerate() {
+        flat.push(DeviceTableRow::Group(layout));
+        flat.push(DeviceTableRow::ColumnHeader(layout));
+        flat.extend(
+            rows.iter()
+                .copied()
+                .map(|entry| DeviceTableRow::Device { layout, entry }),
+        );
+        flat.push(DeviceTableRow::Gap(layout));
+    }
+    flat
 }
 
 fn region_color(region: &str, colors: &crate::ui::palette::Palette) -> egui::Color32 {

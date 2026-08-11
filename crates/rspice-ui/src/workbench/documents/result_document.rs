@@ -27,6 +27,7 @@ mod soa;
 mod specs;
 mod table;
 mod transfer_function;
+mod virtual_rows;
 
 pub(crate) fn open_specification_editor(state: &mut AppState) {
     specs::open_editor(state);
@@ -4752,19 +4753,46 @@ mod availability_tests {
             .with_waveforms(vec![WaveformData::new("V(out)", time, values, "#00aaff")])
     }
 
+    /// A resonant second-order response, swept densely enough to decimate.
+    ///
+    /// Four points was not a sweep: it sat under every reduction threshold, so
+    /// the Bode, Nyquist and Smith fixtures exercised only the raw-stroke
+    /// path and never the one a real AC run takes. The resonance also makes
+    /// the complex locus genuinely non-monotone in its real part, so the
+    /// precondition assertion in `decimate_minmax` fires if either locus
+    /// sheet ever loses its `parametric` declaration.
+    const AC_FIXTURE_POINTS: usize = 8_192;
+
     fn ac_analysis() -> AnalysisResult {
-        let frequency = vec![1.0e3, 1.0e4, 1.0e5, 1.0e6];
-        let magnitude = vec![10.0, 7.0, 1.0, 0.1];
-        let imaginary = vec![0.0, -3.0, -0.9, -0.05];
+        let (mut frequency, mut real, mut imaginary) = (
+            Vec::with_capacity(AC_FIXTURE_POINTS),
+            Vec::with_capacity(AC_FIXTURE_POINTS),
+            Vec::with_capacity(AC_FIXTURE_POINTS),
+        );
+        let (mut magnitude, mut phase) = (
+            Vec::with_capacity(AC_FIXTURE_POINTS),
+            Vec::with_capacity(AC_FIXTURE_POINTS),
+        );
+        // H(jω) = 1 / (1 − (ω/ω0)² + j·ω/(Q·ω0)), log-swept through resonance.
+        let (natural, quality) = (1.0e5_f64, 6.0_f64);
+        for index in 0..AC_FIXTURE_POINTS {
+            let decade = 3.0 + 4.0 * index as f64 / (AC_FIXTURE_POINTS - 1) as f64;
+            let f = 10.0_f64.powf(decade);
+            let ratio = f / natural;
+            let (denominator_real, denominator_imaginary) = (1.0 - ratio * ratio, ratio / quality);
+            let square =
+                denominator_real * denominator_real + denominator_imaginary * denominator_imaginary;
+            let (re, im) = (denominator_real / square, -denominator_imaginary / square);
+            frequency.push(f);
+            real.push(re);
+            imaginary.push(im);
+            magnitude.push(re.hypot(im));
+            phase.push(im.atan2(re).to_degrees());
+        }
         AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
-            WaveformData::new("|V(out)|", frequency.clone(), magnitude.clone(), "#00aaff")
-                .with_complex_components("V(out)", magnitude, imaginary),
-            WaveformData::new(
-                "phase(V(out))",
-                frequency,
-                vec![0.0, -23.2, -83.0, -178.0],
-                "#ffaa00",
-            ),
+            WaveformData::new("|V(out)|", frequency.clone(), magnitude, "#00aaff")
+                .with_complex_components("V(out)", real, imaginary),
+            WaveformData::new("phase(V(out))", frequency, phase, "#ffaa00"),
         ])
     }
 
@@ -4953,6 +4981,127 @@ mod availability_tests {
                     "{viewer:?} put a non-finite vertex in the mesh",
                 );
             }
+        }
+    }
+
+    /// Paint one sheet and count the primitives it actually emits.
+    fn drawn_shape_count(app: &mut RSpiceApp, viewer: ResultViewer) -> usize {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1440.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        let mut shapes = 0;
+        for _ in 0..2 {
+            let output = ctx.run_ui(input.clone(), |ctx| {
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| show_persistent_pane_viewer(ui, app, viewer));
+            });
+            shapes = output.shapes.len();
+        }
+        shapes
+    }
+
+    fn operating_point_app(devices: usize) -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        let analysis = AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_device_op(
+            rspice_core::circuit::DeviceOpReport {
+                entries: (0..devices)
+                    .map(|index| rspice_core::circuit::DeviceOpEntry {
+                        // Spread across scopes so the group headers and the
+                        // per-scope column sets are exercised too.
+                        name: format!("X{}.M{index}", index % 8),
+                        device_kind: "MOSFET",
+                        region: Some("saturation"),
+                        params: Vec::new(),
+                    })
+                    .collect(),
+            },
+        );
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(analysis);
+        app.state.simulation.runs = vec![run];
+        assert!(app.state.simulation.select_run(0));
+        assert!(app.state.simulation.select_analysis(0));
+        app
+    }
+
+    fn sensitivity_app(parameters: usize) -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        let analysis = AnalysisResult::new(1, AnalysisType::Sensitivity, "SENS")
+            .with_result_payload(AnalysisResultPayload::Sensitivity {
+                output: "V(out)".to_owned(),
+                result_mode: SensitivityResultMode::Dc,
+                rows: (0..parameters)
+                    .map(|index| SensitivityResultRow {
+                        // Zero-padded: the payload requires strictly sorted
+                        // parameter names, and "p10" sorts before "p2".
+                        parameter: format!("p{index:06}"),
+                        raw: index as f64 * 1.0e-3,
+                        normalized: (index as f64 * 1.0e-3).tanh(),
+                    })
+                    .collect(),
+            });
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(analysis);
+        app.state.simulation.runs = vec![run];
+        assert!(app.state.simulation.select_run(0));
+        assert!(app.state.simulation.select_analysis(0));
+        app
+    }
+
+    fn manifest_app(analyses: usize) -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        let mut run = SimulationRun::new(1);
+        for index in 0..analyses {
+            run.add_analysis(AnalysisResult::new(
+                index as u64 + 1,
+                AnalysisType::Transient,
+                format!("TRAN {index}"),
+            ));
+        }
+        app.state.simulation.runs = vec![run];
+        assert!(app.state.simulation.select_run(0));
+        assert!(app.state.simulation.select_analysis(0));
+        app
+    }
+
+    /// The evidence tables must cost their viewport, not their dataset.
+    ///
+    /// `save_device_op` on a real block emits one row per device, a swept
+    /// design ranks one sensitivity row per parameter, and a save-all run
+    /// retains one manifest row per task. All three laid out, sensed and
+    /// painted every retained row on every frame, so the sheet's cost grew
+    /// without bound while the window stayed the same size. A row count is
+    /// not the assertion — the drawn primitive count is.
+    #[test]
+    fn the_evidence_tables_cost_their_viewport_not_their_dataset() {
+        for (viewer, small, large) in [
+            (
+                ResultViewer::Op,
+                drawn_shape_count(&mut operating_point_app(64), ResultViewer::Op),
+                drawn_shape_count(&mut operating_point_app(20_000), ResultViewer::Op),
+            ),
+            (
+                ResultViewer::Contribution,
+                drawn_shape_count(&mut sensitivity_app(64), ResultViewer::Contribution),
+                drawn_shape_count(&mut sensitivity_app(20_000), ResultViewer::Contribution),
+            ),
+            (
+                ResultViewer::Manifest,
+                drawn_shape_count(&mut manifest_app(64), ResultViewer::Manifest),
+                drawn_shape_count(&mut manifest_app(4_000), ResultViewer::Manifest),
+            ),
+        ] {
+            assert!(
+                large < small * 2,
+                "{viewer:?} drew {large} primitives for the large dataset against {small} \
+                 for the small one — it is still laying out rows it cannot show"
+            );
         }
     }
 

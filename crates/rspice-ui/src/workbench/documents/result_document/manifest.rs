@@ -15,6 +15,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{measurement_table, section_header};
 use crate::workbench::AppState;
 
+use super::virtual_rows::RowOffsets;
 use super::well_hint;
 
 const MIN_TABLE_WIDTH: f32 = 1_030.0;
@@ -281,12 +282,25 @@ pub(crate) fn show(ui: &mut Ui, state: &AppState) {
         egui::ScrollArea::both()
             .id_salt("rspice.results.dataset-manifest")
             .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.set_min_width(MIN_TABLE_WIDTH.max(ui.available_width()));
+            .show_viewport(ui, |ui, viewport| {
+                let width = MIN_TABLE_WIDTH.max(ui.available_width());
+                ui.set_min_width(width);
                 paint_header_row(ui);
-                for row in &manifest.rows {
+                // The inventory is one row per retained analysis task, and a
+                // save-all run retains thousands.
+                let offsets = RowOffsets::from_heights(std::iter::repeat_n(
+                    TABLE_ROW_HEIGHT,
+                    manifest.rows.len(),
+                ));
+                let plan = offsets.plan(egui::Rangef::new(
+                    viewport.min.y - TABLE_HEAD_HEIGHT,
+                    viewport.max.y - TABLE_HEAD_HEIGHT,
+                ));
+                ui.allocate_space(egui::vec2(width, plan.leading));
+                for row in &manifest.rows[plan.range()] {
                     paint_manifest_row(ui, row);
                 }
+                ui.allocate_space(egui::vec2(width, plan.trailing));
                 if manifest.rows.is_empty() {
                     let (rect, response) = ui.allocate_exact_size(
                         egui::vec2(ui.available_width(), TABLE_ROW_HEIGHT),
