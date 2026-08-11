@@ -437,10 +437,8 @@ mod tests {
         assert!(requirement.python.matches(&Version::new(3, 14, 0)));
         assert!(requirement.rspice_api.matches(&Version::new(1, 0, 0)));
 
-        let production = include_str!("automation_runtime.rs")
-            .split("\n#[cfg(test)]\nmod tests {")
-            .next()
-            .expect("production source");
+        let production =
+            crate::source_guard::production_half(include_str!("automation_runtime.rs"));
         for shortcut in [
             ".expect(",
             ".unwrap(",

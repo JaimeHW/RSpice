@@ -3731,10 +3731,7 @@ mod tests {
             ),
             ("Netlist surface", include_str!("../../surfaces/netlist.rs")),
         ] {
-            let production = source
-                .split("\n#[cfg(test)]\nmod tests {")
-                .next()
-                .expect("the production source precedes its test module");
+            let production = crate::source_guard::production_half(source);
             for forbidden in [
                 ".expect(",
                 ".unwrap(",

@@ -847,10 +847,7 @@ mod tests {
 
     #[test]
     fn production_source_search_has_no_panic_shortcuts() {
-        let production = include_str!("source_search.rs")
-            .split("\n#[cfg(test)]\nmod tests {")
-            .next()
-            .expect("production source");
+        let production = crate::source_guard::production_half(include_str!("source_search.rs"));
         for shortcut in [
             ".expect(",
             ".unwrap(",

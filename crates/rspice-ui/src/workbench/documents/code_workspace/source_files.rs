@@ -1277,11 +1277,7 @@ mod tests {
 
     #[test]
     fn production_source_lifecycle_has_no_panic_based_state_transitions() {
-        let source = include_str!("source_files.rs");
-        let production = source
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .expect("the production source precedes this test module");
+        let production = crate::source_guard::production_half(include_str!("source_files.rs"));
         for forbidden in [".expect(", ".unwrap(", "panic!("] {
             assert!(
                 !production.contains(forbidden),

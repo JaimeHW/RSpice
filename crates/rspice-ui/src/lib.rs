@@ -183,6 +183,11 @@ pub(crate) mod time_compat;
 /// Shared output specification helpers for analysis/sensitivity paths
 pub(crate) mod output_spec;
 
+/// Locating the production half of a source file that inspects itself, for the
+/// guards that assert their own shipped code takes no panic shortcuts.
+#[cfg(test)]
+mod source_guard;
+
 // =============================================================================
 // The crate's entire external surface
 // =============================================================================

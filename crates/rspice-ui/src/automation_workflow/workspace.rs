@@ -1648,10 +1648,7 @@ mod tests {
 
     #[test]
     fn workspace_formation_has_no_production_panic_shortcuts() {
-        let production = include_str!("workspace.rs")
-            .split("\n#[cfg(test)]\nmod tests {")
-            .next()
-            .expect("the production source precedes this test module");
+        let production = crate::source_guard::production_half(include_str!("workspace.rs"));
         for forbidden in [".expect(", ".unwrap(", "panic!(", "unreachable!("] {
             assert!(
                 !production.contains(forbidden),
