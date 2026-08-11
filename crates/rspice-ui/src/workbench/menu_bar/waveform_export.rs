@@ -16,6 +16,26 @@ pub(crate) fn action_export_csv_with_io(
         .preferences
         .result_presentation_policy()
         .engineering_export();
+    // What the reader is looking at comes first. Three sheets derive their
+    // curve in the viewer rather than reading a retained vector, so routing
+    // on the payload alone handed back the transient samples the spectrum was
+    // computed from and called it the result.
+    if let Some(derived) = prepare_active_derived_view_csv(state) {
+        match export_format {
+            EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &derived),
+            EngineeringExportFormat::TouchstoneWhereCompatible => {
+                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
+                    "Touchstone export is not compatible with a derived viewer; select CSV export."
+                        .to_owned(),
+                ))
+            }
+            EngineeringExportFormat::Hdf5EngineeringDataset => {
+                unreachable!("unsupported export preferences resolve to CSV")
+            }
+        }
+        return;
+    }
+
     if let Some(typed) = prepare_active_typed_result_csv(state) {
         match export_format {
             EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &typed),
@@ -59,6 +79,155 @@ struct PreparedTypedResultCsv {
     default_name: &'static str,
     contents: String,
     detail: String,
+}
+
+/// The exact numbers behind a sheet that derives its own curve.
+///
+/// The spectrum, the folded eye and the binned distribution exist only in the
+/// viewer: nothing retains them, so the payload-driven export below cannot
+/// see them and wrote out the source samples instead. A reader who exports
+/// from the FFT sheet wants the spectrum, and every value here is the one
+/// that was drawn — full `f64`, never the displayed rounding.
+///
+/// Sheets that plot a retained vector are deliberately absent. Their export
+/// already is what they show.
+fn prepare_active_derived_view_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
+    match state.ui.results.viewer {
+        crate::workbench::ResultViewer::Fft => fft_spectrum_csv(state),
+        crate::workbench::ResultViewer::Hist => histogram_bins_csv(state),
+        crate::workbench::ResultViewer::Eye => eye_measurements_csv(state),
+        _ => None,
+    }
+}
+
+fn fft_spectrum_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
+    let fft = &state.analysis.fft_state;
+    let data = fft.data.as_ref()?;
+    if data.points.is_empty() {
+        return None;
+    }
+    let source = fft
+        .source_cache
+        .as_ref()
+        .map_or(data.name.as_str(), |cache| cache.name.as_str());
+    let mut contents = String::from("field,value,unit\n");
+    for (field, value, unit) in [
+        ("source", csv_text(source), ""),
+        ("window", csv_text(data.window.display_name()), ""),
+        ("fft_size", data.fft_size.to_string(), ""),
+        ("sample_rate", format!("{:.17e}", data.sample_rate), "Hz"),
+        (
+            "resolution_bandwidth",
+            format!("{:.17e}", data.resolution_bandwidth()),
+            "Hz",
+        ),
+        (
+            "normalization",
+            csv_text(data.normalization.display_name()),
+            "",
+        ),
+    ] {
+        contents.push_str(&format!("{field},{value},{unit}\n"));
+    }
+    contents.push_str("\nfrequency_hz,magnitude,magnitude_db,phase_rad\n");
+    for point in &data.points {
+        contents.push_str(&format!(
+            "{:.17e},{:.17e},{:.17e},{:.17e}\n",
+            point.frequency,
+            point.magnitude,
+            point.magnitude_db(),
+            point.phase
+        ));
+    }
+    Some(PreparedTypedResultCsv {
+        default_name: "rspice-spectrum.csv",
+        detail: format!("{} spectrum points", data.points.len()),
+        contents,
+    })
+}
+
+fn histogram_bins_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
+    let histogram = state
+        .analysis
+        .histogram_state
+        .histograms
+        .get(state.analysis.histogram_state.selected)?;
+    if histogram.bins.is_empty() {
+        return None;
+    }
+    let mut contents = String::from("field,value,unit\n");
+    for (field, value) in [
+        ("measurement", csv_text(&histogram.name)),
+        ("total_count", histogram.total_count.to_string()),
+        ("total_weight", format!("{:.17e}", histogram.total_weight)),
+        ("underflow", histogram.underflow.to_string()),
+        ("overflow", histogram.overflow.to_string()),
+        ("data_min", format!("{:.17e}", histogram.data_min)),
+        ("data_max", format!("{:.17e}", histogram.data_max)),
+    ] {
+        contents.push_str(&format!("{field},{value},\n"));
+    }
+    contents.push_str("\nbin_lower,bin_upper,count,weight\n");
+    for bin in &histogram.bins {
+        contents.push_str(&format!(
+            "{:.17e},{:.17e},{},{:.17e}\n",
+            bin.lower, bin.upper, bin.count, bin.weight
+        ));
+    }
+    Some(PreparedTypedResultCsv {
+        default_name: "rspice-distribution.csv",
+        detail: format!("{} distribution bins", histogram.bins.len()),
+        contents,
+    })
+}
+
+fn eye_measurements_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
+    let eye = &state.analysis.eye_diagram_state;
+    if eye.data.traces.is_empty() {
+        return None;
+    }
+    let m = &eye.measurements;
+    let mut contents = String::from("field,value,unit\n");
+    for (field, value, unit) in [
+        ("acquisitions", eye.data.traces.len().to_string(), ""),
+        ("unit_intervals", eye.data.ui_count.to_string(), ""),
+        ("data_rate", format!("{:.17e}", m.data_rate), "b/s"),
+        ("unit_interval", format!("{:.17e}", m.unit_interval), "s"),
+        ("eye_height", format!("{:.17e}", m.eye_height), "V"),
+        ("eye_width", format!("{:.17e}", m.eye_width), "UI"),
+        ("eye_area", format!("{:.17e}", m.eye_area), ""),
+        (
+            "vertical_margin",
+            format!("{:.17e}", m.vertical_margin),
+            "V",
+        ),
+        (
+            "horizontal_margin",
+            format!("{:.17e}", m.horizontal_margin),
+            "UI",
+        ),
+        ("rise_time", format!("{:.17e}", m.rise_time), "s"),
+        ("fall_time", format!("{:.17e}", m.fall_time), "s"),
+        ("jitter_pp", format!("{:.17e}", m.jitter_pp), "s"),
+        ("jitter_rms", format!("{:.17e}", m.jitter_rms), "s"),
+        ("jitter_dj", format!("{:.17e}", m.jitter_dj), "s"),
+        ("crossing_level", format!("{:.17e}", m.crossing_level), "V"),
+        (
+            "crossing_percentage",
+            format!("{:.17e}", m.crossing_percentage),
+            "",
+        ),
+        ("snr", format!("{:.17e}", m.snr_db), "dB"),
+        ("q_factor", format!("{:.17e}", m.q_factor), ""),
+        ("estimated_ber", format!("{:.17e}", m.estimated_ber), ""),
+    ] {
+        contents.push_str(&format!("{field},{value},{unit}\n"));
+    }
+    Some(PreparedTypedResultCsv {
+        default_name: "rspice-eye.csv",
+        detail: format!("{} eye acquisitions", eye.data.traces.len()),
+        contents,
+    })
 }
 
 fn prepare_active_typed_result_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
@@ -996,6 +1165,105 @@ mod tests {
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
         state
+    }
+
+    /// A derived sheet must export the curve it drew, not the samples it was
+    /// derived from.
+    ///
+    /// The export routed on the retained payload alone, so exporting from the
+    /// FFT sheet wrote the transient — the input to the spectrum, never the
+    /// spectrum. The distribution and the eye had the same gap, and none of
+    /// the three is retained anywhere the payload path can see.
+    #[test]
+    fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
+        use crate::analysis::fft::data::{FftData, SpectrumNormalization};
+        use crate::analysis::histogram::data::{Histogram, HistogramBin};
+
+        let transient = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.0])]);
+        let mut state = state_with_typed_result(transient);
+        state.analysis.fft_state.data = Some(FftData::from_spectrum_with_normalization(
+            "V(out)",
+            &[0.0, 1.0e3, 2.0e3],
+            &[1.0, 0.5, 0.25],
+            &[0.0, 0.1, 0.2],
+            8_192.0,
+            SpectrumNormalization::Peak,
+        ));
+        state.ui.results.viewer = crate::workbench::ResultViewer::Fft;
+        let io = MockExportWorkflowIo::default();
+
+        action_export_csv_with_io(&mut state, &io);
+
+        let files = io.text_files.borrow();
+        assert_eq!(files[0].0, PathBuf::from("rspice-spectrum.csv"));
+        let spectrum = files[0].1.clone();
+        drop(files);
+        assert!(
+            spectrum.contains("frequency_hz,magnitude,magnitude_db,phase_rad"),
+            "{spectrum}"
+        );
+        assert!(spectrum.contains("2.00000000000000000e3"), "{spectrum}");
+        assert!(
+            !spectrum.contains("V(out)\ntime"),
+            "the transient leaked into a spectrum export: {spectrum}"
+        );
+
+        // The distribution exports its bins, not the Monte-Carlo waveform.
+        let mut state =
+            state_with_typed_result(
+                AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC")
+                    .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0], vec![0.9, 1.1])]),
+            );
+        state.analysis.histogram_state.load_histogram(Histogram {
+            name: "V(out)".to_owned(),
+            bins: vec![HistogramBin {
+                lower: 0.9,
+                upper: 1.0,
+                count: 3,
+                weight: 3.0,
+            }],
+            total_count: 3,
+            total_weight: 3.0,
+            underflow: 0,
+            overflow: 0,
+            data_min: 0.9,
+            data_max: 1.0,
+        });
+        state.ui.results.viewer = crate::workbench::ResultViewer::Hist;
+        let io = MockExportWorkflowIo::default();
+
+        action_export_csv_with_io(&mut state, &io);
+
+        let files = io.text_files.borrow();
+        assert_eq!(files[0].0, PathBuf::from("rspice-distribution.csv"));
+        assert!(
+            files[0].1.contains("bin_lower,bin_upper,count,weight"),
+            "{}",
+            files[0].1
+        );
+    }
+
+    /// A sheet that plots a retained vector keeps the payload path: its
+    /// export already is what it shows, and a second writer would be a
+    /// second answer to the same question.
+    #[test]
+    fn csv_export_from_a_retained_sheet_is_unchanged_by_the_derived_route() {
+        let mut state =
+            state_with_typed_result(
+                AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+                    .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0], vec![0.0, 2.0])]),
+            );
+        state.ui.results.viewer = crate::workbench::ResultViewer::Waves;
+        let io = MockExportWorkflowIo::default();
+
+        action_export_csv_with_io(&mut state, &io);
+
+        assert!(
+            io.text_files.borrow().is_empty(),
+            "a waveform sheet must still go through the waveform dataset writer"
+        );
+        assert_eq!(io.datasets.borrow().len(), 1);
     }
 
     #[test]
