@@ -1,12 +1,7 @@
 use super::lexer::{Token, TokenKind, tokenize};
+use super::model_resolution::builtin_model_names;
 use super::{Netlist, SubcircuitDef};
 use std::collections::HashSet;
-use std::sync::OnceLock;
-
-use crate::builtin_lib::{
-    BJT_LIB as BUILTIN_BJT_LIB, DIODE_LIB as BUILTIN_DIODE_LIB, JFET_LIB as BUILTIN_JFET_LIB,
-    MOSFET_LIB as BUILTIN_MOSFET_LIB,
-};
 
 /// Byte range on one physical source line.
 ///
@@ -464,6 +459,12 @@ fn ident_text(token: &Token) -> Option<&str> {
     }
 }
 
+/// Names a model reference in the deck text may carry without being unknown.
+///
+/// A text reference does not say which device family names it, so the
+/// card-free names are taken as one union. `unresolved_device_model_references`
+/// applies the per-family form to the instantiated topology, where the family
+/// is known.
 fn known_model_names(netlist: &Netlist) -> HashSet<String> {
     let mut names = builtin_model_names().clone();
     for model in &netlist.models {
@@ -535,39 +536,6 @@ fn scoped_reference_is_known(
     }
 
     false
-}
-
-fn builtin_model_names() -> &'static HashSet<String> {
-    static NAMES: OnceLock<HashSet<String>> = OnceLock::new();
-    NAMES.get_or_init(|| {
-        let mut names = HashSet::new();
-        for model_type in [
-            "D", "DIODE", "NPN", "PNP", "NMOS", "PMOS", "NJF", "PJF", "NMF", "PMF", "NHFET",
-            "PHFET",
-        ] {
-            names.insert(model_type.to_string());
-        }
-        insert_model_names_from_library(BUILTIN_BJT_LIB, &mut names);
-        insert_model_names_from_library(BUILTIN_DIODE_LIB, &mut names);
-        insert_model_names_from_library(BUILTIN_JFET_LIB, &mut names);
-        insert_model_names_from_library(BUILTIN_MOSFET_LIB, &mut names);
-        for model_name in crate::codemodels::BUILTIN_MODEL_NAMES {
-            names.insert(model_name.to_ascii_uppercase());
-        }
-        names
-    })
-}
-
-fn insert_model_names_from_library(library: &str, names: &mut HashSet<String>) {
-    for line in library.lines() {
-        let trimmed = line.trim_start();
-        if !dot_command_matches(trimmed, ".MODEL") {
-            continue;
-        }
-        if let Some(name) = dot_command_argument(trimmed, 1) {
-            names.insert(name.to_ascii_uppercase());
-        }
-    }
 }
 
 fn dot_command_matches(line: &str, command: &str) -> bool {
@@ -754,6 +722,32 @@ mod tests {
         let diagnostics = netlist.lint_unknown_references();
 
         assert_eq!(diagnostics, Vec::new());
+    }
+
+    #[test]
+    fn names_no_bind_path_accepts_lint_unknown() {
+        // A bare `D`/`NPN` is a card's type, never a model the builder can
+        // resolve, and the JFET and MOSFET libraries back no bind path: the
+        // embedded fallbacks the builder consults are the diode and bipolar
+        // libraries alone. 2N3819 and 2N7000 are real cards in the two
+        // libraries that go unread.
+        let deck = "source map\n\
+            D1 a 0 d\n\
+            Q1 c b e npn\n\
+            J1 jd jg js 2N3819\n\
+            M1 md mg ms mb 2N7000\n\
+            .end\n";
+
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let diagnostics = netlist.lint_unknown_references();
+
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["D", "NPN", "2N3819", "2N7000"]
+        );
     }
 
     #[test]

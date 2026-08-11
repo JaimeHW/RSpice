@@ -23,6 +23,7 @@ pub mod include;
 mod initcond;
 pub mod lexer;
 pub mod measure;
+mod model_resolution;
 pub mod multi_run;
 mod mutual_inductor;
 mod output_symbols;
@@ -56,6 +57,7 @@ pub use initcond::{
     DeviceInitialConditionSourceProvider, DeviceInitialConditionSourceText,
     MAX_DEVICE_INITIAL_CONDITION_SOURCE_BYTES,
 };
+pub use model_resolution::{UnresolvedDeviceModelReference, unresolved_device_model_references};
 pub use mutual_inductor::validate_mutual_inductor_references;
 pub(crate) use output_symbols::{
     InterfaceNodeAliases, canonical_symbol, collect_output_node_namespace_from_elements_with_abort,
