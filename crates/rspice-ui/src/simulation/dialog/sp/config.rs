@@ -166,10 +166,11 @@ impl SpConfig {
         if self.z0 <= 0.0 {
             return Err("Reference impedance Z0 must be positive".to_string());
         }
-        if self.ports.is_empty() {
-            return Err("At least one port must be defined".to_string());
-        }
-        if self.ports.len() < 2 {
+        // An empty table is legitimate: a design drawn with RF Port components
+        // declares its ports in the deck, and typing them again here would be
+        // a second place for them to disagree. A partly filled table is not —
+        // one port is a table someone stopped filling in.
+        if self.ports.len() == 1 {
             return Err("S-parameter analysis requires at least 2 ports".to_string());
         }
 

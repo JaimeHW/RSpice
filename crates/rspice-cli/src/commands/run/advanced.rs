@@ -1350,80 +1350,18 @@ fn solve_netlist_sparameters(
     ports: Vec<s_param::SParameterPort>,
     frequencies: Vec<f64>,
 ) -> Result<SParameterSweepData, CliError> {
-    let num_ports = ports.len();
-    let num_freqs = frequencies.len();
-    let z0_by_port = ports.iter().map(|port| port.z0).collect::<Vec<_>>();
-    let mut y =
-        vec![vec![vec![rspice_core::Complex64::new(0.0, 0.0); num_freqs]; num_ports]; num_ports];
-
-    for (excite_port, _) in ports.iter().enumerate() {
-        let mut excited = ctx.netlist.clone();
-        s_param::set_excitations(&mut excited, &ports, excite_port).map_err(sparameter_error)?;
-        let ac_points = ctx
-            .engine
-            .run_ac(&excited, &frequencies)
-            .map_err(|e| CliError::simulation_error_in(e.to_string(), "S-Parameters"))?;
-        if ac_points.len() != num_freqs {
-            return Err(CliError::SimulationError {
-                message: format!(
-                    ".SP AC solve returned {} points for {} requested frequencies",
-                    ac_points.len(),
-                    num_freqs
-                ),
-                analysis: Some("S-Parameters".to_string()),
-            });
-        }
-
-        for (freq_idx, point) in ac_points.iter().enumerate() {
-            for (row_port, port) in ports.iter().enumerate() {
-                let current =
-                    branch_current_by_name(point, &port.source_name).ok_or_else(|| {
-                        CliError::SimulationError {
-                            message: format!(
-                                ".SP source '{}' branch current missing at point {}",
-                                port.source_name, freq_idx
-                            ),
-                            analysis: Some("S-Parameters".to_string()),
-                        }
-                    })?;
-                y[row_port][excite_port][freq_idx] = -current;
-            }
-        }
-    }
-
-    let mut s =
-        vec![vec![vec![rspice_core::Complex64::new(0.0, 0.0); num_freqs]; num_ports]; num_ports];
-    for freq_idx in 0..num_freqs {
-        let mut y_matrix = vec![vec![rspice_core::Complex64::new(0.0, 0.0); num_ports]; num_ports];
-        for row in 0..num_ports {
-            for col in 0..num_ports {
-                y_matrix[row][col] = y[row][col][freq_idx];
-            }
-        }
-        let s_matrix = s_param::s_from_y(&y_matrix, &z0_by_port).map_err(sparameter_error)?;
-        for row in 0..num_ports {
-            for col in 0..num_ports {
-                s[row][col][freq_idx] = s_matrix[row][col];
-            }
-        }
-    }
+    let s = s_param::extract_s_matrix(ctx.netlist, &ports, &frequencies, |driven| {
+        ctx.engine
+            .run_ac(driven, &frequencies)
+            .map_err(|error| error.to_string())
+    })
+    .map_err(|error| CliError::simulation_error_in(error.to_string(), "S-Parameters"))?;
 
     Ok(SParameterSweepData {
         frequencies,
         ports,
         s,
     })
-}
-
-fn branch_current_by_name(
-    point: &rspice_core::analysis::AcResult,
-    branch_name: &str,
-) -> Option<rspice_core::Complex64> {
-    point
-        .branch_names
-        .iter()
-        .position(|name| name.eq_ignore_ascii_case(branch_name))
-        .and_then(|index| point.currents.get(index).copied())
 }
 
 fn touchstone_extension_matches(path: &std::path::Path, num_ports: usize) -> bool {

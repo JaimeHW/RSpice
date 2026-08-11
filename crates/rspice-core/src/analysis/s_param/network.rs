@@ -210,6 +210,73 @@ pub fn s_column_from_port_voltages(
         .collect())
 }
 
+/// Convert scattering parameters back to an N-port admittance matrix.
+///
+/// The exact inverse of [`s_from_y`]:
+///
+/// ```text
+/// Y = D^-1 (I + S)^-1 (I - S) D^-1,   D = diag(sqrt(Z0_i))
+/// ```
+///
+/// This exists so a caller that measured `S` need not also measure `Y`. Reading
+/// admittance off the port branch currents is only valid when the port source is
+/// ideal; behind a Thevenin generator the branch current is the one flowing
+/// through the reference resistor, which is a different quantity.
+///
+/// Returns [`NetworkError::SingularNormalization`] when `I + S` is singular,
+/// which is what a network with no admittance representation looks like from
+/// here.
+pub fn y_from_s(
+    scattering: &[Vec<Complex64>],
+    reference_impedances: &[Value],
+) -> Result<Vec<Vec<Complex64>>, NetworkError> {
+    let size = scattering.len();
+    if size == 0
+        || reference_impedances.len() != size
+        || scattering.iter().any(|row| row.len() != size)
+    {
+        return Err(NetworkError::MalformedAdmittance {
+            rows: size,
+            impedances: reference_impedances.len(),
+        });
+    }
+    for (port, &z0) in reference_impedances.iter().enumerate() {
+        if !z0.is_finite() || z0 <= 0.0 {
+            return Err(NetworkError::InvalidReferenceImpedance { port, z0 });
+        }
+    }
+
+    let one = Complex64::new(1.0, 0.0);
+    let mut sum = scattering.to_vec();
+    let mut difference = vec![vec![Complex64::new(0.0, 0.0); size]; size];
+    for row in 0..size {
+        for column in 0..size {
+            difference[row][column] = -scattering[row][column];
+        }
+        sum[row][row] += one;
+        difference[row][row] += one;
+    }
+
+    let inverse = invert_complex_matrix(&sum).ok_or(NetworkError::SingularNormalization)?;
+    let inverse_scale = reference_impedances
+        .iter()
+        .map(|z0| 1.0 / z0.sqrt())
+        .collect::<Vec<_>>();
+
+    Ok((0..size)
+        .map(|row| {
+            (0..size)
+                .map(|column| {
+                    let product: Complex64 = (0..size)
+                        .map(|k| inverse[row][k] * difference[k][column])
+                        .sum();
+                    product * inverse_scale[row] * inverse_scale[column]
+                })
+                .collect()
+        })
+        .collect())
+}
+
 /// Convert an N-port admittance matrix to scattering parameters.
 ///
 /// `admittance` is indexed `[row][column]`; `reference_impedances` gives one
@@ -375,6 +442,30 @@ mod tests {
             "S21 = {}",
             column[1]
         );
+    }
+
+    /// `y_from_s` must be the exact inverse of `s_from_y`, including the `D`
+    /// scaling that only shows up when the reference impedances differ.
+    #[test]
+    fn admittance_round_trips_through_scattering() {
+        let y = vec![
+            vec![Complex64::new(0.02, 0.01), Complex64::new(-0.005, 0.002)],
+            vec![Complex64::new(-0.005, 0.002), Complex64::new(0.01, -0.003)],
+        ];
+        let z0 = [50.0, 75.0];
+
+        let s = s_from_y(&y, &z0).expect("conversion succeeds");
+        let recovered = y_from_s(&s, &z0).expect("inverse succeeds");
+
+        for (row, values) in y.iter().enumerate() {
+            for (column, value) in values.iter().enumerate() {
+                assert!(
+                    (recovered[row][column] - value).norm() < 1e-12,
+                    "Y[{row}][{column}] = {}, expected {value}",
+                    recovered[row][column]
+                );
+            }
+        }
     }
 
     #[test]

@@ -392,66 +392,24 @@ impl PyEngine {
         let engine = self.engine_for_netlist(&netlist.inner);
         let temperature = engine.config().temperature;
         let (parameters, noise) = run_interruptible(py, &self.active_runs, |abort| {
-            let num_ports = ports.len();
             let num_points = frequencies.len();
-            let zero = rspice_core::Complex64::new(0.0, 0.0);
-            let mut admittances = vec![vec![vec![zero; num_points]; num_ports]; num_ports];
-            for excited_port in 0..num_ports {
-                if abort.is_aborted() {
-                    return Err(rspice_core::engine::SimulationError::Aborted);
-                }
-                let mut excited = netlist.inner.clone();
-                s_param::set_excitations(&mut excited, &ports, excited_port).map_err(|error| {
-                    rspice_core::engine::SimulationError::Circuit(error.to_string())
-                })?;
-                let points = engine.run_ac_with_abort(&excited, &frequencies, abort)?;
-                if points.len() != num_points {
-                    return Err(rspice_core::engine::SimulationError::Circuit(format!(
-                        "S-parameter AC solve returned {} points for {num_points} requested frequencies",
-                        points.len()
-                    )));
-                }
-                for (frequency_index, point) in points.iter().enumerate() {
-                    for (output_port, port) in ports.iter().enumerate() {
-                        let branch_index = point
-                                .branch_names
-                                .iter()
-                                .position(|name| name.eq_ignore_ascii_case(&port.source_name))
-                                .ok_or_else(|| {
-                                    rspice_core::engine::SimulationError::Circuit(format!(
-                                        "S-parameter source '{}' has no branch current at frequency point {frequency_index}",
-                                        port.source_name
-                                    ))
-                                })?;
-                        let current = point.currents.get(branch_index).copied().ok_or_else(|| {
-                                rspice_core::engine::SimulationError::Circuit(format!(
-                                    "S-parameter source '{}' branch-current vector is malformed at frequency point {frequency_index}",
-                                    port.source_name
-                                ))
-                            })?;
-                        admittances[output_port][excited_port][frequency_index] = -current;
+            let scattering =
+                s_param::extract_s_matrix(&netlist.inner, &ports, &frequencies, |driven| {
+                    engine
+                        .run_ac_with_abort(driven, &frequencies, abort)
+                        .map_err(|error| error.to_string())
+                })
+                // An interrupt surfaces as a failed AC solve, so the abort
+                // signal — not the error text — decides which it was. A
+                // cancelled run must never reach the caller dressed up as a
+                // defect in their circuit.
+                .map_err(|error| {
+                    if abort.is_aborted() {
+                        rspice_core::engine::SimulationError::Aborted
+                    } else {
+                        rspice_core::engine::SimulationError::Circuit(error.to_string())
                     }
-                }
-            }
-
-            let mut scattering = vec![vec![vec![zero; num_points]; num_ports]; num_ports];
-            for frequency_index in 0..num_points {
-                let y = (0..num_ports)
-                    .map(|row| {
-                        (0..num_ports)
-                            .map(|column| admittances[row][column][frequency_index])
-                            .collect::<Vec<_>>()
-                    })
-                    .collect::<Vec<_>>();
-                let matrix = s_param::s_from_y(&y, &impedances).map_err(|error| {
-                    rspice_core::engine::SimulationError::Circuit(error.to_string())
                 })?;
-                for row in 0..num_ports {
-                    for column in 0..num_ports {
-                        scattering[row][column][frequency_index] = matrix[row][column];
-                    }
-                }
-            }
 
             let noise = if do_noise {
                 let points = engine.run_port_noise_correlation_with_abort(
@@ -467,6 +425,8 @@ impl PyEngine {
                         points.len()
                     )));
                 }
+                let num_ports = ports.len();
+                let zero = rspice_core::Complex64::new(0.0, 0.0);
                 let mut current_correlation =
                     vec![vec![vec![zero; num_points]; num_ports]; num_ports];
                 let mut two_port_points = Vec::with_capacity(num_points);
@@ -494,13 +454,20 @@ impl PyEngine {
                         }
                     }
                     if num_ports == 2 {
-                        let y = (0..num_ports)
+                        // Derived from the S-matrix just measured rather than
+                        // read off the port branch currents: behind a Thevenin
+                        // port that current flows through the reference
+                        // resistor and is not the admittance term at all.
+                        let s = (0..num_ports)
                             .map(|row| {
                                 (0..num_ports)
-                                    .map(|column| admittances[row][column][frequency_index])
+                                    .map(|column| scattering[row][column][frequency_index])
                                     .collect::<Vec<_>>()
                             })
                             .collect::<Vec<_>>();
+                        let y = s_param::y_from_s(&s, &impedances).map_err(|error| {
+                            rspice_core::engine::SimulationError::Circuit(error.to_string())
+                        })?;
                         two_port_points.push(s_param::derive_two_port_noise(
                             &y,
                             &point.current_correlation,

@@ -34,6 +34,7 @@ use crate::Value;
 use std::f64::consts::PI;
 
 mod complex;
+mod extract;
 mod matching;
 mod matrix;
 mod network;
@@ -43,6 +44,7 @@ mod stability;
 mod touchstone;
 
 pub use complex::Complex;
+pub use extract::{ExtractError, extract_s_matrix};
 pub use matching::{
     SourceImpedance, available_power, delivered_power, l_section_match, mismatch_loss_db,
     optimal_load_impedance, optimal_source_impedance, reactance_to_component,
@@ -51,7 +53,7 @@ pub use matching::{
 pub use matrix::{Port, SMatrix, SParameterResult};
 pub use network::{
     NetworkError, invert_complex_matrix, invert_complex_matrix_with_abort,
-    s_column_from_port_voltages, s_from_y, s_from_y_with_abort,
+    s_column_from_port_voltages, s_from_y, s_from_y_with_abort, y_from_s,
 };
 pub use noise_params::{TwoPortNoise, derive_two_port_noise};
 pub use ports::{
