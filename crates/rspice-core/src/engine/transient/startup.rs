@@ -901,9 +901,9 @@ impl Engine {
     /// The controller supplies its own tiny positive implementation floor at
     /// time zero, where the canonical expression is exactly zero.
     #[inline]
-    pub(super) fn xyce_hard_min_timestep(current_time: Value) -> Value {
+    pub(crate) fn xyce_hard_min_timestep(current_time: Value) -> Value {
         if current_time.is_finite() {
-            current_time.abs() * 10.0 * Value::EPSILON
+            current_time.abs() * (10.0 * Value::EPSILON)
         } else {
             0.0
         }
@@ -1042,5 +1042,14 @@ mod tests {
     fn breakpoint_tolerance_matches_xspice_minbreak_rule() {
         assert_close(Engine::ngspice_breakpoint_tolerance(1e-11), 1e-21);
         assert_close(Engine::ngspice_breakpoint_tolerance(0.5e-9), 5e-20);
+    }
+
+    #[test]
+    fn xyce_hard_min_timestep_avoids_intermediate_overflow() {
+        let minimum = Engine::xyce_hard_min_timestep(Value::MAX);
+
+        assert!(minimum.is_finite());
+        assert!(minimum > 0.0);
+        assert_eq!(minimum, Value::MAX * (10.0 * Value::EPSILON));
     }
 }

@@ -1899,6 +1899,18 @@ impl Engine {
         // (its device-state priming is wanted), but time, solution, and the
         // reactive histories come from the checkpoint.
         let resume_time = resume.map_or(0.0, |checkpoint| checkpoint.time);
+        if self.config.spice_dialect == SpiceDialect::Xyce {
+            // A resumed source must observe the tolerance belonging to the
+            // restored accepted state before branch-current capture or any
+            // other source evaluation occurs.
+            let breakpoint_tolerance = 2.0 * Self::xyce_hard_min_timestep(resume_time);
+            circuit
+                .voltage_sources
+                .set_xyce_breakpoint_tolerance(breakpoint_tolerance);
+            circuit
+                .current_sources
+                .set_xyce_breakpoint_tolerance(breakpoint_tolerance);
+        }
         if let Some(checkpoint) = resume {
             if checkpoint.solution.len() != circuit.matrix_size() {
                 return Err(SimulationError::Circuit(format!(
@@ -2102,7 +2114,9 @@ impl Engine {
             source_step_hint,
             self.config.spice_dialect,
             &mut breakpoints,
-        );
+            abort,
+            self.config.resource_limits.max_analysis_points,
+        )?;
         Self::add_breakpoint_if_in_range(&mut breakpoints, tstop, tstop);
         let source_breakpoint_times = breakpoints.times().to_vec();
         Self::collect_transient_tline_breakpoints(
@@ -2974,7 +2988,15 @@ impl Engine {
                 // Stiff state devices can legitimately require steps far below
                 // ngspice's max-step-derived `delmin` while crossing a narrow
                 // physical boundary layer.
-                timestep.set_hard_min_dt(Self::xyce_hard_min_timestep(t));
+                let hard_min_timestep = Self::xyce_hard_min_timestep(t);
+                timestep.set_hard_min_dt(hard_min_timestep);
+                let breakpoint_tolerance = 2.0 * hard_min_timestep;
+                circuit
+                    .voltage_sources
+                    .set_xyce_breakpoint_tolerance(breakpoint_tolerance);
+                circuit
+                    .current_sources
+                    .set_xyce_breakpoint_tolerance(breakpoint_tolerance);
             }
             // Progress logging every 2 seconds
             if last_progress_log

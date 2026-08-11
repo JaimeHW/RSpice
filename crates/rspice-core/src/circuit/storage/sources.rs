@@ -92,6 +92,11 @@ struct TransientSourceContext {
     tstep: Value,
     tstop: Value,
     dialect: crate::config::SpiceDialect,
+    /// Xyce `SolverState::bpTol_` from the current accepted transient state.
+    /// `None` is reserved for stateless waveform previews, which have no
+    /// integration controller and derive the closest available fallback from
+    /// their evaluation time.
+    xyce_breakpoint_tolerance: Option<Value>,
     resource_limits: crate::resource::ResourceLimits,
 }
 
@@ -281,8 +286,20 @@ impl VoltageSources {
             tstep: step,
             tstop: stop,
             dialect,
+            xyce_breakpoint_tolerance: (dialect == crate::config::SpiceDialect::Xyce)
+                .then_some(0.0),
             resource_limits,
         });
+    }
+
+    /// Publish Xyce's accepted-state breakpoint tolerance to source devices.
+    pub(crate) fn set_xyce_breakpoint_tolerance(&mut self, tolerance: Value) {
+        if let Some(context) = self.transient_context.as_mut()
+            && context.dialect == crate::config::SpiceDialect::Xyce
+        {
+            context.xyce_breakpoint_tolerance =
+                (tolerance.is_finite() && tolerance >= 0.0).then_some(tolerance);
+        }
     }
 
     /// Clear transient context and use static waveform defaults.
@@ -1057,6 +1074,7 @@ impl VoltageSources {
                 tstep: step,
                 tstop: stop,
                 dialect,
+                xyce_breakpoint_tolerance: None,
                 resource_limits: crate::resource::ResourceLimits::default(),
             }),
         )
@@ -1173,51 +1191,51 @@ impl VoltageSources {
         // `pulse(0 5 2ns 2ns 2ns 80ns)`: v(1) rises at 3ns, falls at 85ns,
         // and rises again at 88ns and 172ns — a period of tr+pw+tf = 84ns,
         // not a single pulse held low to tstop.
-        let stop_time_defaults = xyce_defaults;
-
-        let td = if delay.is_finite() {
-            delay.max(0.0)
+        // Xyce keys every timing default off whether the field was authored,
+        // not off its numeric value. In particular, explicit zero rise/fall
+        // times are ideal edges and an explicit zero period is a one-shot
+        // source. ngspice instead replaces non-positive TR/TF/PER values with
+        // analysis-scaled defaults. The parser's NaN sentinels preserve the
+        // omitted-vs-authored distinction for the optional fields.
+        // Xyce 7.10 and ngspice 46 both preserve an authored finite delay,
+        // including a negative one.  A negative delay advances the waveform;
+        // clamping it would change both the initial source value and phase.
+        let td = if delay.is_finite() { delay } else { 0.0 };
+        let tr = if xyce_defaults {
+            if rise.is_nan() { step_default } else { rise }
+        } else if rise.is_finite() && rise > 0.0 {
+            rise
         } else {
-            0.0
+            step_default
         };
-        let tr = if rise.is_nan() { step_default } else { rise };
-        let tf = if fall.is_nan() { step_default } else { fall };
-        let pw = if width.is_nan() && xyce_defaults {
-            stop_default
-        } else if width.is_nan() && ngspice_defaults && !width_defaults_to_zero {
-            stop_default
-        } else if width.is_nan() {
-            0.0
+        let tf = if xyce_defaults {
+            if fall.is_nan() { step_default } else { fall }
+        } else if fall.is_finite() && fall > 0.0 {
+            fall
         } else {
+            step_default
+        };
+        let pw = if width_was_omitted && xyce_defaults {
+            stop_default
+        } else if xyce_defaults {
             width
-        };
-        let per = if period.is_nan() { 0.0 } else { period };
-
-        let tr = if tr.is_finite() && tr > 0.0 {
-            tr
-        } else {
-            step_default
-        };
-        let tf = if tf.is_finite() && tf > 0.0 {
-            tf
-        } else {
-            step_default
-        };
-        let pw = if pw.is_finite() && pw >= 0.0 {
-            pw
-        } else if width_was_omitted && xyce_defaults {
+        } else if width.is_finite() && width >= 0.0 {
+            width
+        } else if width_was_omitted && ngspice_defaults && !width_defaults_to_zero {
             stop_default
         } else {
             0.0
         };
         let per = if period_was_omitted {
-            if stop_time_defaults {
+            if xyce_defaults {
                 stop_default
             } else {
                 tr + pw + tf
             }
-        } else if per.is_finite() && per > 0.0 {
-            per
+        } else if xyce_defaults {
+            period
+        } else if period.is_finite() && period > 0.0 {
+            period
         } else {
             tr + pw + tf
         };
@@ -1327,6 +1345,8 @@ impl VoltageSources {
                 phase,
                 width_defaults_to_zero,
             } => {
+                let xyce_boundaries =
+                    Self::pulse_dialect(context) == crate::config::SpiceDialect::Xyce;
                 let (delay, rise, fall, width, period) = Self::resolve_pulse_timing(
                     *delay,
                     *rise,
@@ -1350,12 +1370,50 @@ impl VoltageSources {
                     0.0
                 };
                 let t_rel = time - delay + phase_time;
-                let t = if period.is_finite() && period > 0.0 && t_rel > period {
+                let repeating_period = if xyce_boundaries {
+                    period.is_finite() && period != 0.0
+                } else {
+                    period.is_finite() && period > 0.0
+                };
+                let t = if repeating_period && t_rel > period {
                     t_rel - period * (t_rel / period).floor()
                 } else {
                     t_rel
                 };
-                if t <= 0.0 || t >= rise + width + fall {
+                if xyce_boundaries {
+                    // Mirror Xyce 7.10 PulseData::updateSource branch-for-
+                    // branch. Its tolerance follows the transient hard
+                    // minimum timestep at the current accepted time and is
+                    // deliberately unrelated to the static source tstep. A
+                    // real transient supplies that accepted controller state;
+                    // only stateless waveform previews derive a target-time
+                    // fallback because they have no accepted state.
+                    let breakpoint_tolerance = context
+                        .and_then(|context| context.xyce_breakpoint_tolerance)
+                        .unwrap_or_else(|| {
+                            2.0 * crate::engine::Engine::xyce_hard_min_timestep(time)
+                        });
+                    let rise_width = rise + width;
+                    let end = rise_width + fall;
+                    if t <= 0.0 || (t > end && (t - end).abs() > breakpoint_tolerance) {
+                        *v1
+                    } else if t > rise
+                        && (t - rise).abs() > breakpoint_tolerance
+                        && (t < rise_width || (t - rise_width).abs() < breakpoint_tolerance)
+                    {
+                        *v2
+                    } else if t > 0.0 && (t < rise || (t - rise).abs() < breakpoint_tolerance) {
+                        if rise != 0.0 {
+                            v1 + (v2 - v1) * t / rise
+                        } else {
+                            *v1
+                        }
+                    } else if fall != 0.0 {
+                        v2 + (v1 - v2) * (t - rise_width) / fall
+                    } else {
+                        *v2
+                    }
+                } else if t <= 0.0 || t >= rise + width + fall {
                     *v1
                 } else if t < rise {
                     v1 + (v2 - v1) * t / rise
@@ -2064,8 +2122,20 @@ impl CurrentSources {
             tstep: step,
             tstop: stop,
             dialect,
+            xyce_breakpoint_tolerance: (dialect == crate::config::SpiceDialect::Xyce)
+                .then_some(0.0),
             resource_limits,
         });
+    }
+
+    /// Publish Xyce's accepted-state breakpoint tolerance to source devices.
+    pub(crate) fn set_xyce_breakpoint_tolerance(&mut self, tolerance: Value) {
+        if let Some(context) = self.transient_context.as_mut()
+            && context.dialect == crate::config::SpiceDialect::Xyce
+        {
+            context.xyce_breakpoint_tolerance =
+                (tolerance.is_finite() && tolerance >= 0.0).then_some(tolerance);
+        }
     }
 
     /// Clear transient context and use static waveform defaults.
@@ -2306,6 +2376,7 @@ mod tests {
             tstep,
             tstop,
             dialect: crate::config::SpiceDialect::BestAvailable,
+            xyce_breakpoint_tolerance: None,
             resource_limits: crate::resource::ResourceLimits::default(),
         })
     }
@@ -2315,6 +2386,7 @@ mod tests {
             tstep,
             tstop,
             dialect: crate::config::SpiceDialect::Ngspice,
+            xyce_breakpoint_tolerance: None,
             resource_limits: crate::resource::ResourceLimits::default(),
         })
     }
@@ -2324,6 +2396,7 @@ mod tests {
             tstep,
             tstop,
             dialect: crate::config::SpiceDialect::Xyce,
+            xyce_breakpoint_tolerance: Some(0.0),
             resource_limits: crate::resource::ResourceLimits::default(),
         })
     }
@@ -2966,6 +3039,150 @@ mod tests {
             VoltageSources::evaluate_source_at_time_with_context(&spec, 100.01208e-3, ctx),
             0.0,
         );
+    }
+
+    #[test]
+    fn xyce_pulse_defaults_only_omitted_timing_fields() {
+        let explicit = VoltageSources::resolve_pulse_timing_with_defaults(
+            -1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            false,
+            0.02,
+            0.8,
+            crate::config::SpiceDialect::Xyce,
+        );
+        assert_eq!(explicit, (-1.0, 0.0, 0.0, 0.0, 0.0));
+
+        let omitted = VoltageSources::resolve_pulse_timing_with_defaults(
+            Value::NAN,
+            Value::NAN,
+            Value::NAN,
+            Value::NAN,
+            Value::NAN,
+            false,
+            0.02,
+            0.8,
+            crate::config::SpiceDialect::Xyce,
+        );
+        assert_eq!(omitted, (0.0, 0.02, 0.02, 0.8, 0.8));
+    }
+
+    #[test]
+    fn ngspice_pulse_keeps_authored_delay_and_nonpositive_edge_compatibility() {
+        let resolved = VoltageSources::resolve_pulse_timing_with_defaults(
+            -1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            false,
+            0.02,
+            0.8,
+            crate::config::SpiceDialect::Ngspice,
+        );
+        assert_eq!(resolved, (-1.0, 0.02, 0.02, 0.0, 0.04));
+    }
+
+    #[test]
+    fn xyce_explicit_zero_pulse_edges_are_instantaneous() {
+        let spec = SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 20.0,
+            delay: 0.0,
+            rise: 0.0,
+            fall: 0.0,
+            width: 0.2,
+            period: 0.4,
+            phase: 0.0,
+            width_defaults_to_zero: false,
+        };
+        let context = xyce_transient_context(0.02, 0.8);
+
+        assert_eq!(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 0.0, context).to_bits(),
+            0.0_f64.to_bits()
+        );
+        assert_eq!(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 1.0e-12, context).to_bits(),
+            20.0_f64.to_bits()
+        );
+        assert_eq!(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 0.2, context).to_bits(),
+            20.0_f64.to_bits()
+        );
+        assert_eq!(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 0.2 + 1.0e-12, context,)
+                .to_bits(),
+            0.0_f64.to_bits()
+        );
+    }
+
+    #[test]
+    fn xyce_pulse_boundaries_use_accepted_state_breakpoint_tolerance() {
+        let spec = SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 20.0,
+            delay: 0.0,
+            rise: 0.0,
+            fall: 0.0,
+            width: 0.2,
+            period: 0.4,
+            phase: 0.0,
+            width_defaults_to_zero: false,
+        };
+        let mut context = xyce_transient_context(0.02, 0.8);
+        let tolerance = 1.0e-9;
+        context
+            .as_mut()
+            .expect("test transient context")
+            .xyce_breakpoint_tolerance = Some(tolerance);
+
+        assert_eq!(
+            VoltageSources::evaluate_source_at_time_with_context(
+                &spec,
+                0.2 + tolerance * 0.5,
+                context,
+            )
+            .to_bits(),
+            20.0_f64.to_bits()
+        );
+        assert_eq!(
+            VoltageSources::evaluate_source_at_time_with_context(
+                &spec,
+                0.2 + tolerance * 2.0,
+                context,
+            )
+            .to_bits(),
+            0.0_f64.to_bits()
+        );
+    }
+
+    #[test]
+    fn xyce_negative_pulse_period_matches_nonzero_period_wrapping() {
+        let spec = SourceSpec::Pulse {
+            v1: -2.0,
+            v2: 5.0,
+            delay: 0.0,
+            rise: 0.0,
+            fall: 0.0,
+            width: 0.2,
+            period: -0.4,
+            phase: 0.0,
+            width_defaults_to_zero: false,
+        };
+        let context = xyce_transient_context(0.02, 0.8);
+
+        for time in [0.0, 1.0e-12, 0.1, 0.4, 1.0] {
+            assert_eq!(
+                VoltageSources::evaluate_source_at_time_with_context(&spec, time, context)
+                    .to_bits(),
+                (-2.0_f64).to_bits(),
+                "time={time:.17e}"
+            );
+        }
     }
 
     #[test]
