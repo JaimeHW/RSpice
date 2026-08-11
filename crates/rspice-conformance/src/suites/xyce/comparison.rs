@@ -1704,11 +1704,11 @@ impl XyceTestRunner {
     pub(super) fn compare_analytic_integer_dc_table(
         &self,
         actual: &XycePrnTable,
-        kind: XyceAnalyticIntegerDcKind,
+        kind: XyceAnalyticIntegerKind,
     ) -> Result<Vec<XyceValueMismatch>, String> {
         let expected_width = match kind {
-            XyceAnalyticIntegerDcKind::Fmod => 3,
-            XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources => 5,
+            XyceAnalyticIntegerKind::Fmod => 3,
+            XyceAnalyticIntegerKind::IntFloorCeil => 5,
         };
         if actual.columns.len() != expected_width
             || actual
@@ -1724,6 +1724,53 @@ impl XyceTestRunner {
             ));
         }
 
+        self.compare_analytic_integer_rows(actual, kind, 1, "analytic integer DC")
+    }
+
+    pub(super) fn compare_analytic_int_floor_ceil_tran_table(
+        &self,
+        actual: &XycePrnTable,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if actual.columns.len() != 6
+            || actual
+                .columns
+                .first()
+                .is_none_or(|column| column != "Index")
+            || actual.columns.get(1).is_none_or(|column| column != "TIME")
+            || actual.rows.is_empty()
+        {
+            return Err(format!(
+                "analytic INT/FLOOR/CEIL transient output requires a nonempty Index/TIME/input/int/floor/ceil table, got {:?} and {} row(s)",
+                actual.columns,
+                actual.rows.len()
+            ));
+        }
+        self.compare_analytic_integer_rows(
+            actual,
+            XyceAnalyticIntegerKind::IntFloorCeil,
+            2,
+            "analytic INT/FLOOR/CEIL transient",
+        )
+    }
+
+    fn compare_analytic_integer_rows(
+        &self,
+        actual: &XycePrnTable,
+        kind: XyceAnalyticIntegerKind,
+        input_column: usize,
+        label: &str,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let output_count = match kind {
+            XyceAnalyticIntegerKind::Fmod => 1,
+            XyceAnalyticIntegerKind::IntFloorCeil => 3,
+        };
+        let expected_width = input_column + 1 + output_count;
+        if actual.columns.len() != expected_width {
+            return Err(format!(
+                "{label} output requires {expected_width} columns, got {}",
+                actual.columns.len()
+            ));
+        }
         let mut mismatches = Vec::new();
         for (row_index, row) in actual.rows.iter().enumerate() {
             if row.len() != expected_width
@@ -1731,24 +1778,24 @@ impl XyceTestRunner {
                 || row.iter().any(|value| !value.is_finite())
             {
                 return Err(format!(
-                    "analytic integer DC row {row_index} is malformed, nonfinite, or has a noncanonical index"
+                    "{label} row {row_index} is malformed, nonfinite, or has a noncanonical index"
                 ));
             }
             // The Release 7.10 Perl wrappers consume whitespace-split tokens
             // from Xyce's already-written default PRN. Round-trip every input
             // and DUT output through that exact serialization boundary before
             // applying their numeric-equality checks.
-            let printed_input = Self::xyce_default_prn_roundtrip(row[1])?;
+            let printed_input = Self::xyce_default_prn_roundtrip(row[input_column])?;
             let expected = match kind {
-                XyceAnalyticIntegerDcKind::Fmod => vec![99.5 % printed_input],
-                XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources => vec![
+                XyceAnalyticIntegerKind::Fmod => vec![99.5 % printed_input],
+                XyceAnalyticIntegerKind::IntFloorCeil => vec![
                     printed_input.trunc(),
                     printed_input.floor(),
                     printed_input.ceil(),
                 ],
             };
             for (offset, expected_value) in expected.into_iter().enumerate() {
-                let column = offset + 2;
+                let column = input_column + offset + 1;
                 let actual_value = Self::xyce_default_prn_roundtrip(row[column])?;
                 if expected_value == actual_value {
                     continue;

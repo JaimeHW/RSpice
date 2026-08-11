@@ -1700,6 +1700,26 @@ fn test_xyce_capacitor_analytic_first_order_rc_wrapper_runs() {
 }
 
 #[test]
+fn test_xyce_analytic_int_floor_ceil_transient_wrapper_runs() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "{relative} should retain removed Release 7.10 wrapper provenance"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should pass native transient execution and exact serialized-token checks, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+    assert_eq!(result.contract, "analytic_int_floor_ceil_tran_wrapper");
+}
+
+#[test]
 fn test_xyce_capacitor_analytic_newlte_sibling_runs() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

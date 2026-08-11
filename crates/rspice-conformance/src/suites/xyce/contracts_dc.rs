@@ -3099,10 +3099,8 @@ impl XyceTestRunner {
     ) -> Option<Result<XyceAnalyticIntegerDcContract, String>> {
         let relative = Self::normalize_manifest_key(&deck.relative_path);
         let kind = match relative.as_str() {
-            XYCE_ANALYTIC_FMOD_DC_RECORD => XyceAnalyticIntegerDcKind::Fmod,
-            XYCE_ANALYTIC_INT_FLOOR_CEIL_DC_RECORD => {
-                XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources
-            }
+            XYCE_ANALYTIC_FMOD_DC_RECORD => XyceAnalyticIntegerKind::Fmod,
+            XYCE_ANALYTIC_INT_FLOOR_CEIL_DC_RECORD => XyceAnalyticIntegerKind::IntFloorCeil,
             _ => return None,
         };
         Some((|| {
@@ -3128,7 +3126,7 @@ impl XyceTestRunner {
     pub(super) fn validate_analytic_integer_dc_plan(
         plan: &XyceStaticDcPlan,
         netlist: &Netlist,
-        kind: XyceAnalyticIntegerDcKind,
+        kind: XyceAnalyticIntegerKind,
     ) -> Result<(), String> {
         if plan.execution_dir.is_some()
             || plan.dc_data.is_some()
@@ -3152,10 +3150,10 @@ impl XyceTestRunner {
         }
         Self::validate_analytic_integer_dc_statement_envelope(&plan.source, kind)?;
         match kind {
-            XyceAnalyticIntegerDcKind::Fmod => {
+            XyceAnalyticIntegerKind::Fmod => {
                 Self::validate_analytic_fmod_dc_topology(plan, netlist)
             }
-            XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources => {
+            XyceAnalyticIntegerKind::IntFloorCeil => {
                 Self::validate_analytic_int_floor_ceil_dc_topology(plan, netlist)
             }
         }
@@ -3163,7 +3161,7 @@ impl XyceTestRunner {
 
     pub(super) fn validate_analytic_integer_dc_statement_envelope(
         source: &str,
-        kind: XyceAnalyticIntegerDcKind,
+        kind: XyceAnalyticIntegerKind,
     ) -> Result<(), String> {
         let mut counts = BTreeMap::<char, usize>::new();
         // SPICE reserves the first physical record for the title, including
@@ -3207,8 +3205,8 @@ impl XyceTestRunner {
             *counts.entry(key).or_default() += 1;
         }
         let expected = match kind {
-            XyceAnalyticIntegerDcKind::Fmod => [('r', 1), ('v', 1), ('d', 1), ('p', 1), ('e', 1)],
-            XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources => {
+            XyceAnalyticIntegerKind::Fmod => [('r', 1), ('v', 1), ('d', 1), ('p', 1), ('e', 1)],
+            XyceAnalyticIntegerKind::IntFloorCeil => {
                 [('r', 4), ('v', 1), ('d', 1), ('p', 1), ('e', 1)]
             }
         };
@@ -3219,9 +3217,7 @@ impl XyceTestRunner {
                 ));
             }
         }
-        if kind == XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources
-            && counts.remove(&'b') != Some(3)
-        {
+        if kind == XyceAnalyticIntegerKind::IntFloorCeil && counts.remove(&'b') != Some(3) {
             return Err("INT/FLOOR/CEIL wrapper requires exactly three B sources".to_string());
         }
         if !counts.is_empty() {

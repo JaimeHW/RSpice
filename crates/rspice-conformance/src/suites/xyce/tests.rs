@@ -6806,6 +6806,50 @@ fn analytic_integer_dc_fixture(
     (root, deck, runner)
 }
 
+fn analytic_int_floor_ceil_tran_fixture(
+    label: &str,
+    owner_source: &[u8],
+    manifest: &str,
+) -> (PathBuf, XyceDeck, XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-analytic-int-floor-ceil-tran-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = root.join("Netlists/ABM_INT_FLOOR_CEIL");
+    fs::create_dir_all(&family).expect("create analytic INT/FLOOR/CEIL transient family");
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_family = workspace_root.join("tests/xyce/Netlists/ABM_INT_FLOOR_CEIL");
+    let deck_path = family.join("int_floor_ceil.cir");
+    fs::write(&deck_path, owner_source).expect("write analytic transient owner fixture");
+    fs::copy(
+        corpus_family.join("int_floor_ceil_bsrc.cir"),
+        family.join("int_floor_ceil_bsrc.cir"),
+    )
+    .expect("copy canonical INT/FLOOR/CEIL companion");
+    fs::write(root.join(HARNESS_MANIFEST_FILE), manifest)
+        .expect("write analytic transient wrapper manifest");
+    let deck = XyceDeck {
+        path: deck_path,
+        relative_path: "Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    (root, deck, runner)
+}
+
+fn analytic_int_floor_ceil_manifest() -> &'static str {
+    "Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil.cir\trequires_upstream_wrapper\n\
+Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil_bsrc.cir\trequires_upstream_wrapper\n"
+}
+
 const ANALYTIC_FMOD_DC_SOURCE: &str = "Test of nint\n\
         *\n\
         R1 1 0 1\n\
@@ -10284,13 +10328,13 @@ fn analytic_integer_dc_wrappers_are_manifest_owned_and_structurally_qualified() 
             "fmod",
             "Netlists/ABM_NINT_FMOD/fmod.cir",
             ANALYTIC_FMOD_DC_SOURCE,
-            XyceAnalyticIntegerDcKind::Fmod,
+            XyceAnalyticIntegerKind::Fmod,
         ),
         (
             "int-floor-ceil",
             "Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil_bsrc.cir",
             ANALYTIC_INT_FLOOR_CEIL_DC_SOURCE,
-            XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources,
+            XyceAnalyticIntegerKind::IntFloorCeil,
         ),
     ] {
         let (root, deck, runner) = analytic_integer_dc_fixture(label, relative, source);
@@ -10495,10 +10539,7 @@ fn analytic_integer_dc_comparison_uses_printed_inputs_and_exact_numeric_equality
     };
     assert!(
         runner
-            .compare_analytic_integer_dc_table(
-                &table,
-                XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources,
-            )
+            .compare_analytic_integer_dc_table(&table, XyceAnalyticIntegerKind::IntFloorCeil,)
             .expect("valid analytic table")
             .is_empty(),
         "Perl numeric equality treats signed zero as equal"
@@ -10517,14 +10558,215 @@ fn analytic_integer_dc_comparison_uses_printed_inputs_and_exact_numeric_equality
     };
     assert!(
         runner
-            .compare_analytic_integer_dc_table(
-                &int,
-                XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources,
-            )
+            .compare_analytic_integer_dc_table(&int, XyceAnalyticIntegerKind::IntFloorCeil,)
             .expect("valid integer table")
             .is_empty(),
         "the oracle must consume the serialized input token"
     );
+}
+
+#[test]
+fn analytic_int_floor_ceil_tran_contract_binds_exact_family_and_release_provenance() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_root = workspace_root.join("tests/xyce");
+    let deck = XyceDeck {
+        path: corpus_root.join("Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil.cir"),
+        relative_path: "Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    let contract = runner
+        .analytic_int_floor_ceil_tran_wrapper_contract(&deck)
+        .expect("exact transient wrapper record is selected")
+        .expect("canonical family, manifest, source, and plan qualify");
+    let netlist = XyceTestRunner::parse_xyce_netlist(&contract.plan.source, &deck.path)
+        .expect("qualified source reparses");
+    XyceTestRunner::validate_analytic_int_floor_ceil_tran_plan(&contract.plan, &netlist)
+        .expect("qualified plan and topology remain exact");
+
+    let records = XyceTestRunner::analytic_int_floor_ceil_historical_provenance_records();
+    assert_eq!(
+        records.len(),
+        XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_RECORD_COUNT
+    );
+    assert!(
+        records
+            .iter()
+            .any(|record| record.contains(XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_WRAPPER_BLOB))
+    );
+    assert!(
+        records
+            .iter()
+            .any(|record| record.contains(XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TOOLS_BLOB))
+    );
+    XyceTestRunner::validate_analytic_int_floor_ceil_historical_provenance_records(&records)
+        .expect("Release 7.10 historical provenance fingerprint validates");
+
+    let mut mutated = records;
+    mutated[0].push('0');
+    assert!(
+        XyceTestRunner::validate_analytic_int_floor_ceil_historical_provenance_records(&mutated)
+            .is_err(),
+        "any historical identity mutation must fail closed"
+    );
+}
+
+#[test]
+fn analytic_int_floor_ceil_tran_provenance_rejects_source_family_and_manifest_mutations() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let canonical =
+        fs::read(workspace_root.join("tests/xyce/Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil.cir"))
+            .expect("read canonical analytic transient owner");
+
+    let mut source_mutation = String::from_utf8(canonical.clone()).expect("source is UTF-8");
+    source_mutation = source_mutation.replace("SIN(0 5 1K)", "SIN(0 4 1K)");
+    let (root, deck, runner) = analytic_int_floor_ceil_tran_fixture(
+        "source-mutation",
+        source_mutation.as_bytes(),
+        analytic_int_floor_ceil_manifest(),
+    );
+    assert!(
+        runner
+            .analytic_int_floor_ceil_tran_wrapper_contract(&deck)
+            .expect("exact record remains selected")
+            .is_err(),
+        "a source-content mutation must fail the canonical family identity"
+    );
+    fs::remove_dir_all(root).expect("remove source-mutation fixture");
+
+    let (root, deck, runner) = analytic_int_floor_ceil_tran_fixture(
+        "family-mutation",
+        &canonical,
+        analytic_int_floor_ceil_manifest(),
+    );
+    fs::write(
+        root.join("Netlists/ABM_INT_FLOOR_CEIL/unrelated.cir"),
+        "unrelated\n.end\n",
+    )
+    .expect("add unrelated family member");
+    assert!(
+        runner
+            .analytic_int_floor_ceil_tran_wrapper_contract(&deck)
+            .expect("exact record remains selected")
+            .is_err(),
+        "an extra physical family member must fail the exact census"
+    );
+    fs::remove_dir_all(root).expect("remove family-mutation fixture");
+
+    let missing_companion_manifest =
+        "Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil.cir\trequires_upstream_wrapper\n";
+    let (root, deck, runner) = analytic_int_floor_ceil_tran_fixture(
+        "manifest-mutation",
+        &canonical,
+        missing_companion_manifest,
+    );
+    assert!(
+        runner
+            .analytic_int_floor_ceil_tran_wrapper_contract(&deck)
+            .expect("exact record remains selected")
+            .is_err(),
+        "manifest ownership must remain an exact family bijection"
+    );
+    fs::remove_dir_all(root).expect("remove manifest-mutation fixture");
+}
+
+#[test]
+fn analytic_int_floor_ceil_tran_semantics_reject_adversarial_plan_and_topology_mutations() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_root = workspace_root.join("tests/xyce");
+    let deck = XyceDeck {
+        path: corpus_root.join("Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil.cir"),
+        relative_path: "Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    let contract = runner
+        .analytic_int_floor_ceil_tran_wrapper_contract(&deck)
+        .expect("exact record is selected")
+        .expect("canonical contract qualifies");
+    let netlist = XyceTestRunner::parse_xyce_netlist(&contract.plan.source, &deck.path)
+        .expect("canonical source parses");
+
+    let mut wrong_stop = contract.plan.clone();
+    wrong_stop.tran.stop = 4.0e-3;
+    assert!(
+        XyceTestRunner::validate_analytic_int_floor_ceil_tran_plan(&wrong_stop, &netlist).is_err(),
+        "the analysis tuple is semantic contract state"
+    );
+
+    let mut wrong_probe_order = contract.plan.clone();
+    wrong_probe_order
+        .print
+        .as_mut()
+        .expect("canonical print")
+        .probes
+        .swap(1, 2);
+    assert!(
+        XyceTestRunner::validate_analytic_int_floor_ceil_tran_plan(&wrong_probe_order, &netlist)
+            .is_err(),
+        "the Perl wrapper's positional probe mapping must be preserved"
+    );
+
+    let wrong_source = contract.plan.source.replace("SIN(0 5 1K)", "SIN(0 4 1K)");
+    let wrong_netlist = XyceTestRunner::parse_xyce_netlist(&wrong_source, &deck.path)
+        .expect("adversarial source remains syntactically valid");
+    assert!(
+        XyceTestRunner::validate_analytic_int_floor_ceil_tran_topology(&wrong_netlist).is_err(),
+        "SIN amplitude is independently validated after parsing"
+    );
+    assert!(
+        XyceTestRunner::validate_analytic_int_floor_ceil_tran_statement_envelope(&format!(
+            "{}\n.OPTIONS RELTOL=1e-3",
+            contract.plan.source
+        ))
+        .is_err(),
+        "unrelated directives cannot enter the execution envelope"
+    );
+}
+
+#[test]
+fn analytic_int_floor_ceil_tran_comparison_uses_exact_printed_tokens() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let rounded_to_integer = 0.999_999_999_6;
+    let passing = XycePrnTable {
+        columns: vec![
+            "Index".to_string(),
+            "TIME".to_string(),
+            "V(1)".to_string(),
+            "{int(v(1))}".to_string(),
+            "{floor(v(1))}".to_string(),
+            "{ceil(v(1))}".to_string(),
+        ],
+        rows: vec![vec![0.0, 0.0, rounded_to_integer, 1.0, 1.0, 1.0]],
+    };
+    assert!(
+        runner
+            .compare_analytic_int_floor_ceil_tran_table(&passing)
+            .expect("valid transient table")
+            .is_empty(),
+        "the already-serialized V(1) token must drive all three exact checks"
+    );
+
+    let mut failing = passing;
+    failing.rows[0][5] = 0.0;
+    let mismatches = runner
+        .compare_analytic_int_floor_ceil_tran_table(&failing)
+        .expect("well-formed failing transient table");
+    assert_eq!(mismatches.len(), 1);
+    assert_eq!(mismatches[0].expected.to_bits(), 1.0f64.to_bits());
+    assert_eq!(mismatches[0].actual.to_bits(), 0.0f64.to_bits());
 }
 
 fn analytic_rc_test_plan(source: &str) -> XyceStaticTranPlan {
