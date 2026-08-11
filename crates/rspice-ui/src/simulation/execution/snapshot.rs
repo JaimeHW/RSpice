@@ -897,7 +897,7 @@ impl PreparedRunSnapshot {
             parts.reference_process,
             parts.reference_temperature_celsius,
         )?;
-        parts.tasks = expand_operating_point_tasks(
+        parts.tasks = expand_pvt_point_tasks(
             parts.tasks,
             &pvt_points,
             &parts.executable_netlist,
@@ -1460,7 +1460,16 @@ fn point_is_nominal(
     }
 }
 
-fn expand_operating_point_tasks(
+/// Expand every task that is declared over the run set's PVT points into one
+/// prepared task per point.
+///
+/// Two declarations reach this: an operating point bound to the run-set axis,
+/// and a corner run, whose base analysis *is* the thing declared over the
+/// points. Both expand through the same per-point ingredients — the process
+/// corner materialized into the point's own deck, the point recorded on the
+/// task so its result can be attributed, and an instance identity derived
+/// from the point so two points can never share one.
+fn expand_pvt_point_tasks(
     tasks: Vec<PreparedTask>,
     pvt_points: &[PreparedPvtPoint],
     executable_netlist: &str,
@@ -1513,6 +1522,37 @@ fn expand_operating_point_tasks(
             }
         ) {
             prepared.executable_netlist_override = inherited_op_source_override;
+        }
+
+        // A corner run is not one analysis swept along an axis: it is a base
+        // analysis solved once per PVT point, and collapsing those solves into
+        // one scalar per node is what threw the waveforms and the `.MEAS`
+        // results away. Each point earns its own task so its result carries
+        // its own evidence and the point that produced it.
+        //
+        // The authored corner task stays in the graph rather than being
+        // replaced: it is what produces the corner family a corner plot reads,
+        // and reconstituting that family from the point results would be a
+        // second, parallel way of assembling one result.
+        if matches!(prepared.task.spec, AnalysisSpec::Corner) {
+            final_task.insert(
+                original_identity,
+                (
+                    original_identity,
+                    prepared.source_revision,
+                    prepared.config_digest,
+                    prepared.executable_netlist_override.clone(),
+                ),
+            );
+            let point_tasks = expand_corner_run_point_tasks(
+                &prepared,
+                executable_netlist,
+                reference_process,
+                reference_temperature_celsius,
+            )?;
+            expanded.push(prepared);
+            expanded.extend(point_tasks);
+            continue;
         }
 
         let Some(base_config) = operating_point_config(&prepared.task.spec) else {
@@ -1662,6 +1702,272 @@ fn expand_operating_point_tasks(
     Ok(expanded)
 }
 
+/// One prepared task per point of a corner run's declared space.
+///
+/// The points come from the corner task's own contract rather than from the
+/// run-level PVT set, because these tasks must solve exactly the points the
+/// corner task itself solves; a run-level set merges the spaces of every
+/// corner declaration in the run and would put a foreign point on this one.
+///
+/// Each point states itself three times over, and the three are not
+/// interchangeable: the contract narrowed to a single point *declares* which
+/// point this is and is what makes the task's configuration digest its own;
+/// the deck *materializes* everything a deck can carry — the process models
+/// and the temperature card; and the supply scale is applied to the elaborated
+/// circuit at execution, because a supply corner multiplies existing source
+/// values and no card can express that.
+fn expand_corner_run_point_tasks(
+    corner_task: &PreparedTask,
+    executable_netlist: &str,
+    reference_process: ProcessCorner,
+    reference_temperature_celsius: f64,
+) -> Result<Vec<PreparedTask>, PreparationError> {
+    let default_contract;
+    let contract = match corner_task.task.spec_options.corner.as_ref() {
+        Some(contract) => contract,
+        None => {
+            default_contract = crate::services::simulation_runner::CornerRunConfig::default();
+            &default_contract
+        }
+    };
+    contract.validate().map_err(|error| {
+        PreparationError::new(
+            PreparationStage::AnalysisPlan,
+            format!("Corner PVT contract is invalid: {error}"),
+        )
+    })?;
+    let points =
+        crate::services::simulation_runner::expand_corner_pvt_points(contract).map_err(|error| {
+            PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!("Corner PVT expansion failed: {error}"),
+            )
+        })?;
+    if points.is_empty() {
+        return Err(PreparationError::new(
+            PreparationStage::AnalysisPlan,
+            "Corner run declared no PVT execution points",
+        ));
+    }
+
+    let contract_digest = corner_contract_digest(contract);
+    let count = points.len();
+    let mut point_tasks = Vec::with_capacity(count);
+    for (index, (process, voltage, temperature_celsius)) in points.into_iter().enumerate() {
+        let point = PreparedPvtPoint {
+            process: process_from_corner_runner(process),
+            voltage: Some(voltage),
+            temperature_celsius,
+            corner_contract: Some(contract.clone()),
+        };
+        let (source_override, nominal_supply_voltage) =
+            prepare_pvt_point_source(executable_netlist, &point)?;
+
+        let mut point_task = corner_task.clone();
+        point_task.instance_id = AnalysisInstanceId::from_namespace(
+            corner_task.instance_id.as_uuid(),
+            format!(
+                "rspice-corner-run-point/v1/{index}/{count}/{}/{:016x}/{:016x}/{contract_digest}",
+                process_tag(point.process),
+                voltage.to_bits(),
+                temperature_celsius.to_bits(),
+            )
+            .as_bytes(),
+        );
+        point_task.pvt_point = Some(
+            crate::state::AnalysisResultPvtPoint::new(
+                point.process.short_name(),
+                point.voltage,
+                point.temperature_celsius,
+                Some(contract_digest),
+                point_is_nominal(
+                    &point,
+                    nominal_supply_voltage,
+                    reference_process,
+                    reference_temperature_celsius,
+                ),
+            )
+            .map_err(|error| {
+                PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    format!(
+                        "Corner run point {}/{count} cannot be attributed: {error}",
+                        index + 1
+                    ),
+                )
+            })?,
+        );
+        point_task.label = format!(
+            "{} \u{00b7} {} \u{00b7} {voltage} V \u{00b7} {temperature_celsius} \u{00b0}C",
+            corner_task.label,
+            point.process.short_name(),
+        );
+
+        // The temperature is written into the deck rather than handed to the
+        // engine beside it, so the point's own bytes state the condition it
+        // was solved at. It also reaches deck expressions in `TEMPER`, which a
+        // configuration field never did.
+        let deck = source_override.unwrap_or_else(|| executable_netlist.to_owned());
+        point_task.executable_netlist_override = Some(splice_before_terminal_end_card(
+            &deck,
+            &format!(".OPTIONS TEMP={temperature_celsius}"),
+        ));
+
+        let (spec, config, analysis_line) = corner_point_request(
+            &contract.base_mode,
+            &point,
+            index,
+            count,
+            nominal_supply_voltage,
+        );
+        spec.validate().map_err(|error| {
+            PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!(
+                    "Corner run point {}/{count} base analysis is invalid: {error}",
+                    index + 1
+                ),
+            )
+        })?;
+        point_task.task.spec = spec;
+        point_task.task.config = config;
+        point_task.task.analysis_line = analysis_line;
+        point_task.task.spec_options.corner =
+            Some(crate::services::simulation_runner::CornerRunConfig {
+                nominal_voltage: nominal_supply_voltage,
+                points: vec![crate::services::simulation_runner::CornerPoint {
+                    process,
+                    voltage,
+                    temperature_c: temperature_celsius,
+                }],
+                ..contract.clone()
+            });
+
+        point_task.saved_output_contracts = corner_task
+            .saved_output_contracts
+            .iter()
+            .map(|saved| {
+                saved
+                    .rebind_analysis(point_task.instance_id, &point_task.task.spec)
+                    .map_err(|error| {
+                        PreparationError::new(
+                            PreparationStage::AnalysisPlan,
+                            format!(
+                                "Failed to bind saved output to corner run point {}/{count}: {error}",
+                                index + 1
+                            ),
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        point_task.config_digest = point_task.payload_digest();
+        point_tasks.push(point_task);
+    }
+
+    Ok(point_tasks)
+}
+
+/// The base analysis a corner point actually runs.
+///
+/// The operating point takes its temperature and supply from its own typed
+/// run-point contract, because that contract is the only channel its engine
+/// build reads. The other three have no such field: their temperature is
+/// already in the point's deck, and their supply is applied from the narrowed
+/// corner contract that travels with the request.
+fn corner_point_request(
+    base_mode: &crate::services::simulation_runner::CornerBaseMode,
+    point: &PreparedPvtPoint,
+    index: usize,
+    count: usize,
+    nominal_supply_voltage: Option<f64>,
+) -> (
+    AnalysisSpec,
+    Option<crate::simulation::AnalysisConfig>,
+    String,
+) {
+    use crate::services::simulation_runner::{CornerBaseMode, CornerFrequencySweep};
+    use crate::simulation::dialog::{OpConfig, OpRunPointContext, OpTemperatureMode};
+    use crate::simulation::multi_run::FrequencySweep;
+
+    match base_mode {
+        CornerBaseMode::Op => {
+            let config = OpConfig {
+                temperature_mode: OpTemperatureMode::Explicit,
+                temperature_celsius: point.temperature_celsius,
+                run_point: OpRunPointContext {
+                    index,
+                    count,
+                    process: point.process,
+                    supply_voltage: point.voltage,
+                    nominal_supply_voltage,
+                },
+                ..OpConfig::default()
+            };
+            let spec = operating_point_spec(&config);
+            (
+                spec,
+                Some(crate::simulation::AnalysisConfig::DcOp(config)),
+                ".op".to_owned(),
+            )
+        }
+        CornerBaseMode::DcSweep {
+            source_name,
+            start,
+            stop,
+            step,
+        } => (
+            AnalysisSpec::DcSweep {
+                source_name: source_name.clone(),
+                start: *start,
+                stop: *stop,
+                step: *step,
+                source2: None,
+                start2: None,
+                stop2: None,
+                step2: None,
+            },
+            None,
+            format!(".dc {source_name} {start} {stop} {step}"),
+        ),
+        CornerBaseMode::Transient {
+            stop_time,
+            step_time,
+        } => (
+            AnalysisSpec::Transient {
+                stop_time: *stop_time,
+                step_time: *step_time,
+                start_time: 0.0,
+                max_timestep: None,
+                uic: false,
+            },
+            None,
+            format!(".tran {step_time} {stop_time}"),
+        ),
+        CornerBaseMode::Ac {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+        } => {
+            let (sweep, keyword) = match sweep {
+                CornerFrequencySweep::Decade => (FrequencySweep::Decade, "dec"),
+                CornerFrequencySweep::Octave => (FrequencySweep::Octave, "oct"),
+                CornerFrequencySweep::Linear => (FrequencySweep::Linear, "lin"),
+            };
+            (
+                AnalysisSpec::Ac {
+                    start_freq: *start_freq,
+                    stop_freq: *stop_freq,
+                    points_per_unit: *points_per_unit,
+                    sweep,
+                },
+                None,
+                format!(".ac {keyword} {points_per_unit} {start_freq} {stop_freq}"),
+            )
+        }
+    }
+}
+
 fn prepare_pvt_point_source(
     executable_netlist: &str,
     point: &PreparedPvtPoint,
@@ -1670,7 +1976,7 @@ fn prepare_pvt_point_source(
         if point.voltage.is_some() {
             return Err(PreparationError::new(
                 PreparationStage::AnalysisPlan,
-                "Operating-point PVT voltage is missing its authenticated corner contract",
+                "PVT run point voltage is missing its authenticated corner contract",
             ));
         }
         return Ok((None, None));
@@ -1686,7 +1992,7 @@ fn prepare_pvt_point_source(
         PreparationError::new(
             PreparationStage::ModelBindings,
             format!(
-                "Failed to materialize {} operating-point process corner: {error}",
+                "Failed to materialize the {} PVT process corner: {error}",
                 point.process.short_name()
             ),
         )
@@ -1714,7 +2020,7 @@ fn prepare_pvt_point_source(
             .ok_or_else(|| {
                 PreparationError::new(
                     PreparationStage::AnalysisPlan,
-                    "Operating-point PVT voltage axis requires a non-zero independent DC supply or an explicit nominal voltage",
+                    "A PVT supply axis requires a non-zero independent DC supply or an explicit nominal voltage",
                 )
             })?,
         })

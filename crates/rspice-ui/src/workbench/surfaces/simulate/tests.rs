@@ -1908,3 +1908,201 @@ fn a_render_path_refusal_restated_every_frame_does_not_spin_the_sequence() {
     );
     assert_eq!(app.state.ui.toasts.activity().len(), 1);
 }
+
+/// A supply-and-process corner declaration whose transient base analysis
+/// measures the divider output. The supply axis is what makes the corners
+/// disagree: `V(out)` is half the supply the point was solved at.
+fn corner_evidence_run() -> SimulationRun {
+    use crate::services::simulation_runner::{
+        CornerBaseMode, CornerModelBinding, CornerProcess, CornerRunConfig,
+    };
+
+    let deck = "corner evidence\n\
+         VDD vdd 0 DC 1.8\n\
+         R1 vdd out 1k\n\
+         R2 out 0 1k\n\
+         C1 out 0 1p\n\
+         .tran 1n 100n\n\
+         .meas tran vout FIND V(out) AT=100n\n\
+         .end\n";
+    let binding = |process: CornerProcess, label: &str, saturation_current: &str| {
+        CornerModelBinding {
+            process,
+            source_label: label.to_owned(),
+            section: Some(process.as_keyword().to_owned()),
+            materialized_model_cards: format!(".model DPROCESS D (IS={saturation_current})"),
+        }
+    };
+    let contract = CornerRunConfig {
+        process_corners: vec![CornerProcess::TT, CornerProcess::SS],
+        voltages: vec![1.8, 1.62],
+        temperatures_c: vec![27.0, 125.0],
+        full_matrix: false,
+        nominal_voltage: Some(1.8),
+        base_mode: CornerBaseMode::Transient {
+            stop_time: 100.0e-9,
+            step_time: 1.0e-9,
+        },
+        model_bindings: vec![
+            binding(CornerProcess::TT, "tt.lib", "1e-12"),
+            binding(CornerProcess::SS, "ss.lib", "1e-13"),
+        ],
+        points: Vec::new(),
+    };
+
+    crate::simulation::runner::pvt_point_evidence::run_corner_declaration(deck, contract, 27.0)
+        .expect("the corner declaration prepares, authorizes and runs")
+}
+
+/// The whole claim of the per-point expansion: a specification is answerable
+/// corner by corner, against measurements the executor really produced rather
+/// than fixtures a test wrote. Before the expansion the corner run retained
+/// one scalar per node and no `.MEAS` result at all, so every scope here
+/// would have reported that the evidence was missing.
+#[test]
+fn a_corner_run_answers_a_specification_at_each_of_its_own_points() {
+    let run = corner_evidence_run();
+
+    let attributed_points = run
+        .analyses
+        .iter()
+        .filter_map(|analysis| {
+            analysis
+                .provenance
+                .as_ref()
+                .and_then(crate::state::AnalysisResultProvenance::pvt_point)
+        })
+        .count();
+    assert_eq!(
+        attributed_points, 2,
+        "each declared point produced its own attributed result"
+    );
+
+    let nominal = measurement_in_output_dataset(
+        &run,
+        &scoped("vout", Some(0.85), crate::state::SpecPointScope::Nominal),
+    )
+    .expect("the nominal point answers a nominal limit");
+    assert!(
+        (nominal.value - 0.9).abs() < 1.0e-3,
+        "the nominal point solved at the full supply, got {}",
+        nominal.value
+    );
+    assert!(nominal.is_complete_coverage());
+
+    let everywhere = measurement_in_output_dataset(
+        &run,
+        &scoped("vout", Some(0.85), crate::state::SpecPointScope::AllPoints),
+    )
+    .expect("the run set answers an unscoped limit");
+    assert!(
+        (everywhere.value - 0.81).abs() < 1.0e-3,
+        "the worst point is the derated supply, got {}",
+        everywhere.value
+    );
+    assert_eq!(everywhere.retained_measurements, 2);
+
+    let slow = measurement_in_output_dataset(
+        &run,
+        &scoped(
+            "vout",
+            Some(0.85),
+            crate::state::SpecPointScope::SelectedCorners {
+                corners: vec!["SS".to_owned()],
+            },
+        ),
+    )
+    .expect("the SS corner answers a limit scoped to it");
+    assert_eq!(slow.value, everywhere.value);
+    assert_eq!(slow.retained_measurements, 1);
+
+    let bound = scoped("vout", Some(0.85), crate::state::SpecPointScope::Nominal);
+    assert!(bound.passes(nominal.value), "nominal holds the limit");
+    assert!(
+        !bound.passes(everywhere.value),
+        "the derated corner does not, which is the verdict the run set had no way to report"
+    );
+
+    // The per-point results are additional evidence, not a replacement for the
+    // corner family: the same run still carries the axis a corner plot draws.
+    let Some(crate::state::AnalysisResultFamilyMetadata::Corner { corner_labels, .. }) = run
+        .analyses
+        .iter()
+        .find(|analysis| analysis.analysis_type == AnalysisType::Corner)
+        .and_then(|analysis| analysis.family_metadata.as_ref())
+    else {
+        panic!("the corner declaration still produces its plotting family");
+    };
+    assert_eq!(corner_labels.len(), 2);
+}
+
+/// A corner that will not solve is a result about that corner, not an absence.
+/// Dropping it would let a specification scoped to every point report a pass
+/// it was never given evidence for.
+#[test]
+fn a_corner_point_that_cannot_be_solved_is_retained_as_a_failure() {
+    use crate::services::simulation_runner::{
+        CornerBaseMode, CornerModelBinding, CornerProcess, CornerRunConfig,
+    };
+
+    // The base analysis names a sweep source the deck does not define, so
+    // every point fails in the engine rather than in preparation.
+    let deck = "corner failure\n\
+         VDD vdd 0 DC 1.8\n\
+         R1 vdd out 1k\n\
+         R2 out 0 1k\n\
+         .op\n\
+         .end\n";
+    let contract = CornerRunConfig {
+        process_corners: vec![CornerProcess::TT],
+        voltages: vec![1.8, 1.62],
+        temperatures_c: vec![27.0],
+        full_matrix: true,
+        nominal_voltage: Some(1.8),
+        base_mode: CornerBaseMode::DcSweep {
+            source_name: "VMISSING".to_owned(),
+            start: 0.0,
+            stop: 1.0,
+            step: 0.5,
+        },
+        model_bindings: vec![CornerModelBinding {
+            process: CornerProcess::TT,
+            source_label: "tt.lib".to_owned(),
+            section: Some("TT".to_owned()),
+            materialized_model_cards: ".model DPROCESS D (IS=1e-12)".to_owned(),
+        }],
+        points: Vec::new(),
+    };
+
+    let run =
+        crate::simulation::runner::pvt_point_evidence::run_corner_declaration(deck, contract, 27.0)
+            .expect("a run whose points fail still completes preparation");
+
+    let failed: Vec<_> = run
+        .analyses
+        .iter()
+        .filter(|analysis| !analysis.success)
+        .filter(|analysis| {
+            analysis
+                .provenance
+                .as_ref()
+                .and_then(crate::state::AnalysisResultProvenance::pvt_point)
+                .is_some()
+        })
+        .collect();
+    assert_eq!(failed.len(), 2, "both points are reported, not dropped");
+    assert!(
+        failed
+            .iter()
+            .all(|analysis| analysis.error_message.is_some()),
+        "a failed point says why it failed"
+    );
+    assert_eq!(
+        measurement_in_output_dataset(
+            &run,
+            &scoped("vout", Some(0.85), crate::state::SpecPointScope::AllPoints),
+        ),
+        None,
+        "a point that did not solve is not evidence that the limit holds"
+    );
+}

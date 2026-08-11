@@ -44,10 +44,25 @@ pub struct EngineBridge {
     engine: rspice_core::Engine,
 }
 
+/// The supply corner one PVT point is solved at.
+///
+/// A supply corner scales the deck's existing independent DC supplies instead
+/// of restating them, so no card can express it and the point's deck cannot
+/// carry it. It is applied to the elaborated netlist between parsing and
+/// dispatch — the one seam every configuration-backed analysis passes through
+/// — so a corner point reaches transient, AC and DC exactly as it reaches the
+/// operating point.
+#[derive(Debug, Clone, Copy)]
+pub(in crate::simulation) struct SupplyCornerScale {
+    pub(in crate::simulation) corner_voltage: f64,
+    pub(in crate::simulation) nominal_voltage: f64,
+}
+
 struct SimulationInput<'a> {
     config: &'a AnalysisConfig,
     netlist_str: &'a str,
     source_path: Option<&'a Path>,
+    supply_corner: Option<SupplyCornerScale>,
 }
 
 impl Default for EngineBridge {
@@ -93,6 +108,7 @@ impl EngineBridge {
                 config,
                 netlist_str,
                 source_path: None,
+                supply_corner: None,
             },
             &NoAbort,
         )
@@ -111,6 +127,7 @@ impl EngineBridge {
                 config,
                 netlist_str,
                 source_path: None,
+                supply_corner: None,
             },
             abort_flag,
         )
@@ -118,11 +135,16 @@ impl EngineBridge {
 
     /// Run simulation with cooperative cancellation and a source path for
     /// relative include/model resolution.
-    pub fn run_with_abort_and_source_path(
+    ///
+    /// `supply_corner` is the one part of a PVT point a deck cannot state; a
+    /// request that is not point-scoped passes `None` and the deck's own
+    /// supplies stand.
+    pub(in crate::simulation) fn run_with_abort_and_source_path(
         &self,
         config: &AnalysisConfig,
         netlist_str: &str,
         source_path: Option<&Path>,
+        supply_corner: Option<SupplyCornerScale>,
         abort_flag: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
         self.run_request(
@@ -130,6 +152,7 @@ impl EngineBridge {
                 config,
                 netlist_str,
                 source_path,
+                supply_corner,
             },
             abort_flag,
         )
@@ -152,11 +175,28 @@ impl EngineBridge {
         input: SimulationInput<'_>,
         abort_flag: &dyn AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
-        let netlist = self.parse_netlist_with_abort_and_source_path(
+        let mut netlist = self.parse_netlist_with_abort_and_source_path(
             input.netlist_str,
             input.source_path,
             abort_flag,
         )?;
+        if let Some(corner) = input.supply_corner {
+            crate::services::simulation_runner::apply_voltage_corner(
+                &mut netlist,
+                corner.corner_voltage,
+                corner.nominal_voltage,
+                abort_flag,
+            )
+            .map_err(|error| {
+                if error.is_aborted() {
+                    SimulationError::Aborted
+                } else {
+                    SimulationError::InvalidConfig(format!(
+                        "PVT supply corner application failed: {error}"
+                    ))
+                }
+            })?;
+        }
         self.dispatch_analysis(input.config, &netlist, abort_flag)
     }
 
