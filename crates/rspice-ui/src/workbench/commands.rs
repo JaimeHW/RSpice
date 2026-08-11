@@ -716,10 +716,11 @@ impl Command {
                     && state.simulation.active_execution.is_none()
                     && !state.simulation.is_running
             }
-            // "Open results workspace" is the generic route and remains
-            // useful before a dataset exists. Specialized viewers are only
-            // actionable when the active retained dataset satisfies the same
-            // compatibility contract used by the in-workspace viewer tabs.
+            // Waves is the workspace's default sheet, and its empty state is
+            // the workspace's landing, so this route stays actionable before a
+            // dataset exists. Every other viewer is only actionable when the
+            // active retained dataset satisfies the same compatibility
+            // contract used by the in-workspace viewer tabs.
             Self::ResultViewer(crate::workbench::ResultViewer::Waves) => true,
             Self::ResultViewer(viewer) => {
                 crate::workbench::documents::result_document::viewer_is_available(state, viewer)

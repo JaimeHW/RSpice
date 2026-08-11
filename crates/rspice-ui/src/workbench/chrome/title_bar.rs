@@ -14,7 +14,6 @@ use super::super::layout::LayoutSpec;
 use super::super::state::{ModelsPage, VerificationPage, Workspace};
 use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
 
-const DESCEND_MENU_LABEL: &str = "Descend into selected instance…";
 #[cfg(test)]
 const COMMAND_REFERENCE_MENU_LABEL: &str = "Command reference";
 const MENU_OUTER_WIDTH: f32 = 244.0;
@@ -1501,7 +1500,7 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         None,
     );
     command_item(ui, app, Command::AscendHierarchy);
-    command_item_as(ui, app, Command::DescendHierarchy, DESCEND_MENU_LABEL, None);
+    command_item(ui, app, Command::DescendHierarchy);
     menu_separator(ui);
     for command in DESIGN_PLACEMENT_COMMANDS {
         command_item(ui, app, command);

@@ -443,7 +443,10 @@ fn occurrence_specific_shortcuts_can_be_suppressed_or_overridden() {
         ),
         "Ctrl+Alt+R"
     );
-    assert_eq!(DESCEND_MENU_LABEL, "Descend into selected instance…");
+    assert_eq!(
+        Command::DescendHierarchy.spec().label,
+        "Descend into selected instance…"
+    );
     assert_eq!(COMMAND_REFERENCE_MENU_LABEL, "Command reference");
 }
 
@@ -641,7 +644,7 @@ fn results_menu_exposes_only_truthful_completed_result_workflows() {
     assert_eq!(
         labels,
         [
-            "Open results workspace",
+            "Open waveform viewer",
             "Dataset and manifest browser…",
             "Create result document…",
             "Add result comparison…",

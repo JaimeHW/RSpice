@@ -586,14 +586,18 @@ impl Command {
             ),
             Self::Cancel => spec("cancel-active-command", "Cancel active command", "Design"),
             Self::AscendHierarchy => spec("ascend-hierarchy", "Ascend hierarchy", "Design"),
+            // Two gestures, two rows: this one opens the descend dialog, and
+            // the direct gesture below goes straight to the master. Sharing one
+            // title made them indistinguishable everywhere the palette, the
+            // shortcut editor and the command reference list them side by side.
             Self::DescendHierarchy => spec(
                 "descend-hierarchy",
-                "Descend into selected instance",
+                "Descend into selected instance…",
                 "Design",
             ),
             Self::DescendHierarchyDirect => spec(
                 "descend-selected-instance",
-                "Descend into selected instance",
+                "Open selected instance master",
                 "Design",
             ),
             Self::RunChecks => spec("run-checks", "Run schematic checks", "Design"),
@@ -649,8 +653,12 @@ impl Command {
             Self::ResultViewer(crate::workbench::ResultViewer::Manifest) => {
                 spec("result-manifest", "Open dataset manifest", "Results")
             }
+            // Named for the sheet it selects, not for the workspace it lands
+            // in: `OpenWorkspace(Results)` is the route that restores whatever
+            // sheet was last open, and two palette rows reading "Open results
+            // workspace" would be indistinguishable.
             Self::ResultViewer(crate::workbench::ResultViewer::Waves) => {
-                spec("waveforms", "Open results workspace", "Results")
+                spec("waveforms", "Open waveform viewer", "Results")
             }
             Self::ResultViewer(crate::workbench::ResultViewer::DcSweep) => {
                 spec("result-dc-sweep", "Open DC sweep viewer", "Results")
@@ -1137,6 +1145,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ResultViewer(crate::workbench::ResultViewer::Soa),
     Command::ResultViewer(crate::workbench::ResultViewer::Reliability),
     Command::ResultViewer(crate::workbench::ResultViewer::Optimization),
+    Command::ResultViewer(crate::workbench::ResultViewer::Manifest),
     Command::EditSpecifications,
     Command::VerificationPage(VerificationPage::Corners),
     Command::VerificationPage(VerificationPage::Optimization),

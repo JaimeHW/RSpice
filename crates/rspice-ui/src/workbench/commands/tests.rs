@@ -1197,33 +1197,21 @@ fn truthful_results_menu_routes_keep_their_stable_dispatch_identities() {
     }
 }
 
+/// A sheet reachable only by clicking its tab is reachable only when the strip
+/// happens to draw that tab. The registry is what puts a command in the
+/// palette, in the shortcut editor, and within reach of `from_stable_id` — so a
+/// viewer missing from it cannot be bound, searched, or restored from a saved
+/// profile. Driven by `ResultViewer::every()` on purpose: the hand-written list
+/// this replaced went stale for five of the sheets.
 #[test]
-fn every_mockup_results_mode_is_registered_for_commands_and_shortcuts() {
+fn every_result_sheet_is_registered_for_commands_and_shortcuts() {
     use crate::workbench::ResultViewer;
 
-    for viewer in [
-        ResultViewer::Waves,
-        ResultViewer::DcSweep,
-        ResultViewer::Bode,
-        ResultViewer::NoiseContrib,
-        ResultViewer::Nyquist,
-        ResultViewer::Fft,
-        ResultViewer::HarmonicBalance,
-        ResultViewer::PhaseNoise,
-        ResultViewer::Smith,
-        ResultViewer::TransferFunction,
-        ResultViewer::Contribution,
-        ResultViewer::Op,
-        ResultViewer::Specs,
-        ResultViewer::Table,
-        ResultViewer::Hist,
-        ResultViewer::Eye,
-        ResultViewer::PoleZero,
-    ] {
+    for viewer in ResultViewer::every() {
         let command = Command::ResultViewer(viewer);
         assert!(
             vocabulary::COMMAND_REGISTRY.contains(&command),
-            "Results mode is absent from the command registry: {viewer:?}"
+            "Result sheet is absent from the command registry: {viewer:?}"
         );
         assert_eq!(Command::from_stable_id(command.stable_id()), Some(command));
     }
@@ -1422,6 +1410,20 @@ fn command_catalog_has_unique_stable_ids() {
             ids.contains(command.stable_id()),
             "bindable command is missing a unique stable ID: {command:?}"
         );
+    }
+}
+
+/// The palette is a title-matched list, so two commands sharing a title are two
+/// rows the user cannot tell apart — and picking the wrong one goes somewhere
+/// else entirely. Unique IDs do not cover this: they are never displayed.
+#[test]
+fn command_catalog_titles_name_exactly_one_action() {
+    let mut labels: std::collections::HashMap<&str, Command> = std::collections::HashMap::new();
+    for command in vocabulary::COMMAND_REGISTRY.iter().copied() {
+        let label = command.spec().label;
+        if let Some(previous) = labels.insert(label, command) {
+            panic!("{previous:?} and {command:?} both offer the palette row {label:?}");
+        }
     }
 }
 
