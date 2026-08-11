@@ -1498,9 +1498,16 @@ impl SourceRfPort {
     /// ngspice applies by setting the source's function type to `PORT` from
     /// `PWR` and `FREQ` alone.
     ///
-    /// The amplitude is the peak volts that delivers `power` into a matched
-    /// `z0` load: available power `V_peak^2 / (8 Z0)` inverts to
-    /// `V_peak = sqrt(4 P Z0)`.
+    /// The two port spellings scale `power` differently, because they are not
+    /// the same generator. A `P` element sits behind a real `z0`, so half its
+    /// EMF drops across its own reference impedance and `power` is the
+    /// *available* power a matched load actually receives -- `P = E^2/(8 Z0)`,
+    /// so `E = sqrt(8 P Z0)`. That is what a port means in ADS and Spectre, and
+    /// what the schematic RF Port authors. An ngspice `portnum=` annotation
+    /// instead drives the reference plane directly with `sqrt(4 P Z0)`, which
+    /// is ngspice's own formula and is kept exactly so an imported deck
+    /// reproduces its numbers. Using one formula for both would put a shipped
+    /// deck 6 dB off whichever way it was written.
     ///
     /// One deliberate divergence: ngspice converts `phase` to radians and then
     /// never reads it, so its ports always start at a cosine peak. A port phase
@@ -1513,7 +1520,12 @@ impl SourceRfPort {
         }
         let power = self.power.unwrap_or(Self::DEFAULT_DRIVE_POWER);
         let frequency = self.frequency.unwrap_or(Self::DEFAULT_DRIVE_FREQUENCY);
-        let amplitude = (4.0 * power * self.z0).sqrt();
+        let watts_to_volts_squared = if self.reference_plane.is_some() {
+            8.0
+        } else {
+            4.0
+        };
+        let amplitude = (watts_to_volts_squared * power * self.z0).sqrt();
         let phase = self.phase.unwrap_or(0.0).to_radians();
         Some(amplitude * (std::f64::consts::TAU * frequency * time + phase).cos())
     }

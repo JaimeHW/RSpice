@@ -5328,6 +5328,9 @@ fn parse_xyce_port(
 
     let mut z0 = 50.0;
     let mut portnum = None;
+    let mut power = None;
+    let mut frequency = None;
+    let mut phase = None;
     let mut source_tokens = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
@@ -5342,27 +5345,49 @@ fn parse_xyce_port(
                 skip_commas(stream);
                 stream.consume(&TokenKind::Equals);
                 let value = expect_value(stream, line_num, params)?;
-                if upper == "Z0" {
-                    if value <= 0.0 || !value.is_finite() {
-                        return Err(ParseError::Syntax {
-                            line: line_num,
-                            message: format!(
-                                "Xyce port '{}' requires a positive finite Z0 value",
-                                name
-                            ),
-                        });
-                    }
-                    z0 = value;
-                } else if value < 1.0 || !value.is_finite() || value.fract().abs() > 1e-12 {
-                    return Err(ParseError::Syntax {
+                let reject = |requirement: &str| {
+                    Err(ParseError::Syntax {
                         line: line_num,
-                        message: format!(
-                            "Xyce port '{}' requires a positive integer {} value",
-                            name, upper
-                        ),
-                    });
-                } else {
-                    portnum = Some(value as usize);
+                        message: format!("Xyce port '{name}' requires {requirement} {upper} value"),
+                    })
+                };
+                match upper.as_str() {
+                    "Z0" => {
+                        if !value.is_finite() || value <= 0.0 {
+                            return reject("a positive finite");
+                        }
+                        z0 = value;
+                    }
+                    // Large-signal drive. Xyce's own P element stops at PORT
+                    // and Z0; these are ngspice's port parameters, accepted
+                    // here so a schematic RF Port can author a drive without
+                    // changing spelling to the annotated form -- which would
+                    // silently move the generator from behind the reference
+                    // impedance onto the plane itself.
+                    "PWR" | "POWER" => {
+                        if !value.is_finite() || value < 0.0 {
+                            return reject("a non-negative finite");
+                        }
+                        power = Some(value);
+                    }
+                    "FREQ" | "FREQUENCY" => {
+                        if !value.is_finite() || value <= 0.0 {
+                            return reject("a positive finite");
+                        }
+                        frequency = Some(value);
+                    }
+                    "PHASE" => {
+                        if !value.is_finite() {
+                            return reject("a finite");
+                        }
+                        phase = Some(value);
+                    }
+                    _ => {
+                        if !value.is_finite() || value < 1.0 || value.fract().abs() > 1e-12 {
+                            return reject("a positive integer");
+                        }
+                        portnum = Some(value as usize);
+                    }
                 }
                 continue;
             }
@@ -5396,9 +5421,9 @@ fn parse_xyce_port(
             port: crate::netlist::SourceRfPort {
                 portnum,
                 z0,
-                power: None,
-                frequency: None,
-                phase: None,
+                power,
+                frequency,
+                phase,
                 reference_plane: Some(node_pos.clone()),
             },
         },
@@ -5428,7 +5453,10 @@ fn parse_xyce_port(
 }
 
 fn is_xyce_port_assignment(raw: &str) -> bool {
-    matches!(raw.to_ascii_uppercase().as_str(), "PORT" | "PORTNUM" | "Z0")
+    matches!(
+        raw.to_ascii_uppercase().as_str(),
+        "PORT" | "PORTNUM" | "Z0" | "PWR" | "POWER" | "FREQ" | "FREQUENCY" | "PHASE"
+    )
 }
 
 fn is_xyce_port_source_keyword(raw: &str) -> bool {

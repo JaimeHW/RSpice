@@ -507,6 +507,19 @@ impl<'a> NetlistGenerator<'a> {
                 let port = Self::get_param_owned(&params, "port", "", "1");
                 let z0 = Self::get_param_owned(&params, "z0", "", "50");
                 let mut line = format!("{} {} PORT={} Z0={}", instance_name, nodes, port, z0);
+                // Large-signal drive. PHASE and FREQ mean nothing without a
+                // power to carry, so they ride behind one rather than turning
+                // the port into a generator on their own.
+                let power = Self::get_param_owned(&params, "pwr", "", "");
+                if !power.is_empty() {
+                    line.push_str(&format!(" PWR={}", power));
+                    for (key, keyword) in [("freq", "FREQ"), ("phase", "PHASE")] {
+                        let value = Self::get_param_owned(&params, key, "", "");
+                        if !value.is_empty() {
+                            line.push_str(&format!(" {keyword}={value}"));
+                        }
+                    }
+                }
                 let dc = Self::get_param_owned(&params, "dc", component.value.trim(), "");
                 if !dc.is_empty() {
                     line.push_str(&format!(" DC {}", dc));

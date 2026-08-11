@@ -75,6 +75,42 @@ impl PropertyRegistry {
                 .with_category("Excitation"),
         );
 
+        // Large-signal RF drive. `pwr` is the power a matched load actually
+        // receives, as it is on an ADS or Spectre port: the generator sits
+        // behind Z0 and drops half its EMF there, so the lowered source carries
+        // sqrt(8·P·Z0). An ngspice `portnum=` deck keeps ngspice's own
+        // sqrt(4·P·Z0), because there the source drives the plane directly.
+        sheet.add(
+            PropertyDefinition::new("pwr")
+                .with_display_name("Available Power")
+                .with_description("Power delivered into a matched Z0; empty = no RF drive")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::string(""))
+                .with_unit("W")
+                .with_order(30)
+                .with_category("RF Drive"),
+        );
+        sheet.add(
+            PropertyDefinition::new("freq")
+                .with_display_name("Drive Frequency")
+                .with_description("Applied only when an available power is set; defaults to 1 GHz")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::string(""))
+                .with_unit("Hz")
+                .with_order(31)
+                .with_category("RF Drive"),
+        );
+        sheet.add(
+            PropertyDefinition::new("phase")
+                .with_display_name("Drive Phase")
+                .with_description("Applied only when an available power is set")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::string(""))
+                .with_unit("°")
+                .with_order(32)
+                .with_category("RF Drive"),
+        );
+
         self.sheets.insert(ComponentType::RfPort, sheet);
     }
 }

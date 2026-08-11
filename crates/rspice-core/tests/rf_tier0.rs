@@ -451,3 +451,64 @@ fn an_rf_port_operating_point_opens_at_the_drive_rather_than_stepping_into_it() 
         op.node_voltages[index]
     );
 }
+
+/// The two port spellings are different generators, so the same `pwr` has to
+/// mean different EMFs. A `P` element sits behind a real Z0 and drops half its
+/// EMF there, so `pwr` is the available power a matched load receives -- the
+/// ADS/Spectre convention. An ngspice `portnum=` annotation drives the plane
+/// directly with ngspice's own `sqrt(4 P Z0)`.
+///
+/// Reading one formula onto both would put a deck 6 dB off whichever way it
+/// was written, so the divider below measures each against its own contract.
+#[test]
+fn the_two_port_spellings_scale_declared_power_to_their_own_topology() {
+    let frequency = 1.0e9;
+    let peak = |deck: &str, node: &str| {
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let result = engine()
+            .run_tran(&netlist, 4.0 / frequency, 1.0 / (frequency * 2000.0))
+            .expect("transient completes");
+        let index = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(node))
+            .unwrap_or_else(|| panic!("node {node} missing"));
+        result.voltages[index]
+            .iter()
+            .fold(0.0_f64, |peak, v| peak.max(v.abs()))
+    };
+
+    // Thevenin: 1 mW available into a matched 50 R is 316.2 mV at the plane.
+    let thevenin = peak(
+        "* P element delivering its declared power\n\
+         P1 in 0 PORT=1 Z0=50 PWR=1m FREQ=1e9\n\
+         R1 in 0 50\n\
+         .end\n",
+        "in",
+    );
+    // EMF sqrt(8 P Z0), halved across the port's own reference impedance.
+    let delivered = (8.0 * 0.001 * 50.0_f64).sqrt() / 2.0;
+    assert!(
+        (thevenin - delivered).abs() < 1.0e-3 * delivered,
+        "P element plane peak {thevenin} V, expected {delivered} V"
+    );
+    let watts = thevenin * thevenin / (2.0 * 50.0);
+    assert!(
+        (watts - 0.001).abs() < 1.0e-5,
+        "P element delivered {watts} W into a matched load, expected 1 mW"
+    );
+
+    // Annotated: ngspice drives the plane itself, undivided.
+    let annotated = peak(
+        "* ngspice annotated port keeps ngspice's amplitude\n\
+         V1 in 0 dc 0 portnum 1 z0 50 pwr 1m freq 1e9\n\
+         R1 in 0 50\n\
+         .end\n",
+        "in",
+    );
+    let ngspice = (4.0 * 0.001 * 50.0_f64).sqrt();
+    assert!(
+        (annotated - ngspice).abs() < 1.0e-3 * ngspice,
+        "annotated port peak {annotated} V, expected ngspice's {ngspice} V"
+    );
+}

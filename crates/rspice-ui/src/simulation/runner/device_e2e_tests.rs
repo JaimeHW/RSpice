@@ -363,6 +363,68 @@ fn rf_port_bench_solves_op() {
     solve_op(&bench.netlist());
 }
 
+/// A schematic RF Port has to be able to author a large-signal drive, and the
+/// card it emits has to keep the generator behind the reference impedance.
+/// Switching to the ngspice `portnum=` spelling to carry a power would move the
+/// source onto the plane and change the circuit, so `P` carries it instead.
+#[test]
+fn rf_port_authors_an_available_power_drive_on_its_own_card() {
+    let mut bench = Bench::new();
+    let port = bench.place(
+        ComponentType::RfPort,
+        0,
+        0,
+        "P1",
+        "",
+        "port=1 z0=50 pwr=1m freq=1e9 phase=90",
+    );
+    let rl = bench.place(ComponentType::Resistor, 200, 0, "RL", "50", "");
+    bench.connect((port, 0), (rl, 0));
+    bench.ground((rl, 1));
+    bench.ground((port, 1));
+
+    let netlist = bench.netlist();
+    let card = netlist
+        .lines()
+        .find(|line| line.trim_start().starts_with("P1 "))
+        .unwrap_or_else(|| panic!("no P1 card in:\n{netlist}"));
+    for expected in ["PORT=1", "Z0=50", "PWR=1m", "FREQ=1e9", "PHASE=90"] {
+        assert!(card.contains(expected), "{expected} missing from `{card}`");
+    }
+
+    solve_op(&netlist);
+}
+
+/// Frequency and phase describe a drive; with no power there is none to
+/// describe, and emitting them would make the card claim a generator the
+/// schematic never asked for.
+#[test]
+fn rf_port_omits_drive_timing_when_no_power_is_set() {
+    let mut bench = Bench::new();
+    let port = bench.place(
+        ComponentType::RfPort,
+        0,
+        0,
+        "P1",
+        "",
+        "port=1 z0=50 freq=1e9 phase=90",
+    );
+    let rl = bench.place(ComponentType::Resistor, 200, 0, "RL", "50", "");
+    bench.connect((port, 0), (rl, 0));
+    bench.ground((rl, 1));
+    bench.ground((port, 1));
+
+    let netlist = bench.netlist();
+    let card = netlist
+        .lines()
+        .find(|line| line.trim_start().starts_with("P1 "))
+        .unwrap_or_else(|| panic!("no P1 card in:\n{netlist}"));
+    assert!(
+        !card.contains("FREQ") && !card.contains("PHASE") && !card.contains("PWR"),
+        "unpowered port still claims a drive: `{card}`"
+    );
+}
+
 #[test]
 fn placed_k_coupling_bench_solves_op() {
     let mut bench = Bench::new();
