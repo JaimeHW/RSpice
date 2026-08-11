@@ -4,7 +4,7 @@
 //! and writable handles complete on a later frame.  Both paths use the same
 //! token so a late completion can never commit into a different project.
 
-use crate::product::ContentDigest;
+use crate::product::{ContentDigest, TransactionId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TransactionKind {
@@ -12,15 +12,6 @@ pub(crate) enum TransactionKind {
     SaveAll,
     SaveProjectCopy,
     OpenProject,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct TransactionId(uuid::Uuid);
-
-impl TransactionId {
-    pub(crate) fn new() -> Self {
-        Self(uuid::Uuid::new_v4())
-    }
 }
 
 #[derive(Debug, Clone)]

@@ -1468,7 +1468,7 @@ pub(crate) struct CheckAndSaveDialogState {
     pub(crate) discard_confirm: bool,
     #[cfg(target_arch = "wasm32")]
     pub(crate) pending_transaction:
-        Option<crate::workbench::lifecycle::project_lifecycle::TransactionId>,
+        Option<crate::product::TransactionId>,
     #[cfg(target_arch = "wasm32")]
     pub(crate) pending_revision_id: Option<crate::state::ValidatedSchematicRevisionId>,
     #[cfg(target_arch = "wasm32")]

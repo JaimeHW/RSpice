@@ -169,7 +169,7 @@ pub(crate) fn save_all(state: &mut AppState) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SaveRequestOutcome {
     CanonicalComplete,
-    CanonicalPending(crate::workbench::lifecycle::project_lifecycle::TransactionId),
+    CanonicalPending(crate::product::TransactionId),
     CopyOnly,
     CopyPending,
     Cancelled,
@@ -439,16 +439,16 @@ struct BrowserProjectSaveCompletion {
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SaveContinuationEvent {
-    Saved(crate::workbench::lifecycle::project_lifecycle::TransactionId),
-    SavedWithNewerChanges(crate::workbench::lifecycle::project_lifecycle::TransactionId),
-    Cancelled(crate::workbench::lifecycle::project_lifecycle::TransactionId),
-    Conflict(crate::workbench::lifecycle::project_lifecycle::TransactionId),
+    Saved(crate::product::TransactionId),
+    SavedWithNewerChanges(crate::product::TransactionId),
+    Cancelled(crate::product::TransactionId),
+    Conflict(crate::product::TransactionId),
     Failed(
-        crate::workbench::lifecycle::project_lifecycle::TransactionId,
+        crate::product::TransactionId,
         String,
     ),
     PublishedButNotAdopted(
-        crate::workbench::lifecycle::project_lifecycle::TransactionId,
+        crate::product::TransactionId,
         String,
     ),
 }
@@ -457,7 +457,7 @@ pub(crate) enum SaveContinuationEvent {
 impl SaveContinuationEvent {
     pub(crate) fn transaction(
         &self,
-    ) -> crate::workbench::lifecycle::project_lifecycle::TransactionId {
+    ) -> crate::product::TransactionId {
         match self {
             Self::Saved(transaction)
             | Self::SavedWithNewerChanges(transaction)
@@ -707,7 +707,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
 #[cfg(target_arch = "wasm32")]
 fn canonical_save_continuation_event(
     state: &AppState,
-    transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
+    transaction: crate::product::TransactionId,
     scope: SaveScope,
     saved_document: &crate::workbench::lifecycle::project_lifecycle::ProjectDocumentId,
 ) -> SaveContinuationEvent {
@@ -972,7 +972,7 @@ fn apply_loaded_project_authorized(
     mut project: ProjectFile,
     origin: ProjectLoadOrigin<'_>,
     binding: Option<PersistenceBinding>,
-    transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
+    transaction: crate::product::TransactionId,
 ) -> bool {
     if let Err(error) = crate::workbench::lifecycle::project_lifecycle::validate_project_replacement(
         state,
@@ -1198,7 +1198,7 @@ enum BrowserProjectImportResult {
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug)]
 struct BrowserProjectImportCompletion {
-    transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
+    transaction: crate::product::TransactionId,
     context: crate::workbench::lifecycle::project_lifecycle::BrowserOperationContext,
     import_token: crate::workbench::browser::file_import::TextImportToken,
     payload: BrowserProjectImportPayload,
@@ -1221,7 +1221,7 @@ thread_local! {
 
 #[cfg(target_arch = "wasm32")]
 fn start_browser_project_import(
-    transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
+    transaction: crate::product::TransactionId,
     context: crate::workbench::lifecycle::project_lifecycle::BrowserOperationContext,
 ) -> Result<(), String> {
     let import_token = crate::workbench::browser::file_import::try_begin_text_import(
@@ -1392,7 +1392,7 @@ fn finish_browser_project_import(token: crate::workbench::browser::file_import::
 #[cfg(target_arch = "wasm32")]
 fn finish_browser_canonical_open(
     state: &mut AppState,
-    transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
+    transaction: crate::product::TransactionId,
     result: crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult,
 ) -> bool {
     let crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult::Opened {
@@ -1580,7 +1580,7 @@ mod tests {
         assert!(SaveRequestOutcome::CanonicalComplete.authorizes_immediate_destructive_action());
         assert!(
             !SaveRequestOutcome::CanonicalPending(
-                crate::workbench::lifecycle::project_lifecycle::TransactionId::new()
+                crate::product::TransactionId::new()
             )
             .authorizes_immediate_destructive_action()
         );

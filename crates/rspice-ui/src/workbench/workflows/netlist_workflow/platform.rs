@@ -240,7 +240,7 @@ pub(super) struct BrowserDependencyRelinkCompletion {
 #[cfg(target_arch = "wasm32")]
 pub(super) struct BrowserNetlistImportCompletion {
     token: crate::workbench::browser::file_import::TextImportToken,
-    transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
+    transaction: crate::product::TransactionId,
     mode: NetlistImportMode,
     result: BrowserNetlistImportResult,
 }

@@ -194,7 +194,7 @@ pub(super) fn validate_import_candidate(
 
 pub(super) fn stage_netlist_import(
     state: &mut AppState,
-    transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
+    transaction: crate::product::TransactionId,
     mode: NetlistImportMode,
     bytes: Vec<u8>,
     source_path: Option<std::path::PathBuf>,
@@ -367,7 +367,7 @@ pub(crate) fn stage_dropped_netlist_import(
 
 pub(super) fn stage_netlist_bundle_import(
     state: &mut AppState,
-    transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
+    transaction: crate::product::TransactionId,
     mode: NetlistImportMode,
     bytes: Vec<u8>,
     selected_file_path: Option<std::path::PathBuf>,

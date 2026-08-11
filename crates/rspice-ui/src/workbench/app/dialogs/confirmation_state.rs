@@ -90,7 +90,7 @@ pub struct ConfirmationDialogState {
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 #[derive(Debug, Clone)]
 pub(crate) struct PendingConfirmationContinuation {
-    pub(crate) transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
+    pub(crate) transaction: crate::product::TransactionId,
     pub(crate) action: ConfirmationAction,
     pub(crate) path: Option<std::path::PathBuf>,
     pub(crate) recent_kind: Option<crate::workbench::app_state::RecentKind>,
@@ -131,7 +131,7 @@ impl ConfirmationDialogState {
 
     pub(crate) fn await_canonical_save(
         &mut self,
-        transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
+        transaction: crate::product::TransactionId,
         action: ConfirmationAction,
         path: Option<std::path::PathBuf>,
         recent_kind: Option<crate::workbench::app_state::RecentKind>,
@@ -149,7 +149,7 @@ impl ConfirmationDialogState {
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub(crate) fn take_canonical_save(
         &mut self,
-        transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
+        transaction: crate::product::TransactionId,
     ) -> Option<PendingConfirmationContinuation> {
         let matching = self
             .awaiting_canonical_save
@@ -235,8 +235,8 @@ mod tests {
             ConfirmationAction::ProjectNew,
             ConfirmationAction::Exit,
         ] {
-            let expected = crate::workbench::lifecycle::project_lifecycle::TransactionId::new();
-            let stale = crate::workbench::lifecycle::project_lifecycle::TransactionId::new();
+            let expected = crate::product::TransactionId::new();
+            let stale = crate::product::TransactionId::new();
             let mut state = ConfirmationDialogState::default();
             state.await_canonical_save(expected, action, None, None, None);
 
@@ -261,7 +261,7 @@ mod tests {
             ConfirmationAction::ProjectNew,
             ConfirmationAction::Exit,
         ] {
-            let transaction = crate::workbench::lifecycle::project_lifecycle::TransactionId::new();
+            let transaction = crate::product::TransactionId::new();
             let mut state = ConfirmationDialogState::default();
             state.await_canonical_save(transaction, action, None, None, None);
             assert!(state.take_canonical_save(transaction).is_some());
@@ -271,7 +271,7 @@ mod tests {
 
     #[test]
     fn explicit_browser_operation_cancel_revokes_exact_pending_continuation() {
-        let transaction = crate::workbench::lifecycle::project_lifecycle::TransactionId::new();
+        let transaction = crate::product::TransactionId::new();
         let mut state = ConfirmationDialogState::default();
         state.await_canonical_save(
             transaction,
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn recent_kind_survives_confirmation_and_async_save_continuation() {
-        let transaction = crate::workbench::lifecycle::project_lifecycle::TransactionId::new();
+        let transaction = crate::product::TransactionId::new();
         let path = std::path::PathBuf::from("typed-recent.rspiceproj");
         let mut state = ConfirmationDialogState::default();
         state.show_recent(path.clone(), RecentKind::Project);

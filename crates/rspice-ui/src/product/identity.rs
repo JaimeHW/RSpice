@@ -120,6 +120,12 @@ define_derivable_uuid_id!(AnalysisInstanceId);
 define_derivable_uuid_id!(DesignVariableId);
 define_derivable_uuid_id!(SavedOutputId);
 define_uuid_id!(JobId);
+// A lifecycle transaction is a token, not a product object: it exists only to
+// let a completion that arrives on a later frame prove it belongs to the
+// operation that started it. It lives here because every layer that carries
+// one — a dialog, a document, an import workflow — must be able to name it
+// without reaching up to the lifecycle module that mints it.
+define_uuid_id!(TransactionId);
 define_derivable_uuid_id!(RunId);
 define_derivable_uuid_id!(DatasetId);
 define_raw_uuid_id!(ResultDocumentId);

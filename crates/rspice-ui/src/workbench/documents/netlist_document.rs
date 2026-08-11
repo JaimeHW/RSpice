@@ -876,7 +876,7 @@ pub(crate) struct NetlistImportIssue {
 /// different file and cancellation never mutates project-owned documents.
 #[derive(Debug, Clone)]
 pub(crate) struct NetlistImportReviewState {
-    pub transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
+    pub transaction: crate::product::TransactionId,
     pub operation: NetlistImportOperation,
     pub display_name: String,
     /// Native picker origin re-read at commit to reject review races. Archive

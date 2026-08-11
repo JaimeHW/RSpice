@@ -23,7 +23,7 @@ pub(crate) use persistence::BrowserBindingBackend;
 pub(crate) use persistence::BrowserWriteTarget;
 pub(crate) use persistence::{BrowserBindingReceipt, NativeBindingReceipt, PersistenceBinding};
 pub(crate) use registry::ProjectDocumentId;
-pub(crate) use transaction::TransactionId;
+pub(crate) use crate::product::TransactionId;
 use transaction::{LifecycleTransaction, TransactionKind};
 
 use crate::io::{ProjectExecutionContext, ProjectFile, ProjectSimulationResults};
