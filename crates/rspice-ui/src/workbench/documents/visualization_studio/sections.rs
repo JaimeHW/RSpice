@@ -602,12 +602,6 @@ pub(super) fn export_section(ui: &mut Ui, app: &mut RSpiceApp) {
         ui.add_space(10.0);
         ui.horizontal_wrapped(|ui| {
             dock_action(ui, app, "Edit report pages…", VisualizationDock::PageEditor);
-            dock_action(
-                ui,
-                app,
-                "Save plot export preset…",
-                VisualizationDock::ExportPreset,
-            );
             if Button::new("Export exact data…")
                 .accent()
                 .show(ui)
@@ -615,8 +609,8 @@ pub(super) fn export_section(ui: &mut Ui, app: &mut RSpiceApp) {
             {
                 app.state.ui.export_csv_requested = true;
             }
-            if Button::new("Export viewer image…").show(ui).clicked() {
-                app.state.ui.export_png_requested = true;
+            if Button::new("Export viewer figure…").show(ui).clicked() {
+                app.state.ui.export_figure_requested = true;
             }
         });
         concept_banner(

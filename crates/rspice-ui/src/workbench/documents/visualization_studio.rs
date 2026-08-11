@@ -35,12 +35,6 @@ use serde::{Deserialize, Serialize};
 use crate::analysis::calculator;
 use crate::diagnostics::ConsoleMessage;
 use crate::product::{AnalysisInstanceId, DatasetBinding, DatasetId};
-use crate::results::plot_export_preset::{
-    ColorProfile, DeterministicNamingTemplate, ExportBackground, ExportPageSize,
-    FontEmbeddingPolicy, FontPolicy, MetadataProvenancePolicy, PageGeometry, PageMargins,
-    PageOrientation, PdfAConformance, PlotExportFormat, PlotExportPresetDefinition,
-    PlotExportPresetScope, RasterResampling, VectorHandling, VectorRasterPolicy,
-};
 use crate::results::viewer_catalog::{
     VIEWER_DOCUMENTS, ViewerCapabilities, ViewerCompatibility, ViewerDocumentDefinition,
     ViewerGroup, viewer_compatibility, viewer_document,
@@ -288,7 +282,6 @@ enum VisualizationDock {
     FamilyEncoding,
     FamilyFilter,
     Comparison,
-    ExportPreset,
     Export,
 }
 
@@ -698,10 +691,6 @@ pub struct VisualizationStudioState {
     #[serde(skip)]
     draft_comparison_difference_trace: bool,
     #[serde(skip)]
-    draft_export_preset_name: String,
-    #[serde(skip)]
-    draft_export_preset_scope: Option<PlotExportPresetScope>,
-    #[serde(skip)]
     operation_state: OperationState,
     #[serde(skip)]
     operation_dataset_id: Option<DatasetId>,
@@ -783,8 +772,6 @@ impl Default for VisualizationStudioState {
             draft_comparison_threshold: 0.0,
             draft_comparison_maximum_lag_samples: 128,
             draft_comparison_difference_trace: true,
-            draft_export_preset_name: "Publication vector · A4".to_owned(),
-            draft_export_preset_scope: Some(PlotExportPresetScope::Project),
             operation_state: OperationState::NotStarted,
             operation_dataset_id: None,
             operation_analysis_sequence: None,
@@ -1590,14 +1577,6 @@ fn open_dock(app: &mut RSpiceApp, dock: VisualizationDock) {
         }
         VisualizationDock::Comparison => {
             initialize_comparison_dock(studio, comparison_datasets, comparison_data_version);
-        }
-        VisualizationDock::ExportPreset => {
-            if studio.draft_export_preset_name.trim().is_empty() {
-                studio.draft_export_preset_name = "Publication vector · A4".to_owned();
-            }
-            studio
-                .draft_export_preset_scope
-                .get_or_insert(PlotExportPresetScope::Project);
         }
         VisualizationDock::CursorManager
         | VisualizationDock::Annotation

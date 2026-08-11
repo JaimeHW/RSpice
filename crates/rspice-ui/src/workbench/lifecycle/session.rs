@@ -757,10 +757,14 @@ pub struct UiSessionState {
     /// One-shot request to export the visible waveforms as CSV (needs the
     /// app's IO backend, so it is handled at the workbench boundary).
     pub export_csv_requested: bool,
-    /// One-shot request to capture the window as a PNG (native: viewport
-    /// screenshot + save dialog; the web build offers the browser's own
-    /// capture instead).
-    pub export_png_requested: bool,
+    /// One-shot request to export the active view as a publication figure.
+    ///
+    /// This used to capture the window and crop it, which handed the reader
+    /// back the pixels they already had at whatever resolution the display
+    /// happened to be. It opens the hardcopy export workflow instead — the
+    /// one pipeline that renders a sheet as PDF/A, PDF, SVG or PNG at a
+    /// chosen resolution, and the same one Print already used.
+    pub export_figure_requested: bool,
     /// One-shot platform clipboard payload emitted by commands that copy
     /// engineering readouts. Kept transient so clipboard intent is never
     /// serialized into a project/session.

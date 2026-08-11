@@ -419,8 +419,6 @@ pub enum SimulationConfigurationError {
     InvalidNetlistDocumentProjection { message: String },
     #[error("project-owned Code source registry is invalid: {message}")]
     InvalidProjectSourceRegistry { message: String },
-    #[error("project plot export preset catalog has invalid ownership: {message}")]
-    InvalidPlotExportPresetOwnership { message: String },
     #[error("project hardcopy source-set catalog is invalid: {message}")]
     InvalidHardcopySourceSetCatalog { message: String },
     #[error("project hardcopy receipt ledger is invalid: {message}")]
@@ -2141,11 +2139,6 @@ pub struct ProjectWorkspace {
     /// authority; callback output is never accepted as ambient mutable state.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pdk_callback_receipts: Vec<crate::state::pdk_config::ProjectPdkCallbackReceipt>,
-    /// Project-owned, versioned publication profiles for result plots.
-    /// Personal profiles are owned by serialized user preferences; an
-    /// organization profile requires a connected organization authority.
-    #[serde(default)]
-    pub plot_export_presets: crate::results::plot_export_preset::PlotExportPresetCatalog,
     /// Versioned, per-document Page Setup contracts used by schematic,
     /// symbol, result, and report hardcopy workflows. Publication artifacts
     /// and transient preview state are intentionally not persisted here.
@@ -2265,8 +2258,6 @@ impl Default for ProjectWorkspace {
             simulation_plan_payloads: Vec::new(),
             physical_layout_documents: BTreeMap::new(),
             pdk_callback_receipts: Vec::new(),
-            plot_export_presets:
-                crate::results::plot_export_preset::PlotExportPresetCatalog::default(),
             hardcopy_setups: crate::hardcopy::HardcopySetupStore::default(),
             hardcopy_receipts: crate::hardcopy::HardcopyReceiptLedger::default(),
             project_print_mappings: crate::hardcopy::PrintMappingPresetCatalog::new(
@@ -2756,15 +2747,6 @@ impl ProjectWorkspace {
             SimulationConfigurationError::InvalidConnectivityContract { message }
         })?;
         validate_connectivity_contract_references(self)?;
-        self.plot_export_presets
-            .validate_ownership_scope(
-                crate::results::plot_export_preset::PlotExportPresetScope::Project,
-            )
-            .map_err(
-                |error| SimulationConfigurationError::InvalidPlotExportPresetOwnership {
-                    message: error.to_string(),
-                },
-            )?;
         validate_hardcopy_source_set_catalog(&self.hardcopy_source_sets).map_err(|error| {
             SimulationConfigurationError::InvalidHardcopySourceSetCatalog {
                 message: error.to_string(),

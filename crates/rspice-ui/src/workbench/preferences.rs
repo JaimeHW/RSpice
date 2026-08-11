@@ -12,10 +12,6 @@ use serde_json::Value;
 use crate::quantity::{QuantityPresentationPolicy, UnitsPreferences};
 
 mod drawing_sheet;
-use crate::results::plot_export_preset::{
-    PlotExportPresetCatalog, PlotExportPresetDefinition, PlotExportPresetError,
-    PlotExportPresetMutationReceipt, PlotExportPresetScope,
-};
 pub(crate) use drawing_sheet::DrawingSheetPersonalPreferences;
 
 #[cfg(test)]
@@ -491,16 +487,6 @@ enum UnitsPreferencesStorage {
     Future(Value),
 }
 
-/// Device/user-owned plot publication presets. Keeping this beside the other
-/// serialized personal preferences prevents opening or sharing a project from
-/// leaking one user's publication policy into that project.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-enum PersonalPlotExportPresetStorage {
-    Current(PlotExportPresetCatalog),
-    Future(Value),
-}
-
 /// Device/user-owned reusable hardcopy mappings. A future incompatible value
 /// is retained verbatim so one preference domain cannot invalidate session
 /// recovery for every other domain.
@@ -547,47 +533,6 @@ impl PersonalPrintMappingPresetStorage {
                 if catalog
                     == &PrintMappingPresetCatalog::new(PrintMappingCatalogOwner::Personal)
         )
-    }
-}
-
-impl Default for PersonalPlotExportPresetStorage {
-    fn default() -> Self {
-        Self::Current(PlotExportPresetCatalog::default())
-    }
-}
-
-impl PersonalPlotExportPresetStorage {
-    fn current(&self) -> Option<&PlotExportPresetCatalog> {
-        match self {
-            Self::Current(catalog)
-                if catalog
-                    .validate_ownership_scope(PlotExportPresetScope::Personal)
-                    .is_ok() =>
-            {
-                Some(catalog)
-            }
-            Self::Current(_) | Self::Future(_) => None,
-        }
-    }
-
-    fn current_mut(&mut self) -> Result<&mut PlotExportPresetCatalog, &'static str> {
-        match self {
-            Self::Current(catalog)
-                if catalog
-                    .validate_ownership_scope(PlotExportPresetScope::Personal)
-                    .is_ok() =>
-            {
-                Ok(catalog)
-            }
-            Self::Current(_) => Err("personal plot export presets contain a non-personal scope"),
-            Self::Future(_) => {
-                Err("personal plot export presets were written by an incompatible build")
-            }
-        }
-    }
-
-    fn is_default(&self) -> bool {
-        matches!(self, Self::Current(catalog) if catalog == &PlotExportPresetCatalog::default())
     }
 }
 
@@ -960,11 +905,6 @@ pub struct UserPreferences {
     #[serde(skip_serializing_if = "UnitsPreferencesStorage::is_default")]
     units: UnitsPreferencesStorage,
     #[serde(
-        rename = "plot-export-presets",
-        skip_serializing_if = "PersonalPlotExportPresetStorage::is_default"
-    )]
-    personal_plot_export_presets: PersonalPlotExportPresetStorage,
-    #[serde(
         rename = "print-mapping-presets",
         skip_serializing_if = "PersonalPrintMappingPresetStorage::is_default"
     )]
@@ -1017,31 +957,6 @@ impl UserPreferences {
     /// Personal publication presets owned by this user/device profile. An
     /// incompatible or wrongly scoped persisted root is retained but never
     /// exposed as enforceable runtime policy.
-    #[must_use]
-    pub fn personal_plot_export_presets(&self) -> Option<&PlotExportPresetCatalog> {
-        self.personal_plot_export_presets.current()
-    }
-
-    pub fn create_personal_plot_export_preset(
-        &mut self,
-        definition: PlotExportPresetDefinition,
-        timestamp_unix_ms: u64,
-    ) -> Result<PlotExportPresetMutationReceipt, PlotExportPresetError> {
-        let catalog = self
-            .personal_plot_export_presets
-            .current_mut()
-            .map_err(|message| PlotExportPresetError::InvalidValue {
-                field: "personal-plot-export-presets",
-                message: message.to_owned(),
-            })?;
-        catalog.create_owned(
-            catalog.revision(),
-            PlotExportPresetScope::Personal,
-            definition,
-            timestamp_unix_ms,
-        )
-    }
-
     /// Reusable hardcopy mappings owned by this personal profile. Document
     /// and project mappings are rejected by the typed catalog.
     #[must_use]
@@ -1399,100 +1314,6 @@ fn take_legacy_choice(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::results::plot_export_preset::{
-        ColorProfile, DeterministicNamingTemplate, ExportBackground, ExportPageSize,
-        FontEmbeddingPolicy, FontPolicy, MetadataProvenancePolicy, PageGeometry, PageMargins,
-        PageOrientation, PdfAConformance, PlotExportFormat, PlotExportPresetDefinition,
-        RasterResampling, VectorHandling, VectorRasterPolicy,
-    };
-
-    fn personal_plot_preset(name: &str) -> PlotExportPresetDefinition {
-        PlotExportPresetDefinition {
-            name: name.to_owned(),
-            formats: vec![PlotExportFormat::PdfA {
-                conformance: PdfAConformance::PdfA2b,
-            }],
-            page: PageGeometry {
-                size: ExportPageSize::A4,
-                orientation: PageOrientation::Portrait,
-                margins: PageMargins {
-                    top_micrometers: 12_000,
-                    right_micrometers: 12_000,
-                    bottom_micrometers: 12_000,
-                    left_micrometers: 12_000,
-                },
-            },
-            fonts: FontPolicy {
-                primary_family: "Inter".to_owned(),
-                fallback_families: vec!["DejaVu Sans".to_owned()],
-                embedding: FontEmbeddingPolicy::EmbedSubset,
-            },
-            color_profile: ColorProfile::Srgb,
-            background: ExportBackground::White,
-            rendering: VectorRasterPolicy {
-                vector_handling: VectorHandling::PreserveNative,
-                raster_dpi: 300,
-                raster_resampling: RasterResampling::Lanczos,
-                antialias: true,
-            },
-            metadata: MetadataProvenancePolicy {
-                include_document_metadata: true,
-                include_dataset_manifest: true,
-                include_source_digests: true,
-                include_revision_receipts: true,
-                include_export_timestamp: true,
-            },
-            naming_template: DeterministicNamingTemplate::new("{document}-{format}").unwrap(),
-            scope: PlotExportPresetScope::Personal,
-        }
-    }
-
-    #[test]
-    fn personal_plot_export_presets_round_trip_in_user_preferences() {
-        let mut preferences = UserPreferences::default();
-        preferences
-            .create_personal_plot_export_preset(
-                personal_plot_preset("My publication profile"),
-                1_000,
-            )
-            .unwrap();
-
-        let encoded = serde_json::to_string(&preferences).unwrap();
-        let restored: UserPreferences = serde_json::from_str(&encoded).unwrap();
-        let restored_catalog = restored.personal_plot_export_presets().unwrap();
-        assert_eq!(restored_catalog.active_presets().len(), 1);
-        assert_eq!(
-            restored_catalog.active_presets()[0].definition.scope,
-            PlotExportPresetScope::Personal
-        );
-        assert!(serde_json::to_value(restored).unwrap()["plot-export-presets"].is_object());
-    }
-
-    #[test]
-    fn wrongly_scoped_personal_catalog_is_preserved_but_never_applied() {
-        let mut definition = personal_plot_preset("Wrong owner");
-        definition.scope = PlotExportPresetScope::Project;
-        let mut catalog = PlotExportPresetCatalog::new();
-        catalog
-            .create(catalog.revision(), definition, 1_000)
-            .unwrap();
-        let mut preferences = UserPreferences {
-            personal_plot_export_presets: PersonalPlotExportPresetStorage::Current(catalog),
-            ..UserPreferences::default()
-        };
-
-        assert!(preferences.personal_plot_export_presets().is_none());
-        assert!(
-            preferences
-                .create_personal_plot_export_preset(personal_plot_preset("Still blocked"), 2_000)
-                .is_err()
-        );
-        let encoded = serde_json::to_value(preferences).unwrap();
-        assert_eq!(
-            encoded["plot-export-presets"]["histories"][0]["revisions"][0]["definition"]["scope"],
-            "project"
-        );
-    }
 
     #[test]
     fn consumed_overrides_round_trip() {

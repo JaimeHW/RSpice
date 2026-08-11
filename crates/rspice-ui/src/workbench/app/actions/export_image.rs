@@ -1,91 +1,42 @@
-//! Viewer-image (PNG) export.
+//! Viewer-figure export.
 //!
-//! Native flow: a one-shot request sends `ViewportCommand::Screenshot`;
-//! the frame after, the screenshot arrives as an input event, gets cropped
-//! to the results document well, gets a save dialog, and is encoded with
-//! the `png` crate at physical-pixel resolution. The web build exports the
-//! active canvas through the browser download path, cropped to the same well
-//! when the browser permits it.
+//! Native builds hand this to the hardcopy publication pipeline — the one
+//! that already renders every result sheet and every schematic as PDF/A, PDF,
+//! SVG or PNG at a chosen resolution, attaches provenance, and which Print has
+//! always used. What was here instead was a second, worse export beside it: it
+//! sent `ViewportCommand::Screenshot`, waited a frame, cropped the window
+//! capture to the document well and encoded that. A "figure" was therefore the
+//! pixels already on screen, at whatever the display happened to be, with the
+//! chrome removed by rectangle — no resolution, no vector format, no page
+//! size, no colour profile, no provenance.
+//!
+//! The browser build keeps its canvas capture, because the pipeline's
+//! export-artifact finalization (`dialogs::hardcopy::finalize`) is native-only:
+//! the renderer itself compiles for WebAssembly, but nothing yet carries its
+//! bytes to a download. Routing the browser at a workflow whose primary action
+//! cannot complete would be worse than the crude capture it replaced. That
+//! boundary is the remaining work, not a design.
 
 use egui::Context;
 
-#[cfg(not(target_arch = "wasm32"))]
-use crate::diagnostics::ConsoleMessage;
 use crate::workbench::app::RSpiceApp;
 
 impl RSpiceApp {
-    /// Pump the export request and any screenshot that arrived this frame.
+    /// Pump a pending figure-export request.
     pub(in crate::workbench) fn handle_image_export(&mut self, ctx: &Context) {
-        if std::mem::take(&mut self.state.ui.export_png_requested) {
-            #[cfg(not(target_arch = "wasm32"))]
-            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
-            #[cfg(target_arch = "wasm32")]
-            self.save_browser_canvas_png(ctx);
+        if !std::mem::take(&mut self.state.ui.export_figure_requested) {
+            return;
         }
-
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let screenshot = ctx.input(|input| {
-                input.events.iter().find_map(|event| match event {
-                    egui::Event::Screenshot { image, .. } => Some(image.clone()),
-                    _ => None,
-                })
-            });
-            if let Some(image) = screenshot {
-                self.save_screenshot_png(ctx, &image);
-            }
-        }
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn save_screenshot_png(&mut self, ctx: &Context, image: &egui::ColorImage) {
-        // Crop the window capture to the document well so the export is
-        // the viewer, not the chrome around it. Falls back to the full
-        // window when no well rect was recorded.
-        let pixels_per_point = ctx.pixels_per_point();
-        let cropped = self.state.ui.results.well_rect.and_then(|well| {
-            let image_rect = egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(
-                    image.size[0] as f32 / pixels_per_point,
-                    image.size[1] as f32 / pixels_per_point,
-                ),
+            let _ = ctx;
+            crate::workbench::app::open_hardcopy_workflow(
+                self,
+                crate::workbench::app::HardcopyWorkflow::Export,
             );
-            let well = well.intersect(image_rect);
-            (well.width() > 1.0 && well.height() > 1.0)
-                .then(|| image.region(&well, Some(pixels_per_point)))
-        });
-        let image = cropped.as_ref().unwrap_or(image);
-
-        let viewer = self.state.ui.results.viewer.label().to_lowercase();
-        let Some(path) = rfd::FileDialog::new()
-            .add_filter("PNG image", &["png"])
-            .set_file_name(format!("rspice-{viewer}.png"))
-            .save_file()
-        else {
-            return;
-        };
-
-        let result = write_png(&path, image);
-        match result {
-            Ok(()) => {
-                let message = format!("Exported window image: {}", path.display());
-                self.state.ui.toasts.success(
-                    ctx,
-                    "Window image exported",
-                    format!("Saved to {}.", path.display()),
-                );
-                self.state.push_user_message(ConsoleMessage::info(message));
-            }
-            Err(error) => {
-                let message = format!("PNG export failed: {error}");
-                self.state
-                    .ui
-                    .toasts
-                    .error_with_title(ctx, "PNG export failed", error.to_string());
-                self.state.push_user_message(ConsoleMessage::error(message));
-            }
         }
+        #[cfg(target_arch = "wasm32")]
+        self.save_browser_canvas_png(ctx);
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -119,66 +70,6 @@ impl RSpiceApp {
             }
         }
     }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn write_png(path: &std::path::Path, image: &egui::ColorImage) -> Result<(), String> {
-    let expected = crate::io::durable_file::observe_expected_content(path)
-        .map_err(|error| format!("failed to authorize PNG destination: {error}"))?;
-    let encoded = encode_png(image)?;
-    publish_png(path, expected, &encoded)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn encode_png(image: &egui::ColorImage) -> Result<Vec<u8>, String> {
-    let width = u32::try_from(image.size[0])
-        .map_err(|_| "PNG width exceeds the format limit".to_string())?;
-    let height = u32::try_from(image.size[1])
-        .map_err(|_| "PNG height exceeds the format limit".to_string())?;
-    if width == 0 || height == 0 {
-        return Err("PNG dimensions must be non-zero".to_string());
-    }
-    let expected_pixels = image.size[0]
-        .checked_mul(image.size[1])
-        .ok_or_else(|| "PNG pixel count overflowed".to_string())?;
-    if image.pixels.len() != expected_pixels {
-        return Err(format!(
-            "PNG pixel buffer has {} pixels for a {}x{} image",
-            image.pixels.len(),
-            image.size[0],
-            image.size[1]
-        ));
-    }
-    let rgba_len = expected_pixels
-        .checked_mul(4)
-        .ok_or_else(|| "PNG RGBA buffer size overflowed".to_string())?;
-    let mut rgba = Vec::new();
-    rgba.try_reserve_exact(rgba_len)
-        .map_err(|error| format!("failed to allocate PNG RGBA buffer: {error}"))?;
-    for pixel in &image.pixels {
-        rgba.extend_from_slice(&pixel.to_array());
-    }
-
-    let mut encoded = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(&mut encoded, width, height);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
-        writer.write_image_data(&rgba).map_err(|e| e.to_string())?;
-        writer.finish().map_err(|e| e.to_string())?;
-    }
-    Ok(encoded)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn publish_png(
-    path: &std::path::Path,
-    expected: crate::io::durable_file::ExpectedContent,
-    encoded: &[u8],
-) -> Result<(), String> {
-    crate::io::durable_file::compare_exchange_bytes(path, expected, encoded)
-        .map_err(|error| format!("failed to publish PNG: {error}"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -380,53 +271,5 @@ mod tests {
             ),
             None
         );
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn png_encode_failure_preserves_existing_destination() {
-        let root = unique_temp_dir("png-encode-failure");
-        let path = root.join("plot.png");
-        std::fs::write(&path, b"predecessor").expect("write predecessor");
-        let invalid = egui::ColorImage {
-            size: [2, 2],
-            source_size: egui::vec2(2.0, 2.0),
-            pixels: vec![egui::Color32::RED],
-        };
-
-        let result = write_png(&path, &invalid);
-
-        assert!(result.is_err());
-        assert_eq!(std::fs::read(&path).unwrap(), b"predecessor");
-        std::fs::remove_dir_all(root).expect("remove fixture");
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn png_publication_rejects_late_external_change() {
-        let root = unique_temp_dir("png-late-change");
-        let path = root.join("plot.png");
-        std::fs::write(&path, b"authorized predecessor").expect("write predecessor");
-        let expected =
-            crate::io::durable_file::observe_expected_content(&path).expect("observe destination");
-        let image = egui::ColorImage::filled([2, 2], egui::Color32::BLUE);
-        let encoded = encode_png(&image).expect("encode PNG");
-        std::fs::write(&path, b"late external edit").expect("race destination");
-
-        let result = publish_png(&path, expected, &encoded);
-
-        assert!(result.is_err());
-        assert_eq!(std::fs::read(&path).unwrap(), b"late external edit");
-        std::fs::remove_dir_all(root).expect("remove fixture");
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn unique_temp_dir(label: &str) -> std::path::PathBuf {
-        let root = std::env::temp_dir().join(format!(
-            "rspice-image-export-{label}-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&root).expect("create fixture");
-        root
     }
 }

@@ -24,7 +24,6 @@ impl VisualizationDock {
             Self::FamilyEncoding => "Family visual encoding",
             Self::FamilyFilter => "Advanced family filter",
             Self::Comparison => "Plan explicit comparison",
-            Self::ExportPreset => "Save plot export preset",
             Self::Export => "Export visualization document",
         }
     }
@@ -49,7 +48,6 @@ pub(super) fn dock_body(ui: &mut Ui, app: &mut RSpiceApp, dock: VisualizationDoc
         VisualizationDock::FamilyEncoding => family_encoding_dock(ui, app),
         VisualizationDock::FamilyFilter => family_filter_dock(ui, app),
         VisualizationDock::Comparison => comparison_dock(ui, app),
-        VisualizationDock::ExportPreset => export_preset_dock(ui, app),
         VisualizationDock::Export => export_dock(ui, app),
     }
 }
@@ -2810,186 +2808,6 @@ fn apply_family_policy_draft(app: &mut RSpiceApp) {
     }
 }
 
-fn export_preset_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
-    dock_intro(
-        ui,
-        "RESULTS · PUBLICATION PROFILE",
-        "Store page, font, color, vector, raster, metadata, and naming defaults without changing the plot document.",
-    );
-    ui.label("Name");
-    ui.text_edit_singleline(
-        &mut app
-            .state
-            .workbench
-            .visualization_studio
-            .draft_export_preset_name,
-    );
-    property_row(ui, "Formats", "PDF/A + SVG + 2× PNG");
-    ui.label("Scope");
-    let scope = app
-        .state
-        .workbench
-        .visualization_studio
-        .draft_export_preset_scope
-        .get_or_insert(PlotExportPresetScope::Project);
-    ui.radio_value(scope, PlotExportPresetScope::Project, "Project team");
-    ui.radio_value(scope, PlotExportPresetScope::Personal, "Personal");
-    ui.add_enabled_ui(false, |ui| {
-        ui.radio_value(
-            scope,
-            PlotExportPresetScope::Organization,
-            "Organization template",
-        )
-    })
-    .response
-    .on_hover_text("Connect an organization authority before saving organization templates.");
-    ui.weak("Organization templates are unavailable while no organization authority is connected.");
-
-    let selected_scope = *scope;
-    let name = app
-        .state
-        .workbench
-        .visualization_studio
-        .draft_export_preset_name
-        .trim();
-    let duplicate_name = match selected_scope {
-        PlotExportPresetScope::Project => app
-            .state
-            .workspace
-            .plot_export_presets
-            .active_presets()
-            .into_iter()
-            .any(|preset| preset.definition.name.eq_ignore_ascii_case(name)),
-        PlotExportPresetScope::Personal => app
-            .state
-            .ui
-            .preferences
-            .personal_plot_export_presets()
-            .is_some_and(|catalog| {
-                catalog
-                    .active_presets()
-                    .into_iter()
-                    .any(|preset| preset.definition.name.eq_ignore_ascii_case(name))
-            }),
-        PlotExportPresetScope::Organization => false,
-    };
-    if duplicate_name {
-        ui.weak("A preset with this name already exists in the selected scope.");
-    }
-    let valid = !name.is_empty()
-        && name.len() <= 96
-        && !name.chars().any(char::is_control)
-        && selected_scope != PlotExportPresetScope::Organization
-        && !duplicate_name;
-    let save = Button::new("Save export preset")
-        .accent()
-        .enabled(valid)
-        .show(ui)
-        .clicked();
-    if !save {
-        return false;
-    }
-
-    let scope = app
-        .state
-        .workbench
-        .visualization_studio
-        .draft_export_preset_scope
-        .unwrap_or(PlotExportPresetScope::Project);
-    let definition = PlotExportPresetDefinition {
-        name: name.to_owned(),
-        formats: vec![
-            PlotExportFormat::PdfA {
-                conformance: PdfAConformance::PdfA2b,
-            },
-            PlotExportFormat::Svg,
-            PlotExportFormat::RasterPng { scale_percent: 200 },
-        ],
-        page: PageGeometry {
-            size: ExportPageSize::A4,
-            orientation: PageOrientation::Portrait,
-            margins: PageMargins {
-                top_micrometers: 12_000,
-                right_micrometers: 12_000,
-                bottom_micrometers: 12_000,
-                left_micrometers: 12_000,
-            },
-        },
-        fonts: FontPolicy {
-            primary_family: "Inter".to_owned(),
-            fallback_families: vec!["DejaVu Sans".to_owned()],
-            embedding: FontEmbeddingPolicy::EmbedSubset,
-        },
-        color_profile: ColorProfile::Srgb,
-        background: ExportBackground::White,
-        rendering: VectorRasterPolicy {
-            vector_handling: VectorHandling::PreserveNative,
-            raster_dpi: 300,
-            raster_resampling: RasterResampling::Lanczos,
-            antialias: true,
-        },
-        metadata: MetadataProvenancePolicy {
-            include_document_metadata: true,
-            include_dataset_manifest: true,
-            include_source_digests: true,
-            include_revision_receipts: true,
-            include_export_timestamp: true,
-        },
-        naming_template: match DeterministicNamingTemplate::new(
-            "{document}-{page}-{revision}-{format}",
-        ) {
-            Ok(template) => template,
-            Err(error) => {
-                app.state
-                    .push_user_message(ConsoleMessage::error(error.to_string()));
-                return false;
-            }
-        },
-        scope,
-    };
-    let timestamp = crate::time_compat::unix_epoch().as_millis();
-    let timestamp = u64::try_from(timestamp).unwrap_or(u64::MAX);
-    let result = match scope {
-        PlotExportPresetScope::Project => {
-            let catalog = &mut app.state.workspace.plot_export_presets;
-            catalog
-                .create_owned(
-                    catalog.revision(),
-                    PlotExportPresetScope::Project,
-                    definition,
-                    timestamp,
-                )
-                .map_err(|error| error.to_string())
-        }
-        PlotExportPresetScope::Personal => app
-            .state
-            .ui
-            .preferences
-            .create_personal_plot_export_preset(definition, timestamp)
-            .map_err(|error| error.to_string()),
-        PlotExportPresetScope::Organization => {
-            Err("organization export presets require a connected organization authority".to_owned())
-        }
-    };
-    match result {
-        Ok(receipt) => {
-            if scope == PlotExportPresetScope::Project {
-                app.state.workspace.project_metadata_dirty = true;
-            }
-            app.state.push_user_message(ConsoleMessage::info(format!(
-                "Saved {scope:?} plot export preset revision {} (receipt {}).",
-                receipt.committed_preset_revision.get(),
-                receipt.receipt_id
-            )));
-            true
-        }
-        Err(error) => {
-            app.state.push_user_message(ConsoleMessage::error(error));
-            false
-        }
-    }
-}
-
 fn export_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
     dock_intro(
         ui,
@@ -3006,10 +2824,10 @@ fn export_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
         close = true;
     }
     if ui
-        .add_enabled(enabled, egui::Button::new("Export active viewer PNG…"))
+        .add_enabled(enabled, egui::Button::new("Export active viewer figure…"))
         .clicked()
     {
-        app.state.ui.export_png_requested = true;
+        app.state.ui.export_figure_requested = true;
         close = true;
     }
     if !enabled {

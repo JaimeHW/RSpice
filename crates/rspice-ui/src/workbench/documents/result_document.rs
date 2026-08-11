@@ -3386,15 +3386,28 @@ fn sheet_purpose(state: &AppState) -> String {
 
 fn export_menu(ui: &mut Ui, state: &mut AppState) {
     ui.menu_button("Export…", |ui| {
-        // Not "waveform data": the export routes on the retained payload, so
-        // on the evidence sheets it writes SOA rules, ageing checkpoints,
-        // optimizer candidates or an event history — none of them samples.
+        // Not "waveform data": the export routes on the active sheet and then
+        // on the retained payload, so it writes a spectrum here and SOA rules,
+        // ageing checkpoints, optimizer candidates or an event history there —
+        // none of them samples.
         if ui.button("Result data (CSV)…").clicked() {
             state.ui.export_csv_requested = true;
             ui.close();
         }
-        if ui.button("Viewer image (PNG)…").clicked() {
-            state.ui.export_png_requested = true;
+        // The figure goes through the publication pipeline, which renders this
+        // sheet as PDF/A, PDF, SVG or PNG at a chosen resolution. A window
+        // screenshot used to live here instead: the same pixels the reader
+        // already had, at whatever the display happened to be, with the chrome
+        // cropped off by rectangle. The browser build still takes that route,
+        // because the pipeline's artifact writer is native-only — so the label
+        // promises there exactly what that build can deliver.
+        let figure_label = if cfg!(target_arch = "wasm32") {
+            "Viewer image (PNG)…"
+        } else {
+            "Viewer figure (PDF, SVG, PNG)…"
+        };
+        if ui.button(figure_label).clicked() {
+            state.ui.export_figure_requested = true;
             ui.close();
         }
     });
