@@ -675,7 +675,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 });
         });
     if let Some(selection) = requested {
-        state.ui.results.select_digital_event(selection);
+        state.ui.results.selected_digital_event = Some(selection);
     }
 }
 

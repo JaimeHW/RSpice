@@ -125,13 +125,38 @@ fn legacy_workbench_defaults_the_visualization_document() {
 
 #[test]
 fn ordinary_noise_uses_the_frequency_document_identity() {
+    use super::super::ResultViewer;
     assert_eq!(
-        result_viewer_document_id(super::super::ResultViewer::NoiseContrib),
+        ResultViewer::NoiseContrib.viewer_document_id(),
         Some("viewer-bode")
     );
     assert_eq!(
-        result_viewer_document_id(super::super::ResultViewer::Fft),
+        ResultViewer::Fft.viewer_document_id(),
         Some("viewer-spectrum")
+    );
+}
+
+/// Every document a sheet claims must exist in the catalog and must accept
+/// the sheet's analysis. Three copies of this map used to exist; the Studio's
+/// said the noise sheet renders `viewer-spectrum`, whose catalog entry rejects
+/// a `noise` analysis outright.
+#[test]
+fn every_claimed_viewer_document_is_in_the_catalog() {
+    use super::super::ResultViewer;
+    for viewer in ResultViewer::every() {
+        let Some(id) = viewer.viewer_document_id() else {
+            continue;
+        };
+        assert!(
+            crate::results::viewer_catalog::viewer_document(id).is_some(),
+            "{viewer:?} claims the unregistered document {id}"
+        );
+    }
+    let noise = crate::results::viewer_catalog::viewer_document("viewer-spectrum")
+        .expect("the spectrum document is registered");
+    assert!(
+        !noise.analysis_ids.contains(&"noise"),
+        "the spectrum document would accept noise, so this test proves nothing"
     );
 }
 

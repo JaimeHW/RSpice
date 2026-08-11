@@ -121,7 +121,7 @@ fn add_pane_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
         .visualization_studio
         .draft_analysis_sequence;
     let options = NATIVE_VIEWERS.map(|viewer| {
-        let definition = viewer_document_id(viewer).and_then(viewer_document);
+        let definition = viewer.viewer_document_id().and_then(viewer_document);
         let availability = definition
             .ok_or_else(|| "Viewer document is not registered".to_owned())
             .and_then(|definition| {
@@ -309,7 +309,7 @@ fn add_pane_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
         .clicked();
     if add {
         let viewer = app.state.workbench.visualization_studio.draft_viewer;
-        let Some(document_id) = viewer_document_id(viewer) else {
+        let Some(document_id) = viewer.viewer_document_id() else {
             app.state.push_user_message(ConsoleMessage::error(
                 "Dataset-native result projections cannot be added as Visualization Studio panes",
             ));

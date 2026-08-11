@@ -621,6 +621,10 @@ pub(super) fn resolve_results_quick_view_parts(
         | ResultViewer::TransferFunction
         | ResultViewer::Specs
         | ResultViewer::Table
+        | ResultViewer::Soa
+        | ResultViewer::Reliability
+        | ResultViewer::Optimization
+        | ResultViewer::Events
         | ResultViewer::PoleZero => HardcopySemanticDocument::ResultSummary(Box::new(
             semantic_result_summary(viewer, active.analysis)?,
         )),
@@ -1791,6 +1795,159 @@ pub(super) fn semantic_result_summary(
             tables.push(SemanticTable {
                 title: format!("Pole-zero roots · gain {}", exact_number(*gain)),
                 columns: vec!["Root".to_owned(), "Real".to_owned(), "Imaginary".to_owned()],
+                rows,
+            });
+        }
+        ResultViewer::Events => {
+            let Some(AnalysisResultPayload::TransientEvents {
+                digital_traces,
+                real_traces,
+            }) = &analysis.result_payload
+            else {
+                return Err(HardcopySourceError::MissingViewerEvidence("event history"));
+            };
+            let mut rows = Vec::new();
+            for trace in digital_traces {
+                rows.extend(trace.points.iter().map(|point| {
+                    vec![
+                        exact_number(point.time_s),
+                        trace.node_name.clone(),
+                        "digital".to_owned(),
+                        point.value_code.to_string(),
+                    ]
+                }));
+            }
+            for trace in real_traces {
+                rows.extend(trace.points.iter().map(|point| {
+                    vec![
+                        exact_number(point.time_s),
+                        trace.node_name.clone(),
+                        "real".to_owned(),
+                        exact_number(point.value),
+                    ]
+                }));
+            }
+            // One merged schedule in time order, which is how the sheet reads
+            // it: a per-node listing would hide the ordering between nodes.
+            rows.sort_by(|left, right| left[0].cmp(&right[0]).then_with(|| left[1].cmp(&right[1])));
+            tables.push(SemanticTable {
+                title: format!(
+                    "Committed event history · {} nodes",
+                    digital_traces.len() + real_traces.len()
+                ),
+                columns: vec![
+                    "Time (s)".to_owned(),
+                    "Node".to_owned(),
+                    "Domain".to_owned(),
+                    "Value".to_owned(),
+                ],
+                rows,
+            });
+        }
+        ResultViewer::Soa => {
+            let Some(AnalysisResultPayload::Soa {
+                evaluations,
+                violations,
+            }) = &analysis.result_payload
+            else {
+                return Err(HardcopySourceError::MissingViewerEvidence(
+                    "safe operating area",
+                ));
+            };
+            tables.push(SemanticTable {
+                title: format!(
+                    "Safe-operating-area rules · {} retained violation events",
+                    violations.len()
+                ),
+                columns: vec![
+                    "Device".to_owned(),
+                    "Rule".to_owned(),
+                    "Observed".to_owned(),
+                    "Limit".to_owned(),
+                    "Unit".to_owned(),
+                    "Worst time (s)".to_owned(),
+                    "Verdict".to_owned(),
+                ],
+                rows: evaluations
+                    .iter()
+                    .map(|evaluation| {
+                        vec![
+                            evaluation.device_id.clone(),
+                            evaluation.description.clone(),
+                            exact_number(evaluation.worst_actual_value),
+                            exact_number(evaluation.limit_value),
+                            evaluation.unit.clone(),
+                            exact_number(evaluation.worst_time_s),
+                            evaluation.verdict.label().to_owned(),
+                        ]
+                    })
+                    .collect(),
+            });
+        }
+        ResultViewer::Reliability => {
+            let Some(AnalysisResultPayload::Reliability { devices }) = &analysis.result_payload
+            else {
+                return Err(HardcopySourceError::MissingViewerEvidence("reliability"));
+            };
+            for device in devices {
+                tables.push(SemanticTable {
+                    title: format!(
+                        "{} · {} K average, {} s stressed",
+                        device.device_id,
+                        exact_number(device.stress.average_temperature_k),
+                        exact_number(device.stress.duration_s)
+                    ),
+                    columns: vec![
+                        "Years".to_owned(),
+                        "ΔVth (V)".to_owned(),
+                        "Δmobility".to_owned(),
+                        "ΔRds".to_owned(),
+                    ],
+                    rows: device
+                        .checkpoints
+                        .iter()
+                        .map(|checkpoint| {
+                            vec![
+                                exact_number(checkpoint.years),
+                                exact_number(checkpoint.shift.threshold_voltage_shift_v),
+                                exact_number(checkpoint.shift.mobility_shift),
+                                exact_number(checkpoint.shift.drain_source_resistance_shift),
+                            ]
+                        })
+                        .collect(),
+                });
+            }
+            if tables.is_empty() {
+                return Err(HardcopySourceError::MissingViewerEvidence("reliability"));
+            }
+        }
+        ResultViewer::Optimization => {
+            let Some(AnalysisResultFamilyMetadata::Optimization {
+                best_cost,
+                best_variables,
+                converged,
+                ..
+            }) = &analysis.family_metadata
+            else {
+                return Err(HardcopySourceError::MissingViewerEvidence("optimization"));
+            };
+            let mut rows = vec![vec![
+                "Outcome".to_owned(),
+                if *converged {
+                    "converged".to_owned()
+                } else {
+                    "stopped without converging".to_owned()
+                },
+            ]];
+            rows.push(vec!["Best cost".to_owned(), exact_number(*best_cost)]);
+            rows.extend(
+                best_variables
+                    .iter()
+                    .map(|(name, value)| vec![name.clone(), exact_number(*value)]),
+            );
+            tables.push(SemanticTable {
+                title: "Optimizer outcome and best candidate".to_owned(),
+                columns: vec!["Quantity".to_owned(), "Value".to_owned()],
                 rows,
             });
         }

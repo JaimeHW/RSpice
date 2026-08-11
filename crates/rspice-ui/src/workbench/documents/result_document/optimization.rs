@@ -347,7 +347,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 });
         });
     if let Some(selection) = requested {
-        state.ui.results.select_optimization(selection);
+        state.ui.results.selected_optimization = Some(selection);
     }
 }
 

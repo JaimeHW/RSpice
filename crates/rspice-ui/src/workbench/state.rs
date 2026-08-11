@@ -1533,7 +1533,7 @@ impl WorkbenchState {
         let mut used = HashSet::new();
 
         studio.panes.retain_mut(|pane| {
-            let Some(canonical_document_id) = result_viewer_document_id(pane.viewer) else {
+            let Some(canonical_document_id) = pane.viewer.viewer_document_id() else {
                 // Dataset-native projections (currently Manifest) are owned
                 // by the Results frame and can never become Visualization
                 // Studio panes. Reject malformed/restored presentation state
@@ -2018,27 +2018,6 @@ fn allocate_restored_identity(used: &HashSet<u64>, next_identity: &mut u64) -> O
     let allocated = *next_identity;
     *next_identity = next_identity.saturating_add(1);
     Some(allocated)
-}
-
-const fn result_viewer_document_id(viewer: super::ResultViewer) -> Option<&'static str> {
-    Some(match viewer {
-        super::ResultViewer::Manifest => return None,
-        super::ResultViewer::Waves | super::ResultViewer::DcSweep => "viewer-waveform",
-        super::ResultViewer::Bode
-        | super::ResultViewer::Nyquist
-        | super::ResultViewer::NoiseContrib => "viewer-bode",
-        super::ResultViewer::Fft | super::ResultViewer::HarmonicBalance => "viewer-spectrum",
-        super::ResultViewer::PhaseNoise => "viewer-phase-noise",
-        super::ResultViewer::Contribution => "viewer-contribution",
-        super::ResultViewer::TransferFunction => "viewer-transfer-function",
-        super::ResultViewer::Eye => "eye-viewer",
-        super::ResultViewer::Hist => "viewer-histogram",
-        super::ResultViewer::Op | super::ResultViewer::Specs | super::ResultViewer::Table => {
-            "viewer-table"
-        }
-        super::ResultViewer::Smith => "viewer-smith",
-        super::ResultViewer::PoleZero => "viewer-pz",
-    })
 }
 
 #[cfg(test)]

@@ -708,6 +708,20 @@ impl Command {
             Self::ResultViewer(crate::workbench::ResultViewer::PoleZero) => {
                 spec("result-pole-zero", "Open pole-zero viewer", "Results")
             }
+            Self::ResultViewer(crate::workbench::ResultViewer::Events) => {
+                spec("result-events", "Open event history viewer", "Results")
+            }
+            Self::ResultViewer(crate::workbench::ResultViewer::Soa) => spec(
+                "result-safe-operating-area",
+                "Open safe-operating-area viewer",
+                "Results",
+            ),
+            Self::ResultViewer(crate::workbench::ResultViewer::Reliability) => {
+                spec("result-ageing", "Open ageing viewer", "Results")
+            }
+            Self::ResultViewer(crate::workbench::ResultViewer::Optimization) => {
+                spec("result-optimization", "Open optimization viewer", "Results")
+            }
             Self::EditSpecifications => {
                 spec("specifications", "Edit specification matrix", "Results")
             }
@@ -1119,6 +1133,10 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ResultViewer(crate::workbench::ResultViewer::Nyquist),
     Command::ResultViewer(crate::workbench::ResultViewer::Smith),
     Command::ResultViewer(crate::workbench::ResultViewer::PoleZero),
+    Command::ResultViewer(crate::workbench::ResultViewer::Events),
+    Command::ResultViewer(crate::workbench::ResultViewer::Soa),
+    Command::ResultViewer(crate::workbench::ResultViewer::Reliability),
+    Command::ResultViewer(crate::workbench::ResultViewer::Optimization),
     Command::EditSpecifications,
     Command::VerificationPage(VerificationPage::Corners),
     Command::VerificationPage(VerificationPage::Optimization),

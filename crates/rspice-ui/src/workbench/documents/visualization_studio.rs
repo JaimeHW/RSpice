@@ -907,7 +907,7 @@ impl VisualizationStudioState {
             if pane.id == 0 || !identities.insert(pane.id) {
                 return Err("Visualization pane identities must be unique and non-zero".to_owned());
             }
-            let Some(canonical_document_id) = viewer_document_id(pane.viewer) else {
+            let Some(canonical_document_id) = pane.viewer.viewer_document_id() else {
                 return Err(format!(
                     "Pane {} uses a dataset-native projection that cannot be retained by Visualization Studio",
                     pane.id
@@ -1367,7 +1367,9 @@ fn bind_comparison_owner(
     app: &mut RSpiceApp,
     source: ResultsComparisonSource,
 ) -> Result<(), String> {
-    let viewer_document = viewer_document_id(source.viewer)
+    let viewer_document = source
+        .viewer
+        .viewer_document_id()
         .ok_or_else(|| {
             "Dataset-native result projections cannot be bound as Visualization Studio panes"
                 .to_owned()
@@ -1756,7 +1758,7 @@ fn reconcile_document(app: &mut RSpiceApp) {
         .active_analysis()
         .map(|analysis| analysis.id);
     let requested_viewer = app.state.ui.results.viewer;
-    let (viewer, viewer_document_id) = viewer_document_id(requested_viewer).map_or_else(
+    let (viewer, viewer_document_id) = requested_viewer.viewer_document_id().map_or_else(
         || (ResultViewer::Waves, "viewer-waveform".to_owned()),
         |document_id| (requested_viewer, document_id.to_owned()),
     );
@@ -2056,9 +2058,13 @@ fn resolved_viewer_availability_for_binding(
         | ResultViewer::Nyquist => {
             binding_is_active && result_document::viewer_is_available(state, viewer)
         }
-        // Manifest is a dataset-native Results projection and therefore can
-        // never be resolved from a Visualization Studio document definition.
-        ResultViewer::Manifest => false,
+        // Dataset-native Results projections, which therefore can never be
+        // resolved from a Visualization Studio document definition.
+        ResultViewer::Manifest
+        | ResultViewer::Events
+        | ResultViewer::Soa
+        | ResultViewer::Reliability
+        | ResultViewer::Optimization => false,
     };
     if !available {
         return Err(if binding_is_active {
@@ -2087,25 +2093,6 @@ fn renderer_for_viewer_document(id: &str) -> Option<ResultViewer> {
         "viewer-transfer-function" => Some(ResultViewer::TransferFunction),
         _ => None,
     }
-}
-
-fn viewer_document_id(viewer: ResultViewer) -> Option<&'static str> {
-    Some(match viewer {
-        ResultViewer::Manifest => return None,
-        ResultViewer::Waves | ResultViewer::DcSweep => "viewer-waveform",
-        ResultViewer::Bode | ResultViewer::Nyquist => "viewer-bode",
-        ResultViewer::Fft | ResultViewer::HarmonicBalance | ResultViewer::NoiseContrib => {
-            "viewer-spectrum"
-        }
-        ResultViewer::PhaseNoise => "viewer-phase-noise",
-        ResultViewer::Eye => "eye-viewer",
-        ResultViewer::Hist => "viewer-histogram",
-        ResultViewer::Op | ResultViewer::Specs | ResultViewer::Table => "viewer-table",
-        ResultViewer::Smith => "viewer-smith",
-        ResultViewer::PoleZero => "viewer-pz",
-        ResultViewer::Contribution => "viewer-contribution",
-        ResultViewer::TransferFunction => "viewer-transfer-function",
-    })
 }
 
 fn available_analysis_ids(state: &AppState) -> Vec<&'static str> {
@@ -2810,7 +2797,8 @@ mod integrity_scan_tests {
         app.state.workbench.visualization_studio.panes = vec![VisualizationPane {
             id: 1,
             viewer: ResultViewer::Waves,
-            viewer_document_id: viewer_document_id(ResultViewer::Waves)
+            viewer_document_id: ResultViewer::Waves
+                .viewer_document_id()
                 .expect("waveform viewer has a catalog document")
                 .to_owned(),
             dataset_id: baseline_id,

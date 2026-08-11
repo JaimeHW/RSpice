@@ -160,7 +160,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         };
         if let Some(viewer) = restored_viewer {
             app.state.ui.results.viewer = viewer;
-            if let Some(viewer_document_id) = viewer_document_id(viewer) {
+            if let Some(viewer_document_id) = viewer.viewer_document_id() {
                 app.state
                     .workbench
                     .visualization_studio
@@ -210,7 +210,7 @@ fn compatible_active_viewer(
 
 fn select_global_viewer(state: &mut AppState, viewer: ResultViewer) {
     state.ui.results.viewer = viewer;
-    if let Some(viewer_document_id) = viewer_document_id(viewer) {
+    if let Some(viewer_document_id) = viewer.viewer_document_id() {
         state
             .workbench
             .visualization_studio
@@ -579,7 +579,8 @@ fn pane_header(
     let viewer_title = viewer.map_or_else(
         || pane.viewer_id.as_str(),
         |viewer| {
-            viewer_document_id(viewer)
+            viewer
+                .viewer_document_id()
                 .and_then(viewer_document)
                 .map_or(viewer.tab_label(), |document| document.title)
         },
@@ -671,7 +672,7 @@ fn render_pane_viewer(
         .workbench
         .visualization_studio
         .selected_viewer_document = if is_active {
-        let Some(viewer_document_id) = viewer_document_id(viewer) else {
+        let Some(viewer_document_id) = viewer.viewer_document_id() else {
             unavailable_surface(
                 ui,
                 &pane.title,
@@ -738,23 +739,6 @@ fn select_pane_binding(state: &mut AppState, pane: &Pane) -> Result<(), String> 
         return Err("The retained analysis could not be selected.".to_owned());
     }
     Ok(())
-}
-
-const fn viewer_document_id(viewer: ResultViewer) -> Option<&'static str> {
-    Some(match viewer {
-        ResultViewer::Manifest => return None,
-        ResultViewer::Waves | ResultViewer::DcSweep => "viewer-waveform",
-        ResultViewer::Bode | ResultViewer::NoiseContrib | ResultViewer::Nyquist => "viewer-bode",
-        ResultViewer::Fft | ResultViewer::HarmonicBalance => "viewer-spectrum",
-        ResultViewer::PhaseNoise => "viewer-phase-noise",
-        ResultViewer::Eye => "eye-viewer",
-        ResultViewer::Hist => "viewer-histogram",
-        ResultViewer::Op | ResultViewer::Specs | ResultViewer::Table => "viewer-table",
-        ResultViewer::Contribution => "viewer-contribution",
-        ResultViewer::TransferFunction => "viewer-transfer-function",
-        ResultViewer::Smith => "viewer-smith",
-        ResultViewer::PoleZero => "viewer-pz",
-    })
 }
 
 fn resolve_binding(state: &AppState, binding: PaneDataBinding) -> Result<(usize, usize), String> {
@@ -1133,8 +1117,9 @@ mod tests {
             ResultViewer::Smith,
             ResultViewer::PoleZero,
         ] {
-            let document_id =
-                viewer_document_id(viewer).expect("interactive viewers have catalog identities");
+            let document_id = viewer
+                .viewer_document_id()
+                .expect("interactive viewers have catalog identities");
             assert!(
                 viewer_document(document_id).is_some(),
                 "{viewer:?} mapped to unknown canonical document {document_id}"

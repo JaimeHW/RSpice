@@ -7,6 +7,7 @@
 
 mod bode;
 mod create_document;
+mod events;
 mod eye;
 mod fft;
 mod harmonic_balance;
@@ -15,11 +16,14 @@ pub(crate) mod manifest;
 mod noise_contrib;
 mod nyquist;
 mod op_inspector;
+mod optimization;
 mod persistent_document;
 mod phase_noise;
 mod pz;
+mod reliability;
 mod sensitivity;
 mod smith;
+mod soa;
 mod specs;
 mod table;
 mod transfer_function;
@@ -71,7 +75,7 @@ pub(crate) use waves::{
 
 pub(crate) use waves::toggle_visibility;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use egui::{Ui, WidgetInfo, WidgetType};
 use serde::{Deserialize, Serialize};
@@ -80,7 +84,9 @@ use super::visualization_family::SourceSampleSelection;
 use crate::product::{AnalysisInstanceId, DatasetId};
 use crate::simulation::SimulationController;
 use crate::simulation::controller::DerivedViewerLoadState;
-use crate::state::{AnalysisResult, SharedWaveformValues, SimulationRun, WaveformData};
+use crate::state::{
+    AnalysisResult, SharedWaveformValues, SimulationRun, SoaParameterEvidence, WaveformData,
+};
 use crate::ui::icons::Icon;
 use crate::ui::plot::{CursorPair, DecimationCache, InteractionMode};
 use crate::ui::theme::{self, FontWeight};
@@ -216,6 +222,14 @@ pub enum ResultViewer {
     Smith,
     /// Complex-plane pole-zero surface.
     PoleZero,
+    /// Committed XSPICE digital and real-valued event history.
+    Events,
+    /// Safe-operating-area rule evidence with per-rule stress history.
+    Soa,
+    /// Ageing shift and lifetime checkpoints per stressed device.
+    Reliability,
+    /// Optimizer cost convergence and the candidate history behind it.
+    Optimization,
     /// Immutable task and retained-value inventory for the active dataset.
     ///
     /// This is dataset-native and deliberately has no Visualization Studio
@@ -244,11 +258,15 @@ impl ResultViewer {
             ResultViewer::Nyquist => "NYQ",
             ResultViewer::Smith => "SMITH",
             ResultViewer::PoleZero => "PZ",
+            ResultViewer::Events => "EVENTS",
+            ResultViewer::Soa => "SOA",
+            ResultViewer::Reliability => "AGEING",
+            ResultViewer::Optimization => "OPT",
             ResultViewer::Manifest => "MANIFEST",
         }
     }
 
-    const PRIMARY: [ResultViewer; 17] = [
+    const PRIMARY: [ResultViewer; 21] = [
         ResultViewer::Waves,
         ResultViewer::DcSweep,
         ResultViewer::Bode,
@@ -266,8 +284,26 @@ impl ResultViewer {
         ResultViewer::Hist,
         ResultViewer::Eye,
         ResultViewer::PoleZero,
+        // Specialist sheets last: each needs evidence an ordinary run does not
+        // produce — XSPICE event nodes, or a whole campaign analysis kind — so
+        // leading with them would push the everyday sheets rightward for the
+        // sake of tabs that are usually dim.
+        ResultViewer::Events,
+        ResultViewer::Soa,
+        ResultViewer::Reliability,
+        ResultViewer::Optimization,
     ];
     const DATASET_NATIVE: [ResultViewer; 1] = [ResultViewer::Manifest];
+
+    /// Every sheet the workspace can show, tab order first.
+    ///
+    /// Production code always has a viewer in hand; this exists so a test can
+    /// assert a property holds for the whole set rather than a list someone
+    /// has to remember to extend.
+    #[cfg(test)]
+    pub(crate) fn every() -> impl Iterator<Item = ResultViewer> {
+        Self::PRIMARY.into_iter().chain(Self::DATASET_NATIVE)
+    }
 
     /// Human-readable document-tab label from the upgraded Results mockup.
     pub(crate) const fn tab_label(self) -> &'static str {
@@ -289,8 +325,47 @@ impl ResultViewer {
             ResultViewer::Nyquist => "Nyquist",
             ResultViewer::Smith => "Smith",
             ResultViewer::PoleZero => "PZ",
+            ResultViewer::Events => "Events",
+            ResultViewer::Soa => "SOA",
+            ResultViewer::Reliability => "Ageing",
+            ResultViewer::Optimization => "Optimization",
             ResultViewer::Manifest => "Manifest",
         }
+    }
+
+    /// The Visualization Studio viewer document this sheet renders, if any.
+    ///
+    /// `None` means the sheet is dataset-native: it reads the retained result
+    /// directly and has no place in the Studio's document catalog, so binding
+    /// a page to it would name a renderer that cannot draw the page.
+    ///
+    /// One owner on purpose. Three copies of this map existed — in the
+    /// persistent-document layer, the Studio, and the workbench state — and
+    /// they disagreed about the noise sheet: two said `viewer-bode`, the
+    /// Studio's own said `viewer-spectrum`, which the catalog rejects for a
+    /// `noise` analysis. Whether a noise sheet could be pinned into a
+    /// document depended on which path asked.
+    pub(crate) const fn viewer_document_id(self) -> Option<&'static str> {
+        Some(match self {
+            ResultViewer::Manifest
+            | ResultViewer::Events
+            | ResultViewer::Soa
+            | ResultViewer::Reliability
+            | ResultViewer::Optimization => return None,
+            ResultViewer::Waves | ResultViewer::DcSweep => "viewer-waveform",
+            ResultViewer::Bode | ResultViewer::Nyquist | ResultViewer::NoiseContrib => {
+                "viewer-bode"
+            }
+            ResultViewer::Fft | ResultViewer::HarmonicBalance => "viewer-spectrum",
+            ResultViewer::PhaseNoise => "viewer-phase-noise",
+            ResultViewer::Eye => "eye-viewer",
+            ResultViewer::Hist => "viewer-histogram",
+            ResultViewer::Op | ResultViewer::Specs | ResultViewer::Table => "viewer-table",
+            ResultViewer::Contribution => "viewer-contribution",
+            ResultViewer::TransferFunction => "viewer-transfer-function",
+            ResultViewer::Smith => "viewer-smith",
+            ResultViewer::PoleZero => "viewer-pz",
+        })
     }
 
     const fn tab_icon(self) -> WorkbenchIcon {
@@ -311,7 +386,11 @@ impl ResultViewer {
             ResultViewer::Op
             | ResultViewer::TransferFunction
             | ResultViewer::Specs
+            | ResultViewer::Soa
+            | ResultViewer::Reliability
+            | ResultViewer::Events
             | ResultViewer::Table => WorkbenchIcon::Grid,
+            ResultViewer::Optimization => WorkbenchIcon::Results,
             ResultViewer::Manifest => WorkbenchIcon::Layers,
         }
     }
@@ -378,15 +457,24 @@ pub(crate) fn request_view_gesture(state: &mut AppState, gesture: ViewGesture) {
 /// Every plot sheet does; the structured documents (OP, specs, table, XF,
 /// manifest) have no viewport at all and must not offer the gesture.
 pub(crate) fn fit_gesture_available(state: &AppState) -> bool {
-    state.simulation.has_results()
-        && !matches!(
-            state.ui.results.viewer,
-            ResultViewer::Op
-                | ResultViewer::Specs
-                | ResultViewer::Table
-                | ResultViewer::TransferFunction
-                | ResultViewer::Manifest
-        )
+    state.simulation.has_results() && viewer_draws_a_pane(state.ui.results.viewer)
+}
+
+/// Whether this sheet draws a plot pane at all.
+///
+/// The evidence tables (OP, specs, sample table, event history, manifest) and
+/// the scalar transfer-function readout draw no axes, so they have no
+/// viewport, no fit, and no limit mask to report.
+pub(crate) const fn viewer_draws_a_pane(viewer: ResultViewer) -> bool {
+    !matches!(
+        viewer,
+        ResultViewer::Op
+            | ResultViewer::Specs
+            | ResultViewer::Table
+            | ResultViewer::Events
+            | ResultViewer::TransferFunction
+            | ResultViewer::Manifest
+    )
 }
 
 /// Whether the active sheet can be magnified about its centre.
@@ -405,10 +493,10 @@ fn apply_pending_view_gesture(ui: &Ui, state: &mut AppState) {
     };
     let viewer = state.ui.results.viewer;
     if !viewer_uses_wave_stack(viewer) {
-        // Single-canvas viewers keep their one view under the plot ordinal,
-        // and only fit is expressible without their renderer's own extents.
+        // Single-canvas viewers keep their views under plot ordinals, and
+        // only fit is expressible without their renderer's own extents.
         if gesture == ViewGesture::Fit {
-            state.ui.results.reset_plot_view(viewer, 0);
+            state.ui.results.reset_viewer_plot_views(viewer);
         }
         return;
     }
@@ -620,6 +708,122 @@ pub(super) struct HorizontalWaveCursor {
     pub y: f64,
 }
 
+/// Which safe-operating-area rules the SOA table lists.
+///
+/// Attention and passing are complements, so a rule is in exactly one of them
+/// and the two counts always sum to the evaluated total.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum SoaRuleFilter {
+    #[default]
+    All,
+    Violations,
+    Passing,
+}
+
+/// One SOA rule picked out of the evidence table.
+///
+/// A rule is identified by its device and the stressed parameter, never by row
+/// ordinal: the filter reorders the table and the analysis may be re-run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SoaRuleSelection {
+    pub analysis: AnalysisPresentationKey,
+    pub device_id: String,
+    pub parameter: SoaParameterEvidence,
+}
+
+/// One ageing checkpoint picked out of the reliability table.
+///
+/// The checkpoint year is held as raw bits so the selection compares exactly
+/// against the retained value instead of through a float tolerance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReliabilitySelection {
+    pub analysis: AnalysisPresentationKey,
+    pub device_id: String,
+    pub checkpoint_year_bits: u64,
+}
+
+/// One optimizer candidate picked out of the iteration history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OptimizationSelection {
+    pub analysis: AnalysisPresentationKey,
+    pub iteration_index: usize,
+}
+
+/// Where one row of the event history came from.
+///
+/// Exact rows are the schedule the event solver committed. Projected rows are
+/// reconstructed from an older project's `D(..)`/`E(..)` waveforms, which were
+/// sampled on the analog grid — the distinction is reported, never hidden,
+/// because a projected time is an approximation of the real one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EventSelectionSource {
+    ExactDigital,
+    ExactReal,
+    ProjectedDigital,
+    ProjectedReal,
+}
+
+/// One event row's position in the merged, time-ordered history.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct EventOrderEntry {
+    pub source: EventSelectionSource,
+    pub trace_index: usize,
+    pub point_index: usize,
+    pub time_s: f64,
+    pub initial: bool,
+}
+
+/// The merged event order for one analysis.
+///
+/// Built once per analysis rather than per frame: merging every node's
+/// schedule is O(events log events), and the answer only changes when the
+/// analysis does.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct EventOrderCache {
+    pub analysis: AnalysisPresentationKey,
+    /// Whether the rows are the committed schedule rather than a projection.
+    pub exact: bool,
+    pub rows: Vec<EventOrderEntry>,
+}
+
+/// One event picked out of the history.
+///
+/// Addressed by node name rather than trace ordinal so the selection survives
+/// a re-run that registers event nodes in a different order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DigitalEventSelection {
+    pub analysis: AnalysisPresentationKey,
+    pub source: EventSelectionSource,
+    pub trace_name: String,
+    pub point_index: usize,
+}
+
+/// Whether one analysis' retained evidence passes its own validator.
+///
+/// Memoized per analysis because the answer walks the whole payload and only
+/// changes when the datasets do; `prepare_viewer_state` clears the memo on a
+/// new data version.
+pub(crate) fn retained_evidence_is_valid(
+    state: &mut AppState,
+    analysis: AnalysisPresentationKey,
+) -> bool {
+    if let Some(known) = state.ui.results.retained_evidence_validity.get(&analysis) {
+        return *known;
+    }
+    let valid = state
+        .simulation
+        .runs
+        .iter()
+        .find_map(|run| analysis.resolve(run))
+        .is_some_and(|(_, resolved)| resolved.validate_retained_evidence().is_ok());
+    state
+        .ui
+        .results
+        .retained_evidence_validity
+        .insert(analysis, valid);
+    valid
+}
+
 /// The marker tool: armed, a plot click drops a marker on the nearest
 /// visible trace. Off by default — unlike cursors, annotating is a
 /// deliberate act, and an always-armed default would litter the plot.
@@ -773,6 +977,28 @@ pub struct ResultsState {
     pub op_sort: Option<(String, bool)>,
     /// Open spec-editor rows (None = matrix view). Transient.
     pub spec_drafts: Option<Vec<specs::SpecDraft>>,
+    /// SOA rule whose evidence the inspector reports. Transient.
+    pub(super) selected_soa_rule: Option<SoaRuleSelection>,
+    /// Verdict filter applied to the SOA rule table. Transient.
+    pub(super) soa_rule_filter: SoaRuleFilter,
+    /// Whether the selected SOA rule's stress history is drawn above the
+    /// table. Off by default: the table is the evidence, the trace is the
+    /// follow-up question.
+    pub(super) soa_stress_trace_open: bool,
+    /// Ageing checkpoint whose retained shift the inspector reports.
+    /// Transient.
+    pub(super) selected_reliability: Option<ReliabilitySelection>,
+    /// Optimizer candidate whose retained cost and variables the inspector
+    /// reports. Transient.
+    pub(super) selected_optimization: Option<OptimizationSelection>,
+    /// Event whose exact value and provenance the inspector reports.
+    /// Transient.
+    pub(super) selected_digital_event: Option<DigitalEventSelection>,
+    /// Merged event order for the analysis the EVENTS sheet last drew.
+    pub(super) event_order_cache: Option<EventOrderCache>,
+    /// Memoized retained-evidence verdict per analysis; see
+    /// [`retained_evidence_is_valid`].
+    pub(super) retained_evidence_validity: HashMap<AnalysisPresentationKey, bool>,
     /// Row/column selection for the TABLE viewer.
     pub table: table::TableView,
     /// Last row count the table rendered, as its footer states it. Written
@@ -1232,6 +1458,16 @@ impl ResultsState {
     /// the strip's panes disagree about the window they show.
     pub fn reset_plot_view(&mut self, viewer: ResultViewer, index: usize) {
         self.reset_plot_view_for(viewer, PlotPresentationKey::Global(index));
+    }
+
+    /// Drop every pinned viewport this sheet owns.
+    ///
+    /// A single-canvas sheet is not always a single *plot*: the ageing sheet
+    /// draws a degradation curve and a lifetime curve under ordinals 0 and 1.
+    /// A Fit that reset only ordinal 0 would leave half the sheet zoomed.
+    pub(crate) fn reset_viewer_plot_views(&mut self, viewer: ResultViewer) {
+        self.views
+            .retain(|(key_viewer, _, _), _| *key_viewer != viewer);
     }
 
     fn reset_plot_view_for(&mut self, viewer: ResultViewer, plot: PlotPresentationKey) {
@@ -2092,6 +2328,10 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
         // Pinned XY readouts index into the old run's point arrays;
         // a same-shape new run would silently relabel them.
         results.rf_pin.clear();
+        // Both are derived from the retained datasets, so a new version makes
+        // them answers to an old question.
+        results.retained_evidence_validity.clear();
+        results.event_order_cache = None;
     }
     results.cache.ensure_version(data_version);
     results.derived.ensure_version(data_version);
@@ -2163,6 +2403,10 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         ResultViewer::Nyquist => nyquist::show(ui, &mut app.state),
         ResultViewer::Smith => smith::show(ui, &mut app.state),
         ResultViewer::PoleZero => pz::show(ui, &mut app.state),
+        ResultViewer::Events => events::show(ui, &mut app.state),
+        ResultViewer::Soa => soa::show(ui, &mut app.state),
+        ResultViewer::Reliability => reliability::show(ui, &mut app.state),
+        ResultViewer::Optimization => optimization::show(ui, &mut app.state),
         ResultViewer::Manifest => manifest::show(ui, &app.state),
     }
 }
@@ -2464,6 +2708,18 @@ fn show_sheet_bar(ui: &mut Ui, state: &mut AppState) {
         show_wave_instrument(&mut child, state);
     } else {
         child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // The evidence sheets exist to be recorded, so they carry the same
+            // export affordance the other tabular sheets do. The plotted
+            // sheets keep theirs on the instrument strip instead.
+            if matches!(
+                viewer,
+                ResultViewer::Events
+                    | ResultViewer::Soa
+                    | ResultViewer::Reliability
+                    | ResultViewer::Optimization
+            ) {
+                export_menu(ui, state);
+            }
             inline_result_actions(ui, state);
             let remaining = ui.available_size();
             ui.allocate_ui_with_layout(
@@ -3007,10 +3263,11 @@ fn family_allows_viewer(family_label: &str, viewer: ResultViewer) -> bool {
                 | ResultViewer::PhaseNoise
         ),
         "Statistics & yield" => matches!(viewer, ResultViewer::Hist | ResultViewer::Contribution),
+        "Digital & AMS events" => viewer == ResultViewer::Events,
         // These specialist mockup families have no native quick modes. They
         // resolve to the dataset manifest rather than substituting an
         // unrelated electrical viewer.
-        "Digital & AMS events" | "Fields & physical" | "Photonics" | "Report page" => false,
+        "Fields & physical" | "Photonics" | "Report page" => false,
         // Imported or migrated documents with no recognized family label keep
         // their exact retained panes reachable.
         _ => true,
@@ -3191,6 +3448,50 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         ResultViewer::Nyquist => specialized_availability(state, ActiveViewer::Nyquist),
         ResultViewer::Smith => specialized_availability(state, ActiveViewer::SmithChart),
         ResultViewer::PoleZero => specialized_availability(state, ActiveViewer::PoleZero),
+        ResultViewer::Events => {
+            if events::active_analysis_is_renderable(state) {
+                ViewerAvailability::available(
+                    "A committed XSPICE event history is available for the active analysis",
+                )
+            } else {
+                ViewerAvailability::unavailable(
+                    "Requires a transient analysis with retained XSPICE event nodes",
+                )
+            }
+        }
+        ResultViewer::Soa => {
+            if soa::active_payload_is_valid(state) {
+                ViewerAvailability::available(
+                    "Retained safe-operating-area evidence is available for the active analysis",
+                )
+            } else {
+                ViewerAvailability::unavailable(
+                    "Requires the active analysis to contain a valid retained SOA payload",
+                )
+            }
+        }
+        ResultViewer::Reliability => {
+            if reliability::active_payload_is_valid(state) {
+                ViewerAvailability::available(
+                    "Retained ageing evidence is available for the active analysis",
+                )
+            } else {
+                ViewerAvailability::unavailable(
+                    "Requires the active analysis to contain a valid retained reliability payload",
+                )
+            }
+        }
+        ResultViewer::Optimization => {
+            if optimization::active_metadata_is_valid(state) {
+                ViewerAvailability::available(
+                    "A retained optimizer cost history is available for the active analysis",
+                )
+            } else {
+                ViewerAvailability::unavailable(
+                    "Requires the active analysis to carry a retained optimization history",
+                )
+            }
+        }
         ResultViewer::Manifest => {
             if active_run.is_some() {
                 ViewerAvailability::available("The immutable active-dataset inventory is available")
@@ -3383,6 +3684,10 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ResultViewer::Nyquist => nyquist::right_panel(ui, state),
         ResultViewer::Smith => smith::right_panel(ui, state),
         ResultViewer::PoleZero => pz::right_panel(ui, state),
+        ResultViewer::Events => events::right_panel(ui, state),
+        ResultViewer::Soa => soa::right_panel(ui, state),
+        ResultViewer::Reliability => reliability::right_panel(ui, state),
+        ResultViewer::Optimization => optimization::right_panel(ui, state),
         ResultViewer::Manifest => manifest::right_panel(ui, state),
     }
 }
@@ -3747,6 +4052,10 @@ mod availability_tests {
                 ResultViewer::Hist,
                 ResultViewer::Eye,
                 ResultViewer::PoleZero,
+                ResultViewer::Events,
+                ResultViewer::Soa,
+                ResultViewer::Reliability,
+                ResultViewer::Optimization,
             ]
         );
     }
@@ -3859,6 +4168,16 @@ mod availability_tests {
             "Statistics & yield",
             ResultViewer::Nyquist
         ));
+        // The digital family gained a native mode when the event sheet was
+        // wired; it is the only viewer that family admits.
+        assert!(family_allows_viewer(
+            "Digital & AMS events",
+            ResultViewer::Events
+        ));
+        assert!(!family_allows_viewer(
+            "Digital & AMS events",
+            ResultViewer::Waves
+        ));
         assert!(!family_allows_viewer(
             "Fields & physical",
             ResultViewer::Waves
@@ -3878,6 +4197,258 @@ mod availability_tests {
                 family_allows_viewer(family, ResultViewer::Manifest),
                 "{family}"
             );
+        }
+    }
+
+    fn soa_analysis() -> AnalysisResult {
+        use crate::state::{
+            AnalysisResultFamilyMetadata, SoaEvaluationEvidence, SoaParameterEvidence,
+            SoaRuleVerdictEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence,
+        };
+        let time = vec![0.0, 1.0e-9];
+        AnalysisResult::new(1, AnalysisType::Soa, "SOA")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Soa { time: time.clone() })
+            .with_waveforms(vec![
+                WaveformData::new(
+                    "SOA_VIOLATION_COUNT",
+                    time.clone(),
+                    vec![0.0, 0.0],
+                    "#ffbd2e",
+                ),
+                // The stress history the producer now retains, named exactly as
+                // the sheet addresses it.
+                WaveformData::new(
+                    &crate::services::safety::soa_stress_waveform_name(
+                        "M1",
+                        crate::services::safety::SoAParameter::Vds,
+                    ),
+                    time,
+                    vec![2.0, 3.0],
+                    "#00aaff",
+                ),
+            ])
+            .with_result_payload(AnalysisResultPayload::Soa {
+                evaluations: vec![SoaEvaluationEvidence {
+                    device_id: "M1".to_owned(),
+                    parameter: SoaParameterEvidence::DrainSourceVoltage,
+                    limit_value: 3.3,
+                    worst_actual_value: 3.0,
+                    worst_time_s: 1.0e-9,
+                    sample_count: 2,
+                    unit: "V".to_owned(),
+                    description: "Maximum drain-source voltage".to_owned(),
+                    // 3.0 V against a 3.3 V limit is inside the warning band,
+                    // which the payload validator derives rather than trusts.
+                    verdict: SoaRuleVerdictEvidence::Warning,
+                }],
+                // A non-passing rule must carry the exact event at its worst
+                // point; the validator refuses a verdict with nothing behind it.
+                violations: vec![SoaViolationEvidence {
+                    device_id: "M1".to_owned(),
+                    parameter: SoaParameterEvidence::DrainSourceVoltage,
+                    limit_value: 3.3,
+                    actual_value: 3.0,
+                    time_s: 1.0e-9,
+                    severity: SoaViolationSeverityEvidence::Warning,
+                }],
+            })
+    }
+
+    fn reliability_analysis() -> AnalysisResult {
+        use crate::state::{
+            AnalysisResultFamilyMetadata, ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence,
+            ReliabilityShiftEvidence, ReliabilityStressEvidence,
+        };
+        AnalysisResult::new(1, AnalysisType::Reliability, "Reliability")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Reliability {
+                years: vec![1.0, 5.0],
+            })
+            .with_result_payload(AnalysisResultPayload::Reliability {
+                devices: vec![ReliabilityDeviceEvidence {
+                    device_id: "M1".to_owned(),
+                    stress: ReliabilityStressEvidence {
+                        average_gate_stress_v: 1.1,
+                        average_drain_stress_v: 1.8,
+                        average_temperature_k: 358.0,
+                        duration_s: 1.0e-6,
+                    },
+                    checkpoints: vec![
+                        ReliabilityCheckpointEvidence {
+                            years: 1.0,
+                            shift: ReliabilityShiftEvidence {
+                                threshold_voltage_shift_v: 1.0e-3,
+                                mobility_shift: -1.0e-4,
+                                drain_source_resistance_shift: 2.0e-3,
+                            },
+                        },
+                        ReliabilityCheckpointEvidence {
+                            years: 5.0,
+                            shift: ReliabilityShiftEvidence {
+                                threshold_voltage_shift_v: 4.0e-3,
+                                mobility_shift: -4.0e-4,
+                                drain_source_resistance_shift: 8.0e-3,
+                            },
+                        },
+                    ],
+                }],
+            })
+    }
+
+    fn optimization_analysis() -> AnalysisResult {
+        use crate::state::AnalysisResultFamilyMetadata;
+        AnalysisResult::new(1, AnalysisType::Optimization, "Optimization")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Optimization {
+                iterations: vec![0.0, 1.0],
+                best_cost: 0.25,
+                best_variables: [("w".to_owned(), 1.5e-6)].into_iter().collect(),
+                converged: true,
+            })
+            // The names the optimization runner emits: one OPT_COST trace over
+            // the iteration axis, plus OPT_<variable> per design variable.
+            .with_waveforms(vec![
+                WaveformData::new("OPT_COST", vec![0.0, 1.0], vec![1.0, 0.25], "#ffbd2e"),
+                WaveformData::new("OPT_w", vec![0.0, 1.0], vec![1.0e-6, 1.5e-6], "#00aaff"),
+            ])
+    }
+
+    fn events_analysis() -> AnalysisResult {
+        use crate::state::{
+            DigitalEventPointEvidence, DigitalEventTraceEvidence, RealEventPointEvidence,
+            RealEventTraceEvidence,
+        };
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_result_payload(
+            AnalysisResultPayload::TransientEvents {
+                digital_traces: vec![DigitalEventTraceEvidence {
+                    node_name: "clk".to_owned(),
+                    points: vec![
+                        DigitalEventPointEvidence {
+                            time_s: 0.0,
+                            value_code: 0,
+                        },
+                        DigitalEventPointEvidence {
+                            time_s: 5.0e-10,
+                            value_code: 1,
+                        },
+                        DigitalEventPointEvidence {
+                            time_s: 1.0e-9,
+                            value_code: 12,
+                        },
+                    ],
+                }],
+                real_traces: vec![RealEventTraceEvidence {
+                    node_name: "level".to_owned(),
+                    points: vec![RealEventPointEvidence {
+                        time_s: 2.5e-10,
+                        value: 0.75,
+                    }],
+                }],
+            },
+        )
+    }
+
+    /// Every campaign analysis the Simulate catalog can launch must land on a
+    /// sheet that draws it. These four sheets shipped in the repository for
+    /// months with no `mod` declaration, so SOA, ageing, optimizer and event
+    /// runs produced results the Results workspace could not show at all.
+    #[test]
+    fn every_campaign_analysis_reaches_a_sheet_that_can_draw_it() {
+        for (analysis, viewer) in [
+            (soa_analysis(), ResultViewer::Soa),
+            (reliability_analysis(), ResultViewer::Reliability),
+            (optimization_analysis(), ResultViewer::Optimization),
+            (events_analysis(), ResultViewer::Events),
+        ] {
+            assert!(
+                analysis.validate_retained_evidence().is_ok(),
+                "{viewer:?} fixture is not valid evidence"
+            );
+            let mut state = state_with_analysis(analysis);
+            assert!(
+                viewer_availability(&state, viewer).available,
+                "{viewer:?} is unreachable"
+            );
+            // The sheet's own evidence gate must agree with the tab that
+            // offered it, or the tab opens onto a refusal.
+            let key = active_analysis_key(&state);
+            assert!(retained_evidence_is_valid(&mut state, key), "{viewer:?}");
+        }
+    }
+
+    /// A transient with no event nodes must not grow an empty event payload:
+    /// the tab would light up on a deck that has nothing to show.
+    #[test]
+    fn a_transient_without_event_nodes_offers_no_event_sheet() {
+        let state = transient_state();
+        assert!(!viewer_availability(&state, ResultViewer::Events).available);
+    }
+
+    /// Draw each newly reachable sheet through a real frame and tessellate it.
+    ///
+    /// Availability only proves the tab lights up. This proves the sheet
+    /// behind it lays out, paints and meshes — the failure mode these viewers
+    /// were most exposed to, having never been compiled at all.
+    #[test]
+    fn every_newly_reachable_sheet_draws_and_meshes() {
+        for (analysis, viewer) in [
+            (soa_analysis(), ResultViewer::Soa),
+            (reliability_analysis(), ResultViewer::Reliability),
+            (optimization_analysis(), ResultViewer::Optimization),
+            (events_analysis(), ResultViewer::Events),
+        ] {
+            let mut state = state_with_analysis(analysis);
+            state.ui.results.viewer = viewer;
+            if viewer == ResultViewer::Soa {
+                // The stress trace is the sheet's only plot; a card that never
+                // opens is a card this test never covers.
+                state.ui.results.soa_stress_trace_open = true;
+                state.ui.results.selected_soa_rule = Some(SoaRuleSelection {
+                    analysis: active_analysis_key(&state),
+                    device_id: "M1".to_owned(),
+                    parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
+                });
+            }
+            draw_sheet_and_tessellate(&mut state, viewer);
+        }
+    }
+
+    /// Run one sheet plus its inspector panel through a real egui frame and
+    /// assert every mesh vertex is finite. A value that escapes an axis
+    /// mapping does not panic — it becomes a vertex at infinity and
+    /// degenerates the whole draw call.
+    fn draw_sheet_and_tessellate(state: &mut AppState, viewer: ResultViewer) {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1440.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        // Twice: the first frame builds the caches, the second is the path a
+        // reader actually spends their time on.
+        for _ in 0..2 {
+            let output = ctx.run_ui(input.clone(), |ctx| {
+                egui::Panel::right("inspector").show(ctx, |ui| right_panel(ui, state));
+                egui::CentralPanel::default().show(ctx, |ui| match viewer {
+                    ResultViewer::Soa => soa::show(ui, state),
+                    ResultViewer::Reliability => reliability::show(ui, state),
+                    ResultViewer::Optimization => optimization::show(ui, state),
+                    ResultViewer::Events => events::show(ui, state),
+                    other => unreachable!("{other:?} is not covered by this harness"),
+                });
+            });
+            for primitive in ctx.tessellate(output.shapes, output.pixels_per_point) {
+                let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive else {
+                    continue;
+                };
+                assert!(
+                    mesh.vertices
+                        .iter()
+                        .all(|vertex| vertex.pos.x.is_finite() && vertex.pos.y.is_finite()),
+                    "{viewer:?} put a non-finite vertex in the mesh",
+                );
+            }
         }
     }
 

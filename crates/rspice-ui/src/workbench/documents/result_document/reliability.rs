@@ -453,7 +453,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                         &format!("{:.6} K", device.stress.average_temperature_k),
                                     )
                                 });
-                                row.col(|ui| retained_badge(ui));
+                                row.col(retained_badge);
                             });
                         }
                     }
@@ -473,7 +473,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 .results
                 .reset_plot_view(super::ResultViewer::Reliability, 1);
         }
-        state.ui.results.select_reliability(selection);
+        state.ui.results.selected_reliability = Some(selection);
     }
 }
 

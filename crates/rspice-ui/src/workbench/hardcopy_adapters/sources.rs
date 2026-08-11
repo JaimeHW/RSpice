@@ -1103,6 +1103,26 @@ fn quick_result_availability(
         ),
         // The sample table needs nothing but retained samples.
         ResultViewer::Table => has_waveform(),
+        ResultViewer::Events => matches!(
+            analysis.result_payload.as_ref(),
+            Some(AnalysisResultPayload::TransientEvents {
+                digital_traces,
+                real_traces,
+            }) if !digital_traces.is_empty() || !real_traces.is_empty()
+        ),
+        ResultViewer::Soa => matches!(
+            analysis.result_payload.as_ref(),
+            Some(AnalysisResultPayload::Soa { evaluations, .. }) if !evaluations.is_empty()
+        ),
+        ResultViewer::Reliability => matches!(
+            analysis.result_payload.as_ref(),
+            Some(AnalysisResultPayload::Reliability { devices }) if !devices.is_empty()
+        ),
+        ResultViewer::Optimization => matches!(
+            analysis.family_metadata.as_ref(),
+            Some(AnalysisResultFamilyMetadata::Optimization { iterations, .. })
+                if !iterations.is_empty()
+        ),
         // Handled before analysis selection because this is dataset-native.
         ResultViewer::Manifest => true,
     };

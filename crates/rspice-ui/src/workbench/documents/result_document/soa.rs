@@ -289,7 +289,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     .results
                     .reset_plot_view(super::ResultViewer::Soa, 0);
             }
-            state.ui.results.select_soa_rule(selection);
+            state.ui.results.selected_soa_rule = Some(selection);
         } else {
             state.ui.results.selected_soa_rule = None;
         }
@@ -358,11 +358,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         .count();
     let margin = evaluation.limit_value - evaluation.worst_actual_value;
 
-    section_header(
-        ui,
-        "Selected SOA rule",
-        Some(verdict_label(evaluation.verdict)),
-    );
+    section_header(ui, "Selected SOA rule", Some(evaluation.verdict.label()));
     stat_table(
         ui,
         &[
@@ -816,15 +812,6 @@ fn parameter_label(parameter: SoaParameterEvidence) -> &'static str {
     }
 }
 
-fn verdict_label(verdict: SoaRuleVerdictEvidence) -> &'static str {
-    match verdict {
-        SoaRuleVerdictEvidence::Pass => "PASS",
-        SoaRuleVerdictEvidence::Warning => "WARNING",
-        SoaRuleVerdictEvidence::Violation => "VIOLATION",
-        SoaRuleVerdictEvidence::Critical => "CRITICAL",
-    }
-}
-
 fn verdict(ui: &mut Ui, value: SoaRuleVerdictEvidence) {
     let t = Tokens::get(ui.ctx());
     let color = match value {
@@ -832,7 +819,7 @@ fn verdict(ui: &mut Ui, value: SoaRuleVerdictEvidence) {
         SoaRuleVerdictEvidence::Warning => t.color.warn,
         SoaRuleVerdictEvidence::Violation | SoaRuleVerdictEvidence::Critical => t.color.err,
     };
-    ui.label(RichText::new(verdict_label(value)).strong().color(color));
+    ui.label(RichText::new(value.label()).strong().color(color));
 }
 
 fn table_header(ui: &mut Ui, text: &str) {

@@ -1806,6 +1806,12 @@ fn active_result_pane(
     selected: Option<&crate::workbench::documents::result_document::SelectedResultTrace>,
 ) {
     let viewer = app.state.ui.results.viewer;
+    // A pure evidence table — OP, specs, samples, events, the manifest — has
+    // no drawn pane at all. Reporting one would have the inspector state a
+    // view, a fit and a limit mask for a sheet that has none of them.
+    if !crate::workbench::documents::result_document::viewer_draws_a_pane(viewer) {
+        return;
+    }
     let Some(run) = app.state.simulation.active_run() else {
         return;
     };
