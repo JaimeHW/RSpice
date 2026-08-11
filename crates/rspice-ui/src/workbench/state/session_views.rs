@@ -1199,6 +1199,18 @@ impl InlineEdit {
         (self.target.as_ref() == Some(&(component, field.clone()))).then_some(self.buffer.as_str())
     }
 
+    /// Which of `component`'s fields holds the open session, if any.
+    ///
+    /// The inspector asks so a group of editable rows can reserve its
+    /// validation strip for exactly as long as one of its own fields is being
+    /// typed into, rather than permanently.
+    pub fn editing_field(&self, component: u64) -> Option<&InlineEditField> {
+        self.target
+            .as_ref()
+            .filter(|(id, _)| *id == component)
+            .map(|(_, field)| field)
+    }
+
     /// Why the open session's text was rejected, if it was.
     pub fn error_for(&self, component: u64, field: &InlineEditField) -> Option<&str> {
         (self.target.as_ref() == Some(&(component, field.clone())))

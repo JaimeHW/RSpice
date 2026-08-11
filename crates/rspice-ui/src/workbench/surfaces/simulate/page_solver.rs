@@ -6,28 +6,39 @@
 //! refuses outright — closing on the ledger of the value each analysis
 //! actually resolves to.
 //!
-//! Every control edits [`SimSetupState::options_draft`] and is applied through
+//! The six cards edit [`SimSetupState::options_draft`] and are applied through
 //! the plan-configuration transaction, so a numerical change produces a
 //! configuration receipt and invalidates preflight exactly as the dialog does.
 //! Nothing here is presentational: every field reaches
 //! `SimulationOptions::resolve_simulation_config`, which is what the engine
 //! runs under.
+//!
+//! The ledger authors the other half of the page's title. A per-analysis
+//! override is not a second copy of a plan field: it is the analysis's own
+//! record, committed through the same plan transaction the analysis forms use,
+//! and it reaches the engine as a second options block in that task's deck.
+//! Options an analysis form already owns are written back to that form's field
+//! rather than duplicated here.
+
+use std::cell::{Cell, RefCell};
 
 use egui::Ui;
 
+use crate::product::AnalysisInstanceId;
 use crate::simulation::dialog::{
     DampingStrategy, IntegrationMethod, MatrixSolver, OptionsDialogState, SimulationOptions,
 };
-use crate::simulation::plan::AnalysisKind;
+use crate::simulation::plan::{AnalysisKind, NumericOverrideOption};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, mono_input, select};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::sim_setup::dialogs::options_dialog::commit_options_transaction;
+use crate::workbench::state::AnalysisOverrideDraft;
 
 use super::page_kit::{
-    CARD_PAD_X, Tone, card, card_body, card_note, card_row, cell_ui, field_pair, ledger_group,
-    ledger_head, ledger_row, ledger_row_cells, rule_row,
+    CARD_PAD_X, Tone, card, card_body, card_head_row, card_note, card_row, cell_ui, field_pair,
+    ledger_group, ledger_head, ledger_row, ledger_row_cells, rule_row,
 };
 
 /// What choosing each named policy means, positionally matched to
@@ -351,12 +362,41 @@ fn iteration_budgets(ui: &mut Ui, app: &mut RSpiceApp) {
                 "transient · iterations per accepted timestep",
                 |draft| &mut draft.itl4,
             );
+            budget_row(
+                ui,
+                app,
+                "TRTOL",
+                "transient · truncation error the step controller will accept",
+                |draft| &mut draft.trtol,
+            );
+            budget_row(
+                ui,
+                app,
+                "LTE rel",
+                "transient · relative truncation bound · blank keeps the engine's",
+                |draft| &mut draft.transient_lte_reltol,
+            );
+            budget_row(
+                ui,
+                app,
+                "LTE abs",
+                "transient · absolute truncation bound · blank keeps the engine's",
+                |draft| &mut draft.transient_lte_abstol,
+            );
+            budget_row(
+                ui,
+                app,
+                "SEED",
+                "statistical draws · agauss/gauss/unif · blank is not reproducible",
+                |draft| &mut draft.statistical_seed,
+            );
             card_note(
                 ui,
                 "A budget bounds one attempt, not the task: exhausting it hands the point to the \
                  next rung of the continuation ladder rather than failing it. Only when every \
                  enabled rung is exhausted does the point fail, with its per-node residuals \
-                 retained.",
+                 retained. TRTOL scales the accepted local truncation error, so raising it buys \
+                 transient run time at the cost of waveform fidelity.",
             );
         },
     );
@@ -835,134 +875,382 @@ fn topology_contract(ui: &mut Ui) {
 
 // ------------------------------------------------------------ resolution ledger
 
-const LEDGER_COLUMNS: [f32; 4] = [0.26, 0.24, 0.24, 0.26];
+const LEDGER_COLUMNS: [f32; 5] = [0.19, 0.25, 0.16, 0.18, 0.22];
+
+/// The origin cell of a row an analysis owns rather than the plan.
+const OVERRIDE_ORIGIN: &str = "analysis override";
+
+/// One statement of what an analysis actually resolves to.
+struct PolicyRow {
+    analysis: String,
+    option: String,
+    preset: String,
+    effective: String,
+    origin: &'static str,
+    /// The authored override this row reports, when it reports one. Rows
+    /// without a target state the plan policy and cannot be removed from here.
+    target: Option<OverrideTarget>,
+}
+
+/// An authored per-analysis option, as a row reports it.
+///
+/// Storage is not carried: it follows from the analysis's kind and the option,
+/// and deriving it in one place keeps a row from claiming an owner the writer
+/// would then disagree with.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct OverrideTarget {
+    instance: AnalysisInstanceId,
+    option: NumericOverrideOption,
+}
+
+/// Where an authored option's value lives.
+///
+/// A step ceiling can be typed here or on the transient's own form, and both
+/// write the same field. Two editors over one fact is deliberate; two copies of
+/// it would let this ledger and that form disagree about what runs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OverrideStorage {
+    NumericRecord,
+    TransientStepCeiling,
+}
 
 fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
-    let options = &app.state.sim_setup.options;
-    // Which analyses the plan actually holds. A row scoped to transient
-    // integration is a claim about a run, so it is only shown when a transient
-    // is enabled — the alternative states a policy for a solve that will never
-    // happen.
-    let kinds: Vec<AnalysisKind> = app
-        .state
-        .sim_setup
-        .stable_analysis_plan()
-        .map(|plan| {
-            plan.instances()
-                .iter()
-                .filter(|instance| instance.enabled())
-                .map(|instance| instance.kind())
-                .collect()
-        })
-        .unwrap_or_default();
-    let has = |kind: AnalysisKind| kinds.contains(&kind);
-    let time_stepped =
-        has(AnalysisKind::Transient) || has(AnalysisKind::Pss) || has(AnalysisKind::MonteCarlo);
-
-    let mut rows: Vec<(String, String, String, &'static str)> = vec![
-        (
-            "Every analysis".to_owned(),
-            "Update bound · RELTOL".to_owned(),
-            format_value(options.reltol),
-            "plan preset",
-        ),
-        (
-            "Every analysis".to_owned(),
-            "Residual bound · RESIDUAL_RELTOL".to_owned(),
-            format_value(options.residual_reltol),
-            "plan preset",
-        ),
-        (
-            "DC · operating point".to_owned(),
-            "Newton budget · ITL1".to_owned(),
-            options.itl1.to_string(),
-            "plan preset",
-        ),
-    ];
-    if time_stepped {
-        rows.extend([
-            (
-                "Time stepped".to_owned(),
-                "Integration method".to_owned(),
-                options.method.spice_name().to_owned(),
-                "plan preset",
-            ),
-            (
-                "Time stepped".to_owned(),
-                "Iterations per step · ITL4".to_owned(),
-                options.itl4.to_string(),
-                "plan preset",
-            ),
-            (
-                "Time stepped".to_owned(),
-                "Step ceiling".to_owned(),
-                format_value(options.max_timestep),
-                "plan preset",
-            ),
-        ]);
-    }
-    rows.extend([
-        (
-            "Every analysis".to_owned(),
-            "Factorization".to_owned(),
-            options.solver.display_name().to_owned(),
-            "plan level",
-        ),
-        (
-            "Every analysis".to_owned(),
-            "Reference temperature".to_owned(),
-            format!("{:.1} °C", options.temp),
-            "run set",
-        ),
-    ]);
-    // The overrides the page's own title promises. An analysis that carries
-    // its own accuracy tier does not resolve to the plan preset, and the
-    // ledger is the only place that difference is visible.
+    let mut rows = plan_policy_rows(app);
+    // The overrides the page's own title promises. An analysis that carries its
+    // own bound does not resolve to the plan preset, and the ledger is the only
+    // place that difference is visible.
     rows.extend(analysis_overrides(app));
-    card(
+    let editor = override_editor(app);
+    let selected = editor
+        .as_ref()
+        .map(|editor| (editor.instance, editor.option));
+    let removable = selected.is_some_and(|(instance, option)| {
+        rows.iter().any(|row| {
+            row.target
+                .is_some_and(|target| target.instance == instance && target.option == option)
+        })
+    });
+    let departures = rows.iter().filter(|row| row.target.is_some()).count();
+    let status = if departures == 0 {
+        "every analysis resolves to the plan policy".to_owned()
+    } else {
+        format!("{departures} authored departures from the plan policy")
+    };
+
+    // Every control writes through a cell: `card_with_head` takes two closures
+    // and neither may hold `&mut app` while the other runs.
+    let open = Cell::new(false);
+    let close = Cell::new(false);
+    let remove = Cell::new(false);
+    let apply = Cell::new(false);
+    let picked_row = Cell::new(None::<usize>);
+    let picked_analysis = Cell::new(None::<usize>);
+    let picked_option = Cell::new(None::<usize>);
+    let value = RefCell::new(
+        editor
+            .as_ref()
+            .map_or_else(String::new, |editor| editor.value.clone()),
+    );
+
+    super::page_kit::card_with_head(
         ui,
-        "Resolved policy",
-        Some(("what the next run manifest freezes", Tone::Neutral)),
+        |ui| {
+            card_head_row(
+                ui,
+                "Resolved policy",
+                Some((status.as_str(), Tone::Neutral)),
+                |ui| {
+                    if editor.is_some() {
+                        remove.set(Button::new("Remove").enabled(removable).show(ui).clicked());
+                        close.set(Button::new("Close").show(ui).clicked());
+                    } else {
+                        open.set(
+                            Button::new("Add override…")
+                                .enabled(!analysis_choices(app).is_empty())
+                                .show(ui)
+                                .clicked(),
+                        );
+                    }
+                },
+            );
+        },
         |ui| {
             ledger_head(
                 ui,
                 &LEDGER_COLUMNS,
-                &["Scope", "Option", "Resolved value", "Owner"],
+                &[
+                    "Analysis",
+                    "Option",
+                    "Preset value",
+                    "Effective value",
+                    "Origin",
+                ],
             );
-            for (scope, option, value, owner) in &rows {
-                ledger_row(
+            for (index, row) in rows.iter().enumerate() {
+                let is_selected = row
+                    .target
+                    .is_some_and(|target| selected == Some((target.instance, target.option)));
+                let response = ledger_row(
                     ui,
                     &LEDGER_COLUMNS,
                     &[
-                        (scope.as_str(), Tone::Neutral),
-                        (option.as_str(), Tone::Neutral),
-                        (value.as_str(), Tone::Accent),
-                        (*owner, Tone::Neutral),
+                        (row.analysis.as_str(), Tone::Neutral),
+                        (row.option.as_str(), Tone::Neutral),
+                        (row.preset.as_str(), Tone::Neutral),
+                        (
+                            row.effective.as_str(),
+                            if row.target.is_some() {
+                                Tone::Warn
+                            } else {
+                                Tone::Accent
+                            },
+                        ),
+                        (row.origin, Tone::Neutral),
                     ],
-                    false,
+                    is_selected,
                 );
+                if response.clicked() && row.target.is_some() {
+                    picked_row.set(Some(index));
+                }
+            }
+            if let Some(editor) = editor.as_ref() {
+                override_editor_row(ui, editor, &picked_analysis, &picked_option, &value, &apply);
             }
             card_note(
                 ui,
                 "The reference temperature is owned by the run set and mirrored here; every other \
-                 value on this page is owned by this page. An analysis without its own override \
-                 resolves to exactly these values.",
+                 preset on this page is owned by this page. An authored override reaches its \
+                 analysis as a second options block in that task's own deck, so it wins over the \
+                 preset for exactly the keys it names and inherits the rest.",
             );
         },
     );
+
+    if open.get() {
+        app.state.workbench.analysis_override_draft = fresh_override_draft(app);
+    }
+    if close.get() {
+        app.state.workbench.analysis_override_draft = None;
+    }
+    if let Some(index) = picked_row.get()
+        && let Some(target) = rows[index].target
+    {
+        app.state.workbench.analysis_override_draft = Some(AnalysisOverrideDraft {
+            instance: target.instance,
+            option: target.option,
+            value: rows[index].effective.clone(),
+            error: None,
+        });
+        return;
+    }
+    if let Some(draft) = app.state.workbench.analysis_override_draft.as_mut() {
+        draft.value = value.into_inner();
+    }
+    if let Some(index) = picked_analysis.get() {
+        retarget_override_draft(app, index);
+    }
+    if let Some(index) = picked_option.get() {
+        reoption_override_draft(app, index);
+    }
+    if remove.get() {
+        remove_authored_override(app);
+    }
+    if apply.get() {
+        apply_override_draft(app);
+    }
+}
+
+/// What the plan states before any analysis departs from it.
+fn plan_policy_rows(app: &RSpiceApp) -> Vec<PolicyRow> {
+    let options = &app.state.sim_setup.options;
+    // A row scoped to time integration is a claim about a run, so it is only
+    // shown when a solve that steps time is enabled — the alternative states a
+    // policy for a solve that will never happen.
+    let time_stepped = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .is_ok_and(|plan| {
+            plan.instances()
+                .iter()
+                .any(|instance| instance.enabled() && instance.kind().advances_time())
+        });
+
+    let plan_row = |analysis: &str, option: NumericOverrideOption| PolicyRow {
+        analysis: analysis.to_owned(),
+        option: option.label().to_owned(),
+        preset: plan_preset_value(option, options),
+        effective: plan_preset_value(option, options),
+        origin: "plan preset",
+        target: None,
+    };
+    let mut rows = vec![
+        plan_row("Every analysis", NumericOverrideOption::Reltol),
+        plan_row("Every analysis", NumericOverrideOption::ResidualReltol),
+        plan_row("DC · operating point", NumericOverrideOption::Itl1),
+    ];
+    if time_stepped {
+        rows.extend([
+            plan_row("Time stepped", NumericOverrideOption::IntegrationMethod),
+            plan_row("Time stepped", NumericOverrideOption::Itl4),
+            plan_row("Time stepped", NumericOverrideOption::MaximumTimestep),
+        ]);
+    }
+    let solver = options.solver.display_name().to_owned();
+    let temperature = format!("{:.1} °C", options.temp);
+    rows.extend([
+        PolicyRow {
+            analysis: "Every analysis".to_owned(),
+            option: "Factorization".to_owned(),
+            preset: solver.clone(),
+            effective: solver,
+            origin: "plan level",
+            target: None,
+        },
+        PolicyRow {
+            analysis: "Every analysis".to_owned(),
+            option: "Reference temperature".to_owned(),
+            preset: temperature.clone(),
+            effective: temperature,
+            origin: "run set",
+            target: None,
+        },
+    ]);
+    rows
+}
+
+/// What the plan resolves one option to, for the preset column.
+fn plan_preset_value(option: NumericOverrideOption, options: &SimulationOptions) -> String {
+    match option {
+        NumericOverrideOption::Reltol => format_value(options.reltol),
+        NumericOverrideOption::Abstol => format_value(options.abstol),
+        NumericOverrideOption::Vntol => format_value(options.vntol),
+        NumericOverrideOption::ResidualReltol => format_value(options.residual_reltol),
+        NumericOverrideOption::Itl1 => options.itl1.to_string(),
+        NumericOverrideOption::Itl4 => options.itl4.to_string(),
+        NumericOverrideOption::Trtol => format_value(options.trtol),
+        NumericOverrideOption::IntegrationMethod => options.method.spice_name().to_owned(),
+        NumericOverrideOption::MaximumTimestep => format_value(options.max_timestep),
+    }
 }
 
 /// The analyses that resolve to something other than the plan-level policy.
 ///
 /// Only a divergence is reported: listing every analysis at its default would
 /// bury the ones that actually differ, which is the only thing this section of
-/// the ledger exists to show. Each value is owned by the analysis's own form —
-/// this page reports where the plan policy stops applying, it does not offer a
-/// second place to set the same field.
-fn analysis_overrides(app: &RSpiceApp) -> Vec<(String, String, String, &'static str)> {
+/// the ledger exists to show. The numeric records are enumerated from the
+/// records themselves rather than from a table of options this page recognizes,
+/// so an authored bound always earns a row even when the projection below has
+/// nothing else to say about it.
+fn analysis_overrides(app: &RSpiceApp) -> Vec<PolicyRow> {
     use crate::simulation::dialog::{OpAccuracy, XfAccuracy};
     use crate::simulation::plan::AnalysisDraft;
 
+    let options = &app.state.sim_setup.options;
+    let Ok(plan) = app.state.sim_setup.stable_analysis_plan() else {
+        return Vec::new();
+    };
+    let mut rows = Vec::new();
+    for (index, instance) in plan
+        .instances()
+        .iter()
+        .enumerate()
+        .filter(|(_, instance)| instance.enabled())
+    {
+        let analysis = format!("#{} · {}", index + 1, instance.kind().code());
+        // Accuracy tiers are owned by their analysis's own form and are only
+        // reported here. There is no plan-level tier to depart from, so the
+        // preset column names the tier every analysis starts at.
+        match instance.draft() {
+            AnalysisDraft::OperatingPoint(setup) => {
+                if let Some(accuracy) = OpAccuracy::ALL
+                    .get(setup.accuracy_idx)
+                    .filter(|accuracy| **accuracy != OpAccuracy::default())
+                {
+                    rows.push(PolicyRow {
+                        analysis: analysis.clone(),
+                        option: "Accuracy tier".to_owned(),
+                        preset: OpAccuracy::default().display_name().to_owned(),
+                        effective: accuracy.display_name().to_owned(),
+                        origin: OVERRIDE_ORIGIN,
+                        target: None,
+                    });
+                }
+            }
+            AnalysisDraft::TransferFunction(setup) => {
+                if let Some(accuracy) = XfAccuracy::ALL
+                    .get(setup.accuracy_idx)
+                    .filter(|accuracy| **accuracy != XfAccuracy::default())
+                {
+                    rows.push(PolicyRow {
+                        analysis: analysis.clone(),
+                        option: "Accuracy tier".to_owned(),
+                        preset: XfAccuracy::default().display_name().to_owned(),
+                        effective: accuracy.display_name().to_owned(),
+                        origin: OVERRIDE_ORIGIN,
+                        target: None,
+                    });
+                }
+            }
+            // A transient that names its own step ceiling stops resolving to
+            // the plan's. `auto` means it does not.
+            AnalysisDraft::Transient(setup) => {
+                let ceiling = setup.max_step.trim();
+                if !(ceiling.is_empty() || ceiling.eq_ignore_ascii_case("auto")) {
+                    rows.push(PolicyRow {
+                        analysis: analysis.clone(),
+                        option: NumericOverrideOption::MaximumTimestep.label().to_owned(),
+                        preset: plan_preset_value(NumericOverrideOption::MaximumTimestep, options),
+                        effective: ceiling.to_owned(),
+                        origin: OVERRIDE_ORIGIN,
+                        target: Some(OverrideTarget {
+                            instance: instance.id(),
+                            option: NumericOverrideOption::MaximumTimestep,
+                        }),
+                    });
+                }
+            }
+            _ => {}
+        }
+        let Some(record) = instance.numeric_override() else {
+            continue;
+        };
+        for (option, effective) in record.entries() {
+            rows.push(PolicyRow {
+                analysis: analysis.clone(),
+                option: option.label().to_owned(),
+                preset: plan_preset_value(option, options),
+                effective,
+                origin: OVERRIDE_ORIGIN,
+                target: Some(OverrideTarget {
+                    instance: instance.id(),
+                    option,
+                }),
+            });
+        }
+    }
+    rows
+}
+
+fn format_value(value: f64) -> String {
+    crate::simulation::dialog::format_si_value(value)
+}
+
+// ------------------------------------------------------------ override authoring
+
+/// The authoring row's resolved choices, derived fresh each frame so a plan
+/// edit made elsewhere cannot leave a stale analysis or option on offer.
+struct OverrideEditorModel {
+    instance: AnalysisInstanceId,
+    option: NumericOverrideOption,
+    value: String,
+    error: Option<String>,
+    analyses: Vec<(AnalysisInstanceId, String)>,
+    options: Vec<(NumericOverrideOption, OverrideStorage)>,
+}
+
+/// Enabled analyses, as the analysis picker offers them.
+fn analysis_choices(app: &RSpiceApp) -> Vec<(AnalysisInstanceId, String)> {
     let Ok(plan) = app.state.sim_setup.stable_analysis_plan() else {
         return Vec::new();
     };
@@ -970,39 +1258,315 @@ fn analysis_overrides(app: &RSpiceApp) -> Vec<(String, String, String, &'static 
         .iter()
         .enumerate()
         .filter(|(_, instance)| instance.enabled())
-        .filter_map(|(index, instance)| {
-            let (option, value) = match instance.draft() {
-                AnalysisDraft::OperatingPoint(setup) => OpAccuracy::ALL
-                    .get(setup.accuracy_idx)
-                    .filter(|accuracy| **accuracy != OpAccuracy::default())
-                    .map(|accuracy| ("Accuracy tier", accuracy.display_name().to_owned()))?,
-                AnalysisDraft::TransferFunction(setup) => XfAccuracy::ALL
-                    .get(setup.accuracy_idx)
-                    .filter(|accuracy| **accuracy != XfAccuracy::default())
-                    .map(|accuracy| ("Accuracy tier", accuracy.display_name().to_owned()))?,
-                // A transient that names its own step ceiling stops resolving
-                // to the plan's. `auto` means it does not.
-                AnalysisDraft::Transient(setup) => {
-                    let ceiling = setup.max_step.trim();
-                    if ceiling.is_empty() || ceiling.eq_ignore_ascii_case("auto") {
-                        return None;
-                    }
-                    ("Step ceiling", ceiling.to_owned())
-                }
-                _ => return None,
-            };
-            Some((
+        .map(|(index, instance)| {
+            (
+                instance.id(),
                 format!("#{} · {}", index + 1, instance.kind().code()),
-                option.to_owned(),
-                value,
-                "analysis override",
-            ))
+            )
         })
         .collect()
 }
 
-fn format_value(value: f64) -> String {
-    crate::simulation::dialog::format_si_value(value)
+/// The options one kind may be given, and where each one is stored.
+///
+/// The numeric record refuses a step ceiling on a transient because the
+/// transient's own form owns that field; the option is still offered here and
+/// routed to that field, so the page keeps its promise without holding a second
+/// copy of the value.
+fn authorable_options(kind: AnalysisKind) -> Vec<(NumericOverrideOption, OverrideStorage)> {
+    let mut options: Vec<_> = NumericOverrideOption::applicable_to(kind)
+        .into_iter()
+        .map(|option| (option, OverrideStorage::NumericRecord))
+        .collect();
+    if matches!(kind, AnalysisKind::Transient) {
+        options.push((
+            NumericOverrideOption::MaximumTimestep,
+            OverrideStorage::TransientStepCeiling,
+        ));
+    }
+    options
+}
+
+fn override_editor(app: &RSpiceApp) -> Option<OverrideEditorModel> {
+    let draft = app.state.workbench.analysis_override_draft.as_ref()?;
+    let plan = app.state.sim_setup.stable_analysis_plan().ok()?;
+    let kind = plan.instance(draft.instance)?.kind();
+    Some(OverrideEditorModel {
+        instance: draft.instance,
+        option: draft.option,
+        value: draft.value.clone(),
+        error: draft.error.clone(),
+        analyses: analysis_choices(app),
+        options: authorable_options(kind),
+    })
+}
+
+/// A draft aimed at the first enabled analysis and its first usable option.
+fn fresh_override_draft(app: &RSpiceApp) -> Option<AnalysisOverrideDraft> {
+    let plan = app.state.sim_setup.stable_analysis_plan().ok()?;
+    let (instance, _) = analysis_choices(app).into_iter().next()?;
+    let (option, _) = authorable_options(plan.instance(instance)?.kind())
+        .into_iter()
+        .next()?;
+    Some(AnalysisOverrideDraft {
+        instance,
+        option,
+        value: String::new(),
+        error: None,
+    })
+}
+
+/// Point the draft at another analysis, keeping its option only if that
+/// analysis can carry it.
+fn retarget_override_draft(app: &mut RSpiceApp, index: usize) {
+    let Some((instance, _)) = analysis_choices(app).into_iter().nth(index) else {
+        return;
+    };
+    let Some(kind) = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .and_then(|plan| plan.instance(instance))
+        .map(|instance| instance.kind())
+    else {
+        return;
+    };
+    let options = authorable_options(kind);
+    let Some(draft) = app.state.workbench.analysis_override_draft.as_mut() else {
+        return;
+    };
+    draft.instance = instance;
+    draft.error = None;
+    if !options.iter().any(|(option, _)| *option == draft.option) {
+        let Some((option, _)) = options.into_iter().next() else {
+            return;
+        };
+        draft.option = option;
+    }
+}
+
+fn reoption_override_draft(app: &mut RSpiceApp, index: usize) {
+    let Some(kind) = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .zip(app.state.workbench.analysis_override_draft.as_ref())
+        .and_then(|(plan, draft)| plan.instance(draft.instance))
+        .map(|instance| instance.kind())
+    else {
+        return;
+    };
+    let Some((option, _)) = authorable_options(kind).into_iter().nth(index) else {
+        return;
+    };
+    if let Some(draft) = app.state.workbench.analysis_override_draft.as_mut() {
+        draft.option = option;
+        draft.error = None;
+    }
+}
+
+/// Commit the draft, or leave the plan alone and report why it was refused.
+fn apply_override_draft(app: &mut RSpiceApp) {
+    let Some(draft) = app.state.workbench.analysis_override_draft.clone() else {
+        return;
+    };
+    let Some(model) = override_editor(app) else {
+        return;
+    };
+    let storage = model
+        .options
+        .iter()
+        .find(|(option, _)| *option == draft.option)
+        .map(|(_, storage)| *storage);
+    let outcome = match storage {
+        Some(OverrideStorage::TransientStepCeiling) => {
+            write_transient_step_ceiling(app, draft.instance, draft.value.trim())
+        }
+        Some(OverrideStorage::NumericRecord) => {
+            write_numeric_record(app, draft.instance, draft.option, draft.value.trim())
+        }
+        None => Err(format!(
+            "This analysis cannot carry {}.",
+            draft.option.key()
+        )),
+    };
+    if let Some(draft) = app.state.workbench.analysis_override_draft.as_mut() {
+        draft.error = outcome.err();
+    }
+}
+
+/// Return the drafted option to the plan policy.
+fn remove_authored_override(app: &mut RSpiceApp) {
+    let Some(draft) = app.state.workbench.analysis_override_draft.clone() else {
+        return;
+    };
+    let Some(model) = override_editor(app) else {
+        return;
+    };
+    let storage = model
+        .options
+        .iter()
+        .find(|(option, _)| *option == draft.option)
+        .map(|(_, storage)| *storage);
+    let outcome = match storage {
+        Some(OverrideStorage::TransientStepCeiling) => {
+            write_transient_step_ceiling(app, draft.instance, "auto")
+        }
+        _ => {
+            let record = app
+                .state
+                .sim_setup
+                .stable_analysis_plan()
+                .ok()
+                .and_then(|plan| plan.instance(draft.instance))
+                .and_then(|instance| instance.numeric_override().cloned())
+                .map(|mut record| {
+                    record.clear(draft.option);
+                    record
+                });
+            match record {
+                Some(record) => {
+                    super::lifecycle::commit_numeric_override(app, draft.instance, Some(record))
+                }
+                None => Ok(()),
+            }
+        }
+    };
+    if let Some(draft) = app.state.workbench.analysis_override_draft.as_mut() {
+        draft.error = outcome.err();
+    }
+}
+
+fn write_numeric_record(
+    app: &mut RSpiceApp,
+    instance: AnalysisInstanceId,
+    option: NumericOverrideOption,
+    authored: &str,
+) -> Result<(), String> {
+    let plan = app.state.sim_setup.stable_analysis_plan()?;
+    let target = plan
+        .instance(instance)
+        .ok_or_else(|| "The selected analysis is no longer in the plan.".to_owned())?;
+    let kind = target.kind();
+    let mut record = target.numeric_override().cloned().unwrap_or_default();
+    record.set(kind, option, authored)?;
+    super::lifecycle::commit_numeric_override(app, instance, Some(record))
+}
+
+/// Write the transient's own step ceiling through the transaction its form
+/// uses, so the ledger and the form remain one editor over one field.
+fn write_transient_step_ceiling(
+    app: &mut RSpiceApp,
+    instance: AnalysisInstanceId,
+    authored: &str,
+) -> Result<(), String> {
+    use crate::simulation::plan::AnalysisDraft;
+
+    if !authored.eq_ignore_ascii_case("auto") {
+        let value = crate::simulation::dialog::parse_si_value(authored)
+            .map_err(|error| format!("Step ceiling: {error}"))?;
+        if !value.is_finite() || value <= 0.0 {
+            return Err("Step ceiling must be a positive time.".to_owned());
+        }
+    }
+    let plan = app.state.sim_setup.stable_analysis_plan()?;
+    let mut draft = plan
+        .instance(instance)
+        .ok_or_else(|| "The selected analysis is no longer in the plan.".to_owned())?
+        .draft()
+        .clone();
+    let AnalysisDraft::Transient(setup) = &mut draft else {
+        return Err("Only a transient owns a step ceiling of its own.".to_owned());
+    };
+    setup.max_step = authored.to_owned();
+    super::lifecycle::commit_draft(app, instance, draft);
+    Ok(())
+}
+
+const OVERRIDE_CONTROL_WIDTH: f32 = 148.0;
+
+fn override_editor_row(
+    ui: &mut Ui,
+    editor: &OverrideEditorModel,
+    picked_analysis: &Cell<Option<usize>>,
+    picked_option: &Cell<Option<usize>>,
+    value: &RefCell<String>,
+    apply: &Cell<bool>,
+) {
+    let t = Tokens::get(ui.ctx());
+    card_body(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let analyses: Vec<String> = editor
+                .analyses
+                .iter()
+                .map(|(_, label)| label.clone())
+                .collect();
+            let selected_analysis = editor
+                .analyses
+                .iter()
+                .position(|(id, _)| *id == editor.instance)
+                .and_then(|index| analyses.get(index).cloned())
+                .unwrap_or_default();
+            if let Some(index) = select(
+                ui,
+                "simulation.solver.override.analysis",
+                "Analysis to override",
+                &selected_analysis,
+                &analyses,
+                OVERRIDE_CONTROL_WIDTH,
+            ) {
+                picked_analysis.set(Some(index));
+            }
+
+            let options: Vec<String> = editor
+                .options
+                .iter()
+                .map(|(option, _)| option.label().to_owned())
+                .collect();
+            let selected_option = editor
+                .options
+                .iter()
+                .position(|(option, _)| *option == editor.option)
+                .and_then(|index| options.get(index).cloned())
+                .unwrap_or_default();
+            if let Some(index) = select(
+                ui,
+                "simulation.solver.override.option",
+                "Option to override",
+                &selected_option,
+                &options,
+                OVERRIDE_CONTROL_WIDTH * 1.4,
+            ) {
+                picked_option.set(Some(index));
+            }
+
+            let mut buffer = value.borrow_mut();
+            let response = mono_input(ui, &mut buffer, OVERRIDE_CONTROL_WIDTH);
+            drop(buffer);
+            if Button::new("Apply").accent().show(ui).clicked()
+                || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+            {
+                apply.set(true);
+            }
+            ui.label(
+                egui::RichText::new(
+                    editor
+                        .error
+                        .clone()
+                        .unwrap_or_else(|| editor.option.value_hint().to_owned()),
+                )
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .color(if editor.error.is_some() {
+                    t.color.err
+                } else {
+                    t.color.text_faint
+                }),
+            );
+        });
+    });
 }
 
 // ------------------------------------------------------------------- committing

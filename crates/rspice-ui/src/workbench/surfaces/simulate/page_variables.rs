@@ -68,8 +68,12 @@ fn registry(
     let selected_index = selected
         .as_ref()
         .and_then(|name| variables.iter().position(|variable| &variable.name == name));
+    // "Optimizable" rather than "sweepable": the sweep role is enforced at
+    // dispatch by the optimizer, which refuses a variable declared fixed.
+    // There is no design-variable axis in the run set yet, so counting these
+    // as sweepable would name a capability the plan cannot execute.
     let status = format!(
-        "{} typed · {} sweepable",
+        "{} typed · {} optimizable",
         variables.len(),
         variables
             .iter()
@@ -79,8 +83,14 @@ fn registry(
             ))
             .count()
     );
+    // A spec sheet the browser picker has finished reading is adopted before
+    // the head is drawn, so the row it adds is in this frame's registry.
+    #[cfg(target_arch = "wasm32")]
+    super::variable_import::poll_pending_import(ui.ctx(), app, plan_id);
+
     let mut duplicate = false;
     let mut remove = false;
+    let mut import = false;
     let mut pick = None;
     super::page_kit::card_with_head(
         ui,
@@ -90,6 +100,14 @@ fn registry(
                 "Variable registry",
                 Some((status.as_str(), Tone::Ok)),
                 |ui| {
+                    import = Button::new("Import…")
+                        .show(ui)
+                        .on_hover_text(
+                            "Add every variable in a spec-sheet CSV as one transaction. The \
+                             header row names the columns; a row that fails is reported by line \
+                             and nothing is imported.",
+                        )
+                        .clicked();
                     remove = Button::new("Remove")
                         .enabled(selected_index.is_some())
                         .show(ui)
@@ -169,6 +187,9 @@ fn registry(
             app.state.workbench.design_variable_bounds_draft = None;
         }
         app.state.workbench.selected_design_variable = Some(name);
+    }
+    if import {
+        super::variable_import::import_from_file(ui.ctx(), app, plan_id);
     }
     if let Some(index) = selected_index {
         let name = variables[index].name.clone();

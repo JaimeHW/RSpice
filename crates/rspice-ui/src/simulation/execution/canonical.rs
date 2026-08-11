@@ -17,13 +17,15 @@ use crate::simulation::config::{
     AcSweepType, NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType, PzAnalysisType,
 };
 use crate::simulation::dialog::{
-    OpAccuracy, OpAnnotation, OpConfig, OpDeviceDetail, OpHomotopy, OpInitialGuess,
-    OpNodeInitialization, OpPreviousState, OpRunPointContext, OpSaveDevice, OpTemperatureMode,
+    IntegrationMethod, OpAccuracy, OpAnnotation, OpConfig, OpDeviceDetail, OpHomotopy,
+    OpInitialGuess, OpNodeInitialization, OpPreviousState, OpRunPointContext, OpSaveDevice,
+    OpTemperatureMode,
 };
 use crate::simulation::multi_run::{
     AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
     FrequencySweep, OptimizationAlgorithm, OptimizationGoal,
 };
+use crate::simulation::plan::AnalysisNumericOverride;
 use crate::simulation::runner::SpecExecutionOptions;
 
 const CANONICAL_MAGIC: &[u8] = b"RSPICE-CANONICAL";
@@ -210,19 +212,59 @@ pub(crate) fn manual_deck_analysis_instance_id_from_tag(
     AnalysisInstanceId::from_namespace(MANUAL_DECK_TASK_NAMESPACE, &name)
 }
 
+/// Identity of one task's exact numerical contract.
+///
+/// The domain moved to `/v2` when per-analysis solver overrides joined the
+/// payload: two tasks that differ only by their override run different solves
+/// and must not share an identity. No persisted digest is ever re-derived from
+/// its inputs — receipts store the bytes and later comparisons hash those — so
+/// the change does not invalidate a retained run.
 pub(in crate::simulation) fn analysis_config_digest(
     analysis_line: &str,
     spec: &AnalysisSpec,
     config: Option<&AnalysisConfig>,
     options: &SpecExecutionOptions,
+    numeric_override: Option<&AnalysisNumericOverride>,
 ) -> ContentDigest {
-    let mut writer = CanonicalWriter::new("rspice.analysis-config/v1");
+    let mut writer = CanonicalWriter::new("rspice.analysis-config/v2");
     writer.domain("analysis-line");
     writer.string(analysis_line);
     encode_analysis_spec(&mut writer, spec);
     encode_analysis_config(&mut writer, config);
     encode_spec_options(&mut writer, options);
+    encode_numeric_override(&mut writer, numeric_override);
     writer.finish()
+}
+
+fn encode_numeric_override(
+    writer: &mut CanonicalWriter,
+    numeric_override: Option<&AnalysisNumericOverride>,
+) {
+    writer.domain("analysis-numeric-override");
+    writer.option(numeric_override, |writer, record| {
+        writer.option(record.reltol().as_ref(), |w, v| w.f64(*v));
+        writer.option(record.abstol().as_ref(), |w, v| w.f64(*v));
+        writer.option(record.vntol().as_ref(), |w, v| w.f64(*v));
+        writer.option(record.residual_reltol().as_ref(), |w, v| w.f64(*v));
+        writer.option(record.itl1().as_ref(), |w, v| w.usize(*v));
+        writer.option(record.itl4().as_ref(), |w, v| w.usize(*v));
+        writer.option(record.trtol().as_ref(), |w, v| w.f64(*v));
+        writer.option(record.integration_method().as_ref(), |w, v| {
+            w.u8(integration_method_tag(*v));
+        });
+        writer.option(record.max_timestep().as_ref(), |w, v| w.f64(*v));
+    });
+}
+
+const fn integration_method_tag(method: IntegrationMethod) -> u8 {
+    match method {
+        IntegrationMethod::Trap => 0,
+        IntegrationMethod::Euler => 1,
+        IntegrationMethod::Gear => 2,
+        IntegrationMethod::Gear2 => 3,
+        IntegrationMethod::TrapGear => 4,
+        IntegrationMethod::Gear2Only => 5,
+    }
 }
 
 fn encode_analysis_config(writer: &mut CanonicalWriter, config: Option<&AnalysisConfig>) {
@@ -624,7 +666,7 @@ fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
         | AnalysisSpec::Pnoise
         | AnalysisSpec::Pxf
         | AnalysisSpec::Pstb
-        | AnalysisSpec::MonteCarlo
+        | AnalysisSpec::MonteCarlo { .. }
         | AnalysisSpec::Parametric
         | AnalysisSpec::Corner => {}
         AnalysisSpec::Tf {
@@ -844,12 +886,14 @@ fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
             stop_freq,
             sweep,
             points_per_decade,
+            compute_nyquist,
         } => {
             writer.string(probe_node);
             writer.f64(*start_freq);
             writer.f64(*stop_freq);
             encode_frequency_sweep(writer, *sweep);
             writer.usize(*points_per_decade);
+            writer.bool(*compute_nyquist);
         }
         AnalysisSpec::Reliability {
             target_years,
@@ -1444,7 +1488,7 @@ pub(in crate::simulation) fn analysis_kind_tag(spec: &AnalysisSpec) -> u8 {
         AnalysisSpec::Pxf => 14,
         AnalysisSpec::Pstb => 15,
         AnalysisSpec::Stb { .. } => 16,
-        AnalysisSpec::MonteCarlo => 17,
+        AnalysisSpec::MonteCarlo { .. } => 17,
         AnalysisSpec::Parametric => 18,
         AnalysisSpec::Corner => 19,
         AnalysisSpec::Reliability { .. } => 20,
@@ -1606,7 +1650,13 @@ mod tests {
     fn noise_digest_changes_for_every_exact_execution_field() {
         let base = exact_noise_spec();
         let digest = |spec: &AnalysisSpec, config: Option<&AnalysisConfig>| {
-            analysis_config_digest(".noise", spec, config, &SpecExecutionOptions::default())
+            analysis_config_digest(
+                ".noise",
+                spec,
+                config,
+                &SpecExecutionOptions::default(),
+                None,
+            )
         };
         let baseline = digest(&base, None);
 
@@ -1661,7 +1711,7 @@ mod tests {
             num_harmonics: 20,
         };
         let digest = |spec: &AnalysisSpec| {
-            analysis_config_digest(".pss", spec, None, &SpecExecutionOptions::default())
+            analysis_config_digest(".pss", spec, None, &SpecExecutionOptions::default(), None)
         };
         let baseline = digest(&base);
         let mut variants = Vec::new();
@@ -1697,7 +1747,7 @@ mod tests {
     fn operating_point_digest_is_sensitive_to_every_contract_field() {
         let base = AnalysisSpec::dc_op();
         let digest = |spec: &AnalysisSpec| {
-            analysis_config_digest(".op", spec, None, &SpecExecutionOptions::default())
+            analysis_config_digest(".op", spec, None, &SpecExecutionOptions::default(), None)
         };
         let baseline = digest(&base);
 
@@ -1788,7 +1838,7 @@ mod tests {
             normalize,
         };
         let digest = |spec: &AnalysisSpec| {
-            analysis_config_digest(".four", spec, None, &SpecExecutionOptions::default())
+            analysis_config_digest(".four", spec, None, &SpecExecutionOptions::default(), None)
         };
 
         let baseline = digest(&spec(true, false));
@@ -1808,7 +1858,7 @@ mod tests {
             accuracy: TfAccuracy::Balanced,
         };
         let digest = |spec: &AnalysisSpec| {
-            analysis_config_digest(".tf", spec, None, &SpecExecutionOptions::default())
+            analysis_config_digest(".tf", spec, None, &SpecExecutionOptions::default(), None)
         };
         let baseline = digest(&base);
         let mutations: [fn(&mut AnalysisSpec); 7] = [
@@ -1886,7 +1936,7 @@ mod tests {
             extraction_path: EnvelopeExtractionPath::Preview,
         };
         let digest = |spec: &AnalysisSpec| {
-            analysis_config_digest(".envlp", spec, None, &SpecExecutionOptions::default())
+            analysis_config_digest(".envlp", spec, None, &SpecExecutionOptions::default(), None)
         };
         let baseline = digest(&base);
 

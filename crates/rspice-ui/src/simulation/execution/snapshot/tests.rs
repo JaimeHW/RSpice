@@ -11,6 +11,7 @@ use crate::simulation::runner::SpecExecutionOptions;
 
 fn task() -> QueuedAnalysis {
     QueuedAnalysis {
+        numeric_override: None,
         spec: AnalysisSpec::dc_op(),
         config: Some(AnalysisConfig::dc_op()),
         spec_options: SpecExecutionOptions::default(),
@@ -20,6 +21,7 @@ fn task() -> QueuedAnalysis {
 
 fn configured_op_task(config: crate::simulation::dialog::OpConfig) -> QueuedAnalysis {
     QueuedAnalysis {
+        numeric_override: None,
         spec: operating_point_spec(&config),
         config: Some(AnalysisConfig::DcOp(config)),
         spec_options: SpecExecutionOptions::default(),
@@ -36,6 +38,7 @@ fn transient_task() -> QueuedAnalysis {
         uic: false,
     };
     QueuedAnalysis {
+        numeric_override: None,
         spec: AnalysisSpec::Transient {
             stop_time: config.stop_time,
             step_time: config.step_time,
@@ -51,6 +54,7 @@ fn transient_task() -> QueuedAnalysis {
 
 fn temperature_task(temperatures_c: Vec<f64>) -> QueuedAnalysis {
     QueuedAnalysis {
+        numeric_override: None,
         spec: AnalysisSpec::Parametric,
         config: None,
         spec_options: SpecExecutionOptions {
@@ -71,6 +75,7 @@ fn corner_task(
     full_matrix: bool,
 ) -> QueuedAnalysis {
     QueuedAnalysis {
+        numeric_override: None,
         spec: AnalysisSpec::Corner,
         config: None,
         spec_options: SpecExecutionOptions {
@@ -82,6 +87,7 @@ fn corner_task(
                 nominal_voltage: Some(1.0),
                 base_mode: crate::services::simulation_runner::CornerBaseMode::Op,
                 model_bindings: Vec::new(),
+                points: Vec::new(),
             }),
             ..SpecExecutionOptions::default()
         },
@@ -519,6 +525,7 @@ fn retained_op_state_must_match_the_prepared_executable_source() {
     *node_initialization = OpNodeInitialization::IgnoreIcAndNodeset;
     *previous_state = Some(previous);
     let retained_task = QueuedAnalysis {
+        numeric_override: None,
         spec,
         config: Some(AnalysisConfig::DcOp(config)),
         spec_options: SpecExecutionOptions::default(),
@@ -561,6 +568,7 @@ fn retained_soa_context_must_match_the_prepared_executable_source() {
     *violation_devices = vec!["M1".to_owned()];
     *violation_source_content_digest = Some(soa_source);
     let retained_task = QueuedAnalysis {
+        numeric_override: None,
         spec,
         config: Some(AnalysisConfig::DcOp(config)),
         spec_options: SpecExecutionOptions::default(),
@@ -1097,4 +1105,70 @@ fn pvt_plan_capacity_check_handles_overflow_and_limit() {
     let overflow = ensure_pvt_point_capacity(usize::MAX, 1, usize::MAX - 1)
         .expect_err("overflow must fail closed");
     assert!(overflow.message().contains(&usize::MAX.to_string()));
+}
+
+/// A per-analysis solver override only exists if the bytes the engine parses
+/// carry it. This walks the whole seam: the record reaches the task's own deck
+/// as a second options card, that card wins over the one already in the deck,
+/// and the two tasks do not share a configuration identity.
+#[test]
+fn an_authored_iteration_budget_reaches_the_task_deck_and_changes_its_identity() {
+    use crate::simulation::plan::{AnalysisKind, AnalysisNumericOverride, NumericOverrideOption};
+
+    const DECK: &str = "override deck\n\
+         V1 in 0 1\n\
+         R1 in 0 1k\n\
+         .options ITL1=40\n\
+         .tran 1n 1u\n\
+         .end\n";
+
+    let deck_parts = |task| {
+        let mut parts = parts();
+        parts.executable_netlist = DECK.to_owned();
+        parts.tasks = vec![prepared("tran", "Transient", task)];
+        parts
+    };
+
+    let mut record = AnalysisNumericOverride::default();
+    record
+        .set(AnalysisKind::Transient, NumericOverrideOption::Itl1, "321")
+        .expect("a transient may carry its own Newton budget");
+    let mut authored_task = transient_task();
+    authored_task.numeric_override = Some(record);
+
+    let inheriting = PreparedRunSnapshot::new(deck_parts(transient_task()))
+        .expect("an inheriting transient prepares");
+    let authored = PreparedRunSnapshot::new(deck_parts(authored_task))
+        .expect("an authored transient prepares");
+
+    assert!(
+        inheriting.tasks[0].executable_netlist_override.is_none(),
+        "an analysis that states nothing must leave its deck alone"
+    );
+    assert_ne!(
+        inheriting.tasks[0].config_digest, authored.tasks[0].config_digest,
+        "two tasks that run different numerics cannot share one configuration identity"
+    );
+
+    let deck = authored.tasks[0]
+        .executable_netlist_override
+        .as_deref()
+        .expect("the authored budget rewrote this task's deck");
+    assert_eq!(
+        deck.matches(".OPTIONS").count() + deck.matches(".options").count(),
+        2,
+        "the authored card must join the deck's own, not replace it:\n{deck}"
+    );
+    assert!(
+        deck.find("ITL1=321")
+            .is_some_and(|authored| deck.find(".end").is_some_and(|end| authored < end)),
+        "a card after the terminal .end is never read:\n{deck}"
+    );
+
+    let parsed = rspice_core::netlist::parse_netlist(deck).expect("the spliced deck still parses");
+    assert_eq!(
+        parsed.options.itl1,
+        Some(321),
+        "the later options card must win per key, or the override resolves to the deck's value"
+    );
 }

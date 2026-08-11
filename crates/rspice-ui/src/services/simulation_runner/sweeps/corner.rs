@@ -115,19 +115,23 @@ fn run_corner_analysis_with_bound_models(
         ));
     }
     let source_without_reference = strip_reference_model_binding_with_abort(netlist_text, abort)?;
+    // Driven by the expanded points rather than by the process axis. A filtered
+    // space can declare a process every one of its points removed, and
+    // materializing a section no point is solved against would spend the parse
+    // and could fail on a deck the run never reaches.
     let mut process_netlists = HashMap::new();
-    for (process_index, process) in config.process_corners.iter().enumerate() {
-        poll_periodically(abort, process_index)?;
-        if process_netlists.contains_key(process) {
+    for (point_index, point) in points.iter().enumerate() {
+        poll_periodically(abort, point_index)?;
+        if process_netlists.contains_key(&point.process) {
             continue;
         }
         let source = materialize_corner_process_source_from_stripped(
             &source_without_reference,
             config,
-            *process,
+            point.process,
             abort,
         )?;
-        process_netlists.insert(*process, source);
+        process_netlists.insert(point.process, source);
     }
 
     let mut parsed_by_process = HashMap::new();

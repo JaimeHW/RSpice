@@ -775,6 +775,20 @@ pub struct RunSetBudgetDrafts {
     pub bytes_per_point: String,
 }
 
+/// A per-analysis solver override while it is being authored.
+///
+/// The target analysis is carried with the value because applicability is
+/// decided per kind: moving the draft to another analysis can invalidate the
+/// option that was picked, so the two are never held apart.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnalysisOverrideDraft {
+    pub instance: crate::product::AnalysisInstanceId,
+    pub option: crate::simulation::plan::NumericOverrideOption,
+    pub value: String,
+    /// Why the last attempt to commit this draft was refused, if it was.
+    pub error: Option<String>,
+}
+
 /// Simulation Studio setup route.
 ///
 /// The analyses page owns the ordered plan and its per-analysis forms; the
@@ -1137,6 +1151,11 @@ pub struct WorkbenchState {
     /// In-progress edit of the execution budgets, as authored text.
     #[serde(skip)]
     pub run_set_budget_drafts: Option<RunSetBudgetDrafts>,
+    /// In-progress per-analysis solver override on the Solver page.
+    /// Runtime-only: an override is a numerical policy, and a half-authored
+    /// one must never be restored as the bound a run resolves to.
+    #[serde(skip)]
+    pub analysis_override_draft: Option<AnalysisOverrideDraft>,
     /// In-progress edit of the selected design variable's expression.
     /// Runtime-only: a partially typed expression must never be restored as
     /// authoritative plan data.
@@ -1323,6 +1342,7 @@ impl Default for WorkbenchState {
             selected_run_set_dimension: None,
             run_set_values_draft: None,
             run_set_budget_drafts: None,
+            analysis_override_draft: None,
             design_variable_expression_draft: None,
             design_variable_bounds_draft: None,
             saved_output_name_draft: None,

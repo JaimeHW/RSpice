@@ -23,11 +23,13 @@ pub use model::{
     InvalidValuePolicy, RunSetBudgets, RunSetComposition, RunSetCompositionMode, RunSetDimension,
     RunSetDimensionKind, RunSetState,
 };
-pub use points::resolve;
+pub use points::{RunSetPoint, compose, resolve};
 pub use transaction::{RunSetAction, RunSetReceipt, RunSetReceiptStatus, dispatch};
 pub use validate::{RunSetForecast, RunSetStatus, RunSetValidation, validate};
 
-use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig, ProcessCorner};
+use crate::simulation::dialog::corner::{
+    CornerBaseAnalysis, CornerConfig, CornerPointSpec, ProcessCorner,
+};
 
 /// Storage sizes in the binary units the budgets are authored in.
 #[must_use]
@@ -115,6 +117,11 @@ impl RunSetState {
     /// declaration read twice rather than two configurations kept in step. A
     /// dimension that is absent contributes exactly one point: the run still
     /// happens, at the deck's own value for that quantity.
+    ///
+    /// A filtered space cannot be stated as axes at all — that is the point of
+    /// it — so it is carried as the resolved point list instead. The axes are
+    /// still emitted, holding the distinct values those points use, because the
+    /// process axis is what decides which model sections are materialized.
     pub fn to_corner_config(
         &self,
         base_analysis: CornerBaseAnalysis,
@@ -153,15 +160,78 @@ impl RunSetState {
             None => vec![reference.temperature_celsius],
         };
 
-        let config = CornerConfig {
-            process_corners,
-            voltages,
-            temperatures,
-            full_matrix: self.composition.mode == RunSetCompositionMode::Cartesian,
-            base_analysis,
+        let points = if self.composition.filters() {
+            self.explicit_points(reference)?
+        } else {
+            Vec::new()
+        };
+
+        // An axis value every point excluded is a value the run never reaches,
+        // and leaving it on the process axis would demand a PDK section for a
+        // corner that is not executed. So a filtered space narrows its axes to
+        // the values its points actually use.
+        let config = if points.is_empty() {
+            CornerConfig {
+                process_corners,
+                voltages,
+                temperatures,
+                full_matrix: self.composition.mode != RunSetCompositionMode::Zipped,
+                points,
+                base_analysis,
+            }
+        } else {
+            CornerConfig {
+                process_corners: retain_used(&process_corners, &points, |point| point.process),
+                voltages: retain_used(&voltages, &points, |point| point.voltage),
+                temperatures: retain_used(&temperatures, &points, |point| {
+                    point.temperature_celsius
+                }),
+                full_matrix: true,
+                points,
+                base_analysis,
+            }
         };
         config.validate()?;
         Ok(config)
+    }
+
+    /// The resolved points of a filtered space, each stated in full.
+    ///
+    /// An axis the run set does not declare has no coordinate on the point, so
+    /// it is filled from the plan's reference here — the executor takes points,
+    /// not partial ones, and leaving a hole would make the filtered path
+    /// disagree with the axis path about what an undeclared axis means.
+    fn explicit_points(&self, reference: ReferencePoint) -> Result<Vec<CornerPointSpec>, String> {
+        let resolved = resolve(self).ok_or_else(|| {
+            "The declared space does not expand exactly, so its points cannot be executed"
+                .to_owned()
+        })?;
+        resolved
+            .into_iter()
+            .map(|point| {
+                let mut spec = CornerPointSpec {
+                    process: reference.process,
+                    voltage: UNSWEPT_SUPPLY,
+                    temperature_celsius: reference.temperature_celsius,
+                };
+                for (dimension, value) in &point.coordinates {
+                    let canonical = value
+                        .canonical
+                        .ok_or_else(|| format!("{} is not a usable value", value.lexical))?;
+                    match dimension.kind {
+                        RunSetDimensionKind::ProcessSection => {
+                            spec.process =
+                                *PROCESS_CORNERS.get(canonical as usize).ok_or_else(|| {
+                                    format!("{} is not a process section", value.lexical)
+                                })?;
+                        }
+                        RunSetDimensionKind::Supply => spec.voltage = canonical,
+                        RunSetDimensionKind::Temperature => spec.temperature_celsius = canonical,
+                    }
+                }
+                Ok(spec)
+            })
+            .collect()
     }
 
     /// How many points the declared space expands to.
@@ -176,7 +246,10 @@ impl RunSetState {
     /// Build a run set from an executable corner configuration.
     ///
     /// Used to carry a configuration authored before the run set existed, and
-    /// by tests that state a space as the engine sees it.
+    /// by tests that state a space as the engine sees it. It reads the axes
+    /// only: an explicit point list is what a space looks like once it has
+    /// stopped being an axis composition, and there is no axis form to recover
+    /// it into. The one caller passes axis configurations.
     #[must_use]
     pub fn from_corner_config(config: &CornerConfig) -> Self {
         let mut state = Self {
@@ -189,6 +262,7 @@ impl RunSetState {
                 } else {
                     RunSetCompositionMode::Zipped
                 },
+                excluded_points: std::collections::BTreeSet::new(),
             },
             budgets: RunSetBudgets::default(),
             preview: None,
@@ -232,6 +306,19 @@ impl RunSetState {
 
         state
     }
+}
+
+/// The declared axis values at least one point uses, in declaration order.
+fn retain_used<T: PartialEq + Copy>(
+    declared: &[T],
+    points: &[CornerPointSpec],
+    coordinate: impl Fn(&CornerPointSpec) -> T,
+) -> Vec<T> {
+    declared
+        .iter()
+        .copied()
+        .filter(|value| points.iter().any(|point| coordinate(point) == *value))
+        .collect()
 }
 
 /// Process corners in the order [`PROCESS_SECTIONS`] names them.

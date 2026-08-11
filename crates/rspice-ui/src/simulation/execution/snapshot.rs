@@ -10,12 +10,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
-use crate::simulation::controller::QueuedAnalysis;
+use crate::simulation::controller::{QueuedAnalysis, splice_before_terminal_end_card};
 use crate::simulation::dialog::corner::ProcessCorner;
 use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::output_contract::{
     PreparedSavedOutput, output_kind_tag, policy_tag, precision_tag, streaming_tag,
 };
+use crate::simulation::plan::AnalysisNumericOverride;
 use crate::state::{
     AnalysisResultSourceDomain, Point, PreparedModelSourceIdentity, PreparedRunReceipt,
     PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRunIntent,
@@ -368,6 +369,7 @@ impl PreparedTask {
             &task.spec,
             task.config.as_ref(),
             &task.spec_options,
+            task.numeric_override.as_ref(),
         );
         Self {
             instance_id,
@@ -447,6 +449,7 @@ impl PreparedTask {
             &self.task.spec,
             self.task.config.as_ref(),
             &self.task.spec_options,
+            self.task.numeric_override.as_ref(),
         )
     }
 }
@@ -875,6 +878,30 @@ impl PreparedRunSnapshot {
         )?;
         parts.tasks =
             expand_operating_point_tasks(parts.tasks, &pvt_points, &parts.executable_netlist)?;
+
+        // A per-analysis solver override reaches the engine exactly the way the
+        // plan's own policy does: as an `.OPTIONS` card in the deck. Splicing
+        // it here, after per-point expansion has chosen each task's deck, is
+        // what lets a PVT point keep its process binding and still resolve
+        // under the analysis's own bounds. The parser takes the last card per
+        // key, so the analysis wins over the plan without either block having
+        // to know the other exists.
+        for task in &mut parts.tasks {
+            let Some(block) = task
+                .task
+                .numeric_override
+                .as_ref()
+                .map(AnalysisNumericOverride::to_spice_options)
+                .filter(|block| !block.is_empty())
+            else {
+                continue;
+            };
+            let deck = task
+                .executable_netlist_override
+                .as_deref()
+                .unwrap_or(&parts.executable_netlist);
+            task.executable_netlist_override = Some(splice_before_terminal_end_card(deck, &block));
+        }
 
         let mut positions = HashMap::with_capacity(parts.tasks.len());
         for (index, task) in parts.tasks.iter().enumerate() {

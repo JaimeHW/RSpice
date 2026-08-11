@@ -11,9 +11,8 @@ use egui::{Sense, Ui, vec2};
 
 use crate::simulation::plan::AnalysisKind;
 use crate::simulation::run_set::{
-    self, InvalidValuePolicy, RunSetAction, RunSetBudgets, RunSetComposition,
-    RunSetCompositionMode, RunSetDimension, RunSetDimensionKind, RunSetReceiptStatus, RunSetState,
-    RunSetValidation,
+    self, InvalidValuePolicy, RunSetAction, RunSetBudgets, RunSetCompositionMode, RunSetDimension,
+    RunSetDimensionKind, RunSetReceiptStatus, RunSetState, RunSetValidation,
 };
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
@@ -27,9 +26,11 @@ use super::page_kit::{
     ledger_row, rule_row,
 };
 
-/// Rows shown before the resolved point table truncates. A resolved run space
-/// can be large; a table that listed all of it would be a scrolling wall rather
-/// than a check on the composition.
+/// Rows shown before the point table truncates. A composed run space can be
+/// large; a table that listed all of it would be a scrolling wall rather than a
+/// check on the composition. An excluded point is drawn wherever it falls: the
+/// cap hides rows that behave alike, and an exclusion the user cannot see is
+/// one they cannot lift.
 const POINT_TABLE_LIMIT: usize = 40;
 
 /// Value chips drawn on an axis card before the rest are counted.
@@ -47,8 +48,8 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let validation = run_set::validate(&app.state.sim_setup.corner.run_set, analyses);
 
     toolbar(ui, app, &validation);
-    if !validation.errors.is_empty() {
-        error_summary(ui, app, &validation);
+    if !validation.errors.is_empty() || !validation.warnings.is_empty() {
+        issue_summary(ui, app, &validation);
     }
     run_space(ui, app, &validation);
     card_row(ui, app, selected_dimension, composition);
@@ -127,50 +128,78 @@ fn toolbar(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
     }
 }
 
-// ------------------------------------------------------------ error summary
+// ------------------------------------------------------------ issue summary
 
-/// Every standing refusal, each one a jump to the control that caused it.
-fn error_summary(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
+/// Every standing refusal and advisory: a refusal is a jump to the control that
+/// caused it, an advisory states something the space is doing that the axes do
+/// not show. Advisories appear here rather than nowhere, because a report the
+/// page never draws is a report nobody receives.
+fn issue_summary(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
     let t = Tokens::get(ui.ctx());
-    let count = validation.errors.len();
-    let title = format!(
-        "Run-set preview blocked · {count} issue{}",
-        if count == 1 { "" } else { "s" }
-    );
+    let errors = validation.errors.len();
+    let advisories = validation.warnings.len();
+    let (title, status) = if errors > 0 {
+        (
+            format!(
+                "Run-set preview blocked · {errors} issue{}",
+                if errors == 1 { "" } else { "s" }
+            ),
+            ("invalid input retained", Tone::Error),
+        )
+    } else {
+        (
+            format!(
+                "Run-set advisories · {advisories} note{}",
+                if advisories == 1 { "" } else { "s" }
+            ),
+            ("preview available", Tone::Warn),
+        )
+    };
     let mut focus = None;
-    card(
-        ui,
-        &title,
-        Some(("invalid input retained", Tone::Error)),
-        |ui| {
-            card_body(ui, |ui| {
-                for error in &validation.errors {
-                    let response = ui
-                        .add(
-                            egui::Label::new(
-                                egui::RichText::new(format!("{} · {}", error.id, error.message))
-                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                    .color(t.color.err),
-                            )
-                            .wrap()
-                            .sense(Sense::click()),
+    card(ui, &title, Some(status), |ui| {
+        card_body(ui, |ui| {
+            for error in &validation.errors {
+                let response = ui
+                    .add(
+                        egui::Label::new(
+                            egui::RichText::new(format!("{} · {}", error.id, error.message))
+                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                .color(t.color.err),
                         )
-                        .on_hover_text(error.dimension_id.as_deref().map_or(
-                            "Composition or budget refusal",
-                            |_| "Select the dimension this refusal is about",
-                        ));
-                    if response.clicked() {
-                        focus = error.dimension_id.clone();
-                    }
+                        .wrap()
+                        .sense(Sense::click()),
+                    )
+                    .on_hover_text(error.dimension_id.as_deref().map_or(
+                        "Composition or budget refusal",
+                        |_| "Select the dimension this refusal is about",
+                    ));
+                if response.clicked() {
+                    focus = error.dimension_id.clone();
                 }
-            });
-            card_note(
-                ui,
+            }
+            for warning in &validation.warnings {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(format!("{} · {}", warning.id, warning.message))
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.warn),
+                    )
+                    .wrap(),
+                );
+            }
+        });
+        card_note(
+            ui,
+            if errors > 0 {
                 "Invalid input is preserved exactly as written. No task matrix, no dispatch and no \
-                 result were created, and every prior dataset is retained unchanged.",
-            );
-        },
-    );
+                 result were created, and every prior dataset is retained unchanged."
+            } else {
+                "An advisory does not block a preview or a dispatch. It states a consequence of the \
+                 declaration that the axis strip cannot show, and nothing it names has been \
+                 discarded."
+            },
+        );
+    });
     if let Some(id) = focus {
         app.state.workbench.selected_run_set_dimension = Some(id);
         app.state.workbench.run_set_values_draft = None;
@@ -769,7 +798,9 @@ fn policy_label(policy: InvalidValuePolicy) -> &'static str {
 // ------------------------------------------------------------- composition
 
 fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
-    let mode = app.state.sim_setup.corner.run_set.composition.mode;
+    let current_composition = app.state.sim_setup.corner.run_set.composition.clone();
+    let mode = current_composition.mode;
+    let excluded = current_composition.excluded_points.len();
     let variation = app
         .state
         .sim_setup
@@ -801,10 +832,12 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
                     }),
                     None,
                 );
-                if let Some(index) = picked {
-                    action = Some(RunSetAction::SetComposition(RunSetComposition {
-                        mode: RunSetCompositionMode::ALL[index.min(1)],
-                    }));
+                if let Some(index) = picked
+                    && let Some(mode) = RunSetCompositionMode::ALL.get(index).copied()
+                {
+                    action = Some(RunSetAction::SetComposition(
+                        current_composition.with_mode(mode),
+                    ));
                 }
                 rule_row(ui, "Contract", mode.contract());
                 rule_row(
@@ -818,15 +851,31 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
                 );
                 rule_row(
                     ui,
+                    "Excluded points",
+                    &match (mode, excluded) {
+                        (_, 0) => "none · the composition runs whole".to_owned(),
+                        (RunSetCompositionMode::Filtered, count) => {
+                            format!("{count} removed in the point table below")
+                        }
+                        (_, count) => format!(
+                            "{count} held but not applied · only a filtered composition subtracts \
+                             them"
+                        ),
+                    },
+                );
+                rule_row(
+                    ui,
                     "Point identity",
                     "every coordinate is carried into the run manifest",
                 );
             });
             card_note(
                 ui,
-                "Predicate-filtered, conditional, adaptive and nested compositions are not offered: \
-             the executor expands a declared matrix, and a mode it could not expand would be a \
-             choice that changed nothing about what runs.",
+                "Conditional, adaptive and nested compositions are not offered: the executor \
+                 expands a declared matrix, and a mode it could not expand would be a choice that \
+                 changed nothing about what runs. A filtered composition is still that matrix — it \
+                 removes points the design cannot reach by naming each one, not by evaluating a \
+                 predicate.",
             );
         },
     );
@@ -1016,9 +1065,9 @@ fn receipts(ui: &mut Ui, app: &mut RSpiceApp) {
 
 // ---------------------------------------------------------- resolved points
 
-fn point_table(ui: &mut Ui, app: &RSpiceApp, validation: &RunSetValidation) {
+fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
     let state: &RunSetState = &app.state.sim_setup.corner.run_set;
-    let Some(points) = run_set::resolve(state) else {
+    let Some(points) = run_set::compose(state) else {
         card(
             ui,
             "Resolved point table",
@@ -1039,34 +1088,73 @@ fn point_table(ui: &mut Ui, app: &RSpiceApp, validation: &RunSetValidation) {
         .enabled_dimensions()
         .filter(|dimension| !dimension.values.is_empty())
         .collect();
-    let total = points.len();
-    let shown = total.min(POINT_TABLE_LIMIT);
-    let status = format!(
-        "{total} point{} · {} task{}",
-        if total == 1 { "" } else { "s" },
-        validation.forecast.task_count,
-        if validation.forecast.task_count == 1 {
-            ""
-        } else {
-            "s"
-        }
-    );
+    // Excluding a point is what a zipped composition has no form for: a
+    // pairing minus a pair is a different pairing, not the same one shorter.
+    let excludable = state.composition.mode != RunSetCompositionMode::Zipped;
+    let excluded = &state.composition.excluded_points;
 
-    let mut fractions = Vec::with_capacity(axes.len() + 2);
+    // A row past the cap is still drawn when it is excluded. The cap exists so
+    // a large space does not become a scrolling wall, but an exclusion the user
+    // cannot see is one they cannot undo, and hiding it would be the silent
+    // drop this whole feature refuses.
+    let rows: Vec<(usize, &run_set::RunSetPoint<'_>, String, bool)> = points
+        .iter()
+        .enumerate()
+        .map(|(index, point)| {
+            let key = point.point_key();
+            let is_excluded = excludable && excluded.contains(&key);
+            (index, point, key, is_excluded)
+        })
+        .filter(|(index, _, _, is_excluded)| *index < POINT_TABLE_LIMIT || *is_excluded)
+        .collect();
+
+    let composed = points.len();
+    let running = validation.forecast.point_count;
+    let status = if composed == running {
+        format!(
+            "{composed} point{} · {} task{}",
+            if composed == 1 { "" } else { "s" },
+            validation.forecast.task_count,
+            if validation.forecast.task_count == 1 {
+                ""
+            } else {
+                "s"
+            }
+        )
+    } else {
+        format!(
+            "{running} of {composed} points · {} task{}",
+            validation.forecast.task_count,
+            if validation.forecast.task_count == 1 {
+                ""
+            } else {
+                "s"
+            }
+        )
+    };
+
+    let mut fractions = Vec::with_capacity(axes.len() + 3);
     fractions.push(0.09);
-    let axis_share = 0.75 / axes.len().max(1) as f32;
+    if excludable {
+        fractions.push(0.07);
+    }
+    let axis_share = (if excludable { 0.68 } else { 0.75 }) / axes.len().max(1) as f32;
     for _ in &axes {
         fractions.push(axis_share);
     }
     fractions.push(0.16);
     let mut headers: Vec<String> = Vec::with_capacity(fractions.len());
     headers.push("Point".to_owned());
+    if excludable {
+        headers.push("Run".to_owned());
+    }
     for axis in &axes {
         headers.push(axis.name.clone());
     }
     headers.push("Tasks".to_owned());
     let header_refs: Vec<&str> = headers.iter().map(String::as_str).collect();
     let tasks = validation.forecast.enabled_analysis_count.to_string();
+    let mut action: Option<RunSetAction> = None;
 
     card(
         ui,
@@ -1081,42 +1169,160 @@ fn point_table(ui: &mut Ui, app: &RSpiceApp, validation: &RunSetValidation) {
         )),
         |ui| {
             ledger_head(ui, &fractions, &header_refs);
-            for (index, point) in points.iter().take(shown).enumerate() {
-                let mut cells: Vec<String> = Vec::with_capacity(headers.len());
-                cells.push(format!("{:03}", index + 1));
-                for axis in &axes {
-                    let value = point
-                        .coordinates
-                        .iter()
-                        .find(|(dimension, _)| dimension.id == axis.id)
-                        .map(|(_, value)| value.lexical.clone())
-                        .unwrap_or_else(|| "—".to_owned());
-                    cells.push(value);
-                }
-                cells.push(tasks.clone());
-                let row: Vec<(&str, Tone)> = cells
-                    .iter()
-                    .map(|cell| (cell.as_str(), Tone::Neutral))
-                    .collect();
-                ledger_row(ui, &fractions, &row, false).on_hover_text(point.label());
+            for (index, point, key, is_excluded) in &rows {
+                point_row(
+                    ui,
+                    PointRow {
+                        index: *index,
+                        point,
+                        key,
+                        excluded: *is_excluded,
+                        excludable,
+                        axes: &axes,
+                        fractions: &fractions,
+                        tasks: &tasks,
+                    },
+                    &mut action,
+                );
             }
-            card_note(
-                ui,
-                &if total > shown {
-                    format!(
-                        "The first {shown} of {total} points are listed. Every point is still \
-                         executed and recorded in the run manifest; this table exists to check \
-                         the composition, not to enumerate the run."
-                    )
-                } else {
-                    "Each row is one execution point of the declared matrix, and every enabled \
-                     analysis contributes one task per point. The run manifest carries these \
-                     exact identities."
-                        .to_owned()
-                },
-            );
+            card_note(ui, &point_table_note(composed, rows.len(), excludable));
         },
     );
+
+    if let Some(action) = action {
+        commit(app, action);
+    }
+}
+
+/// Everything one point row draws from.
+struct PointRow<'a> {
+    index: usize,
+    point: &'a run_set::RunSetPoint<'a>,
+    key: &'a str,
+    excluded: bool,
+    excludable: bool,
+    axes: &'a [&'a RunSetDimension],
+    fractions: &'a [f32],
+    tasks: &'a str,
+}
+
+/// One composed point, and the control that keeps or removes it.
+fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) {
+    let mut cells: Vec<String> = Vec::with_capacity(row.fractions.len());
+    cells.push(format!("{:03}", row.index + 1));
+    if row.excludable {
+        cells.push(String::new());
+    }
+    for axis in row.axes {
+        cells.push(
+            row.point
+                .coordinates
+                .iter()
+                .find(|(dimension, _)| dimension.id == axis.id)
+                .map(|(_, value)| value.lexical.clone())
+                .unwrap_or_else(|| "—".to_owned()),
+        );
+    }
+    cells.push(if row.excluded {
+        "excluded".to_owned()
+    } else {
+        row.tasks.to_owned()
+    });
+
+    // Only the trailing cell carries the exclusion's colour. The coordinates
+    // are still what the point is; recolouring them would read as an invalid
+    // value rather than a point that is not being run.
+    let last = cells.len() - 1;
+    let painted: Vec<(&str, Tone)> = cells
+        .iter()
+        .enumerate()
+        .map(|(index, cell)| {
+            (
+                cell.as_str(),
+                if index == last && row.excluded {
+                    Tone::Warn
+                } else {
+                    Tone::Neutral
+                },
+            )
+        })
+        .collect();
+
+    if !row.excludable {
+        ledger_row(ui, row.fractions, &painted, false).on_hover_text(row.point.label());
+        return;
+    }
+
+    // The checkbox owns the row's height, so the text is painted into the
+    // reserved cells rather than laid out beside it.
+    let (rect, columns) = super::page_kit::ledger_row_cells(ui, row.fractions);
+    let t = Tokens::get(ui.ctx());
+    for (column, (text, tone)) in columns.iter().zip(&painted) {
+        if text.is_empty() {
+            continue;
+        }
+        super::page_kit::paint_text(
+            ui,
+            column.shrink2(vec2(CARD_PAD_X * 0.8, 0.0)),
+            text,
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            if *tone == Tone::Neutral {
+                t.color.text_dim
+            } else {
+                tone.color(ui)
+            },
+        );
+    }
+    // The row's own hover is registered before the checkbox so the control
+    // keeps its tooltip: within a layer, the later widget wins the pointer.
+    ui.interact(rect, ui.id().with(row.key), Sense::hover())
+        .on_hover_text(row.point.label());
+    let Some(cell) = columns.get(1) else {
+        return;
+    };
+    let mut child = super::page_kit::cell_ui(ui, cell.shrink2(vec2(CARD_PAD_X * 0.8, 0.0)));
+    let mut included = !row.excluded;
+    if child
+        .add(egui::Checkbox::without_text(&mut included))
+        .on_hover_text(if row.excluded {
+            "Restore this point to the run"
+        } else {
+            "Exclude this point from the run"
+        })
+        .changed()
+    {
+        *action = Some(if included {
+            RunSetAction::IncludePoint {
+                key: row.key.to_owned(),
+            }
+        } else {
+            RunSetAction::ExcludePoint {
+                key: row.key.to_owned(),
+            }
+        });
+    }
+}
+
+/// What the table is and is not showing.
+fn point_table_note(composed: usize, drawn: usize, excludable: bool) -> String {
+    if composed > drawn {
+        return format!(
+            "The first {POINT_TABLE_LIMIT} of {composed} composed points are listed, together with \
+             every excluded point beyond them wherever it falls. Points that are not listed are \
+             executed and recorded in the run manifest; this table exists to check the \
+             composition, not to enumerate the run."
+        );
+    }
+    if excludable {
+        return "Each row is one point of the declared matrix, and every enabled analysis \
+                contributes one task per point it runs. Clearing a row removes that point by \
+                identity: the axes keep every value they declare, and the exclusion is recorded in \
+                the plan rather than applied by rewriting the space."
+            .to_owned();
+    }
+    "Each row is one execution point of the declared matrix, and every enabled analysis \
+     contributes one task per point. The run manifest carries these exact identities."
+        .to_owned()
 }
 
 // ------------------------------------------------------------------ commit

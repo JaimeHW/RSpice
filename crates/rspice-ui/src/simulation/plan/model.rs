@@ -17,6 +17,7 @@ use super::config::{
     AnalysisDependencyRepairContext, DependencyConfigurationIssue,
     dependency_candidate_context_issue, dependency_configuration_issue, prerequisite_draft_for,
 };
+use super::numeric_override::{AnalysisNumericOverride, NumericOverrideOption};
 use super::{AnalysisDraft, AnalysisKind};
 
 /// Explicit, typed dependency from an analysis to one prerequisite instance.
@@ -339,6 +340,11 @@ pub struct AnalysisInstance {
     lifecycle: AnalysisLifecycleState,
     created_revision: ObjectRevision,
     modified_revision: ObjectRevision,
+    /// Numerical departures from the plan's solver policy. Absent is the
+    /// normal case and is what every project written before this field existed
+    /// deserializes to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    numeric_override: Option<AnalysisNumericOverride>,
 }
 
 impl AnalysisInstance {
@@ -347,6 +353,7 @@ impl AnalysisInstance {
         draft: AnalysisDraft,
         enabled: bool,
         dependencies: Vec<AnalysisDependency>,
+        numeric_override: Option<AnalysisNumericOverride>,
         revision: ObjectRevision,
     ) -> Self {
         Self {
@@ -362,13 +369,16 @@ impl AnalysisInstance {
             },
             created_revision: revision,
             modified_revision: revision,
+            numeric_override,
         }
     }
 
     /// Build a supplied-ID instance for deterministic migration.
     ///
     /// Whole-plan graph constraints are checked by
-    /// [`SimulationPlan::from_ordered_instances`].
+    /// [`SimulationPlan::from_ordered_instances`]. No numeric override is
+    /// taken: the only caller migrates the retired singleton setup model,
+    /// which never had per-analysis numerics to carry forward.
     pub fn supplied(
         id: AnalysisInstanceId,
         kind: AnalysisKind,
@@ -400,6 +410,7 @@ impl AnalysisInstance {
             },
             created_revision,
             modified_revision,
+            numeric_override: None,
         })
     }
 
@@ -447,6 +458,12 @@ impl AnalysisInstance {
     #[must_use]
     pub const fn modified_revision(&self) -> ObjectRevision {
         self.modified_revision
+    }
+
+    /// This analysis's departures from the plan's solver policy, if any.
+    #[must_use]
+    pub fn numeric_override(&self) -> Option<&AnalysisNumericOverride> {
+        self.numeric_override.as_ref()
     }
 }
 
@@ -786,6 +803,12 @@ pub enum AnalysisPlanError {
         target: AnalysisInstanceId,
         dependents: Vec<AnalysisInstanceId>,
     },
+    NumericOverrideNotApplicable {
+        id: AnalysisInstanceId,
+        kind: AnalysisKind,
+        option: NumericOverrideOption,
+        reason: &'static str,
+    },
     InvalidConfigurationChangeDetail,
     ReceiptSequenceExhausted,
     Revision(RevisionError),
@@ -869,6 +892,17 @@ impl fmt::Display for AnalysisPlanError {
                 }
                 formatter.write_str(".")
             }
+            Self::NumericOverrideNotApplicable {
+                id,
+                kind,
+                option,
+                reason,
+            } => write!(
+                formatter,
+                "{} analysis {id} cannot carry {}: {reason}.",
+                kind.label(),
+                option.key()
+            ),
             Self::InvalidConfigurationChangeDetail => formatter.write_str(
                 "Plan configuration change detail must be a non-empty single line of at most 512 characters.",
             ),
@@ -920,6 +954,8 @@ pub struct FrozenAnalysisInstance {
     kind: AnalysisKind,
     draft: AnalysisDraft,
     dependencies: Vec<AnalysisDependency>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    numeric_override: Option<AnalysisNumericOverride>,
 }
 
 impl FrozenAnalysisInstance {
@@ -946,6 +982,11 @@ impl FrozenAnalysisInstance {
     #[must_use]
     pub fn dependencies(&self) -> &[AnalysisDependency] {
         &self.dependencies
+    }
+
+    #[must_use]
+    pub fn numeric_override(&self) -> Option<&AnalysisNumericOverride> {
+        self.numeric_override.as_ref()
     }
 }
 
@@ -1026,6 +1067,7 @@ impl SimulationPlan {
                 AnalysisDraft::for_kind(AnalysisKind::Transient),
                 true,
                 Vec::new(),
+                None,
                 revision,
             )],
             tombstones: Vec::new(),
@@ -1087,6 +1129,7 @@ impl SimulationPlan {
                     source.draft.clone(),
                     source.enabled,
                     dependencies,
+                    source.numeric_override.clone(),
                     revision,
                 ))
             })
@@ -1918,7 +1961,7 @@ impl SimulationPlan {
                 }
                 candidate.instances.insert(
                     position,
-                    AnalysisInstance::fresh(id, draft, enabled, Vec::new(), revision),
+                    AnalysisInstance::fresh(id, draft, enabled, Vec::new(), None, revision),
                 );
                 debug_assert_eq!(candidate.instances[position].kind, kind);
                 Ok(())
@@ -1983,6 +2026,75 @@ impl SimulationPlan {
         )
     }
 
+    /// Atomically replace one analysis's numerical departures from the plan.
+    ///
+    /// Passing `None` returns the analysis to the plan policy outright. An
+    /// override stating an option the analysis's kind cannot use is refused and
+    /// leaves the plan byte-for-byte unchanged: a bound that is stored but
+    /// never read is worse than one that was never offered, because the ledger
+    /// would then report a policy no solve resolves to.
+    pub fn set_numeric_override(
+        &mut self,
+        id: AnalysisInstanceId,
+        numeric_override: Option<AnalysisNumericOverride>,
+    ) -> Result<AnalysisLifecycleReceipt, AnalysisPlanError> {
+        let instance = self
+            .instance(id)
+            .ok_or(AnalysisPlanError::InstanceNotFound(id))?;
+        let kind = instance.kind();
+        let outcome = if instance.enabled() {
+            AnalysisLifecycleState::Draft
+        } else {
+            AnalysisLifecycleState::Disabled
+        };
+        // An empty record and no record resolve identically, so they are stored
+        // identically; otherwise "Remove" would leave a record behind that the
+        // ledger has to special-case.
+        let numeric_override = numeric_override.filter(|record| !record.is_empty());
+        let detail = match &numeric_override {
+            Some(record) => format!(
+                "{} analysis {id} now departs from the plan policy on {}.",
+                kind.label(),
+                record
+                    .entries()
+                    .iter()
+                    .map(|(option, _)| option.key())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            None => format!(
+                "{} analysis {id} resolves to the plan policy again.",
+                kind.label()
+            ),
+        };
+        let ((), receipt) = self.transact(
+            AnalysisLifecycleCommand::Edit,
+            id,
+            None,
+            outcome,
+            detail,
+            move |candidate, revision| {
+                let index = candidate.index_of(id)?;
+                candidate.ensure_editable(index)?;
+                if let Some(record) = numeric_override.as_ref()
+                    && let Some((option, reason)) = record.first_refusal_for(kind)
+                {
+                    return Err(AnalysisPlanError::NumericOverrideNotApplicable {
+                        id,
+                        kind,
+                        option,
+                        reason,
+                    });
+                }
+                let instance = &mut candidate.instances[index];
+                instance.numeric_override = numeric_override;
+                instance.modified_revision = revision;
+                Ok(())
+            },
+        )?;
+        Ok(receipt)
+    }
+
     /// Deep-clone an instance and insert the fresh identity directly after it.
     pub fn clone_instance(
         &mut self,
@@ -2028,6 +2140,10 @@ impl SimulationPlan {
                         source_instance.draft,
                         source_instance.enabled,
                         source_instance.dependencies,
+                        // A clone is an independent copy of the same analysis,
+                        // and its numerics are part of what makes it that
+                        // analysis rather than a fresh one of the same kind.
+                        source_instance.numeric_override,
                         revision,
                     ),
                 );
@@ -2228,6 +2344,7 @@ impl SimulationPlan {
                     kind: instance.kind,
                     draft: instance.draft.clone(),
                     dependencies,
+                    numeric_override: instance.numeric_override.clone(),
                 }
             })
             .collect();

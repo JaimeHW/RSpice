@@ -111,6 +111,34 @@ impl ProjectWorkspace {
         Ok(())
     }
 
+    /// Add a batch of design variables to one plan as a single transaction.
+    ///
+    /// The batch is the unit of acceptance. Every candidate is validated, and
+    /// every name is checked against both the plan's existing registry and the
+    /// rows that precede it in the batch, before any of them is adopted — a
+    /// spec sheet that names one variable twice, or names one the plan already
+    /// owns, is refused whole rather than leaving the registry holding
+    /// whichever rows happened to come first. The refusal names the offending
+    /// variable, because a batch import has no other way to say which row is
+    /// wrong.
+    pub fn add_design_variables(
+        &mut self,
+        plan_id: SimulationPlanId,
+        variables: Vec<DesignVariable>,
+    ) -> Result<(), SimulationConfigurationError> {
+        let mut candidate = self.clone();
+        for variable in variables {
+            // Accumulating into the candidate is what makes a name repeated
+            // inside the batch collide: by the time the second row is checked,
+            // the first is already in the registry it is checked against.
+            candidate.add_design_variable(plan_id, variable)?;
+        }
+        candidate.validate_simulation_configuration()?;
+
+        *self = candidate;
+        Ok(())
+    }
+
     /// Replace the expression of one plan-owned design variable as a single
     /// validated workspace transaction.
     ///

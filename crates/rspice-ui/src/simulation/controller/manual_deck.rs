@@ -266,6 +266,7 @@ fn build_temperature_plan(
         insert_index,
         skip_indices,
         item: QueuedAnalysis {
+            numeric_override: None,
             spec: AnalysisSpec::Parametric,
             config: None,
             spec_options: SpecExecutionOptions {
@@ -570,6 +571,7 @@ fn command_to_queue_item(
     let spec_options = SpecExecutionOptions::default();
     match command {
         AnalysisCommand::Op => Ok(QueuedAnalysis {
+            numeric_override: None,
             spec: AnalysisSpec::dc_op(),
             config: Some(AnalysisConfig::dc_op()),
             spec_options,
@@ -603,6 +605,7 @@ fn command_to_queue_item(
                 step2,
             };
             Ok(QueuedAnalysis {
+                numeric_override: None,
                 config: Some(AnalysisConfig::DcSweep(DcSweepConfig {
                     source: source.clone(),
                     start: *start,
@@ -631,6 +634,7 @@ fn command_to_queue_item(
                 sweep: frequency_sweep(*variation),
             };
             Ok(QueuedAnalysis {
+                numeric_override: None,
                 config: Some(AnalysisConfig::Ac(AcAnalysisConfig {
                     sweep_type: ac_sweep(*variation),
                     num_points: *points,
@@ -643,6 +647,7 @@ fn command_to_queue_item(
             })
         }
         AnalysisCommand::AcData { table_name } => Ok(QueuedAnalysis {
+            numeric_override: None,
             spec: AnalysisSpec::AcData {
                 table_name: table_name.clone(),
                 frequencies: ac_data_table_frequencies(netlist, table_name)?,
@@ -686,6 +691,7 @@ fn command_to_queue_item(
                 None
             };
             Ok(QueuedAnalysis {
+                numeric_override: None,
                 spec: AnalysisSpec::HarmonicBalance {
                     tones,
                     reltol: defaults.tolerance,
@@ -715,6 +721,7 @@ fn command_to_queue_item(
             let ports = collect_sparameter_ports(netlist)?;
             let z0 = ports.first().and_then(|port| port.z0).unwrap_or(50.0);
             Ok(QueuedAnalysis {
+                numeric_override: None,
                 spec: AnalysisSpec::SParameter {
                     start_freq: *start_freq,
                     stop_freq: *stop_freq,
@@ -735,12 +742,16 @@ fn command_to_queue_item(
             stop_freq,
             probe,
         } => Ok(QueuedAnalysis {
+            numeric_override: None,
             spec: AnalysisSpec::Stb {
                 probe_node: probe.clone(),
                 start_freq: *start_freq,
                 stop_freq: *stop_freq,
                 sweep: frequency_sweep(*variation),
                 points_per_decade: *points,
+                // The directive has no Nyquist token; a hand-written deck
+                // gets the contour, matching the editor's default.
+                compute_nyquist: true,
             },
             config: None,
             spec_options,
@@ -760,6 +771,7 @@ fn command_to_queue_item(
             stop_freq,
             f2_over_f1,
         } => Ok(QueuedAnalysis {
+            numeric_override: None,
             spec: AnalysisSpec::Disto {
                 start_freq: *start_freq,
                 stop_freq: *stop_freq,
@@ -787,6 +799,7 @@ fn command_to_queue_item(
                 uic: *uic,
             };
             Ok(QueuedAnalysis {
+                numeric_override: None,
                 config: Some(AnalysisConfig::Transient(TransientAnalysisConfig {
                     stop_time: *stop,
                     step_time: *step,
@@ -834,6 +847,7 @@ fn command_to_queue_item(
                 temperature,
             };
             Ok(QueuedAnalysis {
+                numeric_override: None,
                 config: Some(AnalysisConfig::Noise(NoiseAnalysisConfig {
                     output_node: output_node.clone(),
                     reference_node,
@@ -890,6 +904,7 @@ fn command_to_queue_item(
             };
             config.validate().map_err(|errors| errors.join("; "))?;
             Ok(QueuedAnalysis {
+                numeric_override: None,
                 spec: AnalysisSpec::Noise {
                     output_node: output_node.clone(),
                     reference_node,
@@ -928,6 +943,7 @@ fn command_to_queue_item(
                 analysis_type: analysis_name.clone(),
             };
             Ok(QueuedAnalysis {
+                numeric_override: None,
                 config: Some(AnalysisConfig::PoleZero(PoleZeroConfig {
                     input_node: input_pos.clone(),
                     input_ref: input_neg.clone(),
@@ -963,6 +979,7 @@ fn command_to_queue_item(
                 frequency,
             };
             Ok(QueuedAnalysis {
+                numeric_override: None,
                 config: Some(AnalysisConfig::Sensitivity(SensitivityConfig {
                     output_var,
                     ac_mode: ac_sweep.is_some(),
@@ -988,6 +1005,7 @@ fn command_to_queue_item(
             };
 
             Ok(QueuedAnalysis {
+                numeric_override: None,
                 config: None,
                 analysis_line: ".tf".to_string(),
                 spec: AnalysisSpec::Tf {
@@ -1018,12 +1036,14 @@ fn command_to_queue_item(
             fourier_queue_item(netlist, *fundamental, output, *num_harmonics)
         }
         AnalysisCommand::MonteCarlo(_) => Ok(QueuedAnalysis {
-            spec: AnalysisSpec::MonteCarlo,
+            numeric_override: None,
+            spec: AnalysisSpec::MonteCarlo { variation_source: Default::default() },
             config: None,
             spec_options,
             analysis_line: ".mc".to_string(),
         }),
         AnalysisCommand::Step(_) => Ok(QueuedAnalysis {
+            numeric_override: None,
             spec: AnalysisSpec::Parametric,
             config: None,
             spec_options,
@@ -1044,6 +1064,7 @@ fn fourier_queue_item(
     let (output_node, output_ref) = parse_fourier_output(output)?;
     validate_manual_fourier_current_capability(netlist, &output_node)?;
     Ok(QueuedAnalysis {
+        numeric_override: None,
         spec: AnalysisSpec::Fourier {
             fundamental_freq: fundamental,
             num_harmonics,
@@ -1521,7 +1542,7 @@ Rload out 0 {rload}\n\
         assert_eq!(queue.len(), 2);
         assert!(matches!(queue[0].spec, AnalysisSpec::Parametric));
         assert!(queue[0].config.is_none());
-        assert!(matches!(queue[1].spec, AnalysisSpec::MonteCarlo));
+        assert!(matches!(queue[1].spec, AnalysisSpec::MonteCarlo { .. }));
         assert!(queue[1].config.is_none());
     }
 

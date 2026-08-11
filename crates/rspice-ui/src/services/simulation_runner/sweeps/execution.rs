@@ -39,6 +39,34 @@ fn expand_corner_points_impl(
     if let Some(abort) = abort {
         ensure_not_aborted(abort)?;
     }
+    // An explicit list is the space. It reaches here from a run set that
+    // removed points from its cross product, and re-deriving the matrix from
+    // the axes would put every one of them back. This is the only expansion
+    // both the corner executor and operating-point PVT preparation call, so
+    // honouring the list here is what keeps them running the same points.
+    if !config.points.is_empty() {
+        let requested = config.points.len();
+        if requested > max_batch_runs {
+            return Err(ServiceRunError::resource_limit(
+                rspice_core::ResourceKind::BatchRuns,
+                requested,
+                max_batch_runs,
+            ));
+        }
+        let mut points = Vec::new();
+        points.try_reserve_exact(requested).map_err(|error| {
+            ServiceRunError::Failure(format!(
+                "Corner expansion allocation for {requested} explicit points failed: {error}"
+            ))
+        })?;
+        for (index, point) in config.points.iter().enumerate() {
+            if let Some(abort) = abort {
+                poll_periodically(abort, index)?;
+            }
+            points.push(*point);
+        }
+        return Ok(points);
+    }
     if config.process_corners.is_empty()
         || config.voltages.is_empty()
         || config.temperatures_c.is_empty()
@@ -178,7 +206,7 @@ pub(super) fn run_corner_sweep(
         let engine = Engine::new(sim_config);
 
         match run_base_mode_point(&engine, &corner_netlist, &config.base_mode, abort) {
-            Ok(result) => results.push((point.clone(), result)),
+            Ok(result) => results.push((*point, result)),
             Err(ServiceRunError::Aborted) => return Err(ServiceRunError::Aborted),
             Err(error @ ServiceRunError::ResourceLimit(_)) => return Err(error),
             Err(ServiceRunError::Failure(error)) => {
@@ -436,6 +464,65 @@ mod tests {
                     resource: rspice_core::ResourceKind::BatchRuns,
                     requested: 8,
                     limit: 7,
+                }
+            ))
+        ));
+    }
+
+    #[test]
+    fn an_explicit_point_list_is_expanded_verbatim_rather_than_recomposed() {
+        let points = vec![
+            CornerPoint {
+                process: CornerProcess::TT,
+                voltage: 0.9,
+                temperature_c: 125.0,
+            },
+            CornerPoint {
+                process: CornerProcess::TT,
+                voltage: 1.1,
+                temperature_c: -40.0,
+            },
+        ];
+        let config = CornerRunConfig {
+            process_corners: vec![CornerProcess::TT],
+            voltages: vec![0.9, 1.1],
+            temperatures_c: vec![-40.0, 125.0],
+            points: points.clone(),
+            ..Default::default()
+        };
+
+        let expanded = expand_corner_points(&config, 64).expect("an explicit list expands");
+
+        assert_eq!(
+            expanded, points,
+            "the axes would compose four points; the declaration asked for these two"
+        );
+    }
+
+    #[test]
+    fn an_explicit_point_list_is_still_held_to_the_batch_limit() {
+        let config = CornerRunConfig {
+            process_corners: vec![CornerProcess::TT],
+            points: vec![
+                CornerPoint {
+                    process: CornerProcess::TT,
+                    voltage: 1.0,
+                    temperature_c: 25.0,
+                };
+                3
+            ],
+            ..Default::default()
+        };
+
+        let result = expand_corner_points(&config, 2);
+
+        assert!(matches!(
+            result,
+            Err(ServiceRunError::ResourceLimit(
+                rspice_core::ResourceLimitError {
+                    resource: rspice_core::ResourceKind::BatchRuns,
+                    requested: 3,
+                    limit: 2,
                 }
             ))
         ));

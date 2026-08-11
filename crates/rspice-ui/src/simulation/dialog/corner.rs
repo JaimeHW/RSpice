@@ -80,6 +80,19 @@ pub enum CornerBaseAnalysis {
 // Corner Configuration
 // =============================================================================
 
+/// One explicitly declared point of a filtered space.
+///
+/// A filtered run set is not an axis product, so it cannot be carried as one.
+/// Every point states all three quantities: an axis the run set left undeclared
+/// has already been resolved against the plan's reference by the time a point
+/// reaches here.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CornerPointSpec {
+    pub process: ProcessCorner,
+    pub voltage: f64,
+    pub temperature_celsius: f64,
+}
+
 /// Corner analysis configuration
 #[derive(Debug, Clone)]
 pub struct CornerConfig {
@@ -95,6 +108,15 @@ pub struct CornerConfig {
     pub temperatures: Vec<f64>,
     /// Full matrix (all combinations) or diagonal sweep
     pub full_matrix: bool,
+    /// The exact points to run, when the space is not an axis composition.
+    ///
+    /// Empty means the axes above compose as `full_matrix` says. Non-empty
+    /// replaces that composition entirely: it is the list the run set resolved,
+    /// and re-deriving it from the axes would re-admit the points a filtered
+    /// space removed. The axes stay populated with the distinct values the
+    /// points use, because the process axis still selects which model sections
+    /// are materialized.
+    pub points: Vec<CornerPointSpec>,
     /// Base analysis type
     pub base_analysis: CornerBaseAnalysis,
 }
@@ -106,6 +128,7 @@ impl Default for CornerConfig {
             voltages: vec![1.0],
             temperatures: vec![25.0],
             full_matrix: true,
+            points: Vec::new(),
             base_analysis: CornerBaseAnalysis::Transient,
         }
     }
@@ -125,6 +148,9 @@ impl CornerConfig {
 
     /// Total number of corners
     pub fn num_corners(&self) -> usize {
+        if !self.points.is_empty() {
+            return self.points.len();
+        }
         if self.full_matrix {
             self.process_corners.len() * self.voltages.len() * self.temperatures.len()
         } else {
@@ -138,6 +164,21 @@ impl CornerConfig {
     /// Generate corner names
     pub fn corner_names(&self) -> Vec<String> {
         let mut names = Vec::new();
+
+        if !self.points.is_empty() {
+            return self
+                .points
+                .iter()
+                .map(|point| {
+                    format!(
+                        "{}_{:.2}V_{:.0}C",
+                        point.process.short_name(),
+                        point.voltage,
+                        point.temperature_celsius
+                    )
+                })
+                .collect();
+        }
 
         if self.full_matrix {
             for p in &self.process_corners {
@@ -195,6 +236,26 @@ impl CornerConfig {
         for t in &self.temperatures {
             if *t < -273.15 {
                 return Err("Temperature cannot be below absolute zero".to_string());
+            }
+        }
+
+        for point in &self.points {
+            if !point.voltage.is_finite() || point.voltage <= 0.0 {
+                return Err("Explicit corner points require positive voltages".to_string());
+            }
+            if !point.temperature_celsius.is_finite() || point.temperature_celsius < -273.15 {
+                return Err(
+                    "Explicit corner point temperature cannot be below absolute zero".to_string(),
+                );
+            }
+            // The process axis is what selects the model section a point is
+            // materialized against, so a point naming a process the axis omits
+            // would run against whichever section happened to be loaded.
+            if !self.process_corners.contains(&point.process) {
+                return Err(format!(
+                    "Explicit corner point uses process {} which the process axis does not declare",
+                    point.process.short_name()
+                ));
             }
         }
 

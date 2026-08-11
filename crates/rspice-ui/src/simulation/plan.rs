@@ -8,6 +8,7 @@
 mod config;
 mod kind;
 mod model;
+mod numeric_override;
 
 pub use config::{
     AnalysisDependencyRepairContext, AnalysisDraft, DistoDraft, FrequencySweepDraft,
@@ -19,3 +20,4 @@ pub use model::{
     AnalysisLifecycleState, AnalysisPlanError, AnalysisPlanIssue, FrozenAnalysisInstance,
     FrozenSimulationPlan, SimulationPlan, SimulationPlanConfigurationReceipt,
 };
+pub use numeric_override::{AnalysisNumericOverride, NumericOverrideOption};

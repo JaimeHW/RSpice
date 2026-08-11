@@ -223,7 +223,7 @@ pub fn validate(state: &RunSetState, enabled_analysis_count: usize) -> RunSetVal
         }
     }
 
-    let point_count = if lengths.is_empty() {
+    let composed_count = if lengths.is_empty() {
         1
     } else if state.composition.mode == RunSetCompositionMode::Zipped {
         lengths.iter().copied().max().unwrap_or(1)
@@ -233,6 +233,36 @@ pub fn validate(state: &RunSetState, enabled_analysis_count: usize) -> RunSetVal
             .try_fold(1usize, |total, length| total.checked_mul(*length))
             .unwrap_or(usize::MAX)
     };
+
+    let excluded = classify_exclusions(state);
+    if !excluded.unknown.is_empty() {
+        // A warning, not a refusal: widening or retyping an axis legitimately
+        // strands an exclusion, and blocking the whole space until a key that
+        // names nothing is hunted down would punish the edit rather than the
+        // mistake. The exclusion is kept and named, so restoring the values it
+        // was placed on restores it.
+        warnings.push(RunSetWarning {
+            id: "RUNSET-EXCLUSION-UNKNOWN",
+            message: format!(
+                "{} of the declared exclusions name a point this space no longer contains, so they \
+                 subtract nothing: {}. They are retained by identity and apply again if those \
+                 values return.",
+                excluded.unknown.len(),
+                excluded.unknown.join("; ")
+            ),
+        });
+    }
+
+    let point_count = composed_count.saturating_sub(excluded.applied);
+    if point_count == 0 {
+        errors.push(RunSetError::global(
+            "RUNSET-ALL-POINTS-EXCLUDED",
+            format!(
+                "Every one of the {composed_count} composed points is excluded, so the run set \
+                 resolves to nothing executable. Restore at least one point or widen an axis."
+            ),
+        ));
+    }
 
     let analyses = enabled_analysis_count.max(1);
     let task_count = point_count.checked_mul(analyses);
@@ -306,4 +336,34 @@ pub fn validate(state: &RunSetState, enabled_analysis_count: usize) -> RunSetVal
             storage_bytes,
         },
     }
+}
+
+/// How the declared exclusions stand against the current space.
+#[derive(Default)]
+struct ExclusionStanding {
+    /// Exclusions that name a point the space contains, and so shorten it.
+    applied: usize,
+    /// Exclusions that name no point of the current space.
+    unknown: Vec<String>,
+}
+
+/// Sort the exclusions into the ones that remove a point and the ones that no
+/// longer name one.
+///
+/// Only a filtered composition subtracts anything, so the other modes report an
+/// empty standing: their exclusions are stored, not applied, and reporting them
+/// as stranded would refuse a space that is composing exactly as declared.
+fn classify_exclusions(state: &RunSetState) -> ExclusionStanding {
+    if state.composition.mode != RunSetCompositionMode::Filtered {
+        return ExclusionStanding::default();
+    }
+    let mut standing = ExclusionStanding::default();
+    for key in &state.composition.excluded_points {
+        if super::points::contains_point_key(state, key) {
+            standing.applied += 1;
+        } else {
+            standing.unknown.push(key.clone());
+        }
+    }
+    standing
 }

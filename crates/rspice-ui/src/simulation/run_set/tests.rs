@@ -93,6 +93,7 @@ fn a_zipped_space_refuses_unequal_non_scalar_lengths_instead_of_cycling() {
         &mut state,
         RunSetAction::SetComposition(RunSetComposition {
             mode: RunSetCompositionMode::Zipped,
+            ..RunSetComposition::default()
         }),
         1,
     );
@@ -372,6 +373,305 @@ fn storage_budgets_round_trip_through_the_form_they_are_shown_in() {
     assert_eq!(parse_bytes("2 GB"), Ok(2_000_000_000));
     assert_eq!(parse_bytes("1_048_576"), Ok(1_048_576));
     assert!(parse_bytes("plenty").is_err());
+}
+
+/// The identity of the `index`-th point of the composed space.
+fn key_of(state: &RunSetState, index: usize) -> String {
+    compose(state)
+        .expect("the space composes")
+        .get(index)
+        .expect("the composed space reaches this point")
+        .point_key()
+}
+
+fn exclude(state: &mut RunSetState, key: &str) {
+    let transaction = dispatch(
+        state,
+        RunSetAction::ExcludePoint {
+            key: key.to_owned(),
+        },
+        1,
+    );
+    assert!(transaction.was_adopted(), "{:?}", transaction.receipt);
+}
+
+#[test]
+fn excluding_one_point_shortens_the_space_by_exactly_that_point() {
+    let mut state = RunSetState::default();
+    let key = key_of(&state, 13);
+    let label = compose(&state).expect("composes")[13].label();
+
+    exclude(&mut state, &key);
+
+    assert_eq!(
+        state.composition.mode,
+        RunSetCompositionMode::Filtered,
+        "excluding a point is what makes the composition a filtered one"
+    );
+    let validation = validate(&state, 1);
+    assert!(validation.is_ready(), "{:?}", validation.errors);
+    assert_eq!(validation.forecast.point_count, 26);
+    assert_eq!(validation.forecast.task_count, 26);
+
+    let points = resolve(&state).expect("a filtered space resolves");
+    assert_eq!(points.len(), 26);
+    assert!(
+        points.iter().all(|point| point.label() != label),
+        "the excluded point must not be in the executed list"
+    );
+    assert_eq!(
+        compose(&state).expect("composes").len(),
+        27,
+        "the axes are untouched: exclusion removes a point, not a value"
+    );
+
+    // Putting it back is the same transaction in reverse, and leaves no
+    // filtered composition that filters nothing.
+    let transaction = dispatch(&mut state, RunSetAction::IncludePoint { key }, 1);
+    assert!(transaction.was_adopted(), "{:?}", transaction.receipt);
+    assert_eq!(state.composition.mode, RunSetCompositionMode::Cartesian);
+    assert_eq!(validate(&state, 1).forecast.point_count, 27);
+}
+
+#[test]
+fn a_point_identity_survives_reordering_the_dimensions_that_built_it() {
+    let mut state = RunSetState::default();
+    let key = key_of(&state, 7);
+    exclude(&mut state, &key);
+
+    let id = state
+        .dimensions
+        .first()
+        .expect("the default run set declares axes")
+        .id
+        .clone();
+    let transaction = dispatch(
+        &mut state,
+        RunSetAction::MoveDimension { id, later: true },
+        1,
+    );
+    assert!(transaction.was_adopted(), "{:?}", transaction.receipt);
+
+    let validation = validate(&state, 1);
+    assert_eq!(
+        validation.forecast.point_count, 26,
+        "reordering axes reorders points; it does not release exclusions"
+    );
+    assert!(
+        validation
+            .warnings
+            .iter()
+            .all(|warning| warning.id != "RUNSET-EXCLUSION-UNKNOWN")
+    );
+}
+
+#[test]
+fn an_exclusion_the_space_outgrew_is_reported_by_identity_and_never_dropped() {
+    let mut state = RunSetState::default();
+    // Point 26 is the last of the cartesian expansion, so it uses the last
+    // value of every axis — including the temperature about to be removed.
+    let key = key_of(&state, 26);
+    exclude(&mut state, &key);
+    assert_eq!(validate(&state, 1).forecast.point_count, 26);
+
+    set_values(&mut state, RunSetDimensionKind::Temperature, "-40\n25");
+
+    let validation = validate(&state, 1);
+    let warning = validation
+        .warnings
+        .iter()
+        .find(|warning| warning.id == "RUNSET-EXCLUSION-UNKNOWN")
+        .expect("a stranded exclusion is reported");
+    assert!(warning.message.contains(&key), "{}", warning.message);
+    assert!(
+        validation.errors.is_empty(),
+        "a stranded exclusion must not block the space: {:?}",
+        validation.errors
+    );
+    assert_eq!(
+        validation.forecast.point_count, 18,
+        "an exclusion that names nothing subtracts nothing"
+    );
+    assert_eq!(resolve(&state).expect("still resolvable").len(), 18);
+    assert!(
+        state.composition.excluded_points.contains(&key),
+        "the exclusion is retained so restoring the value restores it"
+    );
+
+    // Restoring the value restores the exclusion, by the same identity.
+    set_values(&mut state, RunSetDimensionKind::Temperature, "-40\n25\n125");
+    assert_eq!(validate(&state, 1).forecast.point_count, 26);
+}
+
+#[test]
+fn a_run_set_with_every_point_excluded_is_refused() {
+    let mut state = RunSetState::default();
+    set_values(&mut state, RunSetDimensionKind::ProcessSection, "TT");
+    set_values(&mut state, RunSetDimensionKind::Supply, "1.0");
+    set_values(&mut state, RunSetDimensionKind::Temperature, "25");
+    let key = key_of(&state, 0);
+    exclude(&mut state, &key);
+
+    let validation = validate(&state, 1);
+    assert_eq!(validation.forecast.point_count, 0);
+    assert!(
+        validation
+            .errors
+            .iter()
+            .any(|error| error.id == "RUNSET-ALL-POINTS-EXCLUDED"),
+        "{:?}",
+        validation.errors
+    );
+    assert!(
+        state
+            .to_corner_config(CornerBaseAnalysis::Op, reference())
+            .is_err(),
+        "a space with nothing to run must never become an executable configuration"
+    );
+}
+
+#[test]
+fn excluding_from_a_zipped_composition_is_refused_rather_than_reinterpreted() {
+    let mut state = RunSetState::default();
+    let key = key_of(&state, 4);
+    let transaction = dispatch(
+        &mut state,
+        RunSetAction::SetComposition(RunSetComposition {
+            mode: RunSetCompositionMode::Zipped,
+            ..RunSetComposition::default()
+        }),
+        1,
+    );
+    assert!(transaction.was_adopted());
+
+    let transaction = dispatch(&mut state, RunSetAction::ExcludePoint { key }, 1);
+    assert!(!transaction.was_adopted());
+    assert_eq!(transaction.receipt.error_ids, ["RUNSET-EXCLUSION-MODE"]);
+    assert_eq!(state.composition.mode, RunSetCompositionMode::Zipped);
+    assert!(state.composition.excluded_points.is_empty());
+    assert_eq!(state.receipts.len(), 2, "a blocked command still records");
+}
+
+#[test]
+fn an_exclusion_naming_no_point_is_refused_at_the_transaction() {
+    let mut state = RunSetState::default();
+    let transaction = dispatch(
+        &mut state,
+        RunSetAction::ExcludePoint {
+            key: "dimension-process-value-009".to_owned(),
+        },
+        1,
+    );
+
+    assert!(!transaction.was_adopted());
+    assert_eq!(transaction.receipt.error_ids, ["RUNSET-EXCLUSION-UNKNOWN"]);
+    assert_eq!(state.composition.mode, RunSetCompositionMode::Cartesian);
+}
+
+#[test]
+fn undo_restores_an_excluded_point_and_the_composition_it_changed() {
+    let mut state = RunSetState::default();
+    let key = key_of(&state, 3);
+    exclude(&mut state, &key);
+    assert_eq!(validate(&state, 1).forecast.point_count, 26);
+
+    let transaction = dispatch(&mut state, RunSetAction::Undo, 1);
+    assert!(transaction.was_adopted(), "{:?}", transaction.receipt);
+    assert_eq!(state.composition.mode, RunSetCompositionMode::Cartesian);
+    assert_eq!(validate(&state, 1).forecast.point_count, 27);
+
+    let transaction = dispatch(&mut state, RunSetAction::Redo, 1);
+    assert!(transaction.was_adopted());
+    assert_eq!(state.composition.mode, RunSetCompositionMode::Filtered);
+    assert_eq!(validate(&state, 1).forecast.point_count, 26);
+}
+
+#[test]
+fn a_filtered_space_reaches_the_executor_as_the_points_it_resolved() {
+    let mut state = RunSetState::default();
+    set_values(&mut state, RunSetDimensionKind::ProcessSection, "TT\nSS");
+    set_values(&mut state, RunSetDimensionKind::Supply, "0.9\n1.1");
+    set_values(&mut state, RunSetDimensionKind::Temperature, "-40\n125");
+    let key = key_of(&state, 5);
+    exclude(&mut state, &key);
+
+    let config = state
+        .to_corner_config(CornerBaseAnalysis::Op, reference())
+        .expect("a filtered space is executable");
+    assert_eq!(config.points.len(), 7);
+    assert_eq!(config.num_corners(), 7);
+
+    // Same count, same coordinates, same order as the run set resolved.
+    let resolved = resolve(&state).expect("the filtered space resolves");
+    assert_eq!(config.points.len(), resolved.len());
+    for (point, spec) in resolved.iter().zip(&config.points) {
+        assert_eq!(
+            point.label(),
+            format!(
+                "{} · {} V · {} °C",
+                spec.process.short_name(),
+                spec.voltage,
+                spec.temperature_celsius
+            )
+        );
+    }
+
+    // The expansion the executor and operating-point preparation share must
+    // return exactly that list, not the matrix the axes would rebuild.
+    let expanded = crate::services::simulation_runner::expand_corner_pvt_points(
+        &crate::services::simulation_runner::CornerRunConfig {
+            process_corners: vec![
+                crate::services::simulation_runner::CornerProcess::TT,
+                crate::services::simulation_runner::CornerProcess::SS,
+            ],
+            voltages: config.voltages.clone(),
+            temperatures_c: config.temperatures.clone(),
+            full_matrix: true,
+            points: config
+                .points
+                .iter()
+                .map(|point| crate::services::simulation_runner::CornerPoint {
+                    process: match point.process {
+                        ProcessCorner::TT => crate::services::simulation_runner::CornerProcess::TT,
+                        _ => crate::services::simulation_runner::CornerProcess::SS,
+                    },
+                    voltage: point.voltage,
+                    temperature_c: point.temperature_celsius,
+                })
+                .collect(),
+            ..Default::default()
+        },
+    )
+    .expect("an explicit list expands");
+    assert_eq!(expanded.len(), 7);
+    for (index, (_, voltage, temperature)) in expanded.iter().enumerate() {
+        assert_eq!(*voltage, config.points[index].voltage);
+        assert_eq!(*temperature, config.points[index].temperature_celsius);
+    }
+}
+
+#[test]
+fn a_filtered_space_narrows_its_axes_to_the_values_its_points_still_use() {
+    let mut state = RunSetState::default();
+    set_values(&mut state, RunSetDimensionKind::ProcessSection, "TT\nSS");
+    set_values(&mut state, RunSetDimensionKind::Supply, "1.0");
+    set_values(&mut state, RunSetDimensionKind::Temperature, "25\n125");
+
+    // Remove both SS points, leaving a process axis value nothing reaches.
+    for index in [2, 3] {
+        let key = key_of(&state, index);
+        exclude(&mut state, &key);
+    }
+
+    let config = state
+        .to_corner_config(CornerBaseAnalysis::Op, reference())
+        .expect("a filtered space is executable");
+    assert_eq!(config.points.len(), 2);
+    assert_eq!(
+        config.process_corners,
+        vec![ProcessCorner::TT],
+        "a process no point uses must not demand a PDK section it never binds"
+    );
 }
 
 #[test]

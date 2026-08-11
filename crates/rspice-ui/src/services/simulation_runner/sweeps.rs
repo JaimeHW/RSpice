@@ -44,6 +44,6 @@ pub use parametric::{
     run_parametric_analysis_with_source_path_and_abort,
 };
 pub use types::{
-    CornerBaseMode, CornerFrequencySweep, CornerModelBinding, CornerProcess, CornerRunConfig,
-    TempRunConfig,
+    CornerBaseMode, CornerFrequencySweep, CornerModelBinding, CornerPoint, CornerProcess,
+    CornerRunConfig, TempRunConfig,
 };

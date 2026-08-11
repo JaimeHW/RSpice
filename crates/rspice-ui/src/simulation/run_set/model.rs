@@ -119,24 +119,34 @@ pub enum RunSetCompositionMode {
     /// implicit cycling is prohibited, because a run set that quietly repeated
     /// a value would report a point count the manifest could not justify.
     Zipped,
+    /// The cross product with named points removed. The removals are held as
+    /// point identities in [`RunSetComposition::excluded_points`], so a
+    /// combination the design cannot reach is dropped from the run without
+    /// distorting the axes that produced it.
+    Filtered,
 }
 
 impl RunSetCompositionMode {
-    pub const ALL: [Self; 2] = [Self::Cartesian, Self::Zipped];
+    pub const ALL: [Self; 3] = [Self::Cartesian, Self::Zipped, Self::Filtered];
 
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Cartesian => "cartesian",
             Self::Zipped => "zipped",
+            Self::Filtered => "filtered",
         }
     }
 
     /// Glyph drawn between adjacent axis cards.
+    ///
+    /// A filtered space is a cross product, so it carries the cross product's
+    /// glyph: the exclusions remove points from the result, they do not change
+    /// how the axes combine.
     #[must_use]
     pub fn operator(self) -> &'static str {
         match self {
-            Self::Cartesian => "×",
+            Self::Cartesian | Self::Filtered => "×",
             Self::Zipped => "⇅",
         }
     }
@@ -153,6 +163,11 @@ impl RunSetCompositionMode {
                 "Index-aligned pairing: non-scalar dimensions must share one length, and implicit \
                  cycling is prohibited."
             }
+            Self::Filtered => {
+                "Full cross product less an explicit set of excluded points, each named by the \
+                 identities of the values it is made of. An exclusion the space no longer contains \
+                 is reported, never silently discarded."
+            }
         }
     }
 
@@ -161,6 +176,7 @@ impl RunSetCompositionMode {
         match self {
             Self::Cartesian => "Cartesian · every combination",
             Self::Zipped => "Zipped · index-aligned",
+            Self::Filtered => "Filtered · Cartesian less excluded points",
         }
     }
 }
@@ -379,9 +395,40 @@ impl Default for RunSetBudgets {
 }
 
 /// The composition rule and its parameters.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct RunSetComposition {
     pub mode: RunSetCompositionMode,
+    /// Point identities removed from the cross product, read only by
+    /// [`RunSetCompositionMode::Filtered`].
+    ///
+    /// A set rather than a list: excluding a point twice is the same space, and
+    /// the ordered form makes the declaration byte-identical however the
+    /// exclusions were authored. Each entry is a `RunSetPoint::point_key`,
+    /// which is built from value identities rather than authored text so that
+    /// retyping a value keeps the exclusion attached to it.
+    #[serde(default)]
+    pub excluded_points: std::collections::BTreeSet<String>,
+}
+
+impl RunSetComposition {
+    /// The composition with a different rule and the same exclusions.
+    #[must_use]
+    pub fn with_mode(&self, mode: RunSetCompositionMode) -> Self {
+        Self {
+            mode,
+            excluded_points: self.excluded_points.clone(),
+        }
+    }
+
+    /// Whether exclusions are being applied, as opposed to merely stored.
+    ///
+    /// Exclusions survive a switch to another mode so that returning to
+    /// `Filtered` restores the space that was authored; only this predicate
+    /// decides whether they are subtracted from the run.
+    #[must_use]
+    pub fn filters(&self) -> bool {
+        self.mode == RunSetCompositionMode::Filtered && !self.excluded_points.is_empty()
+    }
 }
 
 /// The complete run-set working state.
@@ -515,7 +562,7 @@ impl RunSetState {
             revision: self.revision,
             sequence: self.sequence,
             dimensions: self.dimensions.clone(),
-            composition: self.composition,
+            composition: self.composition.clone(),
             budgets: self.budgets,
             preview: self.preview,
         }

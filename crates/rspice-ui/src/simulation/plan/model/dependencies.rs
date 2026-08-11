@@ -315,7 +315,7 @@ impl SimulationPlan {
                 candidate.ensure_editable(dependent_index)?;
                 candidate.instances.insert(
                     dependent_index,
-                    AnalysisInstance::fresh(id, draft, false, Vec::new(), revision),
+                    AnalysisInstance::fresh(id, draft, false, Vec::new(), None, revision),
                 );
                 let dependent_index = candidate.index_of(dependent)?;
                 let dependent_instance = &mut candidate.instances[dependent_index];
@@ -482,7 +482,7 @@ impl SimulationPlan {
                     })?;
                 self.instances.insert(
                     dependent_index,
-                    AnalysisInstance::fresh(target, draft, true, Vec::new(), revision),
+                    AnalysisInstance::fresh(target, draft, true, Vec::new(), None, revision),
                 );
                 repair.inserted.push(target);
                 target

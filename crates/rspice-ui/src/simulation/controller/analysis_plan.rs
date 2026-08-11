@@ -168,12 +168,19 @@ impl SimulationController {
                 _ => None,
             };
 
+            // The analysis's own numerics travel with the task rather than
+            // being resolved here: snapshot preparation owns the seam where a
+            // task's deck is written, and it is the only place that can splice
+            // them after per-point expansion has chosen that deck.
+            let numeric_override = instance.numeric_override().cloned();
+
             let task = if Self::executes_via_spec(&spec) {
                 QueuedAnalysis {
                     spec,
                     config: None,
                     spec_options,
                     analysis_line,
+                    numeric_override: numeric_override.clone(),
                 }
             } else {
                 match self.analysis_spec_to_config(&projected_state, &spec) {
@@ -191,6 +198,7 @@ impl SimulationController {
                                 config: Some(config),
                                 spec_options,
                                 analysis_line,
+                                numeric_override: numeric_override.clone(),
                             }
                         }
                     }
@@ -236,6 +244,11 @@ impl SimulationController {
                         config: None,
                         spec_options,
                         analysis_line,
+                        // The spectrum is the same authored PSS solve read at
+                        // a different index, so it resolves under the same
+                        // numerics; a second task under the plan policy would
+                        // report harmonics of a solve that never happened.
+                        numeric_override,
                     },
                 ));
             }
@@ -340,7 +353,7 @@ impl SimulationController {
                 | AnalysisSpec::Pxf
                 | AnalysisSpec::Pstb
                 | AnalysisSpec::Stb { .. }
-                | AnalysisSpec::MonteCarlo
+                | AnalysisSpec::MonteCarlo { .. }
                 | AnalysisSpec::Parametric
                 | AnalysisSpec::Corner
                 | AnalysisSpec::Pss { .. }

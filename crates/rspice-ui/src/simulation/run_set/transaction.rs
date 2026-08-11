@@ -7,7 +7,8 @@
 //! matrix is created.
 
 use super::model::{
-    InvalidValuePolicy, RunSetComposition, RunSetDimension, RunSetDimensionKind, RunSetState,
+    InvalidValuePolicy, RunSetComposition, RunSetCompositionMode, RunSetDimension,
+    RunSetDimensionKind, RunSetState,
 };
 use super::validate::{RunSetError, RunSetValidation};
 
@@ -35,6 +36,10 @@ pub enum RunSetAction {
     MoveDimension { id: String, later: bool },
     /// Replace the composition rule.
     SetComposition(RunSetComposition),
+    /// Remove one resolved point from the space, named by its point key.
+    ExcludePoint { key: String },
+    /// Restore one excluded point.
+    IncludePoint { key: String },
     /// Replace the execution budgets.
     SetBudgets(super::RunSetBudgets),
     /// Validate and freeze the forecast. Creates no numerical result.
@@ -59,6 +64,8 @@ impl RunSetAction {
             Self::RemoveDimension { .. } => "remove-dimension",
             Self::MoveDimension { .. } => "move-dimension",
             Self::SetComposition(_) => "set-composition",
+            Self::ExcludePoint { .. } => "exclude-point",
+            Self::IncludePoint { .. } => "include-point",
             Self::SetBudgets(_) => "set-budgets",
             Self::Preview => "preview",
             Self::Undo => "undo",
@@ -77,6 +84,7 @@ impl RunSetAction {
             | Self::SetEnabled { id, .. }
             | Self::RemoveDimension { id }
             | Self::MoveDimension { id, .. } => id.clone(),
+            Self::ExcludePoint { key } | Self::IncludePoint { key } => key.clone(),
             Self::SetComposition(composition) => composition.mode.as_str().to_owned(),
             Self::SetBudgets(_) => "budgets".to_owned(),
             Self::Preview => "run-set".to_owned(),
@@ -270,7 +278,41 @@ pub fn dispatch(
             }
             None => refusal = Some(dimension_missing(id)),
         },
-        RunSetAction::SetComposition(composition) => next.composition = *composition,
+        RunSetAction::SetComposition(composition) => next.composition = composition.clone(),
+        RunSetAction::ExcludePoint { key } => {
+            if next.composition.mode == RunSetCompositionMode::Zipped {
+                // Excluding from a zipped space would have to name a point of
+                // the cross product, which is a different space from the one
+                // being run. Switching modes silently would change what the
+                // remaining points are, not just how many there are.
+                refusal = Some(missing(
+                    "RUNSET-EXCLUSION-MODE",
+                    "Points are excluded from a cross product. Change the composition away from \
+                     zipped before excluding one.",
+                ));
+            } else if !super::points::contains_point_key(&next, key) {
+                refusal = Some(exclusion_unknown(
+                    key,
+                    "does not name a point of the declared space",
+                ));
+            } else if !next.composition.excluded_points.insert(key.clone()) {
+                refusal = Some(exclusion_unknown(key, "is already excluded"));
+            } else {
+                next.composition.mode = RunSetCompositionMode::Filtered;
+            }
+        }
+        RunSetAction::IncludePoint { key } => {
+            if next.composition.excluded_points.remove(key) {
+                // A filtered composition that excludes nothing is the cross
+                // product under another name, and two names for one space is
+                // exactly the disagreement this module refuses elsewhere.
+                if next.composition.excluded_points.is_empty() {
+                    next.composition.mode = RunSetCompositionMode::Cartesian;
+                }
+            } else {
+                refusal = Some(exclusion_unknown(key, "is not excluded"));
+            }
+        }
         RunSetAction::SetBudgets(budgets) => {
             if budgets.maximum_tasks == 0 {
                 refusal = Some(missing(
@@ -382,6 +424,15 @@ fn dimension_missing(id: &str) -> RunSetError {
         id: "RUNSET-DIMENSION-MISSING",
         dimension_id: Some(id.to_owned()),
         message: format!("Dimension {id} does not exist."),
+    }
+}
+
+/// A refusal about one exclusion, naming it by the identity it was given.
+fn exclusion_unknown(key: &str, reason: &str) -> RunSetError {
+    RunSetError {
+        id: "RUNSET-EXCLUSION-UNKNOWN",
+        dimension_id: None,
+        message: format!("Point {key} {reason}."),
     }
 }
 

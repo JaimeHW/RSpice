@@ -140,6 +140,15 @@ pub struct CornerRunConfig {
     /// backed by a real library section; RSpice never fabricates a foundry
     /// corner by scaling model parameters heuristically.
     pub model_bindings: Vec<CornerModelBinding>,
+    /// The exact points to run, when the declared space is not an axis
+    /// composition.
+    ///
+    /// Empty means the axes compose as `full_matrix` says. Non-empty is the
+    /// whole space: expansion returns this list unchanged, because a space that
+    /// had points removed cannot be recovered from the axes that produced it.
+    /// The axes still describe which values the points draw on, and the process
+    /// axis still decides which model sections are materialized.
+    pub points: Vec<CornerPoint>,
 }
 
 /// Frequency sweep type used by corner AC base analysis.
@@ -212,6 +221,7 @@ impl Default for CornerRunConfig {
             nominal_voltage: Some(1.0),
             base_mode: CornerBaseMode::default(),
             model_bindings: Vec::new(),
+            points: Vec::new(),
         }
     }
 }
@@ -242,7 +252,28 @@ impl CornerRunConfig {
                 "Corner analysis nominal voltage must be a positive finite value".to_string(),
             );
         }
-        if !self.full_matrix {
+        for point in &self.points {
+            if !point.voltage.is_finite() || point.voltage <= 0.0 {
+                return Err(
+                    "Explicit corner points must carry positive finite voltages".to_string()
+                );
+            }
+            if !point.temperature_c.is_finite() {
+                return Err("Explicit corner points must carry finite temperatures".to_string());
+            }
+            // Model sections are materialized per process from the process
+            // axis, so a point naming a process the axis omits would be solved
+            // against whichever section was already loaded.
+            if !self.process_corners.contains(&point.process) {
+                return Err(format!(
+                    "Explicit corner point uses process {} which the process axis does not declare",
+                    point.process.as_keyword()
+                ));
+            }
+        }
+        // An explicit list is already paired: it states each point in full, so
+        // there are no axes left to align and nothing that could be cycled.
+        if !self.full_matrix && self.points.is_empty() {
             // A diagonal sweep pairs the axes index by index. Axes of
             // different non-scalar lengths have no such pairing: continuing
             // would silently cycle the shorter one, producing a point set the
@@ -274,22 +305,44 @@ impl CornerRunConfig {
         for binding in &self.model_bindings {
             binding.validate()?;
         }
-        for process in &self.process_corners {
-            if *process != CornerProcess::TT
-                && !self
-                    .model_bindings
-                    .iter()
-                    .any(|binding| binding.process == *process && binding.section.is_some())
-            {
-                return Err(format!(
-                    "{} corner requires an explicit PDK model-library section",
-                    process.as_keyword()
-                ));
+        // Every process that is actually solved needs a real library section.
+        // With an explicit list that is the list's own processes: a value the
+        // axis declares but no point uses is never materialized, and demanding
+        // a PDK section for it would refuse a corner that does not run.
+        if self.points.is_empty() {
+            for process in &self.process_corners {
+                require_model_section(*process, &self.model_bindings)?;
+            }
+        } else {
+            for point in &self.points {
+                require_model_section(point.process, &self.model_bindings)?;
             }
         }
         validate_base_mode("Corner", &self.base_mode)?;
         Ok(())
     }
+}
+
+/// Refuse a non-typical process that no real library section backs.
+///
+/// RSpice never fabricates a foundry corner by scaling model parameters, so a
+/// process the deck cannot resolve through a section is a corner that cannot be
+/// run at all.
+fn require_model_section(
+    process: CornerProcess,
+    bindings: &[CornerModelBinding],
+) -> Result<(), String> {
+    if process == CornerProcess::TT
+        || bindings
+            .iter()
+            .any(|binding| binding.process == process && binding.section.is_some())
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "{} corner requires an explicit PDK model-library section",
+        process.as_keyword()
+    ))
 }
 
 fn validate_base_mode(context: &str, base_mode: &CornerBaseMode) -> Result<(), String> {
@@ -384,11 +437,16 @@ fn validate_base_mode(context: &str, base_mode: &CornerBaseMode) -> Result<(), S
     Ok(())
 }
 
-#[derive(Debug, Clone)]
-pub(super) struct CornerPoint {
-    pub(super) process: CornerProcess,
-    pub(super) voltage: Value,
-    pub(super) temperature_c: Value,
+/// One executable corner point.
+///
+/// Public because a filtered run space is delivered to the executor as its
+/// points rather than as axes; the type is a plain PVT triple and exposes no
+/// execution machinery.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CornerPoint {
+    pub process: CornerProcess,
+    pub voltage: Value,
+    pub temperature_c: Value,
 }
 
 impl CornerPoint {
@@ -457,6 +515,97 @@ mod tests {
             .expect_err("synthetic process scaling must not be accepted");
 
         assert!(error.contains("explicit PDK model-library section"));
+    }
+
+    #[test]
+    fn explicit_points_still_require_a_real_model_section_for_every_process_they_run() {
+        let config = CornerRunConfig {
+            process_corners: vec![CornerProcess::TT, CornerProcess::SS],
+            voltages: vec![1.0],
+            temperatures_c: vec![25.0],
+            points: vec![
+                CornerPoint {
+                    process: CornerProcess::TT,
+                    voltage: 1.0,
+                    temperature_c: 25.0,
+                },
+                CornerPoint {
+                    process: CornerProcess::SS,
+                    voltage: 1.0,
+                    temperature_c: 25.0,
+                },
+            ],
+            ..CornerRunConfig::default()
+        };
+
+        let error = config
+            .validate()
+            .expect_err("an explicit list is not a way around the PDK binding rule");
+
+        assert!(error.contains("SS corner requires an explicit PDK model-library section"));
+    }
+
+    #[test]
+    fn a_process_no_explicit_point_runs_needs_no_binding() {
+        let config = CornerRunConfig {
+            process_corners: vec![CornerProcess::TT, CornerProcess::SS],
+            voltages: vec![1.0],
+            temperatures_c: vec![25.0],
+            points: vec![CornerPoint {
+                process: CornerProcess::TT,
+                voltage: 1.0,
+                temperature_c: 25.0,
+            }],
+            ..CornerRunConfig::default()
+        };
+
+        config
+            .validate()
+            .expect("a declared-but-unreached corner binds nothing");
+    }
+
+    #[test]
+    fn an_explicit_point_naming_an_undeclared_process_is_refused() {
+        let config = CornerRunConfig {
+            process_corners: vec![CornerProcess::TT],
+            voltages: vec![1.0],
+            temperatures_c: vec![25.0],
+            points: vec![CornerPoint {
+                process: CornerProcess::FF,
+                voltage: 1.0,
+                temperature_c: 25.0,
+            }],
+            ..CornerRunConfig::default()
+        };
+
+        let error = config.validate().expect_err(
+            "a point outside the process axis would be solved against the wrong models",
+        );
+
+        assert!(
+            error.contains("the process axis does not declare"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn an_explicit_list_is_exempt_from_the_diagonal_pairing_rule() {
+        let config = CornerRunConfig {
+            process_corners: vec![CornerProcess::TT],
+            voltages: vec![0.9, 1.0, 1.1],
+            temperatures_c: vec![-40.0, 125.0],
+            full_matrix: false,
+            points: vec![CornerPoint {
+                process: CornerProcess::TT,
+                voltage: 0.9,
+                temperature_c: 125.0,
+            }],
+            ..CornerRunConfig::default()
+        };
+
+        config
+            .validate()
+            .expect("an explicit list states each point in full, so there is nothing to pair");
     }
 
     #[test]

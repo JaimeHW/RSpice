@@ -13,6 +13,7 @@ mod page_solver;
 mod page_specs;
 mod page_variables;
 mod pages;
+mod variable_import;
 mod workflows;
 
 use catalog::*;
@@ -228,6 +229,9 @@ enum StackAction {
 }
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    // A removal confirmed in the destructive review is applied here, by the
+    // surface that owns the plan, rather than by the modal that asked.
+    apply_confirmed_analysis_removal(app);
     if let Err(error) = resolve_active_analysis_instance(app) {
         record_failure(app, "Analysis selection", &error);
     }
