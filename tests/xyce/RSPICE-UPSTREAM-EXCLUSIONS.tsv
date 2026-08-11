@@ -1,7 +1,7 @@
 # RSpice Xyce upstream-exclusion provenance and qualification manifest
 # Reproduce with tools/xyce/sync_upstream_exclusions.py.
-# qualification_commit=88e20942a3c45c701d1dbca1666039f0085ac3e1
-# qualification_report_sha256=734d765270044efb1e1f4358eddd911fd3fb9bf817690d999e7e16f9b0d6c223
+# qualification_commit=839191033c5770fd718f98b94707fb9a4519d23b
+# qualification_report_sha256=afcca558a24b78a2dab7c76d56e5768d68f0cee84b4a8613efa39dbdf2504034
 # Fields: deck, trimmed upstream exclude file, disposition, optional exact contract.
 schema_version	1
 source_commit	80115a9277c0ddb3409acceb3d4e745fd11cddd4
