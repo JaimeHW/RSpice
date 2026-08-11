@@ -373,8 +373,9 @@ fn the_resolved_policy_ledger_only_claims_analyses_the_plan_holds() {
 }
 
 /// The page is titled "…& per-analysis overrides", so an analysis that stops
-/// resolving to the plan policy has to be visible on it. The value itself is
-/// owned by the analysis form; this page reports the divergence.
+/// resolving to the plan policy has to be visible on it. A step ceiling is
+/// stored by the transient's own form and only reported here, which is why the
+/// row still has to appear when the form is what wrote it.
 #[test]
 fn an_analysis_that_leaves_the_plan_policy_is_named_in_the_ledger() {
     use crate::simulation::plan::AnalysisDraft;
@@ -1117,4 +1118,139 @@ fn ledger_columns_tile_their_row_without_a_gap_or_an_overhang() {
                 .all(|pair| pair[0].right() == pair[1].left())
         );
     }
+}
+
+/// The ledger's job is to say what a run resolves to, so an analysis that
+/// carries its own bound has to be reported at that bound and not at the plan's.
+/// Both values are shown side by side: the divergence is the fact, and one
+/// number alone cannot state it.
+#[test]
+fn the_ledger_reports_the_effective_value_of_an_authored_override() {
+    use crate::simulation::plan::{
+        AnalysisDraft, AnalysisKind, AnalysisNumericOverride, NumericOverrideOption,
+    };
+
+    let rendered = render_with(SimulationPage::Solver, 1400.0, |app| {
+        app.state.sim_setup.options.itl4 = 6;
+        let Ok(plan) = app.state.sim_setup.stable_analysis_plan_mut() else {
+            return;
+        };
+        let Some(id) = plan
+            .instances()
+            .iter()
+            .find(|instance| matches!(instance.draft(), AnalysisDraft::Transient(_)))
+            .map(|instance| instance.id())
+        else {
+            return;
+        };
+        let mut record = AnalysisNumericOverride::default();
+        record
+            .set(AnalysisKind::Transient, NumericOverrideOption::Itl4, "137")
+            .expect("a transient takes timesteps");
+        plan.set_numeric_override(id, Some(record))
+            .expect("the plan accepts a bound the transient can use");
+    });
+
+    assert!(
+        rendered.contains("EFFECTIVE VALUE") && rendered.contains("PRESET VALUE"),
+        "the ledger must separate what the plan states from what the run resolves to:\n{rendered}"
+    );
+    assert_eq!(
+        rendered.matches("Iterations per step").count(),
+        2,
+        "the plan row and the analysis's own row must both appear:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("137"),
+        "the ledger reported the preset instead of the value the run will use:\n{rendered}"
+    );
+    assert_eq!(
+        rendered.matches("analysis override").count(),
+        2,
+        "exactly one row may be attributed to the analysis:\n{rendered}"
+    );
+}
+
+/// An override the analysis's solve would never read must be refused, not
+/// stored. A stored-and-ignored bound is indistinguishable from one that works,
+/// and the ledger would then report a policy no run resolves to.
+///
+/// The record is built against a transient and then offered to an AC sweep,
+/// because that is the shape a restored project or a retyped analysis takes:
+/// the authoring gate is not the only place the pairing has to hold.
+#[test]
+fn an_override_the_analysis_cannot_use_is_refused_and_leaves_the_plan_unchanged() {
+    use crate::simulation::plan::{AnalysisKind, AnalysisNumericOverride, NumericOverrideOption};
+
+    let mut app = RSpiceApp::test_instance();
+    let plan = app
+        .state
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .expect("the test instance has a stable plan");
+    let (ac, _) = plan.insert(AnalysisKind::Ac).expect("an AC sweep inserts");
+
+    let mut record = AnalysisNumericOverride::default();
+    record
+        .set(AnalysisKind::Transient, NumericOverrideOption::Itl4, "12")
+        .expect("a transient takes timesteps");
+
+    let before = serde_json::to_vec(&plan).expect("the plan serializes");
+    let error = plan
+        .set_numeric_override(ac, Some(record))
+        .expect_err("an AC sweep never takes a timestep");
+    let after = serde_json::to_vec(&plan).expect("the plan serializes");
+
+    assert_eq!(
+        before, after,
+        "a refused override must leave the plan byte-for-byte unchanged"
+    );
+    assert!(
+        error.to_string().contains("ITL4"),
+        "the refusal must name the option it refused: {error}"
+    );
+}
+
+/// Projects written before per-analysis numerics existed have to keep opening.
+/// `AnalysisInstance` denies unknown fields, so the new one has to default when
+/// absent — and stay absent on the way out, so re-saving an untouched plan does
+/// not rewrite every instance.
+#[test]
+fn a_plan_written_before_per_analysis_numerics_still_loads() {
+    use crate::simulation::plan::{
+        AnalysisDraft, AnalysisKind, AnalysisNumericOverride, NumericOverrideOption, SimulationPlan,
+    };
+
+    let mut plan = SimulationPlan::new();
+    let serialized = serde_json::to_string(&plan).expect("the plan serializes");
+    assert!(
+        !serialized.contains("numeric_override"),
+        "an inheriting plan must serialize exactly as it did before the field existed"
+    );
+    let restored: SimulationPlan =
+        serde_json::from_str(&serialized).expect("a plan without the field still loads");
+    assert!(restored.instances()[0].numeric_override().is_none());
+
+    let id = plan
+        .instances()
+        .iter()
+        .find(|instance| matches!(instance.draft(), AnalysisDraft::Transient(_)))
+        .map(|instance| instance.id())
+        .expect("a fresh plan holds one transient");
+    let mut record = AnalysisNumericOverride::default();
+    record
+        .set(AnalysisKind::Transient, NumericOverrideOption::Trtol, "3")
+        .expect("a transient has a truncation bound");
+    plan.set_numeric_override(id, Some(record))
+        .expect("the plan accepts it");
+    let round_tripped: SimulationPlan =
+        serde_json::from_str(&serde_json::to_string(&plan).expect("serializes"))
+            .expect("an authored plan round trips");
+    assert_eq!(
+        round_tripped
+            .instance(id)
+            .and_then(|instance| instance.numeric_override())
+            .and_then(|record| record.trtol()),
+        Some(3.0)
+    );
 }

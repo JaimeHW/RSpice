@@ -292,6 +292,104 @@ fn bulk_design_variable_update_rejects_duplicate_identities_atomically() {
 }
 
 #[test]
+fn bulk_design_variable_add_commits_the_whole_batch() {
+    let plan_id = SimulationPlanId::new();
+    let mut workspace = ProjectWorkspace::default();
+    let batch = vec![
+        resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project),
+        resistance_variable("RBIAS", "15 kohm", DesignVariableScope::Project),
+    ];
+
+    workspace
+        .add_design_variables(plan_id, batch)
+        .expect("a valid batch commits");
+
+    let names = workspace
+        .active_plan_data(plan_id)
+        .expect("plan payload exists")
+        .design_variables
+        .iter()
+        .map(|variable| variable.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["RLOAD", "RBIAS"]);
+}
+
+#[test]
+fn bulk_design_variable_add_rejects_an_invalid_member_atomically() {
+    let plan_id = SimulationPlanId::new();
+    let mut workspace = ProjectWorkspace::default();
+    let mut outside = resistance_variable("RBIAS", "15 kohm", DesignVariableScope::Project);
+    outside.expression = "2 Mohm".to_owned();
+    let batch = vec![
+        resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project),
+        outside,
+    ];
+    let before = serde_json::to_value(&workspace).expect("workspace serializes");
+
+    assert!(matches!(
+        workspace.add_design_variables(plan_id, batch),
+        Err(SimulationConfigurationError::InvalidDesignVariable { message, .. })
+            if message.contains("outside the inclusive allowed range")
+    ));
+    assert_eq!(
+        serde_json::to_value(&workspace).expect("workspace still serializes"),
+        before
+    );
+}
+
+#[test]
+fn bulk_design_variable_add_rejects_a_name_repeated_within_the_batch() {
+    let plan_id = SimulationPlanId::new();
+    let mut workspace = ProjectWorkspace::default();
+    let batch = vec![
+        resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project),
+        resistance_variable("rload", "22 kohm", DesignVariableScope::Project),
+    ];
+    let before = serde_json::to_value(&workspace).expect("workspace serializes");
+
+    assert_eq!(
+        workspace.add_design_variables(plan_id, batch),
+        Err(SimulationConfigurationError::DesignVariableNameConflict {
+            plan_id,
+            name: "rload".to_owned(),
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(&workspace).expect("workspace still serializes"),
+        before
+    );
+}
+
+#[test]
+fn bulk_design_variable_add_rejects_a_name_the_plan_already_owns() {
+    let plan_id = SimulationPlanId::new();
+    let mut workspace = ProjectWorkspace::default();
+    workspace
+        .add_design_variable(
+            plan_id,
+            resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project),
+        )
+        .expect("fixture variable is accepted");
+    let before = serde_json::to_value(&workspace).expect("workspace serializes");
+    let batch = vec![
+        resistance_variable("RTERM", "50 kohm", DesignVariableScope::Project),
+        resistance_variable("RLOAD", "22 kohm", DesignVariableScope::Project),
+    ];
+
+    assert_eq!(
+        workspace.add_design_variables(plan_id, batch),
+        Err(SimulationConfigurationError::DesignVariableNameConflict {
+            plan_id,
+            name: "RLOAD".to_owned(),
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(&workspace).expect("workspace still serializes"),
+        before
+    );
+}
+
+#[test]
 fn saved_output_validation_is_kind_specific() {
     assert!(
         raw_output(
