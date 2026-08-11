@@ -2655,3 +2655,51 @@ fn repeated_violation_navigation_keeps_advancing_after_jump_to_design() {
         assert!(app.state.schematic.center_request.is_some());
     }
 }
+
+/// Every one of these opens a window drawn only by the netlist page. Offered
+/// from a sibling page they set a dialog open with nothing on screen, and it
+/// then appeared unprompted when the user navigated back.
+#[test]
+fn netlist_document_commands_are_not_offered_from_the_sibling_code_pages() {
+    use crate::workbench::documents::code_workspace::CodeWorkspacePage;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.workspace = Workspace::Netlist;
+    app.state.ui.code_workspace.page = CodeWorkspacePage::Netlist;
+    app.state.simulation.netlist_content = "deck\n.end\n".to_owned();
+
+    assert!(Command::FindCodeDocument.is_enabled(&app));
+    assert!(Command::ValidateCodeDocument.is_enabled(&app));
+
+    for page in [CodeWorkspacePage::VerilogA, CodeWorkspacePage::Automation] {
+        app.state.ui.code_workspace.page = page;
+        assert!(
+            !Command::FindCodeDocument.is_enabled(&app),
+            "{page:?} does not draw the netlist find window"
+        );
+        assert!(
+            !Command::ValidateCodeDocument.is_enabled(&app),
+            "{page:?} does not own the netlist deck"
+        );
+        assert!(
+            !Command::CompareGeneratedRevisions.is_enabled(&app),
+            "{page:?} does not draw the revision comparison"
+        );
+    }
+}
+
+/// Navigating to the Verilog-A page is not compiling it. The stage's Compile
+/// button dispatches this command, so an execute that only switched pages made
+/// the button a no-op on the page it lives on.
+#[test]
+fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
+    let mut app = RSpiceApp::test_instance();
+    Command::CompileVerilogA.execute(&mut app);
+
+    assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
+    assert_eq!(
+        app.state.ui.code_workspace.page,
+        crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA
+    );
+    assert!(app.state.ui.code_workspace.veriloga.compile_requested);
+}

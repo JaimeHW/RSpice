@@ -310,12 +310,7 @@ fn available_documents_for_workspace(
             icon: WorkbenchIcon::Models,
             dirty: false,
         }],
-        Workspace::Netlist => vec![WorkspaceDocument {
-            id: WorkspaceDocumentId::NetlistSource,
-            label: netlist_document_label(state),
-            icon: WorkbenchIcon::Netlist,
-            dirty: state.workspace.netlist_source_dirty,
-        }],
+        Workspace::Netlist => vec![code_workspace_document(state)],
     }
 }
 
@@ -351,14 +346,24 @@ fn document_is_closable(state: &AppState, document: &WorkspaceDocumentId) -> boo
         .is_some_and(|root| root.id != *document)
 }
 
-fn netlist_document_label(state: &AppState) -> String {
-    state
-        .workspace
-        .netlist_source_path
-        .as_deref()
-        .and_then(std::path::Path::file_name)
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| format!("{}.sp · generated", state.workspace.project.top_cell))
+/// The Code & Automation workspace shows one document at a time and the page
+/// decides which. Only the netlist page has a dirty bit to report: Verilog-A
+/// and Automation sources are project-owned bundles whose dirtiness belongs to
+/// the bundle, not to this tab.
+fn code_workspace_document(state: &AppState) -> WorkspaceDocument {
+    use crate::workbench::documents::code_workspace::CodeWorkspacePage;
+
+    let page = state.ui.code_workspace.page;
+    WorkspaceDocument {
+        id: WorkspaceDocumentId::NetlistSource,
+        label: crate::workbench::documents::code_workspace::active_document_label(state),
+        icon: match page {
+            CodeWorkspacePage::Netlist => WorkbenchIcon::Netlist,
+            CodeWorkspacePage::VerilogA => WorkbenchIcon::Code,
+            CodeWorkspacePage::Automation => WorkbenchIcon::Terminal,
+        },
+        dirty: page == CodeWorkspacePage::Netlist && state.workspace.netlist_source_dirty,
+    }
 }
 
 fn authoritative_active_document(

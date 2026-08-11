@@ -1144,27 +1144,91 @@ fn models_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     }
 }
 
+/// The Code & Automation workspace hosts three different documents, so its
+/// toolbar is chosen by the visible page.
+///
+/// Find is deliberately absent: the editor's own toolbar sits directly under
+/// this one and owns it. Offering it twice was the mockup's own earlier
+/// mistake, and here it was worse than redundant — the find window is drawn
+/// only by the netlist page, so the button silently did nothing on the other
+/// two and then ambushed the user on return.
 fn netlist_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    use crate::workbench::documents::code_workspace::CodeWorkspacePage;
+
+    match app.state.ui.code_workspace.page {
+        CodeWorkspacePage::Netlist => netlist_page_tools(ui, app, layout),
+        CodeWorkspacePage::VerilogA => {
+            toolbar_text_command(
+                ui,
+                app,
+                Command::CompileVerilogA,
+                WorkbenchIcon::Run,
+                "Compile Verilog-A project",
+                layout,
+            );
+            context_separator(ui, layout);
+            toolbar_text_command(
+                ui,
+                app,
+                Command::ModelRunQualificationTests,
+                WorkbenchIcon::Models,
+                "Open model qualification",
+                layout,
+            );
+        }
+        CodeWorkspacePage::Automation => {
+            toolbar_text_command(
+                ui,
+                app,
+                Command::AutomationConsole,
+                WorkbenchIcon::Terminal,
+                "Automation console",
+                layout,
+            );
+        }
+    }
+    toolbar_icon_command(ui, app, Command::RunSimulation, WorkbenchIcon::Run, layout);
+}
+
+/// The netlist page's set follows the document it is showing: a generated
+/// primary is exported and compared, an owned deck is saved and run.
+fn netlist_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let generated = app.state.ui.netlist.active_document
         == crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated;
+    if generated {
+        toolbar_text_command(
+            ui,
+            app,
+            Command::ExportNetlist(crate::io::NetlistFormat::Spice),
+            WorkbenchIcon::Export,
+            "Export generated deck",
+            layout,
+        );
+        toolbar_text_command(
+            ui,
+            app,
+            Command::ValidateCodeDocument,
+            WorkbenchIcon::Check,
+            "Validate generated netlist",
+            layout,
+        );
+        context_separator(ui, layout);
+        toolbar_text_command(
+            ui,
+            app,
+            Command::CompareGeneratedRevisions,
+            WorkbenchIcon::Compare,
+            "Compare generated revisions",
+            layout,
+        );
+        return;
+    }
     toolbar_text_command(
         ui,
         app,
-        Command::ExportNetlist(crate::io::NetlistFormat::Spice),
-        WorkbenchIcon::Export,
-        "Export generated deck",
-        layout,
-    );
-    toolbar_text_command(
-        ui,
-        app,
-        Command::FindCodeDocument,
-        WorkbenchIcon::Search,
-        if generated {
-            "Find generated netlist"
-        } else {
-            "Find source"
-        },
+        Command::Save,
+        WorkbenchIcon::Save,
+        "Save deck",
         layout,
     );
     toolbar_text_command(
@@ -1172,23 +1236,18 @@ fn netlist_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         app,
         Command::ValidateCodeDocument,
         WorkbenchIcon::Check,
-        if generated {
-            "Validate generated netlist"
-        } else {
-            "Validate source"
-        },
+        "Validate source",
         layout,
     );
     context_separator(ui, layout);
     toolbar_text_command(
         ui,
         app,
-        Command::CompareGeneratedRevisions,
-        WorkbenchIcon::Compare,
-        "Compare generated revisions",
+        Command::ExportNetlist(crate::io::NetlistFormat::Spice),
+        WorkbenchIcon::Export,
+        "Export deck copy",
         layout,
     );
-    toolbar_icon_command(ui, app, Command::RunSimulation, WorkbenchIcon::Run, layout);
 }
 
 /// Render a canonical compact precision tool. The design mockup uses these

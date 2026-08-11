@@ -693,15 +693,20 @@ impl Command {
                     state.can_run_simulation()
                 }
             }
-            Self::FindCodeDocument => state.workbench.workspace == Workspace::Netlist,
+            // Each of these opens a window that only the netlist page draws.
+            // Availability therefore has to name the page, not just the
+            // workspace: from Verilog-A or Automation they would set a dialog
+            // open with nothing on screen, and it would then appear
+            // unprompted the moment the user came back.
+            Self::FindCodeDocument => netlist_page_is_visible(state),
             Self::ValidateCodeDocument => {
-                state.workbench.workspace == Workspace::Netlist
+                netlist_page_is_visible(state)
                     && state.ui.netlist.active_document
                         != crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
                     && !state.simulation.netlist_content.trim().is_empty()
             }
             Self::CompareGeneratedRevisions => {
-                state.workbench.workspace == Workspace::Netlist
+                netlist_page_is_visible(state)
                     && !state.ui.netlist.generated_history.is_empty()
                     && state.ui.netlist.generated_document.is_some()
             }
@@ -914,7 +919,7 @@ impl Command {
             Self::NewProject => file_action(app, FileMenuAction::NewProject),
             Self::OpenProject => file_action(app, FileMenuAction::OpenProject),
             Self::Save => {
-                if app.state.workbench.workspace == Workspace::Netlist
+                if netlist_page_is_visible(&app.state)
                     && app.state.ui.netlist.active_document
                         == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
                 {
@@ -947,7 +952,7 @@ impl Command {
                 file_action(app, FileMenuAction::ExportPublicationSnapshot)
             }
             Self::ExportNetlist(format) => {
-                if app.state.workbench.workspace == Workspace::Netlist {
+                if netlist_page_is_visible(&app.state) {
                     app.state.ui.netlist.export_dialog.open = true;
                     app.state.ui.netlist.export_dialog.format = format;
                     app.state.ui.netlist.export_dialog.error = None;
@@ -1064,7 +1069,7 @@ impl Command {
                 }
             }
             Self::FindInDesign => {
-                if app.state.workbench.workspace == Workspace::Netlist {
+                if netlist_page_is_visible(&app.state) {
                     app.state.ui.netlist.find.open = true;
                 } else {
                     activate_workspace(app, Workspace::Design);
@@ -1836,6 +1841,11 @@ impl Command {
                 activate_workspace(app, Workspace::Netlist);
                 app.state.ui.code_workspace.page =
                     crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA;
+                // Navigating to the page is not compiling. The surface owns
+                // the compile transaction because opening its review dialog
+                // needs an egui context, so the request is left for it to
+                // consume on the next frame.
+                app.state.ui.code_workspace.veriloga.compile_requested = true;
             }
             Self::AutomationConsole => {
                 activate_workspace(app, Workspace::Netlist);
@@ -1945,6 +1955,14 @@ impl Command {
             Self::About => app.state.dialogs.about = true,
         }
     }
+}
+
+/// Whether the netlist document — not merely the workspace that hosts it — is
+/// the thing on screen.
+fn netlist_page_is_visible(state: &crate::workbench::AppState) -> bool {
+    state.workbench.workspace == Workspace::Netlist
+        && state.ui.code_workspace.page
+            == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
 }
 
 fn activate_workspace(app: &mut RSpiceApp, workspace: Workspace) {
