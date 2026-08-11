@@ -717,6 +717,29 @@ impl Netlist {
         table.frequency_points()
     }
 
+    /// How many PSpice `CHEBYSHEV` controlled sources the deck authored.
+    ///
+    /// Counted from the realizations they lowered to, because once parsing is
+    /// done a designed filter is the same behavioral sources and capacitors as
+    /// any hand-written one. A cascade names its intermediate sections
+    /// `{source}.__F{n}` and gives the last one the authored name, so counting
+    /// the distinct owners that are not sections counts authored sources.
+    #[must_use]
+    pub fn pspice_chebyshev_source_count(&self) -> usize {
+        self.elements
+            .iter()
+            .filter_map(|element| match &element.provenance {
+                ElementProvenance::SynthesizedTransferState {
+                    owner,
+                    form: SynthesizedTransferForm::Chebyshev,
+                } => Some(owner.as_str()),
+                _ => None,
+            })
+            .filter(|owner| !owner.contains(".__F"))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+    }
+
     fn enforce_root_source_limits_with_abort(
         input: &str,
         limits: crate::resource::ResourceLimits,

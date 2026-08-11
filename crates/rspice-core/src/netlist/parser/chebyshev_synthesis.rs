@@ -377,6 +377,134 @@ fn design_transfer(spec: &ChebyshevSpec) -> Result<(Poly, Poly), String> {
     ))
 }
 
+/// Scale factors this parser accepts in front of `Hz`, matching the set the
+/// lexer already resolves so a frequency means the same thing wherever it is
+/// written. `M` is mega here, as it is in `MHz` everywhere in SPICE practice.
+const FREQUENCY_SCALES: [(&str, Value); 5] = [
+    ("T", 1.0e12),
+    ("G", 1.0e9),
+    ("MEG", 1.0e6),
+    ("M", 1.0e6),
+    ("K", 1.0e3),
+];
+
+/// Read one filter requirement, which is either a bare number, a number
+/// carrying `unit` with an optional scale factor, or the name of a parameter.
+///
+/// The units are checked rather than skipped. SPICE's own suffix rules would
+/// read `800frogs` as 800 femto-somethings and `.1watts` as 0.1, quietly
+/// designing a filter to requirements nobody wrote; a contract this specific
+/// should refuse what it does not understand.
+fn requirement(
+    word: &str,
+    unit: &str,
+    what: &str,
+    resolve_param: &mut dyn FnMut(&str) -> Option<Value>,
+) -> Result<Value, String> {
+    if let Ok(value) = word.parse::<Value>() {
+        return Ok(value);
+    }
+
+    // Longest leading run that is still a number, so `1.2e3kHz` keeps its
+    // exponent instead of breaking at the `e`.
+    let split = (1..=word.len())
+        .filter(|end| word.is_char_boundary(*end))
+        .filter(|end| word[..*end].parse::<Value>().is_ok())
+        .next_back();
+    let Some(split) = split else {
+        return resolve_param(word)
+            .ok_or_else(|| format!("{what} '{word}' is neither a number nor a known parameter"));
+    };
+
+    let (number, suffix) = word.split_at(split);
+    let number: Value = number
+        .parse()
+        .map_err(|_| format!("{what} '{word}' is not a number"))?;
+    let suffix = suffix.to_ascii_uppercase();
+    let unit_upper = unit.to_ascii_uppercase();
+
+    let Some(scale) = suffix.strip_suffix(&unit_upper).and_then(|scale| {
+        if scale.is_empty() {
+            return Some(1.0);
+        }
+        FREQUENCY_SCALES
+            .iter()
+            .find(|(name, _)| *name == scale && unit_upper == "HZ")
+            .map(|(_, factor)| *factor)
+    }) else {
+        return Err(format!("{what} '{word}' must be given in {unit}"));
+    };
+    Ok(number * scale)
+}
+
+/// Parse a PSpice CHEBYSHEV filter contract: `LP (800Hz 1.2kHz) .1dB 50dB`.
+///
+/// `words` arrives as raw source text rather than lexer values because the
+/// lexer resolves `1.2kHz` to a number but hands back `800Hz` and `50dB` whole,
+/// so only the original spelling says what the author actually asked for.
+pub(super) fn parse_chebyshev_spec(
+    words: &[String],
+    resolve_param: &mut dyn FnMut(&str) -> Option<Value>,
+) -> Result<ChebyshevSpec, String> {
+    let mut words = words.iter().map(String::as_str);
+    let kind = match words.next().map(str::to_ascii_uppercase).as_deref() {
+        Some("LP") => ChebyshevKind::LowPass,
+        Some("HP") => ChebyshevKind::HighPass,
+        Some("BP") => ChebyshevKind::BandPass,
+        Some("BR") => ChebyshevKind::BandReject,
+        Some(other) => {
+            return Err(format!(
+                "unknown filter family '{other}'; expected LP, HP, BP, or BR"
+            ));
+        }
+        None => return Err("expected a filter family: LP, HP, BP, or BR".to_string()),
+    };
+
+    if words.next() != Some("(") {
+        return Err(format!(
+            "{} requires its cutoff frequencies in parentheses",
+            kind.label()
+        ));
+    }
+    let mut frequencies_hz = Vec::with_capacity(kind.frequency_count());
+    for index in 0..kind.frequency_count() {
+        let Some(word) = words.next().filter(|word| *word != ")") else {
+            return Err(format!(
+                "{} requires {} cutoff frequencies, found {index}",
+                kind.label(),
+                kind.frequency_count()
+            ));
+        };
+        frequencies_hz.push(requirement(word, "Hz", "cutoff frequency", resolve_param)?);
+    }
+    if words.next() != Some(")") {
+        return Err(format!(
+            "{} takes exactly {} cutoff frequencies",
+            kind.label(),
+            kind.frequency_count()
+        ));
+    }
+
+    let mut next_requirement = |what: &str| -> Result<Value, String> {
+        let word = words
+            .next()
+            .ok_or_else(|| format!("filter contract is missing its {what}"))?;
+        requirement(word, "dB", what, resolve_param)
+    };
+    let ripple_db = next_requirement("pass-band ripple")?;
+    let stop_db = next_requirement("stop-band attenuation")?;
+    if let Some(extra) = words.next() {
+        return Err(format!("unexpected '{extra}' after the filter contract"));
+    }
+
+    Ok(ChebyshevSpec {
+        kind,
+        frequencies_hz,
+        ripple_db,
+        stop_db,
+    })
+}
+
 /// Compile one PSpice CHEBYSHEV E/G source into exact dynamic helper elements.
 pub(super) fn synthesize_chebyshev(
     name: &str,
@@ -421,7 +549,7 @@ pub(super) fn synthesize_chebyshev(
             numerator,
             denominator,
             if last { voltage_output } else { true },
-            "CHEBYSHEV",
+            crate::netlist::SynthesizedTransferForm::Chebyshev,
             line_num,
         )?);
         if !last {

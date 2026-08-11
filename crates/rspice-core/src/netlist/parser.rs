@@ -44,6 +44,7 @@ mod command_parsers;
 mod commands;
 
 pub use commands::parse_save_probe;
+mod chebyshev_synthesis;
 mod conditionals;
 mod elements;
 mod laplace_synthesis;
@@ -54,6 +55,7 @@ mod state;
 mod tlines;
 mod values;
 
+use chebyshev_synthesis::*;
 use command_parsers::*;
 use commands::*;
 use conditionals::*;

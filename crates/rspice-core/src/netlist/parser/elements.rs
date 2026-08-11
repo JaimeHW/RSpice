@@ -5529,6 +5529,7 @@ enum ControlledSourceForm {
     Value,
     Table,
     Laplace,
+    Chebyshev,
     Freq,
 }
 
@@ -5588,6 +5589,7 @@ fn try_controlled_source_form(
         "VALUE" => Some(ControlledSourceForm::Value),
         "TABLE" => Some(ControlledSourceForm::Table),
         "LAPLACE" => Some(ControlledSourceForm::Laplace),
+        "CHEBYSHEV" => Some(ControlledSourceForm::Chebyshev),
         "FREQ" => Some(ControlledSourceForm::Freq),
         _ => None,
     };
@@ -5736,6 +5738,45 @@ fn collect_source_expression_argument(
         });
     }
     Ok(expression)
+}
+
+/// Collect the rest of the line as the words the author actually wrote.
+///
+/// [`collect_source_expression_argument`] renders tokens back from their parsed
+/// values, which is right for an expression and wrong for a contract written in
+/// units. The lexer resolves `1.2kHz` to a number, hands back `800Hz` whole as
+/// an identifier, and splits `.1dB` in two -- so only the original spelling
+/// distinguishes `800Hz` from `800frogs`.
+///
+/// Words break on source whitespace, on commas, and on parentheses. Tokens the
+/// lexer split but the author wrote together rejoin by their spans.
+fn collect_raw_words(stream: &mut TokenStream) -> Vec<String> {
+    let mut words: Vec<String> = Vec::new();
+    let mut previous_end = None;
+    let mut previous_was_paren = false;
+
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        if source_multiplicity_assignment(stream) {
+            break;
+        }
+        let token = stream.peek();
+        if matches!(token.kind, TokenKind::Comma) {
+            previous_end = None;
+            stream.advance();
+            continue;
+        }
+        let paren = matches!(token.kind, TokenKind::LParen | TokenKind::RParen);
+        let joins = previous_end == Some(token.span.start) && !paren && !previous_was_paren;
+        let lexeme = token.lexeme.clone();
+        previous_end = Some(token.span.end);
+        previous_was_paren = paren;
+        match words.last_mut() {
+            Some(last) if joins => last.push_str(&lexeme),
+            _ => words.push(lexeme),
+        }
+        stream.advance();
+    }
+    words
 }
 
 fn source_multiplicity_assignment(stream: &TokenStream) -> bool {
@@ -6230,6 +6271,56 @@ fn parse_voltage_controlled_source(
             }
             elements.extend(synthesized);
         }
+        Some(ControlledSourceForm::Chebyshev) => {
+            // CHEBYSHEV {input} = FAMILY (edges) ripple stop — the filter is
+            // designed exactly from its requirements at parse time and lowered
+            // through the same realization LAPLACE uses, so no analysis has to
+            // know that a filter specification was ever involved.
+            let input_expr =
+                collect_expression_argument(stream, line_num, Some(&TokenKind::Equals))?;
+            stream.consume(&TokenKind::Equals);
+            let words = collect_raw_words(stream);
+            let multiplicity = parse_source_multiplicity_tail(
+                stream,
+                line_num,
+                params,
+                defer_simple_param_refs,
+                element_label,
+                !is_voltage_output,
+            )?;
+            let spec =
+                parse_chebyshev_spec(&words, &mut |name| params.get(name)).map_err(|message| {
+                    ParseError::Syntax {
+                        line: line_num,
+                        message: format!("CHEBYSHEV source '{name}': {message}"),
+                    }
+                })?;
+            let mut synthesized = synthesize_chebyshev(
+                &name,
+                &node_pos,
+                &node_neg,
+                &input_expr,
+                &spec,
+                is_voltage_output,
+                line_num,
+            )?;
+            for element in &mut synthesized {
+                if element.name.eq_ignore_ascii_case(&name) {
+                    match &mut element.kind {
+                        ElementKind::BehavioralVoltage {
+                            multiplicity: target,
+                            ..
+                        }
+                        | ElementKind::BehavioralCurrent {
+                            multiplicity: target,
+                            ..
+                        } => *target = multiplicity.clone(),
+                        _ => {}
+                    }
+                }
+            }
+            elements.extend(synthesized);
+        }
         Some(ControlledSourceForm::Freq) => {
             return Err(unsupported_form_error(line_num, element_label, "FREQ"));
         }
@@ -6469,6 +6560,7 @@ fn parse_current_controlled_source(
                 ControlledSourceForm::Value => "VALUE",
                 ControlledSourceForm::Table => "TABLE",
                 ControlledSourceForm::Laplace => "LAPLACE",
+                ControlledSourceForm::Chebyshev => "CHEBYSHEV",
                 ControlledSourceForm::Freq => "FREQ",
                 ControlledSourceForm::Poly(_) => unreachable!(),
             };
