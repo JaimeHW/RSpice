@@ -30,6 +30,7 @@ use crate::simulation::multi_run::{
     OptimizationGoal, OptimizationVariable, PssMethod, SpPort,
 };
 use crate::simulation::output_contract::{PreparedSavedOutput, materialize_saved_outputs};
+use crate::simulation::plan::AnalysisNumericOverride;
 use crate::simulation::runner::SimulationError;
 use crate::simulation::runner::SpecExecutionOptions;
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
@@ -51,6 +52,8 @@ mod analysis_plan;
 mod analysis_run_config;
 mod analysis_spec_build;
 mod manual_deck;
+#[cfg(test)]
+mod projection_ratchet;
 pub(crate) mod prepared_run;
 mod results_convert;
 mod results_post;
@@ -58,6 +61,7 @@ mod results_update;
 pub(crate) mod spice_value;
 mod touchstone;
 mod transient_post;
+pub(super) use analysis_commands::splice_before_terminal_end_card;
 pub(crate) use transient_post::DerivedViewerLoadState;
 
 use self::spice_value::parse_spice_value_checked;
@@ -68,6 +72,11 @@ pub(super) struct QueuedAnalysis {
     pub(super) config: Option<AnalysisConfig>,
     pub(super) spec_options: SpecExecutionOptions,
     pub(super) analysis_line: String,
+    /// Numerical departures authored against this analysis. Snapshot
+    /// preparation turns them into a second `.OPTIONS` block in this task's own
+    /// deck; a manual deck states its options in the deck itself and therefore
+    /// never carries one.
+    pub(super) numeric_override: Option<AnalysisNumericOverride>,
 }
 
 //=============================================================================

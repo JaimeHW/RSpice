@@ -42,18 +42,47 @@ fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
 }
 
 /// Resolved evidence for one specification against the active dataset.
+///
+/// `points` on a judged outcome is how many retained measurements of that name
+/// the dataset holds. It is carried through so the page can say whether the
+/// number it shows is the dataset's answer or one point out of many — the
+/// difference between a verdict and a sample.
 enum Evidence {
-    Pass(f64),
-    Fail(f64),
+    Pass { value: f64, points: usize },
+    Fail { value: f64, points: usize },
     MeasurementFailed,
     None,
 }
 
 impl Evidence {
+    fn value(&self) -> Option<f64> {
+        match self {
+            Self::Pass { value, .. } | Self::Fail { value, .. } => Some(*value),
+            Self::MeasurementFailed | Self::None => None,
+        }
+    }
+
+    /// True when the dataset holds more than one measurement of this name, so
+    /// the reported value is the worst of a set rather than a lone answer.
+    fn is_partial(&self) -> bool {
+        match self {
+            Self::Pass { points, .. } | Self::Fail { points, .. } => *points > 1,
+            Self::MeasurementFailed | Self::None => false,
+        }
+    }
+
     fn cell(&self, spec: &SpecEntry) -> (String, Tone) {
         match self {
-            Self::Pass(value) => (format!("{value:.6} {}", spec.unit), Tone::Ok),
-            Self::Fail(value) => (format!("{value:.6} {}", spec.unit), Tone::Error),
+            Self::Pass { value, points } if *points > 1 => (
+                format!("{value:.6} {} · worst of {points}", spec.unit),
+                Tone::Warn,
+            ),
+            Self::Fail { value, points } if *points > 1 => (
+                format!("{value:.6} {} · worst of {points}", spec.unit),
+                Tone::Error,
+            ),
+            Self::Pass { value, .. } => (format!("{value:.6} {}", spec.unit), Tone::Ok),
+            Self::Fail { value, .. } => (format!("{value:.6} {}", spec.unit), Tone::Error),
             Self::MeasurementFailed => ("measurement failed".to_owned(), Tone::Error),
             Self::None => ("no evidence".to_owned(), Tone::Warn),
         }
@@ -68,11 +97,17 @@ fn evidence_for(app: &RSpiceApp, spec: &SpecEntry) -> Evidence {
     let Some(run) = super::output_evidence::selected_output_dataset(&app.state.simulation) else {
         return Evidence::None;
     };
-    match super::output_evidence::measurement_in_output_dataset(run, &spec.measurement) {
+    match super::output_evidence::measurement_in_output_dataset(run, spec) {
         None => Evidence::None,
         Some(evidence) if !evidence.measurement_passed => Evidence::MeasurementFailed,
-        Some(evidence) if spec.passes(evidence.value) => Evidence::Pass(evidence.value),
-        Some(evidence) => Evidence::Fail(evidence.value),
+        Some(evidence) if spec.passes(evidence.value) => Evidence::Pass {
+            value: evidence.value,
+            points: evidence.retained_measurements,
+        },
+        Some(evidence) => Evidence::Fail {
+            value: evidence.value,
+            points: evidence.retained_measurements,
+        },
     }
 }
 
@@ -81,22 +116,33 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     let mut passing = 0usize;
     let mut failing = 0usize;
     let mut unmapped = 0usize;
+    let mut partial = 0usize;
     let rows: Vec<(String, Tone)> = specs
         .iter()
         .map(|spec| {
             let evidence = evidence_for(app, spec);
             match evidence {
-                Evidence::Pass(_) => passing += 1,
-                Evidence::Fail(_) | Evidence::MeasurementFailed => failing += 1,
+                Evidence::Pass { .. } => passing += 1,
+                Evidence::Fail { .. } | Evidence::MeasurementFailed => failing += 1,
                 Evidence::None => unmapped += 1,
+            }
+            if evidence.is_partial() {
+                partial += 1;
             }
             evidence.cell(spec)
         })
         .collect();
-    let status = format!("{passing} pass · {failing} fail · {unmapped} without evidence");
+    // A partially-covered pass is reported separately rather than folded into
+    // the pass count. Reading "4 pass" when three of those were decided by one
+    // point of a forty-five point sweep is exactly the false sign-off this
+    // page exists to prevent.
+    let mut status = format!("{passing} pass · {failing} fail · {unmapped} without evidence");
+    if partial > 0 {
+        status.push_str(&format!(" · {partial} judged on the worst of several points"));
+    }
     let tone = if failing > 0 {
         Tone::Error
-    } else if unmapped > 0 {
+    } else if unmapped > 0 || partial > 0 {
         Tone::Warn
     } else {
         Tone::Ok
@@ -120,13 +166,12 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
             ledger_head(
                 ui,
                 &REGISTRY_COLUMNS,
-                &[
-                    "Measurement",
-                    "Definition",
-                    "Limit",
-                    "Worst result",
-                    "Margin",
-                ],
+                // The value is the worst attributed measurement of this name
+                // the dataset holds, judged against this specification bound.
+                // The cell says how many points it was chosen from, because
+                // the worst of what was retained is not the worst of a space
+                // the runners did not measure at every point.
+                &["Measurement", "Definition", "Limit", "Result", "Margin"],
             );
             if specs.is_empty() {
                 ledger_row(
@@ -173,7 +218,11 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                 ui,
                 "A limit is evaluated against the active dataset's measurement of the same name. \
                  A specification with no matching measurement is reported as being without \
-                 evidence — it is never treated as passing. Authoring lives in the \
+                 evidence — it is never treated as passing. Where the dataset holds several \
+                 measurements of one name — a corner, temperature or Monte Carlo run set — the \
+                 result shown is the worst of them against this limit, marked with the count it \
+                 was chosen from. That verdict is sound for every point the dataset retained; it \
+                 does not speak for points the run never measured. Authoring lives in the \
                  specification editor, which owns the limits this page reads.",
             );
         },
@@ -205,9 +254,8 @@ fn open_specification_editor(app: &mut RSpiceApp) {
 /// waveform specification has no margin, and inventing one would be a claim
 /// the plan cannot support.
 fn margin_label(app: &RSpiceApp, spec: &SpecEntry) -> String {
-    let value = match evidence_for(app, spec) {
-        Evidence::Pass(value) | Evidence::Fail(value) => value,
-        Evidence::MeasurementFailed | Evidence::None => return "—".to_owned(),
+    let Some(value) = evidence_for(app, spec).value() else {
+        return "—".to_owned();
     };
     let margin = match (spec.min, spec.max) {
         (Some(minimum), Some(maximum)) => (value - minimum).min(maximum - value),
@@ -250,9 +298,12 @@ fn selected_record(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload
         return;
     };
     let title = format!("Selected specification · {}", spec.measurement);
-    let (result, tone) = evidence_for(app, spec).cell(spec);
+    let evidence = evidence_for(app, spec);
+    let coverage = evidence_coverage(app, spec);
+    let (result, tone) = evidence.cell(spec);
     card(ui, &title, Some((result.as_str(), tone)), |ui| {
         card_body(ui, |ui| {
+            rule_row(ui, "Evidence coverage", &coverage);
             rule_row(
                 ui,
                 "Limit",
@@ -271,6 +322,26 @@ fn selected_record(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload
             rule_row(ui, "Margin", &margin_label(app, spec));
         });
     });
+}
+
+/// How much of the dataset the reported value speaks for.
+///
+/// Spelled out rather than implied, because "judged" and "judged against one
+/// of forty-five points" are different claims about the same number.
+fn evidence_coverage(app: &RSpiceApp, spec: &SpecEntry) -> String {
+    let Some(run) = super::output_evidence::selected_output_dataset(&app.state.simulation) else {
+        return "no dataset loaded".to_owned();
+    };
+    match super::output_evidence::measurement_in_output_dataset(run, spec) {
+        None => "no attributed measurement of this name".to_owned(),
+        Some(evidence) if evidence.is_complete_coverage() => {
+            "the dataset's only measurement of this name".to_owned()
+        }
+        Some(evidence) => format!(
+            "worst of {} retained measurements of this name",
+            evidence.retained_measurements
+        ),
+    }
 }
 
 fn evaluation_policy(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) {

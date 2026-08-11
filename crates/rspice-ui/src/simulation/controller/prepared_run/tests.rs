@@ -214,6 +214,7 @@ fn prepared_pss_task(
         Vec::new(),
         "PSS",
         QueuedAnalysis {
+            numeric_override: None,
             spec: AnalysisSpec::Pss {
                 method: PssMethod::Shooting,
                 fundamental_freq: 1.0e3,
@@ -351,6 +352,7 @@ fn automatic_touchstone_export_policy_captures_live_dialog_and_path_once() {
     );
     state.schematic.current_file = Some(PathBuf::from("designs").join("amp.rsch"));
     let tasks = vec![QueuedAnalysis {
+        numeric_override: None,
         spec: AnalysisSpec::SParameter {
             start_freq: 1.0e6,
             stop_freq: 1.0e9,
@@ -791,6 +793,7 @@ fn every_materialized_corner_binding_is_audited_before_dispatch() {
     use crate::services::simulation_runner::{CornerModelBinding, CornerProcess, CornerRunConfig};
 
     let task = QueuedAnalysis {
+        numeric_override: None,
         spec: AnalysisSpec::Corner,
         config: None,
         spec_options: SpecExecutionOptions {

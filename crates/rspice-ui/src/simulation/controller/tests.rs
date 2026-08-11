@@ -702,6 +702,7 @@ fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
         config: None,
         spec_options: SpecExecutionOptions::default(),
         analysis_line: line.to_owned(),
+        numeric_override: None,
     };
     let prerequisite = PreparedTask::new(
         prerequisite_id,

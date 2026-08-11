@@ -29,35 +29,90 @@ pub(super) fn selected_output_dataset(
 pub(super) struct OutputMeasurementEvidence {
     pub(super) value: f64,
     pub(super) measurement_passed: bool,
+    /// How many attributed measurements of this name the dataset holds.
+    ///
+    /// One means the reported value is the dataset's only answer. More than
+    /// one means the dataset swept — corners, temperatures, trials — and this
+    /// value is a single point out of that set, not a summary of it. The page
+    /// must say which, because a limit judged against one arbitrary point of a
+    /// sweep is not a verdict on the sweep.
+    pub(super) retained_measurements: usize,
 }
 
-/// The most recent attributed measurement of this name in the dataset.
+impl OutputMeasurementEvidence {
+    /// Whether the reported value stands for the whole dataset.
+    pub(super) fn is_complete_coverage(&self) -> bool {
+        self.retained_measurements <= 1
+    }
+}
+
+/// The worst attributed measurement of this name in the dataset, with the
+/// number of measurements it was chosen from.
+///
+/// Worst against the specification's own bound, not the most recent. A dataset
+/// that holds several measurements of one name — the same measurement taken
+/// under several analyses, or over a sweep once the runners attribute one per
+/// point — has one verdict, and it is the verdict of its worst point. Reporting
+/// the last one made a specification pass while a retained point failed it,
+/// which is the one failure mode a limits table must not have.
 ///
 /// Only analyses that succeeded and carry provenance are considered: an
 /// unattributed result cannot be traced to the configuration that produced it,
 /// so it is not evidence.
 pub(super) fn measurement_in_output_dataset(
     run: &crate::state::SimulationRun,
-    name: &str,
+    spec: &crate::state::SpecEntry,
 ) -> Option<OutputMeasurementEvidence> {
-    run.analyses
+    let name = spec.measurement.as_str();
+    let candidates: Vec<(f64, bool)> = run
+        .analyses
         .iter()
-        .rev()
         .filter(|analysis| analysis.success && analysis.provenance.is_some())
-        .find_map(|analysis| {
-            analysis
-                .measurements
-                .iter()
-                .rev()
-                .find(|measurement| measurement.name.eq_ignore_ascii_case(name))
-                .and_then(|measurement| {
-                    measurement
-                        .value
-                        .filter(|value| value.is_finite())
-                        .map(|value| OutputMeasurementEvidence {
-                            value,
-                            measurement_passed: measurement.passed && measurement.error.is_none(),
-                        })
-                })
+        .flat_map(|analysis| analysis.measurements.iter())
+        .filter(|measurement| measurement.name.eq_ignore_ascii_case(name))
+        .filter_map(|measurement| {
+            let value = measurement.value.filter(|value| value.is_finite())?;
+            Some((value, measurement.passed && measurement.error.is_none()))
         })
+        .collect();
+
+    let retained_measurements = candidates.len();
+    // Ordered so that the chosen entry is the one a reader would most want to
+    // be told about: a measurement the engine could not complete first, then
+    // the smallest margin. `total_cmp` rather than `partial_cmp` because every
+    // value here is already finite and a panic on a tie is not acceptable.
+    let (value, measurement_passed) = candidates.into_iter().reduce(|worst, candidate| {
+        let rank = |(value, passed): (f64, bool)| (passed, margin_to_bound(spec, value));
+        let (worst_passed, worst_margin) = rank(worst);
+        let (candidate_passed, candidate_margin) = rank(candidate);
+        match (worst_passed, candidate_passed) {
+            (false, true) => worst,
+            (true, false) => candidate,
+            // A later point wins a tie, so a dataset re-run in place reports
+            // its newest evidence rather than its oldest.
+            _ if candidate_margin.total_cmp(&worst_margin).is_gt() => worst,
+            _ => candidate,
+        }
+    })?;
+
+    Some(OutputMeasurementEvidence {
+        value,
+        measurement_passed,
+        retained_measurements,
+    })
+}
+
+/// How much room a value has before it violates the specification.
+///
+/// Negative once the bound is broken, and more negative the worse the
+/// violation, so ordering by this alone ranks failures ahead of passes and the
+/// worst failure ahead of the rest. A specification with no scalar bound has no
+/// ordering to offer, so every value ties and the latest one stands.
+fn margin_to_bound(spec: &crate::state::SpecEntry, value: f64) -> f64 {
+    match (spec.min, spec.max) {
+        (Some(minimum), Some(maximum)) => (value - minimum).min(maximum - value),
+        (Some(minimum), None) => value - minimum,
+        (None, Some(maximum)) => maximum - value,
+        (None, None) => 0.0,
+    }
 }

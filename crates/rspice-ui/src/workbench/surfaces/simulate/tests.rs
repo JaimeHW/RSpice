@@ -12,6 +12,17 @@ use super::*;
 use crate::product::{ContentDigest, ObjectRevision};
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationState};
 
+/// A specification bounding `measurement`, used to order a dataset's points.
+fn spec(measurement: &str, min: Option<f64>, max: Option<f64>) -> crate::state::SpecEntry {
+    crate::state::SpecEntry {
+        measurement: measurement.to_owned(),
+        expression: String::new(),
+        min,
+        max,
+        unit: String::new(),
+    }
+}
+
 fn attributed(analysis: AnalysisResult) -> AnalysisResult {
     analysis.with_provenance(
         crate::state::AnalysisResultProvenance::new(
@@ -1176,13 +1187,171 @@ fn output_specifications_never_mix_measurements_across_retained_datasets() {
     let run = selected_output_dataset(&simulation).expect("selected dataset");
     assert_eq!(run.dataset_id, selected_dataset);
     assert_eq!(
-        measurement_in_output_dataset(run, "bandwidth"),
+        measurement_in_output_dataset(run, &spec("bandwidth", Some(0.0), None)),
         Some(OutputMeasurementEvidence {
             value: 42.0,
             measurement_passed: true,
+            retained_measurements: 1,
         })
     );
-    assert_eq!(measurement_in_output_dataset(run, "gain"), None);
+    assert_eq!(measurement_in_output_dataset(run, &spec("gain", Some(0.0), None)), None);
+}
+
+#[test]
+fn swept_evidence_reports_how_many_points_the_value_was_chosen_from() {
+    let mut run = SimulationRun::new(1);
+    for (id, value) in [(1u64, 12.0), (2, 9.0), (3, 15.0)] {
+        run.add_analysis(attributed(
+            AnalysisResult::new(id, AnalysisType::Ac, "corner")
+                .with_measurements(vec![rspice_core::MeasureResult::success("gain", value)]),
+        ));
+    }
+
+    let evidence = measurement_in_output_dataset(&run, &spec("gain", Some(10.0), None))
+        .expect("evidence resolves");
+
+    assert_eq!(
+        evidence.retained_measurements, 3,
+        "every retained point of the sweep counts toward coverage"
+    );
+    assert!(
+        !evidence.is_complete_coverage(),
+        "one point of a three-point sweep cannot stand for the sweep"
+    );
+    assert_eq!(
+        evidence.value, 9.0,
+        "the reported value is the worst point against the bound, not the last one taken"
+    );
+}
+
+/// The failure mode this ordering exists to prevent.
+#[test]
+fn a_specification_cannot_pass_while_a_retained_point_fails_it() {
+    let mut run = SimulationRun::new(1);
+    // The failing point is taken first, so "most recent" would have hidden it.
+    for (id, value) in [(1u64, 4.0), (2, 11.0), (3, 12.0)] {
+        run.add_analysis(attributed(
+            AnalysisResult::new(id, AnalysisType::Ac, "corner")
+                .with_measurements(vec![rspice_core::MeasureResult::success("gain", value)]),
+        ));
+    }
+    let bound = spec("gain", Some(10.0), None);
+
+    let evidence = measurement_in_output_dataset(&run, &bound).expect("evidence resolves");
+
+    assert_eq!(evidence.value, 4.0);
+    assert!(!bound.passes(evidence.value));
+}
+
+#[test]
+fn the_worst_point_of_a_two_sided_bound_is_the_one_nearest_a_violation() {
+    let mut run = SimulationRun::new(1);
+    for (id, value) in [(1u64, 5.0), (2, 9.6), (3, 5.5)] {
+        run.add_analysis(attributed(
+            AnalysisResult::new(id, AnalysisType::Ac, "corner")
+                .with_measurements(vec![rspice_core::MeasureResult::success("gain", value)]),
+        ));
+    }
+
+    let evidence = measurement_in_output_dataset(&run, &spec("gain", Some(0.0), Some(10.0)))
+        .expect("evidence resolves");
+
+    assert_eq!(
+        evidence.value, 9.6,
+        "0.4 from the ceiling beats 5.0 from the floor"
+    );
+}
+
+#[test]
+fn a_measurement_the_engine_could_not_complete_outranks_every_margin() {
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(attributed(
+        AnalysisResult::new(1, AnalysisType::Ac, "incomplete").with_measurements(vec![
+            rspice_core::MeasureResult {
+                name: "gain".to_owned(),
+                value: Some(50.0),
+                error: Some("no crossing in the swept band".to_owned()),
+                passed: false,
+                expected: None,
+                tolerance: None,
+                event_axis: None,
+            },
+        ]),
+    ));
+    run.add_analysis(attributed(
+        AnalysisResult::new(2, AnalysisType::Ac, "tight")
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 10.001)]),
+    ));
+
+    let evidence = measurement_in_output_dataset(&run, &spec("gain", Some(10.0), None))
+        .expect("evidence resolves");
+
+    assert!(!evidence.measurement_passed);
+    assert_eq!(evidence.value, 50.0);
+}
+
+/// A specification with no scalar bound has no ordering to offer.
+#[test]
+fn an_unbounded_specification_reports_its_latest_point() {
+    let mut run = SimulationRun::new(1);
+    for (id, value) in [(1u64, 3.0), (2, 7.0)] {
+        run.add_analysis(attributed(
+            AnalysisResult::new(id, AnalysisType::Ac, "corner")
+                .with_measurements(vec![rspice_core::MeasureResult::success("gain", value)]),
+        ));
+    }
+
+    let evidence =
+        measurement_in_output_dataset(&run, &spec("gain", None, None)).expect("evidence resolves");
+
+    assert_eq!(evidence.value, 7.0);
+    assert_eq!(evidence.retained_measurements, 2);
+}
+
+#[test]
+fn a_lone_measurement_is_reported_as_complete_coverage() {
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(attributed(
+        AnalysisResult::new(1, AnalysisType::Ac, "single")
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 12.0)]),
+    ));
+
+    let evidence = measurement_in_output_dataset(&run, &spec("gain", Some(0.0), None)).expect("evidence resolves");
+
+    assert!(evidence.is_complete_coverage());
+}
+
+#[test]
+fn coverage_counts_only_attributed_finite_measurements() {
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(attributed(
+        AnalysisResult::new(1, AnalysisType::Ac, "kept")
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 12.0)]),
+    ));
+    // Unattributed: cannot be traced to a configuration, so it is not a point.
+    run.add_analysis(
+        AnalysisResult::new(2, AnalysisType::Ac, "legacy")
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 13.0)]),
+    );
+    // Attributed but non-finite: not a value, so not a point either.
+    run.add_analysis(attributed(
+        AnalysisResult::new(3, AnalysisType::Ac, "non-finite").with_measurements(vec![
+            rspice_core::MeasureResult {
+                name: "gain".to_owned(),
+                value: Some(f64::INFINITY),
+                error: None,
+                passed: true,
+                expected: None,
+                tolerance: None,
+                event_axis: None,
+            },
+        ]),
+    ));
+
+    let evidence = measurement_in_output_dataset(&run, &spec("gain", Some(0.0), None)).expect("evidence resolves");
+
+    assert_eq!(evidence.retained_measurements, 1);
+    assert!(evidence.is_complete_coverage());
 }
 
 #[test]
@@ -1210,7 +1379,7 @@ fn output_specifications_reject_unattributed_failed_and_non_finite_measurements(
         ]),
     ));
 
-    assert_eq!(measurement_in_output_dataset(&run, "gain"), None);
+    assert_eq!(measurement_in_output_dataset(&run, &spec("gain", Some(0.0), None)), None);
 }
 
 #[test]
@@ -1231,10 +1400,11 @@ fn output_specifications_retain_finite_measurement_contract_failures() {
     ));
 
     assert_eq!(
-        measurement_in_output_dataset(&run, "gain"),
+        measurement_in_output_dataset(&run, &spec("gain", Some(0.0), None)),
         Some(OutputMeasurementEvidence {
             value: 9.0,
             measurement_passed: false,
+            retained_measurements: 1,
         })
     );
 }
