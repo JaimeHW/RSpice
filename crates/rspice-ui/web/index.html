@@ -254,9 +254,40 @@
 
   installSimulationWorker();
 
+  // Give the canvas its real backing store before eframe's first paint.
+  //
+  // A canvas whose width/height attributes were never set keeps the 300x150
+  // default while its CSS box is already full size. eframe normally corrects
+  // that from its ResizeObserver, but in a tab that is not being composited the
+  // observer cannot take the runner lock during startup ("failed to lock
+  // runner"), so the first paint reaches egui-wgpu against a surface that was
+  // never allocated and panics: "Tried to update a texture that has not been
+  // allocated yet". The instance is dead after that — it keeps its last frame
+  // and silently drops every click and keystroke, so it reads as a frozen app
+  // rather than a crash. Loading RSpice into a background tab is ordinary
+  // (middle click, a restored session), so this must not depend on the tab
+  // being visible.
+  //
+  // This runs after the dynamic import resolves, which is what makes it
+  // correct: at parse time the element has no laid-out size yet, and the usual
+  // retry — requestAnimationFrame — never fires in a tab that is not
+  // compositing. eframe still owns every resize after this one.
+  function sizeCanvasForFirstPaint() {
+    const canvas = document.getElementById("rspice_canvas");
+    if (!canvas || canvas.clientWidth <= 0 || canvas.clientHeight <= 0) {
+      return;
+    }
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = Math.round(canvas.clientWidth * ratio);
+    canvas.height = Math.round(canvas.clientHeight * ratio);
+  }
+
   const wasmModule = executableAsset("rspice-ui_bg.wasm");
   import(executableAsset("rspice-ui.js").href)
-    .then(({ default: init }) => init({ module_or_path: wasmModule }))
+    .then(({ default: init }) => {
+      sizeCanvasForFirstPaint();
+      return init({ module_or_path: wasmModule });
+    })
     .catch((e) => {
       showStartupError(`Failed to load the RSpice module: ${errorMessage(e)}`);
       console.error(e);
