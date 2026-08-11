@@ -30,6 +30,23 @@ pub(crate) fn production_half(source: &str) -> &str {
     panic!("the scanned source declares no `#[cfg(test)] mod tests` block to stop at")
 }
 
+/// Everything a source file ships, whichever of the two shapes it has.
+///
+/// Splitting a module leaves submodules that carry no tests of their own, and
+/// a guard has to be able to scan those too. A file with no `#[cfg(test)]`
+/// anywhere is production in full. A file that has test-only code still must
+/// declare the `mod tests` boundary, so the ambiguity [`production_half`]
+/// panics on -- a boundary that stopped matching -- stays a red test here as
+/// well. What is never allowed is scanning a file that mixes the two without
+/// saying where the seam is.
+pub(crate) fn production_source(source: &str) -> &str {
+    if source.contains("#[cfg(test)]") {
+        production_half(source)
+    } else {
+        source
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -68,5 +85,21 @@ mod tests {
     #[should_panic(expected = "no `#[cfg(test)] mod tests` block")]
     fn a_source_with_no_test_module_is_a_failure_and_not_an_empty_scan() {
         let _ = production_half("fn shipped() {}\n");
+    }
+
+    /// A split submodule carrying no tests is scanned whole rather than
+    /// refused, which is what lets a guard keep covering a module after it
+    /// grows children.
+    #[test]
+    fn a_source_with_no_test_only_code_at_all_is_production_in_full() {
+        assert_eq!(production_source("fn shipped() {}\n"), "fn shipped() {}\n");
+    }
+
+    /// Test-only code without the `mod tests` boundary is still the ambiguous
+    /// case, and still has to fail rather than be scanned as shipped code.
+    #[test]
+    #[should_panic(expected = "no `#[cfg(test)] mod tests` block")]
+    fn test_only_code_without_the_boundary_is_still_refused() {
+        let _ = production_source("#[cfg(test)]\nfn fixture() {}\nfn shipped() {}\n");
     }
 }
