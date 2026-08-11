@@ -76,6 +76,11 @@ pub struct PlotResponse {
     /// (Ctrl+wheel zooms Y), drag pans, Shift- or right-drag draws a
     /// zoom box, double-click fits.
     pub view: ViewChange,
+    /// The X and Y intervals this frame actually drew, whether they came
+    /// from a pinned viewport or from fitting the data. A surface offering
+    /// explicit axis limits has to seed itself from what the reader can
+    /// see, and only the renderer knows that for certain.
+    pub axes: ((f64, f64), (f64, f64)),
 }
 
 /// A row of the hover readout: (label, value).
@@ -405,6 +410,7 @@ pub fn show(
         horizontal_cursor_y: None,
         plot_rect,
         view: ViewChange::default(),
+        axes: ((spec.x.min, spec.x.max), (spec.y.min, spec.y.max)),
     };
     if plot_rect.width() < 24.0
         || plot_rect.height() < 24.0

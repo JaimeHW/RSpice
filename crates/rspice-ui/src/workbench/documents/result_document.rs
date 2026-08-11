@@ -70,8 +70,8 @@ mod strip;
 mod waves;
 pub(crate) use waves::copy_cursor_text;
 pub(crate) use waves::{
-    SharedXStatus, active_pane_facts, active_shared_x_status, analysis_default_unit,
-    browser_signal_is_current, browser_signal_unit,
+    ActivePaneFacts, SharedXStatus, active_pane_facts, active_shared_x_status,
+    analysis_default_unit, browser_signal_is_current, browser_signal_unit,
 };
 
 pub(crate) use waves::toggle_visibility;
@@ -964,6 +964,16 @@ pub struct ResultsState {
     /// re-runs on purpose — keeping the zoomed window across parameter
     /// tweaks is how engineers compare iterations.
     pub views: std::collections::HashMap<(ResultViewer, PlotPresentationKey, usize), PlotView>,
+    /// What each single-canvas sheet's axes actually spanned when it last
+    /// drew, pinned or fitted.
+    ///
+    /// The axis-limit editor has to open on the interval the reader is
+    /// looking at, and an unpinned sheet's interval is derived inside the
+    /// sheet from its own data. The waveform stack is deliberately absent:
+    /// it reports its panes through `active_pane_facts`, which knows which
+    /// of several panes is active — something a last-drawn record cannot.
+    /// Transient.
+    pub(crate) drawn_axes: std::collections::HashMap<ResultViewer, ((f64, f64), (f64, f64))>,
     /// A viewport gesture asked for from outside the drawing pass.
     ///
     /// Menus, the command palette and shortcuts all reach the workspace
@@ -1003,6 +1013,12 @@ pub struct ResultsState {
     pub op_filter: String,
     /// OP inspector sort: (column key, descending). Transient.
     pub op_sort: Option<(String, bool)>,
+    /// The axis-limit field being typed, if any.
+    ///
+    /// Editing is transactional like the marker dialog: the pinned interval
+    /// only moves on commit, so a half-typed bound never rescales the plot
+    /// under the reader's hands. Transient.
+    pub(crate) axis_limit_draft: Option<(ResultViewer, PaneAxis, String)>,
     /// Open spec-editor rows (None = matrix view). Transient.
     pub spec_drafts: Option<Vec<specs::SpecDraft>>,
     /// SOA rule whose evidence the inspector reports. Transient.
@@ -1546,6 +1562,23 @@ impl ResultsState {
         analysis: AnalysisPresentationKey,
     ) -> bool {
         self.plot_is_zoomed(viewer, PlotPresentationKey::Analysis(analysis))
+    }
+
+    /// Whether any pane of one strip pins the given axis.
+    pub(super) fn analysis_strip_axis_is_pinned(
+        &self,
+        viewer: ResultViewer,
+        analysis: AnalysisPresentationKey,
+        axis: PaneAxis,
+    ) -> bool {
+        let plot = PlotPresentationKey::Analysis(analysis);
+        self.views.iter().any(|((key_viewer, key_plot, _), view)| {
+            (*key_viewer, *key_plot) == (viewer, plot)
+                && match axis {
+                    PaneAxis::X => view.x.is_some(),
+                    PaneAxis::Y => view.y.is_some(),
+                }
+        })
     }
 
     /// Restore a strip addressed by the current run's transient ordinal.
@@ -2395,6 +2428,126 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
     results.derived.ensure_version(data_version);
 
     reconcile_active_viewer(&mut app.state);
+}
+
+/// Record what a single-canvas sheet's axes just spanned.
+///
+/// Called by the sheet that drew, because only it knows which plot on the
+/// sheet is the one the inspector speaks for.
+pub(super) fn record_drawn_axes(
+    results: &mut ResultsState,
+    viewer: ResultViewer,
+    response: &crate::ui::plot::PlotResponse,
+) {
+    results.drawn_axes.insert(viewer, response.axes);
+}
+
+/// Which axis an explicit range applies to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PaneAxis {
+    X,
+    Y,
+}
+
+/// The interval the active sheet's axis is showing, pinned or fitted.
+pub(crate) fn active_axis_range(
+    state: &AppState,
+    facts: &waves::ActivePaneFacts,
+    axis: PaneAxis,
+) -> Option<(f64, f64)> {
+    let viewer = state.ui.results.viewer;
+    if viewer_uses_wave_stack(viewer) {
+        return match axis {
+            PaneAxis::X => facts.x_extent,
+            PaneAxis::Y => facts.y_extent,
+        };
+    }
+    let drawn = state.ui.results.drawn_axes.get(&viewer).copied();
+    let pinned = state.ui.results.plot_view(viewer, 0);
+    match axis {
+        PaneAxis::X => pinned.x.or_else(|| drawn.map(|(x, _)| x)),
+        PaneAxis::Y => pinned.y.or_else(|| drawn.map(|(_, y)| y)),
+    }
+}
+
+/// Whether the active sheet's axis is pinned to an explicit interval rather
+/// than fitting its data.
+pub(crate) fn active_axis_is_pinned(state: &AppState, axis: PaneAxis) -> bool {
+    let viewer = state.ui.results.viewer;
+    if viewer_uses_wave_stack(viewer) {
+        return waves::active_pane_axis_is_pinned(&state.ui.results, axis);
+    }
+    let pinned = state.ui.results.plot_view(viewer, 0);
+    match axis {
+        PaneAxis::X => pinned.x.is_some(),
+        PaneAxis::Y => pinned.y.is_some(),
+    }
+}
+
+/// Render an interval so the field it came from can read it back without loss.
+pub(crate) fn format_axis_range((minimum, maximum): (f64, f64)) -> String {
+    format!(
+        "{} … {}",
+        format_axis_bound(minimum),
+        format_axis_bound(maximum)
+    )
+}
+
+fn format_axis_bound(value: f64) -> String {
+    if value == 0.0 {
+        "0".to_owned()
+    } else if (1.0e-3..1.0e6).contains(&value.abs()) {
+        format!("{value:.7}")
+    } else {
+        format!("{value:.7e}")
+    }
+}
+
+/// Read an interval typed as `min … max`, in engineering notation.
+///
+/// Accepts the ellipsis [`format_axis_range`] writes back, plus `..`, a comma
+/// or plain space, so a pair copied out of a datasheet or a netlist parses
+/// without being reformatted first.
+///
+/// A reversed or degenerate interval is refused rather than quietly sorted.
+/// On a logarithmic axis those are not the same request, and silently
+/// swapping the bounds would hide a typo that changes what the reader sees.
+pub(crate) fn parse_axis_range(text: &str) -> Option<(f64, f64)> {
+    let cleaned = text.replace('…', " ").replace("..", " ").replace(',', " ");
+    let mut parts = cleaned.split_whitespace();
+    let minimum = crate::quantity::engineering::parse_engineering_value(parts.next()?).ok()?;
+    let maximum = crate::quantity::engineering::parse_engineering_value(parts.next()?).ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    (minimum.is_finite() && maximum.is_finite() && maximum > minimum).then_some((minimum, maximum))
+}
+
+/// Pin the active sheet's axis to an explicit interval, or clear it back to
+/// automatic fit.
+///
+/// Routes on [`viewer_uses_wave_stack`] for the same reason every other
+/// viewport gesture does: the stack keys its viewports by analysis, and a
+/// write to the single-canvas store would land where the sheet never reads.
+pub(crate) fn set_active_axis_range(
+    tokens: &Tokens,
+    state: &mut AppState,
+    axis: PaneAxis,
+    range: Option<(f64, f64)>,
+) -> bool {
+    let viewer = state.ui.results.viewer;
+    if viewer_uses_wave_stack(viewer) {
+        return waves::set_active_pane_axis_range(tokens, state, axis, range);
+    }
+    let view = state
+        .ui
+        .results
+        .plot_view_pane_mut_for(viewer, PlotPresentationKey::Global(0), 0);
+    match axis {
+        PaneAxis::X => view.x = range,
+        PaneAxis::Y => view.y = range,
+    }
+    true
 }
 
 fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
@@ -5103,6 +5256,136 @@ mod availability_tests {
                  for the small one — it is still laying out rows it cannot show"
             );
         }
+    }
+
+    #[test]
+    fn a_typed_interval_round_trips_through_the_field_that_shows_it() {
+        for range in [
+            (0.0, 5.0),
+            (-1.5e-3, 2.25e-3),
+            (1.0e6, 1.0e9),
+            (-1.0e-15, 1.0e-14),
+        ] {
+            let text = format_axis_range(range);
+            let parsed = parse_axis_range(&text)
+                .unwrap_or_else(|| panic!("{text} did not read back as an interval"));
+            assert!(
+                (parsed.0 - range.0).abs() <= range.0.abs() * 1.0e-6
+                    && (parsed.1 - range.1).abs() <= range.1.abs() * 1.0e-6,
+                "{range:?} rendered as {text} and read back as {parsed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_interval_parses_from_the_separators_an_engineer_would_paste() {
+        for text in ["1m … 5m", "1m..5m", "1m,5m", "1m 5m", "  1m   5m  "] {
+            assert_eq!(
+                parse_axis_range(text),
+                Some((1.0e-3, 5.0e-3)),
+                "failed on {text:?}"
+            );
+        }
+        assert_eq!(parse_axis_range("-2.5 -1.5"), Some((-2.5, -1.5)));
+    }
+
+    #[test]
+    fn a_reversed_or_degenerate_interval_is_refused_rather_than_sorted() {
+        // On a log axis "5m … 1m" is not the same request as "1m … 5m", and
+        // quietly swapping them would hide the typo behind a correct-looking
+        // plot.
+        assert_eq!(parse_axis_range("5m … 1m"), None);
+        assert_eq!(parse_axis_range("1m … 1m"), None);
+        assert_eq!(parse_axis_range("1m"), None);
+        assert_eq!(parse_axis_range("1m … 2m … 3m"), None);
+        assert_eq!(parse_axis_range(""), None);
+        assert_eq!(parse_axis_range("wide open"), None);
+    }
+
+    /// An explicit interval has to land in the store the sheet reads.
+    ///
+    /// The waveform stack keys its viewports by analysis and every other
+    /// sheet by plot ordinal. A previous fit command wrote to the ordinal
+    /// store for all of them, so Fit was a silent no-op on the four sheets
+    /// people actually use. The same trap is waiting for anything that
+    /// writes a viewport, so this asserts through the reader, not the map.
+    #[test]
+    fn an_explicit_interval_lands_in_the_store_its_own_sheet_reads() {
+        let tokens = Tokens::default();
+        let mut app = app_showing(ResultViewer::Waves);
+        let analysis = active_analysis_key(&app.state);
+        app.state.ui.results.active_wave_pane = Some(WavePanePresentationKey {
+            analysis,
+            unit: "V".to_owned(),
+        });
+
+        assert!(set_active_axis_range(
+            &tokens,
+            &mut app.state,
+            PaneAxis::X,
+            Some((1.0e-6, 4.0e-6))
+        ));
+        assert_eq!(
+            app.state
+                .ui
+                .results
+                .analysis_plot_view_pane(ResultViewer::Waves, analysis, 0)
+                .x,
+            Some((1.0e-6, 4.0e-6)),
+            "the waveform stack must read its own analysis-keyed viewport"
+        );
+        assert!(active_axis_is_pinned(&app.state, PaneAxis::X));
+
+        set_active_axis_range(&tokens, &mut app.state, PaneAxis::X, None);
+        assert!(!active_axis_is_pinned(&app.state, PaneAxis::X));
+
+        let mut app = app_showing(ResultViewer::Smith);
+        app.state.ui.results.viewer = ResultViewer::Smith;
+        assert!(set_active_axis_range(
+            &tokens,
+            &mut app.state,
+            PaneAxis::Y,
+            Some((-0.5, 0.5))
+        ));
+        assert_eq!(
+            app.state.ui.results.plot_view(ResultViewer::Smith, 0).y,
+            Some((-0.5, 0.5)),
+            "a single-canvas sheet keeps its viewport under the plot ordinal"
+        );
+        assert!(active_axis_is_pinned(&app.state, PaneAxis::Y));
+    }
+
+    /// The editor has to open on the interval the reader can see, including
+    /// on a sheet that is fitting its data rather than pinned.
+    #[test]
+    fn the_axis_editor_opens_on_what_the_sheet_actually_drew() {
+        let mut app = app_showing(ResultViewer::Smith);
+        app.state.ui.results.viewer = ResultViewer::Smith;
+        draw_sheet_and_tessellate(&mut app, ResultViewer::Smith);
+
+        let facts = ActivePaneFacts {
+            unit: None,
+            analysis: None,
+            traces: None,
+            runs: None,
+            scale: None,
+            limit_mask: "none bound",
+            x_viewport: None,
+            y_viewport: None,
+            x_extent: None,
+            y_extent: None,
+            pinned: None,
+        };
+        let x = active_axis_range(&app.state, &facts, PaneAxis::X)
+            .expect("the Smith sheet recorded the interval it drew");
+        assert!(
+            x.0 < x.1 && x.0.is_finite() && x.1.is_finite(),
+            "recorded a degenerate interval: {x:?}"
+        );
+        assert!(
+            !active_axis_is_pinned(&app.state, PaneAxis::X),
+            "a fitted sheet must not report itself pinned just because it drew"
+        );
     }
 
     #[test]

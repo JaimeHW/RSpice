@@ -10,12 +10,14 @@ use crate::state::{CellViewRef, Component, ComponentType, ViewType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::DesignCheckStatus;
+use crate::workbench::documents::result_document::PaneAxis;
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
 use crate::workbench::{AppState, MessageId, RSpiceApp, ResultViewer};
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
-    PANEL_HEADER_H, PANEL_SECTION_H, StatusMark, WorkbenchIcon, property_row, property_row_status,
+    PANEL_HEADER_H, PANEL_SECTION_H, StatusMark, WorkbenchIcon, property_row,
+    property_row_input_action, property_row_status,
     schematic_section_header as design_schematic_section_header,
     section_header as design_section_header,
 };
@@ -1890,32 +1892,11 @@ fn active_result_pane(
         };
         property_row(ui, "Composition", &composition);
     }
-    // A unit-pane stack already states its interval in the viewport rows
-    // above; only a single-canvas viewer needs its pinned range spelled out.
-    if !wave_stack {
-        if let Some((minimum, maximum)) = view.x {
-            property_row(
-                ui,
-                "X range",
-                &format!(
-                    "{} – {}",
-                    format_result_scalar(minimum),
-                    format_result_scalar(maximum)
-                ),
-            );
-        }
-        if let Some((minimum, maximum)) = view.y {
-            property_row(
-                ui,
-                "Y range",
-                &format!(
-                    "{} – {}",
-                    format_result_scalar(minimum),
-                    format_result_scalar(maximum)
-                ),
-            );
-        }
-    }
+    // Explicit limits, not just a readout of the gesture that got here.
+    // Comparing two runs on identical axes, or holding a decade while a
+    // parameter sweeps, cannot be done by dragging.
+    axis_limit_row(ui, app, &facts, PaneAxis::X, "X range");
+    axis_limit_row(ui, app, &facts, PaneAxis::Y, "Y range");
     let fit_label = if wave_stack {
         "Fit active strip"
     } else {
@@ -1929,6 +1910,71 @@ fn active_result_pane(
             &mut app.state,
             crate::workbench::documents::result_document::ViewGesture::Fit,
         );
+    }
+}
+
+/// An explicit interval for one axis of the active pane, or automatic fit.
+///
+/// The plot's own gestures can only ever say "a bit more than that". Holding
+/// a decade while a parameter sweeps, or putting two runs on identical axes
+/// so their curves can be compared at all, needs the numbers themselves.
+fn axis_limit_row(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    facts: &crate::workbench::documents::result_document::ActivePaneFacts,
+    axis: PaneAxis,
+    label: &str,
+) {
+    use crate::workbench::documents::result_document::{
+        active_axis_is_pinned, active_axis_range, format_axis_range, parse_axis_range,
+        set_active_axis_range,
+    };
+
+    let viewer = app.state.ui.results.viewer;
+    let current = active_axis_range(&app.state, facts, axis);
+    let pinned = active_axis_is_pinned(&app.state, axis);
+    let committed = current.map(format_axis_range).unwrap_or_default();
+    let mut text = match app.state.ui.results.axis_limit_draft.as_ref() {
+        Some((draft_viewer, draft_axis, text))
+            if *draft_viewer == viewer && *draft_axis == axis =>
+        {
+            text.clone()
+        }
+        _ => committed.clone(),
+    };
+
+    let parsed = parse_axis_range(&text);
+    let invalid = !text.trim().is_empty() && parsed.is_none();
+    let (edit, reset) = property_row_input_action(
+        ui,
+        label,
+        &mut text,
+        invalid,
+        WorkbenchIcon::ZoomFit,
+        "Fit this axis to the retained data",
+        pinned,
+        Some("This axis is already fitting its data."),
+    );
+
+    if edit.changed() {
+        app.state.ui.results.axis_limit_draft = Some((viewer, axis, text.clone()));
+    }
+    // Commit on Enter or on leaving the field, never per keystroke: "1.2" is
+    // a legal prefix of "1.2m" and three orders of magnitude away from it.
+    if edit.lost_focus() {
+        let tokens = Tokens::get(ui.ctx());
+        if text.trim().is_empty() {
+            set_active_axis_range(&tokens, &mut app.state, axis, None);
+            app.state.ui.results.axis_limit_draft = None;
+        } else if let Some(range) = parse_axis_range(&text) {
+            set_active_axis_range(&tokens, &mut app.state, axis, Some(range));
+            app.state.ui.results.axis_limit_draft = None;
+        }
+    }
+    if reset.clicked() {
+        let tokens = Tokens::get(ui.ctx());
+        set_active_axis_range(&tokens, &mut app.state, axis, None);
+        app.state.ui.results.axis_limit_draft = None;
     }
 }
 

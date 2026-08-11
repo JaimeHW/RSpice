@@ -2477,6 +2477,10 @@ pub(crate) struct ActivePaneFacts {
     pub limit_mask: &'static str,
     pub x_viewport: Option<String>,
     pub y_viewport: Option<String>,
+    /// The same two intervals as numbers, so an axis-limit editor opens on
+    /// what the reader is actually looking at rather than on an empty field.
+    pub x_extent: Option<(f64, f64)>,
+    pub y_extent: Option<(f64, f64)>,
     /// Whether any pane of the active strip is showing a pinned viewport.
     /// `None` when this sheet has no unit-pane stack to report on.
     pub pinned: Option<bool>,
@@ -2491,6 +2495,7 @@ pub(crate) fn active_pane_facts(
     // or it is fitting the retained data. The mockup states the interval
     // either way: "automatic" alone does not tell a reader what they see.
     let (x_viewport, y_viewport) = active_pane_viewports(tokens, state);
+    let (x_extent, y_extent) = active_pane_extents(tokens, state);
     let (analysis, traces, runs) = active_pane_identity(tokens, state);
     let pinned = state
         .ui
@@ -2524,6 +2529,8 @@ pub(crate) fn active_pane_facts(
         },
         x_viewport,
         y_viewport,
+        x_extent,
+        y_extent,
         pinned,
     }
 }
@@ -2632,6 +2639,108 @@ fn active_pane_identity(
 
 /// The active pane's X and Y intervals, formatted through the strip's own
 /// formatter so they read like every other number on the sheet.
+/// The active pane's X and Y intervals, as numbers.
+///
+/// One derivation, shared with the formatted rows below, so a typed axis
+/// limit can never open on a different interval than the one displayed.
+fn active_pane_extents(
+    tokens: &Tokens,
+    state: &mut AppState,
+) -> (Option<(f64, f64)>, Option<(f64, f64)>) {
+    let Some(key) = state.ui.results.active_wave_pane.clone() else {
+        return (None, None);
+    };
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        tokens,
+    );
+    let Some(model) = models
+        .iter()
+        .find(|model| model.analysis_key == key.analysis)
+    else {
+        return (None, None);
+    };
+    let panes = model.unit_panes();
+    let Some((ordinal, pane)) = panes
+        .iter()
+        .enumerate()
+        .find(|(_, pane)| pane.unit == key.unit)
+    else {
+        return (None, None);
+    };
+    let x = x_range(model)
+        .map(|full| shared_x_view(&state.ui.results, key.analysis, panes.len()).unwrap_or(full));
+    let y = state
+        .ui
+        .results
+        .analysis_plot_view_pane(super::ResultViewer::Waves, key.analysis, ordinal)
+        .y
+        .or_else(|| pane_y_range(&mut state.ui.results.derived, model, &pane.traces));
+    (x, y)
+}
+
+/// Whether the active pane's axis carries an explicit interval.
+pub(crate) fn active_pane_axis_is_pinned(results: &ResultsState, axis: super::PaneAxis) -> bool {
+    let Some(key) = results.active_wave_pane.as_ref() else {
+        return false;
+    };
+    // Resolving the pane ordinal would need the built models, which this
+    // accessor deliberately does not take. It does not need them: X is shared
+    // by the whole strip, and a pinned Y on any pane of the strip is what the
+    // "manual range" state means to a reader either way.
+    results.analysis_strip_axis_is_pinned(super::ResultViewer::Waves, key.analysis, axis)
+}
+
+/// Pin the active pane's axis to an explicit interval, or clear it.
+///
+/// X belongs to the strip, not the pane: panes of one analysis always share
+/// one abscissa, so an explicit X writes through every pane the way a drag
+/// on the shared strip does. Y is the pane's own, because each pane carries
+/// its own unit and one interval across volts and amps would mean nothing.
+pub(crate) fn set_active_pane_axis_range(
+    tokens: &Tokens,
+    state: &mut AppState,
+    axis: super::PaneAxis,
+    range: Option<(f64, f64)>,
+) -> bool {
+    let Some(key) = state.ui.results.active_wave_pane.clone() else {
+        return false;
+    };
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        tokens,
+    );
+    let Some(model) = models
+        .iter()
+        .find(|model| model.analysis_key == key.analysis)
+    else {
+        return false;
+    };
+    let panes = model.unit_panes();
+    let Some(ordinal) = panes.iter().position(|pane| pane.unit == key.unit) else {
+        return false;
+    };
+    match axis {
+        super::PaneAxis::X => {
+            set_shared_x_view(&mut state.ui.results, key.analysis, panes.len(), range);
+        }
+        super::PaneAxis::Y => {
+            state
+                .ui
+                .results
+                .analysis_plot_view_pane_mut(super::ResultViewer::Waves, key.analysis, ordinal)
+                .y = range;
+        }
+    }
+    true
+}
+
 fn active_pane_viewports(
     tokens: &Tokens,
     state: &mut AppState,

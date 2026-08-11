@@ -217,6 +217,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         None,
         Some(&readout),
     );
+    super::record_drawn_axes(
+        &mut state.ui.results,
+        super::ResultViewer::Nyquist,
+        &response,
+    );
     if response.view.any() {
         let change = super::square_xy_view_change((x0, x1), (y0, y1), response.view);
         state

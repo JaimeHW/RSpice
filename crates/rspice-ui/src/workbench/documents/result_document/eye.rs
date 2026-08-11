@@ -170,6 +170,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }));
 
     let response = plot::show(ui, &spec, &mut state.ui.results.cache, None, None);
+    super::record_drawn_axes(&mut state.ui.results, super::ResultViewer::Eye, &response);
     if response.view.any() {
         state
             .ui

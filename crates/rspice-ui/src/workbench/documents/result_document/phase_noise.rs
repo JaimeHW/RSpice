@@ -291,6 +291,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         ]
     };
     let response = plot::show(ui, &spec, &mut state.ui.results.cache, None, Some(&readout));
+    super::record_drawn_axes(
+        &mut state.ui.results,
+        super::ResultViewer::PhaseNoise,
+        &response,
+    );
     if response.view.any() {
         state
             .ui
