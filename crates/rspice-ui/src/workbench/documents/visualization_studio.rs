@@ -1231,20 +1231,6 @@ fn retained_document_analysis(
     })
 }
 
-fn project_catalog_viewer_for_analysis(
-    viewer: ResultViewer,
-    analysis: &AnalysisResult,
-) -> ResultViewer {
-    if viewer == ResultViewer::Waves && analysis.analysis_type == AnalysisType::DcSweep {
-        ResultViewer::DcSweep
-    } else if viewer == ResultViewer::Fft && analysis.analysis_type == AnalysisType::HarmonicBalance
-    {
-        ResultViewer::HarmonicBalance
-    } else {
-        viewer
-    }
-}
-
 fn active_results_comparison_source(state: &AppState) -> Result<ResultsComparisonSource, String> {
     if state.workbench.workspace != Workspace::Results {
         return Err("Open a result document before comparing datasets.".to_owned());
@@ -1274,8 +1260,8 @@ fn active_results_comparison_source(state: &AppState) -> Result<ResultsCompariso
                 .find_map(|pane| pane.binding.map(|binding| (pane, binding)))
             {
                 authored_analysis = Some(pane_binding.analysis_id);
-                viewer =
-                    renderer_for_viewer_document(&pane.viewer_id).unwrap_or(ResultViewer::Waves);
+                viewer = ResultViewer::from_viewer_document_id(&pane.viewer_id)
+                    .unwrap_or(ResultViewer::Waves);
                 (
                     pane_binding.dataset.dataset_id,
                     Some(pane_binding.dataset.content_digest),
@@ -1324,7 +1310,7 @@ fn active_results_comparison_source(state: &AppState) -> Result<ResultsCompariso
             .first()
             .ok_or_else(|| "The active result dataset contains no analysis.".to_owned())?
     };
-    viewer = project_catalog_viewer_for_analysis(viewer, analysis);
+    viewer = result_document::project_viewer_for_analysis(viewer, analysis);
     Ok(ResultsComparisonSource {
         dataset_id,
         analysis_sequence: analysis.id,
@@ -2015,9 +2001,9 @@ fn resolved_viewer_availability_for_binding(
             return Err("Viewer identity is not registered".to_owned());
         }
     }
-    let viewer = renderer_for_viewer_document(definition.id)
+    let viewer = ResultViewer::from_viewer_document_id(definition.id)
         .ok_or_else(|| "No exact Rust renderer is registered for this viewer".to_owned())?;
-    let viewer = project_catalog_viewer_for_analysis(viewer, analysis);
+    let viewer = result_document::project_viewer_for_analysis(viewer, analysis);
     let binding_is_active = state
         .simulation
         .active_run()
@@ -2076,23 +2062,6 @@ fn resolved_viewer_availability_for_binding(
         });
     }
     Ok(viewer)
-}
-
-fn renderer_for_viewer_document(id: &str) -> Option<ResultViewer> {
-    match id {
-        "viewer-waveform" => Some(ResultViewer::Waves),
-        "viewer-bode" => Some(ResultViewer::Bode),
-        "viewer-spectrum" => Some(ResultViewer::Fft),
-        "viewer-phase-noise" => Some(ResultViewer::PhaseNoise),
-        "viewer-smith" => Some(ResultViewer::Smith),
-        "viewer-table" => Some(ResultViewer::Specs),
-        "viewer-histogram" => Some(ResultViewer::Hist),
-        "eye-viewer" => Some(ResultViewer::Eye),
-        "viewer-pz" => Some(ResultViewer::PoleZero),
-        "viewer-contribution" => Some(ResultViewer::Contribution),
-        "viewer-transfer-function" => Some(ResultViewer::TransferFunction),
-        _ => None,
-    }
 }
 
 fn available_analysis_ids(state: &AppState) -> Vec<&'static str> {
@@ -2438,19 +2407,19 @@ mod integrity_scan_tests {
     fn comparison_source_projection_preserves_dc_and_hb_specialist_modes() {
         let dc = AnalysisResult::new(1, AnalysisType::DcSweep, "DC");
         assert_eq!(
-            project_catalog_viewer_for_analysis(ResultViewer::Waves, &dc),
+            result_document::project_viewer_for_analysis(ResultViewer::Waves, &dc),
             ResultViewer::DcSweep
         );
 
         let hb = AnalysisResult::new(2, AnalysisType::HarmonicBalance, "HB");
         assert_eq!(
-            project_catalog_viewer_for_analysis(ResultViewer::Fft, &hb),
+            result_document::project_viewer_for_analysis(ResultViewer::Fft, &hb),
             ResultViewer::HarmonicBalance
         );
 
         let transient = AnalysisResult::new(3, AnalysisType::Transient, "TRAN");
         assert_eq!(
-            project_catalog_viewer_for_analysis(ResultViewer::Waves, &transient),
+            result_document::project_viewer_for_analysis(ResultViewer::Waves, &transient),
             ResultViewer::Waves
         );
     }

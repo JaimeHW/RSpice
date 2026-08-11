@@ -154,7 +154,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
     if select_pane_binding(&mut app.state, restored_pane).is_ok() {
         app.state.workbench.visualization_studio.active_pane = Some(restored_pane_id);
         let restored_viewer = if activated_pane_id.is_some() {
-            renderer_for_viewer_document(&restored_pane.viewer_id)
+            ResultViewer::from_viewer_document_id(&restored_pane.viewer_id)
         } else {
             active_viewer
         };
@@ -202,7 +202,7 @@ fn compatible_active_viewer(
     {
         return Some(selected);
     }
-    renderer_for_viewer_document(&pane.viewer_id).filter(|viewer| {
+    ResultViewer::from_viewer_document_id(&pane.viewer_id).filter(|viewer| {
         super::family_allows_viewer(family_label, *viewer)
             && super::viewer_is_available(state, *viewer)
     })
@@ -362,7 +362,7 @@ pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> b
         return false;
     }
     state.workbench.visualization_studio.active_pane = Some(pane.id.get());
-    if let Some(viewer) = renderer_for_viewer_document(&pane.viewer_id) {
+    if let Some(viewer) = ResultViewer::from_viewer_document_id(&pane.viewer_id) {
         state.ui.results.viewer = viewer;
     }
     state
@@ -564,7 +564,7 @@ fn pane_viewer(
     if is_active {
         active_viewer
     } else {
-        renderer_for_viewer_document(retained_viewer_id)
+        ResultViewer::from_viewer_document_id(retained_viewer_id)
     }
 }
 
@@ -694,37 +694,19 @@ fn select_pane_context(state: &mut AppState, pane: &Pane) -> Result<(), String> 
         .workbench
         .visualization_studio
         .selected_viewer_document = pane.viewer_id.clone();
-    if let Some(viewer) = renderer_for_viewer_document(&pane.viewer_id) {
+    if let Some(viewer) = ResultViewer::from_viewer_document_id(&pane.viewer_id) {
         state.ui.results.viewer = bound_viewer_projection(state, viewer);
     }
     Ok(())
 }
 
 fn bound_viewer_projection(state: &AppState, viewer: ResultViewer) -> ResultViewer {
-    if viewer == ResultViewer::Waves
-        && state
-            .simulation
-            .active_analysis()
-            .is_some_and(|analysis| analysis.analysis_type == AnalysisType::DcSweep)
-    {
-        ResultViewer::DcSweep
-    } else if viewer == ResultViewer::Fft
-        && state
-            .simulation
-            .active_analysis()
-            .is_some_and(|analysis| analysis.analysis_type == AnalysisType::HarmonicBalance)
-    {
-        ResultViewer::HarmonicBalance
-    } else if viewer == ResultViewer::Bode
-        && state
-            .simulation
-            .active_analysis()
-            .is_some_and(super::bode::ordinary_noise_spectrum_is_renderable)
-    {
-        ResultViewer::NoiseContrib
-    } else {
-        viewer
-    }
+    state
+        .simulation
+        .active_analysis()
+        .map_or(viewer, |analysis| {
+            super::project_viewer_for_analysis(viewer, analysis)
+        })
 }
 
 fn select_pane_binding(state: &mut AppState, pane: &Pane) -> Result<(), String> {
@@ -772,23 +754,6 @@ fn analysis_identity(run: &SimulationRun, analysis: &AnalysisResult) -> Analysis
     )
 }
 
-pub(super) fn renderer_for_viewer_document(id: &str) -> Option<ResultViewer> {
-    match id {
-        "viewer-waveform" => Some(ResultViewer::Waves),
-        "viewer-bode" => Some(ResultViewer::Bode),
-        "viewer-spectrum" => Some(ResultViewer::Fft),
-        "viewer-phase-noise" => Some(ResultViewer::PhaseNoise),
-        "viewer-smith" => Some(ResultViewer::Smith),
-        "viewer-table" => Some(ResultViewer::Table),
-        "viewer-histogram" => Some(ResultViewer::Hist),
-        "eye-viewer" => Some(ResultViewer::Eye),
-        "viewer-pz" => Some(ResultViewer::PoleZero),
-        "viewer-contribution" => Some(ResultViewer::Contribution),
-        "viewer-transfer-function" => Some(ResultViewer::TransferFunction),
-        _ => None,
-    }
-}
-
 /// Whether the registered persistent renderer can truthfully present this
 /// exact retained analysis. Catalog compatibility is intentionally broader:
 /// one catalog document can own several specialist modes, while the current
@@ -796,7 +761,7 @@ pub(super) fn renderer_for_viewer_document(id: &str) -> Option<ResultViewer> {
 /// broader catalog promise to a narrower renderer and silently substitute the
 /// resulting presentation.
 pub(super) fn renderer_supports_analysis(id: &str, analysis: &AnalysisResult) -> bool {
-    if renderer_for_viewer_document(id).is_none() {
+    if ResultViewer::from_viewer_document_id(id).is_none() {
         return false;
     }
     match id {
@@ -1034,20 +999,26 @@ mod tests {
     #[test]
     fn exact_renderer_mapping_exposes_only_implemented_catalog_viewers() {
         assert_eq!(
-            renderer_for_viewer_document("viewer-waveform"),
+            ResultViewer::from_viewer_document_id("viewer-waveform"),
             Some(ResultViewer::Waves)
         );
         assert_eq!(
-            renderer_for_viewer_document("viewer-table"),
+            ResultViewer::from_viewer_document_id("viewer-table"),
             Some(ResultViewer::Table)
         );
         assert_eq!(
-            renderer_for_viewer_document("viewer-phase-noise"),
+            ResultViewer::from_viewer_document_id("viewer-phase-noise"),
             Some(ResultViewer::PhaseNoise)
         );
-        assert_eq!(renderer_for_viewer_document("viewer-manifest"), None);
-        assert_eq!(renderer_for_viewer_document("manifest"), None);
-        assert_eq!(renderer_for_viewer_document("field-viewer-3d"), None);
+        assert_eq!(
+            ResultViewer::from_viewer_document_id("viewer-manifest"),
+            None
+        );
+        assert_eq!(ResultViewer::from_viewer_document_id("manifest"), None);
+        assert_eq!(
+            ResultViewer::from_viewer_document_id("field-viewer-3d"),
+            None
+        );
     }
 
     #[test]

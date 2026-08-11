@@ -168,7 +168,7 @@ pub(super) fn visualization_configuration_status(state: &AppState) -> Result<(),
                 return Err(format!("Pane {:02} viewer is not registered", pane.id));
             }
         }
-        if renderer_for_viewer_document(definition.id) != Some(pane.viewer) {
+        if ResultViewer::from_viewer_document_id(definition.id) != Some(pane.viewer) {
             return Err(format!(
                 "Pane {:02} has no exact renderer for its retained viewer",
                 pane.id

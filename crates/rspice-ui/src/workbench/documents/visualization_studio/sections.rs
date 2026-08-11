@@ -1071,7 +1071,7 @@ pub(super) fn resolved_viewer_availability(
             return Err("Viewer identity is not registered".to_owned());
         }
     }
-    let Some(viewer) = renderer_for_viewer_document(definition.id) else {
+    let Some(viewer) = ResultViewer::from_viewer_document_id(definition.id) else {
         return Err("No exact Rust renderer is registered for this viewer".to_owned());
     };
     if !result_document::viewer_is_available(state, viewer) {

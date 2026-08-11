@@ -368,6 +368,33 @@ impl ResultViewer {
         })
     }
 
+    /// The sheet that draws a retained pane bound to this viewer document.
+    ///
+    /// The inverse of [`Self::viewer_document_id`] is not one-to-one — three
+    /// sheets render `viewer-table` — so the choice has to be made once, here.
+    /// It was made twice instead, and the two answers differed: the persistent
+    /// document layer drew the Table sheet and the Studio drew Specs, so the
+    /// same pane showed exact samples in one surface and a specification matrix
+    /// in the other. Table is the truthful answer, because
+    /// `renderer_supports_analysis` admits a `viewer-table` pane on retained
+    /// waveforms — which is what Table reads and what Specs does not.
+    pub(crate) fn from_viewer_document_id(id: &str) -> Option<Self> {
+        Some(match id {
+            "viewer-waveform" => ResultViewer::Waves,
+            "viewer-bode" => ResultViewer::Bode,
+            "viewer-spectrum" => ResultViewer::Fft,
+            "viewer-phase-noise" => ResultViewer::PhaseNoise,
+            "viewer-smith" => ResultViewer::Smith,
+            "viewer-table" => ResultViewer::Table,
+            "viewer-histogram" => ResultViewer::Hist,
+            "eye-viewer" => ResultViewer::Eye,
+            "viewer-pz" => ResultViewer::PoleZero,
+            "viewer-contribution" => ResultViewer::Contribution,
+            "viewer-transfer-function" => ResultViewer::TransferFunction,
+            _ => return None,
+        })
+    }
+
     const fn tab_icon(self) -> WorkbenchIcon {
         match self {
             ResultViewer::Waves | ResultViewer::DcSweep | ResultViewer::NoiseContrib => {
@@ -2279,6 +2306,36 @@ fn readout_strip_height(state: &AppState) -> f32 {
     }
 }
 
+/// The sheet a bound pane actually draws, once the analysis behind it is known.
+///
+/// Several viewer documents cover a pair of sheets that differ only by what the
+/// analysis turned out to be — one waveform renderer serves transient and DC
+/// sweeps, one spectrum renderer serves FFT and harmonic balance, one AC
+/// renderer serves Bode and ordinary noise. Which of the pair to draw is one
+/// question, so it is answered once: the persistent-document layer and the
+/// Studio each answered it separately and the Studio's copy was missing the
+/// noise rule, so the same pane drew the noise spectrum in a result document
+/// and reported an unsatisfiable Bode contract in the Studio.
+pub(crate) fn project_viewer_for_analysis(
+    viewer: ResultViewer,
+    analysis: &crate::state::AnalysisResult,
+) -> ResultViewer {
+    use crate::state::AnalysisType;
+
+    match viewer {
+        ResultViewer::Waves if analysis.analysis_type == AnalysisType::DcSweep => {
+            ResultViewer::DcSweep
+        }
+        ResultViewer::Fft if analysis.analysis_type == AnalysisType::HarmonicBalance => {
+            ResultViewer::HarmonicBalance
+        }
+        ResultViewer::Bode if bode::ordinary_noise_spectrum_is_renderable(analysis) => {
+            ResultViewer::NoiseContrib
+        }
+        _ => viewer,
+    }
+}
+
 pub(crate) fn viewer_is_available(state: &AppState, viewer: ResultViewer) -> bool {
     viewer_availability(state, viewer).available
 }
@@ -3063,7 +3120,10 @@ fn sheet_purpose(state: &AppState) -> String {
 
 fn export_menu(ui: &mut Ui, state: &mut AppState) {
     ui.menu_button("Export…", |ui| {
-        if ui.button("Waveform data (CSV)…").clicked() {
+        // Not "waveform data": the export routes on the retained payload, so
+        // on the evidence sheets it writes SOA rules, ageing checkpoints,
+        // optimizer candidates or an event history — none of them samples.
+        if ui.button("Result data (CSV)…").clicked() {
             state.ui.export_csv_requested = true;
             ui.close();
         }
@@ -3231,44 +3291,20 @@ fn viewer_tabs_filtered(
     }
 }
 
+/// Which sheets a persistent result document's docbar offers.
+///
+/// The family owns the answer, next to the `includes` list the Create dialog
+/// composes documents from, so the two cannot drift: this restated the mapping
+/// once and drifted immediately — the digital family bound its first pane to
+/// the waveform renderer and then refused every waveform sheet, and the
+/// phase-noise and table sheets were unreachable in families the dialog binds
+/// them for.
+///
+/// Imported or renamed pages resolve to no family and keep every sheet their
+/// dataset can feed reachable.
 fn family_allows_viewer(family_label: &str, viewer: ResultViewer) -> bool {
-    if viewer == ResultViewer::Manifest {
-        return true;
-    }
-    match family_label {
-        "Waveform worksheet" => matches!(
-            viewer,
-            ResultViewer::Waves
-                | ResultViewer::DcSweep
-                | ResultViewer::Eye
-                | ResultViewer::TransferFunction
-                | ResultViewer::Table
-        ),
-        "Frequency & stability" => matches!(
-            viewer,
-            ResultViewer::Bode
-                | ResultViewer::NoiseContrib
-                | ResultViewer::TransferFunction
-                | ResultViewer::Nyquist
-                | ResultViewer::PoleZero
-        ),
-        "RF & network" => matches!(
-            viewer,
-            ResultViewer::Smith
-                | ResultViewer::HarmonicBalance
-                | ResultViewer::Fft
-                | ResultViewer::PhaseNoise
-        ),
-        "Statistics & yield" => matches!(viewer, ResultViewer::Hist | ResultViewer::Contribution),
-        "Digital & AMS events" => viewer == ResultViewer::Events,
-        // These specialist mockup families have no native quick modes. They
-        // resolve to the dataset manifest rather than substituting an
-        // unrelated electrical viewer.
-        "Fields & physical" | "Photonics" | "Report page" => false,
-        // Imported or migrated documents with no recognized family label keep
-        // their exact retained panes reachable.
-        _ => true,
-    }
+    create_document::ResultDocumentFamily::from_label(family_label)
+        .is_none_or(|family| family.offers_sheet(viewer))
 }
 
 fn reconcile_active_viewer(state: &mut AppState) {
@@ -4115,8 +4151,19 @@ mod availability_tests {
         assert_eq!(hidden_wave_strip_count(&state), 1);
     }
 
+    const MOCKUP_FAMILIES: [&str; 8] = [
+        "Waveform worksheet",
+        "Frequency & stability",
+        "RF & network",
+        "Statistics & yield",
+        "Digital & AMS events",
+        "Fields & physical",
+        "Photonics",
+        "Report page",
+    ];
+
     #[test]
-    fn persistent_document_families_expose_only_their_mockup_viewers() {
+    fn persistent_document_families_scope_to_their_own_plot_types() {
         assert!(family_allows_viewer(
             "Waveform worksheet",
             ResultViewer::Waves
@@ -4155,35 +4202,70 @@ mod availability_tests {
             "Statistics & yield",
             ResultViewer::Nyquist
         ));
-        // The digital family gained a native mode when the event sheet was
-        // wired; it is the only viewer that family admits.
-        assert!(family_allows_viewer(
-            "Digital & AMS events",
-            ResultViewer::Events
-        ));
-        assert!(!family_allows_viewer(
-            "Digital & AMS events",
-            ResultViewer::Waves
-        ));
+
         assert!(!family_allows_viewer(
             "Fields & physical",
             ResultViewer::Waves
         ));
-        assert!(!family_allows_viewer("Report page", ResultViewer::Waves));
-        for family in [
-            "Waveform worksheet",
-            "Frequency & stability",
-            "RF & network",
-            "Statistics & yield",
-            "Digital & AMS events",
-            "Fields & physical",
-            "Photonics",
-            "Report page",
-        ] {
+        assert!(!family_allows_viewer("Photonics", ResultViewer::Waves));
+    }
+
+    /// Dataset-native sheets carry evidence the bound dataset either has or has
+    /// not; they are not one family's plot mode, and availability is their only
+    /// gate. A family that hid them would drop evidence the same dataset shows
+    /// in the workspace the moment the user promoted the view to a document.
+    #[test]
+    fn every_family_offers_the_dataset_native_sheets() {
+        for family in MOCKUP_FAMILIES {
+            for viewer in
+                ResultViewer::every().filter(|viewer| viewer.viewer_document_id().is_none())
+            {
+                assert!(family_allows_viewer(family, viewer), "{family} {viewer:?}");
+            }
+        }
+    }
+
+    /// `viewer_document_id` and `from_viewer_document_id` are one map read in
+    /// two directions, so every answer either gives must agree with the other.
+    /// Three sheets share `viewer-table`, which is exactly where the second
+    /// copy of the inverse had drifted onto a different one.
+    #[test]
+    fn the_viewer_document_map_agrees_with_itself_in_both_directions() {
+        use crate::results::viewer_catalog::VIEWER_DOCUMENTS;
+
+        for viewer in ResultViewer::every() {
+            let Some(document_id) = viewer.viewer_document_id() else {
+                assert_eq!(
+                    ResultViewer::from_viewer_document_id(viewer.label()),
+                    None,
+                    "{viewer:?} is dataset-native and must not answer to a document id"
+                );
+                continue;
+            };
             assert!(
-                family_allows_viewer(family, ResultViewer::Manifest),
-                "{family}"
+                VIEWER_DOCUMENTS
+                    .iter()
+                    .any(|document| document.id == document_id),
+                "{viewer:?} claims {document_id}, which the catalog does not publish"
             );
+            let drawn_by = ResultViewer::from_viewer_document_id(document_id)
+                .unwrap_or_else(|| panic!("{document_id} has no sheet"));
+            assert_eq!(
+                drawn_by.viewer_document_id(),
+                Some(document_id),
+                "{document_id} resolves to {drawn_by:?}, which renders something else"
+            );
+        }
+    }
+
+    /// Pages carry their family only as their title, so a renamed or imported
+    /// page resolves to no family at all. It must fall back to offering every
+    /// sheet the dataset can feed, never to hiding all of them.
+    #[test]
+    fn a_page_outside_the_mockup_families_keeps_every_sheet_reachable() {
+        for viewer in ResultViewer::every() {
+            assert!(family_allows_viewer("Transient review", viewer));
+            assert!(family_allows_viewer("Waveform worksheet · 01", viewer));
         }
     }
 
@@ -4205,7 +4287,7 @@ mod availability_tests {
                 // The stress history the producer now retains, named exactly as
                 // the sheet addresses it.
                 WaveformData::new(
-                    &crate::services::safety::soa_stress_waveform_name(
+                    crate::services::safety::soa_stress_waveform_name(
                         "M1",
                         crate::services::safety::SoAParameter::Vds,
                     ),

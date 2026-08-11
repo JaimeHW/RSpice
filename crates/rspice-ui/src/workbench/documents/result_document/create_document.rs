@@ -25,12 +25,12 @@ use crate::state::workspace::VisualizationDocumentPersistenceError;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationRunLifecycle};
 use crate::ui::tokens::Tokens;
 use crate::workbench::state::{CreateResultDocumentDialogState, Workspace, WorkspaceDocumentId};
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::{AppState, RSpiceApp, ResultViewer};
 
 const MAX_DOCUMENT_NAME_BYTES: usize = 120;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ResultDocumentFamily {
+pub(super) enum ResultDocumentFamily {
     WaveformWorksheet,
     FrequencyAndStability,
     RfAndNetwork,
@@ -94,6 +94,42 @@ impl ResultDocumentFamily {
 
     fn from_id(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|family| family.id() == id)
+    }
+
+    /// Resolve the family a persistent page belongs to. Pages are titled with
+    /// the family label at creation; a page the user has renamed, or one
+    /// imported from another build, resolves to `None` and is scoped by its own
+    /// retained panes instead.
+    pub(super) fn from_label(label: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|family| family.label() == label)
+    }
+
+    /// Which workspace sheets this family's docbar offers.
+    ///
+    /// Every viewer document [`Self::includes`] admits has to be offered here:
+    /// that is the same list the Create dialog binds a new document's first
+    /// pane from, so a docbar refusing it would strand the document RSpice had
+    /// just built with no reachable sheet. What follows are quick modes — they
+    /// read the bound dataset through a different sheet without introducing a
+    /// pane type the family does not compose.
+    pub(super) fn offers_sheet(self, viewer: ResultViewer) -> bool {
+        // Dataset-native sheets are evidence the bound dataset either carries
+        // or it does not, never one of a family's plot modes. No family claims
+        // or excludes them; `viewer_availability` is their only gate.
+        let Some(document_id) = viewer.viewer_document_id() else {
+            return true;
+        };
+        if viewer_document(document_id).is_some_and(|document| self.includes(document)) {
+            return true;
+        }
+        match self {
+            // Exact samples and the scalar DC gains behind them are how a
+            // waveform review is checked; neither adds a pane to the sheet.
+            Self::WaveformWorksheet => {
+                matches!(viewer, ResultViewer::TransferFunction | ResultViewer::Table)
+            }
+            _ => false,
+        }
     }
 
     fn includes(self, viewer: &ViewerDocumentDefinition) -> bool {
@@ -1272,6 +1308,46 @@ mod tests {
                     .any(|family| family.includes(viewer)),
                 "{} has no result-document family",
                 viewer.id
+            );
+        }
+    }
+
+    /// The Create dialog binds a new document's first pane from the family's
+    /// own `includes` list, and the persistent docbar scopes that page with
+    /// [`ResultDocumentFamily::offers_sheet`]. A docbar refusing the pane the
+    /// dialog had just bound would strand the document with no reachable sheet
+    /// — which is what the digital family did while the two lists were
+    /// maintained apart: it composed waveform and eye panes, then admitted
+    /// neither sheet.
+    #[test]
+    fn every_family_offers_the_sheets_its_create_path_can_bind() {
+        for family in ResultDocumentFamily::ALL {
+            for viewer in ResultViewer::every() {
+                let Some(document_id) = viewer.viewer_document_id() else {
+                    continue;
+                };
+                let composes = VIEWER_DOCUMENTS
+                    .iter()
+                    .any(|document| document.id == document_id && family.includes(document));
+                assert!(
+                    !composes || family.offers_sheet(viewer),
+                    "{} composes {document_id} but its docbar refuses {viewer:?}",
+                    family.label()
+                );
+            }
+        }
+    }
+
+    /// Pages are titled with their family label at creation and nothing else
+    /// records the family, so this coupling is what makes the scoping work at
+    /// all. If either side is renamed, every page of that family silently
+    /// widens to offering all sheets.
+    #[test]
+    fn each_family_label_round_trips_to_the_family_it_titles_pages_with() {
+        for family in ResultDocumentFamily::ALL {
+            assert_eq!(
+                ResultDocumentFamily::from_label(family.label()),
+                Some(family)
             );
         }
     }
