@@ -27868,11 +27868,15 @@ fn abm_frequency_plans_and_snapshots_are_strict_typed_pairs() {
             .expect("control has exact DATA plan");
         assert!(owner_plan.frequency_bound);
         assert!(control_plan.ac.data_points().is_some());
-        assert_eq!(
-            owner_plan.ac.frequencies,
-            XyceTestRunner::xyce_ac_sweep_frequencies(FreqVariation::Dec, 1, 1.0, 1.0e5)
-        );
+        assert!(XyceTestRunner::abm_frequency_grid_matches(
+            &owner_plan.ac.frequencies
+        ));
         assert_eq!(control_plan.ac.frequencies, XYCE_ABM_FREQUENCY_GRID);
+        let mut tolerated_owner_roundoff = owner_plan.clone();
+        tolerated_owner_roundoff.ac.frequencies[4] =
+            Value::from_bits(XYCE_ABM_FREQUENCY_GRID[4].to_bits() + 4);
+        XyceTestRunner::validate_abm_frequency_ac_plan(&tolerated_owner_roundoff)
+            .expect("a few ULPs of logarithmic sweep roundoff remain semantically exact");
 
         let owner_netlist =
             XyceTestRunner::relational_ac_plan_netlist(&owner_plan).expect("parse owner plan");
@@ -27899,6 +27903,9 @@ fn abm_frequency_plans_and_snapshots_are_strict_typed_pairs() {
         let mut changed_grid = owner_plan.clone();
         changed_grid.ac.frequencies[3] = 1001.0;
         assert!(XyceTestRunner::validate_abm_frequency_ac_plan(&changed_grid).is_err());
+        let mut changed_roundoff = owner_plan.clone();
+        changed_roundoff.ac.frequencies[1] *= 1.0 + 1.0e-12;
+        assert!(XyceTestRunner::validate_abm_frequency_ac_plan(&changed_roundoff).is_err());
         let mut changed_probes = owner_plan.clone();
         changed_probes.print.probes.swap(1, 2);
         assert!(XyceTestRunner::validate_abm_frequency_ac_plan(&changed_probes).is_err());
@@ -27911,6 +27918,17 @@ fn abm_frequency_plans_and_snapshots_are_strict_typed_pairs() {
             .overrides[1]
             .1 = 101.0;
         assert!(XyceTestRunner::validate_abm_frequency_ac_plan(&changed_data).is_err());
+        let mut changed_data_frequency = control_plan.clone();
+        changed_data_frequency
+            .ac
+            .data_points
+            .as_mut()
+            .expect("control has DATA points")[2]
+            .frequency = Value::from_bits(XYCE_ABM_FREQUENCY_GRID[2].to_bits() + 1);
+        assert!(
+            XyceTestRunner::validate_abm_frequency_ac_plan(&changed_data_frequency).is_err(),
+            "DATA rows remain bit-exact even when DEC sweep roundoff is admitted"
+        );
 
         let mut changed_axis = owner_snapshot.clone();
         changed_axis.variable = match changed_axis.variable {
