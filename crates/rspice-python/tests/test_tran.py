@@ -23,6 +23,23 @@ R2 out 0 1k
 
 
 class TestTransient:
+    def test_run_honors_each_selected_tran_startup_mode(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* mixed selected transient startup modes
+V1 in 0 5
+R1 in out 1k
+C1 out 0 1u
+.tran 10u 1m
+.tran 10u 1m uic
+.end
+"""
+        )
+        report = engine.run(netlist)
+        assert len(report.all_tran) == 2
+        ordinary, uic = report.all_tran
+        assert ordinary.voltage_waveform("out")[0] == pytest.approx(5.0, abs=1e-9)
+        assert uic.voltage_waveform("out")[0] == pytest.approx(0.0, abs=1e-12)
+
     def test_start_time_clips_output_but_preserves_alignment(self, engine):
         netlist = rspice.Netlist.parse(RC_STEP)
         tran = engine.run_tran(
