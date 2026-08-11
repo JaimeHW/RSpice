@@ -1321,25 +1321,48 @@ pub(super) fn form(
                 locale,
                 setup.sens_type_idx == 1,
             );
-            check_row(ui, "Include parameters", &mut setup.include_params);
-            check_row(ui, "Include devices", &mut setup.include_devices);
-            "Sensitivity of the output to every parameter."
+            "Sensitivity of the output to every parameter the circuit exposes."
         }
         AnalysisDraft::MonteCarlo(setup) => {
+            use crate::simulation::dialog::McVariationSource;
+
             input_row(ui, "Samples", &mut setup.num_runs);
             input_row(ui, "Seed", &mut setup.seed);
-            input_row(ui, "Spread %", &mut setup.variation_pct);
             choice_row(
+                ui,
+                "From",
+                &["parameters", "deck"],
+                &mut setup.variation_source_idx,
+            );
+            // The spread and its shape belong to the parameter-tolerance
+            // source. Under deck statistics the deck states its own spread, so
+            // these two rows would be read by nothing.
+            let states_spread = McVariationSource::ALL
+                .get(setup.variation_source_idx)
+                .copied()
+                .unwrap_or_default()
+                .uses_stated_spread();
+            input_row_enabled(ui, "Spread %", &mut setup.variation_pct, states_spread);
+            choice_row_with_disabled(
                 ui,
                 "Vary",
                 &["gauss", "uniform", "worst"],
                 &mut setup.distribution_idx,
+                &if states_spread {
+                    Vec::new()
+                } else {
+                    (0..3)
+                        .map(|index| (index, "the deck states its own distribution"))
+                        .collect::<Vec<_>>()
+                },
             );
-            choice_row(ui, "Base", &["tran", "ac", "dc", "op"], &mut setup.base_idx);
-            check_row(ui, "Process variations", &mut setup.process_variations);
-            check_row(ui, "Mismatch variations", &mut setup.mismatch_variations);
-            check_row(ui, "Save every run", &mut setup.save_all_runs);
-            "Statistical sampling around the nominal design."
+            if states_spread {
+                "Each trial perturbs the eligible parameters and solves an operating \
+                 point; the result is the distribution of the node voltages."
+            } else {
+                "Each trial redraws the deck's own agauss/gauss/unif expressions, model \
+                 cards included, and solves an operating point."
+            }
         }
         AnalysisDraft::Pss(setup) => {
             choice_row(
@@ -1392,11 +1415,11 @@ pub(super) fn form(
                 policy,
                 locale,
             );
-            input_row(ui, "Points/dec", &mut setup.points_per_decade);
-            check_row(ui, "Gain margin", &mut setup.gain_margin);
-            check_row(ui, "Phase margin", &mut setup.phase_margin);
-            check_row(ui, "Crossover freq", &mut setup.crossover_freq);
-            "Loop gain and margins via the probe source."
+            input_row(ui, "Points", &mut setup.num_points);
+            choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
+            check_row(ui, "Nyquist contour", &mut setup.compute_nyquist);
+            "Loop gain via the probe source. Gain margin, phase margin and \
+             crossover are always extracted and reported as measurements."
         }
         AnalysisDraft::Temperature(setup) => {
             quantity_input_row(
@@ -1424,8 +1447,9 @@ pub(super) fn form(
                 locale,
             );
             choice_row(ui, "Base", &["op", "tran", "ac", "dc"], &mut setup.base_idx);
-            check_row(ui, "Corner temps only", &mut setup.corner_temps);
-            "Repeats the base analysis across temperature."
+            input_row(ui, "Explicit list", &mut setup.specific_temps);
+            "Repeats the base analysis across temperature. An explicit list \
+             replaces the range above; leave it empty to sweep the range."
         }
         AnalysisDraft::HarmonicBalance(setup) => {
             quantity_input_row(
@@ -1606,10 +1630,11 @@ pub(super) fn form(
             input_row(ui, "Probe", &mut setup.probe);
             input_row(ui, "Harmonics", &mut setup.max_harmonics);
             input_row(ui, "Multipliers", &mut setup.num_multipliers);
-            check_row(ui, "Annotate", &mut setup.annotate);
-            check_row(ui, "Phase margin", &mut setup.phase_margin);
-            check_row(ui, "Gain margin", &mut setup.gain_margin);
-            "Loop stability around the periodic steady state (needs PSS)."
+            engineering_input_row(ui, "Unstable above", &mut setup.stability_threshold);
+            engineering_input_row(ui, "Eigen tol", &mut setup.eigenvalue_tolerance);
+            check_row(ui, "Detect subharmonics", &mut setup.detect_subharmonics);
+            "Loop stability around the periodic steady state (needs PSS). \
+             Margins are always extracted from the Floquet multipliers."
         }
         AnalysisDraft::TransferFunction(setup) => {
             input_row(ui, XF_FIELD_LABELS[0], &mut setup.input_source);

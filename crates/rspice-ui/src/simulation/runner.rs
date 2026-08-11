@@ -528,7 +528,7 @@ fn initial_status_for_spec(
             freq: *start_freq,
             stop_freq: *stop_freq,
         },
-        AnalysisSpec::MonteCarlo => SimulationStatus::PostProcessing,
+        AnalysisSpec::MonteCarlo { .. } => SimulationStatus::PostProcessing,
         AnalysisSpec::Parametric => SimulationStatus::DcSweep {
             source: if options.temp.is_some() {
                 "TEMP".to_string()

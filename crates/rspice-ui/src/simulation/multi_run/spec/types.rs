@@ -355,9 +355,20 @@ pub enum AnalysisSpec {
         #[serde(default)]
         sweep: FrequencySweep,
         points_per_decade: usize,
+        /// Retain the Nyquist contour. Older specifications predate the
+        /// control and were executed with the contour on, so that is the
+        /// serde default.
+        #[serde(default = "default_true")]
+        compute_nyquist: bool,
     },
     /// Monte Carlo
-    MonteCarlo,
+    MonteCarlo {
+        /// Where a trial's variation comes from. Older specifications predate
+        /// the choice and were executed against the deck's eligible parameter
+        /// values, so that is the serde default.
+        #[serde(default)]
+        variation_source: crate::simulation::dialog::McVariationSource,
+    },
     /// Parametric sweep
     Parametric,
     /// Corner analysis
@@ -627,12 +638,7 @@ pub enum TfNormalization {
 }
 
 /// Numerical policy for the DC operating point and zero-hertz solves.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TfAccuracy {
-    Fast,
-    #[default]
-    Balanced,
-    Accurate,
-    Robust,
-}
+///
+/// The same tier the transfer-function form offers; see
+/// [`crate::simulation::accuracy`] for what a tier name resolves to.
+pub type TfAccuracy = crate::simulation::accuracy::AnalysisAccuracy;

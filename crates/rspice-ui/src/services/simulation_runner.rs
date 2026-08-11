@@ -52,7 +52,10 @@ use helpers::{
     netlist_has_independent_source_named_with_abort, normalize_voltage_signal_name,
     parse_runner_netlist_with_abort,
 };
-pub use monte_carlo::run_monte_carlo_analysis_with_source_path_and_abort;
+pub use monte_carlo::{
+    run_monte_carlo_analysis_with_source_path_and_abort,
+    run_statistical_monte_carlo_with_source_path_and_abort,
+};
 pub use optimization::{
     OptimizationAlgorithmMode, OptimizationGoalMode, OptimizationRunConfig, OptimizationVariable,
     run_optimization_analysis_with_config_and_source_path_and_abort,
@@ -87,8 +90,8 @@ pub use sparameter::{
 };
 pub use stb::run_stb_analysis_with_sweep_and_source_path_and_abort;
 pub use sweeps::{
-    CornerBaseMode, CornerFrequencySweep, CornerModelBinding, CornerProcess, CornerRunConfig,
-    TempRunConfig, run_corner_analysis_with_config_and_source_path_and_abort,
+    CornerBaseMode, CornerFrequencySweep, CornerModelBinding, CornerPoint, CornerProcess,
+    CornerRunConfig, TempRunConfig, run_corner_analysis_with_config_and_source_path_and_abort,
     run_corner_analysis_with_source_path_and_abort,
     run_parametric_analysis_with_config_and_source_path_and_abort,
     run_parametric_analysis_with_source_path_and_abort,

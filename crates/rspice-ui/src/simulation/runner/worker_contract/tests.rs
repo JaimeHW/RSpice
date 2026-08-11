@@ -1324,13 +1324,14 @@ fn analysis_spec_round_trips_supported_variants() {
         AnalysisSpec::Pstb,
         AnalysisSpec::Parametric,
         AnalysisSpec::Corner,
-        AnalysisSpec::MonteCarlo,
+        AnalysisSpec::MonteCarlo { variation_source: Default::default() },
         AnalysisSpec::Stb {
             probe_node: "Vprobe".to_string(),
             start_freq: 1.0,
             stop_freq: 1e6,
             sweep: FrequencySweep::Decade,
             points_per_decade: 12,
+            compute_nyquist: false,
         },
         AnalysisSpec::SParameter {
             start_freq: 1.0,
@@ -1450,7 +1451,7 @@ fn analysis_spec_round_trips_supported_variants() {
 #[test]
 fn worker_spec_request_preserves_monte_carlo() {
     let request = SimulationRequest::Spec {
-        spec: Box::new(AnalysisSpec::MonteCarlo),
+        spec: Box::new(AnalysisSpec::MonteCarlo { variation_source: Default::default() }),
         options: Box::new(SpecExecutionOptions::default()),
     };
     let input = NetlistInput {
@@ -1467,7 +1468,7 @@ fn worker_spec_request_preserves_monte_carlo() {
 
     match round_tripped {
         SimulationRequest::Spec { spec, options } => {
-            assert!(matches!(*spec, AnalysisSpec::MonteCarlo));
+            assert!(matches!(*spec, AnalysisSpec::MonteCarlo { .. }));
             assert!(options.temp.is_none());
             assert!(options.corner.is_none());
             assert!(options.pac.is_none());
@@ -1751,6 +1752,21 @@ fn worker_spec_request_preserves_corner_execution_options() {
                 source_label: "C:/pdk/models.lib [ff]".to_owned(),
                 section: Some("ff".to_owned()),
                 materialized_model_cards: ".model fast D (IS=1e-11)".to_owned(),
+            },
+        ],
+        // A filtered run space crosses the boundary as its points. A worker
+        // handed only the axes would rebuild the cross product and solve the
+        // combinations the declaration removed.
+        points: vec![
+            crate::services::simulation_runner::CornerPoint {
+                process: crate::services::simulation_runner::CornerProcess::SS,
+                voltage: 0.9,
+                temperature_c: 125.0,
+            },
+            crate::services::simulation_runner::CornerPoint {
+                process: crate::services::simulation_runner::CornerProcess::FF,
+                voltage: 1.1,
+                temperature_c: -40.0,
             },
         ],
     };
@@ -2463,6 +2479,7 @@ fn assert_corner_config_matches(
     assert_eq!(actual.full_matrix, expected.full_matrix);
     assert_eq!(actual.nominal_voltage, expected.nominal_voltage);
     assert_eq!(actual.model_bindings, expected.model_bindings);
+    assert_eq!(actual.points, expected.points);
     assert_corner_base_mode_matches(&actual.base_mode, &expected.base_mode);
 }
 

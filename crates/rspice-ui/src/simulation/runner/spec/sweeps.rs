@@ -19,7 +19,9 @@ pub(super) fn run_sweep_spec(
 ) -> Result<SimulationResult, SimulationError> {
     super::ensure_not_aborted(abort)?;
     match spec {
-        AnalysisSpec::MonteCarlo => run_monte_carlo(netlist, source_path, abort),
+        AnalysisSpec::MonteCarlo { variation_source } => {
+            run_monte_carlo(variation_source, netlist, source_path, abort)
+        }
         AnalysisSpec::Parametric => run_parametric(netlist, options, source_path, abort),
         AnalysisSpec::Corner => run_corner(netlist, options, source_path, abort),
         other => Err(super::misrouted_spec_error("sweep", &other)),
@@ -27,12 +29,28 @@ pub(super) fn run_sweep_spec(
 }
 
 fn run_monte_carlo(
+    variation_source: crate::simulation::dialog::McVariationSource,
     netlist: &str,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
-    let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_monte_carlo_analysis_with_source_path_and_abort(netlist, source_path, abort)
+    use crate::simulation::dialog::McVariationSource;
+
+    let data = super::run_abort_aware_service(abort, || match variation_source {
+        McVariationSource::ParameterTolerance => {
+            svc_runner::run_monte_carlo_analysis_with_source_path_and_abort(
+                netlist,
+                source_path,
+                abort,
+            )
+        }
+        McVariationSource::DeckStatistics => {
+            svc_runner::run_statistical_monte_carlo_with_source_path_and_abort(
+                netlist,
+                source_path,
+                abort,
+            )
+        }
     })?;
     let mut variables = Vec::with_capacity(data.variables.len());
     for variable in data.variables {

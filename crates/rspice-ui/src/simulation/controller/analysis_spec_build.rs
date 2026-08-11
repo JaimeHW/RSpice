@@ -517,10 +517,12 @@ impl SimulationController {
     pub(super) fn build_monte_carlo_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
         let mut mc_state = state.sim_setup.mc.clone();
         mc_state.ensure_initialized();
-        mc_state
+        let mc_cfg = mc_state
             .to_config()
             .map_err(|e| format!("invalid Monte Carlo settings: {}", e))?;
-        Ok(AnalysisSpec::MonteCarlo)
+        Ok(AnalysisSpec::MonteCarlo {
+            variation_source: mc_cfg.variation_source,
+        })
     }
 
     pub(super) fn build_temperature_sweep_spec(
@@ -578,8 +580,13 @@ impl SimulationController {
             probe_node: stb_cfg.probe_source,
             start_freq: stb_cfg.start_freq,
             stop_freq: stb_cfg.stop_freq,
-            sweep: FrequencySweep::Decade,
-            points_per_decade: stb_cfg.points_per_decade as usize,
+            sweep: match stb_cfg.sweep_type {
+                crate::simulation::dialog::stb::StbSweepType::Decade => FrequencySweep::Decade,
+                crate::simulation::dialog::stb::StbSweepType::Octave => FrequencySweep::Octave,
+                crate::simulation::dialog::stb::StbSweepType::Linear => FrequencySweep::Linear,
+            },
+            points_per_decade: stb_cfg.num_points as usize,
+            compute_nyquist: stb_cfg.compute_nyquist,
         })
     }
 
@@ -740,6 +747,8 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid optimization settings: {}", e))?;
 
+        Self::reject_optimization_of_fixed_design_variables(state, &cfg.variables)?;
+
         Ok(AnalysisSpec::Optimization {
             variables: cfg
                 .variables
@@ -782,6 +791,55 @@ impl SimulationController {
             initial_step: cfg.initial_step,
             min_step: cfg.min_step,
         })
+    }
+
+    /// Refuse to optimize a variable its owner declared fixed.
+    ///
+    /// The sweep role on the Variables page is the designer's statement about
+    /// what may move. An optimizer that quietly drove a variable marked
+    /// "Fixed parameter" would make that statement decorative, and would hand
+    /// back a design nobody agreed to. Names are matched case-insensitively,
+    /// the way every other design-variable reference is resolved.
+    fn reject_optimization_of_fixed_design_variables(
+        state: &AppState,
+        variables: &[crate::simulation::dialog::optimization::OptimizationVariableConfig],
+    ) -> Result<(), String> {
+        let Some(payload) = state
+            .sim_setup
+            .stable_analysis_plan()
+            .ok()
+            .map(|plan| plan.id())
+            .and_then(|plan_id| state.workspace.active_plan_data(plan_id))
+        else {
+            return Ok(());
+        };
+
+        let mut fixed: Vec<&str> = Vec::new();
+        for variable in variables {
+            if let Some(declared) = payload
+                .design_variables
+                .iter()
+                .find(|candidate| candidate.name.eq_ignore_ascii_case(&variable.name))
+                && declared.sweep_eligibility
+                    == crate::state::DesignVariableSweepEligibility::FixedParameter
+            {
+                fixed.push(declared.name.as_str());
+            }
+        }
+
+        if fixed.is_empty() {
+            return Ok(());
+        }
+        Err(format!(
+            "optimization cannot vary {}: {} declared a fixed parameter on the Variables page. \
+             Change the sweep role, or optimize a different variable.",
+            if fixed.len() == 1 {
+                "this design variable"
+            } else {
+                "these design variables"
+            },
+            fixed.join(", ")
+        ))
     }
 
     pub(super) fn build_soa_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
@@ -863,20 +921,9 @@ impl SimulationController {
                     crate::simulation::multi_run::TfNormalization::PerSourceUnit
                 }
             },
-            accuracy: match config.accuracy {
-                crate::simulation::dialog::XfAccuracy::Fast => {
-                    crate::simulation::multi_run::TfAccuracy::Fast
-                }
-                crate::simulation::dialog::XfAccuracy::Balanced => {
-                    crate::simulation::multi_run::TfAccuracy::Balanced
-                }
-                crate::simulation::dialog::XfAccuracy::Accurate => {
-                    crate::simulation::multi_run::TfAccuracy::Accurate
-                }
-                crate::simulation::dialog::XfAccuracy::Robust => {
-                    crate::simulation::multi_run::TfAccuracy::Robust
-                }
-            },
+            // The form's tier and the spec's tier are the one shared type, so
+            // there is no translation left to get wrong.
+            accuracy: config.accuracy,
         })
     }
 

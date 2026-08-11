@@ -126,6 +126,18 @@ pub(crate) struct WorkerCornerRunConfig {
     pub nominal_voltage: Option<f64>,
     pub base_mode: WorkerCornerBaseMode,
     pub model_bindings: Vec<WorkerCornerModelBinding>,
+    /// The exact points to run, when the space is a filtered one. A worker that
+    /// received only the axes would expand the cross product and solve the
+    /// points the declaration removed.
+    #[serde(default)]
+    pub points: Vec<WorkerCornerPoint>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerCornerPoint {
+    pub process: WorkerCornerProcess,
+    pub voltage: f64,
+    pub temperature_c: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,6 +189,15 @@ impl From<&crate::services::simulation_runner::CornerRunConfig> for WorkerCorner
                 .iter()
                 .map(WorkerCornerModelBinding::from)
                 .collect(),
+            points: value
+                .points
+                .iter()
+                .map(|point| WorkerCornerPoint {
+                    process: WorkerCornerProcess::from(point.process),
+                    voltage: point.voltage,
+                    temperature_c: point.temperature_c,
+                })
+                .collect(),
         }
     }
 }
@@ -198,6 +219,15 @@ impl From<WorkerCornerRunConfig> for crate::services::simulation_runner::CornerR
                 .model_bindings
                 .into_iter()
                 .map(crate::services::simulation_runner::CornerModelBinding::from)
+                .collect(),
+            points: value
+                .points
+                .into_iter()
+                .map(|point| crate::services::simulation_runner::CornerPoint {
+                    process: crate::services::simulation_runner::CornerProcess::from(point.process),
+                    voltage: point.voltage,
+                    temperature_c: point.temperature_c,
+                })
                 .collect(),
         }
     }
@@ -920,7 +950,9 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
             AnalysisSpec::Pstb => Ok(Self::Pstb),
             AnalysisSpec::Parametric => Ok(Self::Parametric),
             AnalysisSpec::Corner => Ok(Self::Corner),
-            AnalysisSpec::MonteCarlo => Ok(Self::MonteCarlo),
+            AnalysisSpec::MonteCarlo { variation_source } => Ok(Self::MonteCarlo {
+                variation_source: *variation_source,
+            }),
             AnalysisSpec::Reliability {
                 target_years,
                 enable_hci,
@@ -988,12 +1020,14 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 stop_freq,
                 sweep,
                 points_per_decade,
+                compute_nyquist,
             } => Ok(Self::Stb {
                 probe_node: probe_node.clone(),
                 start_freq: *start_freq,
                 stop_freq: *stop_freq,
                 sweep: WorkerSweepType::from(*sweep),
                 points_per_decade: *points_per_decade,
+                compute_nyquist: *compute_nyquist,
             }),
             AnalysisSpec::SParameter {
                 start_freq,
@@ -1272,7 +1306,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
             WorkerAnalysisSpec::Pstb => Self::Pstb,
             WorkerAnalysisSpec::Parametric => Self::Parametric,
             WorkerAnalysisSpec::Corner => Self::Corner,
-            WorkerAnalysisSpec::MonteCarlo => Self::MonteCarlo,
+            WorkerAnalysisSpec::MonteCarlo { variation_source } => Self::MonteCarlo { variation_source },
             WorkerAnalysisSpec::Reliability {
                 target_years,
                 enable_hci,
@@ -1340,12 +1374,14 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 stop_freq,
                 sweep,
                 points_per_decade,
+                compute_nyquist,
             } => Self::Stb {
                 probe_node,
                 start_freq,
                 stop_freq,
                 sweep: FrequencySweep::from(sweep),
                 points_per_decade,
+                compute_nyquist,
             },
             WorkerAnalysisSpec::SParameter {
                 start_freq,

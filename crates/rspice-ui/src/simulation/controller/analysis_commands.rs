@@ -12,6 +12,33 @@ fn is_terminal_end_card(line: &str) -> bool {
         .is_some_and(|directive| directive.eq_ignore_ascii_case(".end"))
 }
 
+/// Insert a block of cards immediately before the deck's terminal `.end`.
+///
+/// Anything after `.end` is not part of the circuit, so a card appended to the
+/// file would parse as nothing at all. A deck without a terminal `.end` takes
+/// the block at its foot. The trailing newline of the original is preserved so
+/// splicing twice does not change how the deck ends.
+pub(in crate::simulation) fn splice_before_terminal_end_card(netlist: &str, block: &str) -> String {
+    if block.is_empty() {
+        return netlist.to_owned();
+    }
+    let mut lines: Vec<String> = netlist.lines().map(str::to_owned).collect();
+    let insertion_idx = lines
+        .iter()
+        .position(|line| is_terminal_end_card(line))
+        .unwrap_or(lines.len());
+    lines.splice(
+        insertion_idx..insertion_idx,
+        block.lines().map(str::to_owned),
+    );
+
+    let mut merged = lines.join("\n");
+    if netlist.ends_with('\n') {
+        merged.push('\n');
+    }
+    merged
+}
+
 impl SimulationController {
     pub(super) fn analysis_spec_to_spice_line(
         &self,
@@ -19,7 +46,7 @@ impl SimulationController {
         spec: &AnalysisSpec,
     ) -> Result<String, String> {
         match spec {
-            AnalysisSpec::MonteCarlo => self.build_monte_carlo_command(state),
+            AnalysisSpec::MonteCarlo { .. } => self.build_monte_carlo_command(state),
             AnalysisSpec::Parametric => self.build_temperature_step_command(state),
             AnalysisSpec::Corner => self.build_corner_temp_command(state),
             AnalysisSpec::Pss { .. } => self.build_pss_command(state),
@@ -283,27 +310,12 @@ impl SimulationController {
         options: &crate::simulation::dialog::SimulationOptions,
     ) -> String {
         let options_block = options.to_spice_options();
-        let option_lines: Vec<&str> = options_block.lines().collect();
-        if option_lines.len() <= 1 {
+        // A lone `.OPTIONS` header states nothing, so an all-default option set
+        // leaves the deck alone rather than adding an empty card.
+        if options_block.lines().count() <= 1 {
             return netlist.to_string();
         }
-
-        let mut lines: Vec<String> = netlist.lines().map(|line| line.to_string()).collect();
-        let insertion_idx = lines
-            .iter()
-            .position(|line| is_terminal_end_card(line))
-            .unwrap_or(lines.len());
-        let injected_lines = option_lines
-            .iter()
-            .map(|line| line.to_string())
-            .collect::<Vec<String>>();
-        lines.splice(insertion_idx..insertion_idx, injected_lines);
-
-        let mut merged = lines.join("\n");
-        if netlist.ends_with('\n') {
-            merged.push('\n');
-        }
-        merged
+        splice_before_terminal_end_card(netlist, &options_block)
     }
 
     /// Inject the exact model sources selected for the nominal/reference PVT
@@ -317,11 +329,6 @@ impl SimulationController {
             return netlist.to_owned();
         }
 
-        let mut lines: Vec<String> = netlist.lines().map(str::to_owned).collect();
-        let insertion_idx = lines
-            .iter()
-            .position(|line| is_terminal_end_card(line))
-            .unwrap_or(lines.len());
         let payload = model_cards
             .iter()
             .flat_map(|cards| cards.lines().map(str::to_owned))
@@ -334,34 +341,100 @@ impl SimulationController {
         ));
         block.extend(payload);
         block.push(crate::services::simulation_runner::REFERENCE_MODEL_BINDING_END.to_owned());
-        lines.splice(insertion_idx..insertion_idx, block);
-
-        let mut merged = lines.join("\n");
-        if netlist.ends_with('\n') {
-            merged.push('\n');
-        }
-        merged
+        splice_before_terminal_end_card(netlist, &block.join("\n"))
     }
 }
 
+/// Why this specification cannot reach the engine.
+///
+/// Deliberately delegates to [`AnalysisKind::execution_blocker`] rather than
+/// restating the reason. The catalog row, the editor banner, the insert
+/// refusal and this dispatch refusal are four places a reader meets the same
+/// fact, and they were drifting: the same unavailable solver was described
+/// two different ways depending on which guard the reader hit first. Whoever
+/// unblocks a kind now edits exactly one string.
 fn manifest_spec_execution_blocker(spec: &AnalysisSpec) -> &'static str {
-    match spec {
-        AnalysisSpec::Qpss { .. } => "the QPSS spectral-lattice solver is unavailable",
-        AnalysisSpec::Hbsp { .. } => "HB large-signal network linearization is unavailable",
-        AnalysisSpec::Hbnoise { .. } => "harmonic-balance noise execution is unavailable",
-        AnalysisSpec::Psp { .. } => "periodic S-parameter execution is unavailable",
-        AnalysisSpec::Qpac { .. } => "QPAC conversion-matrix execution is unavailable",
-        AnalysisSpec::Qpnoise { .. } => "quasi-periodic noise execution is unavailable",
-        AnalysisSpec::Qpxf { .. } => "quasi-periodic transfer execution is unavailable",
-        AnalysisSpec::TransientNoise { .. } => "transient device-noise execution is unavailable",
-        AnalysisSpec::DcMismatch { .. } => "DC mismatch contribution extraction is unavailable",
-        _ => "the selected engine capability is unavailable",
-    }
+    const UNMAPPED: &str = "the selected engine capability is unavailable";
+    let Some(kind) = manifest_spec_kind(spec) else {
+        return UNMAPPED;
+    };
+    kind.execution_blocker().unwrap_or(UNMAPPED)
+}
+
+/// The catalog kind a manifest-only specification came from.
+///
+/// Only the kinds that can be blocked need an answer here; every other
+/// specification reaches the engine and never asks.
+const fn manifest_spec_kind(
+    spec: &AnalysisSpec,
+) -> Option<crate::simulation::plan::AnalysisKind> {
+    use crate::simulation::plan::AnalysisKind;
+    Some(match spec {
+        AnalysisSpec::Qpss { .. } => AnalysisKind::Qpss,
+        AnalysisSpec::Hbsp { .. } => AnalysisKind::Hbsp,
+        AnalysisSpec::Hbnoise { .. } => AnalysisKind::Hbnoise,
+        AnalysisSpec::Psp { .. } => AnalysisKind::Psp,
+        AnalysisSpec::Qpac { .. } => AnalysisKind::Qpac,
+        AnalysisSpec::Qpnoise { .. } => AnalysisKind::Qpnoise,
+        AnalysisSpec::Qpxf { .. } => AnalysisKind::Qpxf,
+        AnalysisSpec::TransientNoise { .. } => AnalysisKind::TransientNoise,
+        AnalysisSpec::DcMismatch { .. } => AnalysisKind::DcMismatch,
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The reader meets this fact in four places — catalog disposition, the
+    /// editor banner, the insert refusal, and this dispatch refusal. They
+    /// must all be quoting the same sentence.
+    #[test]
+    fn dispatch_refusal_quotes_the_catalog_blocker_verbatim() {
+        use crate::simulation::plan::AnalysisKind;
+        for kind in AnalysisKind::ALL {
+            let Some(expected) = kind.execution_blocker() else {
+                continue;
+            };
+            let draft = crate::simulation::plan::AnalysisDraft::for_kind(kind);
+            let spec = SimulationController::new()
+                .build_manifest_preview_spec(&AppState::default(), &draft)
+                .expect("blocked kinds still build a transportable specification")
+                .expect("blocked kinds are manifest kinds and have a typed specification");
+
+            assert_eq!(
+                manifest_spec_execution_blocker(&spec),
+                expected,
+                "{} states its blocker differently at dispatch than in the catalog",
+                kind.label()
+            );
+        }
+    }
+
+    /// Every blocked kind must be reachable from its specification, or the
+    /// refusal quietly degrades to the generic sentence.
+    #[test]
+    fn every_blocked_kind_is_recoverable_from_its_specification() {
+        use crate::simulation::plan::AnalysisKind;
+        for kind in AnalysisKind::ALL {
+            if kind.execution_blocker().is_none() {
+                continue;
+            }
+            let draft = crate::simulation::plan::AnalysisDraft::for_kind(kind);
+            let spec = SimulationController::new()
+                .build_manifest_preview_spec(&AppState::default(), &draft)
+                .expect("specification builds")
+                .expect("blocked kinds have a typed specification");
+
+            assert_eq!(
+                manifest_spec_kind(&spec),
+                Some(kind),
+                "{} has no specification-to-kind mapping",
+                kind.label()
+            );
+        }
+    }
 
     #[test]
     fn model_binding_is_inserted_after_hierarchical_subcircuits() {

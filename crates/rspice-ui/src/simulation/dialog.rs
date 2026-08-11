@@ -95,7 +95,7 @@ pub use stb::StbDialogState;
 
 // Re-exports - Statistical/Parametric
 pub use corner::CornerDialogState;
-pub use mc::McDialogState;
+pub use mc::{McDialogState, McVariationSource};
 
 // Re-exports - Temperature
 pub use temp::TempDialogState;
@@ -110,5 +110,5 @@ pub use soa::SoaDialogState;
 // Re-exports - Framework
 pub use options::{
     DampingStrategy, IntegrationMethod, MatrixSolver, OptionsDialogState, SimulationOptions,
-    format_si_value,
+    format_si_value, parse_si_value,
 };

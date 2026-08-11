@@ -400,7 +400,10 @@ pub(crate) enum WorkerAnalysisSpec {
     Pstb,
     Parametric,
     Corner,
-    MonteCarlo,
+    MonteCarlo {
+        #[serde(default)]
+        variation_source: crate::simulation::dialog::McVariationSource,
+    },
     Reliability {
         target_years: Vec<f64>,
         enable_hci: bool,
@@ -439,6 +442,8 @@ pub(crate) enum WorkerAnalysisSpec {
         stop_freq: f64,
         sweep: WorkerSweepType,
         points_per_decade: usize,
+        #[serde(default = "worker_default_true")]
+        compute_nyquist: bool,
     },
     SParameter {
         start_freq: f64,

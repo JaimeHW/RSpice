@@ -25,7 +25,7 @@ impl AnalysisSpec {
             AnalysisSpec::Pxf => AnalysisRunType::Pxf,
             AnalysisSpec::Pstb => AnalysisRunType::Pstb,
             AnalysisSpec::Stb { .. } => AnalysisRunType::Stb,
-            AnalysisSpec::MonteCarlo => AnalysisRunType::MonteCarlo,
+            AnalysisSpec::MonteCarlo { .. } => AnalysisRunType::MonteCarlo,
             AnalysisSpec::Parametric => AnalysisRunType::Parametric,
             AnalysisSpec::Corner => AnalysisRunType::Corner,
             AnalysisSpec::Reliability { .. } => AnalysisRunType::Reliability,

@@ -45,7 +45,7 @@ pub(super) fn run_spec_request(
     }
 
     match spec {
-        AnalysisSpec::MonteCarlo | AnalysisSpec::Parametric | AnalysisSpec::Corner => {
+        AnalysisSpec::MonteCarlo { .. } | AnalysisSpec::Parametric | AnalysisSpec::Corner => {
             sweeps::run_sweep_spec(spec, options, netlist, source_path, abort_flag)
         }
         AnalysisSpec::AcData { frequencies, .. } => bridge.run_ac_frequencies_with_source_path(
@@ -178,7 +178,7 @@ fn spec_variant_name(spec: &AnalysisSpec) -> &'static str {
         AnalysisSpec::Noise { .. } => "AnalysisSpec::Noise",
         AnalysisSpec::PoleZero { .. } => "AnalysisSpec::PoleZero",
         AnalysisSpec::Sensitivity { .. } => "AnalysisSpec::Sensitivity",
-        AnalysisSpec::MonteCarlo => "AnalysisSpec::MonteCarlo",
+        AnalysisSpec::MonteCarlo { .. } => "AnalysisSpec::MonteCarlo",
         AnalysisSpec::Parametric => "AnalysisSpec::Parametric",
         AnalysisSpec::Corner => "AnalysisSpec::Corner",
         AnalysisSpec::Reliability { .. } => "AnalysisSpec::Reliability",
@@ -510,7 +510,7 @@ R2 out 0 1k\n\
     #[test]
     fn specialized_spec_families_observe_the_supplied_counter_signal() {
         let cases = [
-            ("sweep", AnalysisSpec::MonteCarlo),
+            ("sweep", AnalysisSpec::MonteCarlo { variation_source: Default::default() }),
             (
                 "device",
                 AnalysisSpec::Reliability {

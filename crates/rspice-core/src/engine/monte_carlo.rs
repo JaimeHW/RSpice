@@ -300,10 +300,28 @@ impl Engine {
         }
 
         let run_outcomes = run_outcomes.into_iter().collect::<Result<Vec<_>, _>>()?;
-        let mut results = Vec::with_capacity(num_runs);
+        self.monte_carlo_result_from_trials(run_outcomes.into_iter().flatten(), num_runs)
+    }
+
+    /// Aggregate the converged trials into the reported distribution.
+    ///
+    /// Both Monte Carlo drivers reach this. They differ only in how a trial's
+    /// deck is produced — one perturbs eligible parameter values numerically,
+    /// the other redraws the deck's own statistical expressions from a fresh
+    /// seed — so what a reported mean, sigma, or histogram means has one owner
+    /// rather than one per driver.
+    ///
+    /// `requested_runs` is the number of trials asked for, which is what makes
+    /// the failure count and the all-converged flag answerable here.
+    pub fn monte_carlo_result_from_trials(
+        &self,
+        trials: impl IntoIterator<Item = (Vec<Value>, Vec<String>)>,
+        requested_runs: usize,
+    ) -> Result<MonteCarloResult, SimulationError> {
+        let mut results = Vec::with_capacity(requested_runs);
         let mut first_node_names: Option<Vec<String>> = None;
         let mut retained_values = 0usize;
-        for (node_voltages, node_names) in run_outcomes.into_iter().flatten() {
+        for (node_voltages, node_names) in trials {
             if first_node_names.is_none() {
                 first_node_names = Some(node_names);
             }
@@ -362,8 +380,8 @@ impl Engine {
         Ok(MonteCarloResult {
             num_runs: results.len(),
             variables,
-            all_converged: results.len() == num_runs,
-            num_failures: num_runs - results.len(),
+            all_converged: results.len() == requested_runs,
+            num_failures: requested_runs.saturating_sub(results.len()),
         })
     }
 

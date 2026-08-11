@@ -927,7 +927,7 @@ impl AnalysisSpec {
             | AnalysisSpec::Pnoise
             | AnalysisSpec::Pxf
             | AnalysisSpec::Pstb
-            | AnalysisSpec::MonteCarlo
+            | AnalysisSpec::MonteCarlo { .. }
             | AnalysisSpec::Parametric
             | AnalysisSpec::Corner => Ok(()),
         }
