@@ -60,7 +60,7 @@ reported separately from `expected_unsupported`.
 
 Some upstream exclusions are helper, baseline, or control decks tested by an
 upstream wrapper owner. RSpice has independently reconstructed and qualified
-exact native contracts for 191 such decks. Those rows use
+exact native contracts for 201 such decks. Those rows use
 `rspice_independently_qualified` and name the exact expected native contract.
 The adapter executes them, preserves their upstream provenance on the result,
 and fails closed if execution becomes unsupported, fails, or selects a
@@ -73,7 +73,11 @@ BUG 1826 thermal-parameter-scope families pin the Release-7.10.0 regression
 commit, their removed wrapper scripts, and the `xyce_verify.pl`
 implementation that defines the fallback integrated-RMS comparison. BUG 1826
 also pins the historical exclusion-list blob that selected its two executable
-members.
+members. The BSRC/VCCS source-multiplicity families likewise pin the exact 20
+selected owner/baseline decks, all ten removed owner wrappers, both historical
+exclusion-list blobs, and the verifier. Their relational oracle preserves the
+upstream direction: the authored multiplier owner is GOODFILE and the explicit
+0.2-Siemens baseline is TESTFILE.
 
 The complete inventory and promotions are reproduced by
 `tools/xyce/sync_upstream_exclusions.py`. The checked-in manifest pins the

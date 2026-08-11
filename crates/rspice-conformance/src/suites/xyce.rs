@@ -58,15 +58,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 191;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 201;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "4462b3b1fdcff3131d162f40e36969b2c731089558f44f54a93918e94a6d85b1";
+    "4fde490e2daa608c27d5a2566fcfcc51ce8ad6b55c3732dc5e46707058db8734";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "5620d0b15c0f99671b8f7dcc6f24d40d63a258ea665b46aa3c92f0e7a4e3a39d";
+    "103fed91c30ff097942e014f5610b45bb73878876bd9d98c7b04919b00ab11b7";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "c9b146c488397073cd4038df4f6f3fa7d22dd71222755b72a9795414ae8239c3";
+    "997f294a4f0d57de3833e3cc2bc45116ebad07304b8083ccda5882a695acd47c";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -357,6 +357,213 @@ const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_BLAKE3: &str =
 const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_ORACLE_RECORD_COUNT: usize = 3;
 const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_ORACLE_BLAKE3: &str =
     "7ef9daf7fa72a71ca5981eff8c863aba6e8a87873b2f390f9708fbc0fe41303c";
+// Release 7.10 qualified these current-source multiplier decks by running the
+// authored M= owner as GOODFILE and its explicit 0.2-Siemens control as
+// TESTFILE.  Keep the complete selected corpus, removed wrapper/exclude
+// artifacts, and default xyce_verify implementation cryptographically bound;
+// the BSRC and VCCS directories also contain unrelated native regressions and
+// therefore deliberately use an exact-record selector rather than a physical
+// whole-directory census.
+const XYCE_SOURCE_MULTIPLICITY_WRAPPER_CONTRACT: &str = "source_multiplicity_family_wrapper";
+const XYCE_SOURCE_MULTIPLICITY_BASELINE_CONTRACT: &str = "source_multiplicity_family_baseline";
+const XYCE_SOURCE_MULTIPLICITY_CANDIDATE_COUNT: usize = 20;
+const XYCE_SOURCE_MULTIPLICITY_CANDIDATE_BLAKE3: &str =
+    "d4310f2dddfffbfaa2080d48de6cef07d61098c6b17b68bd22f88cbe40286e1d";
+const XYCE_SOURCE_MULTIPLICITY_CANDIDATE_CONTENT_BLAKE3: &str =
+    "1c234afda4454cc64bd9123b425e48c29244d39c9e7cc1f7397442844078c232";
+const XYCE_SOURCE_MULTIPLICITY_OWNER_COUNT: usize = 10;
+const XYCE_SOURCE_MULTIPLICITY_OWNER_MANIFEST_BLAKE3: &str =
+    "a775dba28575547cda2cebd65a10de0725143ba027dc602dba92da6914cc6590";
+const XYCE_SOURCE_MULTIPLICITY_EXCLUSION_COUNT: usize = 10;
+const XYCE_SOURCE_MULTIPLICITY_HISTORICAL_EXCLUSION_BLAKE3: &str =
+    "87ee5ea84b7aa6b9be9d5b46c966148aeb83fb53716e34c0f2775f59b7e65699";
+const XYCE_SOURCE_MULTIPLICITY_UPSTREAM_REGRESSION_COMMIT: &str =
+    "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_SOURCE_MULTIPLICITY_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_SOURCE_MULTIPLICITY_HISTORICAL_ORACLE_RECORD_COUNT: usize = 13;
+const XYCE_SOURCE_MULTIPLICITY_HISTORICAL_ORACLE_BLAKE3: &str =
+    "04535bab1b5685bb32d586a8c9456413b62b18252d988de73b35c972fb1f6493";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct XyceSourceMultiplicityCaseSpec {
+    family: &'static str,
+    owner_record: &'static str,
+    baseline_record: &'static str,
+    owner_content_blake3: &'static str,
+    baseline_content_blake3: &'static str,
+    wrapper_path: &'static str,
+    wrapper_bytes: usize,
+    wrapper_sha256: &'static str,
+    wrapper_blake3: &'static str,
+    representation: XyceSourceMultiplicityRepresentation,
+    analysis: XyceSourceMultiplicityAnalysis,
+}
+
+impl XyceSourceMultiplicityCaseSpec {
+    fn owner_relative_path(self) -> &'static str {
+        self.wrapper_path
+            .strip_suffix(".sh")
+            .expect("source-multiplicity wrapper path must end in .sh")
+    }
+
+    fn baseline_relative_path(self) -> String {
+        let owner = self.owner_relative_path();
+        format!(
+            "{}_baseline.cir",
+            owner
+                .strip_suffix(".cir")
+                .expect("source-multiplicity owner path must end in .cir")
+        )
+    }
+}
+
+const XYCE_SOURCE_MULTIPLICITY_CASES: [XyceSourceMultiplicityCaseSpec; 10] = [
+    XyceSourceMultiplicityCaseSpec {
+        family: "BSRC/bsrc1_m",
+        owner_record: "netlists/bsrc/bsrc1_m.cir",
+        baseline_record: "netlists/bsrc/bsrc1_m_baseline.cir",
+        owner_content_blake3: "f4b552bd15c90721758eeca377d25af9cbe440d8d3fe2c6b4d74f1183b80aa43",
+        baseline_content_blake3: "79ed9fce2f03e8f4207f40e481c0104d2d7056dabb7724ba6d8e29a87c9e3fa6",
+        wrapper_path: "Netlists/BSRC/bsrc1_m.cir.sh",
+        wrapper_bytes: 1_507,
+        wrapper_sha256: "eee1546b6d2dfef86346ab055205d43d0510359eda2aad7a09fcaf19fb219f1a",
+        wrapper_blake3: "8efdcf80dda6a2e4156f0df5696effed008f824b8d92819485e08218315c0148",
+        representation: XyceSourceMultiplicityRepresentation::BehavioralDirect,
+        analysis: XyceSourceMultiplicityAnalysis::Dc,
+    },
+    XyceSourceMultiplicityCaseSpec {
+        family: "BSRC/bsrc2_m",
+        owner_record: "netlists/bsrc/bsrc2_m.cir",
+        baseline_record: "netlists/bsrc/bsrc2_m_baseline.cir",
+        owner_content_blake3: "625c6829c9ba9901c348ac025c819c40169aa613439df53cd67fc4cdac8d865c",
+        baseline_content_blake3: "9f3502fa471a6ba24e3fbe8d3fae8cef6ada9018b21997ad803e6e72456133dd",
+        wrapper_path: "Netlists/BSRC/bsrc2_m.cir.sh",
+        wrapper_bytes: 1_507,
+        wrapper_sha256: "ef0e8238efec42455b4a93ecc66a4cdce7c17d48b02e98d5260f52f11c84344f",
+        wrapper_blake3: "fb14fbf86b76ec0f5139838db876bb1d73ef17107fda20aec295f0fd7256c0c1",
+        representation: XyceSourceMultiplicityRepresentation::BehavioralFormal,
+        analysis: XyceSourceMultiplicityAnalysis::Dc,
+    },
+    XyceSourceMultiplicityCaseSpec {
+        family: "BSRC/bsrc3_m",
+        owner_record: "netlists/bsrc/bsrc3_m.cir",
+        baseline_record: "netlists/bsrc/bsrc3_m_baseline.cir",
+        owner_content_blake3: "35920c403dcbdd82a8fc8cb2603219ea6184c7d3f2648d1f61475cb3e4053ec1",
+        baseline_content_blake3: "2c2406536e6572e285bfb2aa28c92295c6cecfa886b89e30e30edf73abe318af",
+        wrapper_path: "Netlists/BSRC/bsrc3_m.cir.sh",
+        wrapper_bytes: 1_507,
+        wrapper_sha256: "62792bdceaf62b26b47a29131d3c066f8bb2ffcdbab6dfbbe0a8b46230fb1887",
+        wrapper_blake3: "d5cf5022d29dc95f0fa6f4ba521d526f5f449231b9d13704198de1f0fa3ad7c8",
+        representation: XyceSourceMultiplicityRepresentation::BehavioralInherited,
+        analysis: XyceSourceMultiplicityAnalysis::Dc,
+    },
+    XyceSourceMultiplicityCaseSpec {
+        family: "BSRC/bsrc4_m",
+        owner_record: "netlists/bsrc/bsrc4_m.cir",
+        baseline_record: "netlists/bsrc/bsrc4_m_baseline.cir",
+        owner_content_blake3: "0aad95a37310d6977618e07d79f60fae09eafbd691b47b3af57847159789e2c7",
+        baseline_content_blake3: "25bf3ef5d4746dedb55cdbe083a43cd9b42686a7102b929a8c7d5aa8bf26cd6e",
+        wrapper_path: "Netlists/BSRC/bsrc4_m.cir.sh",
+        wrapper_bytes: 1_507,
+        wrapper_sha256: "47492e2c23d5e69b156e60e50694e7db127dca4b303bc86fbbd08d729e1145c5",
+        wrapper_blake3: "df4f4e03e2a72b82ceee402aa483444b47b4ce9bb2148075fabeae89ab56f72a",
+        representation: XyceSourceMultiplicityRepresentation::BehavioralNested,
+        analysis: XyceSourceMultiplicityAnalysis::Dc,
+    },
+    XyceSourceMultiplicityCaseSpec {
+        family: "VCCS/vccs_m",
+        owner_record: "netlists/vccs/vccs_m.cir",
+        baseline_record: "netlists/vccs/vccs_m_baseline.cir",
+        owner_content_blake3: "f812935ead59e7a2b12406d558740053d86d73d008d1ddeb0a08252d7e74f1ed",
+        baseline_content_blake3: "6abda75fdb8e4b10468f1beda790188e30b4a558b4c963a67a797e51fe5c0c75",
+        wrapper_path: "Netlists/VCCS/vccs_m.cir.sh",
+        wrapper_bytes: 1_505,
+        wrapper_sha256: "e006106f3eb412eccc545ba6235a54185ecd2813a757ec49e0e72468bb9a45fa",
+        wrapper_blake3: "c35e4dc65ea5e269b471b81d4b1034993f025cff92d367b8cbd9bccd6b03a75c",
+        representation: XyceSourceMultiplicityRepresentation::LinearDirect,
+        analysis: XyceSourceMultiplicityAnalysis::Dc,
+    },
+    XyceSourceMultiplicityCaseSpec {
+        family: "VCCS/vccs_nl1_m",
+        owner_record: "netlists/vccs/vccs_nl1_m.cir",
+        baseline_record: "netlists/vccs/vccs_nl1_m_baseline.cir",
+        owner_content_blake3: "e2b173114a7447c858a03438e41128d969e0eed6b301d9b2111a5a096bfda931",
+        baseline_content_blake3: "6abda75fdb8e4b10468f1beda790188e30b4a558b4c963a67a797e51fe5c0c75",
+        wrapper_path: "Netlists/VCCS/vccs_nl1_m.cir.sh",
+        wrapper_bytes: 1_513,
+        wrapper_sha256: "58f91c31303fca150139c1fba81a2cdb46847d340dcdd2260bbba1340e4cbc8c",
+        wrapper_blake3: "c5326a2e3a98006d797a9e5462fdbbcba2f750c3ed75fd5d2e1452ce2118d99e",
+        representation: XyceSourceMultiplicityRepresentation::ExpressionDirect,
+        analysis: XyceSourceMultiplicityAnalysis::Dc,
+    },
+    XyceSourceMultiplicityCaseSpec {
+        family: "VCCS/vccs_nl2_m",
+        owner_record: "netlists/vccs/vccs_nl2_m.cir",
+        baseline_record: "netlists/vccs/vccs_nl2_m_baseline.cir",
+        owner_content_blake3: "c05a5858f5193946e8e95fb8ada1e91a38121aaf8f0ef31183724038c1fd11d9",
+        baseline_content_blake3: "6abda75fdb8e4b10468f1beda790188e30b4a558b4c963a67a797e51fe5c0c75",
+        wrapper_path: "Netlists/VCCS/vccs_nl2_m.cir.sh",
+        wrapper_bytes: 1_513,
+        wrapper_sha256: "f55c19a091f33fba8cead3c21aab70b58b7d17104d831e3df8d606468214383d",
+        wrapper_blake3: "a34f4217ca26a757d82df2eff09c52cf6d2a3a63885f824d930757d3a79f85f1",
+        representation: XyceSourceMultiplicityRepresentation::ExpressionFormal,
+        analysis: XyceSourceMultiplicityAnalysis::Dc,
+    },
+    XyceSourceMultiplicityCaseSpec {
+        family: "VCCS/vccs_nl3_m",
+        owner_record: "netlists/vccs/vccs_nl3_m.cir",
+        baseline_record: "netlists/vccs/vccs_nl3_m_baseline.cir",
+        owner_content_blake3: "53f6c0b9c09993e1383d4a64cc07ce6cfca92f403c20f95882c3b77edacbf288",
+        baseline_content_blake3: "6abda75fdb8e4b10468f1beda790188e30b4a558b4c963a67a797e51fe5c0c75",
+        wrapper_path: "Netlists/VCCS/vccs_nl3_m.cir.sh",
+        wrapper_bytes: 1_513,
+        wrapper_sha256: "30aafe1137706d5daf7fce968f232788ccf61482e4b62d9cfd17ba08a820117f",
+        wrapper_blake3: "83a6efe07cdf21df89dced284b2a7c48e66507486c424e24d8e5625d22bec04b",
+        representation: XyceSourceMultiplicityRepresentation::ExpressionInherited,
+        analysis: XyceSourceMultiplicityAnalysis::Dc,
+    },
+    XyceSourceMultiplicityCaseSpec {
+        family: "VCCS/vccs_nl4_m",
+        owner_record: "netlists/vccs/vccs_nl4_m.cir",
+        baseline_record: "netlists/vccs/vccs_nl4_m_baseline.cir",
+        owner_content_blake3: "8d5d10cf88304fd2cb3bb491b4fdaf63d02d12776612d7f8edcac1a2d3c434f2",
+        baseline_content_blake3: "6abda75fdb8e4b10468f1beda790188e30b4a558b4c963a67a797e51fe5c0c75",
+        wrapper_path: "Netlists/VCCS/vccs_nl4_m.cir.sh",
+        wrapper_bytes: 1_513,
+        wrapper_sha256: "5a978749375eb3d89a91d9bf6aac4c44ba01a0904d54baefd17363eb5f16abbd",
+        wrapper_blake3: "2aea6fa37179f2f1f49424c7f2fc6974d2205bd42dbe9526aa4138cc91744a50",
+        representation: XyceSourceMultiplicityRepresentation::ExpressionNested,
+        analysis: XyceSourceMultiplicityAnalysis::Dc,
+    },
+    XyceSourceMultiplicityCaseSpec {
+        family: "VCCS/vccs_tran_m",
+        owner_record: "netlists/vccs/vccs_tran_m.cir",
+        baseline_record: "netlists/vccs/vccs_tran_m_baseline.cir",
+        owner_content_blake3: "9a7640eb4d5e03a2c6208481cb1dc44a77533b8b52d06d2784f9a84aad791fb5",
+        baseline_content_blake3: "ab06d9f0ed36a4616f10430e0a128c0e50cb7b3b85a8f2980c2c6708052357cc",
+        wrapper_path: "Netlists/VCCS/vccs_tran_m.cir.sh",
+        wrapper_bytes: 1_515,
+        wrapper_sha256: "20a644a2b7b5e532e642c672dc7764804938cf67959159824b0fdbed8d6271dd",
+        wrapper_blake3: "a3b3ffdacd87222c56c6a05051206989db9e665b2a19552fc87effb6e06be969",
+        representation: XyceSourceMultiplicityRepresentation::LinearDirect,
+        analysis: XyceSourceMultiplicityAnalysis::Tran,
+    },
+];
+
+const XYCE_SOURCE_MULTIPLICITY_HISTORICAL_EXCLUDES: [(&str, usize, &str, &str); 2] = [
+    (
+        "Netlists/BSRC/exclude",
+        84,
+        "d201ec9fedac09939734e8f5e0746c7a46193ae25bb79d6c75699c68224a38b5",
+        "121f27fd1a3e7cbddc4d282aee79cdd98b843cd821551125566ac2196c00f3e6",
+    ),
+    (
+        "Netlists/VCCS/exclude",
+        141,
+        "918ba1f38f946bc77d7425c176340d5b29253ae9e63ffb3f969553367f63456c",
+        "3b8424f66d51107ee38549cea6006789460a8969f85b6cf59af1f40500e943ad",
+    ),
+];
 const XYCE_LEVEL2_DIODE_DTEMP_WRAPPER_CONTRACT: &str =
     "level2_diode_dtemp_relational_wrapper_owner";
 const XYCE_LEVEL2_DIODE_DTEMP_REFERENCE_CONTRACT: &str =
@@ -5363,6 +5570,43 @@ struct XyceBug1826ThermalParameterFamilyContract {
 }
 
 #[derive(Debug, Clone)]
+struct XyceSourceMultiplicityFamilyContract {
+    relational: XyceBaselineFamilyContract,
+    owner_path: PathBuf,
+    baseline_path: PathBuf,
+    spec: &'static XyceSourceMultiplicityCaseSpec,
+    role: XyceSourceMultiplicityRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceSourceMultiplicityRole {
+    WrapperOwner,
+    Baseline,
+}
+
+impl XyceSourceMultiplicityRole {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::WrapperOwner => XYCE_SOURCE_MULTIPLICITY_WRAPPER_CONTRACT,
+            Self::Baseline => XYCE_SOURCE_MULTIPLICITY_BASELINE_CONTRACT,
+        }
+    }
+
+    fn for_record(relative_path: &str) -> Option<(&'static XyceSourceMultiplicityCaseSpec, Self)> {
+        let relative = XyceTestRunner::normalize_manifest_key(relative_path);
+        XYCE_SOURCE_MULTIPLICITY_CASES.iter().find_map(|spec| {
+            if relative == spec.owner_record {
+                Some((spec, Self::WrapperOwner))
+            } else if relative == spec.baseline_record {
+                Some((spec, Self::Baseline))
+            } else {
+                None
+            }
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
 struct XyceSwitchStateCaseFamilyContract {
     relational: XyceBaselineFamilyContract,
     role: XyceSwitchStateCaseFamilyRole,
@@ -6001,6 +6245,42 @@ struct XyceBug1826ThermalParameterSnapshot {
     ordered_probes: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceSourceMultiplicityAnalysis {
+    Dc,
+    Tran,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceSourceMultiplicityRepresentation {
+    LinearBaseline,
+    LinearDirect,
+    BehavioralDirect,
+    BehavioralFormal,
+    BehavioralInherited,
+    BehavioralNested,
+    ExpressionDirect,
+    ExpressionFormal,
+    ExpressionInherited,
+    ExpressionNested,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceSourceMultiplicitySnapshot {
+    analysis: XyceSourceMultiplicityAnalysis,
+    representation: XyceSourceMultiplicityRepresentation,
+    flattened_elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    effective_gain_bits: u64,
+    source_nodes: [String; 2],
+    control_nodes: [String; 2],
+    authored_multiplicity_bits: u64,
+    authored_multiplicity_given: bool,
+    flattened_multiplicity_bits: u64,
+    flattened_multiplicity_given: bool,
+    hierarchy_multiplicity_bits: Vec<u64>,
+    ordered_probes: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct XyceThermalResistorRuntimeFingerprint {
     name: String,
@@ -6172,6 +6452,7 @@ enum XyceStrictTransientFamilySnapshot {
     Params1(XyceParams1Snapshot),
     NakedAlgebra(XyceNakedAlgebraSnapshot),
     Bug1826ThermalParameter(XyceBug1826ThermalParameterSnapshot),
+    SourceMultiplicity(XyceSourceMultiplicitySnapshot),
     PassivePrimaryValue(XycePassivePrimaryValueSnapshot),
     PassiveTemperatureOverride(XycePassiveTemperatureOverrideSnapshot),
     TransientAnalysisExpression(XyceTransientAnalysisExpressionSnapshot),
@@ -6204,6 +6485,7 @@ enum XyceStrictDcFamilySnapshot {
     SubcktParameterPrecedence(XyceSubcktParameterPrecedenceSnapshot),
     SubcktParameterResolution(XyceSubcktParameterResolutionSnapshot),
     NestedIncludeIdentity(XyceNestedIncludeIdentityFamilySnapshot),
+    SourceMultiplicity(XyceSourceMultiplicitySnapshot),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -6393,6 +6675,7 @@ enum XyceBaselineFamilyKind {
     Params1,
     NakedAlgebra,
     Bug1826ThermalParameter,
+    SourceMultiplicity,
     PassiveCapPrimaryValue,
     PassiveResPrimaryValue,
     PassiveTemperatureOverride,
@@ -6481,6 +6764,7 @@ impl XyceBaselineFamilyKind {
             Self::Params1 => "PARAMS1_PARAMETER_EQUIVALENCE",
             Self::NakedAlgebra => "NAKED_ALGEBRA_PARAMETER_EQUIVALENCE",
             Self::Bug1826ThermalParameter => "BUG1826_THERMAL_PARAMETER_SCOPE_EQUIVALENCE",
+            Self::SourceMultiplicity => "SOURCE_MULTIPLICITY_EQUIVALENCE",
             Self::PassiveCapPrimaryValue => "PASSIVE_CAP_PRIMARY_VALUE",
             Self::PassiveResPrimaryValue => "PASSIVE_RES_PRIMARY_VALUE",
             Self::PassiveTemperatureOverride => "PASSIVE_TEMPERATURE_OVERRIDE",
@@ -6508,6 +6792,7 @@ impl XyceBaselineFamilyKind {
             Self::Params1 => XYCE_PARAMS1_WRAPPER_OWNER_CONTRACT,
             Self::NakedAlgebra => XYCE_NAKED_ALGEBRA_WRAPPER_OWNER_CONTRACT,
             Self::Bug1826ThermalParameter => XYCE_BUG1826_THERMAL_PARAMETER_WRAPPER_OWNER_CONTRACT,
+            Self::SourceMultiplicity => XYCE_SOURCE_MULTIPLICITY_WRAPPER_CONTRACT,
             Self::PassiveCapPrimaryValue => "passive_primary_value_capacitor_tran_wrapper",
             Self::PassiveResPrimaryValue => "passive_primary_value_resistor_dc_wrapper",
             Self::PassiveTemperatureOverride => "passive_temperature_override_family_wrapper",
@@ -6537,6 +6822,7 @@ impl XyceBaselineFamilyKind {
             Self::Bug1826ThermalParameter => {
                 XYCE_BUG1826_THERMAL_PARAMETER_GLOBAL_BASELINE_CONTRACT
             }
+            Self::SourceMultiplicity => XYCE_SOURCE_MULTIPLICITY_BASELINE_CONTRACT,
             Self::PassiveCapPrimaryValue => "passive_primary_value_capacitor_tran_baseline",
             Self::PassiveResPrimaryValue => "passive_primary_value_resistor_dc_baseline",
             Self::PassiveTemperatureOverride => "passive_temperature_override_family_baseline",
@@ -6565,7 +6851,7 @@ impl XyceBaselineFamilyKind {
         // mixed-expression member as GOODFILE and the braced baseline as
         // TESTFILE. The normalized RMS denominator is directional, so this
         // ordering is part of the oracle rather than an interchangeable pair.
-        matches!(self, Self::NakedAlgebra)
+        matches!(self, Self::NakedAlgebra | Self::SourceMultiplicity)
     }
 
     fn transient_plan_purpose(self) -> XyceStaticTranPlanPurpose {
@@ -6582,6 +6868,7 @@ impl XyceBaselineFamilyKind {
             | Self::Params1
             | Self::NakedAlgebra
             | Self::Bug1826ThermalParameter
+            | Self::SourceMultiplicity
             | Self::PassiveCapPrimaryValue
             | Self::PassiveTemperatureOverride
             | Self::TransientAnalysisExpression

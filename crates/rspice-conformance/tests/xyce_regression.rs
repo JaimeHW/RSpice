@@ -9236,6 +9236,64 @@ fn test_xyce_bug1826_thermal_parameter_scope_equivalence_relational_oracles() {
 }
 
 #[test]
+fn test_xyce_bsrc_vccs_source_multiplicity_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let families: &[(&str, &[&str])] = &[
+        ("BSRC", &["bsrc1_m", "bsrc2_m", "bsrc3_m", "bsrc4_m"]),
+        (
+            "VCCS",
+            &[
+                "vccs_m",
+                "vccs_nl1_m",
+                "vccs_nl2_m",
+                "vccs_nl3_m",
+                "vccs_nl4_m",
+                "vccs_tran_m",
+            ],
+        ),
+    ];
+    let mut executed = 0usize;
+    for (directory, stems) in families {
+        for stem in *stems {
+            for baseline in [false, true] {
+                let file = if baseline {
+                    format!("{stem}_baseline.cir")
+                } else {
+                    format!("{stem}.cir")
+                };
+                let relative = format!("Netlists/{directory}/{file}");
+                assert_eq!(
+                    runner.requires_upstream_wrapper(&relative),
+                    !baseline,
+                    "{relative} wrapper ownership changed"
+                );
+                let result = runner.run_test(root.join(&relative));
+                assert!(
+                    result.passed && !result.expected_unsupported && !result.upstream_excluded,
+                    "{relative} should satisfy the typed source-M relational oracle, got {result:?}"
+                );
+                assert_eq!(
+                    result.contract,
+                    if baseline {
+                        "source_multiplicity_family_baseline"
+                    } else {
+                        "source_multiplicity_family_wrapper"
+                    }
+                );
+                assert!(
+                    result.mismatches.is_empty(),
+                    "{relative} should satisfy owner-GOODFILE/baseline-TESTFILE xyce_verify ordering"
+                );
+                executed += 1;
+            }
+        }
+    }
+    assert_eq!(executed, 20, "source-M family census changed");
+}
+
+#[test]
 fn test_xyce_switch_initial_state_case_relational_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

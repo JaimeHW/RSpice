@@ -3590,6 +3590,260 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    pub(super) fn source_multiplicity_historical_oracle_provenance_records() -> Vec<String> {
+        let mut artifacts = XYCE_SOURCE_MULTIPLICITY_CASES
+            .iter()
+            .map(|spec| {
+                (
+                    spec.wrapper_path,
+                    spec.wrapper_bytes,
+                    spec.wrapper_sha256,
+                    spec.wrapper_blake3,
+                )
+            })
+            .chain(XYCE_SOURCE_MULTIPLICITY_HISTORICAL_EXCLUDES)
+            .chain([(
+                XYCE_RELEASE_710_XYCE_VERIFY_PATH,
+                XYCE_RELEASE_710_XYCE_VERIFY_BYTES,
+                XYCE_RELEASE_710_XYCE_VERIFY_SHA256,
+                XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3,
+            )])
+            .map(|(path, bytes, sha256, content_blake3)| {
+                format!(
+                    "{XYCE_SOURCE_MULTIPLICITY_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_SOURCE_MULTIPLICITY_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
+                )
+            })
+            .collect::<Vec<_>>();
+        artifacts.sort();
+        artifacts
+    }
+
+    pub(super) fn validate_source_multiplicity_historical_oracle_provenance() -> Result<(), String>
+    {
+        let records = Self::source_multiplicity_historical_oracle_provenance_records();
+        let provenance_hash = blake3::hash(records.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if records.len() != XYCE_SOURCE_MULTIPLICITY_HISTORICAL_ORACLE_RECORD_COUNT
+            || provenance_hash != XYCE_SOURCE_MULTIPLICITY_HISTORICAL_ORACLE_BLAKE3
+        {
+            return Err(format!(
+                "source-multiplicity Release-7.10 wrapper/exclude/xyce_verify provenance changed: records={}/{provenance_hash}",
+                records.len()
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn source_multiplicity_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceSourceMultiplicityFamilyContract, String>> {
+        let (spec, role) = XyceSourceMultiplicityRole::for_record(&deck.relative_path)?;
+        Some((|| {
+            const LABEL: &str = "BSRC/VCCS source-multiplicity family";
+            if deck.section != XyceDeckSection::Netlists
+                || Self::normalize_manifest_key(&self.relative_key(&deck.path))
+                    != Self::normalize_manifest_key(&deck.relative_path)
+            {
+                return Err(format!(
+                    "recognized {LABEL} record '{}' is not backed by its exact Netlists path",
+                    deck.relative_path
+                ));
+            }
+            let owner_path = self.root.join(spec.owner_relative_path());
+            let baseline_path = self.root.join(spec.baseline_relative_path());
+            let expected_path = match role {
+                XyceSourceMultiplicityRole::WrapperOwner => &owner_path,
+                XyceSourceMultiplicityRole::Baseline => &baseline_path,
+            };
+            if !Self::same_path(&deck.path, expected_path) {
+                return Err(format!(
+                    "recognized {LABEL} role {role:?} is not backed by its canonical path"
+                ));
+            }
+            let contract = XyceSourceMultiplicityFamilyContract {
+                relational: XyceBaselineFamilyContract {
+                    kind: XyceBaselineFamilyKind::SourceMultiplicity,
+                    comparison: XyceBaselineFamilyComparison::TolerancedStrict,
+                    family: spec.family.to_string(),
+                    baseline_path: baseline_path.clone(),
+                    member_paths: vec![owner_path.clone(), baseline_path.clone()],
+                    target_path: Some(expected_path.clone()),
+                },
+                owner_path,
+                baseline_path,
+                spec,
+                role,
+            };
+            self.validate_source_multiplicity_provenance(&contract)?;
+            Ok(contract)
+        })())
+    }
+
+    pub(super) fn validate_source_multiplicity_provenance(
+        &self,
+        contract: &XyceSourceMultiplicityFamilyContract,
+    ) -> Result<(), String> {
+        const LABEL: &str = "BSRC/VCCS source-multiplicity family";
+        Self::validate_source_multiplicity_historical_oracle_provenance()?;
+        let expected_target = match contract.role {
+            XyceSourceMultiplicityRole::WrapperOwner => &contract.owner_path,
+            XyceSourceMultiplicityRole::Baseline => &contract.baseline_path,
+        };
+        if contract.relational.kind != XyceBaselineFamilyKind::SourceMultiplicity
+            || contract.relational.comparison != XyceBaselineFamilyComparison::TolerancedStrict
+            || contract.relational.family != contract.spec.family
+            || !Self::same_path(&contract.relational.baseline_path, &contract.baseline_path)
+            || contract.relational.member_paths.len() != 2
+            || !Self::same_path(&contract.relational.member_paths[0], &contract.owner_path)
+            || !Self::same_path(
+                &contract.relational.member_paths[1],
+                &contract.baseline_path,
+            )
+            || !contract
+                .relational
+                .target_path
+                .as_ref()
+                .is_some_and(|path| Self::same_path(path, expected_target))
+        {
+            return Err(format!(
+                "{LABEL} contract is not the exact owner-GOODFILE/baseline-TESTFILE pair"
+            ));
+        }
+
+        let exclusions = Self::load_upstream_exclusions(&self.root)
+            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
+        let wrapper_records = Self::load_upstream_wrapper_decks(&self.root);
+        let mut candidates = Vec::with_capacity(XYCE_SOURCE_MULTIPLICITY_CANDIDATE_COUNT);
+        let mut candidate_content = Vec::with_capacity(XYCE_SOURCE_MULTIPLICITY_CANDIDATE_COUNT);
+        let mut owner_rows = Vec::with_capacity(XYCE_SOURCE_MULTIPLICITY_OWNER_COUNT);
+        let mut historical_exclusion_rows =
+            Vec::with_capacity(XYCE_SOURCE_MULTIPLICITY_EXCLUSION_COUNT);
+
+        for spec in &XYCE_SOURCE_MULTIPLICITY_CASES {
+            for (record, expected_hash, role) in [
+                (
+                    spec.owner_record,
+                    spec.owner_content_blake3,
+                    XyceSourceMultiplicityRole::WrapperOwner,
+                ),
+                (
+                    spec.baseline_record,
+                    spec.baseline_content_blake3,
+                    XyceSourceMultiplicityRole::Baseline,
+                ),
+            ] {
+                let path = match role {
+                    XyceSourceMultiplicityRole::WrapperOwner => {
+                        self.root.join(spec.owner_relative_path())
+                    }
+                    XyceSourceMultiplicityRole::Baseline => {
+                        self.root.join(spec.baseline_relative_path())
+                    }
+                };
+                let relative = self.relative_key(&path);
+                if Self::normalize_manifest_key(&relative) != record {
+                    return Err(format!("{LABEL} canonical path '{record}' is unavailable"));
+                }
+                let metadata = fs::symlink_metadata(&path).map_err(|error| {
+                    format!("failed to inspect {LABEL} record '{relative}': {error}")
+                })?;
+                if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+                    return Err(format!(
+                        "{LABEL} record '{relative}' must be a regular non-symlink file"
+                    ));
+                }
+                let bytes = fs::read(&path)
+                    .map_err(|error| format!("failed to read {LABEL} record: {error}"))?;
+                let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
+                let content_hash = blake3::hash(&canonical).to_hex().to_string();
+                if canonical.is_empty() || content_hash != expected_hash {
+                    return Err(format!(
+                        "{LABEL} record '{relative}' identity changed: expected {expected_hash}, got {content_hash}"
+                    ));
+                }
+                let key = Self::normalize_manifest_key(&relative);
+                candidates.push(relative.clone());
+                candidate_content.push(format!("{relative}\t{content_hash}"));
+                match role {
+                    XyceSourceMultiplicityRole::WrapperOwner => {
+                        if !self.requires_upstream_wrapper(&relative)
+                            || !wrapper_records.contains(&key)
+                            || exclusions.contains_key(&key)
+                        {
+                            return Err(format!(
+                                "{LABEL} owner '{relative}' lost exclusive removed-wrapper provenance"
+                            ));
+                        }
+                        owner_rows
+                            .push(format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"));
+                    }
+                    XyceSourceMultiplicityRole::Baseline => {
+                        if self.requires_upstream_wrapper(&relative)
+                            || wrapper_records.contains(&key)
+                        {
+                            return Err(format!(
+                                "{LABEL} baseline '{relative}' must not own a wrapper"
+                            ));
+                        }
+                        let exclusion = exclusions.get(&key).ok_or_else(|| {
+                            format!("{LABEL} baseline '{relative}' lost exclusion provenance")
+                        })?;
+                        if !matches!(
+                            &exclusion.disposition,
+                            XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified { expected_contract }
+                                if expected_contract == XYCE_SOURCE_MULTIPLICITY_BASELINE_CONTRACT
+                        ) {
+                            return Err(format!(
+                                "{LABEL} baseline '{relative}' lacks its exact independent qualification contract"
+                            ));
+                        }
+                        historical_exclusion_rows.push(format!(
+                            "{relative}\t{}\t{UPSTREAM_EXCLUDED_DISPOSITION}",
+                            exclusion.source
+                        ));
+                    }
+                }
+                self.reject_wrapper_output_artifacts(&path)
+                    .map_err(|error| format!("{LABEL} record '{relative}' {error}"))?;
+            }
+        }
+
+        candidates.sort();
+        candidate_content.sort();
+        owner_rows.sort();
+        historical_exclusion_rows.sort();
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(candidate_content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let owner_hash = blake3::hash(owner_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let exclusion_hash = blake3::hash(historical_exclusion_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if candidates.len() != XYCE_SOURCE_MULTIPLICITY_CANDIDATE_COUNT
+            || candidate_hash != XYCE_SOURCE_MULTIPLICITY_CANDIDATE_BLAKE3
+            || content_hash != XYCE_SOURCE_MULTIPLICITY_CANDIDATE_CONTENT_BLAKE3
+            || owner_rows.len() != XYCE_SOURCE_MULTIPLICITY_OWNER_COUNT
+            || owner_hash != XYCE_SOURCE_MULTIPLICITY_OWNER_MANIFEST_BLAKE3
+            || historical_exclusion_rows.len() != XYCE_SOURCE_MULTIPLICITY_EXCLUSION_COUNT
+            || exclusion_hash != XYCE_SOURCE_MULTIPLICITY_HISTORICAL_EXCLUSION_BLAKE3
+        {
+            return Err(format!(
+                "{LABEL} provenance changed: candidates={}/{candidate_hash}/{content_hash}, owners={}/{owner_hash}, exclusions={}/{exclusion_hash}",
+                candidates.len(),
+                owner_rows.len(),
+                historical_exclusion_rows.len()
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn param_expression_family_contract(
         &self,
         deck: &XyceDeck,

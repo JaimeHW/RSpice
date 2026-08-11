@@ -905,6 +905,7 @@ impl XyceTestRunner {
                 expression,
                 tc1,
                 tc2,
+                multiplicity,
             } = &behavioral.kind
             else {
                 return Err(format!("ABM_POW {name} is not a behavioral voltage source"));
@@ -912,6 +913,9 @@ impl XyceTestRunner {
             if behavioral.nodes != [*output, "0"]
                 || tc1.to_bits() != 0.0f64.to_bits()
                 || tc2.to_bits() != 0.0f64.to_bits()
+                || multiplicity.value.to_bits() != 1.0f64.to_bits()
+                || multiplicity.value_expr.is_some()
+                || multiplicity.given
                 || Self::normalize_probe(expression) != *expected_expression
             {
                 return Err(format!(

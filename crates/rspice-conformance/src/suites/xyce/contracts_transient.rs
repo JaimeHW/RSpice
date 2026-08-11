@@ -8,6 +8,27 @@ use super::*;
 use rspice_core::netlist::OutputRequest;
 
 impl XyceTestRunner {
+    pub(super) fn validate_source_multiplicity_transient_plan(
+        plan: &XyceStaticTranPlan,
+    ) -> Result<(), String> {
+        let print = plan.require_print("source-multiplicity transient family")?;
+        if !plan.steps.is_empty()
+            || plan.output_override
+            || plan.tran.step.to_bits() != 0.0f64.to_bits()
+            || plan.tran.stop.to_bits() != 1.0f64.to_bits()
+            || plan.tran.start.is_some()
+            || plan.tran.max_step.is_some()
+            || plan.tran.uic
+            || print.probes != ["V(1)".to_string(), "V(2)".to_string(), "V(3)".to_string()]
+        {
+            return Err(
+                "source multiplicity transient control requires diagnostic-free '.TRAN 0.0 1.0' semantics and ordered V(1), V(2), V(3) default-PRN probes"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
     fn physical_output_request_logical_card(
         request: &OutputRequest,
         request_label: &str,
@@ -1170,6 +1191,7 @@ impl XyceTestRunner {
                 expression,
                 tc1,
                 tc2,
+                multiplicity,
             } = &behavioral.kind
             else {
                 return Err(format!(
@@ -1179,6 +1201,9 @@ impl XyceTestRunner {
             if behavioral.nodes != [*node, "0"]
                 || tc1.to_bits() != 0.0f64.to_bits()
                 || tc2.to_bits() != 0.0f64.to_bits()
+                || multiplicity.value.to_bits() != 1.0f64.to_bits()
+                || multiplicity.value_expr.is_some()
+                || multiplicity.given
                 || Self::normalize_probe(expression) != *expected_expression
             {
                 return Err(format!(
@@ -1988,6 +2013,13 @@ impl XyceTestRunner {
             | XyceBaselineFamilyKind::Subckt
             | XyceBaselineFamilyKind::Supernode => baseline == target,
             XyceBaselineFamilyKind::TransientAnalysisExpression => matches!(
+                (baseline, target),
+                (
+                    XyceStaticTranContract::PlainStatic,
+                    XyceStaticTranContract::WrapperStatic
+                )
+            ),
+            XyceBaselineFamilyKind::SourceMultiplicity => matches!(
                 (baseline, target),
                 (
                     XyceStaticTranContract::PlainStatic,

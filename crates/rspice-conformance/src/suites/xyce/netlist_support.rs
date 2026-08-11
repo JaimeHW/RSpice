@@ -840,11 +840,13 @@ impl XyceTestRunner {
                 expression,
                 tc1,
                 tc2,
+                multiplicity,
             }
             | ElementKind::BehavioralCurrent {
                 expression,
                 tc1,
                 tc2,
+                multiplicity,
             } => {
                 let kind = if matches!(&element.kind, ElementKind::BehavioralVoltage { .. }) {
                     "BV"
@@ -861,8 +863,21 @@ impl XyceTestRunner {
                     })?;
                 (
                     kind.to_string(),
-                    vec![tc1.to_bits(), tc2.to_bits()],
-                    vec![prepared.trim().to_ascii_lowercase()],
+                    vec![
+                        tc1.to_bits(),
+                        tc2.to_bits(),
+                        multiplicity.value.to_bits(),
+                        u64::from(multiplicity.given),
+                    ],
+                    vec![
+                        prepared.trim().to_ascii_lowercase(),
+                        multiplicity
+                            .value_expr
+                            .as_deref()
+                            .unwrap_or("")
+                            .trim()
+                            .to_ascii_lowercase(),
+                    ],
                 )
             }
             ElementKind::Bjt { .. } => ("Q".to_string(), Vec::new(), Vec::new()),

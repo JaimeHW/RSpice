@@ -968,6 +968,34 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.source_multiplicity_family_contract(deck) {
+            let result = match contract {
+                Ok(contract) => self.run_source_multiplicity_family_contract(deck, contract, start),
+                Err(reason) => {
+                    let (_, role) = XyceSourceMultiplicityRole::for_record(&deck.relative_path)
+                        .expect("source-multiplicity detection selects only recognized records");
+                    self.failure_result(
+                        deck,
+                        start,
+                        role.result_contract(),
+                        format!(
+                            "source-multiplicity family provenance qualification failed: {reason}"
+                        ),
+                        Vec::new(),
+                    )
+                }
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.baseline_family_contract(deck) {
             let result = self.run_baseline_family_contract(deck, contract, start);
             if self.config.verbose {
@@ -10031,6 +10059,39 @@ impl XyceTestRunner {
         result
     }
 
+    pub(super) fn run_source_multiplicity_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceSourceMultiplicityFamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.role.result_contract();
+        if let Err(reason) = self.validate_source_multiplicity_provenance(&contract) {
+            return self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("source-multiplicity provenance changed before execution: {reason}"),
+                Vec::new(),
+            );
+        }
+        let mut result =
+            self.run_baseline_family_contract(deck, contract.relational.clone(), start);
+        if result.passed && !result.expected_unsupported {
+            if let Err(reason) = self.validate_source_multiplicity_provenance(&contract) {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("source-multiplicity provenance changed during execution: {reason}"),
+                    Vec::new(),
+                );
+            }
+            result.contract = result_contract.to_string();
+        }
+        result
+    }
+
     pub(super) fn run_switch_state_case_family_contract(
         &self,
         deck: &XyceDeck,
@@ -10230,6 +10291,20 @@ impl XyceTestRunner {
                 );
             }
         };
+        if contract.kind == XyceBaselineFamilyKind::SourceMultiplicity
+            && let Err(reason) = Self::validate_source_multiplicity_dc_plan(&baseline_plan)
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline DC qualification failed: {reason}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
         if contract.comparison.compares_waveforms_exactly() {
             return self.run_exact_dc_baseline_family_contract(
                 deck,
@@ -10276,6 +10351,28 @@ impl XyceTestRunner {
                     Vec::new(),
                 );
             }
+        };
+        let baseline_source_multiplicity_snapshot = if contract.kind
+            == XyceBaselineFamilyKind::SourceMultiplicity
+        {
+            match Self::source_multiplicity_family_snapshot(&baseline_netlist, &baseline_plan.print)
+            {
+                Ok(snapshot) => Some(snapshot),
+                Err(reason) => {
+                    return self.failure_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            format!(
+                                "{kind_name} family '{}' baseline semantic qualification failed: {reason}",
+                                contract.family
+                            ),
+                            Vec::new(),
+                        );
+                }
+            }
+        } else {
+            None
         };
         if contract.kind.compares_baseline_oracle()
             && let Some(reference_path) = self.static_prn_reference_path(&contract.baseline_path)
@@ -10384,6 +10481,21 @@ impl XyceTestRunner {
                     );
                 }
             };
+            if contract.kind == XyceBaselineFamilyKind::SourceMultiplicity
+                && let Err(reason) = Self::validate_source_multiplicity_dc_plan(&target_plan)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} DC qualification failed: {reason}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
             let (target_netlist, target_results) = match self
                 .run_static_dc_results(&target_plan, start)
             {
@@ -10429,14 +10541,85 @@ impl XyceTestRunner {
                 }
             };
 
-            let mut mismatches = match self.compare_dc_prn_reference(
-                &baseline_table,
-                &target_plan.print,
-                &target_netlist,
-                &baseline_plan.source,
-                &target_plan.dc,
-                &target_results,
-            ) {
+            if let Some(baseline_snapshot) = baseline_source_multiplicity_snapshot.as_ref() {
+                let target_snapshot = match Self::source_multiplicity_family_snapshot(
+                    &target_netlist,
+                    &target_plan.print,
+                ) {
+                    Ok(snapshot) => snapshot,
+                    Err(reason) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            format!(
+                                "{kind_name} family '{}' member {} semantic qualification failed: {reason}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                };
+                if let Err(reason) =
+                    Self::compare_source_multiplicity_snapshots(baseline_snapshot, &target_snapshot)
+                {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' member {} changes semantics outside source M composition: {reason}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            }
+
+            let target_table = if contract.kind == XyceBaselineFamilyKind::SourceMultiplicity {
+                match self.dc_results_to_prn_table(&target_plan, &target_netlist, &target_results) {
+                    Ok(table) => Some(table),
+                    Err(error) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            format!(
+                                "{kind_name} family '{}' member {} output conversion failed: {error}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                }
+            } else {
+                None
+            };
+            let comparison = if let Some(target_table) = target_table.as_ref() {
+                // Every removed wrapper passed owner.prn as GOODFILE and
+                // baseline.prn as TESTFILE. The normalized-RMS denominator
+                // makes this ordering observable and therefore contractual.
+                self.compare_release_7_10_xyce_verify_dc_tables(
+                    "source multiplicity",
+                    target_table,
+                    &baseline_table,
+                    &target_results,
+                    &baseline_results,
+                )
+            } else {
+                self.compare_dc_prn_reference(
+                    &baseline_table,
+                    &target_plan.print,
+                    &target_netlist,
+                    &baseline_plan.source,
+                    &target_plan.dc,
+                    &target_results,
+                )
+            };
+            let mut mismatches = match comparison {
                 Ok(mismatches) => mismatches,
                 Err(err) => {
                     return self.failure_result(
@@ -11297,6 +11480,20 @@ impl XyceTestRunner {
                 Vec::new(),
             );
         }
+        if contract.kind == XyceBaselineFamilyKind::SourceMultiplicity
+            && let Err(err) = Self::validate_source_multiplicity_transient_plan(&baseline_plan)
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline qualification failed: {err}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
         if contract.kind == XyceBaselineFamilyKind::PassiveCapPrimaryValue
             && let Err(err) = Self::validate_passive_cap_primary_transient_plan(&baseline_plan)
         {
@@ -11686,6 +11883,21 @@ impl XyceTestRunner {
             if contract.kind == XyceBaselineFamilyKind::Bug1826ThermalParameter
                 && let Err(err) =
                     Self::validate_bug1826_thermal_parameter_transient_plan(&target_plan)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} qualification failed: {err}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+            if contract.kind == XyceBaselineFamilyKind::SourceMultiplicity
+                && let Err(err) = Self::validate_source_multiplicity_transient_plan(&target_plan)
             {
                 return self.failure_result(
                     deck,

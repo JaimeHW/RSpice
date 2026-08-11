@@ -27443,3 +27443,313 @@ fn noise_gs_parser_preserves_frequency_at_and_failure_metadata() {
     assert_eq!(rows[2].event_axis, None);
     assert_eq!(rows[2].mixed.value, XyceMeasurementReferenceValue::Failed);
 }
+
+#[test]
+fn source_multiplicity_release_710_oracle_provenance_is_exact() {
+    let records = XyceTestRunner::source_multiplicity_historical_oracle_provenance_records();
+    assert_eq!(
+        records.len(),
+        XYCE_SOURCE_MULTIPLICITY_HISTORICAL_ORACLE_RECORD_COUNT
+    );
+    XyceTestRunner::validate_source_multiplicity_historical_oracle_provenance()
+        .expect("source-multiplicity wrappers, excludes, and xyce_verify stay provenance-bound");
+    assert!(records.iter().any(|record| {
+        record.contains("Netlists/BSRC/bsrc1_m.cir.sh")
+            && record.contains(XYCE_SOURCE_MULTIPLICITY_UPSTREAM_REGRESSION_COMMIT)
+    }));
+    assert!(
+        records
+            .iter()
+            .any(|record| record.contains("Netlists/VCCS/vccs_tran_m.cir.sh"))
+    );
+    assert!(
+        records
+            .iter()
+            .any(|record| record.contains(XYCE_RELEASE_710_XYCE_VERIFY_SHA256))
+    );
+}
+
+#[test]
+fn source_multiplicity_canonical_pairs_are_typed_and_owner_is_goodfile() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let print = XycePrintRequest {
+        probes: vec!["V(1)".to_string(), "V(2)".to_string(), "V(3)".to_string()],
+    };
+    for spec in XYCE_SOURCE_MULTIPLICITY_CASES {
+        let owner_path = root.join(spec.owner_relative_path());
+        let baseline_path = root.join(spec.baseline_relative_path());
+        let owner_source = fs::read_to_string(&owner_path).expect("read canonical M= owner");
+        let baseline_source =
+            fs::read_to_string(&baseline_path).expect("read canonical explicit-gain baseline");
+        let owner = XyceTestRunner::parse_xyce_netlist(&owner_source, &owner_path)
+            .expect("parse canonical M= owner");
+        let baseline = XyceTestRunner::parse_xyce_netlist(&baseline_source, &baseline_path)
+            .expect("parse canonical explicit-gain baseline");
+        let owner_snapshot = XyceTestRunner::source_multiplicity_family_snapshot(&owner, &print)
+            .expect("owner has qualified source-M semantics");
+        let baseline_snapshot =
+            XyceTestRunner::source_multiplicity_family_snapshot(&baseline, &print)
+                .expect("baseline has qualified explicit-gain semantics");
+        assert_eq!(owner_snapshot.representation, spec.representation);
+        assert_eq!(
+            baseline_snapshot.representation,
+            XyceSourceMultiplicityRepresentation::LinearBaseline
+        );
+        assert_eq!(owner_snapshot.analysis, spec.analysis);
+        assert_eq!(baseline_snapshot.analysis, spec.analysis);
+        XyceTestRunner::compare_source_multiplicity_snapshots(&baseline_snapshot, &owner_snapshot)
+            .expect("explicit gain and composed M represent the same typed current law");
+        assert!(
+            XyceTestRunner::compare_source_multiplicity_snapshots(
+                &owner_snapshot,
+                &baseline_snapshot,
+            )
+            .is_err(),
+            "{} must preserve owner-GOODFILE/baseline-TESTFILE direction",
+            spec.family
+        );
+
+        match spec.analysis {
+            XyceSourceMultiplicityAnalysis::Dc => {
+                let owner_plan = runner
+                    .static_dc_plan_for_path(&owner_path, ExpressionDialect::Xyce)
+                    .expect("build owner DC plan");
+                let baseline_plan = runner
+                    .static_dc_plan_for_path(&baseline_path, ExpressionDialect::Xyce)
+                    .expect("build baseline DC plan");
+                XyceTestRunner::validate_source_multiplicity_dc_plan(&owner_plan)
+                    .expect("owner DC plan is exact");
+                XyceTestRunner::validate_source_multiplicity_dc_plan(&baseline_plan)
+                    .expect("baseline DC plan is exact");
+            }
+            XyceSourceMultiplicityAnalysis::Tran => {
+                let owner_plan = runner
+                    .static_tran_family_plan_for_path(
+                        &owner_path,
+                        runner.transient_family_plan_purpose_for_path(
+                            XyceBaselineFamilyKind::SourceMultiplicity,
+                            &owner_path,
+                        ),
+                    )
+                    .expect("build owner TRAN plan");
+                let baseline_plan = runner
+                    .static_tran_family_plan_for_path(
+                        &baseline_path,
+                        runner.transient_family_plan_purpose_for_path(
+                            XyceBaselineFamilyKind::SourceMultiplicity,
+                            &baseline_path,
+                        ),
+                    )
+                    .expect("build baseline TRAN plan");
+                XyceTestRunner::validate_source_multiplicity_transient_plan(&owner_plan)
+                    .expect("owner TRAN plan is exact");
+                XyceTestRunner::validate_source_multiplicity_transient_plan(&baseline_plan)
+                    .expect("baseline TRAN plan is exact");
+            }
+        }
+    }
+}
+
+#[test]
+fn source_multiplicity_provenance_is_a_fail_closed_twenty_record_bijection() {
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let root = tempfile::tempdir().expect("create source-multiplicity provenance fixture");
+    let mut wrapper_rows = Vec::new();
+    let mut exclusion_rows = Vec::new();
+    for spec in XYCE_SOURCE_MULTIPLICITY_CASES {
+        for relative in [
+            spec.owner_relative_path().to_string(),
+            spec.baseline_relative_path(),
+        ] {
+            let source = source_root.join(&relative);
+            let target = root.path().join(&relative);
+            fs::create_dir_all(target.parent().expect("candidate has parent"))
+                .expect("create candidate family directory");
+            fs::copy(source, target).expect("copy canonical source-multiplicity candidate");
+        }
+        wrapper_rows.push(format!(
+            "{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}",
+            spec.owner_relative_path()
+        ));
+        exclusion_rows.push(format!(
+            "{}\t{}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_SOURCE_MULTIPLICITY_BASELINE_CONTRACT}",
+            spec.baseline_relative_path(),
+            if spec.owner_record.starts_with("netlists/bsrc/") {
+                "Netlists/BSRC/exclude"
+            } else {
+                "Netlists/VCCS/exclude"
+            }
+        ));
+    }
+    wrapper_rows.sort();
+    exclusion_rows.sort();
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{}\n", wrapper_rows.join("\n")),
+    )
+    .expect("write canonical source-multiplicity wrapper ownership");
+    let exclusion_refs = exclusion_rows
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&exclusion_refs),
+    )
+    .expect("write canonical source-multiplicity promotions");
+
+    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    let decks = runner.discover_netlist_tests();
+    assert_eq!(decks.len(), XYCE_SOURCE_MULTIPLICITY_CANDIDATE_COUNT);
+    let role_counts = decks.iter().fold([0usize; 2], |mut counts, deck| {
+        let (_, role) = XyceSourceMultiplicityRole::for_record(&deck.relative_path)
+            .expect("every selected fixture deck has one exact source-multiplicity role");
+        counts[usize::from(role == XyceSourceMultiplicityRole::Baseline)] += 1;
+        counts
+    });
+    assert_eq!(role_counts, [10, 10]);
+    let owner = decks
+        .iter()
+        .find(|deck| {
+            XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                == XYCE_SOURCE_MULTIPLICITY_CASES[0].owner_record
+        })
+        .expect("fixture contains first wrapper owner");
+    let contract = runner
+        .source_multiplicity_family_contract(owner)
+        .expect("exact record is selected")
+        .expect("canonical twenty-record provenance qualifies");
+    runner
+        .validate_source_multiplicity_provenance(&contract)
+        .expect("complete provenance revalidates");
+    for relative in [
+        XYCE_SOURCE_MULTIPLICITY_CASES[0]
+            .owner_relative_path()
+            .to_string(),
+        XYCE_SOURCE_MULTIPLICITY_CASES[0].baseline_relative_path(),
+        XYCE_SOURCE_MULTIPLICITY_CASES[9]
+            .owner_relative_path()
+            .to_string(),
+        XYCE_SOURCE_MULTIPLICITY_CASES[9].baseline_relative_path(),
+    ] {
+        let result = runner.run_test(root.path().join(&relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} must execute natively through its relational family: {result:?}"
+        );
+        assert_eq!(
+            result.contract,
+            if relative.ends_with("_baseline.cir") {
+                XYCE_SOURCE_MULTIPLICITY_BASELINE_CONTRACT
+            } else {
+                XYCE_SOURCE_MULTIPLICITY_WRAPPER_CONTRACT
+            }
+        );
+    }
+
+    let baseline = root
+        .path()
+        .join(XYCE_SOURCE_MULTIPLICITY_CASES[9].baseline_relative_path());
+    let original = fs::read(&baseline).expect("read mutation target");
+    fs::write(
+        &baseline,
+        b"source multiplicity provenance mutation\n.end\n",
+    )
+    .expect("mutate one fixed candidate");
+    assert!(
+        runner
+            .validate_source_multiplicity_provenance(&contract)
+            .is_err(),
+        "one changed candidate identity must fail the complete family"
+    );
+    fs::write(&baseline, original).expect("restore candidate identity");
+
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{}\n", wrapper_rows[1..].join("\n")),
+    )
+    .expect("remove one wrapper owner row");
+    assert!(
+        runner
+            .validate_source_multiplicity_provenance(&contract)
+            .is_err(),
+        "missing owner provenance must fail the complete family"
+    );
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{}\n", wrapper_rows.join("\n")),
+    )
+    .expect("restore wrapper owner rows");
+    let mut wrong_exclusions = exclusion_rows.clone();
+    wrong_exclusions[0] = wrong_exclusions[0].replace(
+        XYCE_SOURCE_MULTIPLICITY_BASELINE_CONTRACT,
+        "wrong_source_multiplicity_contract",
+    );
+    let wrong_refs = wrong_exclusions
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&wrong_refs),
+    )
+    .expect("mutate one exclusion contract");
+    assert!(
+        runner
+            .validate_source_multiplicity_provenance(&contract)
+            .is_err(),
+        "one wrong baseline promotion contract must fail the complete family"
+    );
+}
+
+#[test]
+fn source_multiplicity_snapshot_rejects_m_topology_probe_and_analysis_drift() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let spec = XYCE_SOURCE_MULTIPLICITY_CASES[0];
+    let owner_path = root.join(spec.owner_relative_path());
+    let baseline_path = root.join(spec.baseline_relative_path());
+    let owner = XyceTestRunner::parse_xyce_netlist(
+        &fs::read_to_string(&owner_path).expect("read owner"),
+        &owner_path,
+    )
+    .expect("parse owner");
+    let baseline = XyceTestRunner::parse_xyce_netlist(
+        &fs::read_to_string(&baseline_path).expect("read baseline"),
+        &baseline_path,
+    )
+    .expect("parse baseline");
+    let print = XycePrintRequest {
+        probes: vec!["V(1)".to_string(), "V(2)".to_string(), "V(3)".to_string()],
+    };
+    let baseline_snapshot = XyceTestRunner::source_multiplicity_family_snapshot(&baseline, &print)
+        .expect("snapshot baseline");
+    let owner_snapshot = XyceTestRunner::source_multiplicity_family_snapshot(&owner, &print)
+        .expect("snapshot owner");
+
+    let mut changed_m = owner_snapshot.clone();
+    changed_m.flattened_multiplicity_bits = 9.0f64.to_bits();
+    let mut changed_topology = owner_snapshot.clone();
+    changed_topology.source_nodes[0] = "4".to_string();
+    let mut changed_probe = owner_snapshot.clone();
+    changed_probe.ordered_probes.swap(1, 2);
+    let mut changed_analysis = owner_snapshot.clone();
+    changed_analysis.analysis = XyceSourceMultiplicityAnalysis::Tran;
+    for changed in [changed_m, changed_topology, changed_probe, changed_analysis] {
+        assert!(
+            XyceTestRunner::compare_source_multiplicity_snapshots(&baseline_snapshot, &changed,)
+                .is_err()
+        );
+    }
+
+    let mut malformed_owner = owner.clone();
+    let ElementKind::BehavioralCurrent { multiplicity, .. } = &mut malformed_owner.elements[1].kind
+    else {
+        panic!("bsrc1 owner second element remains behavioral current");
+    };
+    multiplicity.value = 9.0;
+    assert!(
+        XyceTestRunner::source_multiplicity_family_snapshot(&malformed_owner, &print).is_err(),
+        "typed parsing must reject an M=9 owner before waveform execution"
+    );
+}

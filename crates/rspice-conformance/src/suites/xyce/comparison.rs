@@ -1847,8 +1847,51 @@ impl XyceTestRunner {
                     Err("scope-qualified nested include semantics differ".to_string())
                 }
             }
+            (
+                XyceStrictDcFamilySnapshot::SourceMultiplicity(baseline),
+                XyceStrictDcFamilySnapshot::SourceMultiplicity(target),
+            ) => Self::compare_source_multiplicity_snapshots(baseline, target),
             _ => Err("baseline and target use different exact-DC snapshot kinds".to_string()),
         }
+    }
+
+    pub(super) fn compare_source_multiplicity_snapshots(
+        baseline: &XyceSourceMultiplicitySnapshot,
+        target: &XyceSourceMultiplicitySnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XyceSourceMultiplicityRepresentation::LinearBaseline
+            || target.representation == XyceSourceMultiplicityRepresentation::LinearBaseline
+        {
+            return Err(
+                "source multiplicity must compare an explicit 0.2-S baseline against one M=10 owner representation"
+                    .to_string(),
+            );
+        }
+        if baseline.analysis != target.analysis
+            || baseline.flattened_elements != target.flattened_elements
+            || baseline.effective_gain_bits != target.effective_gain_bits
+            || baseline.source_nodes != target.source_nodes
+            || baseline.control_nodes != target.control_nodes
+            || baseline.ordered_probes != target.ordered_probes
+        {
+            return Err(
+                "source multiplicity changes analysis, flattened topology/current law, or ordered probes"
+                    .to_string(),
+            );
+        }
+        if baseline.authored_multiplicity_bits != 1.0f64.to_bits()
+            || baseline.authored_multiplicity_given
+            || baseline.flattened_multiplicity_bits != 1.0f64.to_bits()
+            || baseline.flattened_multiplicity_given
+            || !baseline.hierarchy_multiplicity_bits.is_empty()
+            || target.flattened_multiplicity_bits != 10.0f64.to_bits()
+        {
+            return Err(
+                "source multiplicity baseline or effective owner multiplier state is not canonical"
+                    .to_string(),
+            );
+        }
+        Ok(())
     }
 
     pub(super) fn compare_passive_primary_snapshots(
@@ -2070,6 +2113,10 @@ impl XyceTestRunner {
                 XyceStrictTransientFamilySnapshot::Bug1826ThermalParameter(baseline),
                 XyceStrictTransientFamilySnapshot::Bug1826ThermalParameter(target),
             ) => Self::compare_bug1826_thermal_parameter_family_snapshots(baseline, target),
+            (
+                XyceStrictTransientFamilySnapshot::SourceMultiplicity(baseline),
+                XyceStrictTransientFamilySnapshot::SourceMultiplicity(target),
+            ) => Self::compare_source_multiplicity_snapshots(baseline, target),
             (
                 XyceStrictTransientFamilySnapshot::PassivePrimaryValue(baseline),
                 XyceStrictTransientFamilySnapshot::PassivePrimaryValue(target),

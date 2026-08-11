@@ -4367,6 +4367,414 @@ impl XyceTestRunner {
         })
     }
 
+    pub(super) fn source_multiplicity_family_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<XyceSourceMultiplicitySnapshot, String> {
+        const LABEL: &str = "BSRC/VCCS source multiplicity";
+        if !netlist.diagnostics.is_empty()
+            || !netlist.models.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || netlist.device_initial_conditions.is_some()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+            || print.probes != ["V(1)".to_string(), "V(2)".to_string(), "V(3)".to_string()]
+        {
+            return Err(format!(
+                "{LABEL} requires a diagnostic-free circuit with only its typed source hierarchy and ordered V(1), V(2), V(3) probes"
+            ));
+        }
+        let analysis = match netlist.analyses.as_slice() {
+            [AnalysisCommand::Dc { .. }] => XyceSourceMultiplicityAnalysis::Dc,
+            [AnalysisCommand::Tran { .. }] => XyceSourceMultiplicityAnalysis::Tran,
+            _ => return Err(format!("{LABEL} requires exactly one DC or TRAN analysis")),
+        };
+
+        fn collect_authored_state(
+            elements: &[rspice_core::netlist::Element],
+            sources: &mut Vec<(String, u64, bool, Option<String>)>,
+            hierarchy: &mut Vec<u64>,
+        ) -> Result<(), String> {
+            for element in elements {
+                match &element.kind {
+                    ElementKind::Vccs { multiplicity, .. } => sources.push((
+                        "linear".to_string(),
+                        multiplicity.value.to_bits(),
+                        multiplicity.given,
+                        multiplicity.value_expr.clone(),
+                    )),
+                    ElementKind::BehavioralCurrent { multiplicity, .. } => sources.push((
+                        if element.name.trim().to_ascii_lowercase().starts_with('g') {
+                            "expression"
+                        } else {
+                            "behavioral"
+                        }
+                        .to_string(),
+                        multiplicity.value.to_bits(),
+                        multiplicity.given,
+                        multiplicity.value_expr.clone(),
+                    )),
+                    ElementKind::Subcircuit { params, .. } => {
+                        let multiplier = params
+                            .iter()
+                            .filter(|(name, _)| name.eq_ignore_ascii_case("M"))
+                            .map(|(_, value)| value.as_value())
+                            .collect::<Vec<_>>();
+                        if multiplier.len() != 1 || multiplier[0].is_none() {
+                            return Err(
+                                "source-multiplicity hierarchy requires one resolved M on every X instance"
+                                    .to_string(),
+                            );
+                        }
+                        hierarchy.push(multiplier[0].expect("checked resolved M").to_bits());
+                    }
+                    _ => {}
+                }
+            }
+            Ok(())
+        }
+
+        let mut authored_sources = Vec::new();
+        let mut hierarchy_multiplicity_bits = Vec::new();
+        collect_authored_state(
+            &netlist.elements,
+            &mut authored_sources,
+            &mut hierarchy_multiplicity_bits,
+        )?;
+        fn walk_subcircuits(
+            definitions: &[SubcircuitDef],
+            sources: &mut Vec<(String, u64, bool, Option<String>)>,
+            hierarchy: &mut Vec<u64>,
+        ) -> Result<(), String> {
+            for definition in definitions {
+                collect_authored_state(&definition.elements, sources, hierarchy)?;
+                walk_subcircuits(&definition.nested_subcircuits, sources, hierarchy)?;
+            }
+            Ok(())
+        }
+        walk_subcircuits(
+            &netlist.subcircuits,
+            &mut authored_sources,
+            &mut hierarchy_multiplicity_bits,
+        )?;
+        let [(authored_kind, authored_multiplicity_bits, authored_given, authored_expr)] =
+            authored_sources.as_slice()
+        else {
+            return Err(format!(
+                "{LABEL} requires exactly one authored current-producing source"
+            ));
+        };
+
+        let representation = match (
+            authored_kind.as_str(),
+            *authored_multiplicity_bits,
+            *authored_given,
+            authored_expr.as_deref(),
+            hierarchy_multiplicity_bits.as_slice(),
+        ) {
+            ("linear", bits, false, None, []) if bits == 1.0f64.to_bits() => {
+                XyceSourceMultiplicityRepresentation::LinearBaseline
+            }
+            ("linear", bits, true, None, []) if bits == 10.0f64.to_bits() => {
+                XyceSourceMultiplicityRepresentation::LinearDirect
+            }
+            ("behavioral", bits, true, None, []) if bits == 10.0f64.to_bits() => {
+                XyceSourceMultiplicityRepresentation::BehavioralDirect
+            }
+            ("behavioral", bits, true, Some(expr), [ten])
+                if bits == 1.0f64.to_bits()
+                    && expr.trim().eq_ignore_ascii_case("M")
+                    && *ten == 10.0f64.to_bits() =>
+            {
+                XyceSourceMultiplicityRepresentation::BehavioralFormal
+            }
+            ("behavioral", bits, false, None, [ten])
+                if bits == 1.0f64.to_bits() && *ten == 10.0f64.to_bits() =>
+            {
+                XyceSourceMultiplicityRepresentation::BehavioralInherited
+            }
+            ("behavioral", bits, false, None, [five, two])
+                if bits == 1.0f64.to_bits()
+                    && *five == 5.0f64.to_bits()
+                    && *two == 2.0f64.to_bits() =>
+            {
+                XyceSourceMultiplicityRepresentation::BehavioralNested
+            }
+            ("expression", bits, true, None, []) if bits == 10.0f64.to_bits() => {
+                XyceSourceMultiplicityRepresentation::ExpressionDirect
+            }
+            ("expression", bits, true, Some(expr), [ten])
+                if bits == 1.0f64.to_bits()
+                    && expr.trim().eq_ignore_ascii_case("M")
+                    && *ten == 10.0f64.to_bits() =>
+            {
+                XyceSourceMultiplicityRepresentation::ExpressionFormal
+            }
+            ("expression", bits, false, None, [ten])
+                if bits == 1.0f64.to_bits() && *ten == 10.0f64.to_bits() =>
+            {
+                XyceSourceMultiplicityRepresentation::ExpressionInherited
+            }
+            ("expression", bits, false, None, [five, two])
+                if bits == 1.0f64.to_bits()
+                    && *five == 5.0f64.to_bits()
+                    && *two == 2.0f64.to_bits() =>
+            {
+                XyceSourceMultiplicityRepresentation::ExpressionNested
+            }
+            _ => {
+                return Err(format!(
+                    "{LABEL} source M and hierarchy do not match a qualified direct, formal, inherited, nested, or baseline representation"
+                ));
+            }
+        };
+
+        let flattened = flatten_netlist(netlist)
+            .map_err(|error| format!("{LABEL} hierarchy could not be flattened: {error}"))?;
+        if flattened.len() != 6 {
+            return Err(format!(
+                "{LABEL} requires exactly six flattened elements, found {}",
+                flattened.len()
+            ));
+        }
+        let mut flattened_elements = BTreeMap::new();
+        let mut effective_gain_bits = None;
+        let mut source_nodes = None;
+        let mut control_nodes = None;
+        let mut flattened_multiplicity = None;
+        for element in &flattened {
+            let name = element.name.trim().to_ascii_lowercase();
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| node.trim().to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            let (key, fingerprint) = match &element.kind {
+                ElementKind::Resistor { value, .. } => (
+                    name.clone(),
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    },
+                ),
+                ElementKind::VoltageSource(spec) => {
+                    let (kind, numeric_bits) = match spec {
+                        rspice_core::netlist::SourceSpec::Dc(value) => {
+                            ("V:DC".to_string(), vec![value.to_bits()])
+                        }
+                        rspice_core::netlist::SourceSpec::DcTransient {
+                            dc_value,
+                            transient,
+                        } => {
+                            let rspice_core::netlist::SourceSpec::Pwl {
+                                points,
+                                delay,
+                                repeat_from,
+                            } = transient.as_ref()
+                            else {
+                                return Err(format!("{LABEL} transient VIN must use PWL"));
+                            };
+                            let mut bits = vec![dc_value.to_bits(), delay.to_bits()];
+                            bits.push(repeat_from.map(Value::to_bits).unwrap_or(u64::MAX));
+                            bits.extend(
+                                points
+                                    .iter()
+                                    .flat_map(|(time, value)| [time.to_bits(), value.to_bits()]),
+                            );
+                            ("V:DC+PWL".to_string(), bits)
+                        }
+                        rspice_core::netlist::SourceSpec::Pwl {
+                            points,
+                            delay,
+                            repeat_from,
+                        } => {
+                            let mut bits = vec![delay.to_bits()];
+                            bits.push(repeat_from.map(Value::to_bits).unwrap_or(u64::MAX));
+                            bits.extend(
+                                points
+                                    .iter()
+                                    .flat_map(|(time, value)| [time.to_bits(), value.to_bits()]),
+                            );
+                            ("V:PWL".to_string(), bits)
+                        }
+                        _ => return Err(format!("{LABEL} VIN waveform is outside DC/PWL")),
+                    };
+                    (
+                        name.clone(),
+                        XyceRelationalElementFingerprint {
+                            kind,
+                            nodes,
+                            numeric_bits,
+                            text: Vec::new(),
+                        },
+                    )
+                }
+                ElementKind::Vccs {
+                    transconductance,
+                    transconductance_expr,
+                    multiplicity,
+                    control_nodes: controls,
+                } => {
+                    if transconductance_expr.is_some() || multiplicity.value_expr.is_some() {
+                        return Err(format!("{LABEL} flattened linear G remains deferred"));
+                    }
+                    let gain = *transconductance * multiplicity.value;
+                    effective_gain_bits = Some(gain.to_bits());
+                    source_nodes = Some(nodes.clone());
+                    control_nodes = Some([
+                        controls.0.trim().to_ascii_lowercase(),
+                        controls.1.trim().to_ascii_lowercase(),
+                    ]);
+                    flattened_multiplicity =
+                        Some((multiplicity.value.to_bits(), multiplicity.given));
+                    (
+                        "source".to_string(),
+                        XyceRelationalElementFingerprint {
+                            kind: "I=GAIN*V".to_string(),
+                            nodes,
+                            numeric_bits: vec![gain.to_bits()],
+                            text: vec![
+                                controls.0.trim().to_ascii_lowercase(),
+                                controls.1.trim().to_ascii_lowercase(),
+                            ],
+                        },
+                    )
+                }
+                ElementKind::BehavioralCurrent {
+                    expression,
+                    tc1,
+                    tc2,
+                    multiplicity,
+                } => {
+                    if tc1.to_bits() != 0.0f64.to_bits()
+                        || tc2.to_bits() != 0.0f64.to_bits()
+                        || multiplicity.value_expr.is_some()
+                    {
+                        return Err(format!(
+                            "{LABEL} flattened behavioral current retains TC or deferred M state"
+                        ));
+                    }
+                    let prepared = prepare_behavioral_expression(expression, &netlist.params)
+                        .map_err(|error| {
+                            format!("{LABEL} expression resolution failed: {error}")
+                        })?;
+                    let ast = parse_expression_strict(&prepared)
+                        .map_err(|error| format!("{LABEL} expression parse failed: {error}"))?;
+                    fn voltage_pair(expr: &Expr) -> Option<[String; 2]> {
+                        match expr {
+                            Expr::NodeVoltage(node) => {
+                                Some([node.trim().to_ascii_lowercase(), "0".to_string()])
+                            }
+                            Expr::Binary {
+                                op: BinaryOp::Sub,
+                                left,
+                                right,
+                            } => match (left.as_ref(), right.as_ref()) {
+                                (Expr::NodeVoltage(pos), Expr::NodeVoltage(neg)) => Some([
+                                    pos.trim().to_ascii_lowercase(),
+                                    neg.trim().to_ascii_lowercase(),
+                                ]),
+                                _ => None,
+                            },
+                            _ => None,
+                        }
+                    }
+                    let (coefficient, controls) = match ast {
+                        Expr::Binary {
+                            op: BinaryOp::Mul,
+                            left,
+                            right,
+                        } => match (left.as_ref(), right.as_ref()) {
+                            (Expr::Const(value), expression) | (expression, Expr::Const(value)) => {
+                                (*value, voltage_pair(expression))
+                            }
+                            _ => (Value::NAN, None),
+                        },
+                        _ => (Value::NAN, None),
+                    };
+                    let controls = controls.ok_or_else(|| {
+                        format!("{LABEL} behavioral current is not coefficient*V(control)")
+                    })?;
+                    let gain = coefficient * multiplicity.value;
+                    effective_gain_bits = Some(gain.to_bits());
+                    source_nodes = Some(nodes.clone());
+                    control_nodes = Some(controls.clone());
+                    flattened_multiplicity =
+                        Some((multiplicity.value.to_bits(), multiplicity.given));
+                    (
+                        "source".to_string(),
+                        XyceRelationalElementFingerprint {
+                            kind: "I=GAIN*V".to_string(),
+                            nodes,
+                            numeric_bits: vec![gain.to_bits()],
+                            text: controls.to_vec(),
+                        },
+                    )
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} flattened element '{}' is outside VIN/R/G/B topology",
+                        element.name
+                    ));
+                }
+            };
+            if flattened_elements
+                .insert(key.clone(), fingerprint)
+                .is_some()
+            {
+                return Err(format!(
+                    "{LABEL} normalized flattened key '{key}' is duplicated"
+                ));
+            }
+        }
+        let effective_gain_bits = effective_gain_bits
+            .filter(|bits| *bits == 0.2f64.to_bits())
+            .ok_or_else(|| format!("{LABEL} effective current gain is not exactly 0.2 S"))?;
+        let source_nodes = source_nodes
+            .filter(|nodes| nodes.as_slice() == ["3", "0"])
+            .ok_or_else(|| format!("{LABEL} current source must connect from node 3 to 0"))?;
+        let control_nodes = control_nodes
+            .filter(|nodes| nodes.as_slice() == ["2", "0"])
+            .ok_or_else(|| format!("{LABEL} current law must sense V(2,0)"))?;
+        let (flattened_multiplicity_bits, flattened_multiplicity_given) =
+            flattened_multiplicity.ok_or_else(|| format!("{LABEL} has no flattened source M"))?;
+        let expected_flattened_m =
+            if representation == XyceSourceMultiplicityRepresentation::LinearBaseline {
+                1.0f64.to_bits()
+            } else {
+                10.0f64.to_bits()
+            };
+        if flattened_multiplicity_bits != expected_flattened_m {
+            return Err(format!(
+                "{LABEL} flattened M is not the qualified effective value"
+            ));
+        }
+        Ok(XyceSourceMultiplicitySnapshot {
+            analysis,
+            representation,
+            flattened_elements,
+            effective_gain_bits,
+            source_nodes: source_nodes
+                .try_into()
+                .expect("qualified two-terminal source"),
+            control_nodes,
+            authored_multiplicity_bits: *authored_multiplicity_bits,
+            authored_multiplicity_given: *authored_given,
+            flattened_multiplicity_bits,
+            flattened_multiplicity_given,
+            hierarchy_multiplicity_bits,
+            ordered_probes: print.probes.clone(),
+        })
+    }
+
     pub(super) fn strict_ac_family_snapshot(
         kind: XyceBaselineFamilyKind,
         netlist: &Netlist,
@@ -4416,6 +4824,10 @@ impl XyceTestRunner {
             XyceBaselineFamilyKind::NestedIncludeIdentity => {
                 Self::nested_include_identity_family_snapshot(netlist, plan)
                     .map(XyceStrictDcFamilySnapshot::NestedIncludeIdentity)
+            }
+            XyceBaselineFamilyKind::SourceMultiplicity => {
+                Self::source_multiplicity_family_snapshot(netlist, &plan.print)
+                    .map(XyceStrictDcFamilySnapshot::SourceMultiplicity)
             }
             other => Err(format!(
                 "family kind {} has no qualified exact-DC semantic snapshot",
@@ -5025,6 +5437,10 @@ impl XyceTestRunner {
                 Self::bug1826_thermal_parameter_family_snapshot(netlist, print)
                     .map(XyceStrictTransientFamilySnapshot::Bug1826ThermalParameter)
             }
+            XyceBaselineFamilyKind::SourceMultiplicity => {
+                Self::source_multiplicity_family_snapshot(netlist, print)
+                    .map(XyceStrictTransientFamilySnapshot::SourceMultiplicity)
+            }
             XyceBaselineFamilyKind::PassiveCapPrimaryValue => {
                 Self::passive_cap_primary_snapshot(netlist, print)
                     .map(XyceStrictTransientFamilySnapshot::PassivePrimaryValue)
@@ -5511,10 +5927,14 @@ impl XyceTestRunner {
                         expression,
                         tc1,
                         tc2,
+                        multiplicity,
                     },
                 ) if nodes == ["1", "0"]
                     && tc1.to_bits() == 0.0f64.to_bits()
-                    && tc2.to_bits() == 0.0f64.to_bits() =>
+                    && tc2.to_bits() == 0.0f64.to_bits()
+                    && multiplicity.value.to_bits() == 1.0f64.to_bits()
+                    && multiplicity.value_expr.is_none()
+                    && !multiplicity.given =>
                 {
                     let prepared = prepare_behavioral_expression(expression, &netlist.params)
                         .map_err(|error| {
@@ -7845,6 +8265,7 @@ impl XyceTestRunner {
                     expression,
                     tc1,
                     tc2,
+                    multiplicity,
                 } => {
                     if source.is_some() {
                         return Err("exact SIN/SPICE_SIN parity requires exactly one excitation"
@@ -7853,6 +8274,9 @@ impl XyceTestRunner {
                     if nodes.len() != 2
                         || tc1.to_bits() != 0.0f64.to_bits()
                         || tc2.to_bits() != 0.0f64.to_bits()
+                        || multiplicity.value.to_bits() != 1.0f64.to_bits()
+                        || multiplicity.value_expr.is_some()
+                        || multiplicity.given
                     {
                         return Err(format!(
                             "behavioral source '{}' must be two-terminal with exact +0 TC1 and TC2",
@@ -8081,7 +8505,13 @@ impl XyceTestRunner {
                 expression,
                 tc1,
                 tc2,
-            } if tc1.to_bits() == 0.0f64.to_bits() && tc2.to_bits() == 0.0f64.to_bits() => {
+                multiplicity,
+            } if tc1.to_bits() == 0.0f64.to_bits()
+                && tc2.to_bits() == 0.0f64.to_bits()
+                && multiplicity.value.to_bits() == 1.0f64.to_bits()
+                && multiplicity.value_expr.is_none()
+                && !multiplicity.given =>
+            {
                 Self::qualify_raw_param_expression(
                     expression,
                     parameter_name,
@@ -8346,9 +8776,13 @@ impl XyceTestRunner {
                     expression,
                     tc1,
                     tc2,
+                    multiplicity,
                 } if nodes == [signal_nodes[0].clone(), "0".to_string()]
                     && tc1.to_bits() == 0.0f64.to_bits()
                     && tc2.to_bits() == 0.0f64.to_bits()
+                    && multiplicity.value.to_bits() == 1.0f64.to_bits()
+                    && multiplicity.value_expr.is_none()
+                    && !multiplicity.given
                     && flattened_behavioral_count == 0 =>
                 {
                     Self::qualify_prepared_param_expression(
