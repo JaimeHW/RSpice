@@ -22,6 +22,7 @@ use super::page_kit::{
     Tone, card, card_body, card_head_row, card_note, card_row, field_pair, ledger_head, ledger_row,
     rule_row,
 };
+use super::workflows::{commit_plan_change, unique_copy_name};
 
 const REGISTRY_COLUMNS: [f32; 6] = [0.18, 0.14, 0.20, 0.14, 0.16, 0.18];
 
@@ -173,47 +174,41 @@ fn registry(
         let name = variables[index].name.clone();
         let id = variables[index].id;
         if duplicate {
-            // The copy needs a name that is free in this plan; deriving it here
-            // keeps the transaction a single step rather than opening a dialog
-            // over a registry that is about to change.
-            let copy = unique_name(variables, &name);
+            let copy = unique_copy_name(&name, |candidate| {
+                variables
+                    .iter()
+                    .any(|variable| variable.name.eq_ignore_ascii_case(candidate))
+            });
             let detail = format!("Duplicated design variable {name} as {copy}.");
-            mutate(app, plan_id, &detail, move |workspace, plan_id| {
+            let committed = copy.clone();
+            if commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
                 workspace
                     .duplicate_design_variable(plan_id, id, copy)
                     .map(|_| ())
                     .map_err(|error| error.to_string())
-            });
+            }) {
+                // The copy carries the original's whole typed contract, so the
+                // record editor should open on it — that is the field the copy
+                // exists to change.
+                app.state.workbench.design_variable_expression_draft = None;
+                app.state.workbench.design_variable_bounds_draft = None;
+                app.state.workbench.selected_design_variable = Some(committed);
+            }
         } else if remove {
             let detail = format!("Removed design variable {name}.");
-            mutate(app, plan_id, &detail, move |workspace, plan_id| {
+            // A refused removal leaves the variable in the registry, so the
+            // selection has to survive with it — clearing regardless would
+            // close the editor on a row that is still there.
+            if commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
                 workspace
                     .remove_design_variable(plan_id, id)
                     .map(|_| ())
                     .map_err(|error| error.to_string())
-            });
-            app.state.workbench.selected_design_variable = None;
+            }) {
+                app.state.workbench.selected_design_variable = None;
+            }
         }
     }
-}
-
-/// `name_copy`, then `name_copy_2`, and so on until the plan has no such
-/// variable. Names are compared case-insensitively because that is how the
-/// registry itself validates uniqueness.
-fn unique_name(variables: &[crate::state::DesignVariable], base: &str) -> String {
-    let taken = |candidate: &str| {
-        variables
-            .iter()
-            .any(|variable| variable.name.eq_ignore_ascii_case(candidate))
-    };
-    let first = format!("{base}_copy");
-    if !taken(&first) {
-        return first;
-    }
-    (2u32..)
-        .map(|index| format!("{base}_copy_{index}"))
-        .find(|candidate| !taken(candidate))
-        .unwrap_or(first)
 }
 
 fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
@@ -571,25 +566,12 @@ fn commit_replacement(
     replacement: crate::state::DesignVariable,
     detail: &str,
 ) {
-    let mut workspace = app.state.workspace.clone();
-    let mut setup = app.state.sim_setup.clone();
-    let outcome = workspace
-        .replace_design_variable(plan_id, variable_id, replacement)
-        .map_err(|error| error.to_string())
-        .and_then(|_| {
-            setup
-                .commit_active_plan_configuration_change(detail.to_owned())
-                .map_err(|error| error.to_string())
-        });
-    match outcome {
-        Ok(receipt) => {
-            app.state.workspace = workspace;
-            app.state.sim_setup = setup;
-            app.invalidate_simulation_preflight();
-            app.state.workbench.analysis_lifecycle_status = receipt.status_line();
-        }
-        Err(error) => app.state.workbench.analysis_lifecycle_status = error,
-    }
+    commit_plan_change(app, plan_id, detail, move |workspace, plan_id| {
+        workspace
+            .replace_design_variable(plan_id, variable_id, replacement)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    });
 }
 
 /// Replace one variable's expression as a single validated transaction.
@@ -603,30 +585,22 @@ fn commit_expression(
     expression: &str,
     name: &str,
 ) {
-    let mut workspace = app.state.workspace.clone();
-    let mut setup = app.state.sim_setup.clone();
-    let Ok(plan_id) = setup.stable_analysis_plan().map(|plan| plan.id()) else {
+    let Ok(plan_id) = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .map(|plan| plan.id())
+    else {
         return;
     };
-    let outcome = workspace
-        .update_design_variable_expression(plan_id, variable_id, expression.to_owned())
-        .map_err(|error| error.to_string())
-        .and_then(|_| {
-            setup
-                .commit_active_plan_configuration_change(format!(
-                    "Updated design variable {name} to {expression}."
-                ))
-                .map_err(|error| error.to_string())
-        });
-    match outcome {
-        Ok(receipt) => {
-            app.state.workspace = workspace;
-            app.state.sim_setup = setup;
-            app.invalidate_simulation_preflight();
-            app.state.workbench.analysis_lifecycle_status = receipt.status_line();
-        }
-        Err(error) => app.state.workbench.analysis_lifecycle_status = error,
-    }
+    let detail = format!("Updated design variable {name} to {expression}.");
+    let expression = expression.to_owned();
+    commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
+        workspace
+            .update_design_variable_expression(plan_id, variable_id, expression)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    });
 }
 
 fn change_impact(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) {
@@ -683,41 +657,4 @@ fn change_impact(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) 
             );
         },
     );
-}
-
-/// Apply a plan-data mutation as one configuration transaction.
-///
-/// The candidate workspace and setup are mutated on clones and only adopted
-/// once both the mutation and the configuration validation succeed, so a
-/// rejected edit leaves no partial state behind.
-fn mutate(
-    app: &mut RSpiceApp,
-    plan_id: SimulationPlanId,
-    detail: &str,
-    change: impl FnOnce(&mut crate::state::ProjectWorkspace, SimulationPlanId) -> Result<(), String>,
-) {
-    let mut workspace = app.state.workspace.clone();
-    let mut setup = app.state.sim_setup.clone();
-    let outcome = change(&mut workspace, plan_id)
-        .and_then(|()| {
-            workspace
-                .validate_simulation_configuration()
-                .map_err(|error| error.to_string())
-        })
-        .and_then(|()| {
-            setup
-                .commit_active_plan_configuration_change(detail.to_owned())
-                .map_err(|error| error.to_string())
-        });
-    match outcome {
-        Ok(receipt) => {
-            app.state.workspace = workspace;
-            app.state.sim_setup = setup;
-            app.invalidate_simulation_preflight();
-            app.state.workbench.analysis_lifecycle_status = receipt.status_line();
-        }
-        Err(error) => {
-            app.state.workbench.analysis_lifecycle_status = error;
-        }
-    }
 }

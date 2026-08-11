@@ -616,6 +616,70 @@ pub(super) fn commit_saved_output(
     ))
 }
 
+/// Adopt one plan-data mutation as a single configuration transaction.
+///
+/// The workspace and the setup are mutated on clones and adopted only once the
+/// change, the configuration validation, and the receipt have all succeeded, so
+/// a rejected edit leaves no partial state behind and reports why. Every
+/// registry edit routes through here, which is what makes "an edit produces a
+/// receipt and invalidates preflight" one rule rather than a convention each
+/// page repeats. Returns whether the transaction was adopted, which lets a
+/// caller that renamed a record carry the selection onto its new name.
+pub(super) fn commit_plan_change(
+    app: &mut RSpiceApp,
+    plan_id: crate::product::SimulationPlanId,
+    detail: &str,
+    change: impl FnOnce(
+        &mut crate::state::ProjectWorkspace,
+        crate::product::SimulationPlanId,
+    ) -> Result<(), String>,
+) -> bool {
+    let mut workspace = app.state.workspace.clone();
+    let mut setup = app.state.sim_setup.clone();
+    let outcome = change(&mut workspace, plan_id)
+        .and_then(|()| {
+            workspace
+                .validate_simulation_configuration()
+                .map_err(|error| error.to_string())
+        })
+        .and_then(|()| {
+            setup
+                .commit_active_plan_configuration_change(detail.to_owned())
+                .map_err(|error| error.to_string())
+        });
+    match outcome {
+        Ok(receipt) => {
+            app.state.workspace = workspace;
+            app.state.sim_setup = setup;
+            app.invalidate_simulation_preflight();
+            app.state.workbench.analysis_lifecycle_status = receipt.status_line();
+            true
+        }
+        Err(error) => {
+            app.state.workbench.analysis_lifecycle_status = error;
+            false
+        }
+    }
+}
+
+/// `base_copy`, then `base_copy_2`, and so on until the registry has no such
+/// record.
+///
+/// Deriving the name here keeps a duplicate a single transaction rather than a
+/// dialog opened over a registry that is about to change. `taken` is supplied
+/// by the caller because each registry decides its own collision rule; both of
+/// them compare case-insensitively, which is how the plan validates uniqueness.
+pub(super) fn unique_copy_name(base: &str, taken: impl Fn(&str) -> bool) -> String {
+    let first = format!("{base}_copy");
+    if !taken(&first) {
+        return first;
+    }
+    (2u32..)
+        .map(|index| format!("{base}_copy_{index}"))
+        .find(|candidate| !taken(candidate))
+        .unwrap_or(first)
+}
+
 pub(super) fn design_variable_consumers(app: &RSpiceApp, draft: &DesignVariableDraft) -> String {
     let Ok(plan) = app.state.sim_setup.stable_analysis_plan() else {
         return "plan unavailable".to_owned();
