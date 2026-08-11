@@ -315,16 +315,31 @@ impl Engine {
         // A nodal resistor has no MNA branch unknown, so evaluate its lead
         // current directly from the converged terminal voltages and the
         // conductance actually installed in this circuit instance.
-        for ((name, stamp), conductance) in circuit
+        for (index, ((name, stamp), conductance)) in circuit
             .resistors
             .names
             .iter()
             .zip(&circuit.resistors.stamps)
             .zip(&circuit.resistors.conductances)
+            .enumerate()
         {
             let voltage = node_voltage(stamp.pp.row) - node_voltage(stamp.nn.row);
             let current = voltage * conductance;
             let power = voltage * current;
+            // Parameter probes must describe the exact device installed in
+            // this circuit, not re-evaluate its source expression after the
+            // solve. Ordinary resistors retain their raw/base instance value
+            // separately from the electrically effective conductance. Xyce
+            // LEVEL=2 thermal resistors report the material resistance from
+            // the accepted load.
+            let reported_resistance = circuit
+                .resistors
+                .thermal
+                .get(index)
+                .and_then(Option::as_ref)
+                .map(|state| state.output_resistance)
+                .unwrap_or(circuit.resistors.reported_resistances[index]);
+            result.push_dc_observable(format!("{name}:R"), reported_resistance);
             result.push_dc_observable(format!("I({name})"), current);
             result.push_dc_observable(format!("P({name})"), power);
             result.push_dc_observable(format!("W({name})"), power);
@@ -342,6 +357,10 @@ impl Engine {
             // and use the same one-based branch ordinal as every MNA branch.
             let current = solution[circuit.num_nodes() + branch_ordinal - 1];
             let power = voltage * current;
+            result.push_dc_observable(
+                format!("{name}:R"),
+                circuit.resistor_branches.reported_resistances[index],
+            );
             result.push_dc_observable(format!("I({name})"), current);
             result.push_dc_observable(format!("P({name})"), power);
             result.push_dc_observable(format!("W({name})"), power);
@@ -2029,6 +2048,205 @@ RLOAD1B 1b 0 1
     }
 
     #[test]
+    fn dc_resistor_parameter_observable_retains_raw_r_before_effective_scaling() {
+        let deck = "\
+raw resistor parameter observable
+V1 in 0 1
+RMix in 0 8 RMOD M=2 TEMP=37
+.model RMOD R (R=3 TC1=0.1 TNOM=27)
+.op
+.end
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = xyce_engine();
+        let circuit = engine
+            .build_circuit(&netlist)
+            .expect("resistor circuit builds");
+        let index = circuit
+            .resistor_storage()
+            .names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("RMix"))
+            .expect("installed resistor is present");
+        let electrical_resistance = circuit.resistor_storage().conductances[index].recip();
+        assert_eq!(electrical_resistance.to_bits(), 24.0_f64.to_bits());
+        assert_eq!(
+            circuit.resistor_storage().reported_resistances[index].to_bits(),
+            8.0_f64.to_bits()
+        );
+
+        let result = engine
+            .run_dc_op(&netlist)
+            .expect("resistor operating point solves");
+        for spelling in ["RMix:R", "rmix:r", "RmIx:R"] {
+            let reported = result
+                .try_dc_observable_named(spelling)
+                .unwrap_or_else(|| panic!("missing installed resistance observable {spelling}"));
+            assert_eq!(
+                reported.to_bits(),
+                8.0_f64.to_bits(),
+                "{spelling} must retain the raw instance R before electrical scaling"
+            );
+        }
+        assert_eq!(
+            result
+                .dc_observables
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case("RMix:R"))
+                .count(),
+            1,
+            "one canonical installed-value snapshot must own the parameter probe"
+        );
+    }
+
+    #[test]
+    fn statistical_resistor_parameter_observable_is_stable_and_does_not_redraw() {
+        let deck = "\
+statistical installed resistor parameter observable
+.options seed=37
+V1 in 0 1
+RSTAT in 0 {agauss(100,10,10)}
+.op
+.end
+";
+        let netlist = Netlist::parse(deck).expect("statistical deck parses");
+        let engine = Engine::default();
+        let circuit = engine
+            .build_circuit(&netlist)
+            .expect("statistical resistor circuit builds");
+        let replay = crate::netlist::RandomState::new(37);
+        let installed_resistance = 100.0 + replay.next_standard_normal();
+        assert_eq!(
+            circuit.resistor_storage().reported_resistances[0].to_bits(),
+            installed_resistance.to_bits(),
+            "the sampled f64 must be retained directly in device storage"
+        );
+
+        let result = engine
+            .run_dc_op(&netlist)
+            .expect("statistical resistor operating point solves");
+        let first = result
+            .try_dc_observable_named("RSTAT:R")
+            .expect("statistical installed resistance is retained");
+        let repeated = result
+            .try_dc_observable_named("rstat:r")
+            .expect("case-insensitive repeated lookup succeeds");
+        assert_eq!(first.to_bits(), installed_resistance.to_bits());
+        assert_eq!(repeated.to_bits(), first.to_bits());
+
+        // Parsing leaves resistor expressions deferred. Circuit construction
+        // consumes exactly one normal draw, and observation must consume none.
+        let actual_next = netlist.params.random().next_standard_normal();
+        let expected_next = replay.next_standard_normal();
+        assert_eq!(
+            actual_next.to_bits(),
+            expected_next.to_bits(),
+            "publishing or reading an installed parameter must not advance the statistical stream"
+        );
+    }
+
+    #[test]
+    fn nonzero_branch_form_resistor_reports_raw_instance_r() {
+        let deck = "\
+nonzero branch-form raw resistor parameter
+.options device zeroresistancetol=1
+V1 in 0 1
+RTHRESH in 0 0.3 RMOD
+.model RMOD R (R=2)
+.op
+.end
+";
+        let netlist = Netlist::parse(deck).expect("branch-form deck parses");
+        let engine = xyce_engine();
+        let circuit = engine
+            .build_circuit(&netlist)
+            .expect("nonzero branch-form resistor builds");
+        assert!(
+            circuit.resistor_storage().names.is_empty(),
+            "the configured threshold must route this resistor through branch form"
+        );
+        assert_eq!(circuit.resistor_branches.names, ["RTHRESH"]);
+        assert_eq!(
+            circuit.resistor_branches.resistances[0].to_bits(),
+            0.6_f64.to_bits(),
+            "the branch equation must retain the electrically scaled resistance"
+        );
+        assert_eq!(
+            circuit.resistor_branches.reported_resistances[0].to_bits(),
+            0.3_f64.to_bits(),
+            "the parameter probe must retain the unmultiplied instance R"
+        );
+
+        let result = engine
+            .run_dc_op(&netlist)
+            .expect("nonzero branch-form operating point solves");
+        assert_eq!(
+            result
+                .try_dc_observable_named("rthresh:r")
+                .expect("branch-form R parameter is retained")
+                .to_bits(),
+            0.3_f64.to_bits()
+        );
+        let current = result
+            .try_dc_observable_named("I(RTHRESH)")
+            .expect("branch-form current is retained");
+        assert!((current - 1.0 / 0.6).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn broad_statistical_resistor_observables_preserve_gaussian_moments() {
+        use std::fmt::Write as _;
+
+        const SAMPLE_COUNT: usize = 10_000;
+        let mut deck = String::with_capacity(SAMPLE_COUNT * 48);
+        deck.push_str(
+            "broad statistical installed-value observables\n.options seed=1\nV1 in 0 1\n",
+        );
+        for index in 1..=SAMPLE_COUNT {
+            let expression = if index % 2 == 0 {
+                "agauss(100,10,10)"
+            } else {
+                "gauss(100,0.1,10)"
+            };
+            writeln!(deck, "R{index} in 0 {{{expression}}}")
+                .expect("writing to a String cannot fail");
+        }
+        deck.push_str(".op\n.end\n");
+
+        let netlist = Netlist::parse(&deck).expect("broad statistical deck parses");
+        let result = Engine::default()
+            .run_dc_op(&netlist)
+            .expect("broad statistical operating point solves");
+
+        // Welford's recurrence avoids subtracting two large, nearly equal
+        // raw moments and matches the population standard deviation used by
+        // the historical BUG_39 wrappers.
+        let mut count = 0usize;
+        let mut mean = 0.0;
+        let mut second_moment = 0.0;
+        for index in 1..=SAMPLE_COUNT {
+            let value = result
+                .try_dc_observable_named(&format!("r{index}:r"))
+                .unwrap_or_else(|| panic!("missing installed observable R{index}:R"));
+            assert!(value.is_finite(), "R{index}:R must be finite");
+            count += 1;
+            let delta = value - mean;
+            mean += delta / count as Value;
+            second_moment += delta * (value - mean);
+        }
+        let standard_deviation = (second_moment / count as Value).sqrt();
+        assert_eq!(count, SAMPLE_COUNT);
+        assert!(
+            (mean - 100.0).abs() < 0.05,
+            "Gaussian installed-value mean {mean} differs from 100"
+        );
+        assert!(
+            (standard_deviation - 1.0).abs() < 0.05,
+            "Gaussian installed-value standard deviation {standard_deviation} differs from 1"
+        );
+    }
+
+    #[test]
     fn modeled_solution_dependent_resistor_uses_model_temperature_law_and_observables() {
         let deck = r#"modeled solution-dependent resistor
 VCTRL ctrl 0 2
@@ -2113,8 +2331,42 @@ RZERO mid 0 0
         let power = result
             .try_dc_observable_named("P(RZERO)")
             .expect("explicit resistor branch power is retained");
+        let resistance = result
+            .try_dc_observable_named("rzero:r")
+            .expect("explicit resistor branch resistance is retained");
         assert!((current - 1.0).abs() < 1e-12, "expected 1 A, got {current}");
         assert!(power.abs() < 1e-12, "expected zero power, got {power}");
+        assert_eq!(resistance.to_bits(), 0.0_f64.to_bits());
+    }
+
+    #[test]
+    fn xyce_thermal_resistor_observable_uses_reported_material_resistance() {
+        let deck = "\
+thermal reported resistance observable
+V1 in 0 1
+R1 in 0 RMOD L=2 A=1 M=2
+.MODEL RMOD R (LEVEL=2 RESISTIVITY=1e-8 HEATCAPACITY=1)
+.op
+.end
+";
+        let netlist = Netlist::parse(deck).expect("thermal resistor deck parses");
+        let result = xyce_engine()
+            .run_dc_op(&netlist)
+            .expect("thermal resistor operating point solves");
+        let reported = result
+            .try_dc_observable_named("r1:r")
+            .expect("thermal reported resistance is retained");
+
+        // The electrical branch is 1e-8 ohm after M=2; Xyce's R probe reports
+        // the unmultiplied 2e-8-ohm material resistance used by that load.
+        assert_eq!(reported.to_bits(), 2.0e-8_f64.to_bits());
+        let current = result
+            .try_dc_observable_named("I(R1)")
+            .expect("thermal resistor current is retained");
+        assert!(
+            (current - 1.0e8).abs() <= 1.0e-6,
+            "thermal electrical branch must retain its separately scaled resistance, got I={current}"
+        );
     }
 
     #[test]

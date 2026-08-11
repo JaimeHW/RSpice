@@ -2515,7 +2515,7 @@ fn add_generated_xspice_auto_bridge_resistor(
         )));
     }
 
-    let resistance = resolve_resistor_instance_value(
+    let resolved = resolve_resistor_effective_parameters(
         generated,
         &element.name,
         *value,
@@ -2525,6 +2525,7 @@ fn add_generated_xspice_auto_bridge_resistor(
         temperature,
         spice_dialect,
     )?;
+    let resistance = resolved.resistance;
     let small_signal_resistance =
         resolve_resistor_small_signal_value(&element.name, resistance, instance_params)?;
     let np = circuit.get_or_create_node(&element.nodes[0]);
@@ -2542,21 +2543,23 @@ fn add_generated_xspice_auto_bridge_resistor(
             )));
         }
         let branch = circuit.allocate_branch_named(&element.name);
-        circuit.resistor_branches.add(
+        circuit.resistor_branches.add_with_reported(
             element.name.clone(),
             np,
             nn,
             branch,
             resistance,
             small_signal_resistance,
+            resolved.reported_resistance,
         );
     } else {
-        circuit.resistors.add_with_small_signal(
+        circuit.resistors.add_with_small_signal_and_reported(
             element.name.clone(),
             np,
             nn,
             resistance,
             small_signal_resistance,
+            resolved.reported_resistance,
         );
     }
     Ok(())
@@ -3327,6 +3330,42 @@ mod tests {
                 }
             ))) if requested == generated.len() && limit == generated.len() - 1
         ));
+    }
+
+    #[test]
+    fn generated_auto_bridge_resistor_retains_raw_reportable_value() {
+        let generated = Netlist::parse(
+            "generated bridge resistor\n\
+             RAUTO bridge 0 8 RMOD M=2 TEMP=37\n\
+             .model RMOD R (R=3 TC1=0.1 TNOM=27)\n\
+             .end\n",
+        )
+        .expect("generated bridge resistor deck parses");
+        let element = generated
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("RAUTO"))
+            .expect("generated resistor exists");
+        let mut circuit = CircuitData::new();
+
+        add_generated_xspice_auto_bridge_resistor(
+            &mut circuit,
+            &generated,
+            element,
+            crate::constants::TEMP_REFERENCE,
+            SpiceDialect::Xyce,
+        )
+        .expect("generated resistor is added to the auto-bridge subcircuit");
+
+        assert_eq!(circuit.resistors.names, ["RAUTO"]);
+        assert_eq!(
+            circuit.resistors.conductances[0].recip().to_bits(),
+            24.0_f64.to_bits()
+        );
+        assert_eq!(
+            circuit.resistors.reported_resistances[0].to_bits(),
+            8.0_f64.to_bits()
+        );
     }
 
     #[test]
@@ -4958,7 +4997,7 @@ impl Engine {
                         continue;
                     }
 
-                    let resistance = resolve_resistor_instance_value(
+                    let resolved = resolve_resistor_effective_parameters(
                         netlist,
                         &element.name,
                         *value,
@@ -4968,6 +5007,7 @@ impl Engine {
                         self.config.temperature,
                         self.config.spice_dialect,
                     )?;
+                    let resistance = resolved.resistance;
                     let thermal_state = resolve_resistor_thermal_state(
                         &element.name,
                         netlist,
@@ -4998,22 +5038,24 @@ impl Engine {
                             )));
                         }
                         let branch = circuit.allocate_branch_named(&element.name);
-                        circuit.resistor_branches.add(
+                        circuit.resistor_branches.add_with_reported(
                             element.name.clone(),
                             np,
                             nn,
                             branch,
                             resistance,
                             small_signal_resistance,
+                            resolved.reported_resistance,
                         );
                         continue;
                     }
-                    circuit.resistors.add_with_small_signal(
+                    circuit.resistors.add_with_small_signal_and_reported(
                         element.name.clone(),
                         np,
                         nn,
                         resistance,
                         small_signal_resistance,
+                        resolved.reported_resistance,
                     );
                     if self.config.spice_dialect == SpiceDialect::Xyce {
                         circuit.record_xyce_topology_device(
