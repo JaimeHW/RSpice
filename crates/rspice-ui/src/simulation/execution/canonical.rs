@@ -1295,6 +1295,17 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
             writer.option(binding.section.as_ref(), |w, v| w.string(v));
             writer.string(&binding.materialized_model_cards);
         }
+        // An explicit point list is the run's identity, not a presentation of
+        // the axes: a filtered space and the full expansion it was derived from
+        // narrow to the same axis values, so without these the two would share
+        // a config digest and one run's results could be attributed to the
+        // other.
+        writer.sequence(config.points.len());
+        for point in &config.points {
+            writer.u8(corner_process_tag(point.process));
+            writer.f64(point.voltage);
+            writer.f64(point.temperature_c);
+        }
     });
     writer.option(options.pac.as_ref(), |writer, config| {
         writer.f64(config.pss_fundamental_freq);
@@ -1695,6 +1706,58 @@ mod tests {
             digest(&base, Some(&AnalysisConfig::Noise(base_config)),),
             digest(&base, Some(&AnalysisConfig::Noise(changed_config)),)
         );
+    }
+
+    /// A filtered run space narrows to the same axis values as the full
+    /// expansion it came from, so the axes alone cannot tell the two apart. If
+    /// the digest could not either, a filtered run and the full run would share
+    /// one identity and either's results could be attributed to the other.
+    #[test]
+    fn corner_digest_changes_when_points_are_excluded_from_the_same_axes() {
+        use crate::services::simulation_runner::{CornerPoint, CornerProcess, CornerRunConfig};
+
+        let axes = CornerRunConfig {
+            process_corners: vec![CornerProcess::TT],
+            voltages: vec![0.9, 1.1],
+            temperatures_c: vec![-40.0, 125.0],
+            full_matrix: true,
+            nominal_voltage: Some(1.0),
+            ..CornerRunConfig::default()
+        };
+        let point = |voltage: f64, temperature_c: f64| CornerPoint {
+            process: CornerProcess::TT,
+            voltage,
+            temperature_c,
+        };
+        // Every axis value is still drawn on, so the two declarations are
+        // indistinguishable from their axes alone.
+        let filtered = CornerRunConfig {
+            points: vec![point(0.9, -40.0), point(1.1, -40.0), point(1.1, 125.0)],
+            ..axes.clone()
+        };
+        let reordered = CornerRunConfig {
+            points: vec![point(1.1, 125.0), point(0.9, -40.0), point(1.1, -40.0)],
+            ..axes.clone()
+        };
+
+        let digest = |corner: &CornerRunConfig| {
+            analysis_config_digest(
+                ".corner",
+                &AnalysisSpec::Corner,
+                None,
+                &SpecExecutionOptions {
+                    corner: Some(corner.clone()),
+                    ..SpecExecutionOptions::default()
+                },
+                None,
+            )
+        };
+
+        assert_ne!(digest(&axes), digest(&filtered));
+        // Execution order is part of the contract: the manifest labels points
+        // by position, so a reordered list is a different run.
+        assert_ne!(digest(&filtered), digest(&reordered));
+        assert_eq!(digest(&filtered), digest(&filtered.clone()));
     }
 
     #[test]
