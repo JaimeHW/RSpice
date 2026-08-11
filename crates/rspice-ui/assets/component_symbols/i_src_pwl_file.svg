@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- File-backed PWL current source: the page glyph takes the slot the plain PWL
+     trace occupies in i_src_pwl, above the current arrow the family shares. It
+     is narrower than the voltage variant's page because the arc is still
+     closing in at that height and a wider box would touch it.
+     Box 28x40, pins +(14,0), -(14,40). -->
+<svg viewBox="0 0 28 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 14,0 V 10" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 14,10 A 10,10 0 0 1 14,30 A 10,10 0 0 1 14,10" fill="none" stroke="#000000" stroke-width="1"/>
+  <path d="M 10.2,12.2 H 16.2 L 17.8,13.8 V 18 H 10.2 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 16.2,12.2 V 13.8 H 17.8" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 11.2,16.8 L 12.6,15 L 14,16.3 L 15.7,14.6" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 14,19 V 24" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 14,27.2 L 11.6,22.6 H 16.4 Z" fill="#000000" stroke="none"/>
+  <path d="M 14,30 V 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

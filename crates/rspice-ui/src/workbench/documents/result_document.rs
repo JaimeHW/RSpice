@@ -3403,15 +3403,9 @@ fn export_menu(ui: &mut Ui, state: &mut AppState) {
         // sheet as PDF/A, PDF, SVG or PNG at a chosen resolution. A window
         // screenshot used to live here instead: the same pixels the reader
         // already had, at whatever the display happened to be, with the chrome
-        // cropped off by rectangle. The browser build still takes that route,
-        // because the pipeline's artifact writer is native-only — so the label
-        // promises there exactly what that build can deliver.
-        let figure_label = if cfg!(target_arch = "wasm32") {
-            "Viewer image (PNG)…"
-        } else {
-            "Viewer figure (PDF, SVG, PNG)…"
-        };
-        if ui.button(figure_label).clicked() {
+        // cropped off by rectangle. One label for both targets, because the
+        // browser reaches the same pipeline through its own worker.
+        if ui.button("Viewer figure (PDF, SVG, PNG)…").clicked() {
             state.ui.export_figure_requested = true;
             ui.close();
         }

@@ -140,6 +140,11 @@ impl ComponentType {
                 Some("v_src_pwl.svg"),
                 Native,
             ),
+            VoltageSourcePwlFile => (
+                "rspice.native.voltage_source.pwl_file",
+                Some("v_src_pwl_file.svg"),
+                Native,
+            ),
             VoltageSourceExp => (
                 "rspice.native.voltage_source.exp",
                 Some("v_src_exp.svg"),
@@ -183,6 +188,11 @@ impl ComponentType {
             CurrentSourcePwl => (
                 "rspice.native.current_source.pwl",
                 Some("i_src_pwl.svg"),
+                Native,
+            ),
+            CurrentSourcePwlFile => (
+                "rspice.native.current_source.pwl_file",
+                Some("i_src_pwl_file.svg"),
                 Native,
             ),
             CurrentSourceExp => (

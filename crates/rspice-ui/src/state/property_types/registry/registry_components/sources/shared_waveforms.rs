@@ -433,6 +433,97 @@ impl PropertyRegistry {
         sheet
     }
 
+    /// File-backed PWL: `PWL FILE="path"` with the reader's scaling modifiers.
+    ///
+    /// The waveform itself lives in a CSV or WAV file rather than in the deck,
+    /// so this sheet carries no point table — only the reference and the
+    /// transforms applied to what the file contains. Every field here is one
+    /// the netlist reader accepts, spelled the way it accepts it.
+    pub(super) fn create_pwl_file_sheet(driven: Driven) -> PropertySheet {
+        let mut sheet = PropertySheet::new();
+        sheet.add(instance_name(driven));
+
+        sheet.add(
+            PropertyDefinition::new("file")
+                .with_display_name("Data File")
+                .with_description("CSV (time,value rows) or WAV file holding the waveform")
+                .with_type(PropertyType::String)
+                .with_default(PropertyValue::string(""))
+                .with_order(10)
+                .with_category("Data File")
+                .required(),
+        );
+        sheet.add(
+            PropertyDefinition::new("td")
+                .with_display_name("Delay Time")
+                .with_description(
+                    "Time delay before the waveform starts; the source is zero until then",
+                )
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit("s")
+                .with_order(11)
+                .with_category("Data File"),
+        );
+        sheet.add(
+            PropertyDefinition::new("r")
+                .with_display_name("Repeat From")
+                .with_description(
+                    "Source time the waveform repeats from after its last point; 0 repeats the whole file, blank never repeats",
+                )
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::string(""))
+                .with_unit("s")
+                .with_order(12)
+                .with_category("Data File"),
+        );
+
+        // Scaling is applied to the file's own columns as it is read. The
+        // engine rejects a non-positive or non-finite TSCALE, so the range is
+        // the reader's, not a guess.
+        sheet.add(
+            PropertyDefinition::new("tscale")
+                .with_display_name("Time Scale")
+                .with_description("Multiplies every time in the file")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(1.0))
+                .with_order(20)
+                .with_category("Scaling"),
+        );
+        sheet.add(
+            PropertyDefinition::new("vscale")
+                .with_display_name("Value Scale")
+                .with_description("Multiplies every value in the file")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(1.0))
+                .with_order(21)
+                .with_category("Scaling"),
+        );
+        sheet.add(
+            PropertyDefinition::new("toffset")
+                .with_display_name("Time Offset")
+                .with_description("Added to every time after scaling")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit("s")
+                .with_order(22)
+                .with_category("Scaling"),
+        );
+        sheet.add(
+            PropertyDefinition::new("voffset")
+                .with_display_name("Value Offset")
+                .with_description("Added to every value after scaling")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit(driven.unit())
+                .with_order(23)
+                .with_category("Scaling"),
+        );
+
+        Self::finish_source_sheet(&mut sheet, driven);
+        sheet
+    }
+
     /// The AC, advanced-AC, parasitic, and noise blocks every source carries.
     fn finish_source_sheet(sheet: &mut PropertySheet, driven: Driven) {
         Self::add_ac_params(sheet, driven.unit(), 0.0);

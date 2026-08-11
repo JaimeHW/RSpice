@@ -124,6 +124,24 @@ impl<'a> NetlistGenerator<'a> {
         format!("{}{}", formatted_value, formatted_params)
     }
 
+    /// Absolute spelling of a data-file reference stored in a component.
+    ///
+    /// Project files record the path relative to the project folder so a design
+    /// survives being moved or handed to someone else; the engine opens what it
+    /// is given and does not resolve against the deck, so the reference has to
+    /// be made absolute here. An already-absolute path is the user's own choice
+    /// of a file outside the project and is left alone.
+    pub(super) fn resolve_data_file_path(&self, path: &str) -> String {
+        let trimmed = path.trim();
+        let Some(root) = self.hierarchy.and_then(HierarchySource::data_root) else {
+            return trimmed.to_owned();
+        };
+        if trimmed.is_empty() || std::path::Path::new(trimmed).is_absolute() {
+            return trimmed.to_owned();
+        }
+        root.join(trimmed).to_string_lossy().into_owned()
+    }
+
     /// Format source value specification
     pub(super) fn format_source_value(&self, component: &Component) -> String {
         let value = &component.value;
@@ -246,6 +264,33 @@ impl<'a> NetlistGenerator<'a> {
                     .is_some_and(|repeat| repeat.eq_ignore_ascii_case("true") || repeat == "1")
                 {
                     specification.push_str(" R=0");
+                }
+                specification
+            }
+            ComponentType::VoltageSourcePwlFile | ComponentType::CurrentSourcePwlFile => {
+                // PWL FILE="path" [TD=][R=][TSCALE=][VSCALE=][TOFFSET=][VOFFSET=]
+                let params = crate::state::parse_params_string(&component.params);
+                let path = Self::get_param_owned(&params, "file", value, "");
+                // The path is always quoted: the reader refuses a bare path
+                // containing '=', and a directory name may hold spaces.
+                let mut specification =
+                    format!("PWL FILE=\"{}\"", self.resolve_data_file_path(&path));
+
+                // TSCALE has no zero-valued spelling and the offsets have no
+                // unit one, so each modifier states its own unset value rather
+                // than sharing a single "is this blank" test.
+                for (key, keyword, unset) in [
+                    ("td", "TD", "0"),
+                    ("r", "R", ""),
+                    ("tscale", "TSCALE", "1"),
+                    ("vscale", "VSCALE", "1"),
+                    ("toffset", "TOFFSET", "0"),
+                    ("voffset", "VOFFSET", "0"),
+                ] {
+                    let value = Self::get_param_owned(&params, key, "", "");
+                    if !value.trim().is_empty() && value.trim() != unset {
+                        specification.push_str(&format!(" {keyword}={}", value.trim()));
+                    }
                 }
                 specification
             }

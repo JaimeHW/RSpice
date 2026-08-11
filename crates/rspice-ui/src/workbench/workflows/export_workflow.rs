@@ -144,6 +144,13 @@ impl ExportWorkflowIo for NativeExportWorkflowIo {
             .save_file())
     }
 
+    /// The browser derives the name instead of asking for it. A picker exists
+    /// — `showSaveFilePicker` — but only in Chromium, so a download fallback
+    /// is required whatever else is built, and the fallback is what every
+    /// other browser would get. Deliberately not a per-workflow decision:
+    /// every wasm export shares this contract, so it moves as one or not at
+    /// all. The caller still validates the metadata, because a name and a file
+    /// type the user cannot correct must at least be well formed.
     #[cfg(target_arch = "wasm32")]
     fn show_save_dialog(&self, config: SaveDialogConfig<'_>) -> Result<Option<PathBuf>, String> {
         let default_name = config.default_name.trim();

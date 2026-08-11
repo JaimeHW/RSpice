@@ -372,6 +372,7 @@ fn write_component(
         | ComponentType::VoltageSourcePulse
         | ComponentType::VoltageSourceSin
         | ComponentType::VoltageSourcePwl
+        | ComponentType::VoltageSourcePwlFile
         | ComponentType::VoltageSourceExp
         | ComponentType::VoltageSourceSffm
         | ComponentType::VoltageSourceAm
@@ -409,6 +410,7 @@ fn write_component(
         | ComponentType::CurrentSourcePulse
         | ComponentType::CurrentSourceSin
         | ComponentType::CurrentSourcePwl
+        | ComponentType::CurrentSourcePwlFile
         | ComponentType::CurrentSourceExp
         | ComponentType::CurrentSourceSffm
         | ComponentType::CurrentSourceAm

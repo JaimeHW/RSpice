@@ -550,7 +550,7 @@ impl RSpiceApp {
                 .set_active_dirty(self.state.schematic.is_dirty);
         }
         self.sync_window_title(ctx);
-        self.handle_image_export(ctx);
+        self.handle_image_export();
     }
 
     /// Keep the OS window title (or browser tab title) in sync with the

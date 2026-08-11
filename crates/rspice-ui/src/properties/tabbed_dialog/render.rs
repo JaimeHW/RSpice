@@ -1523,6 +1523,113 @@ fn source_preview_samples(
     }
 }
 
+/// Folder inside a project that attached waveform data is copied into.
+const PROJECT_DATA_DIR: &str = "data";
+
+/// Ask for a waveform data file and return the reference to store for it.
+///
+/// A saved project takes a copy: the file is brought inside the project folder
+/// and referenced relative to it, so the design keeps working when the folder is
+/// moved, zipped, or handed to someone else — the same bargain every EDA tool
+/// strikes, paying one duplicated file for a reference that cannot dangle. An
+/// unsaved project has nowhere to copy to, so its reference stays absolute and
+/// becomes relative the first time the project is saved somewhere.
+///
+/// `Ok(None)` means the picker was dismissed.
+#[cfg(not(target_arch = "wasm32"))]
+fn attach_data_file(state: &TabbedPropertyDialogState) -> Result<Option<String>, String> {
+    let Some(source) = rfd::FileDialog::new()
+        .add_filter("Waveform data", &["csv", "wav"])
+        .add_filter("All files", &["*"])
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+
+    let Some(root) = state.data_root.as_deref() else {
+        return Ok(Some(source.to_string_lossy().into_owned()));
+    };
+    // Already inside the project: reference it where it lies rather than
+    // making a second copy of a file the project already owns.
+    if let Ok(relative) = source.strip_prefix(root) {
+        return Ok(Some(relative.to_string_lossy().replace('\\', "/")));
+    }
+
+    let name = source
+        .file_name()
+        .ok_or_else(|| "The selected path has no file name".to_owned())?;
+    let directory = root.join(PROJECT_DATA_DIR);
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| format!("Cannot create '{}': {error}", directory.display()))?;
+
+    let destination = data_file_destination(&directory, &source, std::path::Path::new(name))?;
+    if !destination.exists() {
+        std::fs::copy(&source, &destination)
+            .map_err(|error| format!("Cannot copy '{}': {error}", source.display()))?;
+    }
+    Ok(Some(format!(
+        "{PROJECT_DATA_DIR}/{}",
+        destination.file_name().unwrap_or(name).to_string_lossy()
+    )))
+}
+
+/// Where a copy of `source` belongs in `directory`.
+///
+/// A slot already holding the identical file is returned as-is, so attaching
+/// the same waveform to a second source does not carry in a second copy of it.
+/// A slot holding a *different* file of the same name yields to the first free
+/// numbered variant, so two unrelated `wave.csv` both survive.
+#[cfg(not(target_arch = "wasm32"))]
+fn data_file_destination(
+    directory: &std::path::Path,
+    source: &std::path::Path,
+    name: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    let stem = name.file_stem().unwrap_or(name.as_os_str());
+    let extension = name.extension();
+    for attempt in 0..1000 {
+        let mut candidate = if attempt == 0 {
+            std::path::PathBuf::from(stem)
+        } else {
+            std::path::PathBuf::from(format!("{}-{}", stem.to_string_lossy(), attempt + 1))
+        };
+        if let Some(extension) = extension {
+            candidate.set_extension(extension);
+        }
+        let candidate = directory.join(candidate);
+        if !candidate.exists() || files_have_equal_contents(source, &candidate) {
+            return Ok(candidate);
+        }
+    }
+    Err(format!(
+        "'{}' already holds too many files named like '{}'",
+        directory.display(),
+        name.display()
+    ))
+}
+
+/// Whether two files hold the same bytes. An unreadable file is reported as
+/// different, which costs a redundant copy rather than a silently wrong reuse.
+#[cfg(not(target_arch = "wasm32"))]
+fn files_have_equal_contents(left: &std::path::Path, right: &std::path::Path) -> bool {
+    let (Ok(left_meta), Ok(right_meta)) = (std::fs::metadata(left), std::fs::metadata(right))
+    else {
+        return false;
+    };
+    if left_meta.len() != right_meta.len() {
+        return false;
+    }
+    match (std::fs::read(left), std::fs::read(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn attach_data_file(_state: &TabbedPropertyDialogState) -> Result<Option<String>, String> {
+    Err("Waveform data files are only available in the desktop application".to_owned())
+}
+
 fn render_model_browser(
     ctx: &egui::Context,
     state: &mut TabbedPropertyDialogState,
@@ -1576,7 +1683,11 @@ fn render_property_field(
         .cloned()
         .unwrap_or_else(|| def.default_value.clone());
     let numeric_text_draft = state.numeric_text_draft(&def.name).map(str::to_owned);
-    let browse = def.name == "model";
+    let picks_data_file = def.name == "file"
+        && state
+            .component_type
+            .is_some_and(|kind| kind.is_pwl_file_source());
+    let browse = def.name == "model" || picks_data_file;
 
     ui.set_width(width);
     field_caption(ui, def, is_modified, error.is_some(), width);
@@ -1649,7 +1760,16 @@ fn render_property_field(
             state.set_value(&def.name, value);
         }
     }
-    if browse_clicked {
+    if browse_clicked && picks_data_file {
+        match attach_data_file(state) {
+            Ok(Some(reference)) => {
+                state.set_value(&def.name, PropertyValue::String(reference));
+                state.session_error = None;
+            }
+            Ok(None) => {}
+            Err(error) => state.session_error = Some(error),
+        }
+    } else if browse_clicked {
         state.model_browser.type_filter = state.component_type.and_then(model_type_for_component);
         state.model_browser.allow_corner_selection = false;
         state.model_browser.selected_library = state

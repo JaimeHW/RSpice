@@ -36,6 +36,7 @@ impl ComponentType {
             | ComponentType::VoltageSourcePulse
             | ComponentType::VoltageSourceSin
             | ComponentType::VoltageSourcePwl
+            | ComponentType::VoltageSourcePwlFile
             | ComponentType::VoltageSourceExp
             | ComponentType::VoltageSourceSffm
             | ComponentType::VoltageSourceAm
@@ -46,6 +47,7 @@ impl ComponentType {
             | ComponentType::CurrentSourcePulse
             | ComponentType::CurrentSourceSin
             | ComponentType::CurrentSourcePwl
+            | ComponentType::CurrentSourcePwlFile
             | ComponentType::CurrentSourceExp
             | ComponentType::CurrentSourceSffm
             | ComponentType::CurrentSourceAm
@@ -156,6 +158,7 @@ impl ComponentType {
             ComponentType::VoltageSourcePulse => "V Pulse",
             ComponentType::VoltageSourceSin => "V Sin",
             ComponentType::VoltageSourcePwl => "V PWL",
+            ComponentType::VoltageSourcePwlFile => "V PWL File",
             ComponentType::VoltageSourceExp => "V Exp",
             ComponentType::VoltageSourceSffm => "V SFFM",
             ComponentType::VoltageSourceAm => "V AM",
@@ -165,6 +168,7 @@ impl ComponentType {
             ComponentType::CurrentSourcePulse => "I Pulse",
             ComponentType::CurrentSourceSin => "I Sin",
             ComponentType::CurrentSourcePwl => "I PWL",
+            ComponentType::CurrentSourcePwlFile => "I PWL File",
             ComponentType::CurrentSourceExp => "I Exp",
             ComponentType::CurrentSourceSffm => "I SFFM",
             ComponentType::CurrentSourceAm => "I AM",

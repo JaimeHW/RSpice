@@ -24,6 +24,7 @@ pub struct HierarchySource<'a> {
     schematic_buffers: Option<&'a HashMap<String, SchematicState>>,
     execution_plan: Option<ConfigurationExecutionPlan>,
     connectivity: Option<&'a crate::state::ConnectivityContract>,
+    data_root: Option<std::path::PathBuf>,
 }
 
 impl<'a> HierarchySource<'a> {
@@ -45,7 +46,25 @@ impl<'a> HierarchySource<'a> {
             schematic_buffers: None,
             execution_plan: None,
             connectivity: None,
+            data_root: None,
         }
+    }
+
+    /// Bind the directory that project-relative data-file references resolve
+    /// against — normally the folder holding the `.rspiceproj`.
+    ///
+    /// Absent, a relative reference is emitted verbatim and the engine resolves
+    /// it against the process working directory. That is right for a deck the
+    /// user assembled by hand and wrong for a saved project, which is why the
+    /// execution paths set it and inspection-only callers do not.
+    pub fn with_data_root(mut self, root: impl Into<std::path::PathBuf>) -> Self {
+        self.data_root = Some(root.into());
+        self
+    }
+
+    /// Directory that project-relative data-file references resolve against.
+    pub fn data_root(&self) -> Option<&std::path::Path> {
+        self.data_root.as_deref()
     }
 
     /// Index workspace schematic buffers and library symbol metadata so placed
@@ -96,6 +115,7 @@ impl<'a> HierarchySource<'a> {
             schematic_buffers: None,
             execution_plan: None,
             connectivity: None,
+            data_root: None,
         }
     }
 

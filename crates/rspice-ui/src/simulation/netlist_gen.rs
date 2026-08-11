@@ -1935,6 +1935,83 @@ mod tests {
         );
     }
 
+    fn pwl_file_source(params: &str) -> Component {
+        let mut source = Component::new(1, ComponentType::VoltageSourcePwlFile, Point::origin())
+            .with_name_value("V1", "");
+        source.params = params.to_owned();
+        source
+    }
+
+    /// The card must be spelled the way the netlist reader accepts it, quotes
+    /// and all, and every modifier the sheet exposes must survive the trip.
+    #[test]
+    fn pwl_file_source_emits_the_readers_spelling() {
+        let netlist = netlist_for(vec![pwl_file_source(
+            "file=wave.csv td=1u r=0 tscale=2 vscale=3 toffset=1n voffset=0.5",
+        )]);
+        let card = netlist
+            .lines()
+            .find(|line| line.starts_with("V1 "))
+            .unwrap_or_else(|| panic!("{netlist}"));
+        assert!(
+            card.ends_with(
+                "PWL FILE=\"wave.csv\" TD=1u R=0 TSCALE=2 VSCALE=3 TOFFSET=1n VOFFSET=0.5"
+            ),
+            "{card}"
+        );
+        rspice_core::netlist::parse_netlist(&netlist).expect("engine must accept the card");
+    }
+
+    /// An untouched modifier has no business on the card: TSCALE and VSCALE are
+    /// unset at one, the offsets and delay at zero, and R when it is blank.
+    #[test]
+    fn unset_pwl_file_modifiers_stay_off_the_card() {
+        let netlist = netlist_for(vec![pwl_file_source(
+            "file=wave.csv td=0 r= tscale=1 vscale=1 toffset=0 voffset=0",
+        )]);
+        let card = netlist
+            .lines()
+            .find(|line| line.starts_with("V1 "))
+            .unwrap_or_else(|| panic!("{netlist}"));
+        assert!(card.ends_with("PWL FILE=\"wave.csv\""), "{card}");
+        rspice_core::netlist::parse_netlist(&netlist).expect("engine must accept the card");
+    }
+
+    /// A source with no file selected cannot run, and saying so beats emitting
+    /// a card the engine will reject with a path the user never typed.
+    #[test]
+    fn a_pwl_file_source_without_a_file_blocks_the_run() {
+        let mut state = SchematicState::default();
+        state.components = vec![pwl_file_source("td=1u")];
+        let result = generate_netlist(&state);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.contains("V1") && error.contains("no data file")),
+            "{:?}",
+            result.errors
+        );
+    }
+
+    /// An absolute reference is checkable, so a missing file stops the run
+    /// here rather than deep inside the engine's circuit build.
+    #[test]
+    fn a_missing_pwl_data_file_blocks_the_run() {
+        let absent = std::env::temp_dir().join("rspice-no-such-waveform-9c1f.csv");
+        let mut state = SchematicState::default();
+        state.components = vec![pwl_file_source(&format!("file={}", absent.display()))];
+        let result = generate_netlist(&state);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.contains("V1") && error.contains("cannot read data file")),
+            "{:?}",
+            result.errors
+        );
+    }
+
     /// Substrate and thermal BJTs emit 4/5 nodes; the thermal variant
     /// binds a native VBIC card so the dT terminal is solved.
     #[test]

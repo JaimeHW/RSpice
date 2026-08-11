@@ -81,6 +81,10 @@ const SOURCES: &[ComponentPaletteEntry] = &[
         label: "PWL Voltage Source",
     },
     ComponentPaletteEntry {
+        kind: ComponentType::VoltageSourcePwlFile,
+        label: "PWL File Voltage Source",
+    },
+    ComponentPaletteEntry {
         kind: ComponentType::VoltageSourceExp,
         label: "Exponential Voltage Source",
     },
@@ -119,6 +123,10 @@ const SOURCES: &[ComponentPaletteEntry] = &[
     ComponentPaletteEntry {
         kind: ComponentType::CurrentSourcePwl,
         label: "PWL Current Source",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::CurrentSourcePwlFile,
+        label: "PWL File Current Source",
     },
     ComponentPaletteEntry {
         kind: ComponentType::CurrentSourceExp,

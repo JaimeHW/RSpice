@@ -54,6 +54,7 @@ impl ComponentType {
                 | ComponentType::VoltageSourcePulse
                 | ComponentType::VoltageSourceSin
                 | ComponentType::VoltageSourcePwl
+                | ComponentType::VoltageSourcePwlFile
                 | ComponentType::VoltageSourceExp
                 | ComponentType::VoltageSourceSffm
                 | ComponentType::VoltageSourceAm
@@ -63,6 +64,7 @@ impl ComponentType {
                 | ComponentType::CurrentSourcePulse
                 | ComponentType::CurrentSourceSin
                 | ComponentType::CurrentSourcePwl
+                | ComponentType::CurrentSourcePwlFile
                 | ComponentType::CurrentSourceExp
                 | ComponentType::CurrentSourceSffm
                 | ComponentType::CurrentSourceAm
@@ -102,11 +104,23 @@ impl ComponentType {
         )
     }
 
-    /// Check if this is a PWL (Piecewise Linear) source.
+    /// Check if this source carries an inline table of PWL points.
+    ///
+    /// The file-backed PWL sources are deliberately absent: their breakpoints
+    /// live in the referenced CSV or WAV, so they have no point table for the
+    /// grid editor to edit.
     pub fn is_pwl_source(&self) -> bool {
         matches!(
             self,
             ComponentType::VoltageSourcePwl | ComponentType::CurrentSourcePwl
+        )
+    }
+
+    /// Check if this source reads its waveform from an external data file.
+    pub fn is_pwl_file_source(&self) -> bool {
+        matches!(
+            self,
+            ComponentType::VoltageSourcePwlFile | ComponentType::CurrentSourcePwlFile
         )
     }
 }

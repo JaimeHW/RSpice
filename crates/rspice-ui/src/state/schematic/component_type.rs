@@ -75,6 +75,8 @@ pub enum ComponentType {
     VoltageSourceSin,
     /// Piecewise Linear Voltage Source (SPICE prefix: V)
     VoltageSourcePwl,
+    /// File-Backed Piecewise Linear Voltage Source (SPICE prefix: V)
+    VoltageSourcePwlFile,
     /// Exponential Voltage Source (SPICE prefix: V)
     VoltageSourceExp,
     /// Single-Frequency FM Voltage Source (SPICE prefix: V)
@@ -93,6 +95,8 @@ pub enum ComponentType {
     CurrentSourceSin,
     /// Piecewise Linear Current Source (SPICE prefix: I)
     CurrentSourcePwl,
+    /// File-Backed Piecewise Linear Current Source (SPICE prefix: I)
+    CurrentSourcePwlFile,
     /// Exponential Current Source (SPICE prefix: I)
     CurrentSourceExp,
     /// Single-Frequency FM Current Source (SPICE prefix: I)
@@ -187,7 +191,7 @@ impl ComponentType {
     /// Exhaustive component-family inventory used by schema, editor, and
     /// netlist contract tests. Adding a new enum variant must update this
     /// list, making missing commercial editor coverage visible immediately.
-    pub const ALL: [Self; 80] = [
+    pub const ALL: [Self; 82] = [
         Self::Resistor,
         Self::Capacitor,
         Self::Inductor,
@@ -218,6 +222,7 @@ impl ComponentType {
         Self::VoltageSourcePulse,
         Self::VoltageSourceSin,
         Self::VoltageSourcePwl,
+        Self::VoltageSourcePwlFile,
         Self::VoltageSourceExp,
         Self::VoltageSourceSffm,
         Self::VoltageSourceAm,
@@ -227,6 +232,7 @@ impl ComponentType {
         Self::CurrentSourcePulse,
         Self::CurrentSourceSin,
         Self::CurrentSourcePwl,
+        Self::CurrentSourcePwlFile,
         Self::CurrentSourceExp,
         Self::CurrentSourceSffm,
         Self::CurrentSourceAm,

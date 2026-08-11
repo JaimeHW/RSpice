@@ -109,6 +109,7 @@ fn extract_drc_data_with_terminals_and_junctions(
                     | ComponentType::VoltageSourcePat
                     | ComponentType::VoltageSourceNoise
                     | ComponentType::VoltageSourcePwl
+                    | ComponentType::VoltageSourcePwlFile
             ) && pin_name == "+"
                 || declared_output_pins.contains(&pin_name);
 
@@ -147,6 +148,7 @@ fn extract_drc_data_with_terminals_and_junctions(
                 | ComponentType::CurrentSourcePat
                 | ComponentType::CurrentSourceNoise
                 | ComponentType::CurrentSourcePwl
+                | ComponentType::CurrentSourcePwlFile
         );
         let reference_required = !comp.kind.spice_prefix().is_empty();
         let reference_error = (reference_required && !comp.name.trim().is_empty())

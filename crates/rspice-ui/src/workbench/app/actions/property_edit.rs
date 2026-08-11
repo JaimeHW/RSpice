@@ -477,6 +477,13 @@ pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
                 state.design_execution_epoch,
                 state.active_schematic_epoch,
                 state.workspace.active_view.display_path(),
+            )
+            .with_data_root(
+                state
+                    .workspace
+                    .project
+                    .data_root()
+                    .map(std::path::Path::to_path_buf),
             ),
         );
     } else {

@@ -84,6 +84,11 @@ pub struct TabbedPropertyDialogState {
 
     /// Model browser state (for semiconductor components)
     pub model_browser: ModelBrowserState,
+
+    /// Project folder that an attached data file is copied into and stored
+    /// relative to. `None` for an unsaved project, which has no folder to be
+    /// relative to, so a picked file keeps its absolute path.
+    pub(super) data_root: Option<std::path::PathBuf>,
 }
 
 /// Durable document authority captured when a component property transaction
@@ -95,6 +100,7 @@ pub struct ComponentPropertySession {
     design_execution_epoch: u64,
     active_schematic_epoch: u64,
     view_path: String,
+    data_root: Option<std::path::PathBuf>,
 }
 
 impl ComponentPropertySession {
@@ -109,7 +115,17 @@ impl ComponentPropertySession {
             design_execution_epoch,
             active_schematic_epoch,
             view_path,
+            data_root: None,
         }
+    }
+
+    /// Bind the project folder that attached data files are copied into and
+    /// stored relative to. An unsaved project has none, so a file picked there
+    /// is referenced where it lies.
+    #[must_use]
+    pub fn with_data_root(mut self, data_root: Option<std::path::PathBuf>) -> Self {
+        self.data_root = data_root;
+        self
     }
 }
 
@@ -197,7 +213,9 @@ impl TabbedPropertyDialogState {
             design_execution_epoch,
             active_schematic_epoch,
             view_path,
+            data_root,
         } = session;
+        self.data_root = data_root;
         self.open = true;
         self.component_id = Some(component_id);
         self.component_name = Some(component_name.into());

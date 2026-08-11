@@ -26,6 +26,20 @@ pub(super) struct PendingPreparedRun {
     permit: ExecutionPermit,
 }
 
+/// Let the deck resolve project-relative data-file references.
+///
+/// An unsaved project has no folder to resolve against, so its references stay
+/// as written and the netlist generator reports the ones it cannot check.
+fn bind_data_root<'a>(
+    hierarchy: crate::simulation::netlist_gen::HierarchySource<'a>,
+    state: &AppState,
+) -> crate::simulation::netlist_gen::HierarchySource<'a> {
+    match state.workspace.project.data_root() {
+        Some(root) => hierarchy.with_data_root(root),
+        None => hierarchy,
+    }
+}
+
 impl SimulationController {
     /// Build the analysis-independent executable design deck used by
     /// inspection surfaces.
@@ -56,9 +70,12 @@ impl SimulationController {
                 "The configured simulation root is not materialized",
             )
         })?;
-        let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
-            &state.library_manager,
-            &projection,
+        let hierarchy = bind_data_root(
+            crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
+                &state.library_manager,
+                &projection,
+            ),
+            state,
         );
         let plan = state
             .sim_setup
@@ -345,9 +362,12 @@ impl SimulationController {
                 ),
             ));
         }
-        let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
-            &state.library_manager,
-            &execution_projection,
+        let hierarchy = bind_data_root(
+            crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
+                &state.library_manager,
+                &execution_projection,
+            ),
+            state,
         );
         let drc = crate::services::drc::run_drc_check_with_hierarchy_and_config(
             root_schematic,

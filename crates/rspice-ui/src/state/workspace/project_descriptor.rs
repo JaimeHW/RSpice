@@ -1311,6 +1311,17 @@ impl ProjectDescriptor {
         self.id
     }
 
+    /// Folder that project-relative file references resolve against.
+    ///
+    /// This is the directory holding the `.rspiceproj`, so a design that
+    /// references a data file beside it keeps working when the whole folder is
+    /// moved or handed to someone else. An unsaved project has no such folder
+    /// and therefore no relative references to resolve.
+    #[must_use]
+    pub fn data_root(&self) -> Option<&std::path::Path> {
+        self.path.as_deref().and_then(std::path::Path::parent)
+    }
+
     #[must_use]
     pub const fn schema_version(&self) -> u16 {
         self.schema_version

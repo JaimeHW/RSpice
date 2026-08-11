@@ -31,13 +31,14 @@ impl PropertyRegistry {
 
         // Families whose two sheets are stamped from one builder, so the
         // voltage and current forms cannot drift apart.
-        for (driven, sffm, am, pat, noise) in [
+        for (driven, sffm, am, pat, noise, pwl_file) in [
             (
                 Driven::Voltage,
                 ComponentType::VoltageSourceSffm,
                 ComponentType::VoltageSourceAm,
                 ComponentType::VoltageSourcePat,
                 ComponentType::VoltageSourceNoise,
+                ComponentType::VoltageSourcePwlFile,
             ),
             (
                 Driven::Current,
@@ -45,6 +46,7 @@ impl PropertyRegistry {
                 ComponentType::CurrentSourceAm,
                 ComponentType::CurrentSourcePat,
                 ComponentType::CurrentSourceNoise,
+                ComponentType::CurrentSourcePwlFile,
             ),
         ] {
             self.sheets.insert(sffm, Self::create_sffm_sheet(driven));
@@ -52,6 +54,8 @@ impl PropertyRegistry {
             self.sheets.insert(pat, Self::create_pat_sheet(driven));
             self.sheets
                 .insert(noise, Self::create_trnoise_sheet(driven));
+            self.sheets
+                .insert(pwl_file, Self::create_pwl_file_sheet(driven));
         }
 
         self.register_rf_port();

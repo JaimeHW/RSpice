@@ -77,6 +77,7 @@ impl ComponentType {
             | ComponentType::VoltageSourcePulse
             | ComponentType::VoltageSourceSin
             | ComponentType::VoltageSourcePwl
+            | ComponentType::VoltageSourcePwlFile
             | ComponentType::VoltageSourceExp
             | ComponentType::VoltageSourceSffm
             | ComponentType::VoltageSourceAm
@@ -87,6 +88,7 @@ impl ComponentType {
             | ComponentType::CurrentSourcePulse
             | ComponentType::CurrentSourceSin
             | ComponentType::CurrentSourcePwl
+            | ComponentType::CurrentSourcePwlFile
             | ComponentType::CurrentSourceExp
             | ComponentType::CurrentSourceSffm
             | ComponentType::CurrentSourceAm
@@ -299,6 +301,7 @@ impl ComponentType {
             | ComponentType::VoltageSourcePulse
             | ComponentType::VoltageSourceSin
             | ComponentType::VoltageSourcePwl
+            | ComponentType::VoltageSourcePwlFile
             | ComponentType::VoltageSourceExp
             | ComponentType::VoltageSourceSffm
             | ComponentType::VoltageSourceAm
@@ -309,6 +312,7 @@ impl ComponentType {
             | ComponentType::CurrentSourcePulse
             | ComponentType::CurrentSourceSin
             | ComponentType::CurrentSourcePwl
+            | ComponentType::CurrentSourcePwlFile
             | ComponentType::CurrentSourceExp
             | ComponentType::CurrentSourceSffm
             | ComponentType::CurrentSourceAm
@@ -387,6 +391,7 @@ mod tests {
         ComponentType::VoltageSourcePulse,
         ComponentType::VoltageSourceSin,
         ComponentType::VoltageSourcePwl,
+        ComponentType::VoltageSourcePwlFile,
         ComponentType::VoltageSourceExp,
         ComponentType::VoltageSourceSffm,
         ComponentType::VoltageSourceAm,
@@ -397,6 +402,7 @@ mod tests {
         ComponentType::CurrentSourcePulse,
         ComponentType::CurrentSourceSin,
         ComponentType::CurrentSourcePwl,
+        ComponentType::CurrentSourcePwlFile,
         ComponentType::CurrentSourceExp,
         ComponentType::CurrentSourceSffm,
         ComponentType::CurrentSourceAm,

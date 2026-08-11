@@ -95,6 +95,7 @@ impl<'a> NetlistGenerator<'a> {
             | ComponentType::VoltageSourcePulse
             | ComponentType::VoltageSourceSin
             | ComponentType::VoltageSourcePwl
+            | ComponentType::VoltageSourcePwlFile
             | ComponentType::VoltageSourceExp
             | ComponentType::VoltageSourceSffm
             | ComponentType::VoltageSourceAm
@@ -105,6 +106,7 @@ impl<'a> NetlistGenerator<'a> {
             | ComponentType::CurrentSourcePulse
             | ComponentType::CurrentSourceSin
             | ComponentType::CurrentSourcePwl
+            | ComponentType::CurrentSourcePwlFile
             | ComponentType::CurrentSourceExp
             | ComponentType::CurrentSourceSffm
             | ComponentType::CurrentSourceAm
@@ -890,6 +892,56 @@ impl<'a> NetlistGenerator<'a> {
         ))
     }
 
+    /// Reason a file-backed PWL source cannot run, or `None` when its data file
+    /// is present and readable.
+    ///
+    /// The engine already refuses to build a circuit whose PWL file will not
+    /// load, but that happens after a run has been dispatched and reports a
+    /// resolved absolute path the user never typed. Catching it here names the
+    /// component and blocks the run before it starts.
+    fn pwl_data_file_defect(
+        &self,
+        component: &Component,
+        params: &std::collections::HashMap<String, String>,
+    ) -> Option<String> {
+        let stored = params
+            .get("file")
+            .map(String::as_str)
+            .unwrap_or(component.value.as_str())
+            .trim();
+        if stored.is_empty() {
+            return Some(format!(
+                "{} '{}' has no data file selected",
+                component.kind.display_name(),
+                component.name
+            ));
+        }
+
+        let resolved = self.resolve_data_file_path(stored);
+        // Only a bound data root makes the reference checkable: without one a
+        // relative path is resolved by the engine against its own working
+        // directory, which is not this process's to test.
+        if std::path::Path::new(&resolved).is_relative() {
+            return None;
+        }
+        match std::fs::metadata(&resolved) {
+            Ok(metadata) if metadata.is_file() => None,
+            Ok(_) => Some(format!(
+                "{} '{}' data file '{}' is a directory",
+                component.kind.display_name(),
+                component.name,
+                stored
+            )),
+            Err(error) => Some(format!(
+                "{} '{}' cannot read data file '{}': {}",
+                component.kind.display_name(),
+                component.name,
+                stored,
+                error
+            )),
+        }
+    }
+
     fn generate_independent_source(
         &mut self,
         component: &Component,
@@ -939,6 +991,13 @@ impl<'a> NetlistGenerator<'a> {
                 component.name,
                 unsupported_analysis_parameters.join(", ")
             ));
+            return None;
+        }
+
+        if component.kind.is_pwl_file_source()
+            && let Some(message) = self.pwl_data_file_defect(component, &params)
+        {
+            self.errors.push(message);
             return None;
         }
 
@@ -1092,6 +1151,7 @@ fn independent_source_parameter_names(kind: ComponentType) -> (&'static [&'stati
     ];
     const TRNOISE: &[&str] = &["dc", "na", "nt", "nalpha", "namp"];
     const PWL: &[&str] = &["pwl_data", "td", "repeat"];
+    const PWL_FILE: &[&str] = &["file", "td", "r", "tscale", "vscale", "toffset", "voffset"];
     const BIAS_AC: &[&str] = &["dc", "phase"];
 
     match kind {
@@ -1103,6 +1163,7 @@ fn independent_source_parameter_names(kind: ComponentType) -> (&'static [&'stati
         ),
         ComponentType::VoltageSourceSin => (&["vo", "va", "freq", "td", "theta", "phase"], true),
         ComponentType::VoltageSourcePwl => (PWL, true),
+        ComponentType::VoltageSourcePwlFile => (PWL_FILE, true),
         ComponentType::VoltageSourceExp => (&["v1", "v2", "td1", "tau1", "td2", "tau2"], true),
         ComponentType::VoltageSourceSffm => (SFFM, true),
         ComponentType::VoltageSourceAm => (AM, true),
@@ -1116,6 +1177,7 @@ fn independent_source_parameter_names(kind: ComponentType) -> (&'static [&'stati
         ),
         ComponentType::CurrentSourceSin => (&["io", "ia", "freq", "td", "theta", "phase"], false),
         ComponentType::CurrentSourcePwl => (PWL, false),
+        ComponentType::CurrentSourcePwlFile => (PWL_FILE, false),
         ComponentType::CurrentSourceExp => (&["i1", "i2", "td1", "tau1", "td2", "tau2"], false),
         ComponentType::CurrentSourceSffm => (SFFM, false),
         ComponentType::CurrentSourceAm => (AM, false),

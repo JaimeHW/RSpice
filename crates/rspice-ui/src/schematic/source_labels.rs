@@ -76,6 +76,9 @@ fn format_source_label(component: &Component) -> String {
         ComponentType::VoltageSourcePwl | ComponentType::CurrentSourcePwl => {
             format_pwl_label(&params, primary)
         }
+        ComponentType::VoltageSourcePwlFile | ComponentType::CurrentSourcePwlFile => {
+            format_pwl_file_label(&params, primary)
+        }
         ComponentType::VoltageSourceExp => format_exp_label(&params, primary, true),
         ComponentType::CurrentSourceExp => format_exp_label(&params, primary, false),
         ComponentType::VoltageSourceSffm => format_sffm_label(&params, primary, true),
@@ -233,6 +236,50 @@ fn format_pwl_label(params: &HashMap<String, String>, primary: &str) -> String {
         && is_truthy(repeat)
     {
         lines.push("Repeat: on".to_string());
+    }
+
+    lines.join("\n")
+}
+
+fn format_pwl_file_label(params: &HashMap<String, String>, primary: &str) -> String {
+    let path = get_param_with_aliases(params, &["file"], primary, "");
+
+    // A data file can sit arbitrarily deep under the project; only its name
+    // tells one source from another at canvas zoom, and the full path is a
+    // glance away in the inspector.
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path).trim();
+    let mut lines = vec![
+        "PWL FILE".to_string(),
+        if name.is_empty() {
+            "(no file)".to_string()
+        } else {
+            name.to_string()
+        },
+    ];
+
+    if let Some(td) = get_param_optional(params, &["td"])
+        && !is_default_value(td, "0")
+    {
+        lines.push(format!("TD: {}", td));
+    }
+    if let Some(repeat) = get_param_optional(params, &["r"])
+        && !repeat.trim().is_empty()
+    {
+        lines.push(format!("R: {}", repeat));
+    }
+    // Scaling is silent in the file, so an applied factor has to show here or
+    // the label describes a waveform the source is not producing.
+    for (key, prefix, unset) in [
+        ("tscale", "Tscale", "1"),
+        ("vscale", "Vscale", "1"),
+        ("toffset", "Toffset", "0"),
+        ("voffset", "Voffset", "0"),
+    ] {
+        if let Some(value) = get_param_optional(params, &[key])
+            && !is_default_value(value, unset)
+        {
+            lines.push(format!("{}: {}", prefix, value));
+        }
     }
 
     lines.join("\n")

@@ -70,6 +70,7 @@ pub fn get_primary_property_name(kind: ComponentType) -> &'static str {
         ComponentType::CurrentSourceAm => "vo",
         ComponentType::CurrentSourcePat => "vhi",
         ComponentType::VoltageSourcePwl | ComponentType::CurrentSourcePwl => "pwl_data",
+        ComponentType::VoltageSourcePwlFile | ComponentType::CurrentSourcePwlFile => "file",
         ComponentType::Diode
         | ComponentType::Nmos
         | ComponentType::Pmos
@@ -166,7 +167,13 @@ pub fn collect_properties_from_component(
             properties.insert(primary_prop.to_owned(), default);
         }
     } else if !component.value.is_empty() {
-        let value = if component.kind.is_pwl_source() || component.kind == ComponentType::Port {
+        // A file path is text, never a quantity: routing one through the
+        // expression editor would have it parsed for units and a drive letter
+        // read as an exponent.
+        let value = if component.kind.is_pwl_source()
+            || component.kind.is_pwl_file_source()
+            || component.kind == ComponentType::Port
+        {
             PropertyValue::String(component.value.clone())
         } else {
             PropertyValue::Expression(component.value.clone())
