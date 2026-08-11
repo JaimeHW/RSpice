@@ -21,14 +21,57 @@ impl Engine {
             });
         };
         match spec {
-            SourceSpec::RfPort { inner, .. } => Self::hb_source_spectrum(
-                fallback_dc,
-                ac_mag,
-                ac_phase,
-                Some(inner),
-                config,
-                drive_harmonics,
-            ),
+            SourceSpec::RfPort { inner, port } => {
+                let Some((amplitude, frequency, phase)) = port.drive_tone() else {
+                    return Self::hb_source_spectrum(
+                        fallback_dc,
+                        ac_mag,
+                        ac_phase,
+                        Some(inner),
+                        config,
+                        drive_harmonics,
+                    );
+                };
+                // A declared drive silences the AC magnitude, exactly as an
+                // explicit transient waveform does below: `AC` on a port is the
+                // small-signal excitation `.AC` and the S-parameter sweep read,
+                // and reading it as a large-signal tone as well would drive the
+                // port twice. Transient already ignores it here -- the port's
+                // waveform is its DC plus this drive -- and harmonic balance is
+                // the same steady state, so the two have to agree or one deck
+                // describes two circuits.
+                // Silencing the `ac_mag` argument is not enough: an `AC`-only
+                // or `DcAc` inner spec carries its own magnitude and would
+                // inject it at every drive harmonic regardless. Only the bias
+                // and any real waveform survive. (`DcAcTransient` already drops
+                // its AC when it recurses into the waveform.)
+                let inner = match inner.as_ref() {
+                    SourceSpec::Ac { .. } => SourceSpec::Dc(0.0),
+                    SourceSpec::DcAc { dc_value, .. } => SourceSpec::Dc(*dc_value),
+                    other => other.clone(),
+                };
+                let mut spectrum = Self::hb_source_spectrum(
+                    fallback_dc,
+                    0.0,
+                    0.0,
+                    Some(&inner),
+                    config,
+                    drive_harmonics,
+                )?;
+                if amplitude.abs() > HB_ZERO_SENSE_TOL {
+                    let harmonic = Self::hb_periodic_source_harmonic(
+                        frequency,
+                        config.fundamental_freq,
+                        config.num_harmonics,
+                        "RF port",
+                    )?;
+                    // Summed rather than replacing, so a port carrying both a
+                    // drive and its own waveform excites the circuit with the
+                    // same total that transient integrates.
+                    spectrum.harmonics.push((harmonic, amplitude, phase));
+                }
+                Ok(spectrum)
+            }
             SourceSpec::Dc(value) => Ok(HbSourceSpectrum {
                 dc: *value,
                 harmonics: Vec::new(),

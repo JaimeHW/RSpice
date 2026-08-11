@@ -1515,6 +1515,20 @@ impl SourceRfPort {
     /// every commercial RF tool means by it what is applied here.
     #[must_use]
     pub fn drive_at(&self, time: Value) -> Option<Value> {
+        let (amplitude, frequency, phase) = self.drive_tone()?;
+        Some(amplitude * (std::f64::consts::TAU * frequency * time + phase).cos())
+    }
+
+    /// The port's drive as the cosine-reference tone
+    /// `(peak amplitude, frequency in Hz, phase in radians)`, or `None` if the
+    /// port declares no drive.
+    ///
+    /// Harmonic balance needs the tone rather than a sample of it, and deriving
+    /// it separately would be two statements of the same physics waiting to
+    /// disagree. The phasor convention is already cosine-referenced, so unlike
+    /// a SIN waveform this needs no quarter-turn correction to become one.
+    #[must_use]
+    pub fn drive_tone(&self) -> Option<(Value, Value, Value)> {
         if self.power.is_none() && self.frequency.is_none() {
             return None;
         }
@@ -1527,7 +1541,7 @@ impl SourceRfPort {
         };
         let amplitude = (watts_to_volts_squared * power * self.z0).sqrt();
         let phase = self.phase.unwrap_or(0.0).to_radians();
-        Some(amplitude * (std::f64::consts::TAU * frequency * time + phase).cos())
+        Some((amplitude, frequency, phase))
     }
 }
 

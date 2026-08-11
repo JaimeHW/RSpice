@@ -512,3 +512,59 @@ fn the_two_port_spellings_scale_declared_power_to_their_own_topology() {
         "annotated port peak {annotated} V, expected ngspice's {ngspice} V"
     );
 }
+
+/// Harmonic balance and a settled transient are the same steady state, so a
+/// port that declares a drive has to excite both of them identically.
+///
+/// `hb_source_spectrum` used to unwrap the port and build its spectrum from the
+/// AC magnitude, which is the small-signal excitation `.AC` and the S-parameter
+/// sweep read -- so a port declaring only `pwr`/`freq` drove nothing in HB
+/// while driving the transient properly, and one carrying both was driven
+/// twice. The diode below rectifies, so the tone has to be right in amplitude
+/// and not merely present.
+#[test]
+fn harmonic_balance_drives_a_port_the_same_way_the_transient_does() {
+    let fundamental = 1.0e6;
+    let deck = "* RF port driving a rectifier\n\
+        P1 in 0 PORT=1 Z0=50 PWR=10m FREQ=1e6 AC 1\n\
+        D1 in out DMOD\n\
+        R1 out 0 1k\n\
+        C1 out 0 100n\n\
+        .model DMOD D(is=1e-14 n=1)\n\
+        .end\n";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+
+    let hb = engine()
+        .run_hb(&netlist, HbConfig::new(fundamental).with_harmonics(8))
+        .expect("HB converges");
+    let hb_dc = harmonic_magnitude(&hb, "out", 0);
+
+    // The referee: integrate long enough to settle, then average a whole
+    // number of periods so the fundamental cancels out of the mean.
+    let periods = 400.0;
+    let result = engine()
+        .run_tran(&netlist, periods / fundamental, 1.0 / (fundamental * 200.0))
+        .expect("transient completes");
+    let index = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .expect("out node");
+    let settled_from = (periods - 20.0) / fundamental;
+    let (sum, count) = result
+        .time
+        .iter()
+        .zip(&result.voltages[index])
+        .filter(|(t, _)| **t >= settled_from)
+        .fold((0.0, 0usize), |(sum, count), (_, v)| (sum + v, count + 1));
+    let referee = sum / count as f64;
+
+    assert!(
+        referee > 0.05,
+        "the referee must actually rectify something: {referee} V"
+    );
+    assert!(
+        (hb_dc - referee).abs() / referee.abs() < 0.05,
+        "HB DC {hb_dc} V vs settled transient {referee} V on the same port drive"
+    );
+}
