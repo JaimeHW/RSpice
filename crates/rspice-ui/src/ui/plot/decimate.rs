@@ -60,6 +60,31 @@ struct CacheKey {
     columns: u32,
     x0_bits: u64,
     x1_bits: u64,
+    /// Screen quantization of the Y axis. Only a parametric reduction reads
+    /// the Y projection, so a monotone trace deliberately keys these to zero:
+    /// including a live autoscale bound would invalidate every envelope each
+    /// time a pane refits, which is exactly the cost this cache exists to
+    /// avoid.
+    rows: u32,
+    y0_bits: u64,
+    y1_bits: u64,
+    parametric: bool,
+}
+
+/// The data→screen projection a decimated series is quantized against.
+///
+/// This mirrors `render`'s `mx`/`my` exactly. A reduction is only valid for
+/// the projection that produced it, so every field belongs in the cache key.
+#[derive(Debug, Clone, Copy)]
+pub struct TraceView {
+    pub x0: f64,
+    pub x1: f64,
+    pub y0: f64,
+    pub y1: f64,
+    pub x_scale: XScale,
+    pub y_scale: XScale,
+    pub columns: usize,
+    pub rows: usize,
 }
 
 /// Entry-count bound; old views evict once it's exceeded.
@@ -120,33 +145,50 @@ impl DecimationCache {
 
     /// Fetch or compute a bounded display series for one trace at the given
     /// view. Full-resolution rendering deliberately bypasses this cache.
+    ///
+    /// `parametric` selects the reduction, and it is a property of the data,
+    /// never of the user's display preference: a locus revisits X values, so
+    /// both the X-ordered reductions below would be answering a question it
+    /// has no single answer to. See [`decimate_pixel_cells`].
     pub fn series(
         &mut self,
         mode: DisplayDecimation,
         trace_key: u64,
         x: &[f64],
         y: &[f64],
-        x0: f64,
-        x1: f64,
-        x_scale: XScale,
-        columns: usize,
+        view: TraceView,
+        parametric: bool,
     ) -> Arc<[[f64; 2]]> {
         debug_assert!(!matches!(mode, DisplayDecimation::FullResolution));
         let key = CacheKey {
             trace: trace_key,
             mode,
-            columns: columns as u32,
-            x0_bits: x0.to_bits(),
-            x1_bits: x1.to_bits(),
+            columns: view.columns as u32,
+            x0_bits: view.x0.to_bits(),
+            x1_bits: view.x1.to_bits(),
+            rows: if parametric { view.rows as u32 } else { 0 },
+            y0_bits: if parametric { view.y0.to_bits() } else { 0 },
+            y1_bits: if parametric { view.y1.to_bits() } else { 0 },
+            parametric,
         };
         if let Some(hit) = self.map.get_mut(&key) {
             hit.last_used = self.tick;
             return Arc::clone(&hit.envelope);
         }
-        let envelope: Arc<[[f64; 2]]> = match mode {
-            DisplayDecimation::EnvelopeExtrema => decimate_minmax(x, y, x0, x1, x_scale, columns),
-            DisplayDecimation::Uniform => decimate_uniform(x, y, x0, x1, columns),
-            DisplayDecimation::FullResolution => unreachable!("full resolution bypasses cache"),
+        let envelope: Arc<[[f64; 2]]> = if parametric {
+            decimate_pixel_cells(x, y, view)
+        } else {
+            match mode {
+                DisplayDecimation::EnvelopeExtrema => {
+                    decimate_minmax(x, y, view.x0, view.x1, view.x_scale, view.columns)
+                }
+                DisplayDecimation::Uniform => {
+                    decimate_uniform(x, y, view.x0, view.x1, view.columns)
+                }
+                DisplayDecimation::FullResolution => {
+                    unreachable!("full resolution bypasses cache")
+                }
+            }
         }
         .into();
         let bytes = envelope.len() * size_of::<[f64; 2]>();
@@ -197,6 +239,14 @@ pub fn decimate_uniform(x: &[f64], y: &[f64], x0: f64, x1: f64, columns: usize) 
 /// Reduce `(x, y)` to a per-column min/max envelope over `[x0, x1]` split
 /// into `columns` equal screen columns. Returns the raw points when the
 /// range already holds fewer than `2 × columns` samples.
+///
+/// # Precondition
+///
+/// `x` must be non-decreasing. Both the visible-window binary search and the
+/// per-column reduction below depend on it, and neither fails loudly without
+/// it — a locus fed through here loses whichever branch falls outside the
+/// contiguous index window. Parametric data belongs in
+/// [`decimate_pixel_cells`].
 pub fn decimate_minmax(
     x: &[f64],
     y: &[f64],
@@ -220,6 +270,22 @@ pub fn decimate_minmax(
     if visible <= columns * 2 {
         return (start..end).map(|i| [x[i], y[i]]).collect();
     }
+
+    // Past this point the ordering decides the output, so a violation stops
+    // being a small inaccuracy and starts deleting whole branches of the
+    // curve. Non-finite abscissae are ordinary — a diverged run carries them
+    // and `finite_runs` breaks the stroke around them downstream — so the
+    // precondition is only about the samples that do carry a position.
+    debug_assert!(
+        x[start..end]
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite())
+            .try_fold(f64::NEG_INFINITY, |previous, value| (previous <= value)
+                .then_some(value))
+            .is_some(),
+        "decimate_minmax requires non-decreasing x; a locus belongs in decimate_pixel_cells"
+    );
 
     let mut out: Vec<[f64; 2]> = Vec::with_capacity(columns * 2 + 4);
     let mut column = 0usize;
@@ -271,6 +337,97 @@ pub fn decimate_minmax(
     }
     if has {
         flush(&mut out, col_x, min_v, max_v, min_i, max_i);
+    }
+    out
+}
+
+/// Screen cell index of one sample under `view`'s projection.
+///
+/// Deliberately unclamped, so a sample outside the viewport keeps a distinct
+/// cell and the path still enters and leaves the plot where the data does.
+/// The normalized coordinate is bounded before the cast because an outlier
+/// far beyond the window would otherwise overflow the index; anything that
+/// far off screen is indistinguishable from anything else that far off.
+fn screen_cell(x: f64, y: f64, view: TraceView) -> (i64, i64) {
+    const LIMIT: f64 = 1.0e9;
+    let column = (view
+        .x_scale
+        .normalize(x, view.x0, view.x1)
+        .clamp(-LIMIT, LIMIT)
+        * view.columns as f64) as i64;
+    let row = (view
+        .y_scale
+        .normalize(y, view.y0, view.y1)
+        .clamp(-LIMIT, LIMIT)
+        * view.rows as f64) as i64;
+    (column, row)
+}
+
+/// Reduce a parametric series — one whose X is not monotone — to at most a
+/// few points per screen cell, in source order.
+///
+/// A locus (a Smith or Nyquist curve) revisits X values as the sweep runs, so
+/// neither a binary search for the visible index window nor a per-X-column
+/// min/max envelope describes it: the first assumes the visible samples are
+/// contiguous in index order, and the second assumes one column holds one
+/// span of the curve. A circle violates both, and the failure is silent —
+/// whichever branch falls outside the contiguous window simply is not drawn.
+///
+/// This walks the samples in the order the sweep produced them, projects each
+/// to an integer screen cell, and keeps a sample whenever the cell changes,
+/// plus the last sample of the run it is leaving. The drawn path therefore
+/// follows the sweep, every visible excursion survives, and the output is
+/// bounded by the number of distinct cells the curve actually visits.
+///
+/// Non-finite samples pass through unchanged so `render`'s `finite_runs`
+/// still splits the stroke exactly where the data stops.
+pub fn decimate_pixel_cells(x: &[f64], y: &[f64], view: TraceView) -> Vec<[f64; 2]> {
+    let n = x.len().min(y.len());
+    if n == 0
+        || view.columns == 0
+        || view.rows == 0
+        || !matches!(
+            view.x1.partial_cmp(&view.x0),
+            Some(std::cmp::Ordering::Greater)
+        )
+        || !matches!(
+            view.y1.partial_cmp(&view.y0),
+            Some(std::cmp::Ordering::Greater)
+        )
+    {
+        return Vec::new();
+    }
+
+    let mut out: Vec<[f64; 2]> = Vec::new();
+    let mut current: Option<(i64, i64)> = None;
+    // The most recent sample of the cell run in progress. Emitting it as the
+    // run ends keeps the segment leaving a cell anchored where the curve
+    // actually was, not where it first arrived.
+    let mut trailing: Option<[f64; 2]> = None;
+
+    for index in 0..n {
+        let (xv, yv) = (x[index], y[index]);
+        if !xv.is_finite() || !yv.is_finite() {
+            if let Some(point) = trailing.take() {
+                out.push(point);
+            }
+            out.push([xv, yv]);
+            current = None;
+            continue;
+        }
+        let cell = screen_cell(xv, yv, view);
+        if current == Some(cell) {
+            trailing = Some([xv, yv]);
+            continue;
+        }
+        if let Some(point) = trailing.take() {
+            out.push(point);
+        }
+        out.push([xv, yv]);
+        current = Some(cell);
+    }
+    if let Some(point) = trailing.take() {
+        out.push(point);
     }
     out
 }
@@ -406,6 +563,99 @@ mod tests {
         assert_eq!(linear, 1.125);
         assert!((1.0..=1.5).contains(&cubic));
         assert_ne!(cubic, linear);
+    }
+
+    /// A Smith/Nyquist locus at a sweep density that decimates: 4001 samples
+    /// around a circle, the shape `smith.rs` and `nyquist.rs` actually hand
+    /// the renderer.
+    fn locus(samples: usize) -> (Vec<f64>, Vec<f64>) {
+        let angle = |i: usize| i as f64 / (samples - 1) as f64 * std::f64::consts::TAU;
+        (
+            (0..samples).map(|i| angle(i).cos() * 0.9).collect(),
+            (0..samples).map(|i| angle(i).sin() * 0.9).collect(),
+        )
+    }
+
+    fn locus_view(x0: f64, x1: f64) -> TraceView {
+        TraceView {
+            x0,
+            x1,
+            y0: -1.12,
+            y1: 1.12,
+            x_scale: XScale::Linear,
+            y_scale: XScale::Linear,
+            columns: 1216,
+            rows: 704,
+        }
+    }
+
+    #[test]
+    fn a_zoomed_locus_keeps_every_branch_that_crosses_the_window() {
+        // The defect this pins: the X-ordered reduction finds its visible
+        // window with a binary search, so on a locus it returned one
+        // contiguous index run and the other branch — half the curve — was
+        // silently not drawn. Each of these windows is crossed twice.
+        let (re, im) = locus(4001);
+        for (x0, x1) in [(0.2, 0.5), (-0.6, -0.2), (0.0, 0.3)] {
+            let drawn = decimate_pixel_cells(&re, &im, locus_view(x0, x1));
+            let upper = drawn
+                .iter()
+                .filter(|point| (x0..=x1).contains(&point[0]) && point[1] > 0.0)
+                .count();
+            let lower = drawn
+                .iter()
+                .filter(|point| (x0..=x1).contains(&point[0]) && point[1] < 0.0)
+                .count();
+            assert!(
+                upper > 0 && lower > 0,
+                "window [{x0}, {x1}] drew upper={upper} lower={lower}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_locus_reduction_stays_bounded_and_ordered() {
+        let (re, im) = locus(40_001);
+        let view = locus_view(-1.12, 1.12);
+        let drawn = decimate_pixel_cells(&re, &im, view);
+        assert!(drawn.len() < re.len() / 4, "no reduction: {}", drawn.len());
+        // Source order, not X order: consecutive output points must stay
+        // within a cell step of each other, which an X-sorted reduction of a
+        // circle could not satisfy.
+        for pair in drawn.windows(2) {
+            let (a, b) = (
+                screen_cell(pair[0][0], pair[0][1], view),
+                screen_cell(pair[1][0], pair[1][1], view),
+            );
+            assert!(
+                (a.0 - b.0).abs() <= 1 && (a.1 - b.1).abs() <= 1,
+                "path jumped from {a:?} to {b:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_locus_preserves_the_gaps_in_its_own_data() {
+        let mut re = vec![0.0, 0.1, 0.2, 0.3, 0.4];
+        let im = vec![0.0, 0.1, 0.2, 0.3, 0.4];
+        re[2] = f64::NAN;
+        let drawn = decimate_pixel_cells(&re, &im, locus_view(-1.12, 1.12));
+        assert_eq!(
+            drawn.iter().filter(|point| !point[0].is_finite()).count(),
+            1,
+            "the hole must survive so finite_runs can split the stroke"
+        );
+    }
+
+    #[test]
+    fn a_degenerate_locus_window_draws_nothing_rather_than_guessing() {
+        let (re, im) = locus(64);
+        let mut view = locus_view(0.0, 0.0);
+        assert!(decimate_pixel_cells(&re, &im, view).is_empty());
+        view = locus_view(-1.0, 1.0);
+        view.rows = 0;
+        assert!(decimate_pixel_cells(&re, &im, view).is_empty());
+        assert!(decimate_pixel_cells(&[], &[], locus_view(-1.0, 1.0)).is_empty());
     }
 
     #[test]

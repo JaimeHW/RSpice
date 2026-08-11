@@ -561,6 +561,9 @@ pub fn show(
         // then reuses cached envelopes instead of re-decimating every trace
         // every frame (the envelope is always at least pixel-dense).
         let columns = (plot_rect.width().ceil() as usize).next_multiple_of(64);
+        // A parametric reduction quantizes both axes, so it needs the vertical
+        // resolution too. Bucketed for the same reason as `columns`.
+        let rows = (plot_rect.height().ceil() as usize).next_multiple_of(64);
         for (trace_index, trace) in spec.traces.iter().enumerate() {
             if trace.x.is_empty() {
                 continue;
@@ -576,10 +579,17 @@ pub fn show(
                         key,
                         trace.x,
                         trace.y,
-                        spec.x.min,
-                        spec.x.max,
-                        spec.x_scale,
-                        columns,
+                        super::decimate::TraceView {
+                            x0: spec.x.min,
+                            x1: spec.x.max,
+                            y0: spec.y.min,
+                            y1: spec.y.max,
+                            x_scale: spec.x_scale,
+                            y_scale: spec.y_scale,
+                            columns,
+                            rows,
+                        },
+                        trace.parametric,
                     )
                     .iter()
                     .map(|p| pos2(mx(p[0]), my(p[1])))

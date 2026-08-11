@@ -163,6 +163,14 @@ pub struct Trace<'a> {
     /// per trace — the renderer mixes nothing in, so two traces sharing a
     /// key would serve each other's envelopes. `None` disables caching.
     pub cache_key: Option<u64>,
+    /// This curve is a locus: X is a coordinate, not an ordering.
+    ///
+    /// Smith and Nyquist sweep a path that revisits X values, so the
+    /// X-ordered reductions cannot describe them and silently drop whichever
+    /// branch falls outside their contiguous index window. Set this and the
+    /// renderer reduces in source order instead. It is a fact about the
+    /// data, never about the user's display preference.
+    pub parametric: bool,
 }
 
 impl<'a> Trace<'a> {
@@ -178,6 +186,7 @@ impl<'a> Trace<'a> {
             show_single_point: false,
             width: 1.8,
             cache_key: None,
+            parametric: false,
         }
     }
 
@@ -220,6 +229,12 @@ impl<'a> Trace<'a> {
     /// Set the decimation-cache identity (globally unique per trace).
     pub fn cache_key(mut self, key: u64) -> Self {
         self.cache_key = Some(key);
+        self
+    }
+
+    /// Declare this curve a locus, so it reduces in source order.
+    pub fn parametric(mut self) -> Self {
+        self.parametric = true;
         self
     }
 }

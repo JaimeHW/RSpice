@@ -81,7 +81,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     .accessible_detail(&accessible_detail);
     for (slot, (index, re, im)) in arrays.iter().enumerate() {
         spec.traces.push(
+            // Re Γ is a coordinate, not an ordering: the locus crosses the
+            // same abscissa on the way out and on the way back.
             Trace::new(re, im, c.traces[slot % c.traces.len()])
+                .parametric()
                 .cache_key(0x501_00F0 | *index as u64),
         );
     }
