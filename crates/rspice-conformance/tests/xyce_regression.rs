@@ -9314,6 +9314,43 @@ fn test_xyce_bsrc_vccs_source_multiplicity_relational_oracles() {
 }
 
 #[test]
+fn test_xyce_abm_splines_inline_lookup_order_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, owner) in [
+        ("Netlists/ABM_SPLINES/akimaOutOfOrder.cir", true),
+        ("Netlists/ABM_SPLINES/akimaOutOfOrder_baseline.cir", false),
+        ("Netlists/ABM_SPLINES/tableOutOfOrder2.cir", true),
+        ("Netlists/ABM_SPLINES/tableOutOfOrder2_baseline.cir", false),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            owner,
+            "{relative} wrapper ownership changed"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should satisfy exact sorted/reverse-order lookup equivalence, got {result:?}"
+        );
+        assert_eq!(
+            result.contract,
+            if owner {
+                "abm_splines_inline_lookup_order_wrapper_owner"
+            } else {
+                "abm_splines_inline_lookup_order_sorted_control"
+            }
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should reproduce byte-identical default PRN output"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_switch_initial_state_case_relational_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

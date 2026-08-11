@@ -4568,11 +4568,11 @@ impl XyceTestRunner {
                 Self::strict_expression_contains_file_table(left)
                     || Self::strict_expression_contains_file_table(right)
             }
+            Expr::LookupTable { input, .. } => Self::strict_expression_contains_file_table(input),
             Expr::Const(_)
             | Expr::NodeVoltage(_)
             | Expr::BranchCurrent(_)
             | Expr::StringLiteral(_)
-            | Expr::LookupTable(_)
             | Expr::Time
             | Expr::Frequency
             | Expr::Temperature

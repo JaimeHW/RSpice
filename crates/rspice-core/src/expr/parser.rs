@@ -796,12 +796,7 @@ impl<'a> Parser<'a> {
             };
 
             if let Some(f) = func {
-                self.validate_function_arity(name, f, args.len());
-                if matches!(f, Function::Table)
-                    && matches!(args.first(), Some(Expr::StringLiteral(_)))
-                {
-                    self.validate_arity_range(name, args.len(), 1, 3);
-                }
+                self.validate_function_arity(name, f, &args);
                 return Expr::Function { func: f, args };
             }
 
@@ -816,16 +811,27 @@ impl<'a> Parser<'a> {
         Expr::Const(0.0)
     }
 
-    fn validate_function_arity(&mut self, function_name: &str, func: Function, arg_count: usize) {
+    fn validate_function_arity(&mut self, function_name: &str, func: Function, args: &[Expr]) {
+        let arg_count = args.len();
+        if matches!(func, Function::Table | Function::Akima) {
+            if args.is_empty() || matches!(args.first(), Some(Expr::StringLiteral(_))) {
+                self.validate_arity_range(function_name, arg_count, 1, 3);
+            } else {
+                self.validate_inline_lookup_arity(function_name, arg_count);
+            }
+            return;
+        }
+
         let range = match func {
             Function::SpicePulse => Some((1, 7)),
             Function::SpiceSin => Some((3, 6)),
             Function::SpiceExp => Some((2, 6)),
             Function::SpiceSffm => Some((2, 5)),
-            Function::TableFile | Function::FastTable | Function::FastTableFile => Some((1, 3)),
-            Function::Cubic
+            Function::TableFile
+            | Function::FastTable
+            | Function::FastTableFile
+            | Function::Cubic
             | Function::CubicFile
-            | Function::Akima
             | Function::AkimaFile
             | Function::Wodicka
             | Function::WodickaFile
@@ -840,6 +846,20 @@ impl<'a> Parser<'a> {
         };
 
         self.validate_arity_range(function_name, arg_count, min, max);
+    }
+
+    fn validate_inline_lookup_arity(&mut self, function_name: &str, arg_count: usize) {
+        if arg_count < 3 {
+            self.errors.push(format!(
+                "{} inline lookup expects an input followed by at least one x/y pair, got {} arguments",
+                function_name, arg_count
+            ));
+        } else if arg_count % 2 == 0 {
+            self.errors.push(format!(
+                "{} inline lookup expects complete x/y pairs after its input, got {} arguments",
+                function_name, arg_count
+            ));
+        }
     }
 
     fn validate_arity_range(
@@ -1111,8 +1131,16 @@ mod tests {
             );
         }
 
-        // Numeric TABLE retains its separate inline point-list grammar.
+        // Numeric lookup functions retain their separate inline point-list grammar.
         parse_expression_strict("table(time,0,0,1,1)").expect("inline table remains variadic");
+        parse_expression_strict("akima(v(a),1,4,0.5,2.25,0,1)")
+            .expect("inline Akima remains variadic");
+        for expression in ["akima(v(a),0,1,1)", "table(time,0)"] {
+            assert!(
+                parse_expression_strict(expression).is_err(),
+                "`{expression}` should reject an incomplete inline point list"
+            );
+        }
     }
 
     #[test]

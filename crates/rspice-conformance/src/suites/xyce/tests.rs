@@ -28269,3 +28269,244 @@ fn abm_frequency_eight_record_provenance_and_execution_fail_closed() {
         "contract member ordering must preserve owner-GOODFILE provenance"
     );
 }
+
+fn abm_lookup_order_fixture() -> (tempfile::TempDir, Vec<String>, Vec<String>) {
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let root = tempfile::tempdir().expect("create ABM_SPLINES lookup-order fixture");
+    let mut wrapper_rows = Vec::new();
+    let mut exclusion_rows = Vec::new();
+    for spec in XYCE_ABM_LOOKUP_ORDER_CASES {
+        for relative in [spec.owner_path, spec.control_path] {
+            let source = source_root.join(relative);
+            let target = root.path().join(relative);
+            fs::create_dir_all(target.parent().expect("lookup candidate has parent"))
+                .expect("create ABM_SPLINES fixture directory");
+            fs::copy(source, target).expect("copy canonical lookup-order candidate");
+        }
+        wrapper_rows.push(format!(
+            "{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}",
+            spec.owner_path
+        ));
+        exclusion_rows.push(format!(
+            "{}\t{XYCE_ABM_LOOKUP_ORDER_HISTORICAL_EXCLUDE_PATH}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_ABM_LOOKUP_ORDER_SORTED_CONTROL_CONTRACT}",
+            spec.control_path
+        ));
+    }
+    wrapper_rows.sort();
+    exclusion_rows.sort();
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{}\n", wrapper_rows.join("\n")),
+    )
+    .expect("write lookup-order wrapper ownership");
+    let exclusion_refs = exclusion_rows
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&exclusion_refs),
+    )
+    .expect("write lookup-order independent qualifications");
+    (root, wrapper_rows, exclusion_rows)
+}
+
+#[test]
+fn abm_lookup_order_release_710_oracle_provenance_is_exact() {
+    let records = XyceTestRunner::abm_lookup_order_historical_oracle_provenance_records();
+    assert_eq!(
+        records.len(),
+        XYCE_ABM_LOOKUP_ORDER_HISTORICAL_ORACLE_RECORD_COUNT
+    );
+    XyceTestRunner::validate_abm_lookup_order_historical_oracle_provenance()
+        .expect("two wrappers, exclude, and xyce_verify remain provenance-bound");
+    assert!(records.iter().all(|record| {
+        record.starts_with(&format!(
+            "{XYCE_ABM_LOOKUP_ORDER_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_ABM_LOOKUP_ORDER_UPSTREAM_RELEASE_TAG}\t"
+        ))
+    }));
+    assert!(records.iter().any(|record| {
+        record.contains("Netlists/ABM_SPLINES/akimaOutOfOrder.cir.sh")
+            && !record.contains(XYCE_RELEASE_710_XYCE_VERIFY_SHA256)
+    }));
+    assert!(
+        records
+            .iter()
+            .any(|record| record.contains(XYCE_RELEASE_710_XYCE_VERIFY_SHA256))
+    );
+    let mut changed = records;
+    changed[0].push('x');
+    assert_ne!(
+        blake3::hash(changed.join("\n").as_bytes())
+            .to_hex()
+            .as_str(),
+        XYCE_ABM_LOOKUP_ORDER_HISTORICAL_ORACLE_BLAKE3
+    );
+    assert!(XyceBaselineFamilyKind::AbmLookupOrder.xyce_verify_member_is_good_waveform());
+}
+
+#[test]
+fn abm_lookup_order_plans_and_snapshots_are_strict_typed_pairs() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for spec in XYCE_ABM_LOOKUP_ORDER_CASES {
+        let owner_path = root.join(spec.owner_path);
+        let control_path = root.join(spec.control_path);
+        let owner_plan = runner
+            .static_dc_plan_for_path(&owner_path, ExpressionDialect::Xyce)
+            .expect("build lookup-order owner plan");
+        let control_plan = runner
+            .static_dc_plan_for_path(&control_path, ExpressionDialect::Xyce)
+            .expect("build sorted-control plan");
+        XyceTestRunner::validate_abm_lookup_order_dc_plan(&owner_plan)
+            .expect("owner has exact LIST plan");
+        XyceTestRunner::validate_abm_lookup_order_dc_plan(&control_plan)
+            .expect("control has exact LIST plan");
+        let owner_netlist = XyceTestRunner::parse_xyce_netlist(&owner_plan.source, &owner_path)
+            .expect("parse owner netlist");
+        let control_netlist =
+            XyceTestRunner::parse_xyce_netlist(&control_plan.source, &control_path)
+                .expect("parse control netlist");
+        let owner_snapshot = XyceTestRunner::abm_lookup_order_snapshot(&owner_netlist, &owner_plan)
+            .expect("snapshot reverse-order owner");
+        let control_snapshot =
+            XyceTestRunner::abm_lookup_order_snapshot(&control_netlist, &control_plan)
+                .expect("snapshot sorted control");
+        assert_eq!(owner_snapshot.kind, spec.kind);
+        assert_eq!(control_snapshot.kind, spec.kind);
+        assert_eq!(
+            owner_snapshot.representation,
+            XyceAbmLookupRepresentation::OutOfOrderOwner
+        );
+        assert_eq!(
+            control_snapshot.representation,
+            XyceAbmLookupRepresentation::SortedControl
+        );
+        XyceTestRunner::compare_abm_lookup_order_snapshots(&control_snapshot, &owner_snapshot)
+            .expect("sorted and reverse-order calls have identical typed lookup semantics");
+        assert!(
+            XyceTestRunner::compare_abm_lookup_order_snapshots(&owner_snapshot, &control_snapshot,)
+                .is_err(),
+            "snapshot comparison must preserve control/owner direction"
+        );
+
+        let mut changed_grid = owner_plan.clone();
+        let DcSweepMode::List(values) = &mut changed_grid.dc.mode else {
+            panic!("qualified lookup order uses LIST mode");
+        };
+        values[3] = 0.31;
+        assert!(XyceTestRunner::validate_abm_lookup_order_dc_plan(&changed_grid).is_err());
+        let mut changed_probe = owner_plan.clone();
+        changed_probe.print.probes[0] = "V(A)".to_string();
+        assert!(XyceTestRunner::validate_abm_lookup_order_dc_plan(&changed_probe).is_err());
+        let mut changed_points = owner_snapshot.clone();
+        changed_points.canonical_points_bits[1].1 = 9.0f64.to_bits();
+        let mut changed_topology = owner_snapshot.clone();
+        changed_topology
+            .elements
+            .get_mut("b1")
+            .expect("owner has B1")
+            .nodes[0] = "2".to_string();
+        for changed in [changed_points, changed_topology] {
+            assert!(
+                XyceTestRunner::compare_abm_lookup_order_snapshots(&control_snapshot, &changed,)
+                    .is_err()
+            );
+        }
+    }
+}
+
+#[test]
+fn abm_lookup_order_four_record_provenance_and_execution_fail_closed() {
+    let (root, wrapper_rows, exclusion_rows) = abm_lookup_order_fixture();
+    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    let decks = runner.discover_netlist_tests();
+    assert_eq!(decks.len(), XYCE_ABM_LOOKUP_ORDER_CANDIDATE_COUNT);
+    let mut role_counts = [0usize; 2];
+    for deck in &decks {
+        let (_, role) = XyceAbmLookupOrderRole::for_record(&deck.relative_path)
+            .expect("each fixture deck has one exact lookup-order role");
+        role_counts[usize::from(role == XyceAbmLookupOrderRole::SortedControl)] += 1;
+        let result = runner.run_test(&deck.path);
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{} must execute through the exact lookup-order relational contract: {result:?}",
+            deck.relative_path
+        );
+        assert_eq!(result.contract, role.result_contract());
+        assert!(result.mismatches.is_empty());
+    }
+    assert_eq!(role_counts, [2, 2]);
+
+    let owner = decks
+        .iter()
+        .find(|deck| {
+            XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                == XYCE_ABM_LOOKUP_ORDER_CASES[0].owner_record
+        })
+        .expect("fixture contains the Akima owner");
+    let contract = runner
+        .abm_lookup_order_family_contract(owner)
+        .expect("owner is selected")
+        .expect("canonical four-record family qualifies");
+    runner
+        .validate_abm_lookup_order_provenance(&contract)
+        .expect("canonical lookup-order family revalidates");
+
+    let mutation_path = root
+        .path()
+        .join(XYCE_ABM_LOOKUP_ORDER_CASES[1].control_path);
+    let original = fs::read(&mutation_path).expect("read lookup mutation target");
+    fs::write(&mutation_path, "lookup mutation\n.end\n").expect("mutate lookup candidate");
+    assert!(
+        runner
+            .validate_abm_lookup_order_provenance(&contract)
+            .is_err()
+    );
+    fs::write(&mutation_path, original).expect("restore lookup candidate");
+
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{}\n", wrapper_rows[1..].join("\n")),
+    )
+    .expect("remove lookup wrapper row");
+    assert!(
+        runner
+            .validate_abm_lookup_order_provenance(&contract)
+            .is_err()
+    );
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{}\n", wrapper_rows.join("\n")),
+    )
+    .expect("restore lookup wrapper rows");
+
+    let mut wrong_exclusions = exclusion_rows.clone();
+    wrong_exclusions[0] = wrong_exclusions[0].replace(
+        XYCE_ABM_LOOKUP_ORDER_SORTED_CONTROL_CONTRACT,
+        "wrong_lookup_order_contract",
+    );
+    let wrong_refs = wrong_exclusions
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&wrong_refs),
+    )
+    .expect("mutate lookup control qualification");
+    assert!(
+        runner
+            .validate_abm_lookup_order_provenance(&contract)
+            .is_err()
+    );
+
+    let mut wrong_direction = contract;
+    wrong_direction.relational.member_paths.swap(0, 1);
+    assert!(
+        runner
+            .validate_abm_lookup_order_provenance(&wrong_direction)
+            .is_err(),
+        "contract member ordering must preserve owner/control provenance"
+    );
+}

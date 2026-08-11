@@ -992,6 +992,35 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.abm_lookup_order_family_contract(deck) {
+            let result = match contract {
+                Ok(contract) => self.run_abm_lookup_order_family_contract(deck, contract, start),
+                Err(reason) => {
+                    let (_, role) = XyceAbmLookupOrderRole::for_record(&deck.relative_path).expect(
+                        "ABM_SPLINES lookup-order detection selects only recognized records",
+                    );
+                    self.failure_result(
+                        deck,
+                        start,
+                        role.result_contract(),
+                        format!(
+                            "ABM_SPLINES lookup-order family provenance qualification failed: {reason}"
+                        ),
+                        Vec::new(),
+                    )
+                }
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.source_multiplicity_family_contract(deck) {
             let result = match contract {
                 Ok(contract) => self.run_source_multiplicity_family_contract(deck, contract, start),
@@ -10217,6 +10246,41 @@ impl XyceTestRunner {
         result
     }
 
+    pub(super) fn run_abm_lookup_order_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceAbmLookupOrderFamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.role.result_contract();
+        if let Err(reason) = self.validate_abm_lookup_order_provenance(&contract) {
+            return self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("ABM_SPLINES lookup-order provenance changed before execution: {reason}"),
+                Vec::new(),
+            );
+        }
+        let mut result =
+            self.run_baseline_family_contract(deck, contract.relational.clone(), start);
+        if result.passed && !result.expected_unsupported {
+            if let Err(reason) = self.validate_abm_lookup_order_provenance(&contract) {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!(
+                        "ABM_SPLINES lookup-order provenance changed during execution: {reason}"
+                    ),
+                    Vec::new(),
+                );
+            }
+            result.contract = result_contract.to_string();
+        }
+        result
+    }
+
     pub(super) fn run_abm_frequency_family_contract(
         &self,
         deck: &XyceDeck,
@@ -10361,6 +10425,7 @@ impl XyceTestRunner {
         if matches!(
             contract.kind,
             XyceBaselineFamilyKind::BjtExternalNode
+                | XyceBaselineFamilyKind::AbmLookupOrder
                 | XyceBaselineFamilyKind::DcAnalysisExpression
                 | XyceBaselineFamilyKind::DelimitedExpression
                 | XyceBaselineFamilyKind::PassiveResPrimaryValue

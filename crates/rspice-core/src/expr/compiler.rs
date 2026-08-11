@@ -52,7 +52,8 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
             program.instructions.push(Instruction::PushConst(0.0));
         }
 
-        Expr::LookupTable(table) => {
+        Expr::LookupTable { input, table } => {
+            compile_expr(input, program);
             let index = program.add_lookup_table(table.clone());
             program.instructions.push(Instruction::LookupTable(index));
         }

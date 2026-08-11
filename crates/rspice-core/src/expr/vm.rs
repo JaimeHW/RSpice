@@ -122,7 +122,7 @@ pub struct CompiledExpr {
     pub node_map: HashMap<String, usize>,
     /// Branch name to index mapping
     pub branch_map: HashMap<String, usize>,
-    /// File-backed lookup tables resolved during circuit build.
+    /// Lookup tables resolved and precomputed during circuit build.
     pub lookup_tables: Vec<LookupTable>,
     /// Number of independently stateful SDT occurrences in this program.
     pub sdt_count: usize,
@@ -156,7 +156,7 @@ impl CompiledExpr {
         }
     }
 
-    /// Store a file-backed lookup table and return its bytecode index.
+    /// Store a precomputed lookup table and return its bytecode index.
     pub(crate) fn add_lookup_table(&mut self, table: LookupTable) -> usize {
         let idx = self.lookup_tables.len();
         self.lookup_tables.push(table);
@@ -470,12 +470,21 @@ impl Vm {
                     }
                 }
                 Instruction::LookupTable(index) => {
-                    let result = program
-                        .lookup_tables
-                        .get(*index)
-                        .map(|table| lookup_table_interpolate(ctx.time, table))
-                        .unwrap_or(0.0);
-                    self.stack.push(result);
+                    if let Some(x) = self.stack.pop() {
+                        let result = program
+                            .lookup_tables
+                            .get(*index)
+                            .map(|table| {
+                                lookup_table_interpolate_with_derivative(
+                                    x,
+                                    table,
+                                    ctx.expression_dialect,
+                                )
+                                .0
+                            })
+                            .unwrap_or(0.0);
+                        self.stack.push(result);
+                    }
                 }
                 Instruction::SpicePulse(arg_count) => {
                     if self.stack.len() >= *arg_count {
@@ -592,57 +601,183 @@ impl Vm {
     }
 }
 
-fn lookup_table_interpolate(x: Value, table: &LookupTable) -> Value {
+/// Evaluate a precomputed lookup table and its derivative with respect to `x`.
+///
+/// Values clamp outside the knot domain. Xyce nevertheless evaluates spline
+/// derivatives using the first or last interpolation interval outside that
+/// domain; its linear TABLE derivative keeps its separate legacy behavior.
+pub(crate) fn lookup_table_interpolate_with_derivative(
+    x: Value,
+    table: &LookupTable,
+    expression_dialect: ExpressionDialect,
+) -> (Value, Value) {
     let points = table.points.as_ref();
     match points {
-        [] => 0.0,
-        [(_, y)] => *y,
+        [] => (0.0, 0.0),
+        [(_, y)] => (*y, 0.0),
         _ => {
-            if x <= points[0].0 {
-                return points[0].1;
-            }
             let last = points.len() - 1;
-            if x >= points[last].0 {
-                return points[last].1;
-            }
-
-            let upper = points.partition_point(|(time, _)| *time < x);
-            let lower = upper.saturating_sub(1);
+            let below = x < points[0].0;
+            let above = x > points[last].0;
+            let lower = if below {
+                0
+            } else if above {
+                last - 1
+            } else {
+                points
+                    .partition_point(|(abscissa, _)| *abscissa <= x)
+                    .saturating_sub(1)
+                    .min(last - 1)
+            };
+            let upper = lower + 1;
             match &table.interpolation {
-                LookupInterpolation::Linear => interpolate_segment(
-                    x,
-                    points[lower].0,
-                    points[lower].1,
-                    points[upper].0,
-                    points[upper].1,
-                    points[lower].1,
-                ),
+                LookupInterpolation::Linear => {
+                    let span = points[upper].0 - points[lower].0;
+                    let slope = if expression_dialect == ExpressionDialect::Xyce {
+                        xyce_linear_table_derivative(x, points)
+                    } else if x <= points[0].0 || x >= points[last].0 {
+                        0.0
+                    } else {
+                        (points[upper].1 - points[lower].1) / span
+                    };
+                    (
+                        if below {
+                            points[0].1
+                        } else if above {
+                            points[last].1
+                        } else {
+                            interpolate_segment(
+                                x,
+                                points[lower].0,
+                                points[lower].1,
+                                points[upper].0,
+                                points[upper].1,
+                                points[lower].1,
+                            )
+                        },
+                        slope,
+                    )
+                }
                 LookupInterpolation::NaturalCubic { second_derivatives } => {
                     let span = points[upper].0 - points[lower].0;
                     let lower_weight = (points[upper].0 - x) / span;
                     let upper_weight = (x - points[lower].0) / span;
-                    lower_weight * points[lower].1
-                        + upper_weight * points[upper].1
-                        + ((lower_weight.powi(3) - lower_weight) * second_derivatives[lower]
-                            + (upper_weight.powi(3) - upper_weight) * second_derivatives[upper])
-                            * span.powi(2)
-                            / 6.0
+                    let value = if below {
+                        points[0].1
+                    } else if above {
+                        points[last].1
+                    } else {
+                        lower_weight * points[lower].1
+                            + upper_weight * points[upper].1
+                            + ((lower_weight.powi(3) - lower_weight) * second_derivatives[lower]
+                                + (upper_weight.powi(3) - upper_weight) * second_derivatives[upper])
+                                * span.powi(2)
+                                / 6.0
+                    };
+                    let derivative = if expression_dialect != ExpressionDialect::Xyce
+                        && (x <= points[0].0 || x >= points[last].0)
+                    {
+                        0.0
+                    } else {
+                        (points[upper].1 - points[lower].1) / span
+                            + span
+                                * (-(3.0 * lower_weight.powi(2) - 1.0) * second_derivatives[lower]
+                                    + (3.0 * upper_weight.powi(2) - 1.0)
+                                        * second_derivatives[upper])
+                                / 6.0
+                    };
+                    (value, derivative)
                 }
                 LookupInterpolation::Akima { coefficients }
                 | LookupInterpolation::Wodicka { coefficients } => {
                     let offset = x - points[lower].0;
                     let [p1, p2, p3] = coefficients[lower];
-                    points[lower].1 + offset * (p1 + offset * (p2 + p3 * offset))
+                    let value = if below {
+                        points[0].1
+                    } else if above {
+                        points[last].1
+                    } else {
+                        points[lower].1 + offset * (p1 + offset * (p2 + p3 * offset))
+                    };
+                    let derivative = if expression_dialect != ExpressionDialect::Xyce
+                        && (x <= points[0].0 || x >= points[last].0)
+                    {
+                        0.0
+                    } else {
+                        p1 + offset * (2.0 * p2 + 3.0 * p3 * offset)
+                    };
+                    (value, derivative)
                 }
                 LookupInterpolation::Barycentric { weights } => {
-                    barycentric_interpolate(x, points, weights)
+                    let value = if below {
+                        points[0].1
+                    } else if above {
+                        points[last].1
+                    } else {
+                        barycentric_first_form_value(x, points, weights)
+                    };
+                    let derivative = if expression_dialect != ExpressionDialect::Xyce
+                        && (x <= points[0].0 || x >= points[last].0)
+                    {
+                        0.0
+                    } else if expression_dialect == ExpressionDialect::Xyce {
+                        barycentric_first_form_derivative(x, points, weights)
+                    } else if let Some(knot_index) = points.iter().position(|(knot, _)| x == *knot)
+                    {
+                        barycentric_knot_derivative(knot_index, points, weights)
+                    } else {
+                        barycentric_first_form_derivative(x, points, weights)
+                    };
+                    (value, derivative)
                 }
             }
         }
     }
 }
 
-fn barycentric_interpolate(x: Value, points: &[(Value, Value)], weights: &[Value]) -> Value {
+fn xyce_linear_table_derivative(x: Value, points: &[(Value, Value)]) -> Value {
+    match points {
+        [] | [_] => 0.0,
+        [left, right] => {
+            // Preserve Xyce 7.10's two-point compatibility condition, which
+            // compares the input against ordinate rather than abscissa bounds.
+            if x >= left.1 && x <= right.1 {
+                (right.1 - left.1) / (right.0 - left.0)
+            } else {
+                0.0
+            }
+        }
+        _ => {
+            let first_x = points[0].0;
+            let last_x = points[points.len() - 1].0;
+            if x <= first_x || x >= last_x {
+                return 0.0;
+            }
+
+            let mut previous_x = first_x;
+            let mut previous_slope = 0.0;
+            for pair in points.windows(2) {
+                let midpoint = 0.5 * (pair[0].0 + pair[1].0);
+                let slope = (pair[1].1 - pair[0].1) / (pair[1].0 - pair[0].0);
+                if x <= midpoint {
+                    return interpolate_segment(
+                        x,
+                        previous_x,
+                        previous_slope,
+                        midpoint,
+                        slope,
+                        previous_slope,
+                    );
+                }
+                previous_x = midpoint;
+                previous_slope = slope;
+            }
+            interpolate_segment(x, previous_x, previous_slope, last_x, 0.0, previous_slope)
+        }
+    }
+}
+
+fn barycentric_first_form_value(x: Value, points: &[(Value, Value)], weights: &[Value]) -> Value {
     let mut product = 1.0;
     for &(knot, value) in points {
         let offset = x - knot;
@@ -652,11 +787,52 @@ fn barycentric_interpolate(x: Value, points: &[(Value, Value)], weights: &[Value
         }
     }
 
-    let mut result = 0.0;
+    let mut sum = 0.0;
     for (index, &(knot, value)) in points.iter().enumerate() {
-        result += (weights[index] / (x - knot)) * value;
+        sum += (weights[index] / (x - knot)) * value;
     }
-    result * product
+    sum * product
+}
+
+fn barycentric_first_form_derivative(
+    x: Value,
+    points: &[(Value, Value)],
+    weights: &[Value],
+) -> Value {
+    let mut product = 1.0;
+    for &(knot, _) in points {
+        product *= x - knot;
+    }
+
+    let mut product_derivative = 0.0;
+    for &(knot, _) in points {
+        product_derivative += product / (x - knot);
+    }
+
+    let mut sum = 0.0;
+    let mut sum_derivative = 0.0;
+    for (index, &(knot, value)) in points.iter().enumerate() {
+        let offset = x - knot;
+        sum += (weights[index] / offset) * value;
+        sum_derivative -= (weights[index] / (offset * offset)) * value;
+    }
+    product_derivative * sum + product * sum_derivative
+}
+
+fn barycentric_knot_derivative(
+    knot_index: usize,
+    points: &[(Value, Value)],
+    weights: &[Value],
+) -> Value {
+    let (knot, value) = points[knot_index];
+    points
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != knot_index)
+        .map(|(index, &(other_knot, other_value))| {
+            weights[index] * (other_value - value) / (weights[knot_index] * (knot - other_knot))
+        })
+        .sum()
 }
 
 fn table_interpolate_from_args(x: Value, args: &[Value]) -> Value {

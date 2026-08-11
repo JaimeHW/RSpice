@@ -127,9 +127,9 @@ fn strict_parameter_circuit_probe(expression: &crate::expr::Expr) -> Option<Para
         crate::expr::Expr::Function { args, .. } => args.iter().fold(None, |current, argument| {
             preferred_parameter_probe(current, strict_parameter_circuit_probe(argument))
         }),
+        crate::expr::Expr::LookupTable { input, .. } => strict_parameter_circuit_probe(input),
         crate::expr::Expr::Const(_)
         | crate::expr::Expr::StringLiteral(_)
-        | crate::expr::Expr::LookupTable(_)
         | crate::expr::Expr::Time
         | crate::expr::Expr::Frequency
         | crate::expr::Expr::Temperature
@@ -384,7 +384,6 @@ fn strict_expr_references_runtime_quantity(expression: &crate::expr::Expr) -> bo
     match expression {
         crate::expr::Expr::NodeVoltage(_)
         | crate::expr::Expr::BranchCurrent(_)
-        | crate::expr::Expr::LookupTable(_)
         | crate::expr::Expr::Time
         | crate::expr::Expr::Frequency
         | crate::expr::Expr::Temperature
@@ -401,6 +400,9 @@ fn strict_expr_references_runtime_quantity(expression: &crate::expr::Expr) -> bo
             strict_file_table_function(*func, args)
                 || args.iter().any(strict_expr_references_runtime_quantity)
         }
+        crate::expr::Expr::LookupTable { input, .. } => {
+            strict_expr_references_runtime_quantity(input)
+        }
         crate::expr::Expr::Const(_) | crate::expr::Expr::StringLiteral(_) => false,
     }
 }
@@ -415,11 +417,11 @@ fn strict_expr_references_frequency(expression: &crate::expr::Expr) -> bool {
         crate::expr::Expr::Function { args, .. } => {
             args.iter().any(strict_expr_references_frequency)
         }
+        crate::expr::Expr::LookupTable { input, .. } => strict_expr_references_frequency(input),
         crate::expr::Expr::Const(_)
         | crate::expr::Expr::StringLiteral(_)
         | crate::expr::Expr::NodeVoltage(_)
         | crate::expr::Expr::BranchCurrent(_)
-        | crate::expr::Expr::LookupTable(_)
         | crate::expr::Expr::Time
         | crate::expr::Expr::Temperature
         | crate::expr::Expr::ThermalVoltage
