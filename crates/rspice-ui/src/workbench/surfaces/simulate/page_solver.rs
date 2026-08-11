@@ -9,9 +9,17 @@
 //! The six cards edit [`SimSetupState::options_draft`] and are applied through
 //! the plan-configuration transaction, so a numerical change produces a
 //! configuration receipt and invalidates preflight exactly as the dialog does.
-//! Nothing here is presentational: every field reaches
-//! `SimulationOptions::resolve_simulation_config`, which is what the engine
-//! runs under.
+//! Every field reaches the engine through one channel and only one: the
+//! `.OPTIONS` block `SimulationOptions::to_spice_options` writes into the
+//! prepared deck, which the engine then re-parses. A value that emitter does
+//! not write reaches nothing, so a control added here is not wired until both
+//! the emitter and the netlist parser name it.
+//!
+//! Two things this page still states more confidently than it can. Device
+//! bypass has no engine consumer at all. And each step bound is emitted only
+//! when it differs from the default shown here, which is not the engine's
+//! default — so an untouched project runs under the engine's bound, not this
+//! one.
 //!
 //! The ledger authors the other half of the page's title. A per-analysis
 //! override is not a second copy of a plan field: it is the analysis's own
@@ -648,7 +656,6 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                     .cloned()
                     .unwrap_or_else(|| methods[0].clone());
                 let mut picked_method = None;
-                let mut factor_response = None;
                 field_pair(
                     ui,
                     ("Integration method", &mut |ui: &mut Ui, width: f32| {
@@ -661,20 +668,11 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                             width,
                         );
                     }),
-                    Some(("Timestep growth factor", &mut |ui: &mut Ui, width: f32| {
-                        factor_response = Some(mono_input(
-                            ui,
-                            &mut app.state.sim_setup.options_draft.timestep_factor,
-                            width,
-                        ));
-                    })),
+                    None,
                 );
                 if let Some(index) = picked_method {
                     app.state.sim_setup.options_draft.method = index;
                     commit_draft(app);
-                }
-                if let Some(response) = factor_response {
-                    commit_on_release(app, &response);
                 }
 
                 let mut min_response = None;

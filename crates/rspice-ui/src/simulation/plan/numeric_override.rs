@@ -95,7 +95,7 @@ impl NumericOverrideOption {
     pub const fn value_hint(self) -> &'static str {
         match self {
             Self::Itl1 | Self::Itl4 => "iteration count",
-            Self::IntegrationMethod => "TRAP · EULER · GEAR · GEAR2 · TRAPGEAR",
+            Self::IntegrationMethod => "TRAP · EULER · GEAR2 · TRAPGEAR",
             Self::MaximumTimestep => "time, SI suffixes accepted",
             _ => "positive real",
         }
@@ -373,24 +373,16 @@ fn iteration_budget(option: NumericOverrideOption, authored: &str) -> Result<usi
     Ok(value)
 }
 
-/// The methods a `.OPTIONS METHOD` card can actually select.
-///
-/// The plan-level chooser offers `GEAR2ONLY` as well, but the netlist parser
-/// has no name for it: that card resolves to nothing and the solve keeps
-/// whatever method it already had. Offering it here would author a bound that
-/// never lands, which is the one thing this record exists to prevent.
-const DECK_SELECTABLE_METHODS: [IntegrationMethod; 5] = [
-    IntegrationMethod::Trap,
-    IntegrationMethod::Euler,
-    IntegrationMethod::Gear,
-    IntegrationMethod::Gear2,
-    IntegrationMethod::TrapGear,
-];
-
+/// Every method the plan-level chooser offers is one the netlist parser can
+/// select, so the chooser's own list is the authority here. Keeping a second
+/// list would let the two drift, and a method authored here that the parser
+/// cannot read would leave the solve on whatever method it already had —
+/// exactly the silently ignored bound this record exists to prevent.
 fn integration_method(authored: &str) -> Result<IntegrationMethod, String> {
     let authored = authored.trim();
-    DECK_SELECTABLE_METHODS
-        .into_iter()
+    IntegrationMethod::all()
+        .iter()
+        .copied()
         .find(|method| {
             method.spice_name().eq_ignore_ascii_case(authored)
                 || method.display_name().eq_ignore_ascii_case(authored)
@@ -398,7 +390,7 @@ fn integration_method(authored: &str) -> Result<IntegrationMethod, String> {
         .ok_or_else(|| {
             format!(
                 "METHOD must name an integration method the deck can select: {}",
-                DECK_SELECTABLE_METHODS
+                IntegrationMethod::all()
                     .iter()
                     .map(|method| method.spice_name())
                     .collect::<Vec<_>>()
@@ -535,11 +527,17 @@ mod tests {
                 NumericOverrideOption::IntegrationMethod,
                 "simpson",
             ),
-            // The plan-level chooser names it, but no deck can select it.
+            // Retired chooser spellings. A saved project decodes them onto
+            // the surviving method, but authoring one here is a typo.
             (
                 AnalysisKind::Transient,
                 NumericOverrideOption::IntegrationMethod,
                 "GEAR2ONLY",
+            ),
+            (
+                AnalysisKind::Transient,
+                NumericOverrideOption::IntegrationMethod,
+                "GEAR",
             ),
         ] {
             assert!(
@@ -561,5 +559,20 @@ mod tests {
             .first_refusal_for(AnalysisKind::Ac)
             .expect("the same record cannot be carried by an AC sweep");
         assert_eq!(option, NumericOverrideOption::Itl4);
+    }
+
+    #[test]
+    fn a_record_naming_a_retired_method_decodes_onto_the_survivor() {
+        // The chooser stopped offering the plain `Gear` and `Gear2Only`
+        // spellings, but an analysis authored under either still has to open
+        // and still has to emit a card the parser reads.
+        for retired in ["Gear", "Gear2Only"] {
+            let record: AnalysisNumericOverride =
+                serde_json::from_str(&format!(r#"{{"integration_method":"{retired}"}}"#))
+                    .unwrap_or_else(|error| panic!("a record naming {retired} decodes: {error}"));
+
+            assert_eq!(record.integration_method(), Some(IntegrationMethod::Gear2));
+            assert_eq!(record.to_spice_options(), ".OPTIONS\n+ METHOD=GEAR2");
+        }
     }
 }

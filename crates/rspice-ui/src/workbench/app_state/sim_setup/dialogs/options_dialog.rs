@@ -198,7 +198,6 @@ fn limits_tab(
         policy,
         locale,
     );
-    input_row(ui, "Cut factor", &mut opts.timestep_factor);
 }
 
 fn temperature_tab(
@@ -223,8 +222,6 @@ fn temperature_tab(
         policy,
         locale,
     );
-    check_row(ui, "Verbose diagnostics", &mut opts.verbose);
-    check_row(ui, "Save internal nodes", &mut opts.save_internals);
 }
 
 /// The `.OPTIONS` preview in an inset mono well — live from the draft,

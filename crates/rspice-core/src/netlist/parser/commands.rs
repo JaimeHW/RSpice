@@ -1,7 +1,9 @@
 //! Dot-command parsing for analyses, options, measurements, params, and functions.
 
+use crate::config::DampingStrategy;
 use crate::netlist::{XspiceAutoBridgeParamName, XspiceAutoBridgeTemplate};
 use crate::numerics::integration::TransientLteReference;
+use crate::solver::RealSolverBackend;
 
 use super::*;
 
@@ -1397,6 +1399,25 @@ pub(super) fn parse_options_command(
                     line_num,
                 )?);
             }
+            (Some("TIMEINT"), "MINTIMESTEP" | "MIN_TIMESTEP") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.timeint_min_timestep = Some(parse_positive_real_option(
+                    "TIMEINT.MINTIMESTEP",
+                    value,
+                    line_num,
+                )?);
+            }
+            // The run's step ceiling is deliberately outside `TIMEINT`: that
+            // package's own ceiling is `DELMAX`, and a second key inside it
+            // meaning the same thing would make a deck line ambiguous. Being
+            // unscoped also means a misplaced `TIMEINT MAXTIMESTEP` is
+            // reported by the package's unknown-key arm instead of silently
+            // taking effect.
+            (None, "MAXTIMESTEP" | "MAX_TIMESTEP") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.max_timestep =
+                    Some(parse_positive_real_option("MAXTIMESTEP", value, line_num)?);
+            }
             (Some("TIMEINT"), "USEDEVICEMAX" | "USE_DEVICE_MAX") => {
                 options.timeint_use_device_max_timestep =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
@@ -1542,6 +1563,31 @@ pub(super) fn parse_options_command(
             }
             (_, "METHOD") => {
                 options.method = Some(parse_method_option(stream, line_num, params)?);
+            }
+            // The continuation ladder's rungs are switched one at a time
+            // rather than through `NONLIN CONTINUATION`, which selects a
+            // single algorithm to run in place of the ladder.
+            (_, "GMINSTEPPING" | "GMIN_STEPPING") => {
+                options.gmin_stepping =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
+            (_, "SOURCESTEPPING" | "SOURCE_STEPPING" | "SRCSTEPPING") => {
+                options.source_stepping =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
+            (_, "PSEUDOTRANSIENT" | "PSEUDO_TRANSIENT") => {
+                options.pseudo_transient =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
+            (_, "ARCLENGTH" | "ARC_LENGTH") => {
+                options.arc_length =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
+            (_, "DAMPING") => {
+                options.damping_strategy = Some(parse_damping_option(stream, line_num, params)?);
+            }
+            (_, "SOLVER") => {
+                options.matrix_solver = Some(parse_matrix_solver_option(stream, line_num)?);
             }
             (Some("OUTPUT"), "INITIAL_INTERVAL" | "INITIALINTERVAL") => {
                 let value = expect_value(stream, line_num, params)?;
@@ -1759,6 +1805,83 @@ fn parse_method_option(
             message: format!(
                 "Expected .OPTIONS METHOD value, found {:?}",
                 stream.peek().kind
+            ),
+        }),
+    }
+}
+
+/// Parse `.OPTIONS DAMPING=<strategy>`.
+///
+/// Named strategies only. A damping strategy has no ordering, so a numeric
+/// selector would be an index into a list the deck cannot see; an unreadable
+/// name is rejected rather than defaulted, because silently running an
+/// undamped Newton on a deck that asked for limiting is the failure this
+/// option exists to prevent.
+fn parse_damping_option(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<DampingStrategy, ParseError> {
+    let name = match &stream.peek().kind {
+        TokenKind::Ident(name) => {
+            let name = name.clone();
+            stream.advance();
+            name
+        }
+        _ => {
+            let value = expect_value(stream, line_num, params)?;
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(".OPTIONS DAMPING expects a strategy name, found {value}"),
+            });
+        }
+    };
+
+    match name.to_ascii_uppercase().replace('_', "").as_str() {
+        "NONE" | "OFF" => Ok(DampingStrategy::None),
+        "LINESEARCH" => Ok(DampingStrategy::LineSearch),
+        "VOLTAGELIMITING" | "LIMIT" | "LIMITING" => Ok(DampingStrategy::VoltageLimiting),
+        "BANKROSE" => Ok(DampingStrategy::BankRose),
+        "COMBINED" => Ok(DampingStrategy::Combined),
+        _ => Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "unsupported .OPTIONS DAMPING strategy '{name}'; expected NONE, LINESEARCH, VOLTAGELIMITING, BANKROSE, or COMBINED"
+            ),
+        }),
+    }
+}
+
+/// Parse `.OPTIONS SOLVER=<backend>`.
+///
+/// The three names are the ones `RSPICE_SOLVER` already takes, so a deck and
+/// an environment override read the same. `AUTO` is an explicit request for
+/// measured routing, which is not the same as saying nothing: an unstated
+/// backend also lets the dialect profile force a choice.
+fn parse_matrix_solver_option(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<RealSolverBackend, ParseError> {
+    let TokenKind::Ident(name) = &stream.peek().kind else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                ".OPTIONS SOLVER expects a backend name, found {:?}",
+                stream.peek().kind
+            ),
+        });
+    };
+    let name = name.clone();
+    stream.advance();
+
+    match name.to_ascii_uppercase().as_str() {
+        "AUTO" => Ok(RealSolverBackend::Auto),
+        "KLU" => Ok(RealSolverBackend::Klu),
+        "FAER" => Ok(RealSolverBackend::Faer),
+        _ => Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "unsupported .OPTIONS SOLVER backend '{name}'; expected AUTO, KLU, or FAER"
             ),
         }),
     }
@@ -4893,6 +5016,119 @@ mod tests {
              .op\n\
              .end\n"
         )
+    }
+
+    #[test]
+    fn options_record_the_continuation_ladder_damping_and_solver() {
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options gminstepping=0 sourcestepping=0 pseudotransient=1 arclength=1\n\
+             + damping=combined solver=klu",
+        ))
+        .expect("ladder, damping and solver options parse");
+
+        assert_eq!(netlist.options.gmin_stepping, Some(false));
+        assert_eq!(netlist.options.source_stepping, Some(false));
+        assert_eq!(netlist.options.pseudo_transient, Some(true));
+        assert_eq!(netlist.options.arc_length, Some(true));
+        assert_eq!(
+            netlist.options.damping_strategy,
+            Some(crate::config::DampingStrategy::Combined)
+        );
+        assert_eq!(
+            netlist.options.matrix_solver,
+            Some(crate::solver::RealSolverBackend::Klu)
+        );
+    }
+
+    #[test]
+    fn ladder_options_accept_the_underscored_and_bare_flag_spellings() {
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options gmin_stepping source_stepping=off pseudo_transient=false arc_length=yes",
+        ))
+        .expect("underscored ladder spellings parse");
+
+        assert_eq!(netlist.options.gmin_stepping, Some(true));
+        assert_eq!(netlist.options.source_stepping, Some(false));
+        assert_eq!(netlist.options.pseudo_transient, Some(false));
+        assert_eq!(netlist.options.arc_length, Some(true));
+    }
+
+    #[test]
+    fn timeint_mintimestep_records_the_transient_step_floor() {
+        let netlist = Netlist::parse(&deck_with_options(".options timeint mintimestep=2e-18"))
+            .expect("TIMEINT MINTIMESTEP parses");
+
+        assert_eq!(netlist.options.timeint_min_timestep, Some(2.0e-18));
+    }
+
+    #[test]
+    fn the_run_ceiling_and_the_integrators_ceiling_are_two_separate_keys() {
+        // Both clamp the transient step, and the engine applies them one after
+        // the other. A deck stating both must therefore land two values, not
+        // one: whichever key were to overwrite the other would turn a pair of
+        // bounds into whichever happened to be parsed last.
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options maxtimestep=4e-9\n.options timeint delmax=7e-9",
+        ))
+        .expect("both step ceilings parse");
+
+        assert_eq!(netlist.options.max_timestep, Some(4.0e-9));
+        assert_eq!(netlist.options.timeint_delmax, Some(7.0e-9));
+
+        let only_delmax = Netlist::parse(&deck_with_options(".options timeint delmax=7e-9"))
+            .expect("DELMAX alone parses");
+        assert_eq!(only_delmax.options.max_timestep, None);
+
+        let only_ceiling = Netlist::parse(&deck_with_options(".options max_timestep=4e-9"))
+            .expect("the underscored run ceiling parses");
+        assert_eq!(only_ceiling.options.max_timestep, Some(4.0e-9));
+        assert_eq!(only_ceiling.options.timeint_delmax, None);
+    }
+
+    #[test]
+    fn the_run_ceiling_is_not_a_timeint_key() {
+        // Naming it inside the package would put two "largest step" keys in
+        // one namespace. It falls to TIMEINT's unknown-key arm instead, which
+        // reports the card rather than applying it somewhere unexpected.
+        let netlist = Netlist::parse(&deck_with_options(".options timeint maxtimestep=4e-9"))
+            .expect("an unknown TIMEINT key is reported, not fatal");
+
+        assert_eq!(netlist.options.max_timestep, None);
+        assert_eq!(netlist.options.timeint_delmax, None);
+    }
+
+    #[test]
+    fn a_timeint_scoped_tolerance_never_reaches_the_global_one() {
+        // The package selector is checked before the unscoped `(_, KEY)`
+        // arms, and a package whose own arms do not cover a key falls through
+        // to them. TIMEINT covers RELTOL, ABSTOL and MINTIMESTEP, so a card
+        // that names only those must leave every global tolerance unstated.
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options timeint reltol=1e-7 abstol=2e-13 mintimestep=3e-18",
+        ))
+        .expect("TIMEINT card parses");
+
+        assert_eq!(netlist.options.timeint_reltol, Some(1.0e-7));
+        assert_eq!(netlist.options.timeint_abstol, Some(2.0e-13));
+        assert_eq!(netlist.options.timeint_min_timestep, Some(3.0e-18));
+        assert_eq!(netlist.options.reltol, None);
+        assert_eq!(netlist.options.abstol, None);
+    }
+
+    #[test]
+    fn options_reject_unreadable_damping_and_solver_names() {
+        for options in [
+            ".options damping=quadratic",
+            ".options damping=1",
+            ".options solver=gmres",
+        ] {
+            let err = Netlist::parse(&deck_with_options(options))
+                .expect_err("an unreadable strategy or backend name must fail parsing");
+            assert!(
+                err.to_string().contains("Syntax error"),
+                "unexpected error for {options}: {err}"
+            );
+        }
     }
 
     #[test]

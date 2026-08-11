@@ -256,14 +256,17 @@ fn encode_numeric_override(
     });
 }
 
+/// A tag is a permanent identity, not a position: renumbering one renames
+/// every digest already computed under it. A retired method's tag therefore
+/// stays vacant rather than being reused by whatever is added next — the gaps
+/// here are the retired Gear spellings, which all named the one second-order
+/// Gear integrator the survivor names.
 const fn integration_method_tag(method: IntegrationMethod) -> u8 {
     match method {
         IntegrationMethod::Trap => 0,
         IntegrationMethod::Euler => 1,
-        IntegrationMethod::Gear => 2,
         IntegrationMethod::Gear2 => 3,
         IntegrationMethod::TrapGear => 4,
-        IntegrationMethod::Gear2Only => 5,
     }
 }
 

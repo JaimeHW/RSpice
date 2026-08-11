@@ -138,6 +138,39 @@ pub fn resolve_simulation_config(
         if let Some(mode) = opts.nonlinear_continuation {
             nonlinear_continuation = Some(mode);
         }
+        // The continuation rungs and the damping strategy are written onto
+        // `resolved` here rather than held in a local: they are exactly the
+        // five fields a `convergence_preset` override is made of, and a local
+        // written back at the end of this function would replay the base
+        // config over the preset and make that override inert.
+        if let Some(enabled) = opts.gmin_stepping {
+            resolved.convergence_config.gmin_stepping = enabled;
+        }
+        if let Some(enabled) = opts.source_stepping {
+            resolved.convergence_config.source_stepping = enabled;
+        }
+        if let Some(enabled) = opts.pseudo_transient {
+            resolved.convergence_config.pseudo_transient = enabled;
+        }
+        if let Some(enabled) = opts.arc_length {
+            resolved.convergence_config.arc_length = enabled;
+        }
+        if let Some(strategy) = opts.damping_strategy {
+            resolved.convergence_config.damping_strategy = strategy;
+        }
+        if let Some(backend) = opts.matrix_solver {
+            resolved.matrix_solver = Some(backend);
+        }
+        if let Some(floor) = opts.timeint_min_timestep {
+            min_timestep = floor;
+        }
+        // `MAXTIMESTEP` and `TIMEINT DELMAX` resolve to two different fields
+        // on purpose: the transient engine applies both as separate clamps,
+        // so a deck that states one must leave the other exactly as it found
+        // it or the tighter bound would be silently replaced by the looser.
+        if let Some(ceiling) = opts.max_timestep {
+            max_timestep = ceiling;
+        }
         if let Some(temp_celsius) = opts.temp {
             temperature = temp_celsius + 273.15;
         }
@@ -782,6 +815,150 @@ mod tests {
             resolved.resolved_jfet_level2_model(),
             crate::engine::JfetLevel2Model::ParkerSkellern
         );
+    }
+
+    #[test]
+    fn deck_continuation_ladder_damping_and_solver_reach_the_engine_config() {
+        let options = NetlistSimulationOptions {
+            gmin_stepping: Some(false),
+            source_stepping: Some(false),
+            pseudo_transient: Some(false),
+            arc_length: Some(true),
+            damping_strategy: Some(crate::engine::DampingStrategy::Combined),
+            matrix_solver: Some(crate::solver::RealSolverBackend::Klu),
+            timeint_min_timestep: Some(2.0e-18),
+            ..Default::default()
+        };
+
+        let resolved = resolve_simulation_config(
+            &SimulationConfig::default(),
+            Some(&options),
+            &SimulationConfigOverrides::default(),
+        );
+
+        assert!(!resolved.convergence_config.gmin_stepping);
+        assert!(!resolved.convergence_config.source_stepping);
+        assert!(!resolved.convergence_config.pseudo_transient);
+        assert!(resolved.convergence_config.arc_length);
+        assert_eq!(
+            resolved.convergence_config.damping_strategy,
+            crate::engine::DampingStrategy::Combined
+        );
+        assert_eq!(
+            resolved.matrix_solver,
+            Some(crate::solver::RealSolverBackend::Klu)
+        );
+        assert_eq!(resolved.min_timestep, 2.0e-18);
+    }
+
+    #[test]
+    fn a_convergence_preset_still_outranks_the_decks_ladder_and_damping() {
+        // The five ladder and damping fields are the entire content of a
+        // preset. Resolving them through a base-seeded local would replay the
+        // base config over the preset and leave `--convergence-mode` with no
+        // effect at all, so this pins the precedence rather than the values.
+        let options = NetlistSimulationOptions {
+            gmin_stepping: Some(true),
+            source_stepping: Some(true),
+            pseudo_transient: Some(true),
+            arc_length: Some(true),
+            damping_strategy: Some(crate::engine::DampingStrategy::Combined),
+            ..Default::default()
+        };
+        let overrides = SimulationConfigOverrides {
+            convergence_preset: Some(ConvergencePreset::Fast),
+            ..Default::default()
+        };
+
+        let resolved =
+            resolve_simulation_config(&SimulationConfig::default(), Some(&options), &overrides);
+
+        assert!(!resolved.convergence_config.gmin_stepping);
+        assert!(!resolved.convergence_config.source_stepping);
+        assert!(!resolved.convergence_config.pseudo_transient);
+        assert!(!resolved.convergence_config.arc_length);
+        assert_eq!(
+            resolved.convergence_config.damping_strategy,
+            crate::engine::DampingStrategy::None
+        );
+    }
+
+    #[test]
+    fn the_two_deck_step_ceilings_resolve_onto_their_own_fields() {
+        // The transient engine clamps against `max_timestep` and against
+        // `transient_timeint_max_timestep` in turn. Resolving either onto the
+        // other's field would drop one clamp, so a deck stating one key must
+        // leave the other field exactly as the base config had it.
+        let both = resolve_simulation_config(
+            &SimulationConfig::default(),
+            Some(&NetlistSimulationOptions {
+                max_timestep: Some(4.0e-9),
+                timeint_delmax: Some(7.0e-9),
+                ..Default::default()
+            }),
+            &SimulationConfigOverrides::default(),
+        );
+        assert_eq!(both.max_timestep, 4.0e-9);
+        assert_eq!(both.transient_timeint_max_timestep, Some(7.0e-9));
+
+        let ceiling_only = resolve_simulation_config(
+            &SimulationConfig::default(),
+            Some(&NetlistSimulationOptions {
+                max_timestep: Some(4.0e-9),
+                ..Default::default()
+            }),
+            &SimulationConfigOverrides::default(),
+        );
+        assert_eq!(ceiling_only.max_timestep, 4.0e-9);
+        assert_eq!(ceiling_only.transient_timeint_max_timestep, None);
+
+        let delmax_only = resolve_simulation_config(
+            &SimulationConfig::default(),
+            Some(&NetlistSimulationOptions {
+                timeint_delmax: Some(7.0e-9),
+                ..Default::default()
+            }),
+            &SimulationConfigOverrides::default(),
+        );
+        assert_eq!(
+            delmax_only.max_timestep,
+            SimulationConfig::default().max_timestep
+        );
+        assert_eq!(delmax_only.transient_timeint_max_timestep, Some(7.0e-9));
+    }
+
+    #[test]
+    fn an_explicit_max_timestep_override_wins_over_the_decks_ceiling() {
+        let resolved = resolve_simulation_config(
+            &SimulationConfig::default(),
+            Some(&NetlistSimulationOptions {
+                max_timestep: Some(4.0e-9),
+                ..Default::default()
+            }),
+            &SimulationConfigOverrides {
+                max_timestep: Some(1.0e-9),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(resolved.max_timestep, 1.0e-9);
+    }
+
+    #[test]
+    fn an_explicit_min_timestep_override_wins_over_the_decks_floor() {
+        let options = NetlistSimulationOptions {
+            timeint_min_timestep: Some(2.0e-18),
+            ..Default::default()
+        };
+        let overrides = SimulationConfigOverrides {
+            min_timestep: Some(5.0e-16),
+            ..Default::default()
+        };
+
+        let resolved =
+            resolve_simulation_config(&SimulationConfig::default(), Some(&options), &overrides);
+
+        assert_eq!(resolved.min_timestep, 5.0e-16);
     }
 
     #[test]

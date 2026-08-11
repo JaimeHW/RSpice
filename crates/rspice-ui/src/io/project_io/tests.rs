@@ -343,17 +343,14 @@ fn project_with_execution_context() -> ProjectFile {
     setup.options.arc_length = true;
     setup.options.gmin = 2e-12;
     setup.options.damping = DampingStrategy::Combined;
-    setup.options.method = IntegrationMethod::Gear2Only;
+    setup.options.method = IntegrationMethod::Gear2;
     setup.options.solver = MatrixSolver::SparseLu;
     setup.options.bypass_enabled = true;
     setup.options.bypass_reltol = 5e-4;
     setup.options.bypass_abstol = 5e-7;
     setup.options.min_timestep = 2e-15;
     setup.options.max_timestep = 2e-3;
-    setup.options.timestep_factor = 10.0;
     setup.options.tnom = 25.0;
-    setup.options.verbose = true;
-    setup.options.save_internals = true;
 
     let mut model_manager = ModelLibraryManager::new();
     let mut model_library = ModelLibrary::new("fixture_models");

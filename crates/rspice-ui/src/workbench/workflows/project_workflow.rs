@@ -2044,7 +2044,7 @@ mod tests {
         assert_eq!(state.sim_setup.options.itl1, 200);
         assert_eq!(state.sim_setup.options.itl4, 20);
         assert!(state.sim_setup.options.arc_length);
-        assert_eq!(state.sim_setup.options.method, IntegrationMethod::Gear2Only);
+        assert_eq!(state.sim_setup.options.method, IntegrationMethod::Gear2);
         assert_eq!(state.sim_setup.options.temp, 27.0);
     }
 
@@ -2202,9 +2202,9 @@ mod tests {
             .bind_dependency(noise_id, AnalysisKind::OperatingPoint, op_id)
             .expect("noise binds exact OP");
         source.sim_setup.options.reltol = 2e-4;
-        source.sim_setup.options.method = IntegrationMethod::Gear2Only;
+        source.sim_setup.options.method = IntegrationMethod::Gear2;
         source.sim_setup.options.solver = MatrixSolver::SparseLu;
-        source.sim_setup.options.verbose = true;
+        source.sim_setup.options.arc_length = true;
         let mut project_models = ModelLibraryManager::new();
         project_models.add_library(ModelLibrary::new("project_exact_models"));
         source.model_library_manager = project_models;

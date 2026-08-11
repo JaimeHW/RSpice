@@ -63,24 +63,38 @@ pub struct SimulationOptions {
     pub bypass_abstol: f64,
     pub min_timestep: f64,
     pub max_timestep: f64,
-    pub timestep_factor: f64,
     pub temp: f64,
     pub tnom: f64,
-    pub verbose: bool,
-    pub save_internals: bool,
 }
 
 /// Persisted options. New fields serialize; retired fields only decode.
 ///
-/// `itl2` named a DC-transfer-curve iteration budget that no solver path
-/// reads: the sweep and the operating point share one Newton budget. It is
-/// accepted so earlier projects still open, and is never written back.
+/// Every field below that decodes into nothing named a control the engine
+/// never read, so a project written before it was retired still opens and
+/// simply stops carrying it:
+///
+/// - `itl2` was a DC-transfer-curve iteration budget, but the sweep and the
+///   operating point share one Newton budget.
+/// - `timestep_factor` claimed to set the transient step growth ratio, which
+///   is the compile-time `constants::TIMESTEP_GROWTH_MAX`, not a setting.
+/// - `verbose` fed `ConvergenceConfig::verbose`, which no solver path reads.
+/// - `save_internals` had no engine field at all; internal device nodes are
+///   requested per signal on a `.SAVE` card.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PersistedSimulationOptions {
     #[serde(default)]
     #[allow(dead_code)]
     itl2: serde::de::IgnoredAny,
+    #[serde(default)]
+    #[allow(dead_code)]
+    timestep_factor: serde::de::IgnoredAny,
+    #[serde(default)]
+    #[allow(dead_code)]
+    verbose: serde::de::IgnoredAny,
+    #[serde(default)]
+    #[allow(dead_code)]
+    save_internals: serde::de::IgnoredAny,
     reltol: f64,
     residual_reltol: f64,
     vntol: f64,
@@ -112,11 +126,8 @@ struct PersistedSimulationOptions {
     bypass_abstol: f64,
     min_timestep: f64,
     max_timestep: f64,
-    timestep_factor: f64,
     temp: f64,
     tnom: f64,
-    verbose: bool,
-    save_internals: bool,
 }
 
 impl From<PersistedSimulationOptions> for SimulationOptions {
@@ -149,11 +160,8 @@ impl From<PersistedSimulationOptions> for SimulationOptions {
             bypass_abstol: fields.bypass_abstol,
             min_timestep: fields.min_timestep,
             max_timestep: fields.max_timestep,
-            timestep_factor: fields.timestep_factor,
             temp: fields.temp,
             tnom: fields.tnom,
-            verbose: fields.verbose,
-            save_internals: fields.save_internals,
         }
     }
 }
@@ -161,6 +169,263 @@ impl From<PersistedSimulationOptions> for SimulationOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Resolve `options` exactly the way a run does.
+    ///
+    /// The deck is the only channel these options have: the block is spliced
+    /// into the prepared source, the engine re-parses that source, and every
+    /// shipping runner resolves the parsed `.OPTIONS` against the core
+    /// defaults with no override layer. Asserting on the emitted string
+    /// instead would pass for a key the parser does not know, which is how
+    /// fields drifted out of the engine in the first place.
+    fn resolve_through_the_deck(
+        options: &SimulationOptions,
+    ) -> rspice_core::engine::SimulationConfig {
+        let deck = crate::simulation::SimulationController::apply_simulation_options_to_netlist(
+            "round trip\nV1 1 0 1\nR1 1 0 1k\n.op\n.end\n",
+            options,
+        );
+        let netlist = rspice_core::netlist::parse_netlist(&deck)
+            .unwrap_or_else(|error| panic!("the emitted deck must parse: {error}\n{deck}"));
+        rspice_core::resolve_simulation_config(
+            &rspice_core::engine::SimulationConfig::default(),
+            Some(&netlist.options),
+            &rspice_core::SimulationConfigOverrides::default(),
+        )
+    }
+
+    #[test]
+    fn the_newly_connected_controls_survive_the_deck_round_trip() {
+        let options = SimulationOptions {
+            iabstol: 7.0e-13,
+            chgtol: 3.0e-16,
+            transient_lte_reltol: Some(2.5e-4),
+            transient_lte_abstol: Some(3.5e-9),
+            gmin_stepping: false,
+            source_stepping: false,
+            pseudo_transient: false,
+            arc_length: true,
+            damping: DampingStrategy::Combined,
+            solver: MatrixSolver::Klu,
+            min_timestep: 2.0e-18,
+            ..SimulationOptions::default()
+        };
+
+        let resolved = resolve_through_the_deck(&options);
+
+        assert_eq!(resolved.convergence_config.current_abstol, 7.0e-13);
+        assert_eq!(resolved.convergence_config.charge_abstol, 3.0e-16);
+        assert_eq!(resolved.transient_lte_reltol, Some(2.5e-4));
+        assert_eq!(resolved.transient_lte_abstol, Some(3.5e-9));
+        assert!(!resolved.convergence_config.gmin_stepping);
+        assert!(!resolved.convergence_config.source_stepping);
+        assert!(!resolved.convergence_config.pseudo_transient);
+        assert!(resolved.convergence_config.arc_length);
+        assert_eq!(
+            resolved.convergence_config.damping_strategy,
+            rspice_core::engine::DampingStrategy::Combined
+        );
+        assert_eq!(
+            resolved.matrix_solver,
+            Some(rspice_core::solver::RealSolverBackend::Klu)
+        );
+        assert_eq!(resolved.min_timestep, 2.0e-18);
+    }
+
+    #[test]
+    fn the_timeint_card_leaves_the_global_tolerances_alone() {
+        // The two LTE bounds are spelled RELTOL and ABSTOL inside the TIMEINT
+        // package, which are also global key names. They travel on their own
+        // card so the package selector cannot re-scope the keys after them,
+        // and they must not land on the global tolerances either.
+        let options = SimulationOptions {
+            reltol: 4.0e-4,
+            abstol: 6.0e-13,
+            transient_lte_reltol: Some(2.5e-7),
+            transient_lte_abstol: Some(3.5e-11),
+            temp: 85.0,
+            ..SimulationOptions::default()
+        };
+
+        let resolved = resolve_through_the_deck(&options);
+
+        assert_eq!(resolved.transient_lte_reltol, Some(2.5e-7));
+        assert_eq!(resolved.transient_lte_abstol, Some(3.5e-11));
+        assert_eq!(resolved.convergence_config.voltage_reltol, 4.0e-4);
+        assert_eq!(resolved.convergence_config.current_abstol, 6.0e-13);
+        // TEMP is emitted after the global tolerances and before the TIMEINT
+        // card; a scoped key emitted inline would have swallowed it.
+        assert_eq!(resolved.temperature, 85.0 + 273.15);
+    }
+
+    #[test]
+    fn every_offered_solver_reaches_the_backend_it_names() {
+        for solver in MatrixSolver::all() {
+            let options = SimulationOptions {
+                solver: *solver,
+                ..SimulationOptions::default()
+            };
+            assert_eq!(
+                resolve_through_the_deck(&options).matrix_solver,
+                solver.core_backend_override(),
+                "{} must resolve to the backend the page names",
+                solver.display_name()
+            );
+        }
+    }
+
+    #[test]
+    fn a_step_floor_alone_still_reaches_the_deck() {
+        // Nothing else differs from the defaults, so the global card is empty.
+        // The injection path drops a block of one line as stating nothing, and
+        // would drop this one with it if the bare header were kept.
+        let options = SimulationOptions {
+            min_timestep: 2.0e-18,
+            ..SimulationOptions::default()
+        };
+
+        assert_eq!(
+            options.to_spice_options(),
+            ".OPTIONS TIMEINT\n+ MINTIMESTEP=2.00e-18"
+        );
+        assert_eq!(resolve_through_the_deck(&options).min_timestep, 2.0e-18);
+    }
+
+    #[test]
+    fn every_offered_integration_method_names_one_the_engine_knows() {
+        for method in IntegrationMethod::all() {
+            let options = SimulationOptions {
+                method: *method,
+                ..SimulationOptions::default()
+            };
+            assert_eq!(
+                resolve_through_the_deck(&options).integration_method,
+                options.core_integration_method(),
+                "{} must resolve to the method the page names",
+                method.display_name()
+            );
+        }
+    }
+
+    #[test]
+    fn the_run_step_ceiling_reaches_the_engine_through_the_deck() {
+        let options = SimulationOptions {
+            max_timestep: 4.0e-9,
+            ..SimulationOptions::default()
+        };
+
+        assert_eq!(
+            resolve_through_the_deck(&options).max_timestep,
+            4.0e-9,
+            "the transient clamps its step against this field, so the deck must carry it"
+        );
+    }
+
+    #[test]
+    fn the_plan_ceiling_and_an_analysis_step_ceiling_bound_the_step_separately() {
+        // A run splices the plan's options block and then the analysis's own
+        // override block into the same deck. The two ceilings are different
+        // engine fields and the transient applies both, so each must arrive
+        // whole: a key that overwrote the other would silently drop a bound
+        // the page and the ledger both still report.
+        let options = SimulationOptions {
+            max_timestep: 4.0e-9,
+            ..SimulationOptions::default()
+        };
+        let mut record = crate::simulation::plan::AnalysisNumericOverride::default();
+        record
+            .set(
+                crate::simulation::plan::AnalysisKind::Fourier,
+                crate::simulation::plan::NumericOverrideOption::MaximumTimestep,
+                "700p",
+            )
+            .expect("a Fourier measurement runs a transient");
+
+        let deck = format!(
+            "two ceilings\nV1 1 0 1\nR1 1 0 1k\n{}\n{}\n.op\n.end\n",
+            options.to_spice_options(),
+            record.to_spice_options()
+        );
+        let netlist = rspice_core::netlist::parse_netlist(&deck)
+            .unwrap_or_else(|error| panic!("the spliced deck must parse: {error}\n{deck}"));
+        let resolved = rspice_core::resolve_simulation_config(
+            &rspice_core::engine::SimulationConfig::default(),
+            Some(&netlist.options),
+            &rspice_core::SimulationConfigOverrides::default(),
+        );
+
+        assert_eq!(resolved.max_timestep, 4.0e-9);
+        assert_eq!(resolved.transient_timeint_max_timestep, Some(7.0e-10));
+    }
+
+    #[test]
+    fn a_plan_ceiling_alone_leaves_the_integrators_ceiling_unstated() {
+        let options = SimulationOptions {
+            max_timestep: 4.0e-9,
+            ..SimulationOptions::default()
+        };
+
+        assert_eq!(
+            resolve_through_the_deck(&options).transient_timeint_max_timestep,
+            None
+        );
+    }
+
+    #[test]
+    fn a_project_saved_with_the_retired_gear_only_method_still_opens() {
+        let mut persisted =
+            serde_json::to_value(SimulationOptions::default()).expect("options encode");
+        persisted
+            .as_object_mut()
+            .expect("options are an object")
+            .insert("method".to_owned(), serde_json::json!("Gear2Only"));
+
+        let restored: SimulationOptions =
+            serde_json::from_value(persisted).expect("a project naming the retired method decodes");
+
+        assert_eq!(restored.method, IntegrationMethod::Gear2);
+    }
+
+    #[test]
+    fn a_project_saved_with_the_retired_plain_gear_method_still_opens() {
+        // `Gear` and `Gear2` both resolved to the engine's one second-order
+        // Gear integrator, so a project that chose either was always running
+        // the survivor.
+        let mut persisted =
+            serde_json::to_value(SimulationOptions::default()).expect("options encode");
+        persisted
+            .as_object_mut()
+            .expect("options are an object")
+            .insert("method".to_owned(), serde_json::json!("Gear"));
+
+        let restored: SimulationOptions =
+            serde_json::from_value(persisted).expect("a project naming the retired method decodes");
+
+        assert_eq!(restored.method, IntegrationMethod::Gear2);
+    }
+
+    #[test]
+    fn a_project_saved_with_the_retired_controls_still_opens() {
+        // The shape refuses unknown fields so a typo in a project file is
+        // caught rather than dropped, which means every retired key has to be
+        // named explicitly for older projects to keep opening.
+        let mut persisted =
+            serde_json::to_value(SimulationOptions::default()).expect("options encode");
+        let object = persisted.as_object_mut().expect("options are an object");
+        object.insert("itl2".to_owned(), serde_json::json!(50));
+        object.insert("timestep_factor".to_owned(), serde_json::json!(16.0));
+        object.insert("verbose".to_owned(), serde_json::json!(true));
+        object.insert("save_internals".to_owned(), serde_json::json!(true));
+
+        let restored: SimulationOptions = serde_json::from_value(persisted)
+            .expect("a project written before these controls were retired decodes");
+
+        assert_eq!(
+            serde_json::to_value(&restored).expect("restored options re-encode"),
+            serde_json::to_value(SimulationOptions::default()).expect("options encode"),
+            "a retired key must decode away, not resurface on the next save"
+        );
+    }
 
     #[test]
     fn matrix_selection_and_pivrel_reach_core_configuration() {
@@ -249,7 +514,11 @@ mod tests {
 
     #[test]
     fn no_seed_emits_no_seed_line() {
-        assert!(!SimulationOptions::default().to_spice_options().contains("SEED"));
+        assert!(
+            !SimulationOptions::default()
+                .to_spice_options()
+                .contains("SEED")
+        );
     }
 
     #[test]
@@ -295,11 +564,8 @@ impl Default for SimulationOptions {
             bypass_abstol: 1e-6,
             min_timestep: 1e-15,
             max_timestep: 1e-3,
-            timestep_factor: 8.0,
             temp: 27.0,
             tnom: 27.0,
-            verbose: false,
-            save_internals: false,
         }
     }
 }
@@ -351,9 +617,8 @@ impl SimulationOptions {
             pseudo_transient: true,
             arc_length: true,
             gmin: 1e-10,
-            method: IntegrationMethod::Gear2Only,
+            method: IntegrationMethod::Gear2,
             damping: DampingStrategy::Combined,
-            timestep_factor: 16.0,
             ..Default::default()
         }
     }
@@ -416,15 +681,11 @@ impl SimulationOptions {
             IntegrationMethod::Euler => {
                 rspice_core::numerics::integration::IntegrationMethod::BackwardEuler
             }
-            IntegrationMethod::Gear => rspice_core::numerics::integration::IntegrationMethod::Gear2,
             IntegrationMethod::Gear2 => {
                 rspice_core::numerics::integration::IntegrationMethod::Gear2
             }
             IntegrationMethod::TrapGear => {
                 rspice_core::numerics::integration::IntegrationMethod::TrapGear
-            }
-            IntegrationMethod::Gear2Only => {
-                rspice_core::numerics::integration::IntegrationMethod::Gear2
             }
         }
     }
@@ -491,7 +752,6 @@ impl SimulationOptions {
         sim_config.convergence_config.pseudo_transient = self.pseudo_transient;
         sim_config.convergence_config.arc_length = self.arc_length;
         sim_config.convergence_config.damping_strategy = self.core_damping_strategy();
-        sim_config.convergence_config.verbose = self.verbose;
         sim_config.convergence_config.gmin_target = sim_config
             .convergence_config
             .gmin_target
@@ -592,6 +852,12 @@ impl SimulationOptions {
         if (self.vntol - default.vntol).abs() > 1e-12 {
             lines.push(format!("+ VNTOL={:.2e}", self.vntol));
         }
+        if (self.iabstol - default.iabstol).abs() > 1e-20 {
+            lines.push(format!("+ IABSTOL={:.2e}", self.iabstol));
+        }
+        if (self.chgtol - default.chgtol).abs() > 1e-22 {
+            lines.push(format!("+ CHGTOL={:.2e}", self.chgtol));
+        }
         if self.pivrel.to_bits() != default.pivrel.to_bits() {
             lines.push(format!("+ PIVREL={:.2e}", self.pivrel));
         }
@@ -624,6 +890,61 @@ impl SimulationOptions {
         }
         if (self.gmin - default.gmin).abs() > 1e-20 {
             lines.push(format!("+ GMIN={:.2e}", self.gmin));
+        }
+        if self.gmin_stepping != default.gmin_stepping {
+            lines.push(format!("+ GMINSTEPPING={}", u8::from(self.gmin_stepping)));
+        }
+        if self.source_stepping != default.source_stepping {
+            lines.push(format!(
+                "+ SOURCESTEPPING={}",
+                u8::from(self.source_stepping)
+            ));
+        }
+        if self.pseudo_transient != default.pseudo_transient {
+            lines.push(format!(
+                "+ PSEUDOTRANSIENT={}",
+                u8::from(self.pseudo_transient)
+            ));
+        }
+        if self.arc_length != default.arc_length {
+            lines.push(format!("+ ARCLENGTH={}", u8::from(self.arc_length)));
+        }
+        if self.damping != default.damping {
+            lines.push(format!("+ DAMPING={}", self.damping.spice_name()));
+        }
+        if let Some(backend) = self.solver.spice_name() {
+            lines.push(format!("+ SOLVER={backend}"));
+        }
+        // The run's step ceiling is unscoped. `TIMEINT DELMAX` is the time
+        // integrator's own ceiling and belongs to the per-analysis override
+        // record; stating the plan's ceiling under that key would make one of
+        // the two bounds unstatable.
+        if self.max_timestep.to_bits() != default.max_timestep.to_bits() {
+            lines.push(format!("+ MAXTIMESTEP={:.2e}", self.max_timestep));
+        }
+
+        // The parser's package selector stays in force for the rest of the
+        // `.OPTIONS` command it appears on, so a scoped key placed among the
+        // global ones would re-scope every key after it. The timestep
+        // integrator's settings therefore get their own card.
+        let mut timeint = Vec::new();
+        if let Some(reltol) = self.transient_lte_reltol {
+            timeint.push(format!("+ RELTOL={reltol:.2e}"));
+        }
+        if let Some(abstol) = self.transient_lte_abstol {
+            timeint.push(format!("+ ABSTOL={abstol:.2e}"));
+        }
+        if (self.min_timestep - default.min_timestep).abs() > 1e-24 {
+            timeint.push(format!("+ MINTIMESTEP={:.2e}", self.min_timestep));
+        }
+        if !timeint.is_empty() {
+            // A card whose only content is the global header states nothing,
+            // and would re-scope nothing either; drop it rather than emit it.
+            if lines.len() == 1 {
+                lines.clear();
+            }
+            lines.push(".OPTIONS TIMEINT".to_string());
+            lines.append(&mut timeint);
         }
 
         lines.join("\n")

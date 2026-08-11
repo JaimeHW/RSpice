@@ -2336,6 +2336,14 @@ impl XyceTestRunner {
             device_try_to_compact,
             hb_num_frequencies,
             nonlinear_continuation,
+            gmin_stepping,
+            source_stepping,
+            pseudo_transient,
+            arc_length,
+            damping_strategy,
+            matrix_solver,
+            timeint_min_timestep,
+            max_timestep,
             scale: _,
         } = options;
         reltol.is_none()
@@ -2384,6 +2392,19 @@ impl XyceTestRunner {
             && b3soi_gmin_scaling.is_none()
             && device_try_to_compact.is_none()
             && nonlinear_continuation.is_none()
+            // The continuation rungs, damping, the factorization backend and
+            // both step bounds are stated absent rather than ignored: this
+            // predicate's whole claim is that the deck carries nothing but the
+            // TIMEINT tolerances, and a field bound to `_` would let a deck
+            // that also steers the solve still answer to that name.
+            && gmin_stepping.is_none()
+            && source_stepping.is_none()
+            && pseudo_transient.is_none()
+            && arc_length.is_none()
+            && damping_strategy.is_none()
+            && matrix_solver.is_none()
+            && timeint_min_timestep.is_none()
+            && max_timestep.is_none()
             && hb_num_frequencies.is_empty()
     }
 

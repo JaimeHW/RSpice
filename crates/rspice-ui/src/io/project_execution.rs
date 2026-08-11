@@ -630,7 +630,6 @@ fn validate_solver_options(plan: &SimSetupState) -> Result<(), String> {
         ("bypass_abstol", options.bypass_abstol),
         ("min_timestep", options.min_timestep),
         ("max_timestep", options.max_timestep),
-        ("timestep_factor", options.timestep_factor),
         ("temp", options.temp),
         ("tnom", options.tnom),
     ];
@@ -657,7 +656,6 @@ fn validate_solver_options(plan: &SimSetupState) -> Result<(), String> {
         ("pivtol", options.pivtol),
         ("bypass_reltol", options.bypass_reltol),
         ("bypass_abstol", options.bypass_abstol),
-        ("timestep_factor", options.timestep_factor),
     ];
     if let Some((field, value)) = positive_fields.into_iter().find(|(_, value)| *value <= 0.0) {
         return Err(format!(

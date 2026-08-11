@@ -6,8 +6,9 @@
 //! - Controlled sources (VCVS, VCCS, CCVS, CCCS)
 //! - Advanced components (switches, transmission lines, coupled inductors)
 //! - Analysis commands (DC, AC, transient, parametric, noise)
-use crate::config::NonlinearContinuationMode;
+use crate::config::{DampingStrategy, NonlinearContinuationMode};
 use crate::numerics::integration::TransientLteReference;
+use crate::solver::RealSolverBackend;
 
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -2818,6 +2819,24 @@ pub struct SimulationOptions {
     pub hb_num_frequencies: Vec<usize>,
     /// Explicit Xyce nonlinear continuation policy.
     pub nonlinear_continuation: Option<NonlinearContinuationMode>,
+    /// `.OPTIONS GMINSTEPPING`: allow the GMIN homotopy rung when the direct
+    /// Newton solve fails.
+    ///
+    /// The four rungs below are individually switchable because the solver
+    /// tries them as an ordered ladder and each one costs a full nested solve.
+    /// `NONLIN CONTINUATION` cannot express this: it names one algorithm to
+    /// run instead of the ladder, not which rungs the ladder may use.
+    pub gmin_stepping: Option<bool>,
+    /// `.OPTIONS SOURCESTEPPING`: allow the source-ramp homotopy rung.
+    pub source_stepping: Option<bool>,
+    /// `.OPTIONS PSEUDOTRANSIENT`: allow the pseudo-transient homotopy rung.
+    pub pseudo_transient: Option<bool>,
+    /// `.OPTIONS ARCLENGTH`: allow arc-length continuation, the rung that can
+    /// follow a fold in the solution curve the other three cannot pass.
+    pub arc_length: Option<bool>,
+    /// `.OPTIONS DAMPING`: how a Newton update is shortened before it is
+    /// applied.
+    pub damping_strategy: Option<DampingStrategy>,
     /// Relative tolerance for convergence (default: 1e-3)
     pub reltol: Option<Value>,
     /// Absolute current tolerance (default: 1e-12 A)
@@ -2849,6 +2868,20 @@ pub struct SimulationOptions {
     pub timeint_abstol: Option<Value>,
     /// Xyce `.OPTIONS TIMEINT DELMAX` transient timestep ceiling.
     pub timeint_delmax: Option<Value>,
+    /// `.OPTIONS TIMEINT MINTIMESTEP` transient timestep floor, the companion
+    /// of `DELMAX`. Below it the step controller stops subdividing and the
+    /// step is taken or the run fails, so it bounds how long a hard interval
+    /// may be ground over before the solver gives up.
+    pub timeint_min_timestep: Option<Value>,
+    /// `.OPTIONS MAXTIMESTEP`: the run's own transient step ceiling, the
+    /// deck spelling of the `simulation.max_timestep` configuration key.
+    ///
+    /// It is unscoped because it is not the time integrator's bound: Xyce's
+    /// `TIMEINT` package already spells that `DELMAX`, and two keys in one
+    /// package both meaning "largest step" would leave a reader guessing
+    /// which one a deck line set. The two clamp the step independently and
+    /// the tighter of them wins, so a deck may state either or both.
+    pub max_timestep: Option<Value>,
     /// Xyce `.OPTIONS TIMEINT USEDEVICEMAX` device-provided timestep policy.
     /// Xyce enables this policy by default.
     pub timeint_use_device_max_timestep: Option<bool>,
@@ -2900,6 +2933,10 @@ pub struct SimulationOptions {
     pub pivtol: Option<Value>,
     /// Relative sparse threshold-pivoting tolerance (default: 1e-3).
     pub pivrel: Option<Value>,
+    /// `.OPTIONS SOLVER`: the real matrix factorization backend, named with
+    /// the same three words the `RSPICE_SOLVER` environment variable takes.
+    /// `None` leaves the choice to the dialect and the measured fill profile.
+    pub matrix_solver: Option<RealSolverBackend>,
     /// Temperature in Celsius (default: 27)
     pub temp: Option<Value>,
     /// Nominal temperature in Celsius (default: 27)
