@@ -81,8 +81,19 @@ pub struct SimulationState {
     // =========================================================================
     // Multi-Run Results History (Cadence Spectre PSF-style)
     // =========================================================================
-    /// Simulation run history (newest first, limited to MAX_RUN_HISTORY)
+    /// Simulation run history (newest first, limited to
+    /// [`Self::retained_dataset_limit`])
     pub runs: Vec<SimulationRun>,
+
+    /// How many datasets the project keeps before the oldest unpinned one is
+    /// discarded.
+    ///
+    /// `None` means the built-in default. This is a real limit that silently
+    /// destroyed work before it was surfaced: a project that ran twenty-one
+    /// times lost its first dataset with no warning and no way to ask for
+    /// more. Saying the number, and letting the reader raise it, is the
+    /// difference between a retention policy and data loss.
+    pub retained_dataset_limit: Option<usize>,
 
     /// Next run ID to assign (monotonically increasing)
     pub next_run_id: u64,

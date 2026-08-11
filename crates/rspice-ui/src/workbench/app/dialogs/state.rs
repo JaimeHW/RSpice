@@ -83,6 +83,56 @@ impl LibraryDeletionReviewState {
     }
 }
 
+/// Destructive review for removing one configured analysis.
+///
+/// Only raised where removal actually costs something: the analysis has
+/// retained results attributed to it, or other analyses are bound to it as a
+/// prerequisite. Removing a freshly-added instance that nothing depends on is
+/// not a decision worth a modal, and asking anyway teaches the reader to
+/// dismiss the dialog without reading it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AnalysisRemovalReviewState {
+    pub(crate) target: Option<crate::product::AnalysisInstanceId>,
+    /// What removal takes with it, resolved when the review opened.
+    pub(crate) label: String,
+    pub(crate) retained_runs: usize,
+    pub(crate) dependent_analyses: Vec<String>,
+    /// Set by the dialog when the reader confirms. The Simulate surface owns
+    /// the removal itself and performs it on the next frame, so the modal
+    /// never reaches across into another surface's lifecycle.
+    pub(crate) confirmed: bool,
+}
+
+impl AnalysisRemovalReviewState {
+    /// Stage a review for one analysis.
+    pub(crate) fn open(
+        &mut self,
+        target: crate::product::AnalysisInstanceId,
+        label: String,
+        retained_runs: usize,
+        dependent_analyses: Vec<String>,
+    ) {
+        *self = Self {
+            target: Some(target),
+            label,
+            retained_runs,
+            dependent_analyses,
+            confirmed: false,
+        };
+    }
+
+    /// The analysis the reader confirmed removing, taken exactly once.
+    pub(crate) fn take_confirmed(&mut self) -> Option<crate::product::AnalysisInstanceId> {
+        let target = self.target.filter(|_| self.confirmed)?;
+        self.close();
+        Some(target)
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum FullScreenScope {
     #[default]
@@ -2209,6 +2259,9 @@ pub struct DialogState {
     pub(crate) rename_cell_library_revision: u64,
     /// Exact, revision-bound destructive review for deleting one cell or view.
     pub(crate) library_deletion_review: LibraryDeletionReviewState,
+    /// Destructive review for removing one configured analysis that has
+    /// retained results or dependents.
+    pub(crate) analysis_removal_review: AnalysisRemovalReviewState,
     /// A saved-file open found a bound, eligible autosave checkpoint; the
     /// restore dialog resolves it before either exact byte snapshot is loaded.
     #[cfg(not(target_arch = "wasm32"))]
@@ -2426,6 +2479,7 @@ impl DialogState {
             || self.copy_cell_dialog
             || self.rename_cell_dialog
             || self.library_deletion_review.target.is_some()
+            || self.analysis_removal_review.target.is_some()
             || self.preferences_open
             || self.hardcopy.open
             || self.drawing_sheet_setup.open

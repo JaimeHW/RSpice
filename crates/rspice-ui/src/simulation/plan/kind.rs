@@ -374,17 +374,18 @@ impl AnalysisKind {
         match self {
             Self::OperatingPoint => "Bias solution, annotations, and device operating points.",
             Self::Transient => {
-                "Adaptive time-domain integration, events, breakpoints, and checkpoints."
+                "Adaptive time-domain integration with an output start time and \
+                 initial-condition control."
             }
-            Self::Ac => "Linearized complex frequency response and family sweeps.",
-            Self::DcSweep => {
-                "Single, nested, list, and parameterized bias sweeps with continuation."
-            }
+            Self::Ac => "Linearized complex frequency response over a swept band.",
+            Self::DcSweep => "Single or nested bias source sweep with solver continuation.",
             Self::Noise => {
-                "Input/output-referred noise, correlation, integration, and contributor ranking."
+                "Input- and output-referred noise with band integration and contributor ranking."
             }
-            Self::PoleZero => "Balanced pole, zero, residual, and stability extraction.",
-            Self::Sensitivity => "Direct and adjoint parameter influence with normalized ranking.",
+            Self::PoleZero => "Pole and zero extraction from the linearized state-space model.",
+            Self::Sensitivity => {
+                "Adjoint influence of one output on every parameter the circuit exposes."
+            }
             Self::Stb => "Loop gain, gain margin, phase margin, and instability detection.",
             Self::TransferFunction => "DC transfer gain plus input and output resistance.",
             Self::Pss => "Shooting-Newton driven or autonomous periodic operating point.",
@@ -393,7 +394,8 @@ impl AnalysisKind {
             }
             Self::HarmonicBalance => "Single- and multi-tone frequency-domain nonlinear solution.",
             Self::SParameter => {
-                "Multiport network analysis, conversions, de-embedding, and Touchstone export."
+                "Multiport network response at a declared reference impedance, with \
+                 Touchstone export."
             }
             Self::Hbsp => {
                 "Multiport small-signal network response linearized around an immutable harmonic-balance state."
@@ -416,27 +418,31 @@ impl AnalysisKind {
             Self::Qpxf => "Translated transfer paths indexed by input and output lattice products.",
             Self::TransientNoise => "Reproducible stochastic time-domain device-noise simulation.",
             Self::MonteCarlo => {
-                "Process and mismatch variation with explicit distributions, correlations, and seeds."
+                "Sampled parameter variation about the nominal design, under one \
+                 declared distribution, spread, and seed."
             }
             Self::Temperature => {
-                "List or range temperature dimension with warm-start and failure policy."
+                "Temperature dimension by range or explicit list, over a chosen base analysis."
             }
             Self::Corner => "Explicit model sections crossed with supply and temperature axes.",
             Self::DcMismatch => {
                 "Linearized local mismatch variance, contribution ranking, and sigma estimates around a declared operating point."
             }
             Self::Fourier => {
-                "Harmonics, THD, SINAD, SFDR, and ENOB from compatible time-domain data."
+                "Fundamental and harmonic magnitudes, with total harmonic distortion, \
+                 from time-domain data."
             }
             Self::Disto => {
-                "Legacy AC distortion compatibility with explicit THD/IMD post-processing."
+                "Legacy AC small-signal distortion sweep at a declared second-tone ratio."
             }
             Self::Reliability => {
-                "Mission-profile stress, degradation models, and lifetime margins."
+                "Stress-driven HCI, NBTI, and electromigration degradation across \
+                 declared lifetime points."
             }
             Self::Soa => "Sampled MOS/JFET/MESFET and BJT terminal-voltage magnitude limit checks.",
             Self::Optimization => {
-                "Bounded variables, objectives, hard constraints, algorithms, and candidate history."
+                "Bounded variables driven against one scalar objective, with a \
+                 selectable algorithm and an explicit convergence contract."
             }
         }
     }
@@ -538,6 +544,29 @@ impl AnalysisKind {
             | Self::Reliability => AnalysisAvailability::Preview,
             _ => AnalysisAvailability::Production,
         }
+    }
+
+    /// Whether this kind's solve can advance time.
+    ///
+    /// This is the domain gate for every time-integration control: a bound on
+    /// the step controller reaches a solve only if that solve takes steps. The
+    /// list is what each kind's service actually runs, not what its name
+    /// suggests — reliability and optimization both drive a DC operating point
+    /// per candidate, while the sweep kinds are included because their base
+    /// mode may be a transient.
+    pub const fn advances_time(self) -> bool {
+        matches!(
+            self,
+            Self::Transient
+                | Self::Pss
+                | Self::Envelope
+                | Self::Fourier
+                | Self::Soa
+                | Self::TransientNoise
+                | Self::MonteCarlo
+                | Self::Temperature
+                | Self::Corner
+        )
     }
 
     /// Current engine limitation. The identity and configuration remain
@@ -720,5 +749,66 @@ mod tests {
             assert!(!kind.detail().is_empty());
             assert!(!kind.category().label.is_empty());
         }
+    }
+
+    /// Whoever adds a kind decides whether it steps time, because a wrong
+    /// answer either refuses a legitimate step bound or accepts one that
+    /// silently does nothing. Pinning the exact set forces that decision to be
+    /// made here rather than defaulted.
+    #[test]
+    fn the_time_stepping_domain_names_exactly_the_kinds_that_integrate() {
+        let stepping = AnalysisKind::ALL
+            .into_iter()
+            .filter(|kind| kind.advances_time())
+            .map(AnalysisKind::stable_id)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            stepping,
+            [
+                "tran", "mc", "pss", "temp", "corner", "envelope", "fourier", "soa", "tnoise"
+            ]
+        );
+    }
+
+    /// A catalog entry is a promise the reader will go looking for.
+    ///
+    /// Each of these words was in a `detail()` string for a capability the
+    /// studio does not have: mission profiles, warm-start, de-embedding,
+    /// correlated Monte Carlo, and the FFT viewer's SINAD/SFDR/ENOB claimed
+    /// by the Fourier analysis. They are barred by name so the claim cannot
+    /// return without someone first building the thing it names — at which
+    /// point the word comes off this list along with the fix.
+    #[test]
+    fn catalog_details_do_not_promise_capabilities_the_studio_lacks() {
+        const UNBUILT_CLAIMS: &[&str] = &[
+            "mission-profile",
+            "mission profile",
+            "warm-start",
+            "de-embedding",
+            "deembedding",
+            "correlations",
+            "sinad",
+            "sfdr",
+            "enob",
+            "checkpoints",
+            "hard constraints",
+            "candidate history",
+        ];
+
+        let mut offenders = Vec::new();
+        for kind in AnalysisKind::ALL {
+            let detail = kind.detail().to_ascii_lowercase();
+            for claim in UNBUILT_CLAIMS {
+                if detail.contains(claim) {
+                    offenders.push(format!("{} claims '{claim}'", kind.label()));
+                }
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "catalog details name capabilities the studio does not have:\n  {}",
+            offenders.join("\n  ")
+        );
     }
 }

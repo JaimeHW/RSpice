@@ -336,7 +336,6 @@ fn project_with_execution_context() -> ProjectFile {
     setup.options.pivrel = 8e-4;
     setup.options.pivtol = 9e-14;
     setup.options.itl1 = 80;
-    setup.options.itl2 = 120;
     setup.options.itl4 = 12;
     setup.options.gmin_stepping = false;
     setup.options.source_stepping = false;

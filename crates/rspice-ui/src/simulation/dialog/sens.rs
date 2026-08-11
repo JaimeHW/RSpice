@@ -12,6 +12,11 @@ pub enum SensType {
 }
 
 /// Sensitivity analysis configuration
+///
+/// `.SENS` differentiates the output against every parameter the circuit
+/// exposes; the engine has no selection filter and no reporting threshold, so
+/// this configuration deliberately carries neither. Narrowing the report is
+/// the result viewer's job, where it can be changed without re-solving.
 #[derive(Debug, Clone)]
 pub struct SensConfig {
     /// Output expression (node voltage or current)
@@ -20,12 +25,6 @@ pub struct SensConfig {
     pub sens_type: SensType,
     /// AC frequency (only used for AC sens)
     pub ac_freq: f64,
-    /// Include parameter sensitivities
-    pub include_params: bool,
-    /// Include device sensitivities
-    pub include_devices: bool,
-    /// Threshold for reporting
-    pub threshold: f64,
 }
 
 impl Default for SensConfig {
@@ -34,9 +33,6 @@ impl Default for SensConfig {
             output_expr: "V(OUT)".into(),
             sens_type: SensType::Dc,
             ac_freq: 1e6,
-            include_params: true,
-            include_devices: true,
-            threshold: 1e-9,
         }
     }
 }
@@ -68,23 +64,53 @@ impl SensConfig {
         if self.sens_type == SensType::Ac && (!self.ac_freq.is_finite() || self.ac_freq <= 0.0) {
             return Err("AC frequency must be finite and positive".into());
         }
-        if self.threshold < 0.0 {
-            return Err("Threshold cannot be negative".into());
-        }
         Ok(())
     }
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct SensDialogState {
     pub output_expr: String,
     pub sens_type_idx: usize,
     pub ac_freq: String,
-    pub include_params: bool,
-    pub include_devices: bool,
     #[serde(skip)]
     pub initialized: bool,
+}
+
+/// Persisted editor state. New fields serialize; retired fields only decode.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedSensDialogState {
+    #[serde(default)]
+    output_expr: String,
+    #[serde(default)]
+    sens_type_idx: usize,
+    #[serde(default)]
+    ac_freq: String,
+    /// Retired. `.SENS` differentiates against everything it can reach; there
+    /// was never a filter for these to select. Accepted so earlier projects
+    /// still open; never written back.
+    #[serde(default)]
+    #[allow(dead_code)]
+    include_params: serde::de::IgnoredAny,
+    #[serde(default)]
+    #[allow(dead_code)]
+    include_devices: serde::de::IgnoredAny,
+}
+
+impl<'de> serde::Deserialize<'de> for SensDialogState {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let persisted = PersistedSensDialogState::deserialize(deserializer)?;
+        Ok(Self {
+            output_expr: persisted.output_expr,
+            sens_type_idx: persisted.sens_type_idx,
+            ac_freq: persisted.ac_freq,
+            initialized: false,
+        })
+    }
 }
 
 impl SensDialogState {
@@ -96,8 +122,6 @@ impl SensDialogState {
                 SensType::Ac => 1,
             },
             ac_freq: format_freq(config.ac_freq),
-            include_params: config.include_params,
-            include_devices: config.include_devices,
             initialized: true,
         }
     }
@@ -113,9 +137,6 @@ impl SensDialogState {
             output_expr: self.output_expr.clone(),
             sens_type,
             ac_freq: freq,
-            include_params: self.include_params,
-            include_devices: self.include_devices,
-            threshold: 1e-9,
         };
         config.validate()?;
         Ok(config)

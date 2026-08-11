@@ -532,12 +532,100 @@ impl SimulationState {
         self.sync_selected_analysis_waveforms();
     }
 
-    /// Prune runs history to stay within MAX_RUN_HISTORY limit
+    /// Prune runs history to stay within the project's retention limit.
+    ///
+    /// Two runs are never discarded: a golden baseline, and the newest run in
+    /// the history. When those alone exceed the limit the history stays over
+    /// it — reported by [`Self::retention_limit_is_unenforceable`] — because
+    /// the alternative is destroying a signed-off baseline or the dataset a
+    /// run has just produced, and neither is what "retain fewer" asks for.
     fn prune_runs_history(&mut self) {
-        while self.runs.len() > MAX_RUN_HISTORY {
-            self.runs.pop(); // Remove oldest (last in list)
+        let limit = self.effective_retained_dataset_limit();
+        let selected_run_id = self.active_run().map(|run| run.run_id);
+        while self.runs.len() > limit {
+            // Oldest first among the pruneable, and never index 0: the head of
+            // a newest-first history is the run that was just produced.
+            let Some(oldest_pruneable) = self
+                .runs
+                .iter()
+                .rposition(|run| run.retention().is_pruneable())
+                .filter(|index| *index > 0)
+            else {
+                break;
+            };
+            self.runs.remove(oldest_pruneable);
+        }
+        // Pinning makes pruning remove from the middle, so the index-based
+        // selection is re-resolved from the identity it pointed at rather than
+        // left to land on whichever run shifted into that slot.
+        if let Some(run_id) = selected_run_id {
+            self.active_run_idx = self.runs.iter().position(|run| run.run_id == run_id);
+            if self.active_run_idx.is_none() {
+                self.active_analysis_idx = None;
+            }
         }
         self.prune_yield_evidence_provenance();
+    }
+
+    /// How many retained datasets are pinned as golden baselines.
+    #[must_use]
+    pub fn pinned_run_count(&self) -> usize {
+        self.runs
+            .iter()
+            .filter(|run| run.retention().is_pinned())
+            .count()
+    }
+
+    /// Whether the retention limit can still be honoured at all.
+    ///
+    /// Baselines are exempt from pruning, so once they fill the limit the
+    /// history grows past it instead of holding at it. Surfaces report that
+    /// rather than a count that implies the limit is being enforced.
+    #[must_use]
+    pub fn retention_limit_is_unenforceable(&self) -> bool {
+        self.pinned_run_count() >= self.effective_retained_dataset_limit()
+    }
+
+    /// Classify a retained run for retention.
+    ///
+    /// Returns whether the run is in the history. Deliberately does **not**
+    /// prune: releasing a baseline says the dataset is no longer special, not
+    /// that it should be discarded now, and the oldest pruneable dataset is
+    /// usually the one just released — so pruning here would destroy it on the
+    /// same click, with no undo and no confirmation. It becomes eligible at the
+    /// next run, which is when retention discards anything else.
+    ///
+    /// This is not the rule [`Self::set_retained_dataset_limit`] follows, and
+    /// the difference is deliberate: lowering the limit is the project stating
+    /// how much it keeps, so it must take effect at once. Releasing one pin is
+    /// curation of a single dataset. Until the next run the project may hold
+    /// more than its limit; [`Self::retention_limit_is_unenforceable`] is how
+    /// the page says so rather than implying the limit is being enforced.
+    pub fn set_run_retention(&mut self, run_id: RunId, retention: RunRetention) -> bool {
+        let Some(run) = self.runs.iter_mut().find(|run| run.run_id == run_id) else {
+            return false;
+        };
+        run.set_retention(retention);
+        true
+    }
+
+    /// The retention limit in force, resolved from the project's own setting.
+    ///
+    /// Clamped to at least one: a limit of zero would discard the dataset the
+    /// run just produced, which is never what "retain fewer" means.
+    pub fn effective_retained_dataset_limit(&self) -> usize {
+        self.retained_dataset_limit
+            .unwrap_or(MAX_RUN_HISTORY)
+            .max(1)
+    }
+
+    /// Set the retention limit and apply it immediately.
+    ///
+    /// Applying at once is deliberate: a limit that only takes effect on the
+    /// next run would report a policy the project is not actually under.
+    pub fn set_retained_dataset_limit(&mut self, limit: usize) {
+        self.retained_dataset_limit = Some(limit.max(1));
+        self.prune_runs_history();
     }
 
     /// Delete a specific run by index
@@ -603,6 +691,183 @@ impl SimulationState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_built_in_retention_limit_applies_until_the_project_states_one() {
+        let state = SimulationState::default();
+
+        assert_eq!(state.retained_dataset_limit, None);
+        assert_eq!(state.effective_retained_dataset_limit(), MAX_RUN_HISTORY);
+    }
+
+    #[test]
+    fn lowering_the_retention_limit_discards_the_oldest_datasets_at_once() {
+        let mut state = SimulationState::default();
+        for _ in 0..5 {
+            state.start_run();
+        }
+        assert_eq!(state.runs.len(), 5);
+        let newest = state.runs.first().expect("newest run").run_id;
+
+        state.set_retained_dataset_limit(2);
+
+        assert_eq!(state.runs.len(), 2, "the limit applies immediately");
+        assert_eq!(
+            state.runs.first().expect("newest run").run_id,
+            newest,
+            "pruning discards the oldest, never the newest"
+        );
+    }
+
+    #[test]
+    fn a_retention_limit_of_zero_still_keeps_the_run_just_produced() {
+        let mut state = SimulationState::default();
+        state.start_run();
+
+        state.set_retained_dataset_limit(0);
+
+        assert_eq!(state.effective_retained_dataset_limit(), 1);
+        assert_eq!(state.runs.len(), 1, "retaining nothing is never the intent");
+    }
+
+    #[test]
+    fn a_raised_limit_retains_more_without_recovering_what_was_discarded() {
+        let mut state = SimulationState::default();
+        for _ in 0..3 {
+            state.start_run();
+        }
+        state.set_retained_dataset_limit(1);
+        assert_eq!(state.runs.len(), 1);
+
+        state.set_retained_dataset_limit(10);
+
+        assert_eq!(
+            state.runs.len(),
+            1,
+            "raising the limit cannot bring back a discarded dataset"
+        );
+    }
+
+    #[test]
+    fn a_golden_baseline_survives_a_limit_lowered_beneath_it() {
+        let mut state = SimulationState::default();
+        let baseline = state.start_run().run_id;
+        for _ in 0..3 {
+            state.start_run();
+        }
+        assert!(state.set_run_retention(baseline, RunRetention::GoldenBaseline));
+        let newest = state.runs.first().expect("newest run").run_id;
+
+        state.set_retained_dataset_limit(1);
+
+        assert_eq!(
+            state.runs.iter().map(|run| run.run_id).collect::<Vec<_>>(),
+            vec![newest, baseline],
+            "pruning stops at the baseline and at the run just produced"
+        );
+        assert_eq!(state.pinned_run_count(), 1);
+        assert!(state.retention_limit_is_unenforceable());
+    }
+
+    #[test]
+    fn pruning_discards_the_oldest_pruneable_dataset_not_the_oldest_dataset() {
+        let mut state = SimulationState::default();
+        let baseline = state.start_run().run_id;
+        let oldest_pruneable = state.start_run().run_id;
+        let newest = state.start_run().run_id;
+        assert!(state.set_run_retention(baseline, RunRetention::GoldenBaseline));
+
+        state.set_retained_dataset_limit(2);
+
+        assert_eq!(
+            state.runs.iter().map(|run| run.run_id).collect::<Vec<_>>(),
+            vec![newest, baseline],
+            "a baseline at the tail is skipped for the oldest dataset that may be discarded"
+        );
+        assert!(!state.runs.iter().any(|run| run.run_id == oldest_pruneable));
+    }
+
+    #[test]
+    fn pinning_every_retained_slot_still_keeps_the_run_just_produced() {
+        let mut state = SimulationState::default();
+        let first = state.start_run().run_id;
+        let second = state.start_run().run_id;
+        state.set_retained_dataset_limit(2);
+        for baseline in [first, second] {
+            assert!(state.set_run_retention(baseline, RunRetention::GoldenBaseline));
+        }
+
+        let produced = state.start_run().run_id;
+
+        assert_eq!(
+            state.runs.iter().map(|run| run.run_id).collect::<Vec<_>>(),
+            vec![produced, second, first],
+            "the dataset a run just produced is never the one discarded"
+        );
+        assert!(state.retention_limit_is_unenforceable());
+    }
+
+    #[test]
+    fn releasing_a_baseline_does_not_discard_it_on_the_same_click() {
+        let mut state = SimulationState::default();
+        let baseline = state.start_run().run_id;
+        state.start_run();
+        assert!(state.set_run_retention(baseline, RunRetention::GoldenBaseline));
+        state.set_retained_dataset_limit(1);
+        assert_eq!(state.runs.len(), 2, "the baseline blocks the limit");
+
+        assert!(state.set_run_retention(baseline, RunRetention::Pruneable));
+
+        // Releasing says the dataset is no longer special, not that it should
+        // be destroyed now. The released baseline is usually the oldest
+        // pruneable run, so pruning here would delete exactly the dataset the
+        // reader just touched, with no undo.
+        assert_eq!(
+            state.runs.len(),
+            2,
+            "releasing a pin must not destroy the dataset it released"
+        );
+        assert_eq!(state.pinned_run_count(), 0);
+        assert!(!state.retention_limit_is_unenforceable());
+
+        // It is merely eligible now: the next run collects it, which is when
+        // retention discards anything else.
+        state.start_run();
+        assert_eq!(state.runs.len(), 1);
+    }
+
+    #[test]
+    fn retention_cannot_be_classified_for_a_run_outside_the_history() {
+        let mut state = SimulationState::default();
+        state.start_run();
+
+        assert!(!state.set_run_retention(RunId::new(), RunRetention::GoldenBaseline));
+        assert_eq!(state.pinned_run_count(), 0);
+    }
+
+    #[test]
+    fn the_selected_dataset_follows_pruning_that_discards_a_newer_one() {
+        let mut state = SimulationState::default();
+        let oldest = state.start_run().run_id;
+        let selected = state.start_run().run_id;
+        state.start_run();
+        state.start_run();
+        for baseline in [oldest, selected] {
+            assert!(state.set_run_retention(baseline, RunRetention::GoldenBaseline));
+        }
+        assert!(
+            state.select_run_by_sequence(2),
+            "the baseline is selectable"
+        );
+
+        state.set_retained_dataset_limit(3);
+
+        assert_eq!(
+            state.active_run().map(|run| run.run_id),
+            Some(selected),
+            "selection is identity, not the index a middle removal shifted"
+        );
+    }
 
     #[test]
     fn abort_request_is_bound_to_exact_active_execution_identity() {

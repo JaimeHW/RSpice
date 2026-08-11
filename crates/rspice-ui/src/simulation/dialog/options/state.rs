@@ -23,8 +23,11 @@ pub struct OptionsDialogState {
     pub iabstol: String,
     pub chgtol: String,
     pub itl1: String,
-    pub itl2: String,
     pub itl4: String,
+    pub trtol: String,
+    pub transient_lte_reltol: String,
+    pub transient_lte_abstol: String,
+    pub statistical_seed: String,
     pub gmin: String,
     pub pivrel: String,
     pub pivtol: String,
@@ -65,8 +68,21 @@ impl OptionsDialogState {
             iabstol: format_si_value(opts.iabstol),
             chgtol: format_si_value(opts.chgtol),
             itl1: opts.itl1.to_string(),
-            itl2: opts.itl2.to_string(),
             itl4: opts.itl4.to_string(),
+            trtol: format_si_value(opts.trtol),
+            // An empty buffer is the engine's own bound, not a value of zero.
+            transient_lte_reltol: opts
+                .transient_lte_reltol
+                .map(format_si_value)
+                .unwrap_or_default(),
+            transient_lte_abstol: opts
+                .transient_lte_abstol
+                .map(format_si_value)
+                .unwrap_or_default(),
+            statistical_seed: opts
+                .statistical_seed
+                .map(|seed| seed.to_string())
+                .unwrap_or_default(),
             gmin: format_si_value(opts.gmin),
             pivrel: format_si_value(opts.pivrel),
             pivtol: format_si_value(opts.pivtol),
@@ -119,8 +135,23 @@ impl OptionsDialogState {
         let pivtol = parse_field(&self.pivtol, "pivtol", 1e-13, &mut errors);
 
         let itl1 = parse_usize_field(&self.itl1, "itl1", 50, &mut errors);
-        let itl2 = parse_usize_field(&self.itl2, "itl2", 100, &mut errors);
         let itl4 = parse_usize_field(&self.itl4, "itl4", 6, &mut errors);
+        let trtol = parse_field(&self.trtol, "trtol", 7.0, &mut errors);
+        let transient_lte_reltol =
+            parse_optional_field(&self.transient_lte_reltol, "lte_reltol", &mut errors);
+        let transient_lte_abstol =
+            parse_optional_field(&self.transient_lte_abstol, "lte_abstol", &mut errors);
+        let statistical_seed = if self.statistical_seed.trim().is_empty() {
+            None
+        } else {
+            match self.statistical_seed.trim().parse::<u64>() {
+                Ok(seed) => Some(seed),
+                Err(_) => {
+                    errors.push("statistical_seed: invalid integer".to_owned());
+                    None
+                }
+            }
+        };
         let timestep_factor =
             parse_float_field(&self.timestep_factor, "timestep_factor", 8.0, &mut errors);
         let temp = parse_float_field(&self.temp, "temp", 27.0, &mut errors);
@@ -140,8 +171,11 @@ impl OptionsDialogState {
             pivrel,
             pivtol,
             itl1,
-            itl2,
             itl4,
+            trtol,
+            transient_lte_reltol,
+            transient_lte_abstol,
+            statistical_seed,
             gmin_stepping: self.gmin_stepping,
             source_stepping: self.source_stepping,
             pseudo_transient: self.pseudo_transient,
@@ -169,6 +203,24 @@ fn parse_field(text: &str, name: &str, fallback: f64, errors: &mut Vec<String>) 
         errors.push(format!("{}: {}", name, e));
         fallback
     })
+}
+
+/// Parse a field whose empty value means "leave the engine's own bound".
+///
+/// Blank is a legitimate answer here, distinct from zero: a bound of zero
+/// would reject every step, so treating an empty buffer as zero would turn a
+/// field the reader left alone into one that stops the solve.
+fn parse_optional_field(text: &str, name: &str, errors: &mut Vec<String>) -> Option<f64> {
+    if text.trim().is_empty() {
+        return None;
+    }
+    match parse_si_value(text) {
+        Ok(value) => Some(value),
+        Err(error) => {
+            errors.push(format!("{}: {}", name, error));
+            None
+        }
+    }
 }
 
 fn parse_usize_field(text: &str, name: &str, fallback: usize, errors: &mut Vec<String>) -> usize {

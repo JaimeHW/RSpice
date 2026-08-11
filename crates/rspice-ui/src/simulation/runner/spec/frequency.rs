@@ -92,6 +92,7 @@ pub(super) fn run_frequency_spec(
             stop_freq,
             sweep,
             points_per_decade,
+            compute_nyquist,
         } => run_stb(
             netlist,
             probe_node,
@@ -99,6 +100,7 @@ pub(super) fn run_frequency_spec(
             stop_freq,
             sweep,
             points_per_decade,
+            compute_nyquist,
             abort,
         ),
         AnalysisSpec::Pstb => run_pstb(netlist, source_path, options, dependencies, abort),
@@ -411,6 +413,7 @@ fn run_stb(
     stop_freq: f64,
     sweep: FrequencySweep,
     points_per_decade: usize,
+    compute_nyquist: bool,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     let data = super::run_abort_aware_service(abort, || {
@@ -421,6 +424,7 @@ fn run_stb(
             stop_freq,
             stb_sweep_type(sweep),
             points_per_decade,
+            compute_nyquist,
             None,
             abort,
         )
@@ -444,12 +448,61 @@ fn run_stb(
         "deg",
         "Hz",
     );
+    if let Some(contour) = data.nyquist {
+        super::ensure_not_aborted(abort)?;
+        waveforms.insert(
+            "Nyquist L(jw)".to_string(),
+            WaveformData::new_complex(
+                "Nyquist L(jw)".to_string(),
+                contour.frequencies,
+                contour.real,
+                contour.imaginary,
+            ),
+        );
+    }
 
     Ok(SimulationResult::Ac {
         frequencies: data.frequencies,
+        measurements: stb_margin_measurements(&data.margins),
         waveforms,
-        measurements: Vec::new(),
     })
+}
+
+/// The margins the loop-gain extraction produced, as measurements.
+///
+/// Stability analysis exists to answer "how much margin", so the margins are
+/// reported as named scalars a specification can be written against — not
+/// left inside a waveform for the reader to eyeball. A margin the extraction
+/// could not locate is reported as a failed measurement rather than as a
+/// number, because "no crossover was found" and "the margin is zero" are
+/// different answers.
+fn stb_margin_measurements(
+    margins: &rspice_core::analysis::stb::StabilityMargins,
+) -> Vec<rspice_core::MeasureResult> {
+    fn scalar(name: &str, value: f64) -> rspice_core::MeasureResult {
+        if value.is_finite() {
+            rspice_core::MeasureResult::success(name, value)
+        } else {
+            rspice_core::MeasureResult::failed(
+                name,
+                "the loop gain has no such point in the swept band",
+            )
+        }
+    }
+
+    vec![
+        scalar("stb_gain_margin_db", margins.gain_margin_db),
+        scalar("stb_gain_margin_freq", margins.gain_margin_freq),
+        scalar("stb_phase_margin_deg", margins.phase_margin_deg),
+        scalar("stb_phase_margin_freq", margins.phase_margin_freq),
+        scalar("stb_dc_loop_gain_db", margins.dc_gain_db),
+        scalar("stb_unity_gain_bandwidth", margins.unity_gain_bandwidth),
+        rspice_core::MeasureResult::success("stb_crossovers", margins.num_crossovers as f64),
+        rspice_core::MeasureResult::success(
+            "stb_conditionally_stable",
+            if margins.conditionally_stable { 1.0 } else { 0.0 },
+        ),
+    ]
 }
 
 fn stb_sweep_type(sweep: FrequencySweep) -> rspice_core::analysis::stb::StbSweepType {

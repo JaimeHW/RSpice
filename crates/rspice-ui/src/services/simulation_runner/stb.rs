@@ -21,6 +21,24 @@ pub struct StbData {
     pub loop_gain_db: Vec<Value>,
     /// Loop gain phase (degrees)
     pub loop_phase_deg: Vec<Value>,
+    /// Margins extracted from the loop gain. Always present: the extraction
+    /// is what stability analysis is for, so it is a result, not an option.
+    pub margins: rspice_core::analysis::stb::StabilityMargins,
+    /// Nyquist contour, retained only when the configuration asked for it.
+    ///
+    /// The extraction's own warnings are deliberately not carried here: the
+    /// only two it raises — empty input, and multiple unity-gain crossovers —
+    /// are already reported exactly by the margins themselves.
+    pub nyquist: Option<StbNyquistContour>,
+}
+
+/// The Nyquist contour of the loop gain, split into the three parallel
+/// vectors a plot consumes.
+#[derive(Debug, Clone)]
+pub struct StbNyquistContour {
+    pub frequencies: Vec<Value>,
+    pub real: Vec<Value>,
+    pub imaginary: Vec<Value>,
 }
 
 /// Run STB analysis over a decade sweep with cooperative cancellation.
@@ -68,6 +86,7 @@ pub fn run_stb_analysis_with_source_path_and_abort(
         stop_freq,
         rspice_core::analysis::stb::StbSweepType::Decade,
         points_per_decade,
+        true,
         source_path,
         abort,
     )
@@ -88,6 +107,7 @@ pub fn run_stb_analysis_with_sweep_and_source_path_and_abort(
     stop_freq: Value,
     sweep_type: rspice_core::analysis::stb::StbSweepType,
     points_per_decade: usize,
+    compute_nyquist: bool,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<StbData> {
@@ -101,7 +121,7 @@ pub fn run_stb_analysis_with_sweep_and_source_path_and_abort(
         .with_sweep(start_freq, stop_freq, points_per_decade)
         .with_sweep_type(sweep_type)
         .with_probe(probe)
-        .with_nyquist(true);
+        .with_nyquist(compute_nyquist);
 
     let analysis = engine
         .run_stb_with_abort(&netlist, stb_config, abort)
@@ -119,10 +139,35 @@ pub fn run_stb_analysis_with_sweep_and_source_path_and_abort(
     }
     ensure_not_aborted(abort)?;
 
+    // An empty contour is reported as absent rather than as an empty curve,
+    // so a disabled Nyquist and a Nyquist that produced nothing look the same
+    // downstream: no contour to plot.
+    let nyquist = if compute_nyquist && !stb_result.nyquist_points.is_empty() {
+        let mut frequencies = Vec::with_capacity(stb_result.nyquist_points.len());
+        let mut real = Vec::with_capacity(stb_result.nyquist_points.len());
+        let mut imaginary = Vec::with_capacity(stb_result.nyquist_points.len());
+        for (index, point) in stb_result.nyquist_points.iter().enumerate() {
+            poll_periodically(abort, index)?;
+            frequencies.push(point.frequency);
+            real.push(point.real);
+            imaginary.push(point.imag);
+        }
+        Some(StbNyquistContour {
+            frequencies,
+            real,
+            imaginary,
+        })
+    } else {
+        None
+    };
+    ensure_not_aborted(abort)?;
+
     Ok(StbData {
         frequencies: result_frequencies,
         loop_gain_db,
         loop_phase_deg,
+        margins: stb_result.margins,
+        nyquist,
     })
 }
 

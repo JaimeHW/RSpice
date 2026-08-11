@@ -664,9 +664,6 @@ fn validate_solver_options(plan: &SimSetupState) -> Result<(), String> {
             "simulation_plan.options.{field} must be positive, got {value}"
         ));
     }
-    if options.itl2 == 0 {
-        return Err("simulation_plan.options.itl2 must be greater than zero".to_owned());
-    }
     if options.gmin < 0.0 {
         return Err(format!(
             "simulation_plan.options.gmin must be non-negative, got {}",
@@ -683,7 +680,6 @@ fn validate_choice_indices(plan: &SimSetupState) -> Result<(), String> {
         ("pz.analysis_idx", plan.pz.analysis_idx, 2),
         ("sens.sens_type_idx", plan.sens.sens_type_idx, 1),
         ("mc.distribution_idx", plan.mc.distribution_idx, 2),
-        ("mc.base_idx", plan.mc.base_idx, 3),
         ("pss.method_idx", plan.pss.method_idx, 1),
         ("temp.base_idx", plan.temp.base_idx, 3),
         ("hb.solver_idx", plan.hb.solver_idx, 1),

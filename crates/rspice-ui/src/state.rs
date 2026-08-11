@@ -109,7 +109,7 @@ pub use simulation::{
     PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
     PreparedSourceCheckReceipt, RealEventPointEvidence, RealEventTraceEvidence,
     ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence, ReliabilityShiftEvidence,
-    ReliabilityStressEvidence, SavedOutputMaterializationStatus, SavedOutputReceipt,
+    ReliabilityStressEvidence, RunRetention, SavedOutputMaterializationStatus, SavedOutputReceipt,
     SensitivityResultMode, SensitivityResultRow, SharedWaveformValues, SimulationRun,
     SimulationRunIntent, SimulationRunLifecycle, SimulationRunProvenance, SimulationState,
     SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,

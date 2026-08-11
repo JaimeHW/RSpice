@@ -101,8 +101,6 @@ pub struct PnoiseConfig {
     pub input_source: String,
     /// Noise reference type
     pub noise_ref: NoiseReferenceType,
-    /// Include spot noise
-    pub spot_noise: bool,
     /// Include integrated noise
     pub integrated_noise: bool,
     /// Noise summary (per-device contributions)
@@ -121,7 +119,6 @@ impl Default for PnoiseConfig {
             output_ref: String::new(),
             input_source: "VIN".to_string(),
             noise_ref: NoiseReferenceType::Output,
-            spot_noise: true,
             integrated_noise: false,
             noise_summary: true,
         }
@@ -209,8 +206,7 @@ impl PnoiseConfig {
 // =============================================================================
 
 /// Dialog state with string buffers
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PnoiseDialogState {
     /// Start frequency buffer
     pub start_freq: String,
@@ -230,8 +226,6 @@ pub struct PnoiseDialogState {
     pub input_source: String,
     /// Noise reference type index
     pub noise_ref_idx: usize,
-    /// Spot noise enabled
-    pub spot_noise: bool,
     /// Integrated noise enabled
     pub integrated_noise: bool,
     /// Noise summary enabled
@@ -239,6 +233,62 @@ pub struct PnoiseDialogState {
     /// Initialized flag
     #[serde(skip)]
     pub initialized: bool,
+}
+
+/// Persisted editor state. New fields serialize; retired fields only decode.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedPnoiseDialogState {
+    #[serde(default)]
+    start_freq: String,
+    #[serde(default)]
+    stop_freq: String,
+    #[serde(default)]
+    num_points: String,
+    #[serde(default)]
+    sweep_type_idx: usize,
+    #[serde(default)]
+    max_sideband: String,
+    #[serde(default)]
+    output_node: String,
+    #[serde(default)]
+    output_ref: String,
+    #[serde(default)]
+    input_source: String,
+    #[serde(default)]
+    noise_ref_idx: usize,
+    #[serde(default)]
+    integrated_noise: bool,
+    #[serde(default)]
+    noise_summary: bool,
+    /// Retired. The sweep always produces the per-frequency spectrum, so this
+    /// selected nothing. Accepted so earlier projects still open.
+    #[serde(default)]
+    #[allow(dead_code)]
+    spot_noise: serde::de::IgnoredAny,
+}
+
+impl<'de> serde::Deserialize<'de> for PnoiseDialogState {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let persisted = PersistedPnoiseDialogState::deserialize(deserializer)?;
+        Ok(Self {
+            start_freq: persisted.start_freq,
+            stop_freq: persisted.stop_freq,
+            num_points: persisted.num_points,
+            sweep_type_idx: persisted.sweep_type_idx,
+            max_sideband: persisted.max_sideband,
+            output_node: persisted.output_node,
+            output_ref: persisted.output_ref,
+            input_source: persisted.input_source,
+            noise_ref_idx: persisted.noise_ref_idx,
+            integrated_noise: persisted.integrated_noise,
+            noise_summary: persisted.noise_summary,
+            initialized: false,
+        })
+    }
 }
 
 impl PnoiseDialogState {
@@ -262,7 +312,6 @@ impl PnoiseDialogState {
                 NoiseReferenceType::Input => 1,
                 NoiseReferenceType::Phase => 2,
             },
-            spot_noise: config.spot_noise,
             integrated_noise: config.integrated_noise,
             noise_summary: config.noise_summary,
             initialized: true,
@@ -303,7 +352,6 @@ impl PnoiseDialogState {
             output_ref: self.output_ref.clone(),
             input_source: self.input_source.clone(),
             noise_ref,
-            spot_noise: self.spot_noise,
             integrated_noise: self.integrated_noise,
             noise_summary: self.noise_summary,
         };

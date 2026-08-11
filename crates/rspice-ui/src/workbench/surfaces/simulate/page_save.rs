@@ -7,16 +7,21 @@
 
 use egui::Ui;
 
+use crate::product::RunId;
 use crate::simulation::{SavedOutputStorageEstimate, output_contract::SavedOutputPreflightReport};
 use crate::state::workspace::SimulationPlanPayload;
-use crate::state::{SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming};
+use crate::state::{RunRetention, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming};
 use crate::workbench::RSpiceApp;
 
+use crate::ui::widgets::select;
+
 use super::page_kit::{
-    Tone, card, card_body, card_note, card_row, ledger_head, ledger_row, rule_row,
+    Tone, card, card_body, card_note, card_row, field_pair, ledger_group, ledger_head, ledger_row,
+    rule_row,
 };
 
 const GROUP_COLUMNS: [f32; 4] = [0.34, 0.20, 0.22, 0.24];
+const DATASET_COLUMNS: [f32; 3] = [0.32, 0.24, 0.44];
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let payload = plan_payload(app);
@@ -30,6 +35,43 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         |ui, _| streaming_contract(ui, &payload),
         |ui, app| retention_contract(ui, app),
     );
+}
+
+/// Retention depths the page offers.
+///
+/// A bounded set rather than free text: the number is a promise about how
+/// much of the reader's work survives, and a typo in a text field is a
+/// promise nobody meant to make.
+const RETENTION_CHOICES: [usize; 5] = [5, 10, 20, 50, 200];
+
+/// How many datasets the retention list names before it summarizes the rest.
+///
+/// A baseline past that point is still listed: one the reader cannot see is
+/// one they cannot release, and a project whose baselines have all scrolled
+/// out of reach can never get back under its limit.
+const DATASETS_LISTED: usize = 6;
+
+/// The retention rules the controls cannot state on their own.
+const RETENTION_NOTE: &str = "A dataset is sealed against the manifest that produced it, so a \
+                              retained result can still be trusted after the plan has moved on. \
+                              Lowering the limit discards the oldest unpinned datasets \
+                              immediately, and raising it never recovers one already discarded.";
+
+/// The rules that mean nothing until there is a dataset to act on.
+const RETENTION_LIST_NOTE: &str = "The highlighted row is the active dataset. Selecting a row \
+                                   pins it as a golden baseline or releases it: a baseline \
+                                   survives the limit, and a released one becomes eligible for \
+                                   the next run to discard. Releasing never destroys the dataset \
+                                   on the spot, so a project can sit over its limit until it runs \
+                                   again.";
+
+/// One retained dataset, as the retention card states it.
+struct RetentionRow {
+    run_id: RunId,
+    dataset: String,
+    analyses: String,
+    pinned: bool,
+    active: bool,
 }
 
 fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
@@ -201,20 +243,87 @@ fn streaming_contract(ui: &mut Ui, payload: &SimulationPlanPayload) {
     );
 }
 
-fn retention_contract(ui: &mut Ui, app: &RSpiceApp) {
-    let retained = app.state.simulation.runs.len();
-    let active = app.state.simulation.active_run().map_or_else(
-        || "none loaded".to_owned(),
-        |run| format!("Run {} · immutable", run.id),
-    );
+fn retention_contract(ui: &mut Ui, app: &mut RSpiceApp) {
+    let simulation = &app.state.simulation;
+    let retained = simulation.runs.len();
+    let limit = simulation.effective_retained_dataset_limit();
+    let pinned = simulation.pinned_run_count();
+    // Pinning can put the limit out of reach entirely. The card states that
+    // rather than a count that reads as a policy still being enforced.
+    let unenforceable = simulation.retention_limit_is_unenforceable();
+    let at_limit = retained >= limit;
+    let active_run_id = simulation.active_run().map(|run| run.run_id);
+    let mut rows: Vec<RetentionRow> = Vec::new();
+    let mut summarized = 0usize;
+    for (index, run) in simulation.runs.iter().enumerate() {
+        let is_pinned = run.retention().is_pinned();
+        if index >= DATASETS_LISTED && !is_pinned {
+            summarized += 1;
+            continue;
+        }
+        rows.push(RetentionRow {
+            run_id: run.run_id,
+            dataset: format!("Run {}", run.id),
+            analyses: run.analyses.len().to_string(),
+            pinned: is_pinned,
+            active: Some(run.run_id) == active_run_id,
+        });
+    }
+    let status = if retained > limit {
+        format!("{retained} of {limit} · {pinned} pinned · over the limit")
+    } else if unenforceable {
+        format!("{retained} of {limit} · {pinned} pinned · the limit no longer holds")
+    } else if pinned > 0 {
+        format!("{retained} of {limit} · {pinned} pinned · never pruned")
+    } else if at_limit {
+        format!("{retained} of {limit} · the next run discards the oldest")
+    } else {
+        format!("{retained} of {limit} retained")
+    };
+    let beyond_limit = if unenforceable {
+        format!("{pinned} pinned · nothing left to discard within the limit of {limit}")
+    } else {
+        "the oldest unpinned dataset is discarded when a new run exceeds it".to_owned()
+    };
+    let note = if rows.is_empty() {
+        RETENTION_NOTE.to_owned()
+    } else {
+        format!("{RETENTION_NOTE} {RETENTION_LIST_NOTE}")
+    };
+    let choices: Vec<String> = RETENTION_CHOICES
+        .iter()
+        .map(|depth| format!("{depth} datasets"))
+        .collect();
+    let selected = format!("{limit} datasets");
+    let mut picked = None;
+    let mut reclassified = None;
     card(
         ui,
         "Retention",
-        Some(("committed datasets are immutable", Tone::Ok)),
+        Some((
+            status.as_str(),
+            if at_limit || unenforceable {
+                Tone::Warn
+            } else {
+                Tone::Ok
+            },
+        )),
         |ui| {
             card_body(ui, |ui| {
-                rule_row(ui, "Retained datasets", &retained.to_string());
-                rule_row(ui, "Active dataset", &active);
+                field_pair(
+                    ui,
+                    ("Datasets kept", &mut |ui: &mut Ui, width: f32| {
+                        picked = select(
+                            ui,
+                            "simulation.save.retention",
+                            "Datasets kept",
+                            &selected,
+                            &choices,
+                            width,
+                        );
+                    }),
+                    None,
+                );
                 rule_row(
                     ui,
                     "Commit granularity",
@@ -225,15 +334,51 @@ fn retention_contract(ui: &mut Ui, app: &RSpiceApp) {
                     "Configuration change",
                     "produces a new dataset · it never rewrites a retained one",
                 );
+                rule_row(ui, "Beyond the limit", &beyond_limit);
             });
-            card_note(
-                ui,
-                "A dataset is sealed against the manifest that produced it. Changing the plan and \
-                 running again produces a second dataset to compare against the first, which is \
-                 why a retained result can still be trusted after the plan has moved on.",
-            );
+            if !rows.is_empty() {
+                ledger_head(ui, &DATASET_COLUMNS, &["Dataset", "Analyses", "Retention"]);
+                for row in &rows {
+                    let response = ledger_row(
+                        ui,
+                        &DATASET_COLUMNS,
+                        &[
+                            (row.dataset.as_str(), Tone::Neutral),
+                            (row.analyses.as_str(), Tone::Neutral),
+                            if row.pinned {
+                                ("golden baseline", Tone::Ok)
+                            } else {
+                                ("pruneable", Tone::Neutral)
+                            },
+                        ],
+                        row.active,
+                    );
+                    if response.clicked() {
+                        reclassified = Some((
+                            row.run_id,
+                            if row.pinned {
+                                RunRetention::Pruneable
+                            } else {
+                                RunRetention::GoldenBaseline
+                            },
+                        ));
+                    }
+                }
+                if summarized > 0 {
+                    ledger_group(ui, &format!("{summarized} older · pruneable · not listed"));
+                }
+            }
+            card_note(ui, &note);
         },
     );
+    if let Some((run_id, retention)) = reclassified {
+        app.state.simulation.set_run_retention(run_id, retention);
+    }
+    if let Some(index) = picked
+        && let Some(depth) = RETENTION_CHOICES.get(index)
+    {
+        app.state.simulation.set_retained_dataset_limit(*depth);
+    }
 }
 
 fn format_bytes(bytes: u64) -> String {

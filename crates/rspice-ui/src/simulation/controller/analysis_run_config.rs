@@ -186,9 +186,9 @@ impl SimulationController {
             probe_instance: pstb_cfg.probe,
             max_harmonics: pstb_cfg.max_harmonics as usize,
             num_multipliers: pstb_cfg.num_multipliers as usize,
-            stability_threshold: 1.0 + 1e-6,
-            detect_subharmonics: true,
-            eigenvalue_tolerance: 1e-10,
+            stability_threshold: pstb_cfg.stability_threshold,
+            detect_subharmonics: pstb_cfg.detect_subharmonics,
+            eigenvalue_tolerance: pstb_cfg.eigenvalue_tolerance,
         })
     }
 
@@ -270,19 +270,33 @@ impl SimulationController {
         sealed_model_sources: &crate::state::model_library::SealedModelExecutionSources,
     ) -> Result<crate::services::simulation_runner::CornerRunConfig, String> {
         use crate::services::simulation_runner::{
-            CornerBaseMode, CornerFrequencySweep, CornerProcess, CornerRunConfig,
+            CornerBaseMode, CornerFrequencySweep, CornerPoint, CornerProcess, CornerRunConfig,
         };
         use crate::simulation::dialog::corner::{CornerBaseAnalysis, ProcessCorner};
 
-        let process_corners: Vec<CornerProcess> = corner_cfg
-            .process_corners
-            .iter()
-            .map(|corner| match corner {
+        fn corner_process(corner: ProcessCorner) -> CornerProcess {
+            match corner {
                 ProcessCorner::TT => CornerProcess::TT,
                 ProcessCorner::SS => CornerProcess::SS,
                 ProcessCorner::FF => CornerProcess::FF,
                 ProcessCorner::SF => CornerProcess::SF,
                 ProcessCorner::FS => CornerProcess::FS,
+            }
+        }
+
+        let process_corners: Vec<CornerProcess> = corner_cfg
+            .process_corners
+            .iter()
+            .copied()
+            .map(corner_process)
+            .collect();
+        let points: Vec<CornerPoint> = corner_cfg
+            .points
+            .iter()
+            .map(|point| CornerPoint {
+                process: corner_process(point.process),
+                voltage: point.voltage,
+                temperature_c: point.temperature_celsius,
             })
             .collect();
         let model_bindings = sealed_model_sources.corner_model_bindings(&process_corners)?;
@@ -347,6 +361,7 @@ impl SimulationController {
             nominal_voltage,
             base_mode,
             model_bindings,
+            points,
         })
     }
 

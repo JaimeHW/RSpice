@@ -211,6 +211,37 @@ pub(super) fn commit_draft(app: &mut RSpiceApp, id: AnalysisInstanceId, draft: A
     }
 }
 
+/// Commit one analysis's departures from the plan's solver policy.
+///
+/// Deliberately the same shape as [`commit_draft`]: a numerical override is a
+/// plan mutation like any other, so it produces a receipt, refreshes the
+/// projections, and invalidates preflight through the one path every editor
+/// uses. A refusal leaves the plan untouched and is reported verbatim, because
+/// the reason names which owner already holds the value.
+pub(super) fn commit_numeric_override(
+    app: &mut RSpiceApp,
+    id: AnalysisInstanceId,
+    record: Option<crate::simulation::plan::AnalysisNumericOverride>,
+) -> Result<(), String> {
+    let result = match app.state.sim_setup.stable_analysis_plan_mut() {
+        Ok(plan) => plan
+            .set_numeric_override(id, record)
+            .map_err(|error| error.to_string()),
+        Err(error) => Err(error),
+    };
+    match result {
+        Ok(receipt) => {
+            refresh_analysis_projections(app);
+            record_receipt(app, &receipt);
+            Ok(())
+        }
+        Err(error) => {
+            record_failure(app, "Edit", &error);
+            Err(error)
+        }
+    }
+}
+
 pub(super) type InsertAnalysisResult = Result<
     (
         AnalysisInstanceId,
@@ -490,7 +521,82 @@ pub(super) fn validate_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstan
     }
 }
 
+/// Retained runs holding a result attributed to this analysis.
+fn retained_runs_for_analysis(app: &RSpiceApp, id: AnalysisInstanceId) -> usize {
+    app.state
+        .simulation
+        .runs
+        .iter()
+        .filter(|run| run.find_analysis_by_source_instance(id).is_some())
+        .count()
+}
+
+/// Labels of the analyses bound to this one as a prerequisite.
+fn analyses_depending_on(app: &RSpiceApp, id: AnalysisInstanceId) -> Vec<String> {
+    app.state
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .map(|plan| {
+            plan.instances()
+                .iter()
+                .filter(|instance| instance.id() != id)
+                .filter(|instance| {
+                    instance
+                        .dependencies()
+                        .iter()
+                        .any(|dependency| dependency.target() == id)
+                })
+                .map(|instance| instance.kind().label().to_owned())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+/// Remove one analysis, stopping first if removal costs something.
+///
+/// The check is deliberately narrow: retained results attributed to this
+/// analysis, or other analyses bound to it. Anything else is removed at once,
+/// because a confirmation with nothing behind it only teaches the reader to
+/// click through the ones that matter.
 pub(super) fn remove_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstanceId) {
+    let retained_runs = retained_runs_for_analysis(app, id);
+    let dependent_analyses = analyses_depending_on(app, id);
+    if retained_runs == 0 && dependent_analyses.is_empty() {
+        commit_analysis_removal(app, id);
+        return;
+    }
+
+    let label = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .and_then(|plan| {
+            plan.instances()
+                .iter()
+                .find(|instance| instance.id() == id)
+                .map(|instance| instance.kind().label().to_owned())
+        })
+        .unwrap_or_else(|| "this analysis".to_owned());
+    app.state
+        .dialogs
+        .analysis_removal_review
+        .open(id, label, retained_runs, dependent_analyses);
+}
+
+/// Apply a removal the reader confirmed in the destructive review.
+///
+/// Called once per frame from the surface, so the modal records an answer
+/// rather than reaching into the plan itself.
+pub(super) fn apply_confirmed_analysis_removal(app: &mut RSpiceApp) {
+    if let Some(id) = app.state.dialogs.analysis_removal_review.take_confirmed() {
+        commit_analysis_removal(app, id);
+    }
+}
+
+/// Perform the removal itself, after any review has been answered.
+fn commit_analysis_removal(app: &mut RSpiceApp, id: AnalysisInstanceId) {
     let prior_run_ids = app
         .state
         .simulation

@@ -91,6 +91,38 @@ impl ExecutionTarget {
     }
 }
 
+/// Whether retention pruning is allowed to discard a run.
+///
+/// A named classification rather than a flag: pruning reads it as a policy
+/// decision, and a golden baseline is a claim about the dataset — this is the
+/// result a regression is signed off against — not a UI preference about
+/// which row to keep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RunRetention {
+    /// Ordinary history. The oldest of these is the first thing the retention
+    /// limit discards.
+    #[default]
+    Pruneable,
+    /// A regression baseline. Retention never discards one, so the reference a
+    /// sign-off is measured against cannot be lost to routine iteration.
+    GoldenBaseline,
+}
+
+impl RunRetention {
+    /// Whether retention must keep this run whatever the limit says.
+    #[must_use]
+    pub const fn is_pinned(&self) -> bool {
+        matches!(self, Self::GoldenBaseline)
+    }
+
+    /// Whether retention may discard this run.
+    #[must_use]
+    pub const fn is_pruneable(&self) -> bool {
+        !self.is_pinned()
+    }
+}
+
 /// A simulation run containing multiple analysis results.
 ///
 /// This represents a single invocation of the simulator, which may contain
@@ -133,6 +165,10 @@ pub struct SimulationRun {
     /// Durable run-level authority. `None` is a transient, unsealed run and
     /// must never be persisted as a legacy classification.
     provenance: Option<SimulationRunProvenance>,
+    /// What retention may do with this run. Private because changing it
+    /// changes what the project's limit is allowed to discard, and that policy
+    /// is applied by the state rather than by whoever holds the run.
+    retention: RunRetention,
     /// Total simulation time in seconds
     pub elapsed_time: f64,
     /// Whether all analyses in this run succeeded
@@ -155,9 +191,24 @@ impl SimulationRun {
             timestamp,
             analyses: Vec::new(),
             provenance: None,
+            retention: RunRetention::Pruneable,
             elapsed_time: 0.0,
             success: true,
         }
+    }
+
+    /// What retention may do with this run.
+    #[must_use]
+    pub fn retention(&self) -> RunRetention {
+        self.retention
+    }
+
+    /// Reclassify the run for retention. Callers inside the state go through
+    /// [`SimulationState::set_run_retention`], which resolves the run by its
+    /// stable identity; project restore uses this directly because it is
+    /// rebuilding the history rather than editing it.
+    pub(crate) fn set_retention(&mut self, retention: RunRetention) {
+        self.retention = retention;
     }
 
     /// Stable execution identity, available for current runs and absent for
