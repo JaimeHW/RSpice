@@ -89,6 +89,18 @@ const SOURCES: &[ComponentPaletteEntry] = &[
         label: "SFFM Voltage Source",
     },
     ComponentPaletteEntry {
+        kind: ComponentType::VoltageSourceAm,
+        label: "AM Voltage Source",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::VoltageSourcePat,
+        label: "Pattern Voltage Source",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::VoltageSourceNoise,
+        label: "Noise Voltage Source",
+    },
+    ComponentPaletteEntry {
         kind: ComponentType::CurrentSource,
         label: "Current Source",
     },
@@ -111,6 +123,18 @@ const SOURCES: &[ComponentPaletteEntry] = &[
     ComponentPaletteEntry {
         kind: ComponentType::CurrentSourceExp,
         label: "Exponential Current Source",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::CurrentSourceSffm,
+        label: "SFFM Current Source",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::CurrentSourceAm,
+        label: "AM Current Source",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::CurrentSourcePat,
+        label: "Pattern Current Source",
     },
     ComponentPaletteEntry {
         kind: ComponentType::CurrentSourceNoise,

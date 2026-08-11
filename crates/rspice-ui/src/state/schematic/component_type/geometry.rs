@@ -79,12 +79,18 @@ impl ComponentType {
             | ComponentType::VoltageSourcePwl
             | ComponentType::VoltageSourceExp
             | ComponentType::VoltageSourceSffm
+            | ComponentType::VoltageSourceAm
+            | ComponentType::VoltageSourcePat
+            | ComponentType::VoltageSourceNoise
             | ComponentType::CurrentSource
             | ComponentType::CurrentSourceAc
             | ComponentType::CurrentSourcePulse
             | ComponentType::CurrentSourceSin
             | ComponentType::CurrentSourcePwl
             | ComponentType::CurrentSourceExp
+            | ComponentType::CurrentSourceSffm
+            | ComponentType::CurrentSourceAm
+            | ComponentType::CurrentSourcePat
             | ComponentType::CurrentSourceNoise
             | ComponentType::BehavioralSource => {
                 &[("+", Point { x: 0, y: -20 }), ("-", Point { x: 0, y: 20 })]
@@ -295,12 +301,18 @@ impl ComponentType {
             | ComponentType::VoltageSourcePwl
             | ComponentType::VoltageSourceExp
             | ComponentType::VoltageSourceSffm
+            | ComponentType::VoltageSourceAm
+            | ComponentType::VoltageSourcePat
+            | ComponentType::VoltageSourceNoise
             | ComponentType::CurrentSource
             | ComponentType::CurrentSourceAc
             | ComponentType::CurrentSourcePulse
             | ComponentType::CurrentSourceSin
             | ComponentType::CurrentSourcePwl
             | ComponentType::CurrentSourceExp
+            | ComponentType::CurrentSourceSffm
+            | ComponentType::CurrentSourceAm
+            | ComponentType::CurrentSourcePat
             | ComponentType::CurrentSourceNoise
             | ComponentType::BehavioralSource => (28, 40),
             ComponentType::Ground => (20, 20),
@@ -377,12 +389,18 @@ mod tests {
         ComponentType::VoltageSourcePwl,
         ComponentType::VoltageSourceExp,
         ComponentType::VoltageSourceSffm,
+        ComponentType::VoltageSourceAm,
+        ComponentType::VoltageSourcePat,
+        ComponentType::VoltageSourceNoise,
         ComponentType::CurrentSource,
         ComponentType::CurrentSourceAc,
         ComponentType::CurrentSourcePulse,
         ComponentType::CurrentSourceSin,
         ComponentType::CurrentSourcePwl,
         ComponentType::CurrentSourceExp,
+        ComponentType::CurrentSourceSffm,
+        ComponentType::CurrentSourceAm,
+        ComponentType::CurrentSourcePat,
         ComponentType::CurrentSourceNoise,
         ComponentType::NpnBjt,
         ComponentType::PnpBjt,

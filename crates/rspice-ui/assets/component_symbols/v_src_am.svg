@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Amplitude-modulated voltage source: carrier under an envelope. Box 28x40, pins +(14,0), -(14,40). -->
+<svg viewBox="0 0 28 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 14,0 V 10" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 14,10 A 10,10 0 0 1 14,30 A 10,10 0 0 1 14,10" fill="none" stroke="#000000" stroke-width="1"/>
+  <path d="M 9,20 Q 10,17.64 11,20 Q 12,24.03 13,20 Q 14,15.33 15,20 Q 16,24.03 17,20 Q 18,17.64 19,20" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 14,30 V 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

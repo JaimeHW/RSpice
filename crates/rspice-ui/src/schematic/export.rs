@@ -373,7 +373,10 @@ fn write_component(
         | ComponentType::VoltageSourceSin
         | ComponentType::VoltageSourcePwl
         | ComponentType::VoltageSourceExp
-        | ComponentType::VoltageSourceSffm => write_vsource_symbol(svg, cx, cy, config),
+        | ComponentType::VoltageSourceSffm
+        | ComponentType::VoltageSourceAm
+        | ComponentType::VoltageSourcePat
+        | ComponentType::VoltageSourceNoise => write_vsource_symbol(svg, cx, cy, config),
         ComponentType::RfPort => write_vsource_symbol(svg, cx, cy, config),
         ComponentType::Ground => write_ground_symbol(svg, cx, cy, config),
         ComponentType::Port => write_port_symbol(
@@ -407,6 +410,9 @@ fn write_component(
         | ComponentType::CurrentSourceSin
         | ComponentType::CurrentSourcePwl
         | ComponentType::CurrentSourceExp
+        | ComponentType::CurrentSourceSffm
+        | ComponentType::CurrentSourceAm
+        | ComponentType::CurrentSourcePat
         | ComponentType::CurrentSourceNoise => write_current_source_symbol(svg, cx, cy, config),
         ComponentType::BehavioralSource => write_behavioral_source_symbol(svg, cx, cy, config),
         // JFET symbols (MESFET exports share the JFET family art)

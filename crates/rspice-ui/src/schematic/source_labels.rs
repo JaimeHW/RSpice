@@ -78,8 +78,14 @@ fn format_source_label(component: &Component) -> String {
         }
         ComponentType::VoltageSourceExp => format_exp_label(&params, primary, true),
         ComponentType::CurrentSourceExp => format_exp_label(&params, primary, false),
-        ComponentType::VoltageSourceSffm => format_sffm_label(&params, primary),
-        ComponentType::CurrentSourceNoise => format_noise_label(&params, primary),
+        ComponentType::VoltageSourceSffm => format_sffm_label(&params, primary, true),
+        ComponentType::CurrentSourceSffm => format_sffm_label(&params, primary, false),
+        ComponentType::VoltageSourceAm => format_am_label(&params, primary, true),
+        ComponentType::CurrentSourceAm => format_am_label(&params, primary, false),
+        ComponentType::VoltageSourcePat => format_pat_label(&params, primary, true),
+        ComponentType::CurrentSourcePat => format_pat_label(&params, primary, false),
+        ComponentType::VoltageSourceNoise => format_noise_label(&params, primary, true),
+        ComponentType::CurrentSourceNoise => format_noise_label(&params, primary, false),
         _ => primary_or_default(component.value.as_str(), "0").to_string(),
     }
 }
@@ -266,7 +272,8 @@ fn format_exp_label(params: &HashMap<String, String>, primary: &str, is_voltage:
     .join("\n")
 }
 
-fn format_sffm_label(params: &HashMap<String, String>, primary: &str) -> String {
+fn format_sffm_label(params: &HashMap<String, String>, primary: &str, is_voltage: bool) -> String {
+    let unit = if is_voltage { "V" } else { "A" };
     let offset = get_param_with_aliases(params, &["vo"], primary, "0");
     let amp = get_param_with_aliases(params, &["va"], "", "1");
     let fc = get_param_with_aliases(params, &["fc"], "", "1k");
@@ -275,42 +282,123 @@ fn format_sffm_label(params: &HashMap<String, String>, primary: &str) -> String 
 
     let mut lines = vec![
         "SFFM".to_string(),
-        format!("Amp: {} V", amp),
+        format!("Amp: {} {}", amp, unit),
         format!("Fc: {}", fc),
         format!("Fs: {}", fs),
         format!("Mdi: {}", mdi),
     ];
 
     if !is_default_value(offset, "0") {
-        lines.push(format!("Offset: {} V", offset));
+        lines.push(format!("Offset: {} {}", offset, unit));
+    }
+    if let Some(td) = get_param_optional(params, &["td"])
+        && !is_default_value(td, "0")
+    {
+        lines.push(format!("TD: {}", td));
     }
 
     lines.join("\n")
 }
 
-fn format_noise_label(params: &HashMap<String, String>, primary: &str) -> String {
-    let dc = get_param_with_aliases(params, &["dc"], primary, "0");
-    let noise_type = get_param_with_aliases(params, &["noise_type"], "", "white");
-    let noise_val = get_param_with_aliases(params, &["noiseval"], "", "1e-24");
+/// AM(VO VMO VMA FM FC TD PHASEM PHASEC): the carrier sits at FC and the
+/// envelope swings by VMA about VMO at FM, so the label leads with the two
+/// frequencies an engineer scans a schematic for.
+fn format_am_label(params: &HashMap<String, String>, primary: &str, is_voltage: bool) -> String {
+    let unit = if is_voltage { "V" } else { "A" };
+    let offset = get_param_with_aliases(params, &["vo"], primary, "0");
+    let mod_offset = get_param_with_aliases(params, &["vmo"], "", "0");
+    let mod_amplitude = get_param_with_aliases(params, &["vma"], "", "1");
+    let fm = get_param_with_aliases(params, &["fm"], "", "1k");
+    let fc = get_param_with_aliases(params, &["fc"], "", "1Meg");
 
     let mut lines = vec![
-        "NOISE".to_string(),
-        format!("Type: {}", noise_type),
-        format!("Density: {} A^2/Hz", noise_val),
+        "AM".to_string(),
+        format!("Mod amp: {} {}", mod_amplitude, unit),
+        format!("Fc: {}", fc),
+        format!("Fm: {}", fm),
     ];
 
+    if !is_default_value(mod_offset, "0") {
+        lines.push(format!("Mod offset: {} {}", mod_offset, unit));
+    }
+    if !is_default_value(offset, "0") {
+        lines.push(format!("Offset: {} {}", offset, unit));
+    }
+    if let Some(td) = get_param_optional(params, &["td"])
+        && !is_default_value(td, "0")
+    {
+        lines.push(format!("TD: {}", td));
+    }
+
+    lines.join("\n")
+}
+
+/// PAT(VHI VLO TD TR TF TSAMPLE DATA [R=n]): the bit string is the point of
+/// the device, so it leads — truncated, because a long pattern would push the
+/// rest of the annotation off the sheet.
+fn format_pat_label(params: &HashMap<String, String>, primary: &str, is_voltage: bool) -> String {
+    let unit = if is_voltage { "V" } else { "A" };
+    let high = get_param_with_aliases(params, &["vhi"], primary, "1");
+    let low = get_param_with_aliases(params, &["vlo"], "", "0");
+    let sample = get_param_with_aliases(params, &["tsample"], "", "1u");
+    let data = get_param_with_aliases(params, &["data"], "", "b0101");
+
+    let mut lines = vec!["PAT".to_string(), format!("Data: {}", truncate_bits(data))];
+    lines.push(format!("High: {} {}", high, unit));
+    lines.push(format!("Low: {} {}", low, unit));
+    lines.push(format!("Tsample: {}", sample));
+
+    if let Some(td) = get_param_optional(params, &["td"])
+        && !is_default_value(td, "0")
+    {
+        lines.push(format!("TD: {}", td));
+    }
+    if let Some(repeat) = get_param_optional(params, &["repeat_count", "r"])
+        && !is_default_value(repeat, "0")
+    {
+        lines.push(format!("R: {}", repeat));
+    }
+
+    lines.join("\n")
+}
+
+/// A pattern can be hundreds of bits; the schematic annotation shows the head
+/// and the length rather than letting one device overrun the whole sheet.
+fn truncate_bits(data: &str) -> String {
+    const VISIBLE: usize = 12;
+    let count = data.chars().count();
+    if count <= VISIBLE {
+        return data.to_string();
+    }
+    let head: String = data.chars().take(VISIBLE).collect();
+    format!("{head}… ({count})")
+}
+
+/// TRNOISE(NA NT NALPHA NAMP): white noise of RMS amplitude NA sampled every
+/// NT, plus optional 1/f^NALPHA noise of amplitude NAMP. The flicker pair only
+/// appears once it is armed, because NAMP=0 disables it outright.
+fn format_noise_label(params: &HashMap<String, String>, primary: &str, is_voltage: bool) -> String {
+    let unit = if is_voltage { "V" } else { "A" };
+    let na = get_param_with_aliases(params, &["na"], primary, "1n");
+    let nt = get_param_with_aliases(params, &["nt"], "", "1u");
+    let namp = get_param_with_aliases(params, &["namp"], "", "0");
+    let dc = get_param_with_aliases(params, &["dc"], "", "0");
+
+    let mut lines = vec![
+        "TRNOISE".to_string(),
+        format!("NA: {} {}", na, unit),
+        format!("NT: {}", nt),
+    ];
+
+    if !is_default_value(namp, "0") {
+        lines.push(format!("NAMP: {} {}", namp, unit));
+        lines.push(format!(
+            "NALPHA: {}",
+            get_param_with_aliases(params, &["nalpha"], "", "0")
+        ));
+    }
     if !is_default_value(dc, "0") {
-        lines.push(format!("DC: {} A", dc));
-    }
-    if let Some(kf) = get_param_optional(params, &["kf"])
-        && !is_default_value(kf, "0")
-    {
-        lines.push(format!("KF: {}", kf));
-    }
-    if let Some(af) = get_param_optional(params, &["af"])
-        && !is_default_value(af, "1")
-    {
-        lines.push(format!("AF: {}", af));
+        lines.push(format!("DC: {} {}", dc, unit));
     }
 
     lines.join("\n")
@@ -439,6 +527,7 @@ fn looks_like_placeholder(value: &str) -> bool {
             | "acmag"
             | "ac_mag"
             | "pwl_data"
-            | "noiseval"
+            | "na"
+            | "vhi"
     )
 }

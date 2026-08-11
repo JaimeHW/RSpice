@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Amplitude-modulated current source: carrier under an envelope. Box 28x40, pins +(14,0), -(14,40). -->
+<svg viewBox="0 0 28 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 14,0 V 10" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 14,10 A 10,10 0 0 1 14,30 A 10,10 0 0 1 14,10" fill="none" stroke="#000000" stroke-width="1"/>
+  <path d="M 9.5,14.6 Q 10.4,13.05 11.3,14.6 Q 12.2,17.15 13.1,14.6 Q 14,11.67 14.9,14.6 Q 15.8,17.15 16.7,14.6 Q 17.6,13.05 18.5,14.6" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 14,19 V 24" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 14,27.2 L 11.6,22.6 H 16.4 Z" fill="#000000" stroke="none"/>
+  <path d="M 14,30 V 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

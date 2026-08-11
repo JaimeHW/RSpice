@@ -150,6 +150,21 @@ impl ComponentType {
                 Some("v_src_sffm.svg"),
                 Native,
             ),
+            VoltageSourceAm => (
+                "rspice.native.voltage_source.am",
+                Some("v_src_am.svg"),
+                Native,
+            ),
+            VoltageSourcePat => (
+                "rspice.native.voltage_source.pat",
+                Some("v_src_pat.svg"),
+                Native,
+            ),
+            VoltageSourceNoise => (
+                "rspice.native.voltage_source.noise",
+                Some("v_src_noise.svg"),
+                Native,
+            ),
             CurrentSourceAc => (
                 "rspice.native.current_source.ac",
                 Some("i_src_ac.svg"),
@@ -173,6 +188,21 @@ impl ComponentType {
             CurrentSourceExp => (
                 "rspice.native.current_source.exp",
                 Some("i_src_exp.svg"),
+                Native,
+            ),
+            CurrentSourceSffm => (
+                "rspice.native.current_source.sffm",
+                Some("i_src_sffm.svg"),
+                Native,
+            ),
+            CurrentSourceAm => (
+                "rspice.native.current_source.am",
+                Some("i_src_am.svg"),
+                Native,
+            ),
+            CurrentSourcePat => (
+                "rspice.native.current_source.pat",
+                Some("i_src_pat.svg"),
                 Native,
             ),
             CurrentSourceNoise => (

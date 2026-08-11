@@ -79,6 +79,12 @@ pub enum ComponentType {
     VoltageSourceExp,
     /// Single-Frequency FM Voltage Source (SPICE prefix: V)
     VoltageSourceSffm,
+    /// Amplitude-Modulated Voltage Source (SPICE prefix: V)
+    VoltageSourceAm,
+    /// Digital Pattern Voltage Source (SPICE prefix: V)
+    VoltageSourcePat,
+    /// Noise Voltage Source (SPICE prefix: V)
+    VoltageSourceNoise,
     /// AC Current Source (SPICE prefix: I)
     CurrentSourceAc,
     /// Pulse Current Source (SPICE prefix: I)
@@ -89,6 +95,12 @@ pub enum ComponentType {
     CurrentSourcePwl,
     /// Exponential Current Source (SPICE prefix: I)
     CurrentSourceExp,
+    /// Single-Frequency FM Current Source (SPICE prefix: I)
+    CurrentSourceSffm,
+    /// Amplitude-Modulated Current Source (SPICE prefix: I)
+    CurrentSourceAm,
+    /// Digital Pattern Current Source (SPICE prefix: I)
+    CurrentSourcePat,
     /// Noise Current Source (SPICE prefix: I)
     CurrentSourceNoise,
     /// Voltage-Controlled Voltage Source (SPICE prefix: E)
@@ -175,7 +187,7 @@ impl ComponentType {
     /// Exhaustive component-family inventory used by schema, editor, and
     /// netlist contract tests. Adding a new enum variant must update this
     /// list, making missing commercial editor coverage visible immediately.
-    pub const ALL: [Self; 74] = [
+    pub const ALL: [Self; 80] = [
         Self::Resistor,
         Self::Capacitor,
         Self::Inductor,
@@ -208,11 +220,17 @@ impl ComponentType {
         Self::VoltageSourcePwl,
         Self::VoltageSourceExp,
         Self::VoltageSourceSffm,
+        Self::VoltageSourceAm,
+        Self::VoltageSourcePat,
+        Self::VoltageSourceNoise,
         Self::CurrentSourceAc,
         Self::CurrentSourcePulse,
         Self::CurrentSourceSin,
         Self::CurrentSourcePwl,
         Self::CurrentSourceExp,
+        Self::CurrentSourceSffm,
+        Self::CurrentSourceAm,
+        Self::CurrentSourcePat,
         Self::CurrentSourceNoise,
         Self::Vcvs,
         Self::Vccs,

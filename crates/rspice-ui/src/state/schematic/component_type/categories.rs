@@ -56,11 +56,17 @@ impl ComponentType {
                 | ComponentType::VoltageSourcePwl
                 | ComponentType::VoltageSourceExp
                 | ComponentType::VoltageSourceSffm
+                | ComponentType::VoltageSourceAm
+                | ComponentType::VoltageSourcePat
+                | ComponentType::VoltageSourceNoise
                 | ComponentType::CurrentSourceAc
                 | ComponentType::CurrentSourcePulse
                 | ComponentType::CurrentSourceSin
                 | ComponentType::CurrentSourcePwl
                 | ComponentType::CurrentSourceExp
+                | ComponentType::CurrentSourceSffm
+                | ComponentType::CurrentSourceAm
+                | ComponentType::CurrentSourcePat
                 | ComponentType::CurrentSourceNoise
                 | ComponentType::Vcvs
                 | ComponentType::Vccs

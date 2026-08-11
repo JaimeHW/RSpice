@@ -105,6 +105,9 @@ fn extract_drc_data_with_terminals_and_junctions(
                     | ComponentType::VoltageSourceSin
                     | ComponentType::VoltageSourceExp
                     | ComponentType::VoltageSourceSffm
+                    | ComponentType::VoltageSourceAm
+                    | ComponentType::VoltageSourcePat
+                    | ComponentType::VoltageSourceNoise
                     | ComponentType::VoltageSourcePwl
             ) && pin_name == "+"
                 || declared_output_pins.contains(&pin_name);
@@ -126,6 +129,9 @@ fn extract_drc_data_with_terminals_and_junctions(
                 | ComponentType::VoltageSourceSin
                 | ComponentType::VoltageSourceExp
                 | ComponentType::VoltageSourceSffm
+                | ComponentType::VoltageSourceAm
+                | ComponentType::VoltageSourcePat
+                | ComponentType::VoltageSourceNoise
                 | ComponentType::VoltageSourcePwl
         );
 
@@ -136,6 +142,9 @@ fn extract_drc_data_with_terminals_and_junctions(
                 | ComponentType::CurrentSourcePulse
                 | ComponentType::CurrentSourceSin
                 | ComponentType::CurrentSourceExp
+                | ComponentType::CurrentSourceSffm
+                | ComponentType::CurrentSourceAm
+                | ComponentType::CurrentSourcePat
                 | ComponentType::CurrentSourceNoise
                 | ComponentType::CurrentSourcePwl
         );

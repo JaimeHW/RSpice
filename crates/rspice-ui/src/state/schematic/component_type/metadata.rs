@@ -37,13 +37,19 @@ impl ComponentType {
             | ComponentType::VoltageSourceSin
             | ComponentType::VoltageSourcePwl
             | ComponentType::VoltageSourceExp
-            | ComponentType::VoltageSourceSffm => "V",
+            | ComponentType::VoltageSourceSffm
+            | ComponentType::VoltageSourceAm
+            | ComponentType::VoltageSourcePat
+            | ComponentType::VoltageSourceNoise => "V",
             ComponentType::CurrentSource
             | ComponentType::CurrentSourceAc
             | ComponentType::CurrentSourcePulse
             | ComponentType::CurrentSourceSin
             | ComponentType::CurrentSourcePwl
             | ComponentType::CurrentSourceExp
+            | ComponentType::CurrentSourceSffm
+            | ComponentType::CurrentSourceAm
+            | ComponentType::CurrentSourcePat
             | ComponentType::CurrentSourceNoise => "I",
             ComponentType::Vcvs | ComponentType::OpAmp => "E",
             ComponentType::Vccs => "G",
@@ -152,11 +158,17 @@ impl ComponentType {
             ComponentType::VoltageSourcePwl => "V PWL",
             ComponentType::VoltageSourceExp => "V Exp",
             ComponentType::VoltageSourceSffm => "V SFFM",
+            ComponentType::VoltageSourceAm => "V AM",
+            ComponentType::VoltageSourcePat => "V Pattern",
+            ComponentType::VoltageSourceNoise => "V Noise",
             ComponentType::CurrentSourceAc => "I AC",
             ComponentType::CurrentSourcePulse => "I Pulse",
             ComponentType::CurrentSourceSin => "I Sin",
             ComponentType::CurrentSourcePwl => "I PWL",
             ComponentType::CurrentSourceExp => "I Exp",
+            ComponentType::CurrentSourceSffm => "I SFFM",
+            ComponentType::CurrentSourceAm => "I AM",
+            ComponentType::CurrentSourcePat => "I Pattern",
             ComponentType::CurrentSourceNoise => "I Noise",
             ComponentType::Vcvs => "VCVS (E)",
             ComponentType::OpAmp => "Op-Amp",
