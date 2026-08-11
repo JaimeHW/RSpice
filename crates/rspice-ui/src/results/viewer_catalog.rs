@@ -90,6 +90,47 @@ impl ViewerArt {
     }
 }
 
+/// What the product manifest promises about a viewer for *this* release.
+///
+/// The catalog publishes the whole designed set, most of which no build draws
+/// yet. Without this, a view waiting on its own release and a view waiting on
+/// the user's data are one undifferentiated "unavailable", and a reader cannot
+/// tell which of the two they are looking at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ViewerReleaseClass {
+    /// In scope for this release. [`VIEWER_DOCUMENTS`] entries carrying this
+    /// must have a renderer — a workspace sheet answers for every one of them.
+    ReleaseTarget,
+    /// Designed and published, scheduled after this release.
+    ReleasePlanned,
+    /// Designed for setup and review before it is separately qualified.
+    Preview,
+    /// Designed, and explicitly out of release scope until reactivated.
+    Deferred,
+    /// Satisfied first by a qualified external producer, not by this engine.
+    QualifiedExternalFirst,
+}
+
+impl ViewerReleaseClass {
+    /// Why a view with this classification cannot be opened, in the voice the
+    /// rest of the product uses for a capability the binary does not carry.
+    /// Never phrased as something the reader could correct by producing data.
+    #[must_use]
+    pub const fn unavailable_reason(self) -> &'static str {
+        match self {
+            // Reached only if a release-target view lost its renderer, which
+            // `every_release_target_viewer_document_ships_a_renderer` forbids.
+            Self::ReleaseTarget => "This view is unavailable in this build",
+            Self::ReleasePlanned => "Planned for a release after this one",
+            Self::Preview => "Designed for preview and not yet qualified to draw",
+            Self::Deferred => "Deferred: out of release scope until reactivated",
+            Self::QualifiedExternalFirst => {
+                "Drawn from a qualified external producer this build does not carry"
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ViewerDocumentDefinition {
     pub id: &'static str,
@@ -103,6 +144,8 @@ pub struct ViewerDocumentDefinition {
     pub analysis_ids: &'static [&'static str],
     /// Qualified producer capability required by externally owned viewers.
     pub external_capability: Option<&'static str>,
+    /// Release scope from the product manifest's capability record.
+    pub release: ViewerReleaseClass,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -168,6 +211,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Wave,
         analysis_ids: TRAN_DC,
         external_capability: None,
+        release: ViewerReleaseClass::ReleaseTarget,
     },
     ViewerDocumentDefinition {
         id: "viewer-bode",
@@ -179,6 +223,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Bode,
         analysis_ids: AC_STB_NOISE,
         external_capability: None,
+        release: ViewerReleaseClass::ReleaseTarget,
     },
     ViewerDocumentDefinition {
         id: "viewer-spectrum",
@@ -190,6 +235,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Spectrum,
         analysis_ids: FOURIER_TRAN_HB_PSS,
         external_capability: None,
+        release: ViewerReleaseClass::ReleaseTarget,
     },
     ViewerDocumentDefinition {
         id: "viewer-phase-noise",
@@ -201,6 +247,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Phase,
         analysis_ids: PNOISE_QPNOISE,
         external_capability: None,
+        release: ViewerReleaseClass::ReleaseTarget,
     },
     ViewerDocumentDefinition {
         id: "viewer-spectrogram",
@@ -212,6 +259,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Spectrum,
         analysis_ids: TRAN_FOURIER_HB_ENVELOPE,
         external_capability: None,
+        release: ViewerReleaseClass::ReleasePlanned,
     },
     ViewerDocumentDefinition {
         id: "viewer-optical-spectrum",
@@ -223,6 +271,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Spectrum,
         analysis_ids: &[],
         external_capability: Some("photonics"),
+        release: ViewerReleaseClass::Deferred,
     },
     ViewerDocumentDefinition {
         id: "viewer-optical-transfer",
@@ -234,6 +283,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Bode,
         analysis_ids: &[],
         external_capability: Some("photonics"),
+        release: ViewerReleaseClass::Deferred,
     },
     ViewerDocumentDefinition {
         id: "viewer-optical-mode",
@@ -245,6 +295,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Field,
         analysis_ids: &[],
         external_capability: Some("photonics"),
+        release: ViewerReleaseClass::Deferred,
     },
     ViewerDocumentDefinition {
         id: "viewer-smith",
@@ -256,6 +307,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Smith,
         analysis_ids: SP_HBSP_PSP,
         external_capability: None,
+        release: ViewerReleaseClass::ReleaseTarget,
     },
     ViewerDocumentDefinition {
         id: "viewer-polar",
@@ -267,6 +319,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Polar,
         analysis_ids: AC_SP_HB,
         external_capability: None,
+        release: ViewerReleaseClass::ReleasePlanned,
     },
     ViewerDocumentDefinition {
         id: "viewer-load-pull",
@@ -278,6 +331,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Contour,
         analysis_ids: &["hb"],
         external_capability: None,
+        release: ViewerReleaseClass::Preview,
     },
     ViewerDocumentDefinition {
         id: "viewer-wireless",
@@ -289,6 +343,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Wireless,
         analysis_ids: &["envelope"],
         external_capability: None,
+        release: ViewerReleaseClass::Preview,
     },
     ViewerDocumentDefinition {
         id: "viewer-network-quality",
@@ -300,6 +355,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Bode,
         analysis_ids: SP_HBSP_PSP_HBNOISE,
         external_capability: None,
+        release: ViewerReleaseClass::ReleasePlanned,
     },
     ViewerDocumentDefinition {
         id: "viewer-mixed-mode-network",
@@ -311,6 +367,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Table,
         analysis_ids: SP_HBSP_PSP,
         external_capability: None,
+        release: ViewerReleaseClass::ReleasePlanned,
     },
     ViewerDocumentDefinition {
         id: "viewer-constellation",
@@ -322,6 +379,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Wireless,
         analysis_ids: &["envelope"],
         external_capability: None,
+        release: ViewerReleaseClass::Preview,
     },
     ViewerDocumentDefinition {
         id: "viewer-ccdf",
@@ -333,6 +391,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Histogram,
         analysis_ids: ENVELOPE_TRAN,
         external_capability: None,
+        release: ViewerReleaseClass::ReleasePlanned,
     },
     ViewerDocumentDefinition {
         id: "viewer-tdr",
@@ -344,6 +403,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Wave,
         analysis_ids: SP_TRAN,
         external_capability: None,
+        release: ViewerReleaseClass::ReleasePlanned,
     },
     ViewerDocumentDefinition {
         id: "viewer-transfer-function",
@@ -355,6 +415,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Table,
         analysis_ids: &["xf"],
         external_capability: None,
+        release: ViewerReleaseClass::ReleaseTarget,
     },
     ViewerDocumentDefinition {
         id: "viewer-table",
@@ -366,6 +427,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Table,
         analysis_ids: &[],
         external_capability: None,
+        release: ViewerReleaseClass::ReleaseTarget,
     },
     ViewerDocumentDefinition {
         id: "viewer-histogram",
@@ -377,6 +439,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Histogram,
         analysis_ids: MC_CORNER,
         external_capability: None,
+        release: ViewerReleaseClass::ReleaseTarget,
     },
     ViewerDocumentDefinition {
         id: "viewer-scatter",
@@ -388,6 +451,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Scatter,
         analysis_ids: &["mc"],
         external_capability: None,
+        release: ViewerReleaseClass::ReleasePlanned,
     },
     ViewerDocumentDefinition {
         id: "viewer-contour",
@@ -399,6 +463,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Contour,
         analysis_ids: DC_MC_CORNER,
         external_capability: None,
+        release: ViewerReleaseClass::ReleasePlanned,
     },
     ViewerDocumentDefinition {
         id: "viewer-box-violin",
@@ -410,6 +475,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Histogram,
         analysis_ids: MC_CORNER,
         external_capability: None,
+        release: ViewerReleaseClass::ReleasePlanned,
     },
     ViewerDocumentDefinition {
         id: "viewer-wafer-map",
@@ -421,6 +487,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Contour,
         analysis_ids: &["mc"],
         external_capability: None,
+        release: ViewerReleaseClass::ReleasePlanned,
     },
     ViewerDocumentDefinition {
         id: "viewer-parallel-coordinates",
@@ -432,6 +499,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Scatter,
         analysis_ids: &["mc"],
         external_capability: None,
+        release: ViewerReleaseClass::ReleasePlanned,
     },
     ViewerDocumentDefinition {
         id: "viewer-scatter-matrix",
@@ -443,6 +511,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Scatter,
         analysis_ids: &["mc"],
         external_capability: None,
+        release: ViewerReleaseClass::ReleasePlanned,
     },
     ViewerDocumentDefinition {
         id: "viewer-contribution",
@@ -454,6 +523,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Histogram,
         analysis_ids: SENS_DCMATCH,
         external_capability: None,
+        release: ViewerReleaseClass::ReleaseTarget,
     },
     ViewerDocumentDefinition {
         id: "eye-viewer",
@@ -465,6 +535,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Eye,
         analysis_ids: &["tran"],
         external_capability: None,
+        release: ViewerReleaseClass::ReleaseTarget,
     },
     ViewerDocumentDefinition {
         id: "bathtub-viewer",
@@ -476,6 +547,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Bathtub,
         analysis_ids: &["tran"],
         external_capability: None,
+        release: ViewerReleaseClass::ReleasePlanned,
     },
     ViewerDocumentDefinition {
         id: "margin-viewer",
@@ -487,6 +559,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Margin,
         analysis_ids: TRAN_CORNER,
         external_capability: None,
+        release: ViewerReleaseClass::ReleasePlanned,
     },
     ViewerDocumentDefinition {
         id: "dynamic-droop-viewer",
@@ -498,6 +571,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Wave,
         analysis_ids: &["tran"],
         external_capability: None,
+        release: ViewerReleaseClass::ReleasePlanned,
     },
     ViewerDocumentDefinition {
         id: "viewer-pz",
@@ -509,6 +583,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::PoleZero,
         analysis_ids: &["pz"],
         external_capability: None,
+        release: ViewerReleaseClass::ReleaseTarget,
     },
     ViewerDocumentDefinition {
         id: "field-viewer-3d",
@@ -520,6 +595,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Field,
         analysis_ids: &[],
         external_capability: Some("em"),
+        release: ViewerReleaseClass::QualifiedExternalFirst,
     },
     ViewerDocumentDefinition {
         id: "field-viewer-current",
@@ -531,6 +607,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Field,
         analysis_ids: &[],
         external_capability: Some("em-ir"),
+        release: ViewerReleaseClass::QualifiedExternalFirst,
     },
     ViewerDocumentDefinition {
         id: "field-viewer-voltage",
@@ -542,6 +619,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Field,
         analysis_ids: &[],
         external_capability: Some("em-ir"),
+        release: ViewerReleaseClass::QualifiedExternalFirst,
     },
     ViewerDocumentDefinition {
         id: "field-viewer-thermal",
@@ -553,6 +631,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Thermal,
         analysis_ids: &[],
         external_capability: Some("electrothermal"),
+        release: ViewerReleaseClass::QualifiedExternalFirst,
     },
     ViewerDocumentDefinition {
         id: "field-viewer-mesh",
@@ -564,6 +643,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Mesh,
         analysis_ids: &[],
         external_capability: Some("em"),
+        release: ViewerReleaseClass::QualifiedExternalFirst,
     },
     ViewerDocumentDefinition {
         id: "field-viewer-probe",
@@ -575,6 +655,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Wave,
         analysis_ids: &[],
         external_capability: Some("em"),
+        release: ViewerReleaseClass::QualifiedExternalFirst,
     },
 ];
 

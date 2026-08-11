@@ -1049,11 +1049,6 @@ pub(super) fn elide_text_to_width(
     "…".to_owned()
 }
 
-/// Shown for every catalog viewer this build ships no renderer for. The
-/// catalog publishes the whole designed set; the phrasing matches how the rest
-/// of the product reports a capability the binary does not carry.
-pub(super) const VIEWER_UNAVAILABLE_IN_THIS_BUILD: &str = "This view is unavailable in this build";
-
 pub(super) fn resolved_viewer_availability(
     state: &AppState,
     definition: &ViewerDocumentDefinition,
@@ -1062,11 +1057,12 @@ pub(super) fn resolved_viewer_availability(
     // Answered first, because it answers a different question. Everything below
     // says the retained dataset cannot feed this view, and names what would:
     // run that analysis, retain that capability, and the row lights up. A view
-    // this build cannot draw never lights up for any dataset, so telling the
-    // user to go and produce photonics data would send them after something
-    // that would not help. 28 of the catalog's 39 rows land here.
+    // no sheet draws never lights up for any dataset, so telling the reader to
+    // go and produce photonics data would send them after something that could
+    // not help. The manifest's own release scope says which it is — planned,
+    // preview, deferred, or owned by an external producer.
     let Some(viewer) = ResultViewer::from_viewer_document_id(definition.id) else {
-        return Err(VIEWER_UNAVAILABLE_IN_THIS_BUILD.to_owned());
+        return Err(definition.release.unavailable_reason().to_owned());
     };
     match viewer_compatibility(definition.id, capabilities) {
         ViewerCompatibility::Compatible => {}

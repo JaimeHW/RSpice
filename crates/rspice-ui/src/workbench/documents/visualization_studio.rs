@@ -2852,14 +2852,40 @@ mod integrity_scan_tests {
         assert_eq!(app.state.workbench.visualization_studio.dock, None);
     }
 
-    /// The viewer library publishes every designed view, and most of them this
-    /// build cannot draw. The row a user cannot click has to say which kind of
-    /// unavailable it is: "requires X analysis data" is an instruction, and the
-    /// user can act on it, so a view that will never resolve for any dataset
-    /// must not borrow that phrasing — nor state it as a missing registration.
+    /// What "feature complete" means for the Results workspace, stated as a
+    /// gate rather than a claim: a sheet answers for every view the product
+    /// manifest puts in this release's scope. Publish a release-target row with
+    /// no sheet behind it and this fails.
     #[test]
-    fn every_catalog_viewer_is_either_drawable_or_says_it_is_not_in_this_build() {
-        use sections::{VIEWER_UNAVAILABLE_IN_THIS_BUILD, resolved_viewer_availability};
+    fn every_release_target_viewer_document_ships_a_renderer() {
+        use crate::results::viewer_catalog::ViewerReleaseClass;
+
+        let mut in_scope = 0;
+        for definition in VIEWER_DOCUMENTS {
+            if definition.release != ViewerReleaseClass::ReleaseTarget {
+                continue;
+            }
+            in_scope += 1;
+            assert!(
+                ResultViewer::from_viewer_document_id(definition.id).is_some(),
+                "{} is in this release's scope but no sheet draws it",
+                definition.id
+            );
+        }
+        assert!(
+            in_scope > 0,
+            "the catalog declares no view in release scope"
+        );
+    }
+
+    /// The viewer library publishes every designed view, and most of them this
+    /// build does not draw. The row a reader cannot click has to say which kind
+    /// of unavailable it is: "requires X analysis data" is an instruction they
+    /// can act on, so a view no sheet draws must not borrow that phrasing — it
+    /// reports the manifest's own release scope instead.
+    #[test]
+    fn a_view_no_sheet_draws_reports_its_release_scope_not_a_data_requirement() {
+        use sections::resolved_viewer_availability;
 
         let app = app_with_exact_source();
         let analysis_ids = available_analysis_ids(&app.state);
@@ -2878,7 +2904,7 @@ mod integrity_scan_tests {
             match availability {
                 Ok(_) => assert!(ships_a_renderer, "{} drew without a sheet", definition.id),
                 Err(reason) => assert_eq!(
-                    reason == VIEWER_UNAVAILABLE_IN_THIS_BUILD,
+                    reason == definition.release.unavailable_reason(),
                     !ships_a_renderer,
                     "{} reports the wrong kind of unavailable: {reason}",
                     definition.id
