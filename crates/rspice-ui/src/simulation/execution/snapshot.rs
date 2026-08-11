@@ -354,6 +354,10 @@ pub(in crate::simulation) struct PreparedTask {
     /// Exact per-point source after process-model binding. `None` selects the
     /// run-level executable source verbatim.
     executable_netlist_override: Option<String>,
+    /// The PVT point this task was expanded to. Only per-point expansion sets
+    /// it; a task that runs once for the whole declared space has no point,
+    /// and naming one would attribute its results to a corner it never solved.
+    pvt_point: Option<crate::state::AnalysisResultPvtPoint>,
 }
 
 impl PreparedTask {
@@ -383,6 +387,7 @@ impl PreparedTask {
             saved_output_contracts: Vec::new(),
             touchstone_export: None,
             executable_netlist_override: None,
+            pvt_point: None,
         }
     }
 
@@ -441,6 +446,13 @@ impl PreparedTask {
 
     pub(in crate::simulation) const fn queued_analysis(&self) -> &QueuedAnalysis {
         &self.task
+    }
+
+    #[cfg(test)]
+    pub(in crate::simulation) const fn pvt_point(
+        &self,
+    ) -> Option<&crate::state::AnalysisResultPvtPoint> {
+        self.pvt_point.as_ref()
     }
 
     fn payload_digest(&self) -> ContentDigest {
@@ -566,6 +578,7 @@ pub(in crate::simulation) struct AuthorizedTaskDispatch {
     executable_netlist: Arc<str>,
     project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     touchstone_export: TouchstoneExportPolicy,
+    pvt_point: Option<crate::state::AnalysisResultPvtPoint>,
 }
 
 /// A prepared task paired with the exact batch-local artifacts required by
@@ -670,6 +683,14 @@ impl AuthorizedTaskDispatch {
 
     pub(in crate::simulation) fn dependencies(&self) -> &[AnalysisInstanceId] {
         &self.dependencies
+    }
+
+    /// The PVT point this task was expanded to, or `None` when the task is not
+    /// point-specific.
+    pub(in crate::simulation) const fn pvt_point(
+        &self,
+    ) -> Option<&crate::state::AnalysisResultPvtPoint> {
+        self.pvt_point.as_ref()
     }
 
     pub(in crate::simulation) fn resolve_dependency_artifacts(
@@ -876,8 +897,13 @@ impl PreparedRunSnapshot {
             parts.reference_process,
             parts.reference_temperature_celsius,
         )?;
-        parts.tasks =
-            expand_operating_point_tasks(parts.tasks, &pvt_points, &parts.executable_netlist)?;
+        parts.tasks = expand_operating_point_tasks(
+            parts.tasks,
+            &pvt_points,
+            &parts.executable_netlist,
+            parts.reference_process,
+            parts.reference_temperature_celsius,
+        )?;
 
         // A per-analysis solver override reaches the engine exactly the way the
         // plan's own policy does: as an `.OPTIONS` card in the deck. Splicing
@@ -1322,6 +1348,7 @@ impl PreparedRunSnapshot {
                         .unwrap_or_else(|| Arc::clone(&executable_netlist)),
                     project_veriloga_runtimes: project_veriloga_runtimes.clone(),
                     touchstone_export,
+                    pvt_point: prepared.pvt_point,
                 }
             })
             .collect();
@@ -1408,10 +1435,37 @@ fn validate_prepared_task_integrity(
     Ok(())
 }
 
+/// Whether a point is the run's own reference point.
+///
+/// Exact comparison, not a tolerance: the reference process and temperature
+/// are the same values the axes were resolved from, so a point that sits on
+/// the reference carries its bits unchanged. A supply axis is nominal only at
+/// the resolved nominal supply; a run with no supply axis left the deck's own
+/// supply standing, which is nominal by construction.
+fn point_is_nominal(
+    point: &PreparedPvtPoint,
+    nominal_supply_voltage: Option<f64>,
+    reference_process: ProcessCorner,
+    reference_temperature_celsius: f64,
+) -> bool {
+    if point.process != reference_process
+        || point.temperature_celsius != reference_temperature_celsius
+    {
+        return false;
+    }
+    match (point.voltage, nominal_supply_voltage) {
+        (None, _) => true,
+        (Some(voltage), Some(nominal)) => voltage == nominal,
+        (Some(_), None) => false,
+    }
+}
+
 fn expand_operating_point_tasks(
     tasks: Vec<PreparedTask>,
     pvt_points: &[PreparedPvtPoint],
     executable_netlist: &str,
+    reference_process: ProcessCorner,
+    reference_temperature_celsius: f64,
 ) -> Result<Vec<PreparedTask>, PreparationError> {
     use crate::simulation::AnalysisConfig;
     use crate::simulation::dialog::{OpRunPointContext, OpTemperatureMode};
@@ -1533,6 +1587,30 @@ fn expand_operating_point_tasks(
                 supply_voltage: point.voltage,
                 nominal_supply_voltage,
             };
+            point_task.pvt_point = Some(
+                crate::state::AnalysisResultPvtPoint::new(
+                    point.process.short_name(),
+                    point.voltage,
+                    point.temperature_celsius,
+                    point.corner_contract.as_ref().map(corner_contract_digest),
+                    point_is_nominal(
+                        point,
+                        nominal_supply_voltage,
+                        reference_process,
+                        reference_temperature_celsius,
+                    ),
+                )
+                .map_err(|error| {
+                    PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!(
+                            "Operating-point run point {}/{} cannot be attributed: {error}",
+                            index + 1,
+                            pvt_points.len()
+                        ),
+                    )
+                })?,
+            );
             point_task.executable_netlist_override = source_override;
             point_task.task.spec = operating_point_spec(&config);
             point_task.task.config = Some(AnalysisConfig::DcOp(config));

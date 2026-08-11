@@ -27,9 +27,9 @@ use crate::simulation::plan::AnalysisKind;
 use crate::state::workspace::validate_cell_view_name_segment;
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
-    AnalysisResultSourceDomain, AnalysisType, CanonicalCellViewOwnerKey, CellViewRef, DcOpResult,
-    ExecutionTarget, LibraryManager, NoiseContributorRow, NoiseSummary, OperatingPointValue,
-    PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
+    AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType, CanonicalCellViewOwnerKey,
+    CellViewRef, DcOpResult, ExecutionTarget, LibraryManager, NoiseContributorRow, NoiseSummary,
+    OperatingPointValue, PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
     PreparedSourceCheckReceipt, ProjectWorkspace, RunRetention, SavedOutputMaterializationStatus,
     SavedOutputReceipt, SimulationRun, SimulationRunLifecycle, SimulationRunProvenance,
     SimulationState, ViewType, WaveformData, canonical_cell_view_owner_key,

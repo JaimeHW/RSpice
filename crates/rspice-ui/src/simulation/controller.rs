@@ -508,7 +508,9 @@ impl SimulationController {
                 candidate.source_revision(),
                 candidate.snapshot_digest(),
                 candidate.dependencies().to_vec(),
-            ) {
+            )
+            .map(|provenance| provenance.with_pvt_point(candidate.pvt_point().cloned()))
+            {
                 Ok(provenance) => provenance,
                 Err(error) => {
                     let internal = format!(
@@ -563,7 +565,9 @@ impl SimulationController {
             next_analysis.source_revision(),
             next_analysis.snapshot_digest(),
             next_analysis.dependencies().to_vec(),
-        ) {
+        )
+        .map(|provenance| provenance.with_pvt_point(next_analysis.pvt_point().cloned()))
+        {
             Ok(provenance) => provenance,
             Err(error) => {
                 let message = format!(

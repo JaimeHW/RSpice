@@ -765,6 +765,7 @@ fn signed_margin_is_positive_inside_and_negative_outside_bounds() {
         min: Some(10.0),
         max: Some(20.0),
         unit: "dB".to_owned(),
+        scope: crate::state::SpecPointScope::AllPoints,
     };
 
     assert_eq!(signed_margin(&spec, 15.0), 5.0);

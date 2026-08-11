@@ -3775,6 +3775,7 @@ mod tests {
             min: Some(0.5),
             max: Some(1.5),
             unit: "V".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
         }
     }
 

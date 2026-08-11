@@ -2333,6 +2333,7 @@ mod integrity_scan_tests {
             min: Some(-2.0),
             max: Some(5.0),
             unit: "V".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
         });
 
         assert_eq!(
@@ -2353,6 +2354,7 @@ mod integrity_scan_tests {
             min: Some(-2.0),
             max: Some(5.0),
             unit: "V".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
         });
         app.state.workbench.visualization_studio.autoscale =
             VisualizationAutoscale::SpecificationBounds;

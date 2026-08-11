@@ -144,6 +144,7 @@ impl SpecDraft {
             min: bound(&self.min, "min")?,
             max: bound(&self.max, "max")?,
             unit: self.unit.trim().to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
         }))
     }
 }
@@ -1331,6 +1332,7 @@ mod tests {
             min: Some(10.0),
             max: Some(20.0),
             unit: "dB".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
         };
         assert_eq!(signed_margin(&two_sided, 12.0), Some(2.0));
         assert_eq!(signed_margin(&two_sided, 22.5), Some(-2.5));
@@ -1381,6 +1383,7 @@ mod tests {
             min: Some(0.0),
             max: Some(1.0),
             unit: "V/V".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
         };
 
         let row = result_row(&run, "gain".to_owned(), Some(&spec));
@@ -1428,6 +1431,7 @@ mod tests {
             min: Some(1.0),
             max: None,
             unit: "V/V".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
         };
 
         let rows = result_rows(&run, &[spec]);
@@ -1457,6 +1461,7 @@ mod tests {
             min: Some(0.0),
             max: Some(3.0),
             unit: "V/V".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
         };
 
         let row = result_row(&run, "gain".to_owned(), Some(&spec));
@@ -1484,6 +1489,7 @@ mod tests {
                 min: None,
                 max: Some(2.0),
                 unit: "V".to_owned(),
+                scope: crate::state::SpecPointScope::AllPoints,
             },
             SpecEntry {
                 measurement: "alpha".to_owned(),
@@ -1491,6 +1497,7 @@ mod tests {
                 min: None,
                 max: Some(4.0),
                 unit: "V".to_owned(),
+                scope: crate::state::SpecPointScope::AllPoints,
             },
         ];
 
@@ -1515,6 +1522,7 @@ mod tests {
             min: Some(1.0),
             max: Some(2.0),
             unit: "V/V".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
         };
         let row = result_row(&run, "gain".to_owned(), Some(&spec));
 

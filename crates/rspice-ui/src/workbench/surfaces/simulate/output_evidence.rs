@@ -29,13 +29,15 @@ pub(super) fn selected_output_dataset(
 pub(super) struct OutputMeasurementEvidence {
     pub(super) value: f64,
     pub(super) measurement_passed: bool,
-    /// How many attributed measurements of this name the dataset holds.
+    /// How many attributed measurements of this name the dataset holds
+    /// **within the specification's own scope**.
     ///
-    /// One means the reported value is the dataset's only answer. More than
-    /// one means the dataset swept — corners, temperatures, trials — and this
-    /// value is a single point out of that set, not a summary of it. The page
-    /// must say which, because a limit judged against one arbitrary point of a
-    /// sweep is not a verdict on the sweep.
+    /// One means the reported value is the scope's only answer. More than one
+    /// means the scope swept — corners, temperatures, trials — and this value
+    /// is a single point out of that set, not a summary of it. The page must
+    /// say which, because a limit judged against one arbitrary point of a
+    /// sweep is not a verdict on the sweep. Counting the whole dataset instead
+    /// would overstate what a narrowed specification was judged against.
     pub(super) retained_measurements: usize,
 }
 
@@ -59,6 +61,10 @@ impl OutputMeasurementEvidence {
 /// Only analyses that succeeded and carry provenance are considered: an
 /// unattributed result cannot be traced to the configuration that produced it,
 /// so it is not evidence.
+///
+/// The specification's own point scope narrows the candidate set before the
+/// worst of it is chosen, so a limit that claims to speak for one corner is
+/// answered only by measurements the executor attributed to that corner.
 pub(super) fn measurement_in_output_dataset(
     run: &crate::state::SimulationRun,
     spec: &crate::state::SpecEntry,
@@ -68,6 +74,14 @@ pub(super) fn measurement_in_output_dataset(
         .analyses
         .iter()
         .filter(|analysis| analysis.success && analysis.provenance.is_some())
+        .filter(|analysis| {
+            spec.scope.admits(
+                analysis
+                    .provenance
+                    .as_ref()
+                    .and_then(crate::state::AnalysisResultProvenance::pvt_point),
+            )
+        })
         .flat_map(|analysis| analysis.measurements.iter())
         .filter(|measurement| measurement.name.eq_ignore_ascii_case(name))
         .filter_map(|measurement| {

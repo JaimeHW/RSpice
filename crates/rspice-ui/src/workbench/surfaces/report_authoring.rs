@@ -5088,6 +5088,7 @@ mod tests {
                 min: Some(10.0),
                 max: None,
                 unit: "V/V".to_owned(),
+                scope: crate::state::SpecPointScope::AllPoints,
             },
             crate::state::SpecEntry {
                 measurement: "bandwidth".to_owned(),
@@ -5095,6 +5096,7 @@ mod tests {
                 min: Some(1_000.0),
                 max: None,
                 unit: "Hz".to_owned(),
+                scope: crate::state::SpecPointScope::AllPoints,
             },
         ];
         let checks = crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Ac, "AC")

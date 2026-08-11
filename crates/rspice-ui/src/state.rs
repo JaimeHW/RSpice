@@ -98,7 +98,7 @@ pub use property_types::{
 pub use schematic::*;
 pub use simulation::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
-    AnalysisResultSourceDomain, AnalysisType, ComplexResultValue,
+    AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType, ComplexResultValue,
     DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult, DigitalEventPointEvidence,
     DigitalEventTraceEvidence, ExecutionTarget, MonteCarloVariableMetadata, NoiseContributorRow,
     NoiseSummary, OperatingPointAccuracyEvidence, OperatingPointAnnotationEvidence,
@@ -139,7 +139,7 @@ pub use workspace::{
     RegressionComparisonWindow, RegressionTargetKind, RegressionTargetSelector,
     RegressionToleranceRule, ResolvedHierarchyBinding, SavedOutput, SavedOutputCompatibility,
     SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
-    SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry,
+    SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry, SpecPointScope,
 };
 
 #[cfg(test)]

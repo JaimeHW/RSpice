@@ -4159,6 +4159,7 @@ mod tests {
             min: Some(1.0),
             max: None,
             unit: "V/V".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
         });
         app.state.simulation.active_run_idx = None;
 
@@ -4191,6 +4192,7 @@ mod tests {
             min: Some(41.0),
             max: None,
             unit: "V/V".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
         });
         let mut measurement = rspice_core::MeasureResult::success("gain", 40.0);
         measurement.passed = false;

@@ -20,6 +20,7 @@ fn spec(measurement: &str, min: Option<f64>, max: Option<f64>) -> crate::state::
         min,
         max,
         unit: String::new(),
+        scope: crate::state::SpecPointScope::AllPoints,
     }
 }
 
@@ -1447,5 +1448,181 @@ fn editor_anchor_ignores_user_scroll_but_tracks_layout_displacement() {
     assert_eq!(
         editor_anchor_scroll_delta(before, after_layout_change),
         26.0
+    );
+}
+
+/// An analysis attributed to one exact PVT point.
+fn at_point(
+    analysis: AnalysisResult,
+    process: &str,
+    temperature_celsius: f64,
+    nominal: bool,
+) -> AnalysisResult {
+    analysis.with_provenance(
+        crate::state::AnalysisResultProvenance::new(
+            AnalysisInstanceId::new(),
+            ObjectRevision::INITIAL,
+            ContentDigest::from_bytes([0x5a; 32]),
+            Vec::new(),
+        )
+        .expect("valid test provenance")
+        .with_pvt_point(Some(
+            crate::state::AnalysisResultPvtPoint::new(
+                process,
+                Some(1.8),
+                temperature_celsius,
+                None,
+                nominal,
+            )
+            .expect("valid attributed point"),
+        )),
+    )
+}
+
+fn scoped(
+    measurement: &str,
+    min: Option<f64>,
+    scope: crate::state::SpecPointScope,
+) -> crate::state::SpecEntry {
+    crate::state::SpecEntry {
+        scope,
+        ..spec(measurement, min, None)
+    }
+}
+
+/// The whole point of the scope: a limit that claims to hold at nominal is
+/// answered by the nominal point, and the same limit taken across the run set
+/// is answered by its worst point. If these two agreed, the scope would be
+/// decoration.
+#[test]
+fn a_specification_scoped_to_nominal_ignores_a_failing_off_nominal_point() {
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(at_point(
+        AnalysisResult::new(1, AnalysisType::DcOp, "TT 27C")
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 12.0)]),
+        "TT",
+        27.0,
+        true,
+    ));
+    run.add_analysis(at_point(
+        AnalysisResult::new(2, AnalysisType::DcOp, "SS 125C")
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 4.0)]),
+        "SS",
+        125.0,
+        false,
+    ));
+
+    let nominal = scoped("gain", Some(10.0), crate::state::SpecPointScope::Nominal);
+    let evidence = measurement_in_output_dataset(&run, &nominal).expect("nominal evidence");
+    assert_eq!(evidence.value, 12.0);
+    assert!(nominal.passes(evidence.value));
+    assert!(
+        evidence.is_complete_coverage(),
+        "one point in scope is the scope's whole answer"
+    );
+
+    let everywhere = scoped("gain", Some(10.0), crate::state::SpecPointScope::AllPoints);
+    let evidence = measurement_in_output_dataset(&run, &everywhere).expect("run-set evidence");
+    assert_eq!(evidence.value, 4.0);
+    assert!(!everywhere.passes(evidence.value));
+
+    let slow = scoped(
+        "gain",
+        Some(10.0),
+        crate::state::SpecPointScope::SelectedCorners {
+            corners: vec!["ss".to_owned()],
+        },
+    );
+    let evidence = measurement_in_output_dataset(&run, &slow).expect("corner evidence");
+    assert_eq!(
+        evidence.value, 4.0,
+        "the corner scope is matched case-insensitively against the attributed process"
+    );
+}
+
+/// Coverage is what the page prints beside the value, so counting points the
+/// specification was never judged against would overstate the verdict.
+#[test]
+fn coverage_counts_only_the_points_inside_the_specification_scope() {
+    let mut run = SimulationRun::new(1);
+    for (id, process, value) in [
+        (1u64, "TT", 12.0),
+        (2, "SS", 11.0),
+        (3, "SS", 10.5),
+        (4, "FF", 13.0),
+    ] {
+        run.add_analysis(at_point(
+            AnalysisResult::new(id, AnalysisType::DcOp, process)
+                .with_measurements(vec![rspice_core::MeasureResult::success("gain", value)]),
+            process,
+            27.0,
+            id == 1,
+        ));
+    }
+
+    let all = measurement_in_output_dataset(
+        &run,
+        &scoped("gain", Some(10.0), crate::state::SpecPointScope::AllPoints),
+    )
+    .expect("evidence");
+    assert_eq!(all.retained_measurements, 4);
+
+    let slow = measurement_in_output_dataset(
+        &run,
+        &scoped(
+            "gain",
+            Some(10.0),
+            crate::state::SpecPointScope::SelectedCorners {
+                corners: vec!["SS".to_owned()],
+            },
+        ),
+    )
+    .expect("evidence");
+    assert_eq!(
+        slow.retained_measurements, 2,
+        "only the two SS points were judged"
+    );
+    assert_eq!(slow.value, 10.5, "the worst of the two SS points");
+}
+
+/// A result the executor could not attribute is not proof about a corner. It
+/// still answers an unscoped limit, because that limit asked about every point
+/// the dataset holds.
+#[test]
+fn an_unattributed_measurement_never_answers_a_narrowed_specification() {
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(attributed(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 4.0)]),
+    ));
+
+    assert_eq!(
+        measurement_in_output_dataset(
+            &run,
+            &scoped("gain", Some(10.0), crate::state::SpecPointScope::Nominal),
+        ),
+        None,
+        "an unattributed result must not be read as the nominal point"
+    );
+    assert_eq!(
+        measurement_in_output_dataset(
+            &run,
+            &scoped(
+                "gain",
+                Some(10.0),
+                crate::state::SpecPointScope::SelectedCorners {
+                    corners: vec!["TT".to_owned()],
+                },
+            ),
+        ),
+        None
+    );
+    assert!(
+        measurement_in_output_dataset(
+            &run,
+            &scoped("gain", Some(10.0), crate::state::SpecPointScope::AllPoints),
+        )
+        .is_some(),
+        "an unscoped limit still reads every retained point"
     );
 }

@@ -1109,6 +1109,7 @@ mod tests {
             min: None,
             max: Some(2.5e-3),
             unit: "s".to_string(),
+            scope: crate::state::SpecPointScope::AllPoints,
         };
         let published = publication_measurement(&measure, Some(&spec), 1);
         assert_eq!(published.passed, Some(true));
