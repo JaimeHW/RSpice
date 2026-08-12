@@ -546,6 +546,10 @@ impl RSpiceApp {
         #[cfg(target_arch = "wasm32")]
         crate::workbench::workflows::netlist_workflow::poll_browser_netlist_import(&mut self.state);
         #[cfg(target_arch = "wasm32")]
+        crate::workbench::workflows::netlist_workflow::poll_browser_dependency_relink(
+            &mut self.state,
+        );
+        #[cfg(target_arch = "wasm32")]
         crate::workbench::workflows::result_import_workflow::poll_browser_result_dataset_import(
             &mut self.state,
         );
