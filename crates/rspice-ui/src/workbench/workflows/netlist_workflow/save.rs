@@ -3,6 +3,7 @@
 //! Generated artifacts are exported through their own immutable-artifact
 //! workflow and can never be promoted by a save.
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::external_change::stage_external_netlist_change;
 use super::import::sha256;
 use super::*;
