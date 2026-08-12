@@ -171,32 +171,15 @@ pub fn find_in_source(
     }))
 }
 
-/// Return every non-overlapping match in source order for match-count and
-/// exact-line result lists. The regex engine advances zero-width matches on
-/// UTF-8 boundaries, so this operation cannot stall on empty expressions.
-pub fn find_all_in_source(
-    source: &str,
-    query: &str,
-    options: FindOptions,
-) -> Result<Vec<FindMatch>, FindError> {
-    validate_request(source, query, 0)?;
-    Ok(candidate_ranges(source, query, options)?
-        .into_iter()
-        .map(|byte_range| {
-            let (line, column) = line_column(source, byte_range.start);
-            FindMatch {
-                byte_range,
-                line,
-                column,
-                wrapped: false,
-            }
-        })
-        .collect())
-}
-
-/// Return at most `limit` non-overlapping matches and report whether more
-/// exist. The extra sentinel match is discarded, bounding result storage to
-/// `limit` even for dense literals and zero-width regular expressions.
+/// Return at most `limit` non-overlapping matches in source order and report
+/// whether more exist. The extra sentinel match is discarded, bounding result
+/// storage to `limit` even for dense literals and zero-width regular
+/// expressions. The regex engine advances zero-width matches on UTF-8
+/// boundaries, so this operation cannot stall on empty expressions.
+///
+/// There is deliberately no unbounded twin. A flat deck answers a one-letter
+/// query a hundred and fifty thousand times, and a surface that asked for all
+/// of them got a result set it could neither hold nor show.
 pub fn find_all_in_source_bounded(
     source: &str,
     query: &str,
@@ -207,11 +190,12 @@ pub fn find_all_in_source_bounded(
     let mut candidates = candidate_ranges_bounded(source, query, options, limit.saturating_add(1))?;
     let truncated = candidates.len() > limit;
     candidates.truncate(limit);
+    let mut cursor = SourceCursor::new(source);
     Ok(BoundedFindMatches {
         matches: candidates
             .into_iter()
             .map(|byte_range| {
-                let (line, column) = line_column(source, byte_range.start);
+                let (line, column) = cursor.line_column(byte_range.start);
                 FindMatch {
                     byte_range,
                     line,
@@ -434,48 +418,73 @@ fn case_insensitive_ranges(source: &str, query: &str) -> Vec<Range<usize>> {
     case_insensitive_ranges_bounded(source, query, usize::MAX, false)
 }
 
+/// Non-overlapping case-insensitive matches in source order.
+///
+/// The source is folded a character at a time as the scan reaches it. Folding
+/// it up front costs a second copy of the deck plus a boundary table sixteen
+/// bytes wide per character — around fifty megabytes for a three-megabyte
+/// netlist, allocated on every frame the find surface is open, which is not a
+/// bound at all.
 fn case_insensitive_ranges_bounded(
     source: &str,
     query: &str,
     limit: usize,
     whole_word: bool,
 ) -> Vec<Range<usize>> {
-    let (folded_source, boundaries) = lowercase_with_boundaries(source);
     let folded_query = query.to_lowercase();
-    if folded_query.is_empty() {
+    if folded_query.is_empty() || limit == 0 {
         return Vec::new();
     }
 
-    folded_source
-        .match_indices(&folded_query)
-        .filter_map(|(start, value)| {
-            let end = start + value.len();
-            let original_start = boundaries
-                .binary_search_by_key(&start, |(folded, _)| *folded)
-                .ok()
-                .map(|index| boundaries[index].1)?;
-            let original_end = boundaries
-                .binary_search_by_key(&end, |(folded, _)| *folded)
-                .ok()
-                .map(|index| boundaries[index].1)?;
-            Some(original_start..original_end)
-        })
-        .filter(|range| !whole_word || is_whole_word(source, range))
-        .take(limit)
-        .collect()
+    let next_character =
+        |start: usize| start + source[start..].chars().next().map_or(1, char::len_utf8);
+    let mut found = Vec::new();
+    let mut start = 0;
+    while start < source.len() {
+        let Some(end) = folded_match_end(source, start, &folded_query) else {
+            start = next_character(start);
+            continue;
+        };
+        let range = start..end;
+        // Resuming at the end of a match is what keeps the results
+        // non-overlapping, including when the whole-word filter rejects it.
+        start = if end > start {
+            end
+        } else {
+            next_character(start)
+        };
+        if whole_word && !is_whole_word(source, &range) {
+            continue;
+        }
+        found.push(range);
+        if found.len() == limit {
+            break;
+        }
+    }
+    found
 }
 
-/// Return folded text plus every legal `(folded byte, original byte)` source
-/// character boundary, including the terminal boundary.
-fn lowercase_with_boundaries(source: &str) -> (String, Vec<(usize, usize)>) {
-    let mut folded = String::new();
-    let mut boundaries = Vec::with_capacity(source.chars().count() + 1);
-    for (original_offset, ch) in source.char_indices() {
-        boundaries.push((folded.len(), original_offset));
-        folded.extend(ch.to_lowercase());
+/// Where the folded query ends inside `source` when matched at `start`, or
+/// `None` when it does not match there.
+///
+/// Both ends must fall on source character boundaries: a query that would
+/// match only part of what one character folds to has not matched a character
+/// the source contains.
+fn folded_match_end(source: &str, start: usize, folded_query: &str) -> Option<usize> {
+    let mut wanted = folded_query.chars();
+    let mut consumed = start;
+    for character in source[start..].chars() {
+        if wanted.as_str().is_empty() {
+            break;
+        }
+        for folded in character.to_lowercase() {
+            if wanted.next() != Some(folded) {
+                return None;
+            }
+        }
+        consumed += character.len_utf8();
     }
-    boundaries.push((folded.len(), source.len()));
-    (folded, boundaries)
+    wanted.as_str().is_empty().then_some(consumed)
 }
 
 fn is_whole_word(source: &str, range: &Range<usize>) -> bool {
@@ -488,12 +497,63 @@ fn is_word_character(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '_'
 }
 
+/// Maps byte offsets to one-based line and column in a single forward pass.
+///
+/// Deriving a coordinate from its own prefix costs the whole prefix, so a
+/// result set costs the source once per match: a dense query over a large deck
+/// stopped being a search and became a hang. Matches arrive in source order,
+/// so the walk resumes where the previous one stopped.
+struct SourceCursor<'a> {
+    source: &'a str,
+    /// Byte offset the walk has reached.
+    offset: usize,
+    /// One-based line containing `offset`.
+    line: usize,
+    /// Byte offset of the first character of `line`.
+    line_start: usize,
+    /// Characters between `line_start` and `offset`.
+    characters: usize,
+}
+
+impl<'a> SourceCursor<'a> {
+    const fn new(source: &'a str) -> Self {
+        Self {
+            source,
+            offset: 0,
+            line: 1,
+            line_start: 0,
+            characters: 0,
+        }
+    }
+
+    /// One-based line and column of `offset`, which must be a character
+    /// boundary. An offset behind the walk is still answered exactly; it just
+    /// costs a rewind, so an out-of-order producer stays correct.
+    fn line_column(&mut self, offset: usize) -> (usize, usize) {
+        if offset < self.offset {
+            *self = Self::new(self.source);
+        }
+        for (index, byte) in self.source.as_bytes()[self.offset..offset]
+            .iter()
+            .enumerate()
+        {
+            if *byte == b'\n' {
+                self.line += 1;
+                self.line_start = self.offset + index + 1;
+                self.characters = 0;
+            } else if byte & 0xC0 != 0x80 {
+                // Continuation bytes belong to a character already counted.
+                self.characters += 1;
+            }
+        }
+        self.offset = offset;
+        (self.line, self.characters + 1)
+    }
+}
+
+#[cfg(test)]
 fn line_column(source: &str, offset: usize) -> (usize, usize) {
-    let prefix = &source[..offset];
-    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
-    let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
-    let column = source[line_start..offset].chars().count() + 1;
-    (line, column)
+    SourceCursor::new(source).line_column(offset)
 }
 
 #[cfg(test)]
@@ -709,32 +769,120 @@ mod tests {
     #[test]
     fn find_all_returns_source_order_lines_and_safe_zero_width_matches() {
         let source = "μ\nR1 μ 0 1k\nR2 μ 0 2k\n";
-        let matches =
-            find_all_in_source(source, "μ", FindOptions::default()).expect("literal matches");
+        let found = find_all_in_source_bounded(source, "μ", FindOptions::default(), 16)
+            .expect("literal matches");
         assert_eq!(
-            matches
+            found
+                .matches()
                 .iter()
                 .map(|found| (found.line(), found.column()))
                 .collect::<Vec<_>>(),
             vec![(1, 1), (2, 4), (3, 4)]
         );
-        assert!(matches.iter().all(|found| !found.wrapped()));
+        assert!(!found.truncated());
+        assert!(found.matches().iter().all(|found| !found.wrapped()));
 
-        let zero_width = find_all_in_source(
+        let zero_width = find_all_in_source_bounded(
             "μΔ",
             r"(?:)",
             FindOptions {
                 regular_expression: true,
                 ..FindOptions::default()
             },
+            16,
         )
         .expect("zero-width matches");
         assert_eq!(
             zero_width
+                .matches()
                 .iter()
                 .map(FindMatch::byte_range)
                 .collect::<Vec<_>>(),
             vec![0..0, 2..2, 4..4]
+        );
+    }
+
+    /// A result set walks the source once instead of once per match, which is
+    /// the difference between a search and a hang on a large deck. The
+    /// coordinate it reports has to be the one the source states at every
+    /// boundary, and a producer that hands back an earlier offset has to get
+    /// the same answer as one that does not.
+    #[test]
+    fn source_coordinates_survive_one_forward_pass_and_a_rewind() {
+        fn stated(source: &str, offset: usize) -> (usize, usize) {
+            let prefix = &source[..offset];
+            let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
+            (
+                prefix.bytes().filter(|byte| *byte == b'\n').count() + 1,
+                source[line_start..offset].chars().count() + 1,
+            )
+        }
+
+        let source = "μαβ head\nsecond card\n\n.param Δ = 2\n";
+        let boundaries = (0..=source.len())
+            .filter(|offset| source.is_char_boundary(*offset))
+            .collect::<Vec<_>>();
+
+        let mut forward = SourceCursor::new(source);
+        for offset in &boundaries {
+            assert_eq!(forward.line_column(*offset), stated(source, *offset));
+        }
+        let mut backward = SourceCursor::new(source);
+        for offset in boundaries.iter().rev() {
+            assert_eq!(backward.line_column(*offset), stated(source, *offset));
+        }
+    }
+
+    /// A one-character query against a three-megabyte deck.
+    ///
+    /// This matched a hundred and fifty thousand times and took the better
+    /// part of a minute, on every frame the find surface was open, because
+    /// each match derived its line by counting newlines from the start of the
+    /// deck. Both spellings of the search are gated: case folding used to
+    /// build a second copy of the source and a boundary table sixteen bytes
+    /// wide per character before it looked at anything.
+    #[test]
+    fn a_dense_query_over_a_large_deck_is_bounded_in_both_time_and_results() {
+        let mut source = String::new();
+        for card in 0..100_000 {
+            source.push_str(&format!("R{card} n{card} n{} 1k\n", card + 1));
+        }
+
+        for match_case in [true, false] {
+            let options = FindOptions {
+                match_case,
+                ..FindOptions::default()
+            };
+            let started = crate::time_compat::Instant::now();
+            let found =
+                find_all_in_source_bounded(&source, "1", options, 500).expect("valid search");
+            let elapsed = started.elapsed();
+
+            assert_eq!(found.matches().len(), 500);
+            assert!(found.truncated(), "the deck holds far more than 500");
+            assert!(
+                found
+                    .matches()
+                    .windows(2)
+                    .all(|pair| pair[0].line() <= pair[1].line()),
+                "matches must stay in source order"
+            );
+            assert!(
+                elapsed < std::time::Duration::from_millis(100),
+                "match_case {match_case} took {elapsed:?}"
+            );
+        }
+
+        // A query that matches nothing still has to read the deck exactly once.
+        let started = crate::time_compat::Instant::now();
+        let missing = find_all_in_source_bounded(&source, "zzz", FindOptions::default(), 500)
+            .expect("valid search");
+        let elapsed = started.elapsed();
+        assert!(missing.matches().is_empty());
+        assert!(!missing.truncated());
+        assert!(
+            elapsed < std::time::Duration::from_millis(500),
+            "a full scan took {elapsed:?}"
         );
     }
 }

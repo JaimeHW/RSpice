@@ -253,6 +253,82 @@ impl NetlistOutline {
     }
 }
 
+/// One exact source, its outline, and the offsets that let a caller read any
+/// card back by line.
+///
+/// Parsing a deck costs the deck. The navigator projects the outline on every
+/// frame and materializes a card for every declaration it draws, so both are
+/// done once per change here rather than once per frame at the call site.
+/// Nothing is stored that cannot be derived from `source`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct NetlistSourceIndex {
+    source: String,
+    /// Byte offset of each line, one entry per line `str::lines` would yield.
+    line_starts: Vec<usize>,
+    outline: NetlistOutline,
+}
+
+impl NetlistSourceIndex {
+    #[must_use]
+    pub fn parse(source: &str) -> Self {
+        let mut line_starts = vec![0usize];
+        for (offset, byte) in source.bytes().enumerate() {
+            if byte == b'\n' {
+                line_starts.push(offset + 1);
+            }
+        }
+        // `str::lines` yields nothing after a terminating newline, and nothing
+        // at all for empty text.
+        if source.is_empty() {
+            line_starts.clear();
+        } else if source.ends_with('\n') {
+            line_starts.pop();
+        }
+        Self {
+            source: source.to_owned(),
+            line_starts,
+            outline: NetlistOutline::parse(source),
+        }
+    }
+
+    /// Whether this index still describes `source`, which is the only thing
+    /// that makes it usable. A byte comparison cannot go stale behind a writer
+    /// that forgets to bump a revision counter.
+    #[must_use]
+    pub fn describes(&self, source: &str) -> bool {
+        self.source == source
+    }
+
+    #[must_use]
+    pub const fn outline(&self) -> &NetlistOutline {
+        &self.outline
+    }
+
+    #[must_use]
+    pub fn line_count(&self) -> usize {
+        self.line_starts.len()
+    }
+
+    /// The card at a one-based line, exactly as `str::lines` would yield it.
+    #[must_use]
+    pub fn card(&self, line: usize) -> &str {
+        let Some(start) = line
+            .checked_sub(1)
+            .and_then(|index| self.line_starts.get(index))
+        else {
+            return "";
+        };
+        let end = self
+            .line_starts
+            .get(line)
+            .copied()
+            .unwrap_or(self.source.len());
+        let card = &self.source[*start..end];
+        let card = card.strip_suffix('\n').unwrap_or(card);
+        card.strip_suffix('\r').unwrap_or(card)
+    }
+}
+
 /// Direct source include/library card.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct IncludeDirective {

@@ -789,19 +789,6 @@ impl AutomationExecutionState {
     }
 }
 
-/// The exact project, bundle, revision, closure, and path an editor buffer was
-/// taken from. It seals `source_files::replace_automation_editor_file`, which
-/// is itself `#[cfg(test)]`, so this identity is compiled with it.
-#[cfg(test)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CodeSourceEditorBufferIdentity {
-    pub(crate) project_id: crate::product::ProjectId,
-    pub(crate) bundle_id: crate::state::ProjectSourceId,
-    pub(crate) bundle_revision: u64,
-    pub(crate) closure_digest: crate::product::ContentDigest,
-    pub(crate) path: std::sync::Arc<str>,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct CodeWorkspaceRuntimeState {
     pub page: CodeWorkspacePage,

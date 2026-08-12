@@ -32,8 +32,9 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         return;
     }
     let root_label = active_netlist_artifact_name(&app.state);
-    let projection = NetlistNavigatorProjection::from_source(
-        &app.state.simulation.netlist_content,
+    let index = crate::workbench::documents::netlist_document::visible_source_index(&mut app.state);
+    let projection = NetlistNavigatorProjection::from_index(
+        &index,
         &app.state.workbench.navigator_query,
         &root_label,
         app.state.ui.netlist.active_document == ActiveNetlistDocument::Generated,
@@ -77,18 +78,23 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                 goto = root.target_line;
             }
             for group in &projection.groups {
-                if outline_group_row(ui, group, active_line, height) {
+                if outline_group_row(ui, group, &index, active_line, height) {
                     toggled = Some(group.section);
                 }
                 if !group.expanded {
                     continue;
                 }
-                if group.children.is_empty() {
+                if group.declarations() == 0 {
                     outline_child_note(ui, group.empty_note, height);
                     continue;
                 }
-                uniform_rows(ui, height, group.children.len(), |ui, index| {
-                    let child = &group.children[index];
+                uniform_rows(ui, height, group.declarations(), |ui, position| {
+                    // Declarations are named as they are drawn. A flat deck
+                    // declares tens of thousands of devices and a frame shows
+                    // forty of them.
+                    let Some(child) = group.child(position, &index) else {
+                        return;
+                    };
                     if netlist_outline_row(
                         ui,
                         OutlineRowVisual {
@@ -197,6 +203,7 @@ fn outline_row_height(ui: &Ui, state: &crate::workbench::AppState) -> f32 {
 fn outline_group_row(
     ui: &mut Ui,
     group: &NetlistOutlineGroup,
+    index: &crate::state::NetlistSourceIndex,
     active_line: usize,
     height: f32,
 ) -> bool {
@@ -212,7 +219,7 @@ fn outline_group_row(
             // A collapsed group stands in for the declaration holding the
             // caret. An expanded one does not: its child is on screen and
             // says so itself, and two selected rows claim two carets.
-            selected: !group.expanded && group.row.contains_line(active_line),
+            selected: !group.expanded && group.contains_line(index, active_line),
             enabled: true,
             height,
         },
@@ -489,15 +496,66 @@ impl NetlistOutlineChild {
 }
 
 /// A disclosable structure group and the declarations it holds.
+///
+/// The declarations are held as outline indices rather than as rows. Naming
+/// one means tokenizing its card, and a deck that declares fifty thousand
+/// devices would pay for all of them on every frame to show forty.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct NetlistOutlineGroup {
     pub(super) row: NetlistNavigatorRow,
     pub(super) section: OutlineSectionKind,
-    pub(super) children: Vec<NetlistOutlineChild>,
+    /// Indices into the source index's entries, in source order.
+    entries: Vec<usize>,
     pub(super) expanded: bool,
     /// What the deck does not declare, said in the group's own place. An empty
     /// group and a filtered-out group must not look alike.
     pub(super) empty_note: &'static str,
+}
+
+impl NetlistOutlineGroup {
+    /// How many declarations this group discloses, which is what its count
+    /// states and how many rows it occupies.
+    pub(super) fn declarations(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// The declaration at `position`, named from its own card.
+    pub(super) fn child(
+        &self,
+        position: usize,
+        index: &crate::state::NetlistSourceIndex,
+    ) -> Option<NetlistOutlineChild> {
+        let entry = index
+            .outline()
+            .entries()
+            .get(*self.entries.get(position)?)?;
+        Some(outline_child(self.section, entry, index.card(entry.line())))
+    }
+
+    /// Whether one of the declarations this group holds contains `line`.
+    /// Entries are in source order, so this is a search: the group standing in
+    /// for the caret must not cost the deck on every frame.
+    pub(super) fn contains_line(
+        &self,
+        index: &crate::state::NetlistSourceIndex,
+        line: usize,
+    ) -> bool {
+        let entries = index.outline().entries();
+        self.entries
+            .binary_search_by(|candidate| {
+                let Some(entry) = entries.get(*candidate) else {
+                    return std::cmp::Ordering::Less;
+                };
+                if entry.end_line() < line {
+                    std::cmp::Ordering::Less
+                } else if entry.line() > line {
+                    std::cmp::Ordering::Greater
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            })
+            .is_ok()
+    }
 }
 
 /// A parsed category the structure tree does not promote to a group.
@@ -606,55 +664,58 @@ pub(super) struct NetlistNavigatorProjection {
 }
 
 impl NetlistNavigatorProjection {
-    pub(super) fn from_source(
-        source: &str,
+    pub(super) fn from_index(
+        index: &crate::state::NetlistSourceIndex,
         query: &str,
         root_label: &str,
         source_mapped: bool,
         collapsed: &BTreeSet<OutlineSectionKind>,
         include_states: &[(String, &'static str)],
     ) -> Self {
-        let outline = NetlistOutline::parse(source);
+        let outline = index.outline();
         let query = NetlistNavigatorQuery::new(query);
         let entries = outline.entries();
-        let lines = source.lines().collect::<Vec<_>>();
-        let section_of = |kind: OutlineSectionKind| -> Vec<&OutlineEntry> {
+        let section_of = |kind: OutlineSectionKind| -> &[usize] {
             outline
                 .sections()
                 .iter()
                 .find(|section| section.kind() == kind)
-                .map(OutlineSection::entry_indices)
-                .unwrap_or_default()
+                .map_or(&[][..], OutlineSection::entry_indices)
+        };
+        let resolved = |indices: &[usize]| -> Vec<&OutlineEntry> {
+            indices
                 .iter()
                 .filter_map(|index| entries.get(*index))
                 .collect()
         };
 
-        let root_entries = section_of(OutlineSectionKind::Source);
+        let root_entries = resolved(section_of(OutlineSectionKind::Source));
         let root_target = root_entries.first().copied().or_else(|| entries.first());
-        let root_row = query.matches_group(root_label, &root_entries).then(|| {
-            navigator_group_row(
-                NetlistNavigatorRowKind::Root,
-                root_label,
-                if source_mapped {
-                    "root"
-                } else {
-                    "source of truth"
-                }
-                .to_owned(),
-                root_target,
-                &root_entries,
-            )
-        });
+        let root_row = query
+            .matches_group(root_label, root_entries.iter().copied())
+            .then(|| {
+                navigator_group_row(
+                    NetlistNavigatorRowKind::Root,
+                    root_label,
+                    if source_mapped {
+                        "root"
+                    } else {
+                        "source of truth"
+                    }
+                    .to_owned(),
+                    root_target,
+                    &root_entries,
+                )
+            });
 
         let groups = STRUCTURE_GROUPS
             .iter()
             .filter_map(|spec| {
-                outline_group(spec, &section_of(spec.section), &query, &lines, collapsed)
+                outline_group(spec, section_of(spec.section), entries, &query, collapsed)
             })
             .collect::<Vec<_>>();
 
-        let include_rows = section_of(OutlineSectionKind::Dependencies)
+        let include_rows = resolved(section_of(OutlineSectionKind::Dependencies))
             .into_iter()
             .filter(|entry| query.matches_entry(entry))
             .map(|entry| {
@@ -685,17 +746,21 @@ impl NetlistNavigatorProjection {
             .iter()
             .filter_map(|spec| {
                 let section = section_of(spec.section);
+                let entry_of = |position: &usize| entries.get(*position);
                 let counted = if spec.section == OutlineSectionKind::Subcircuits {
                     // The section holds both ends of every definition; only the
                     // opening card is a definition.
                     section
                         .iter()
+                        .filter_map(entry_of)
                         .filter(|entry| entry.kind() == OutlineEntryKind::Subcircuit)
                         .count()
                 } else {
                     section.len()
                 };
-                if counted == 0 || !query.matches_group(spec.label, &section) {
+                if counted == 0
+                    || !query.matches_group(spec.label, section.iter().filter_map(entry_of))
+                {
                     return None;
                 }
                 // The header has to be the sum of the rows under it, or a
@@ -709,13 +774,16 @@ impl NetlistNavigatorProjection {
                         spec.unit,
                         if counted == 1 { "" } else { "s" }
                     ),
-                    line: section.first().map_or(1, |entry| entry.line()),
+                    line: section
+                        .first()
+                        .and_then(entry_of)
+                        .map_or(1, OutlineEntry::line),
                 })
             })
             .collect::<Vec<_>>();
 
         Self {
-            line_count: lines.len(),
+            line_count: index.line_count(),
             root_row,
             groups,
             include_rows,
@@ -739,12 +807,13 @@ impl NetlistNavigatorProjection {
 
 fn outline_group(
     spec: &GroupSpec,
-    section: &[&OutlineEntry],
+    section: &[usize],
+    entries: &[OutlineEntry],
     query: &NetlistNavigatorQuery,
-    lines: &[&str],
     collapsed: &BTreeSet<OutlineSectionKind>,
 ) -> Option<NetlistOutlineGroup> {
-    if !query.matches_group(spec.label, section) {
+    let entry_of = |position: &usize| entries.get(*position);
+    if !query.matches_group(spec.label, section.iter().filter_map(entry_of)) {
         return None;
     }
     // A filter names the declarations it kept, so the group discloses them
@@ -755,7 +824,7 @@ fn outline_group(
         section
             .iter()
             .copied()
-            .filter(|entry| query.matches_entry(entry))
+            .filter(|position| entry_of(position).is_some_and(|entry| query.matches_entry(entry)))
             .collect::<Vec<_>>()
     } else {
         section.to_vec()
@@ -765,39 +834,26 @@ fn outline_group(
     } else {
         section.len().to_string()
     };
-    let children = if expanded {
-        selected
-            .iter()
-            .map(|entry| outline_child(spec.section, entry, card_of(lines, entry)))
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let target = selected
+        .first()
+        .or_else(|| section.first())
+        .and_then(entry_of);
     Some(NetlistOutlineGroup {
-        row: navigator_group_row(
-            spec.kind,
-            spec.label,
-            meta,
-            selected
-                .first()
-                .copied()
-                .or_else(|| section.first().copied()),
-            &selected,
-        ),
+        row: NetlistNavigatorRow {
+            kind: spec.kind,
+            label: spec.label.to_owned(),
+            meta: Some(meta),
+            target_line: target.map(OutlineEntry::line),
+            // Containment is answered by the group from its own entries. A
+            // span per declaration here would allocate the whole deck once a
+            // frame to settle one question about one line.
+            source_ranges: Vec::new(),
+        },
         section: spec.section,
-        children,
+        entries: selected,
         expanded,
         empty_note: spec.empty_note,
     })
-}
-
-fn card_of<'a>(lines: &[&'a str], entry: &OutlineEntry) -> &'a str {
-    entry
-        .line()
-        .checked_sub(1)
-        .and_then(|index| lines.get(index))
-        .copied()
-        .unwrap_or_default()
 }
 
 /// Name one declaration and what it binds to. The outline entry keeps a head
@@ -983,7 +1039,7 @@ impl NetlistNavigatorQuery {
     }
 
     fn matches_text(&self, text: &str) -> bool {
-        self.is_empty() || text.to_lowercase().contains(&self.text)
+        self.is_empty() || contains_folded(text, &self.text)
     }
 
     fn matches_entry(&self, entry: &OutlineEntry) -> bool {
@@ -991,16 +1047,40 @@ impl NetlistNavigatorQuery {
             || self
                 .line
                 .is_some_and(|line| (entry.line()..=entry.end_line()).contains(&line))
-            || entry.label().to_lowercase().contains(&self.text)
+            || contains_folded(entry.label(), &self.text)
     }
 
-    fn matches_group(&self, label: &str, entries: &[&OutlineEntry]) -> bool {
-        self.matches_text(label) || entries.iter().any(|entry| self.matches_entry(entry))
+    fn matches_group<'a>(
+        &self,
+        label: &str,
+        entries: impl IntoIterator<Item = &'a OutlineEntry>,
+    ) -> bool {
+        self.matches_text(label) || entries.into_iter().any(|entry| self.matches_entry(entry))
     }
 
     fn matches_diff_hunk(&self, hunk: &DiffHunk) -> bool {
         self.matches_text(&hunk.label) || self.matches_text(&hunk.meta)
     }
+}
+
+/// Whether `text` contains an already-lowercased `needle`, ignoring case.
+///
+/// A filter is tested against every declaration in the deck on every frame,
+/// and a lowercase copy of each label is a copy of the deck. ASCII text folds
+/// in place; anything else takes the allocating path, where the answer has to
+/// match `str::to_lowercase` exactly rather than merely closely.
+fn contains_folded(text: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if !text.is_ascii() || !needle.is_ascii() {
+        return text.to_lowercase().contains(needle);
+    }
+    text.len() >= needle.len()
+        && text
+            .as_bytes()
+            .windows(needle.len())
+            .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
 }
 
 pub(super) fn navigator_group_row(
@@ -1483,9 +1563,13 @@ pub(super) fn schematic_nav_row_indented_drag_response(
 mod tests {
     use super::*;
 
+    fn netlist_index(source: &str) -> crate::state::NetlistSourceIndex {
+        crate::state::NetlistSourceIndex::parse(source)
+    }
+
     fn netlist_projection(source: &str, query: &str) -> NetlistNavigatorProjection {
-        NetlistNavigatorProjection::from_source(
-            source,
+        NetlistNavigatorProjection::from_index(
+            &netlist_index(source),
             query,
             "top.sp",
             true,
@@ -1494,10 +1578,21 @@ mod tests {
         )
     }
 
+    /// Every declaration a group discloses, named the way a drawn row is.
+    fn disclosed(
+        group: &NetlistOutlineGroup,
+        index: &crate::state::NetlistSourceIndex,
+    ) -> Vec<NetlistOutlineChild> {
+        (0..group.declarations())
+            .filter_map(|position| group.child(position, index))
+            .collect()
+    }
+
     const OUTLINE_DECK: &str = "Precision amplifier\n.include models/base.lib\n.lib corners/process.lib TT\n.param gain=10 offset=1m\nR1 in out 1k\nXAMP in out opamp\n.model nch nmos\n.ac dec 10 1 1g\n.meas ac peak max v(out)\n.end\n";
 
     #[test]
     fn netlist_navigator_projects_exact_live_counts_and_include_lines() {
+        let index = netlist_index(OUTLINE_DECK);
         let projection = netlist_projection(OUTLINE_DECK, "");
 
         assert_eq!(projection.line_count, 10);
@@ -1522,8 +1617,10 @@ mod tests {
             .iter()
             .find(|group| group.row.kind == NetlistNavigatorRowKind::Instances)
             .expect("instances group exists");
-        assert!(instances.row.contains_line(5));
-        assert!(instances.row.contains_line(6));
+        assert!(instances.contains_line(&index, 5));
+        assert!(instances.contains_line(&index, 6));
+        // The caret between two declarations belongs to neither.
+        assert!(!instances.contains_line(&index, 7));
         assert_eq!(count(NetlistNavigatorRowKind::Models), Some("1"));
         assert_eq!(count(NetlistNavigatorRowKind::Analyses), Some("1"));
         assert_eq!(count(NetlistNavigatorRowKind::Measurements), Some("1"));
@@ -1541,8 +1638,8 @@ mod tests {
             ("models/base.lib".to_owned(), "missing"),
             ("corners/process.lib".to_owned(), "vendor source"),
         ];
-        let projection = NetlistNavigatorProjection::from_source(
-            OUTLINE_DECK,
+        let projection = NetlistNavigatorProjection::from_index(
+            &netlist_index(OUTLINE_DECK),
             "",
             "top.sp",
             true,
@@ -1565,6 +1662,7 @@ mod tests {
 
     #[test]
     fn every_outline_group_discloses_the_declarations_it_counts() {
+        let index = netlist_index(OUTLINE_DECK);
         let projection = netlist_projection(OUTLINE_DECK, "");
 
         let children = |kind| {
@@ -1573,53 +1671,52 @@ mod tests {
                 .iter()
                 .find(|group| group.row.kind == kind)
                 .map(|group| {
-                    group
-                        .children
-                        .iter()
-                        .map(|child| (child.label.as_str(), child.meta.as_deref(), child.line))
+                    disclosed(group, &index)
+                        .into_iter()
+                        .map(|child| (child.label, child.meta, child.line))
                         .collect::<Vec<_>>()
                 })
                 .expect("group exists")
+        };
+        let expected = |rows: &[(&str, Option<&str>, usize)]| {
+            rows.iter()
+                .map(|(label, meta, line)| ((*label).to_owned(), meta.map(str::to_owned), *line))
+                .collect::<Vec<_>>()
         };
 
         // A `.param` card that declares two names attributes no value to
         // either, because the row would otherwise give both the first one's.
         assert_eq!(
             children(NetlistNavigatorRowKind::Parameters),
-            vec![("gain, offset", None, 4)]
+            expected(&[("gain, offset", None, 4)])
         );
         // A resistor's value is positional; a subcircuit call's master is the
         // last positional field. Both are exact from the element letter.
         assert_eq!(
             children(NetlistNavigatorRowKind::Instances),
-            vec![("R1", Some("1k"), 5), ("XAMP", Some("opamp"), 6)]
+            expected(&[("R1", Some("1k"), 5), ("XAMP", Some("opamp"), 6)])
         );
         assert_eq!(
             children(NetlistNavigatorRowKind::Models),
-            vec![("nch", Some("nmos"), 7)]
+            expected(&[("nch", Some("nmos"), 7)])
         );
         assert_eq!(
             children(NetlistNavigatorRowKind::Analyses),
-            vec![(".ac", Some("dec 10 1 1g"), 8)]
+            expected(&[(".ac", Some("dec 10 1 1g"), 8)])
         );
         assert_eq!(
             children(NetlistNavigatorRowKind::Measurements),
-            vec![("peak", Some("ac"), 9)]
+            expected(&[("peak", Some("ac"), 9)])
         );
     }
 
     #[test]
-    fn a_collapsed_group_keeps_its_count_and_builds_no_children() {
+    fn a_collapsed_group_keeps_its_count_and_stands_in_for_its_declarations() {
+        let index = netlist_index(OUTLINE_DECK);
         let collapsed =
             std::collections::BTreeSet::from([crate::state::OutlineSectionKind::Devices]);
-        let projection = NetlistNavigatorProjection::from_source(
-            OUTLINE_DECK,
-            "",
-            "top.sp",
-            true,
-            &collapsed,
-            &[],
-        );
+        let projection =
+            NetlistNavigatorProjection::from_index(&index, "", "top.sp", true, &collapsed, &[]);
 
         let instances = projection
             .groups
@@ -1627,8 +1724,11 @@ mod tests {
             .find(|group| group.row.kind == NetlistNavigatorRowKind::Instances)
             .expect("instances group exists");
         assert!(!instances.expanded);
-        assert!(instances.children.is_empty());
         assert_eq!(instances.row.meta.as_deref(), Some("2"));
+        // A collapsed group draws no declarations but still answers for them,
+        // which is how it stands in for the one holding the caret.
+        assert_eq!(instances.declarations(), 2);
+        assert!(instances.contains_line(&index, 6));
     }
 
     #[test]
@@ -1679,13 +1779,14 @@ mod tests {
         // deck does not declare.
         assert!(projection.groups.iter().any(|group| group.row.kind
             == NetlistNavigatorRowKind::Measurements
-            && group.children.is_empty()
+            && group.declarations() == 0
             && !group.empty_note.is_empty()));
     }
 
     #[test]
     fn netlist_navigator_filter_matches_symbols_and_exact_source_lines() {
         let source = "deck\n.param gain=10\nR1 in out 1k\nR2 out 0 2k\n.end\n";
+        let index = netlist_index(source);
 
         let symbol = netlist_projection(source, "r2");
         assert!(symbol.root_row.is_none());
@@ -1698,8 +1799,8 @@ mod tests {
         // everything the deck declares".
         assert_eq!(symbol.groups[0].row.meta.as_deref(), Some("1 of 2"));
         assert_eq!(symbol.groups[0].row.target_line, Some(4));
-        assert!(!symbol.groups[0].row.contains_line(3));
-        assert!(symbol.groups[0].row.contains_line(4));
+        assert!(!symbol.groups[0].contains_line(&index, 3));
+        assert!(symbol.groups[0].contains_line(&index, 4));
         assert!(!symbol.show_source_mapping);
 
         let line = netlist_projection(source, "line 2");
@@ -1710,35 +1811,34 @@ mod tests {
 
     #[test]
     fn a_filter_discloses_what_it_kept_even_where_the_group_was_collapsed() {
+        let index = netlist_index("deck\nR1 in out 1k\nR2 out 0 2k\n.end\n");
         let collapsed =
             std::collections::BTreeSet::from([crate::state::OutlineSectionKind::Devices]);
-        let projection = NetlistNavigatorProjection::from_source(
-            "deck\nR1 in out 1k\nR2 out 0 2k\n.end\n",
-            "r2",
-            "top.sp",
-            true,
-            &collapsed,
-            &[],
-        );
+        let projection =
+            NetlistNavigatorProjection::from_index(&index, "r2", "top.sp", true, &collapsed, &[]);
 
         assert_eq!(projection.groups.len(), 1);
         assert!(projection.groups[0].expanded);
-        assert_eq!(projection.groups[0].children.len(), 1);
-        assert_eq!(projection.groups[0].children[0].label, "R2");
+        let kept = disclosed(&projection.groups[0], &index);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].label, "R2");
     }
 
     #[test]
     fn an_instance_binding_is_named_only_where_the_element_letter_fixes_it() {
         let source =
             "deck\nM1 d g s b nch W=1u\nD1 a k dmod\nQ1 c b e qmod\nV1 in 0 DC 1.8\nD2 a k\n.end\n";
+        let index = netlist_index(source);
         let projection = netlist_projection(source, "");
 
-        let instances = &projection
-            .groups
-            .iter()
-            .find(|group| group.row.kind == NetlistNavigatorRowKind::Instances)
-            .expect("instances group exists")
-            .children;
+        let instances = disclosed(
+            projection
+                .groups
+                .iter()
+                .find(|group| group.row.kind == NetlistNavigatorRowKind::Instances)
+                .expect("instances group exists"),
+            &index,
+        );
         let binding = |name: &str| {
             instances
                 .iter()
@@ -1756,15 +1856,16 @@ mod tests {
 
     #[test]
     fn a_spaced_assignment_is_not_read_as_one_more_positional_field() {
-        let projection =
-            netlist_projection("deck\nM1 d g s b nch W = 1u\n.param gain = 10\n.end\n", "");
+        let source = "deck\nM1 d g s b nch W = 1u\n.param gain = 10\n.end\n";
+        let index = netlist_index(source);
+        let projection = netlist_projection(source, "");
 
         let child = |kind| {
             projection
                 .groups
                 .iter()
                 .find(|group| group.row.kind == kind)
-                .and_then(|group| group.children.first().cloned())
+                .and_then(|group| group.child(0, &index))
                 .expect("child exists")
         };
         assert_eq!(
@@ -1778,17 +1879,18 @@ mod tests {
 
     #[test]
     fn an_expression_split_across_lexemes_is_named_rather_than_misquoted() {
-        let projection = netlist_projection(
-            "deck\n.param gain = {2 * k}\n.param trim={2*k}\nR9 a b {1 * k}\n.end\n",
-            "",
-        );
+        let source = "deck\n.param gain = {2 * k}\n.param trim={2*k}\nR9 a b {1 * k}\n.end\n";
+        let index = netlist_index(source);
+        let projection = netlist_projection(source, "");
 
-        let parameters = &projection
-            .groups
-            .iter()
-            .find(|group| group.row.kind == NetlistNavigatorRowKind::Parameters)
-            .expect("parameters group exists")
-            .children;
+        let parameters = disclosed(
+            projection
+                .groups
+                .iter()
+                .find(|group| group.row.kind == NetlistNavigatorRowKind::Parameters)
+                .expect("parameters group exists"),
+            &index,
+        );
         // `{2` is not the value of anything.
         assert_eq!(parameters[0].label, "gain");
         assert_eq!(parameters[0].meta, None);
@@ -1796,12 +1898,12 @@ mod tests {
         assert_eq!(parameters[1].label, "trim");
         assert_eq!(parameters[1].meta.as_deref(), Some("{2*k}"));
 
-        let instance = &projection
+        let instance = projection
             .groups
             .iter()
             .find(|group| group.row.kind == NetlistNavigatorRowKind::Instances)
-            .expect("instances group exists")
-            .children[0];
+            .and_then(|group| group.child(0, &index))
+            .expect("instances group exists");
         assert_eq!(instance.label, "R9");
         assert_eq!(instance.meta, None);
     }
@@ -1854,6 +1956,59 @@ mod tests {
         // Scrolled past the end: an empty span, never a reversed range.
         let past = visible_row_span(-10_000.0, 540.0, 27.0, 10);
         assert!(past.start <= past.end);
+    }
+
+    /// A flat deck of a hundred thousand cards, projected the way a frame
+    /// projects it.
+    ///
+    /// The whole outline used to be reparsed and every declaration named on
+    /// every frame, which cost a tenth of a second per frame here. The budget
+    /// is deliberately loose — it is sized to catch work that scales with the
+    /// deck coming back, not to police a few hundred microseconds.
+    #[test]
+    fn a_hundred_thousand_card_deck_projects_within_a_frame() {
+        let mut source = String::from("* flat deck\n");
+        for card in 0..100_000 {
+            match card % 4 {
+                0 => source.push_str(&format!(".param k{card}={{{card} * 2}}\n")),
+                1 => source.push_str(&format!("R{card} n{card} n{} 1k\n", card + 1)),
+                2 => source.push_str(&format!("M{card} d{card} g{card} 0 0 nch W=1u\n")),
+                _ => source.push_str(&format!(".model m{card} nmos level=54\n")),
+            }
+        }
+        source.push_str(".op\n.end\n");
+        let index = netlist_index(&source);
+
+        let started = crate::time_compat::Instant::now();
+        let projection = NetlistNavigatorProjection::from_index(
+            &index,
+            "",
+            "flat.sp",
+            false,
+            &std::collections::BTreeSet::new(),
+            &[],
+        );
+        let devices = projection
+            .groups
+            .iter()
+            .find(|group| group.section == OutlineSectionKind::Devices)
+            .expect("device group exists");
+        // What a scrolled viewport asks for, and nothing else.
+        let drawn = (37..58)
+            .filter_map(|position| devices.child(position, &index))
+            .collect::<Vec<_>>();
+        // The group standing in for the caret searches its declarations.
+        let caret = devices.contains_line(&index, 100_000);
+        let elapsed = started.elapsed();
+
+        assert_eq!(devices.declarations(), 50_000);
+        assert_eq!(drawn.len(), 21);
+        assert_eq!(drawn[0].label, "M74");
+        assert!(caret);
+        assert!(
+            elapsed < std::time::Duration::from_millis(50),
+            "a frame spent {elapsed:?} projecting a deck it did not reparse"
+        );
     }
 
     #[test]

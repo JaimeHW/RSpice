@@ -39,8 +39,6 @@ pub(crate) use language_services::{
     SourceSymbol, commit_language_code_action, commit_language_completion, commit_language_rename,
     document_outline, open_language_tools,
 };
-#[cfg(test)]
-pub(crate) use page::CodeSourceEditorBufferIdentity;
 pub use page::{
     AutomationArtifactStore, AutomationBreakpointKind, AutomationDebugPhase,
     AutomationDispatchSnapshot, AutomationExceptionPolicy, AutomationExecutionState,

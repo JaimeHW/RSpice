@@ -12,7 +12,7 @@ use egui::{Align, Layout, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::product::DatasetId;
 use crate::state::ViewType;
-use crate::state::{NetlistOutline, OutlineEntry, OutlineEntryKind};
+use crate::state::{OutlineEntry, OutlineEntryKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;

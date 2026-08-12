@@ -19,11 +19,11 @@ pub use document::{
     content_digest,
 };
 pub use outline::{
-    NetlistOutline, OutlineEntry, OutlineEntryKind, OutlineSection, OutlineSectionKind,
+    NetlistSourceIndex, OutlineEntry, OutlineEntryKind, OutlineSection, OutlineSectionKind,
 };
 pub(crate) use outline::{card_tokens, parse_include_directives};
 pub(crate) use sealed::expand_retained_netlist_dependencies;
 pub use search::{
     BoundedFindMatches, FindDirection, FindError, FindMatch, FindOptions, ReplaceScope,
-    find_all_in_source, find_all_in_source_bounded, replace_in_source, replace_source_ranges,
+    find_all_in_source_bounded, replace_in_source, replace_source_ranges,
 };

@@ -7,8 +7,6 @@ use crate::state::{
 };
 use crate::workbench::RSpiceApp;
 
-#[cfg(test)]
-use super::CodeSourceEditorBufferIdentity;
 use super::CodeSourceImportState;
 use super::{
     CodeSourceFileAction, CodeSourceFileDialogState, CodeSourceHistoryState, VerilogAFileSelection,
@@ -521,60 +519,6 @@ pub(crate) fn source_bundle_contains_document(
             };
             bundle.language() == language && owner_matches && bundle.contains_file(logical_path)
         })
-}
-
-/// Commit one Automation editor buffer only when the exact project, bundle,
-/// revision, closure, path, and edit authority that produced it are still
-/// current. Presentation code must not call the registry mutation API
-/// directly because safe-mode and governed-role policy live above it.
-#[cfg(test)]
-pub(crate) fn replace_automation_editor_file(
-    app: &mut RSpiceApp,
-    expected: &CodeSourceEditorBufferIdentity,
-    contents: String,
-) -> Result<bool, String> {
-    let language = ProjectSourceLanguage::RSpiceAutomation;
-    if let Some(reason) = source_file_mutation_block_reason(app, language) {
-        return Err(reason.to_owned());
-    }
-    if !source_bundle_document_is_editable(
-        app,
-        language,
-        expected.bundle_id,
-        expected.path.as_ref(),
-    ) {
-        return Err(
-            "The selected Automation document is governed read-only; no source was changed."
-                .to_owned(),
-        );
-    }
-    if app.state.workspace.project.id() != expected.project_id {
-        return Err("The active project changed before this editor update committed.".to_owned());
-    }
-    let bundle = app
-        .state
-        .workspace
-        .project_sources
-        .get_bundle(expected.bundle_id)
-        .ok_or_else(|| "The Automation source bundle no longer exists.".to_owned())?;
-    if bundle.language() != language
-        || bundle.revision().get() != expected.bundle_revision
-        || bundle.closure_digest() != expected.closure_digest
-        || !bundle.contains_file(expected.path.as_ref())
-    {
-        return Err(
-            "The Automation source changed before this editor update committed.".to_owned(),
-        );
-    }
-    let changed = app
-        .state
-        .workspace
-        .replace_project_source_bundle_file(expected.bundle_id, expected.path.as_ref(), contents)
-        .map_err(|error| error.to_string())?;
-    if changed {
-        super::automation::invalidate_automation_evidence(app);
-    }
-    Ok(changed)
 }
 
 fn source_document_blocks_graph_mutation(
@@ -1591,50 +1535,6 @@ mod tests {
             ProjectSourceLanguage::RSpiceAutomation,
             &automation_root
         ));
-    }
-
-    #[test]
-    fn automation_editor_transaction_rechecks_read_only_authority_without_mutation() {
-        let mut app = RSpiceApp::test_instance();
-        let language = ProjectSourceLanguage::RSpiceAutomation;
-        let owner = ProjectSourceOwner::code_workspace(language);
-        let bundle = app
-            .state
-            .workspace
-            .project_sources
-            .bundle_for_owner(&owner)
-            .expect("test Automation bundle");
-        let identity = CodeSourceEditorBufferIdentity {
-            project_id: app.state.workspace.project.id(),
-            bundle_id: bundle.id(),
-            bundle_revision: bundle.revision().get(),
-            closure_digest: bundle.closure_digest(),
-            path: std::sync::Arc::from(bundle.root().logical_path()),
-        };
-        let original = bundle.root().content().to_owned();
-
-        app.state.workbench.safe_mode.activate(
-            crate::workbench::state::LocalSafeModeOptions {
-                open_project_read_only: true,
-                ..Default::default()
-            },
-            String::new(),
-        );
-        let error = replace_automation_editor_file(
-            &mut app,
-            &identity,
-            "raise RuntimeError('must not commit')\n".to_owned(),
-        )
-        .unwrap_err();
-        assert!(error.contains("read-only"));
-        let unchanged = app
-            .state
-            .workspace
-            .project_sources
-            .get_bundle(identity.bundle_id)
-            .expect("same Automation bundle");
-        assert_eq!(unchanged.revision().get(), identity.bundle_revision);
-        assert_eq!(unchanged.root().content(), original);
     }
 
     #[test]

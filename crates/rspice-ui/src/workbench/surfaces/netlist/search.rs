@@ -14,6 +14,14 @@ use crate::workbench::{AppState, MessageCatalog, MessageId, RSpiceApp};
 
 use super::ownership::open_owned_source;
 
+/// How many matches the surface will hold at once.
+///
+/// A result list is read, not exhausted: a query that matches a hundred
+/// thousand times in a flat deck is a query to narrow, and materializing every
+/// hit to say so costs more than the search. The count reported alongside the
+/// rows states plainly that it is a first page.
+const NETLIST_FIND_RESULT_LIMIT: usize = 500;
+
 #[derive(Debug, Clone, Copy)]
 enum FindWindowAction {
     Select(usize),
@@ -21,25 +29,52 @@ enum FindWindowAction {
     ReplaceAll,
 }
 
+/// One searchable document. The source is borrowed from application state:
+/// the closure a project-references search covers is the whole include graph,
+/// and copying it per frame copies the design.
 #[derive(Debug, Clone)]
-struct NetlistSearchDocument {
+struct NetlistSearchDocument<'a> {
     active_document: ActiveNetlistDocument,
-    dependency_identity: Option<String>,
+    dependency_identity: Option<&'a str>,
     editable: bool,
     label: String,
-    source: String,
+    source: &'a str,
 }
 
 #[derive(Debug, Clone)]
 struct NetlistSearchMatch {
-    document: NetlistSearchDocument,
+    /// Index into the scanned document list, so a match is the size of a
+    /// match rather than the size of the document it was found in.
+    document: usize,
     found: crate::state::FindMatch,
+    /// The card the match sits on, captured while the document was walked.
+    card: String,
+}
+
+/// The match an action names, held independently of the scan it came from.
+struct FindTarget {
+    index: usize,
+    active_document: ActiveNetlistDocument,
+    dependency_identity: Option<String>,
+    editable: bool,
+    /// The document's bytes, present only for a replacement.
+    source: Option<String>,
+    line: usize,
+    caret_byte: usize,
+}
+
+/// Matches for one query across one scope, bounded in count.
+struct NetlistSearchResults {
+    matches: Vec<NetlistSearchMatch>,
+    /// Whether the deck holds more matches than the surface retained.
+    truncated: bool,
+    error: Option<crate::state::FindError>,
 }
 
 fn netlist_search_documents(
     state: &AppState,
     scope: crate::workbench::documents::netlist_document::NetlistFindScope,
-) -> Vec<NetlistSearchDocument> {
+) -> Vec<NetlistSearchDocument<'_>> {
     use crate::workbench::documents::netlist_document::NetlistFindScope;
 
     let generated = || NetlistSearchDocument {
@@ -47,7 +82,7 @@ fn netlist_search_documents(
         dependency_identity: None,
         editable: false,
         label: "generated.sp".to_owned(),
-        source: state.ui.netlist.generated_source.clone(),
+        source: state.ui.netlist.generated_source.as_str(),
     };
     let owned = || NetlistSearchDocument {
         active_document: ActiveNetlistDocument::OwnedSource,
@@ -67,7 +102,11 @@ fn netlist_search_documents(
                     .map(|name| name.to_string_lossy().into_owned())
             })
             .unwrap_or_else(|| "owned-source.sp".to_owned()),
-        source: state.workspace.netlist_source.clone().unwrap_or_default(),
+        source: state
+            .workspace
+            .netlist_source
+            .as_deref()
+            .unwrap_or_default(),
     };
 
     match scope {
@@ -81,13 +120,13 @@ fn netlist_search_documents(
                         .netlist
                         .active_dependency_root
                         .unwrap_or(state.ui.netlist.active_document),
-                    dependency_identity: Some(dependency.locator().logical_identity().to_owned()),
+                    dependency_identity: Some(dependency.locator().logical_identity()),
                     editable:
                         crate::workbench::documents::netlist_document::active_dependency_is_owned(
                             state,
                         ),
                     label: dependency.locator().display_name().to_owned(),
-                    source: dependency.source().unwrap_or_default().to_owned(),
+                    source: dependency.source().unwrap_or_default(),
                 }]
             } else {
                 vec![match state.ui.netlist.active_document {
@@ -98,7 +137,7 @@ fn netlist_search_documents(
                         dependency_identity: None,
                         editable: false,
                         label: "generated.diff".to_owned(),
-                        source: state.ui.netlist.generated_diff_source.clone(),
+                        source: state.ui.netlist.generated_diff_source.as_str(),
                     },
                 }]
             }
@@ -144,7 +183,7 @@ fn dependency_search_documents(
     state: &AppState,
     root: ActiveNetlistDocument,
     owned_only: bool,
-) -> Vec<NetlistSearchDocument> {
+) -> Vec<NetlistSearchDocument<'_>> {
     let document = match root {
         ActiveNetlistDocument::Generated => state.ui.netlist.generated_document.as_ref(),
         ActiveNetlistDocument::OwnedSource => state.ui.netlist.owned_document.as_ref(),
@@ -163,13 +202,73 @@ fn dependency_search_documents(
                     .is_some();
             (!owned_only || editable).then(|| NetlistSearchDocument {
                 active_document: root,
-                dependency_identity: Some(identity.to_owned()),
+                dependency_identity: Some(identity),
                 editable,
                 label: dependency.locator().display_name().to_owned(),
-                source: source.to_owned(),
+                source,
             })
         })
         .collect()
+}
+
+/// Scan every document in the scope, stopping once the surface is full.
+///
+/// The limit is shared across documents rather than applied per document, so
+/// the surface holds the first `NETLIST_FIND_RESULT_LIMIT` matches in scope
+/// order however they are distributed. Each document is walked once for the
+/// card text: deriving it per row costs the document per row.
+fn scan_documents(
+    documents: &[NetlistSearchDocument<'_>],
+    query: &str,
+    options: crate::state::FindOptions,
+) -> NetlistSearchResults {
+    use crate::state::find_all_in_source_bounded;
+
+    let mut results = NetlistSearchResults {
+        matches: Vec::new(),
+        truncated: false,
+        error: None,
+    };
+    if query.is_empty() {
+        return results;
+    }
+    for (index, document) in documents.iter().enumerate() {
+        let remaining = NETLIST_FIND_RESULT_LIMIT.saturating_sub(results.matches.len());
+        if remaining == 0 {
+            // Something is left only if a later document holds a match at all.
+            results.truncated = find_all_in_source_bounded(document.source, query, options, 1)
+                .is_ok_and(|found| !found.matches().is_empty());
+            if results.truncated {
+                break;
+            }
+            continue;
+        }
+        let found = match find_all_in_source_bounded(document.source, query, options, remaining) {
+            Ok(found) => found,
+            Err(error) => {
+                results.matches.clear();
+                results.truncated = false;
+                results.error = Some(error);
+                return results;
+            }
+        };
+        results.truncated |= found.truncated();
+        let mut cards = document.source.lines();
+        let mut walked = 0usize;
+        let mut card = "";
+        for one in found.matches() {
+            while walked < one.line() {
+                card = cards.next().unwrap_or_default();
+                walked += 1;
+            }
+            results.matches.push(NetlistSearchMatch {
+                document: index,
+                found: one.clone(),
+                card: card.trim().to_owned(),
+            });
+        }
+    }
+    results
 }
 
 pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
@@ -177,9 +276,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         return;
     }
 
-    use crate::state::{
-        FindDirection, FindOptions, ReplaceScope, find_all_in_source, replace_in_source,
-    };
+    use crate::state::{FindDirection, FindOptions, ReplaceScope, replace_in_source};
     use crate::workbench::documents::netlist_document::NetlistFindScope;
 
     let owned = crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
@@ -194,26 +291,10 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         regular_expression: find.regular_expression,
     };
     let documents = netlist_search_documents(&app.state, find.scope);
-    let matches: Result<Vec<NetlistSearchMatch>, crate::state::FindError> = if find.find.is_empty()
-    {
-        Ok(Vec::new())
-    } else {
-        documents
-            .iter()
-            .try_fold(Vec::<NetlistSearchMatch>::new(), |mut all, document| {
-                all.extend(
-                    find_all_in_source(&document.source, &find.find, options)?
-                        .into_iter()
-                        .map(|found| NetlistSearchMatch {
-                            document: document.clone(),
-                            found,
-                        }),
-                );
-                Ok(all)
-            })
-    };
-    find.error = matches.as_ref().err().map(ToString::to_string);
-    let matches = matches.unwrap_or_default();
+    let found = scan_documents(&documents, &find.find, options);
+    find.error = found.error.as_ref().map(ToString::to_string);
+    let truncated = found.truncated;
+    let matches = found.matches;
     if matches.is_empty() {
         find.selected_match = 0;
     } else {
@@ -320,7 +401,11 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         } else {
             let count = matches.len().to_string();
             ui.label(messages.format(
-                if matches.len() == 1 {
+                if truncated {
+                    // The rows are a first page, and a count that did not say
+                    // so would be read as the number of matches in the deck.
+                    MessageId::NetlistFindFirstMatches
+                } else if matches.len() == 1 {
                     MessageId::NetlistFindMatchSingular
                 } else {
                     MessageId::NetlistFindMatches
@@ -329,36 +414,31 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
             ));
         }
 
+        let row_height = 24.0;
         egui::ScrollArea::vertical()
             .id_salt("rspice.code.find-results")
             .max_height(168.0)
-            .show(ui, |ui| {
+            .show_rows(ui, row_height, matches.len(), |ui, rows| {
                 let show_document =
                     documents.len() > 1 || find.scope != NetlistFindScope::CurrentDocument;
-                for (index, result) in matches.iter().enumerate() {
-                    let line_text = result
-                        .document
-                        .source
-                        .lines()
-                        .nth(result.found.line().saturating_sub(1))
-                        .unwrap_or_default()
-                        .trim();
+                for index in rows {
+                    let Some(result) = matches.get(index) else {
+                        continue;
+                    };
+                    let label = documents
+                        .get(result.document)
+                        .map_or("", |document| document.label.as_str());
                     let location = if show_document {
-                        format!(
-                            "{}  {}:{}",
-                            result.document.label,
-                            result.found.line(),
-                            result.found.column()
-                        )
+                        format!("{label}  {}:{}", result.found.line(), result.found.column())
                     } else {
                         format!("{}:{}", result.found.line(), result.found.column())
                     };
                     if ui
                         .add_sized(
-                            [ui.available_width(), 24.0],
+                            [ui.available_width(), row_height],
                             egui::Button::selectable(
                                 find.selected_match == index,
-                                format!("{location}  {line_text}"),
+                                format!("{location}  {}", result.card),
                             ),
                         )
                         .clicked()
@@ -386,7 +466,8 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
             }
             let selected_owned = matches
                 .get(find.selected_match)
-                .is_some_and(|result| result.document.editable);
+                .and_then(|result| documents.get(result.document))
+                .is_some_and(|document| document.editable);
             let replace_enabled = find.scope != NetlistFindScope::ProjectReferences
                 && has_matches
                 && selected_owned
@@ -421,48 +502,81 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         DialogChoice::Ghost | DialogChoice::Cancelled => find.open = false,
         DialogChoice::None | DialogChoice::Secondary => {}
     }
+
+    // The action is resolved against the borrowed scan before anything is
+    // written, because opening a document replaces the very buffers these
+    // matches were found in.
+    let replacing = matches!(
+        action,
+        Some(FindWindowAction::ReplaceNext | FindWindowAction::ReplaceAll)
+    );
+    let target = match action {
+        Some(FindWindowAction::Select(index)) => Some(index),
+        Some(FindWindowAction::ReplaceNext | FindWindowAction::ReplaceAll) => {
+            Some(find.selected_match)
+        }
+        None => None,
+    }
+    .and_then(|index| Some((index, matches.get(index)?)))
+    .and_then(|(index, result)| {
+        let document = documents.get(result.document)?;
+        Some(FindTarget {
+            index,
+            active_document: document.active_document,
+            dependency_identity: document.dependency_identity.map(str::to_owned),
+            editable: document.editable,
+            // Only a replacement needs the bytes, and a retained include can
+            // be the size of a model library.
+            source: replacing.then(|| document.source.to_owned()),
+            line: result.found.line(),
+            caret_byte: result.found.byte_range().start,
+        })
+    });
+    if let (Some(FindWindowAction::Select(_)), Some(target)) = (action, target.as_ref()) {
+        find.selected_match = target.index;
+    }
+    drop(matches);
+    drop(documents);
     app.state.ui.netlist.find = find;
 
+    let Some(target) = target else {
+        return;
+    };
     match action {
-        Some(FindWindowAction::Select(index)) => {
-            if let Some(result) = matches.get(index) {
-                app.state.ui.netlist.find.selected_match = index;
-                match result.document.active_document {
-                    ActiveNetlistDocument::Generated => {
-                        let _ =
-                            crate::workbench::documents::netlist_document::open_generated_primary(
-                                &mut app.state,
-                            );
-                    }
-                    ActiveNetlistDocument::OwnedSource => {
-                        let _ = open_owned_source(&mut app.state);
-                    }
-                    ActiveNetlistDocument::GeneratedDiff => {}
+        Some(FindWindowAction::Select(_)) => {
+            match target.active_document {
+                ActiveNetlistDocument::Generated => {
+                    let _ = crate::workbench::documents::netlist_document::open_generated_primary(
+                        &mut app.state,
+                    );
                 }
-                if let Some(identity) = result.document.dependency_identity.as_deref()
-                    && let Err(error) =
-                        crate::workbench::documents::netlist_document::open_netlist_dependency(
-                            &mut app.state,
-                            identity,
-                        )
-                {
-                    app.state.push_user_message(ConsoleMessage::error(error));
-                    return;
+                ActiveNetlistDocument::OwnedSource => {
+                    let _ = open_owned_source(&mut app.state);
                 }
-                app.state.ui.netlist.requested_line = Some(result.found.line());
+                ActiveNetlistDocument::GeneratedDiff => {}
             }
+            if let Some(identity) = target.dependency_identity.as_deref()
+                && let Err(error) =
+                    crate::workbench::documents::netlist_document::open_netlist_dependency(
+                        &mut app.state,
+                        identity,
+                    )
+            {
+                app.state.push_user_message(ConsoleMessage::error(error));
+                return;
+            }
+            app.state.ui.netlist.requested_line = Some(target.line);
         }
         Some(FindWindowAction::ReplaceNext) | Some(FindWindowAction::ReplaceAll) => {
-            let selected = matches.get(app.state.ui.netlist.find.selected_match);
-            let Some(selected) = selected.filter(|result| result.document.editable) else {
+            let Some(source) = target.source.as_deref().filter(|_| target.editable) else {
                 return;
             };
-            if selected.document.active_document == ActiveNetlistDocument::OwnedSource
+            if target.active_document == ActiveNetlistDocument::OwnedSource
                 && app.state.ui.netlist.active_document != ActiveNetlistDocument::OwnedSource
             {
                 let _ = open_owned_source(&mut app.state);
             }
-            if let Some(identity) = selected.document.dependency_identity.as_deref()
+            if let Some(identity) = target.dependency_identity.as_deref()
                 && let Err(error) =
                     crate::workbench::documents::netlist_document::open_netlist_dependency(
                         &mut app.state,
@@ -476,11 +590,11 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                 ReplaceScope::All
             } else {
                 ReplaceScope::Next {
-                    caret_byte: selected.found.byte_range().start,
+                    caret_byte: target.caret_byte,
                 }
             };
             match replace_in_source(
-                &selected.document.source,
+                source,
                 &app.state.ui.netlist.find.find,
                 &app.state.ui.netlist.find.replacement,
                 options,
@@ -489,7 +603,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                 Ok(outcome) => {
                     let count = outcome.replacement_count();
                     let replacement = outcome.into_source();
-                    let replaced = if selected.document.dependency_identity.is_some() {
+                    let replaced = if target.dependency_identity.is_some() {
                         crate::workbench::documents::netlist_document::replace_owned_dependency_source(
                             &mut app.state,
                             replacement,

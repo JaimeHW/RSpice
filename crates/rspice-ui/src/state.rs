@@ -64,10 +64,9 @@ pub use netlist_document::{
     BoundedFindMatches, DependencyMetadata, DependencyResolution, DependencySourceAuthority,
     DiagnosticSeverity, DocumentOwnership, FindDirection, FindError, FindMatch, FindOptions,
     GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput,
-    NetlistDocument, NetlistDocumentId, NetlistOutline, OutlineEntry, OutlineEntryKind,
+    NetlistDocument, NetlistDocumentId, NetlistSourceIndex, OutlineEntry, OutlineEntryKind,
     OutlineSection, OutlineSectionKind, ReplaceScope, SourceLocator, ValidationDiagnostic,
-    content_digest, find_all_in_source, find_all_in_source_bounded, replace_in_source,
-    replace_source_ranges,
+    content_digest, find_all_in_source_bounded, replace_in_source, replace_source_ranges,
 };
 pub(crate) use netlist_document::{
     card_tokens, expand_retained_netlist_dependencies, parse_include_directives,

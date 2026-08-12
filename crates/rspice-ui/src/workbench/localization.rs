@@ -294,6 +294,7 @@ define_messages! {
     NetlistFindEnterExactArtifact => "Enter text to search the exact current artifact.",
     NetlistFindMatchSingular => "{count} match",
     NetlistFindMatches => "{count} matches",
+    NetlistFindFirstMatches => "First {count} matches. Narrow the search to reach the rest.",
     NetlistFindPrevious => "Previous",
     NetlistFindReplaceAll => "Replace all",
     NetlistFindCurrentDocument => "Current document",

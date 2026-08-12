@@ -24,6 +24,25 @@ pub fn source_content_digest(source: &str) -> crate::product::ContentDigest {
     crate::state::content_digest(source)
 }
 
+/// The outline and line offsets of the buffer the editor is showing.
+///
+/// Parsing costs the whole deck and the navigator reads the outline on every
+/// frame, so a large netlist would spend the frame budget re-deriving a
+/// structure that did not change. The index is rebuilt only when the bytes
+/// differ from the ones it was built from: that comparison is a memcmp, and
+/// unlike a revision counter it cannot go stale behind a writer that forgets
+/// to bump it.
+pub(crate) fn visible_source_index(
+    state: &mut AppState,
+) -> std::sync::Arc<crate::state::NetlistSourceIndex> {
+    let source = state.simulation.netlist_content.as_str();
+    if !state.ui.netlist.source_index.describes(source) {
+        state.ui.netlist.source_index =
+            std::sync::Arc::new(crate::state::NetlistSourceIndex::parse(source));
+    }
+    std::sync::Arc::clone(&state.ui.netlist.source_index)
+}
+
 /// Invalidate byte-bound review evidence after any ownership or source edit.
 pub fn invalidate_source_evidence(document: &mut NetlistDocumentState) {
     document.validation = None;
@@ -1122,6 +1141,9 @@ pub struct NetlistDocumentState {
     pub completion_dismissed_at: Option<u64>,
     /// Harvested `.model` and `.subckt` symbols.
     symbols: Vec<completion::SymbolEntry>,
+    /// Outline and line offsets of the visible buffer. Read through
+    /// [`visible_source_index`], which is what keeps it current.
+    source_index: std::sync::Arc<crate::state::NetlistSourceIndex>,
 }
 
 impl NetlistDocumentState {
@@ -1237,6 +1259,36 @@ mod tests {
         state.simulation.netlist_content = ROOT.to_owned();
         state.workspace.validate_simulation_configuration().unwrap();
         state
+    }
+
+    /// The navigator asks for the outline on every frame. Parsing costs the
+    /// deck, so the answer has to be the same object until the bytes change —
+    /// and a different one the moment they do, because a navigator listing
+    /// declarations the buffer no longer contains is worse than a slow one.
+    #[test]
+    fn the_visible_outline_is_parsed_once_per_change_and_never_reused_across_one() {
+        let mut state = owned_dependency_state();
+
+        let first = visible_source_index(&mut state);
+        let again = visible_source_index(&mut state);
+        assert!(
+            std::sync::Arc::ptr_eq(&first, &again),
+            "an unchanged buffer must not be parsed twice"
+        );
+        assert!(first.describes(ROOT));
+        assert_eq!(first.card(3), "V1 out 0 1");
+
+        assert!(replace_owned_source(
+            &mut state,
+            format!("{ROOT}* one more card\n")
+        ));
+        let edited = visible_source_index(&mut state);
+        assert!(!std::sync::Arc::ptr_eq(&first, &edited));
+        assert_eq!(edited.line_count(), first.line_count() + 1);
+
+        // Switching documents changes the buffer without editing it.
+        assert!(open_generated_primary(&mut state));
+        assert!(visible_source_index(&mut state).describes(ROOT));
     }
 
     #[test]

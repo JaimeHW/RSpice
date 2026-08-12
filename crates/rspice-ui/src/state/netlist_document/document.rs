@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::product::{ContentDigest, ObjectRevision, RevisionError};
 
-use super::outline::{IncludeDirective, NetlistOutline, parse_include_directives};
+use super::outline::{IncludeDirective, parse_include_directives};
 use super::search::{FindError, FindOptions, ReplaceOutcome, ReplaceScope, replace_in_source};
 
 const DOCUMENT_SCHEMA_VERSION: u32 = 1;
@@ -903,8 +903,13 @@ impl TransitionReceipt {
     }
 }
 
-/// Canonical document model. Derived outline/include data is rebuilt from the
-/// exact source after every successful source transition and after restore.
+/// Canonical document model. Derived include data is rebuilt from the exact
+/// source after every successful source transition and after restore.
+///
+/// The navigable outline is not held here. It was rebuilt on every transition
+/// — which is every keystroke on an owned deck — and read by nobody: the
+/// navigator projects [`crate::state::NetlistSourceIndex`] from the visible
+/// buffer, which is not this document's source while an edit is uncommitted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetlistDocument {
     id: NetlistDocumentId,
@@ -917,7 +922,6 @@ pub struct NetlistDocument {
     save_acknowledgement: Option<SaveAcknowledgement>,
     dependencies: Vec<DependencyMetadata>,
     validation: Option<ValidationReport>,
-    outline: NetlistOutline,
     include_directives: Vec<IncludeDirective>,
 }
 
@@ -942,7 +946,6 @@ impl NetlistDocument {
             save_acknowledgement: None,
             dependencies: generated_artifact.dependencies.clone(),
             validation: None,
-            outline: NetlistOutline::parse(&source),
             include_directives,
             source,
             generated_artifact,
@@ -1027,11 +1030,6 @@ impl NetlistDocument {
     #[must_use]
     pub const fn validation(&self) -> Option<&ValidationReport> {
         self.validation.as_ref()
-    }
-
-    #[must_use]
-    pub const fn outline(&self) -> &NetlistOutline {
-        &self.outline
     }
 
     #[must_use]
@@ -1380,7 +1378,6 @@ impl NetlistDocument {
         let include_directives = parse_include_directives(&source);
         let dependencies = normalize_dependencies(&include_directives, Vec::new())?;
         self.content_digest = digest(source.as_bytes());
-        self.outline = NetlistOutline::parse(&source);
         self.source = source;
         self.include_directives = include_directives;
         self.dependencies = dependencies;
@@ -1390,7 +1387,6 @@ impl NetlistDocument {
     }
 
     fn rebuild_derived(&mut self) {
-        self.outline = NetlistOutline::parse(&self.source);
         self.include_directives = parse_include_directives(&self.source);
     }
 
@@ -1553,7 +1549,6 @@ impl<'de> Deserialize<'de> for NetlistDocument {
             id: data.id,
             revision: data.revision,
             ownership: data.ownership,
-            outline: NetlistOutline::parse(&data.source),
             include_directives,
             source: data.source,
             content_digest: data.content_digest,
