@@ -8,7 +8,6 @@
 mod automation;
 
 mod editor;
-mod editor_buffer;
 mod language_services;
 mod page;
 mod source_files;
@@ -40,18 +39,19 @@ pub(crate) use language_services::{
     SourceSymbol, commit_language_code_action, commit_language_completion, commit_language_rename,
     document_outline, open_language_tools,
 };
+#[cfg(test)]
+pub(crate) use page::CodeSourceEditorBufferIdentity;
 pub use page::{
-    AutomationArtifactStore, AutomationBreakpoint, AutomationBreakpointKind, AutomationDebugPhase,
-    AutomationDebugState, AutomationDispatchSnapshot, AutomationExceptionPolicy,
-    AutomationExecutionState, AutomationRuntimeLaunchMode, AutomationValidationReceipt,
-    AutomationWatch, CodeSourceFileAction, CodeSourceFileDialogState, CodeSourceHistoryState,
-    CodeSourceImportState, CodeSourceSearchScope, CodeSourceSearchState,
-    CodeSourceWorkspaceDialogState, CodeWorkspacePage, CodeWorkspaceRuntimeState,
-    PendingVerilogACompile, SourceOperationToken, TargetQualification, VerilogACompileDialogState,
-    VerilogACompileOutcome, VerilogACompileReceipt, VerilogAFileSelection,
-    VerilogAQualificationHistoryRow, VerilogARootImportTarget,
+    AutomationArtifactStore, AutomationBreakpointKind, AutomationDebugPhase,
+    AutomationDispatchSnapshot, AutomationExceptionPolicy, AutomationExecutionState,
+    AutomationRuntimeLaunchMode, AutomationValidationReceipt, AutomationWatch,
+    CodeSourceFileAction, CodeSourceFileDialogState, CodeSourceHistoryState, CodeSourceImportState,
+    CodeSourceSearchScope, CodeSourceSearchState, CodeSourceWorkspaceDialogState,
+    CodeWorkspacePage, CodeWorkspaceRuntimeState, PendingVerilogACompile, SourceOperationToken,
+    TargetQualification, VerilogACompileDialogState, VerilogACompileOutcome,
+    VerilogACompileReceipt, VerilogAFileSelection, VerilogAQualificationHistoryRow,
+    VerilogARootImportTarget,
 };
-pub(crate) use page::{CodeSourceEditorBufferCache, CodeSourceEditorBufferIdentity};
 pub(crate) use source_files::{
     assign_automation_source_role, commit_source_file_dialog, commit_source_history_restore,
     commit_source_workspace_dialog, import_dropped_automation_source, open_source_file_dialog,

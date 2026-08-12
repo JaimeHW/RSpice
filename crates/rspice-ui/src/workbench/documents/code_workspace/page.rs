@@ -665,10 +665,6 @@ impl AutomationArtifactStore {
         self.records.iter()
     }
 
-    pub fn len(&self) -> usize {
-        self.records.len()
-    }
-
     pub fn clear(&mut self) {
         self.records.clear();
         self.blobs.clear();
@@ -793,6 +789,10 @@ impl AutomationExecutionState {
     }
 }
 
+/// The exact project, bundle, revision, closure, and path an editor buffer was
+/// taken from. It seals `source_files::replace_automation_editor_file`, which
+/// is itself `#[cfg(test)]`, so this identity is compiled with it.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CodeSourceEditorBufferIdentity {
     pub(crate) project_id: crate::product::ProjectId,
@@ -800,12 +800,6 @@ pub(crate) struct CodeSourceEditorBufferIdentity {
     pub(crate) bundle_revision: u64,
     pub(crate) closure_digest: crate::product::ContentDigest,
     pub(crate) path: std::sync::Arc<str>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct CodeSourceEditorBufferCache {
-    pub(crate) identity: CodeSourceEditorBufferIdentity,
-    pub(crate) content: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -829,8 +823,6 @@ pub struct CodeWorkspaceRuntimeState {
     pub source_carets: std::collections::BTreeMap<(ProjectSourceLanguage, String), usize>,
     pub source_selections:
         std::collections::BTreeMap<(ProjectSourceLanguage, String), (usize, usize)>,
-    pub(crate) source_editor_buffer_caches:
-        std::collections::BTreeMap<ProjectSourceLanguage, CodeSourceEditorBufferCache>,
     pub veriloga: VerilogAWorkbenchState,
     pub automation: AutomationWorkbenchState,
 }
@@ -1055,7 +1047,7 @@ mod tests {
             store.try_push(artifact.clone()).unwrap();
         }
 
-        assert_eq!(store.len(), MAX_AUTOMATION_ARTIFACT_RECORDS);
+        assert_eq!(store.iter().count(), MAX_AUTOMATION_ARTIFACT_RECORDS);
         assert_eq!(store.blobs.len(), 1);
         assert_eq!(
             store

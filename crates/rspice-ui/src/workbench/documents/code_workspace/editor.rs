@@ -246,10 +246,6 @@ impl CodeDiagnosticCollection {
         self.records.is_empty()
     }
 
-    pub fn get(&self, index: usize) -> Option<&CodeEditorDiagnostic> {
-        self.records.get(index)
-    }
-
     pub fn iter(&self) -> std::slice::Iter<'_, CodeEditorDiagnostic> {
         self.records.iter()
     }
@@ -1064,8 +1060,8 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let diagnostics = CodeDiagnosticCollection::try_new(records).unwrap();
-        let first = diagnostics.get(0).unwrap();
-        let second = diagnostics.get(1).unwrap();
+        let first = &diagnostics.as_slice()[0];
+        let second = &diagnostics.as_slice()[1];
 
         assert_eq!(first.line, Some(2));
         assert!(first.source.is_none());
