@@ -70,7 +70,7 @@ fn eyebrow(app: &RSpiceApp, page: SimulationPage) -> String {
         SimulationPage::Outputs => "SAVED SIGNALS · EXPRESSIONS".to_owned(),
         SimulationPage::Specifications => "REQUIREMENTS · ACCEPTANCE LIMITS".to_owned(),
         SimulationPage::RunSet => "RUN SPACE · PROCESS · TEMPERATURE · VARIATION".to_owned(),
-        SimulationPage::Models => "MODEL CLOSURE · SECTION BINDING".to_owned(),
+        SimulationPage::Models => "MODEL CLOSURE · SECTION BINDING · QUALIFICATION".to_owned(),
         SimulationPage::Solver => format!(
             "NUMERICS · {} · DESIGN CONTRACT",
             app.state.sim_setup.options.preset_label().to_uppercase()

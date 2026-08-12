@@ -5,6 +5,9 @@ mod manager;
 mod qualification;
 
 use qualification::*;
+/// What the rest of the surfaces may read about model qualification. The glob
+/// above is this module's own working vocabulary and stays private to it.
+pub(super) use qualification::{ModelGateFact, QualificationGate, model_gate_facts};
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;

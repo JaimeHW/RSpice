@@ -8,8 +8,14 @@
 
 use super::*;
 
+/// A model's release verdict.
+///
+/// Readable across the surfaces because it is a fact about the project, not
+/// about this page: a simulation plan cannot honestly sign off on a model the
+/// gate has not cleared, and the alternative — a second verdict enum on the
+/// reading side — is how two surfaces come to disagree about one model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum QualificationGate {
+pub(in crate::workbench::surfaces) enum QualificationGate {
     Qualified,
     Review,
     Unqualified,
@@ -17,7 +23,7 @@ pub(super) enum QualificationGate {
 }
 
 impl QualificationGate {
-    const fn label(self) -> &'static str {
+    pub(in crate::workbench::surfaces) const fn label(self) -> &'static str {
         match self {
             Self::Qualified => "qualified",
             Self::Review => "review",
@@ -376,6 +382,44 @@ pub(super) fn qualification_summaries(app: &RSpiceApp) -> Vec<QualificationModel
         }
     }
     summaries
+}
+
+/// One model's release gate, as another surface may read it.
+///
+/// [`QualificationModelSummary`] is this page's own working record — the
+/// per-domain vector counts, the desktop/wasm parity split, the evidence
+/// digests — and it moves whenever the qualification page does. This is the
+/// narrow projection of it, so a field added there does not silently become
+/// another surface's dependency.
+#[derive(Debug, Clone)]
+pub(in crate::workbench::surfaces) struct ModelGateFact {
+    pub(in crate::workbench::surfaces) library: String,
+    pub(in crate::workbench::surfaces) model: String,
+    pub(in crate::workbench::surfaces) vectors: usize,
+    pub(in crate::workbench::surfaces) evidenced_vectors: usize,
+    pub(in crate::workbench::surfaces) passing_vectors: usize,
+    pub(in crate::workbench::surfaces) open_dispositions: usize,
+    /// This page could not read the model's gate at all, so its counts say
+    /// nothing either way and a reader must not total them as passing.
+    pub(in crate::workbench::surfaces) unreadable: bool,
+    pub(in crate::workbench::surfaces) gate: QualificationGate,
+}
+
+/// Every model in the closure, projected to what a reading surface may know.
+pub(in crate::workbench::surfaces) fn model_gate_facts(app: &RSpiceApp) -> Vec<ModelGateFact> {
+    qualification_summaries(app)
+        .into_iter()
+        .map(|summary| ModelGateFact {
+            library: summary.library,
+            model: summary.model,
+            vectors: summary.vectors,
+            evidenced_vectors: summary.evidenced_vectors,
+            passing_vectors: summary.passing_vectors,
+            open_dispositions: summary.open_dispositions,
+            unreadable: summary.source_error.is_some(),
+            gate: summary.gate,
+        })
+        .collect()
 }
 
 pub(super) fn qualification_model_summary(
