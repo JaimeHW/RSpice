@@ -953,8 +953,21 @@ impl<'a> Dialog<'a> {
                             *offset = body_output.state.offset.y;
                         }
                     }
-                    self.transaction_strip(ui, &t, width);
-                    let footer = self.footer(ui, &t, hide_close_only_footer, large_targets, width);
+                    // The strip and the command row answer to ids of their own.
+                    // Taken from the count of what was laid out first, the
+                    // row's id would move every time a transaction state opened
+                    // or closed the strip above it — while the row itself, held
+                    // on the surface's bottom edge, has not moved a point — and
+                    // its buttons would lose the focus and hover continuity that
+                    // id carries.
+                    ui.scope_builder(egui::UiBuilder::new().id(id.with("transaction")), |ui| {
+                        self.transaction_strip(ui, &t, width);
+                    });
+                    let footer = ui
+                        .scope_builder(egui::UiBuilder::new().id(id.with("footer")), |ui| {
+                            self.footer(ui, &t, hide_close_only_footer, large_targets, width)
+                        })
+                        .inner;
                     rendered_focus.primary = footer.primary_id;
                     rendered_focus.secondary = footer.secondary_id;
                     rendered_focus.ghost = footer.ghost_id;
