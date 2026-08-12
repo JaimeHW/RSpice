@@ -137,7 +137,7 @@ pub(super) fn try_route_generated_bjt_model(
     spice_dialect: crate::config::SpiceDialect,
     temperature: f64,
 ) -> Result<bool, SimulationError> {
-    let target = generated_bjt_target(model_name, model_def, element.nodes.len())?;
+    let target = generated_bjt_target(model_name, model_def)?;
     let Some(target) = target.filter(|target| target.is_available()) else {
         return Ok(false);
     };
@@ -300,10 +300,20 @@ fn generated_diode_target(
     })
 }
 
+/// Generated BJT models are selected by model type only.
+///
+/// A `Q` element's SPICE `LEVEL` belongs to the native BJT front and its
+/// fail-closed policy (`validate_bjt_model_level`): LEVEL=0/1/2 is legacy
+/// Gummel-Poon, LEVEL=4/9/11/12/13 is native VBIC, and every advanced CMC
+/// family is refused by name until it has reference-backed validation. Letting
+/// a level reach the generated catalog made all of that build-dependent — the
+/// same deck meant a different device depending on which `veriloga-model-*`
+/// features happened to be enabled — and handed Xyce/ngspice model cards to an
+/// ADMS parameter dialect that rejects them. The generated modules stay
+/// reachable by their own model type and by direct X-device instantiation.
 fn generated_bjt_target(
     model_name: &str,
     model_def: Option<&ModelDef>,
-    instance_terminal_count: usize,
 ) -> Result<Option<GeneratedTarget>, SimulationError> {
     let type_name = model_def
         .map(|model| model.model_type.as_str())
@@ -338,28 +348,7 @@ fn generated_bjt_target(
             match_normalized(type_name, &["VBIC_4T_ET_CF"])
                 .then_some(GeneratedTarget::new("vbic_4T_et_cf"))
         });
-    if explicit.is_some() {
-        return Ok(explicit);
-    }
-
-    let Some(model) = model_def else {
-        return Ok(None);
-    };
-    if resolve_bjt_type_from_model(&model.model_type).is_none() {
-        return Ok(None);
-    }
-    Ok(match checked_model_level("BJT", model_name, model)? {
-        Some(8 | 234) => Some(GeneratedTarget::new("hicumL2va")),
-        Some(230) => Some(GeneratedTarget::new("hicumL0va")),
-        Some(504) if instance_terminal_count >= 4 => Some(GeneratedTarget::new("bjt505_va")),
-        Some(504) => Some(GeneratedTarget::new("bjtd505_va")),
-        Some(505) if instance_terminal_count >= 4 => Some(GeneratedTarget::new("bjt505t_va")),
-        Some(505) => Some(GeneratedTarget::new("bjtd505t_va")),
-        Some(11) if instance_terminal_count >= 4 => Some(GeneratedTarget::new("vbic13_3t_et")),
-        Some(11) => Some(GeneratedTarget::new("vbic13")),
-        Some(4 | 9 | 12 | 13) => Some(GeneratedTarget::new("vbic13_4t")),
-        _ => None,
-    })
+    Ok(explicit)
 }
 
 fn generated_mos_target(
