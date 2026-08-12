@@ -890,13 +890,34 @@ const LEDGER_COLUMNS: [f32; 5] = [0.19, 0.25, 0.16, 0.18, 0.22];
 /// The origin cell of a row an analysis owns rather than the plan.
 const OVERRIDE_ORIGIN: &str = "analysis override";
 
+/// What a step ceiling resolves to once both bounds are applied.
+///
+/// A step ceiling is the one option an analysis cannot replace. The plan's
+/// ceiling and the analysis's own reach the engine as two separate fields —
+/// `MAXTIMESTEP` and `TIMEINT DELMAX` — and the transient clamps its step
+/// against both, so the run steps at whichever is tighter. Reporting the
+/// authored value as effective would state a bound the run does not honour
+/// whenever an analysis asks for a looser one than the plan already allows.
+fn resolved_step_ceiling(authored: &str, plan_ceiling: f64) -> (String, &'static str) {
+    let Ok(authored_value) = crate::simulation::dialog::parse_si_value(authored) else {
+        return (authored.to_owned(), OVERRIDE_ORIGIN);
+    };
+    if !plan_ceiling.is_finite() || plan_ceiling <= 0.0 || authored_value <= plan_ceiling {
+        return (authored.to_owned(), OVERRIDE_ORIGIN);
+    }
+    (
+        format_value(plan_ceiling),
+        "plan preset · tighter than the override",
+    )
+}
+
 /// One statement of what an analysis actually resolves to.
-struct PolicyRow {
+pub(super) struct PolicyRow {
     analysis: String,
-    option: String,
-    preset: String,
-    effective: String,
-    origin: &'static str,
+    pub(super) option: String,
+    pub(super) preset: String,
+    pub(super) effective: String,
+    pub(super) origin: &'static str,
     /// The authored override this row reports, when it reports one. Rows
     /// without a target state the plan policy and cannot be removed from here.
     target: Option<OverrideTarget>,
@@ -1152,7 +1173,7 @@ fn plan_preset_value(option: NumericOverrideOption, options: &SimulationOptions)
 /// records themselves rather than from a table of options this page recognizes,
 /// so an authored bound always earns a row even when the projection below has
 /// nothing else to say about it.
-fn analysis_overrides(app: &RSpiceApp) -> Vec<PolicyRow> {
+pub(super) fn analysis_overrides(app: &RSpiceApp) -> Vec<PolicyRow> {
     use crate::simulation::dialog::{OpAccuracy, XfAccuracy};
     use crate::simulation::plan::AnalysisDraft;
 
@@ -1202,17 +1223,18 @@ fn analysis_overrides(app: &RSpiceApp) -> Vec<PolicyRow> {
                     });
                 }
             }
-            // A transient that names its own step ceiling stops resolving to
-            // the plan's. `auto` means it does not.
+            // A transient that names its own step ceiling departs from the
+            // plan's, though it can only tighten it. `auto` means it does not.
             AnalysisDraft::Transient(setup) => {
                 let ceiling = setup.max_step.trim();
                 if !(ceiling.is_empty() || ceiling.eq_ignore_ascii_case("auto")) {
+                    let (effective, origin) = resolved_step_ceiling(ceiling, options.max_timestep);
                     rows.push(PolicyRow {
                         analysis: analysis.clone(),
                         option: NumericOverrideOption::MaximumTimestep.label().to_owned(),
                         preset: plan_preset_value(NumericOverrideOption::MaximumTimestep, options),
-                        effective: ceiling.to_owned(),
-                        origin: OVERRIDE_ORIGIN,
+                        effective,
+                        origin,
                         target: Some(OverrideTarget {
                             instance: instance.id(),
                             option: NumericOverrideOption::MaximumTimestep,
@@ -1226,12 +1248,17 @@ fn analysis_overrides(app: &RSpiceApp) -> Vec<PolicyRow> {
             continue;
         };
         for (option, effective) in record.entries() {
+            let (effective, origin) = if option == NumericOverrideOption::MaximumTimestep {
+                resolved_step_ceiling(&effective, options.max_timestep)
+            } else {
+                (effective, OVERRIDE_ORIGIN)
+            };
             rows.push(PolicyRow {
                 analysis: analysis.clone(),
                 option: option.label().to_owned(),
                 preset: plan_preset_value(option, options),
                 effective,
-                origin: OVERRIDE_ORIGIN,
+                origin,
                 target: Some(OverrideTarget {
                     instance: instance.id(),
                     option,
