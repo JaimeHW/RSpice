@@ -1511,11 +1511,11 @@ pub(super) fn parse_options_command(
                 let value = expect_value(stream, line_num, params)?;
                 options.pivrel = Some(parse_positive_real_option("PIVREL", value, line_num)?);
             }
-            (_, "TEMP") => {
+            (None | Some("DEVICE"), "TEMP") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.temp = Some(parse_celsius_option("TEMP", value, line_num)?);
             }
-            (_, "TNOM") => {
+            (None | Some("DEVICE"), "TNOM") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.tnom = Some(parse_celsius_option("TNOM", value, line_num)?);
             }
@@ -1690,7 +1690,7 @@ fn expect_option_key(stream: &mut TokenStream, line_num: usize) -> Result<String
     Ok(key)
 }
 
-fn option_package_key_is_known(key_upper: &str) -> bool {
+pub(super) fn option_package_key_is_known(key_upper: &str) -> bool {
     matches!(
         key_upper,
         "TOPOLOGY"
@@ -5169,6 +5169,10 @@ mod tests {
             ".options temp=-273.15",
             ".options tnom=1e309",
             ".options tnom=-300",
+            ".options device temp=1e309",
+            ".options device temp=-273.15",
+            ".options device tnom=1e309",
+            ".options device tnom=-300",
         ] {
             let err = Netlist::parse(&deck_with_options(options))
                 .expect_err("invalid temperature option must fail parsing");
@@ -5177,6 +5181,41 @@ mod tests {
                 "unexpected error for {options}: {err}"
             );
         }
+    }
+
+    #[test]
+    fn options_device_temperature_matches_spice_unscoped_temperature() {
+        let unscoped = Netlist::parse(&deck_with_options(".options temp=35"))
+            .expect("unscoped SPICE temperature option parses");
+        let device_scoped = Netlist::parse(&deck_with_options(".options device temp=35"))
+            .expect("Xyce DEVICE-scoped temperature option parses");
+
+        assert_eq!(unscoped.options.temp, Some(35.0));
+        assert_eq!(device_scoped.options.temp, Some(35.0));
+        assert_eq!(
+            unscoped.options.temp.map(f64::to_bits),
+            device_scoped.options.temp.map(f64::to_bits),
+            "the SPICE and Xyce spellings must resolve to the same run temperature"
+        );
+        assert_eq!(unscoped.diagnostics, device_scoped.diagnostics);
+        for built_in in ["TEMP", "TEMPER", "VT"] {
+            assert_eq!(
+                unscoped.params.get(built_in).map(f64::to_bits),
+                device_scoped.params.get(built_in).map(f64::to_bits),
+                "the {built_in} built-in must be identical for both spellings"
+            );
+        }
+    }
+
+    #[test]
+    fn options_temperature_is_not_accepted_under_an_unrelated_package() {
+        let netlist = Netlist::parse(&deck_with_options(".options topology temp=35"))
+            .expect("unknown scoped temperature is diagnosed without corrupting the deck");
+
+        assert_eq!(netlist.options.temp, None);
+        assert!(netlist.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "unknown-option" && diagnostic.message.contains("TOPOLOGY.TEMP")
+        }));
     }
 
     fn deck_with_directives(directives: &str) -> String {

@@ -3623,6 +3623,7 @@ fn scan_temperature_option_line(
     let tokens = tokenize(line).map_err(|err| lex_to_parse_error(err, line_num))?;
     let mut stream = TokenStream::new(tokens);
     stream.advance();
+    let mut option_package: Option<String> = None;
 
     while !stream.is_eof() {
         skip_commas(&mut stream);
@@ -3638,11 +3639,21 @@ fn scan_temperature_option_line(
         stream.advance();
 
         let has_equals = stream.consume(&TokenKind::Equals);
-        if !has_equals && matches!(key_upper.as_str(), "DEVICE" | "TOPOLOGY") {
+        if !has_equals && option_package_key_is_known(&key_upper) {
+            option_package = Some(key_upper);
             continue;
         }
         if !matches!(key_upper.as_str(), "TEMP" | "TNOM") {
             if has_equals && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+                stream.advance();
+            }
+            continue;
+        }
+        if !matches!(option_package.as_deref(), None | Some("DEVICE")) {
+            if has_equals
+                && try_value(&mut stream, &state.params).is_none()
+                && matches!(stream.peek().kind, TokenKind::Ident(_))
+            {
                 stream.advance();
             }
             continue;
