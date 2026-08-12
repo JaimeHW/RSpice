@@ -960,6 +960,12 @@ fn output_runtime_scalar_identifiers(
     abort: &dyn AbortSignal,
 ) -> Result<HashSet<String>, ParseWithAbortError> {
     let mut names = HashSet::new();
+    for (index, element) in netlist.elements.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        if element_is_independent_source(&element.kind) {
+            names.insert(canonical_symbol(&element.name));
+        }
+    }
     if let Some(authored) = atomic_device_expression {
         let authored = canonical_symbol(authored.trim());
         for (index, element) in flattened_elements
@@ -1977,6 +1983,13 @@ fn element_supports_bare_output_scalar(kind: &ElementKind) -> bool {
     )
 }
 
+fn element_is_independent_source(kind: &ElementKind) -> bool {
+    matches!(
+        kind,
+        ElementKind::VoltageSource(_) | ElementKind::CurrentSource(_)
+    )
+}
+
 fn validate_xyce_output_accessor(
     operator: &str,
     authored_arguments: &str,
@@ -2735,7 +2748,7 @@ R2 A 0 200
 X1 1 CELL
 .TRAN 0 1
 .PRINT TRAN {V(1)-{(V(1)-V(0))}} {DDX(V(1)*V(1),V(1))}
-.PRINT TRAN {VV1-VV2}
+.PRINT TRAN {VC+VV1-VV2}
 .MEASURE TRAN VV1 PARAM='V(1)+1'
 .MEASURE TRAN VV2 EQN {V(1)+2}
 .END
