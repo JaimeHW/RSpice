@@ -65,8 +65,8 @@ pub(crate) use output_symbols::{
 pub use output_symbols::{
     OutputAnalysisKind, OutputDirectiveKind, OutputExpressionIssue,
     OutputExpressionValidationError, OutputRequest, OutputSymbolDependency, OutputSymbolKind,
-    OutputSymbolValidationError, UnresolvedOutputSymbol, validate_output_expressions,
-    validate_output_expressions_with_abort, validate_output_requests,
+    OutputSymbolValidationError, PrintDelimiter, UnresolvedOutputSymbol,
+    validate_output_expressions, validate_output_expressions_with_abort, validate_output_requests,
     validate_output_requests_with_abort, validate_output_symbols,
     validate_output_symbols_with_abort,
 };

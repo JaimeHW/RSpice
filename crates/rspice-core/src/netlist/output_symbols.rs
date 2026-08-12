@@ -96,6 +96,36 @@ pub enum OutputSymbolKind {
     Device,
 }
 
+/// Field delimiter selected by a source-authored Xyce `.PRINT` card.
+///
+/// Xyce treats an absent or invalid `DELIMITER=` value as its standard
+/// whitespace table layout.  Quoted custom delimiters are retained without
+/// their quotes so every frontend can render the same typed request.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub enum PrintDelimiter {
+    #[default]
+    Whitespace,
+    Tab,
+    Comma,
+    Colon,
+    Semicolon,
+    Custom(String),
+}
+
+impl PrintDelimiter {
+    /// The exact separator written between unpadded table fields.
+    pub fn separator(&self) -> &str {
+        match self {
+            Self::Whitespace => " ",
+            Self::Tab => "\t",
+            Self::Comma => ",",
+            Self::Colon => ":",
+            Self::Semicolon => ";",
+            Self::Custom(value) => value,
+        }
+    }
+}
+
 impl std::fmt::Display for OutputSymbolKind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
@@ -127,6 +157,10 @@ pub struct OutputRequest {
     pub analysis: Option<OutputAnalysisKind>,
     /// Optional semantic name used to replace redefined measurements.
     pub name: Option<String>,
+    /// Effective Xyce `.PRINT` delimiter. This is `Some(Whitespace)` for a
+    /// `.PRINT` card with no delimiter or an invalid delimiter, and `None`
+    /// for directives that do not own Xyce print formatting.
+    pub print_delimiter: Option<PrintDelimiter>,
     /// Authored braced or quoted expression bodies in source order.
     ///
     /// Keeping these separately from circuit dependencies lets semantic
@@ -208,6 +242,8 @@ impl OutputRequest {
             origin,
             analysis,
             name: None,
+            print_delimiter: matches!(directive, OutputDirectiveKind::Print)
+                .then_some(PrintDelimiter::Whitespace),
             expressions,
             dependencies: extract_output_dependencies(source),
         }
@@ -236,6 +272,7 @@ impl OutputRequest {
             origin,
             analysis: None,
             name: None,
+            print_delimiter: None,
             expressions: extract_output_expressions(source),
             dependencies,
         }
@@ -268,6 +305,7 @@ impl OutputRequest {
             origin,
             analysis: OutputAnalysisKind::from_keyword(&statement.analysis),
             name: Some(statement.name.clone()),
+            print_delimiter: None,
             expressions: Vec::new(),
             dependencies,
         }
@@ -291,12 +329,20 @@ impl OutputRequest {
             origin,
             analysis: None,
             name: None,
+            print_delimiter: None,
             expressions: outputs
                 .iter()
                 .flat_map(|output| extract_output_expressions(output))
                 .collect(),
             dependencies,
         }
+    }
+
+    pub(crate) fn with_print_delimiter(mut self, delimiter: PrintDelimiter) -> Self {
+        if self.directive == OutputDirectiveKind::Print {
+            self.print_delimiter = Some(delimiter);
+        }
+        self
     }
 }
 

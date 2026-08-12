@@ -26,7 +26,7 @@ use super::{
     MissingSubcircuitEndsError, ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType,
     Netlist, NetlistSourceLocation, NodeSet, OutputAnalysisKind, OutputDirectiveKind,
     OutputRequest, ParamContext, ParameterRedefinitionPolicy, ParametricValue, ParseDiagnostic,
-    ParseError, ParseWithAbortError, PoleZeroAnalysisType, PoleZeroTransferType,
+    ParseError, ParseWithAbortError, PoleZeroAnalysisType, PoleZeroTransferType, PrintDelimiter,
     PspiceChebyshevKind, PspiceUTiming, PspiceUTimingMode, RemoveUnusedDeviceType,
     RemoveUnusedPolicy, SaveSet, SaveSignal, SensitivityAcSweep, SimulationOptions,
     SourceMultiplicity, SourceRfPort, SourceSpec, StartupDiagnosticCode,
