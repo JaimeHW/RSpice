@@ -62,6 +62,10 @@ __pycache__/
 /*.out
 *.osdi
 *.zip
+# The browser Python runtime ships its standard library as a zip. It is an
+# execution asset that the runtime manifest digests and CI verifies, not a
+# build output, and the browser cannot start Python without it.
+!crates/rspice-ui/web/python/pyodide-*/python_stdlib.zip
 /rtlinv_*.csv
 /rtlinv_*.json
 /rtlinv_*.cir
