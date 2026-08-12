@@ -412,13 +412,14 @@ pub(super) fn parse_command(
             } else {
                 OutputDirectiveKind::Probe
             };
-            output_requests.push(OutputRequest::from_source(
+            let request = OutputRequest::from_source(
                 directive,
                 origin.clone(),
                 &remaining_command_source(stream),
                 remaining_command_expressions(stream),
-            ));
-            parse_save_command(stream, line_num, saves, false)?;
+            );
+            parse_save_command(stream, line_num, saves, false, None, None)?;
+            output_requests.push(request);
         }
         ".PRINT" | ".PLOT" => {
             // .PRINT/.PLOT take an optional leading analysis type before the
@@ -428,13 +429,21 @@ pub(super) fn parse_command(
             } else {
                 OutputDirectiveKind::Plot
             };
-            output_requests.push(OutputRequest::from_source(
+            let request = OutputRequest::from_source(
                 directive,
                 origin.clone(),
                 &remaining_command_source(stream),
                 remaining_command_expressions(stream),
-            ));
-            parse_save_command(stream, line_num, saves, true)?;
+            );
+            let delimiter = parse_save_command(
+                stream,
+                line_num,
+                saves,
+                true,
+                Some(diagnostics),
+                Some(origin),
+            )?;
+            output_requests.push(request.with_print_delimiter(delimiter));
         }
         _ => {
             // An unrecognized dot-command means whatever it requests will not
@@ -886,11 +895,14 @@ pub(super) fn parse_save_command(
     line_num: usize,
     saves: &mut super::SaveSet,
     skip_analysis_type: bool,
-) -> Result<(), ParseError> {
+    mut diagnostics: Option<&mut Vec<ParseDiagnostic>>,
+    origin: Option<&NetlistSourceLocation>,
+) -> Result<PrintDelimiter, ParseError> {
     use super::SaveSignal;
 
     let mut first_token = true;
     let mut parsed_any = false;
+    let mut delimiter = PrintDelimiter::Whitespace;
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
@@ -901,17 +913,65 @@ pub(super) fn parse_save_command(
         match &stream.peek().kind {
             TokenKind::Ident(raw) => {
                 let raw = raw.clone();
-                stream.advance();
                 let upper = raw.to_ascii_uppercase();
 
                 if first_token
                     && skip_analysis_type
                     && OutputAnalysisKind::from_keyword(&upper).is_some()
                 {
+                    stream.advance();
                     first_token = false;
                     continue;
                 }
                 first_token = false;
+
+                if skip_analysis_type
+                    && matches!(stream.peek_n(1).kind, TokenKind::Equals)
+                    && is_xyce_print_option_name(&upper)
+                {
+                    stream.advance();
+                    stream.advance();
+                    let value = stream.peek().clone();
+                    if matches!(value.kind, TokenKind::Newline | TokenKind::Eof) {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: format!(".PRINT {upper}= requires a value"),
+                        });
+                    }
+                    stream.advance();
+                    if upper == "DELIMITER" {
+                        match xyce_print_delimiter_from_token(&value.kind) {
+                            Some(parsed) => delimiter = parsed,
+                            None => {
+                                let message =
+                                    "Invalid value of DELIMITER in .PRINT statment, ignoring";
+                                log::warn!("line {line_num}: {message}");
+                                if let Some(diagnostics) = diagnostics.as_deref_mut() {
+                                    diagnostics.push(match origin {
+                                        Some(origin) => ParseDiagnostic::warning_at(
+                                            origin.clone(),
+                                            "xyce-invalid-print-delimiter",
+                                            message,
+                                        ),
+                                        None => ParseDiagnostic::warning(
+                                            line_num,
+                                            "xyce-invalid-print-delimiter",
+                                            message,
+                                        ),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                if skip_analysis_type && upper == "NOINDEX" {
+                    stream.advance();
+                    continue;
+                }
+
+                stream.advance();
 
                 if upper == "ALL" {
                     saves.signals.push(SaveSignal::All);
@@ -1033,7 +1093,46 @@ pub(super) fn parse_save_command(
         log::warn!("line {line_num}: save/print directive without output signals ignored");
     }
 
-    Ok(())
+    Ok(delimiter)
+}
+
+fn is_xyce_print_option_name(name: &str) -> bool {
+    matches!(
+        name,
+        "TYPE"
+            | "FILE"
+            | "FORMAT"
+            | "DATAFORMAT"
+            | "LINTYPE"
+            | "DELIMITER"
+            | "WIDTH"
+            | "PRECISION"
+            | "TIMESCALEFACTOR"
+            | "FILTER"
+            | "INDEX"
+            | "OUTPUT_SAMPLE_STATS"
+            | "OUTPUT_ALL_SAMPLES"
+            | "OUTPUT_PCE_COEFFS"
+    )
+}
+
+fn xyce_print_delimiter_from_token(token: &TokenKind) -> Option<PrintDelimiter> {
+    match token {
+        TokenKind::Ident(value) if value.eq_ignore_ascii_case("TAB") => Some(PrintDelimiter::Tab),
+        TokenKind::Ident(value) if value.eq_ignore_ascii_case("COMMA") => {
+            Some(PrintDelimiter::Comma)
+        }
+        TokenKind::Ident(value) if value.eq_ignore_ascii_case("COLON") => {
+            Some(PrintDelimiter::Colon)
+        }
+        TokenKind::Ident(value) if value.eq_ignore_ascii_case("SEMICOLON") => {
+            Some(PrintDelimiter::Semicolon)
+        }
+        TokenKind::StringLit(value) if !value.is_empty() => {
+            Some(PrintDelimiter::Custom(value.clone()))
+        }
+        _ => None,
+    }
 }
 
 /// Parse a single textual probe (`v(out)`, `v(a,b)`, `i(v1)`, `n(m1:id)`,
@@ -4979,8 +5078,85 @@ pub(super) fn consume_uic_keyword(stream: &mut TokenStream) -> bool {
 mod tests {
     use crate::{
         Netlist,
-        netlist::{AnalysisCommand, DcSweepMode},
+        netlist::{AnalysisCommand, DcSweepMode, PrintDelimiter, SaveSignal},
     };
+
+    #[test]
+    fn print_delimiters_are_typed_without_polluting_saved_signals() {
+        let netlist = Netlist::parse(
+            "typed print delimiters\n\
+             V1 out 0 1\n\
+             .PRINT DC DELIMITER=coMmA FORMAT=STD V(out)\n\
+             .PRINT DC DELIMITER=TAB WIDTH=17 I(V1)\n\
+             .PRINT DC DELIMITER=COLON V(out)\n\
+             .PRINT DC DELIMITER=SEMICOLON V(out)\n\
+             .PRINT DC DELIMITER=\"|\" V(out)\n\
+             .DC V1 0 1 1\n\
+             .END\n",
+        )
+        .expect("the complete Xyce delimiter domain parses");
+
+        let delimiters = netlist
+            .output_requests
+            .iter()
+            .map(|request| request.print_delimiter.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            delimiters,
+            vec![
+                Some(PrintDelimiter::Comma),
+                Some(PrintDelimiter::Tab),
+                Some(PrintDelimiter::Colon),
+                Some(PrintDelimiter::Semicolon),
+                Some(PrintDelimiter::Custom("|".to_string())),
+            ]
+        );
+        assert_eq!(
+            netlist.saves.signals,
+            vec![
+                SaveSignal::Voltage("out".to_string()),
+                SaveSignal::Current("v1".to_string()),
+                SaveSignal::Voltage("out".to_string()),
+                SaveSignal::Voltage("out".to_string()),
+                SaveSignal::Voltage("out".to_string()),
+            ]
+        );
+        assert!(netlist.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn invalid_print_delimiter_warns_once_and_falls_back_to_whitespace() {
+        let netlist = Netlist::parse(
+            "invalid print delimiter\n\
+             V1 out 0 1\n\
+             .PRINT DC deLIMitEr=Fribble V(out)\n\
+             .DC V1 0 1 1\n\
+             .END\n",
+        )
+        .expect("invalid Xyce delimiter is a warning, not a parse failure");
+
+        let [request] = netlist.output_requests.as_slice() else {
+            panic!("expected one typed output request");
+        };
+        assert_eq!(request.print_delimiter, Some(PrintDelimiter::Whitespace));
+        assert_eq!(
+            netlist.saves.signals,
+            vec![SaveSignal::Voltage("out".to_string())]
+        );
+        let [diagnostic] = netlist.diagnostics.as_slice() else {
+            panic!("expected one invalid-delimiter warning");
+        };
+        assert_eq!(diagnostic.code, "xyce-invalid-print-delimiter");
+        assert_eq!(
+            diagnostic.message,
+            "Invalid value of DELIMITER in .PRINT statment, ignoring"
+        );
+        assert_eq!(diagnostic.line, 3);
+        assert_eq!(
+            diagnostic.origin.as_ref().map(|origin| origin.line),
+            Some(3)
+        );
+    }
 
     #[test]
     fn dc_list_accepts_signed_values_without_leading_zero() {
