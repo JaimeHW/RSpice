@@ -392,8 +392,6 @@ pub(super) fn page_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAc
             draft.margin_left,
             draft.bleed
         ),
-        true,
-        "",
     ) {
         action = BodyAction::CustomPaper;
     }
@@ -678,20 +676,15 @@ pub(super) fn output_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
         ui,
         "Layer, trace, and marker mapping…",
         "dash, marker, hatch and label redundancy",
-        true,
-        "",
     ) {
         action = BodyAction::PrintMapping;
     }
-    if draft.workflow != HardcopyWorkflow::Export {
+    if draft.workflow != HardcopyWorkflow::Export && printer_properties_reachable() {
         ui.add_space(6.0);
-        let (enabled, hint) = printer_properties_availability();
         if action_row(
             ui,
             "Printer properties…",
             "tray, duplex, resolution and collation",
-            enabled,
-            hint,
         ) {
             action = BodyAction::PrinterProperties;
         }
@@ -699,28 +692,14 @@ pub(super) fn output_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
     action
 }
 
-/// Where the driver dialog can be reached from, and what to say where it
-/// cannot. The browser has its own print dialog and no driver boundary to
-/// offer; other desktops have one RSpice does not yet speak to.
-#[cfg(target_os = "windows")]
-const fn printer_properties_availability() -> (bool, &'static str) {
-    (true, "")
-}
-
-#[cfg(all(not(target_os = "windows"), target_arch = "wasm32"))]
-const fn printer_properties_availability() -> (bool, &'static str) {
-    (
-        false,
-        "Printer capabilities are selected in the browser print dialog.",
-    )
-}
-
-#[cfg(all(not(target_os = "windows"), not(target_arch = "wasm32")))]
-const fn printer_properties_availability() -> (bool, &'static str) {
-    (
-        false,
-        "System printer driver properties are available on Windows desktop.",
-    )
+/// Whether this host has a driver boundary the dialog can open at all. The
+/// browser selects tray, duplex and collation in its own print dialog, and the
+/// other desktops have a driver RSpice does not yet speak to — so on both there
+/// is nothing behind this row. Where it leads nowhere it is absent rather than
+/// dimmed: a row advertising capabilities the host does not have reads as a
+/// feature withheld instead of one that was never there.
+const fn printer_properties_reachable() -> bool {
+    cfg!(target_os = "windows")
 }
 
 fn output_format_field(ui: &mut Ui, draft: &mut HardcopyDialogState) {
@@ -760,14 +739,19 @@ fn output_format_field(ui: &mut Ui, draft: &mut HardcopyDialogState) {
                 }
                 // The raster entries carry whatever resolution is currently in
                 // play, so leaving PNG for SVG and coming back does not
-                // silently reset it.
+                // silently reset it — each bounded by what this host can raster
+                // for that format on this page, because the two formats charge
+                // different bytes per pixel and neither ceiling is the default
+                // this list would otherwise commit.
                 let dpi = draft.format.raster_dpi().unwrap_or(DEFAULT_RASTER_DPI);
+                let png = bounded_raster(draft, OutputFormat::Png { dpi });
+                let tiff = bounded_raster(draft, OutputFormat::Tiff { dpi });
                 for (format, label) in [
                     (OutputFormat::PdfVector, "PDF · vector"),
                     (OutputFormat::PdfA, "PDF/A · vector"),
                     (OutputFormat::SvgVector, "SVG · vector"),
-                    (OutputFormat::Png { dpi }, "PNG · raster"),
-                    (OutputFormat::Tiff { dpi }, "TIFF · raster"),
+                    (png, "PNG · raster"),
+                    (tiff, "TIFF · raster"),
                 ] {
                     ui.selectable_value(&mut draft.format, format, label);
                 }
@@ -938,8 +922,7 @@ fn raster_resolution_field(ui: &mut Ui, draft: &mut HardcopyDialogState) {
             commit_raster_resolution(draft, ceiling);
         }
 
-        let committed = draft.format.raster_dpi().unwrap_or(DEFAULT_RASTER_DPI);
-        let (message, tone) = raster_resolution_note(&draft.raster_dpi_draft, ceiling, committed);
+        let (message, tone) = raster_resolution_note(&draft.raster_dpi_draft, ceiling);
         ui.add(
             egui::Label::new(
                 egui::RichText::new(message)
@@ -957,29 +940,48 @@ fn raster_resolution_id() -> egui::Id {
     egui::Id::new("hardcopy-raster-resolution")
 }
 
-/// What this page and this host will accept, or the contract's own range while
-/// no plan has compiled.
+/// What this page and this host will accept for the format in the draft, or the
+/// contract's own range while no plan has compiled.
 fn raster_dpi_ceiling(draft: &HardcopyDialogState) -> Option<u16> {
+    raster_dpi_ceiling_for(draft, draft.format)
+}
+
+/// The same question asked of a format the draft does not currently hold, which
+/// is what the target list has to ask before it offers one.
+fn raster_dpi_ceiling_for(draft: &HardcopyDialogState, format: OutputFormat) -> Option<u16> {
     draft
         .preview_plan
         .as_ref()
-        .and_then(|plan| max_raster_dpi(plan, draft.format))
+        .and_then(|plan| max_raster_dpi(plan, format))
+}
+
+/// The resolution in force for a raster target: the one the format carries,
+/// never above what this host can raster for the page in front of it.
+fn resolution_in_force(format: OutputFormat, ceiling: Option<u16>) -> u16 {
+    let dpi = format.raster_dpi().unwrap_or(DEFAULT_RASTER_DPI);
+    ceiling.map_or(dpi, |ceiling| dpi.min(ceiling))
+}
+
+/// `format` carrying a resolution this host can actually raster for it here.
+fn bounded_raster(draft: &HardcopyDialogState, format: OutputFormat) -> OutputFormat {
+    format.with_raster_dpi(resolution_in_force(
+        format,
+        raster_dpi_ceiling_for(draft, format),
+    ))
 }
 
 /// Take what the field holds into the draft. An entry that names no resolution
 /// this page admits reverts to the one in force, because the field states the
-/// committed value whenever it is not being typed into.
+/// committed value whenever it is not being typed into — and the value it
+/// reverts to is bounded, since reverting to a resolution the publisher would
+/// itself refuse is no refusal at all.
 fn commit_raster_resolution(draft: &mut HardcopyDialogState, ceiling: Option<u16>) {
-    match parse_raster_dpi(&draft.raster_dpi_draft, ceiling) {
-        Ok(dpi) => draft.format = draft.format.with_raster_dpi(dpi),
-        Err(_) => {
-            draft.raster_dpi_draft = draft
-                .format
-                .raster_dpi()
-                .unwrap_or(DEFAULT_RASTER_DPI)
-                .to_string();
-        }
-    }
+    let dpi = parse_raster_dpi(&draft.raster_dpi_draft, ceiling).unwrap_or_else(|_| {
+        let dpi = resolution_in_force(draft.format, ceiling);
+        draft.raster_dpi_draft = dpi.to_string();
+        dpi
+    });
+    draft.format = draft.format.with_raster_dpi(dpi);
 }
 
 /// Settle a resolution the operator typed and then walked away from.
@@ -992,15 +994,27 @@ fn commit_raster_resolution(draft: &mut HardcopyDialogState, ceiling: Option<u16
 /// field still showed the typed one. The body settles it once, on the path
 /// every pass takes, rather than from the surfaces a layout may decide not to
 /// draw.
+///
+/// The ceiling settles on the same path and for the same kind of reason. It
+/// belongs to the page rather than to the field, so media, orientation, scale
+/// and tiling all move it under a resolution that was legal when it was
+/// committed. Bringing the committed value back inside it here is what keeps
+/// the rail summary, the estimate strip and the enabled primary describing a
+/// publication this host will accept, rather than one it refuses a render round
+/// trip later.
 pub(super) fn settle_raster_resolution(ui: &Ui, draft: &mut HardcopyDialogState) {
-    if draft.format.raster_dpi().is_none()
-        || ui
-            .ctx()
-            .memory(|memory| memory.has_focus(raster_resolution_id()))
+    if draft.format.raster_dpi().is_none() {
+        return;
+    }
+    let ceiling = raster_dpi_ceiling(draft);
+    draft.format = bounded_raster(draft, draft.format);
+    if ui
+        .ctx()
+        .memory(|memory| memory.has_focus(raster_resolution_id()))
     {
         return;
     }
-    commit_raster_resolution(draft, raster_dpi_ceiling(draft));
+    commit_raster_resolution(draft, ceiling);
 }
 
 /// Accept a resolution only if both the contract and this host admit it.
@@ -1025,18 +1039,15 @@ pub(super) fn parse_raster_dpi(text: &str, ceiling: Option<u16>) -> Result<u16, 
 
 type NoteTone = fn(&Ui) -> egui::Color32;
 
-fn raster_resolution_note(text: &str, ceiling: Option<u16>, committed: u16) -> (String, NoteTone) {
+/// What the field says under itself. Only the text being typed can be out of
+/// range: the committed value is settled inside the ceiling on every pass, so
+/// the note states the bound rather than reporting the draft against it.
+fn raster_resolution_note(text: &str, ceiling: Option<u16>) -> (String, NoteTone) {
     let warn: NoteTone = |ui| ui.visuals().warn_fg_color;
     let dim: NoteTone = |ui| Tokens::get(ui.ctx()).color.text_dim;
     match parse_raster_dpi(text, ceiling) {
         Err(reason) => (reason, warn),
         Ok(_) => match ceiling {
-            // The committed value can outlive the page it was valid for: a
-            // wider media or a coarser tiling lowers the ceiling underneath it.
-            Some(ceiling) if committed > ceiling => (
-                format!("{committed} dpi no longer fits this page — up to {ceiling} dpi"),
-                warn,
-            ),
             Some(ceiling) => (format!("up to {ceiling} dpi for this page"), dim),
             None => (format!("{MIN_RASTER_DPI}–{MAX_RASTER_DPI} dpi"), dim),
         },
@@ -1386,6 +1397,108 @@ mod tests {
         }
     }
 
+    /// The largest page a standard media offers, which is what pulls the
+    /// ceiling well under both the contract's range and the default a raster
+    /// target would otherwise commit.
+    fn ceiling_bound_media(studio: &mut Studio) -> u16 {
+        studio.app.state.dialogs.hardcopy.paper = PaperDraft::Standard(StandardPaper::A0);
+        studio.app.state.dialogs.hardcopy.refresh_preview();
+        let _ = studio.pass(Vec::new());
+        let plan = studio
+            .app
+            .state
+            .dialogs
+            .hardcopy
+            .preview_plan
+            .clone()
+            .expect("A0 is a legal page");
+        let ceiling = max_raster_dpi(&plan, OutputFormat::Png { dpi: 300 })
+            .expect("an A0 page rasters at some resolution");
+        assert!(
+            ceiling < DEFAULT_RASTER_DPI,
+            "this page rasters to {ceiling} dpi, which is not under the default a target commits"
+        );
+        ceiling
+    }
+
+    /// A raster target is selected here and refused nowhere else until the
+    /// render round trip, so the entries the list offers carry the resolution
+    /// they would commit — not the default, which on a browser's raster budget
+    /// is above the ceiling for an ordinary Letter page. The two formats charge
+    /// different bytes per pixel, so each entry is bounded by its own ceiling
+    /// rather than by one number for both.
+    #[test]
+    fn the_target_list_offers_no_resolution_the_page_it_is_on_refuses() {
+        let mut studio = Studio::wide();
+        let ceiling = ceiling_bound_media(&mut studio);
+        let draft = &studio.app.state.dialogs.hardcopy;
+
+        let png = bounded_raster(
+            draft,
+            OutputFormat::Png {
+                dpi: DEFAULT_RASTER_DPI,
+            },
+        );
+        let tiff = bounded_raster(
+            draft,
+            OutputFormat::Tiff {
+                dpi: DEFAULT_RASTER_DPI,
+            },
+        );
+        assert_eq!(png, OutputFormat::Png { dpi: ceiling });
+        assert!(
+            tiff.raster_dpi().is_some_and(|dpi| dpi < ceiling),
+            "TIFF holds a third more bytes per pixel and cannot share PNG's ceiling: {tiff:?}"
+        );
+        // A resolution already under the ceiling is offered untouched, and a
+        // vector target has no resolution to bound.
+        assert_eq!(
+            bounded_raster(draft, OutputFormat::Png { dpi: 72 }),
+            OutputFormat::Png { dpi: 72 }
+        );
+        assert_eq!(
+            bounded_raster(draft, OutputFormat::SvgVector),
+            OutputFormat::SvgVector
+        );
+    }
+
+    /// The ceiling belongs to the page, so every control that changes the page
+    /// moves it — under a resolution that was legal when it was committed. The
+    /// draft has to be brought back inside it before anything is published from
+    /// it, and what is published has to be what the surface was reporting.
+    #[test]
+    fn a_page_that_lowers_the_ceiling_lowers_the_resolution_committed_with_it() {
+        let mut studio = Studio::wide();
+        studio.app.state.dialogs.hardcopy.format = OutputFormat::Png {
+            dpi: DEFAULT_RASTER_DPI,
+        };
+        studio.app.state.dialogs.hardcopy.raster_dpi_draft = DEFAULT_RASTER_DPI.to_string();
+        studio.app.state.dialogs.hardcopy.refresh_preview();
+        let _ = studio.pass(Vec::new());
+        assert_eq!(
+            studio.app.state.dialogs.hardcopy.format,
+            OutputFormat::Png {
+                dpi: DEFAULT_RASTER_DPI
+            },
+            "the default resolution is legal on the page the studio opened on"
+        );
+
+        let ceiling = ceiling_bound_media(&mut studio);
+        assert_eq!(
+            studio.app.state.dialogs.hardcopy.format,
+            OutputFormat::Png { dpi: ceiling },
+            "the wider media left a resolution behind that this host cannot raster"
+        );
+        assert_eq!(
+            output_summary(studio.app.state.dialogs.hardcopy.format),
+            format!("PNG · {ceiling} dpi")
+        );
+
+        let button = studio.control(Role::Button, "Export hardcopy");
+        let _ = studio.pass(click(button.center()));
+        assert_eq!(studio.published_resolution(), Some(ceiling));
+    }
+
     /// An entry that names no resolution cannot be published, so an unfocused
     /// field states the one in force rather than a number that will not be used.
     #[test]
@@ -1523,6 +1636,40 @@ mod tests {
             let _ = self.pass(Vec::new());
             (self.draft.embed_fonts, self.draft.searchable_text)
         }
+    }
+
+    /// A row that leads nowhere is not drawn. The driver dialog exists on one
+    /// host; on the browser, tray, duplex and collation belong to its own print
+    /// dialog, and a dimmed row advertising them there reads as a capability
+    /// withheld rather than one the host never had. The rest of the section is
+    /// held to the same standard as the sheet section, which is absent rather
+    /// than inert when there is no authored sheet.
+    #[test]
+    fn the_printer_properties_row_is_drawn_only_where_it_leads_somewhere() {
+        let mut draft = sheet_draft();
+        draft.workflow = HardcopyWorkflow::Print;
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(620.0, 620.0))),
+                ..Default::default()
+            },
+            |ui| {
+                let _ = output_panel(ui, &mut draft);
+            },
+        );
+        let row = |wanted: &str| {
+            controls(&output)
+                .into_iter()
+                .any(|(role, name, _)| role == Role::Button && name == wanted)
+        };
+        assert_eq!(row("Printer properties…"), printer_properties_reachable());
+        // The gate is the driver boundary, not the section: the mapping flow is
+        // reachable everywhere and its row is always there to prove the panel
+        // was drawn at all.
+        assert!(row("Layer, trace, and marker mapping…"));
     }
 
     /// `RenderSetup::validate` accepts embedded fonts on their own, refuses

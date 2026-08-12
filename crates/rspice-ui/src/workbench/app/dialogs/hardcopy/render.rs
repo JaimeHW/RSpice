@@ -30,11 +30,13 @@ use crate::ui::widgets::{
 use crate::workbench::app::RSpiceApp;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::hardcopy_adapters::render::HardcopyRenderer;
-use crate::workbench::hardcopy_adapters::render::{HardcopyPreviewPage, max_raster_dpi};
+use crate::workbench::hardcopy_adapters::render::{
+    HardcopyPreviewPage, HardcopyRenderError, max_raster_dpi,
+};
 
 use super::{
-    DEFAULT_RASTER_DPI, HardcopyDialogPage, HardcopyDialogState, HardcopyRegion, HardcopySection,
-    HardcopyWorkflow, PaperDraft, publish,
+    BlockedSetup, DEFAULT_RASTER_DPI, HardcopyDialogPage, HardcopyDialogState, HardcopyRegion,
+    HardcopySection, HardcopyWorkflow, PaperDraft, publish,
 };
 
 #[derive(Clone)]
@@ -50,7 +52,7 @@ type PreviewWorkerPayload = Result<
         Option<HardcopyPreviewPage>,
         crate::product::ContentDigest,
     ),
-    String,
+    BlockedSetup,
 >;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -401,6 +403,18 @@ impl RSpiceApp {
     }
 }
 
+/// A renderer refusal read as a refusal of the thing the operator was looking
+/// at. The sentence gains its context; the section it was attributed to is
+/// carried through unchanged, because the rail has to mark the same place
+/// whichever render raised it.
+fn refused_preview(error: HardcopyRenderError) -> BlockedSetup {
+    let BlockedSetup { message, section } = BlockedSetup::from(error);
+    BlockedSetup {
+        message: format!("The exact preview could not be rendered: {message}"),
+        section,
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
     if draft.preview.is_some()
@@ -419,7 +433,9 @@ fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
                 Ok(result) => Some((active.generation, result)),
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => Some((
                     active.generation,
-                    Err("The preview worker stopped before returning a result.".to_owned()),
+                    Err(BlockedSetup::dialog(
+                        "The preview worker stopped before returning a result.",
+                    )),
                 )),
                 Err(std::sync::mpsc::TryRecvError::Empty) => None,
             });
@@ -442,11 +458,13 @@ fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
                 draft.preview_adjacent = adjacent.map(std::sync::Arc::new);
                 draft.preview_failed_generation = None;
                 draft.error = None;
+                draft.error_section = None;
             }
             Ok(_) => {}
-            Err(error) => {
+            Err(blocked) => {
                 draft.preview_failed_generation = Some(completed_generation);
-                draft.error = Some(error);
+                draft.error = Some(blocked.message);
+                draft.error_section = blocked.section;
             }
         }
         return;
@@ -510,10 +528,12 @@ fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
                 72,
                 || worker_cancelled.load(std::sync::atomic::Ordering::Acquire),
             )
-            .map_err(|error| format!("The exact preview could not be rendered: {error}"))
+            .map_err(refused_preview)
             .and_then(|mut pages| {
                 if pages.is_empty() {
-                    return Err("The preview worker returned no selected page.".to_owned());
+                    return Err(BlockedSetup::dialog(
+                        "The preview worker returned no selected page.",
+                    ));
                 }
                 let preview = pages.remove(0);
                 let adjacent = pages.into_iter().next();
@@ -527,6 +547,7 @@ fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
             |error| {
                 draft.preview_failed_generation = Some(generation);
                 draft.error = Some(format!("Could not start preview worker: {error}"));
+                draft.error_section = None;
             },
             |_| {
                 PREVIEW_WORKER.with(|runtime| {
@@ -605,9 +626,11 @@ fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
         {
             return;
         }
-        let decoded = result.and_then(|buffers| {
+        let decoded = result.map_err(BlockedSetup::dialog).and_then(|buffers| {
             if buffers.len() != page_indices.len() * 2 {
-                return Err("Browser preview returned the wrong buffer count.".to_owned());
+                return Err(BlockedSetup::dialog(
+                    "Browser preview returned the wrong buffer count.",
+                ));
             }
             let mut previews = Vec::with_capacity(page_indices.len());
             for (pair, page_index) in buffers.chunks_exact(2).zip(page_indices) {
@@ -620,7 +643,7 @@ fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
                         &pair[0],
                         pair[1].clone(),
                     )
-                    .map_err(|error| error.to_string())?,
+                    .map_err(refused_preview)?,
                 );
             }
             Ok(previews)
@@ -631,14 +654,17 @@ fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
                 draft.preview_adjacent = previews.into_iter().next().map(std::sync::Arc::new);
                 draft.preview_failed_generation = None;
                 draft.error = None;
+                draft.error_section = None;
             }
             Ok(_) => {
                 draft.preview_failed_generation = Some(ticket.generation);
                 draft.error = Some("Browser preview returned no selected page.".to_owned());
+                draft.error_section = None;
             }
-            Err(error) => {
+            Err(blocked) => {
                 draft.preview_failed_generation = Some(ticket.generation);
-                draft.error = Some(format!("The exact preview could not be rendered: {error}"));
+                draft.error = Some(blocked.message);
+                draft.error_section = blocked.section;
             }
         }
         return;
@@ -698,6 +724,7 @@ fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
         Err(error) => {
             draft.preview_failed_generation = Some(draft.preview_generation);
             draft.error = Some(format!("Could not start browser preview worker: {error}"));
+            draft.error_section = None;
         }
     }
 }
@@ -936,46 +963,57 @@ fn section_navigation(
                 // Claim the whole leftover, or the bottom-up region collapses
                 // to the note's own height and the rail ends above the columns.
                 ui.set_min_height(remaining);
-                Frame::NONE
-                    .fill(t.color.bg_inset)
-                    .inner_margin(Margin::same(12))
-                    .show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
-                        // The frame inherits the bottom-up layout, so the note
-                        // is added in reverse reading order.
-                        let kind = draft.source.as_ref().map_or("unresolved", |source| {
-                            document_kind_label(source.document_kind())
-                        });
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(kind)
-                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                    .color(t.color.text_dim),
-                            )
-                            .truncate(),
-                        );
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(
-                                    draft
-                                        .source
-                                        .as_ref()
-                                        .map_or("No active publication source", |source| {
-                                            source.display_name()
-                                        }),
-                                )
-                                .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
-                                .color(t.color.text),
-                            )
-                            .truncate(),
-                        );
-                        ui.add_space(5.0);
-                        ui.label(
-                            egui::RichText::new("SEALED PUBLICATION SOURCE")
-                                .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-                                .color(t.color.accent),
-                        );
-                    });
+                // The seal answers to an id of its own rather than to however
+                // many entries were laid out before it. Taken from that count,
+                // its id changes the moment a section appears or leaves — while
+                // the block itself, docked to the rail's bottom edge, has not
+                // moved a point — and the widgets inside it lose the continuity
+                // focus, hovering and tooltips are keyed by.
+                ui.scope_builder(
+                    egui::UiBuilder::new().id(egui::Id::new("hardcopy-sealed-source")),
+                    |ui| {
+                        Frame::NONE
+                            .fill(t.color.bg_inset)
+                            .inner_margin(Margin::same(12))
+                            .show(ui, |ui| {
+                                ui.set_min_width(ui.available_width());
+                                // The frame inherits the bottom-up layout, so
+                                // the note is added in reverse reading order.
+                                let kind = draft.source.as_ref().map_or("unresolved", |source| {
+                                    document_kind_label(source.document_kind())
+                                });
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(kind)
+                                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                            .color(t.color.text_dim),
+                                    )
+                                    .truncate(),
+                                );
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(
+                                            draft
+                                                .source
+                                                .as_ref()
+                                                .map_or("No active publication source", |source| {
+                                                    source.display_name()
+                                                }),
+                                        )
+                                        .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
+                                        .color(t.color.text),
+                                    )
+                                    .truncate(),
+                                );
+                                ui.add_space(5.0);
+                                ui.label(
+                                    egui::RichText::new("SEALED PUBLICATION SOURCE")
+                                        .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
+                                        .color(t.color.accent),
+                                );
+                            });
+                    },
+                );
             },
         );
     }
@@ -1314,14 +1352,9 @@ fn panel_header(ui: &mut Ui, eyebrow: &str, title: &str, description: &str) {
 }
 
 /// A supporting flow, offered where the settings it owns are edited rather
-/// than from a command strip that belonged to no section in particular.
-pub(super) fn action_row(
-    ui: &mut Ui,
-    label: &str,
-    detail: &str,
-    enabled: bool,
-    disabled_hint: &str,
-) -> bool {
+/// than from a command strip that belonged to no section in particular. A flow
+/// this host cannot reach is not drawn at all, so the row is never inert.
+pub(super) fn action_row(ui: &mut Ui, label: &str, detail: &str) -> bool {
     let t = Tokens::get(ui.ctx());
     let mut clicked = false;
     Frame::NONE
@@ -1332,11 +1365,7 @@ pub(super) fn action_row(
             ui.set_min_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
-                let response = Button::new(label).enabled(enabled).show(ui);
-                clicked = response.clicked();
-                if !enabled {
-                    response.on_disabled_hover_text(disabled_hint.to_owned());
-                }
+                clicked = Button::new(label).show(ui).clicked();
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(detail)
@@ -1775,9 +1804,9 @@ fn preview_toolbar(ui: &mut Ui, view: &mut PreviewView, count: u32, width: f32) 
                 );
                 return;
             }
-            // Wrapped, not fixed to one row: a column narrow enough to need the
-            // second row would otherwise run Fit page off its right edge, and
-            // the band above reserves whichever count this produces.
+            // Wrapped, not fixed to one row: a column narrow enough to need a
+            // second row would otherwise run its last control off the right
+            // edge, and the band above reserves whichever count this produces.
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
                 if IconButton::new(Icon::ChevronLeft)
@@ -1824,7 +1853,17 @@ fn preview_toolbar(ui: &mut Ui, view: &mut PreviewView, count: u32, width: f32) 
                 {
                     view.zoom = view.zoom.saturating_add(10).min(200);
                 }
-                if Button::new("Fit page").show(ui).clicked() {
+                // The fit control is set as a glyph, not a word. It is the
+                // fifth member of a row of icon buttons and the same action the
+                // rest of the shell spells with this icon; as a labelled button
+                // it was also the one control the column could not pay for at
+                // the tablet width, and the row wrapped to strand it alone on a
+                // second row beneath the other six.
+                if IconButton::new(Icon::ZoomFit)
+                    .tooltip("Fit page")
+                    .show(ui)
+                    .clicked()
+                {
                     view.zoom = 85;
                 }
             });
@@ -3592,6 +3631,110 @@ mod tests {
         rects
     }
 
+    /// Every rectangle egui outlined because the widget occupying it answered
+    /// to a different id than it did on the previous pass. egui reports these
+    /// as a log warning and a red outline; the outline is the part a test can
+    /// read, and it carries the rectangle that names the offender.
+    #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
+    fn id_change_marks(output: &egui::FullOutput) -> Vec<Rect> {
+        output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(shape)
+                    if clipped.clip_rect == Rect::EVERYTHING
+                        && shape.stroke.color == egui::Color32::RED
+                        && shape.stroke.width == 2.0
+                        && shape.stroke_kind == egui::StrokeKind::Outside =>
+                {
+                    Some(shape.rect)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A widget's id is its continuity: focus, drag state, tooltips and the
+    /// scroll offsets of everything under it are keyed by it. An id derived
+    /// from how many siblings happened to be laid out first changes whenever
+    /// the surface does — a section appearing, a refusal opening the banner —
+    /// and every one of those is an ordinary move in this dialog.
+    #[test]
+    #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
+    fn no_widget_changes_its_id_as_the_studio_changes() {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = studio_app();
+        let viewport = vec2(1_440.0, 900.0);
+
+        let mut marks = Vec::new();
+        let mut record = |output: &egui::FullOutput| {
+            marks.extend(id_change_marks(output).into_iter().map(|rect| {
+                format!(
+                    "[{:.0},{:.0}]-[{:.0},{:.0}]",
+                    rect.left(),
+                    rect.top(),
+                    rect.right(),
+                    rect.bottom()
+                )
+            }));
+        };
+        for _ in 0..200 {
+            record(&render_studio(&ctx, &mut app, viewport));
+            if app.state.dialogs.hardcopy.preview.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        // The sheet section only appears once the source has resolved, and that
+        // arrival is the move that shifted the rail's ids. Without it the rest
+        // of this probe would pass by never having been tested.
+        assert!(
+            app.state.dialogs.hardcopy.preview.is_some(),
+            "the studio never resolved a source and an exact page preview"
+        );
+        record(&render_studio(&ctx, &mut app, viewport));
+        for section in HardcopySection::ALL {
+            app.state.dialogs.hardcopy.section = section;
+            record(&render_studio(&ctx, &mut app, viewport));
+            record(&render_studio(&ctx, &mut app, viewport));
+        }
+        // A refusal opens the banner strip between the body and the command
+        // row, and clearing it closes it again. Both are ordinary, and a
+        // publication that fails late raises one over a plan that stayed valid.
+        for refusal in [true, false] {
+            app.state.dialogs.hardcopy.error =
+                refusal.then(|| "the publication was refused".to_owned());
+            record(&render_studio(&ctx, &mut app, viewport));
+            record(&render_studio(&ctx, &mut app, viewport));
+        }
+        app.state.dialogs.hardcopy.margin_left = "100".to_owned();
+        app.state.dialogs.hardcopy.refresh_preview();
+        record(&render_studio(&ctx, &mut app, viewport));
+        record(&render_studio(&ctx, &mut app, viewport));
+        app.state.dialogs.hardcopy.margin_left = "0.5".to_owned();
+        app.state.dialogs.hardcopy.refresh_preview();
+        record(&render_studio(&ctx, &mut app, viewport));
+        record(&render_studio(&ctx, &mut app, viewport));
+
+        // Below the rail's width the sections become a strip and the regions a
+        // switch, so the same moves rearrange a different composition.
+        let narrow = vec2(390.0, 844.0);
+        record(&render_studio(&ctx, &mut app, narrow));
+        record(&render_studio(&ctx, &mut app, narrow));
+        for region in [HardcopyRegion::Preview, HardcopyRegion::Setup] {
+            app.state.dialogs.hardcopy.region = region;
+            record(&render_studio(&ctx, &mut app, narrow));
+            record(&render_studio(&ctx, &mut app, narrow));
+        }
+
+        assert!(
+            marks.is_empty(),
+            "widgets changed id between passes at {marks:?}"
+        );
+    }
+
     /// An invalid field is invisible from every other section, and a disabled
     /// primary with a dialog-level banner says only that something is wrong.
     /// The rail has to say where: marked by name in the accessibility tree,
@@ -3838,6 +3981,28 @@ mod tests {
             bands[1].1 > row,
             "a 340 pt column cannot hold the toolbar in one row, but only {:.0} pt was reserved",
             bands[1].1
+        );
+    }
+
+    /// The tablet width the studio ships to is edge to edge and touch-sized,
+    /// and the page desk keeps only the column the form does not need. The
+    /// toolbar has to hold that column in one row: wrapping there costs the
+    /// page a whole row and buys a strip with one control stranded under six.
+    #[test]
+    fn the_preview_toolbar_holds_one_row_at_the_tablet_width() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply_responsive_metrics_with_target(&ctx, Some(44.0));
+        let (_, desk) = column_widths(820.0, STACKED_FORM_HEIGHT);
+        let mut band = 0.0;
+        let _ = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let view = PreviewView { page: 0, zoom: 100 };
+                band = preview_toolbar_height(ui, &view, 4, desk);
+            });
+        });
+        assert!(
+            band < 44.0 + 12.0 + 6.0,
+            "the toolbar took {band:.0} pt of a {desk:.0} pt column, which is more than one row"
         );
     }
 

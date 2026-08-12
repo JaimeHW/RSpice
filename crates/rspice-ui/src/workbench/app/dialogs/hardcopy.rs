@@ -14,6 +14,7 @@ use crate::hardcopy::{
 };
 #[cfg(test)]
 use crate::hardcopy::{DuplexMode, PrinterMediaSource, PrinterRasterGeometry};
+use crate::workbench::hardcopy_adapters::render::HardcopyRenderError;
 use crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -158,6 +159,26 @@ fn contract_section(error: &HardcopyError) -> Option<HardcopySection> {
     }
 }
 
+/// The section a refusal raised by the renderer belongs to.
+///
+/// Same rule as [`contract_section`], and for the same reason: by variant, so
+/// that rewording a sentence cannot move a marker. A resource limit is the
+/// refusal a browser meets in ordinary use — its raster budget is a quarter of
+/// the desktop's — and every budget it names is charged against the artifact
+/// the target section asks for, which is where an operator goes to ask for a
+/// smaller one. The rest of what the renderer can refuse is about the sealed
+/// document or about the publication as a whole, and stays at the dialog level
+/// rather than marking a section that cannot repair it.
+fn render_section(error: &HardcopyRenderError) -> Option<HardcopySection> {
+    match error {
+        HardcopyRenderError::ResourceLimit { .. } => Some(HardcopySection::Output),
+        HardcopyRenderError::SchematicOutsideContentDecisionRequired => {
+            Some(HardcopySection::DrawingSheet)
+        }
+        _ => None,
+    }
+}
+
 /// A refused configuration: what the operator is told, and where to go about
 /// it. The two travel together so a marker cannot outlive the message it
 /// belongs to.
@@ -191,6 +212,15 @@ impl From<HardcopyError> for BlockedSetup {
         Self {
             message: error.to_string(),
             section: contract_section(&error),
+        }
+    }
+}
+
+impl From<HardcopyRenderError> for BlockedSetup {
+    fn from(error: HardcopyRenderError) -> Self {
+        Self {
+            message: error.to_string(),
+            section: render_section(&error),
         }
     }
 }
@@ -1425,6 +1455,50 @@ mod tests {
         draft.refresh_preview();
         assert!(draft.error.is_none());
         assert_eq!(draft.error_section, None);
+    }
+
+    /// The refusal a browser meets first is the renderer's, not the contract's:
+    /// its raster working set is a quarter of the desktop's, so a page the
+    /// desktop publishes at 600 dpi is refused there. It arrives after a render
+    /// round trip rather than from the draft, and it has to reach the rail
+    /// carrying the section whose controls set the budget it names.
+    #[test]
+    fn a_renderer_resource_limit_is_attributed_to_the_target_that_set_it() {
+        let refused = HardcopyRenderError::ResourceLimit {
+            scope: "raster working-set bytes",
+            maximum: 268_435_456,
+        };
+        assert_eq!(render_section(&refused), Some(HardcopySection::Output));
+
+        let message = refused.to_string();
+        let blocked = BlockedSetup::from(refused);
+        assert_eq!(blocked.section, Some(HardcopySection::Output));
+        assert_eq!(blocked.message, message);
+
+        // The variant decides the section. The scope is a word in the sentence,
+        // not a second key into the table, so no wording of it moves the marker.
+        for scope in ["scene primitives", "render work units", "pages"] {
+            assert_eq!(
+                render_section(&HardcopyRenderError::ResourceLimit {
+                    scope,
+                    maximum: 1_024,
+                }),
+                Some(HardcopySection::Output),
+                "{scope}"
+            );
+        }
+        assert_eq!(
+            render_section(&HardcopyRenderError::SchematicOutsideContentDecisionRequired),
+            Some(HardcopySection::DrawingSheet)
+        );
+        // Nothing any section can be set to repairs a source that will not
+        // convert, so it stays at the dialog level.
+        assert_eq!(
+            render_section(&HardcopyRenderError::SourceConversion(
+                "unreadable".to_owned()
+            )),
+            None
+        );
     }
 
     /// Attribution is a whitelist. A refusal more than one section's controls
