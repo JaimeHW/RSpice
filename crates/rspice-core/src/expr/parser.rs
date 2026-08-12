@@ -761,7 +761,8 @@ impl<'a> Parser<'a> {
                 "PWR" => Some(Function::Pwr),
                 "PWRS" => Some(Function::Pwrs),
                 "LIMIT" => Some(Function::Limit),
-                "SIGN" | "SGN" => Some(Function::Sign),
+                "SGN" => Some(Function::Sign),
+                "SIGN" => Some(Function::HspiceSign),
                 "URAMP" => Some(Function::Uramp),
                 "STP" | "STEP" => Some(Function::Stp),
                 "U" | "USTEP" => Some(Function::Ustep),
@@ -823,6 +824,9 @@ impl<'a> Parser<'a> {
         }
 
         let range = match func {
+            Function::Trunc | Function::Sign => Some((1, 1)),
+            Function::Pow | Function::Pwr | Function::Pwrs | Function::HspiceSign => Some((2, 2)),
+            Function::Limit => Some((2, 3)),
             Function::SpicePulse => Some((1, 7)),
             Function::SpiceSin => Some((3, 6)),
             Function::SpiceExp => Some((2, 6)),
@@ -1177,11 +1181,22 @@ mod tests {
     }
 
     #[test]
-    fn pow_pwr_and_pwrs_keep_distinct_spice_sign_semantics() {
+    fn named_power_functions_follow_the_selected_spice_dialect() {
+        // ngspice behavioral POW uses the magnitude of its base, while PWR
+        // and PWRS preserve the base sign. Xyce aliases POW and PWR to the
+        // same complex-projected power operation.
         assert_eq!(eval_const("pow(-2,2)"), 4.0);
-        assert_eq!(eval_const("pow(-2,3)"), -8.0);
-        assert_eq!(eval_const("pwr(-2,3)"), 8.0);
+        assert_eq!(eval_const("pow(-2,3)"), 8.0);
+        assert_eq!(eval_const("pwr(-2,3)"), -8.0);
         assert_eq!(eval_const("pwrs(-2,3)"), -8.0);
+        assert_eq!(eval_const("pow(-4,0.5)"), 2.0);
+        assert_eq!(eval_const("pwr(-4,0.5)"), -2.0);
+        assert_eq!(eval_const("pwr(0,0)"), 1.0);
+        assert!(eval_const("pwr(0,-1)").is_infinite());
+        assert_eq!(eval_const("pwrs(-0,0)"), 1.0);
+        assert_eq!(eval_const_xyce("pow(-2,3)"), -8.0);
+        assert_eq!(eval_const_xyce("pwr(-2,3)"), -8.0);
+        assert_eq!(eval_const_xyce("pwrs(-0,0)"), 1.0);
     }
 
     #[test]
@@ -1198,11 +1213,41 @@ mod tests {
         assert_eq!(eval_const("u(1e-15)"), 1.0);
         assert_eq!(eval_const("ustep(0)"), 0.5);
         assert_eq!(eval_const("sgn(-1)"), -1.0);
-        assert_eq!(eval_const("sgn(-1e-15)"), 0.0);
+        assert_eq!(eval_const("sgn(-1e-15)"), -1.0);
         assert_eq!(eval_const("sgn(0)"), 0.0);
-        assert_eq!(eval_const("sgn(1e-15)"), 0.0);
+        assert_eq!(eval_const("sgn(1e-15)"), 1.0);
         assert_eq!(eval_const("sgn(1e-9)"), 1.0);
         assert_eq!(eval_const("sgn(1)"), 1.0);
+
+        assert_eq!(eval_const_xyce("sgn(-1e-15)"), -1.0);
+        assert_eq!(eval_const_xyce("sgn(1e-15)"), 1.0);
+        assert_eq!(eval_const_xyce("sign(-3,2)"), 3.0);
+        assert_eq!(eval_const_xyce("sign(3,-2)"), -3.0);
+        assert_eq!(eval_const_xyce("sign(1000,0)"), 0.0);
+    }
+
+    #[test]
+    fn limit_arity_selects_nominal_or_clamp_semantics() {
+        assert_eq!(eval_const_xyce("limit(5,0.5)"), 5.0);
+        assert_eq!(eval_const_xyce("limit(5,0,2)"), 2.0);
+        assert_eq!(eval_const_xyce("10+limit(1,1)"), 11.0);
+        assert_eq!(eval_const_xyce("limit(1,2,0)"), 2.0);
+        assert_eq!(eval_const_xyce("limit(exp(1000),0,2)"), 2.0);
+        assert_eq!(eval_const_xyce("limit(1,exp(1000),2)"), 1.0e50);
+
+        for expression in [
+            "int(1,2)",
+            "pow(2)",
+            "sgn(1,2)",
+            "sign(1)",
+            "limit(1)",
+            "limit(1,2,3,4)",
+        ] {
+            assert!(
+                parse_expression_strict(expression).is_err(),
+                "`{expression}` should reject invalid arity"
+            );
+        }
     }
 
     #[test]

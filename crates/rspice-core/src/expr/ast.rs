@@ -103,12 +103,13 @@ pub enum Function {
     Round,
     Sqr,
     // SPICE-specific
-    Pwr,   // pwr(x, y) = |x|^y
+    Pwr,   // Dialect-specific named PWR function
     Pwrs,  // pwrs(x, y) = sign(x) * |x|^y
-    Limit, // limit(x, lo, hi)
+    Limit, // limit(nominal, variation) or limit(x, lo, hi)
     Min,
     Max,
-    Sign,            // sign(x) = -1, 0, or 1
+    Sign,            // sgn(x) = -1, 0, or 1
+    HspiceSign,      // sign(x, y) = sgn(y) * |x|
     Uramp,           // uramp(x) = max(0, x) - positive ramp
     Stp,             // stp(x) = 1 if x is positive outside expression-zero tolerance else 0
     Ustep,           // u(x) / ustep(x) = 0, 0.5, or 1 at the exact ngspice step boundary
@@ -119,7 +120,7 @@ pub enum Function {
     Lt0,             // lt0(x) = 1 if x < 0 else 0
     Ge0,             // ge0(x) = 1 if x >= 0 else 0
     Le0,             // le0(x) = 1 if x <= 0 else 0
-    Pow,             // pow(x, y) = x^y
+    Pow,             // Dialect-specific named POW function
     Table,           // table(x, x1,y1, x2,y2, ...)
     Pwl,             // pwl(x, x1,y1, x2,y2, ...) alias for table
     TableFile,       // tablefile("path") / tablefile(path) = file-backed table(time)

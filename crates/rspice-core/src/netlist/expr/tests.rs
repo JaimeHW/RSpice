@@ -1004,6 +1004,7 @@ fn limit_three_arg_clamp_is_unchanged() {
     assert_eq!(eval_with(&ctx, "limit(5, 0, 2)"), 2.0);
     assert_eq!(eval_with(&ctx, "limit(-5, 0, 2)"), 0.0);
     assert_eq!(eval_with(&ctx, "limit(1, 0, 2)"), 1.0);
+    assert_eq!(eval_with(&ctx, "limit(1, 2, 0)"), 2.0);
 }
 
 #[test]
@@ -1029,6 +1030,12 @@ fn statistical_functions_validate_arguments() {
         eval_expression("limit(1)", &ctx),
         Err(ExprError::WrongArgCount(_))
     ));
+    for expression in ["pwr(2,3,4)", "pwrs(2,3,4)", "sgn(1,2)", "sign(1,2)"] {
+        assert!(matches!(
+            eval_expression(expression, &ctx),
+            Err(ExprError::WrongArgCount(_))
+        ));
+    }
 }
 
 #[test]

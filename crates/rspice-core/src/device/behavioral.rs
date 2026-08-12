@@ -8,8 +8,10 @@ use crate::Value;
 use crate::config::ExpressionDialect;
 use crate::expr::{
     BinaryOp, CompiledExpr, Context, Expr, Function, UnaryOp, Vm, compile,
-    lookup_table_interpolate_with_derivative, normalize_expression_boundary,
-    parse_expression_strict, real_pow_with_derivative, resolve_file_lookup_functions_with_limits,
+    lookup_table_interpolate_with_derivative, normalize_expression_boundary, ordered_limit,
+    ordered_sign, parse_expression_strict, real_function_pow_with_derivative,
+    real_function_pwr_with_derivative, real_function_pwrs_with_derivative,
+    real_pow_with_derivative, resolve_file_lookup_functions_with_limits,
 };
 use crate::solver::StaticMatrix;
 use std::path::Path;
@@ -606,6 +608,7 @@ fn expression_excludes_voltage_output_from_transient_lte(expr: &Expr) -> bool {
                     | Function::Ceil
                     | Function::Round
                     | Function::Sign
+                    | Function::HspiceSign
                     | Function::Stp
                     | Function::Ustep
                     | Function::Eq0
@@ -1239,44 +1242,24 @@ fn eval_function_with_derivative(
         Function::Pwr => {
             let (base, d_base) = eval_arg(0)?;
             let (exponent, d_exponent) = eval_arg(1)?;
-            let abs_base = base.abs();
-            if d_exponent == 0.0 {
-                let value = abs_base.powf(exponent);
-                Some((
-                    value,
-                    exponent * abs_base.powf(exponent - 1.0) * base.signum() * d_base,
-                ))
-            } else if abs_base > 0.0 {
-                let value = abs_base.powf(exponent);
-                Some((
-                    value,
-                    value
-                        * (d_exponent * abs_base.ln()
-                            + exponent * base.signum() * d_base / abs_base),
-                ))
-            } else {
-                None
-            }
+            real_function_pwr_with_derivative(
+                base,
+                d_base,
+                exponent,
+                d_exponent,
+                context.expression_dialect,
+            )
         }
         Function::Pwrs => {
             let (base, d_base) = eval_arg(0)?;
             let (exponent, d_exponent) = eval_arg(1)?;
-            let abs_base = base.abs();
-            let sign = base.signum();
-            if d_exponent == 0.0 {
-                let value = sign * abs_base.powf(exponent);
-                Some((value, exponent * abs_base.powf(exponent - 1.0) * d_base))
-            } else if abs_base > 0.0 {
-                let magnitude = abs_base.powf(exponent);
-                Some((
-                    sign * magnitude,
-                    sign * magnitude
-                        * (d_exponent * abs_base.ln()
-                            + exponent * base.signum() * d_base / abs_base),
-                ))
-            } else {
-                None
-            }
+            real_function_pwrs_with_derivative(
+                base,
+                d_base,
+                exponent,
+                d_exponent,
+                context.expression_dialect,
+            )
         }
         Function::Limit => match args.len() {
             2 => {
@@ -1287,10 +1270,9 @@ fn eval_function_with_derivative(
                 let (x, dx) = eval_arg(0)?;
                 let (min, _) = eval_arg(1)?;
                 let (max, _) = eval_arg(2)?;
-                Some((
-                    x.clamp(min, max),
-                    if x >= min && x <= max { dx } else { 0.0 },
-                ))
+                let (value, retains_input_derivative) =
+                    ordered_limit(x, min, max, context.expression_dialect);
+                Some((value, if retains_input_derivative { dx } else { 0.0 }))
             }
             _ => None,
         },
@@ -1314,7 +1296,18 @@ fn eval_function_with_derivative(
         }
         Function::Sign => {
             let (x, _) = eval_arg(0)?;
-            Some((x.signum(), 0.0))
+            Some((ordered_sign(x), 0.0))
+        }
+        Function::HspiceSign => {
+            let (magnitude, d_magnitude) = eval_arg(0)?;
+            let (polarity, _) = eval_arg(1)?;
+            let sign = ordered_sign(polarity);
+            let magnitude_derivative = if magnitude >= 0.0 {
+                d_magnitude
+            } else {
+                -d_magnitude
+            };
+            Some((magnitude.abs() * sign, magnitude_derivative * sign))
         }
         Function::Uramp => {
             let (x, dx) = eval_arg(0)?;
@@ -1368,7 +1361,13 @@ fn eval_function_with_derivative(
         Function::Pow => {
             let (left, d_left) = eval_arg(0)?;
             let (right, d_right) = eval_arg(1)?;
-            real_pow_with_derivative(left, d_left, right, d_right, context.expression_dialect)
+            real_function_pow_with_derivative(
+                left,
+                d_left,
+                right,
+                d_right,
+                context.expression_dialect,
+            )
         }
         Function::Mod => {
             let (left, d_left) = eval_arg(0)?;
@@ -2601,5 +2600,53 @@ mod tests {
             &program,
             &Context::dc(&[node_value], &[]).with_expression_dialect(dialect),
         )
+    }
+
+    #[test]
+    fn xyce_sign_and_limit_match_between_vm_and_analytic_derivatives() {
+        for (expression, expected_value, expected_derivative) in [
+            ("sign(V(n),2)", 3.0, -1.0),
+            ("sign(V(n),-2)", -3.0, 1.0),
+            ("sign(V(n),0)", 0.0, 0.0),
+            ("limit(V(n),0.5)", -3.0, 1.0),
+            ("limit(V(n),0,2)", 0.0, 0.0),
+        ] {
+            assert_eq!(
+                eval_node_vm(expression, -3.0, ExpressionDialect::Xyce),
+                expected_value,
+                "VM value for {expression}"
+            );
+            assert_eq!(
+                eval_node_derivative(expression, -3.0),
+                (expected_value, expected_derivative),
+                "analytic value/derivative for {expression}"
+            );
+        }
+
+        assert_eq!(
+            eval_node_derivative("sign(V(n),2)", 0.0),
+            (0.0, 1.0),
+            "Xyce SIGN uses the nonnegative derivative branch at zero"
+        );
+        assert_eq!(
+            eval_node_derivative("limit(V(n),2,0)", 1.0),
+            (2.0, 0.0),
+            "reversed LIMIT bounds preserve Xyce's ordered first branch"
+        );
+    }
+
+    #[test]
+    fn signed_magnitude_zero_branch_matches_between_vm_and_analytic_evaluation() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            assert_eq!(eval_node_vm("pwrs(0*V(n),0)", 3.0, dialect), 1.0);
+            assert_eq!(
+                eval_node_derivative_with_dialect("pwrs(0*V(n),0)", 3.0, dialect),
+                (1.0, 0.0)
+            );
+        }
+        assert_eq!(
+            eval_node_derivative_with_dialect("pwr(0*V(n),0)", 3.0, ExpressionDialect::Ngspice,),
+            (1.0, 0.0)
+        );
     }
 }

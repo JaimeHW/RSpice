@@ -36,6 +36,87 @@ pub(crate) fn real_pow(base: Value, exponent: Value, dialect: ExpressionDialect)
     base.abs().powf(exponent) * cos_pi_exponent
 }
 
+/// Evaluate the named `POW` function. Xyce aliases `POW` and `PWR` to its
+/// complex-projected power operation, while ngspice's behavioral `POW` uses
+/// the magnitude of a negative base.
+#[inline]
+pub(crate) fn real_function_pow(base: Value, exponent: Value, dialect: ExpressionDialect) -> Value {
+    if dialect == ExpressionDialect::Xyce {
+        real_pow(base, exponent, dialect)
+    } else {
+        base.abs().powf(exponent)
+    }
+}
+
+/// Evaluate the named `PWR` function. It is an alias of `POW` in Xyce and a
+/// sign-preserving magnitude power in ngspice behavioral expressions.
+#[inline]
+pub(crate) fn real_function_pwr(base: Value, exponent: Value, dialect: ExpressionDialect) -> Value {
+    if dialect == ExpressionDialect::Xyce {
+        real_pow(base, exponent, dialect)
+    } else {
+        real_signed_magnitude_power(base, exponent)
+    }
+}
+
+/// Evaluate the signed-magnitude `PWRS` operation. Both supported SPICE
+/// dialects select the ordinary power branch for zero and positive bases.
+#[inline]
+pub(crate) fn real_function_pwrs(base: Value, exponent: Value) -> Value {
+    real_signed_magnitude_power(base, exponent)
+}
+
+#[inline]
+fn real_signed_magnitude_power(base: Value, exponent: Value) -> Value {
+    if base < 0.0 {
+        -(-base).powf(exponent)
+    } else {
+        base.powf(exponent)
+    }
+}
+
+/// Exact SPICE sign function. Ordered comparisons deliberately map both
+/// signed zero and NaN to zero, matching Xyce and ngspice.
+#[inline]
+pub(crate) fn ordered_sign(value: Value) -> Value {
+    if value > 0.0 {
+        1.0
+    } else if value < 0.0 {
+        -1.0
+    } else {
+        0.0
+    }
+}
+
+/// Non-panicking three-argument LIMIT with Xyce's specified branch order.
+/// The boolean is true exactly when the input branch is selected and its
+/// directional derivative must be retained.
+#[inline]
+pub(crate) fn ordered_limit(
+    value: Value,
+    lower: Value,
+    upper: Value,
+    dialect: ExpressionDialect,
+) -> (Value, bool) {
+    let normalize_operand = |operand: Value| {
+        if dialect != ExpressionDialect::Xyce || operand.is_finite() {
+            operand
+        } else {
+            XYCE_NONFINITE_REPLACEMENT.copysign(operand)
+        }
+    };
+    let value = normalize_operand(value);
+    let lower = normalize_operand(lower);
+    let upper = normalize_operand(upper);
+    if value < lower {
+        (lower, false)
+    } else if value > upper {
+        (upper, false)
+    } else {
+        (value, true)
+    }
+}
+
 /// Evaluate a power operation and its directional derivative.
 ///
 /// `d_base` and `d_exponent` are derivatives with respect to the same Newton
@@ -94,6 +175,67 @@ pub(crate) fn real_pow_with_derivative(
     // value retains ordinary pow semantics and is normalized only at the
     // completed expression boundary.
     Some((value, 0.0))
+}
+
+pub(crate) fn real_function_pow_with_derivative(
+    base: Value,
+    d_base: Value,
+    exponent: Value,
+    d_exponent: Value,
+    dialect: ExpressionDialect,
+) -> Option<(Value, Value)> {
+    if dialect == ExpressionDialect::Xyce {
+        return real_pow_with_derivative(base, d_base, exponent, d_exponent, dialect);
+    }
+    magnitude_power_with_derivative(base, d_base, exponent, d_exponent, false)
+}
+
+pub(crate) fn real_function_pwr_with_derivative(
+    base: Value,
+    d_base: Value,
+    exponent: Value,
+    d_exponent: Value,
+    dialect: ExpressionDialect,
+) -> Option<(Value, Value)> {
+    if dialect == ExpressionDialect::Xyce {
+        return real_pow_with_derivative(base, d_base, exponent, d_exponent, dialect);
+    }
+    magnitude_power_with_derivative(base, d_base, exponent, d_exponent, true)
+}
+
+pub(crate) fn real_function_pwrs_with_derivative(
+    base: Value,
+    d_base: Value,
+    exponent: Value,
+    d_exponent: Value,
+    dialect: ExpressionDialect,
+) -> Option<(Value, Value)> {
+    if dialect == ExpressionDialect::Xyce && base == 0.0 {
+        return Some((real_function_pwrs(base, exponent), 0.0));
+    }
+    magnitude_power_with_derivative(base, d_base, exponent, d_exponent, true)
+}
+
+fn magnitude_power_with_derivative(
+    base: Value,
+    d_base: Value,
+    exponent: Value,
+    d_exponent: Value,
+    preserve_sign: bool,
+) -> Option<(Value, Value)> {
+    let magnitude = base.abs();
+    let branch_sign = if base < 0.0 { -1.0 } else { 1.0 };
+    let polarity = if preserve_sign { branch_sign } else { 1.0 };
+    let value = polarity * magnitude.powf(exponent);
+    let mut derivative = 0.0;
+    if d_base != 0.0 {
+        let base_polarity = if preserve_sign { 1.0 } else { branch_sign };
+        derivative += base_polarity * exponent * magnitude.powf(exponent - 1.0) * d_base;
+    }
+    if d_exponent != 0.0 {
+        derivative += value * magnitude.ln() * d_exponent;
+    }
+    Some((value, derivative))
 }
 
 fn legacy_real_pow_with_derivative(
@@ -202,6 +344,58 @@ mod tests {
         assert!(
             normalize_expression_boundary(Value::NEG_INFINITY, ExpressionDialect::Ngspice)
                 .is_infinite()
+        );
+    }
+
+    #[test]
+    fn sign_and_limit_helpers_follow_ordered_spice_branches() {
+        assert_eq!(ordered_sign(-1.0e-300), -1.0);
+        assert_eq!(ordered_sign(-0.0), 0.0);
+        assert_eq!(ordered_sign(0.0), 0.0);
+        assert_eq!(ordered_sign(1.0e-300), 1.0);
+        assert_eq!(ordered_sign(Value::NAN), 0.0);
+
+        assert_eq!(
+            ordered_limit(1.0, 2.0, 0.0, ExpressionDialect::Ngspice),
+            (2.0, false)
+        );
+        assert_eq!(
+            ordered_limit(3.0, 2.0, 0.0, ExpressionDialect::Ngspice),
+            (0.0, false)
+        );
+        assert!(
+            ordered_limit(Value::NAN, 0.0, 2.0, ExpressionDialect::Ngspice)
+                .0
+                .is_nan()
+        );
+        assert_eq!(
+            ordered_limit(Value::NAN, 0.0, 2.0, ExpressionDialect::Xyce),
+            (2.0, false)
+        );
+        assert_eq!(
+            ordered_limit(1.0, Value::NAN, 2.0, ExpressionDialect::Xyce),
+            (XYCE_NONFINITE_REPLACEMENT, false)
+        );
+        assert_eq!(
+            ordered_limit(1.0, 0.0, Value::NAN, ExpressionDialect::Xyce),
+            (1.0, true)
+        );
+    }
+
+    #[test]
+    fn signed_magnitude_power_uses_the_nonnegative_zero_branch() {
+        assert_eq!(real_function_pwrs(0.0, 0.0), 1.0);
+        assert_eq!(real_function_pwrs(-0.0, 0.0), 1.0);
+        assert_eq!(real_function_pwr(0.0, 0.0, ExpressionDialect::Ngspice), 1.0);
+        assert!(real_function_pwr(0.0, -1.0, ExpressionDialect::Ngspice).is_infinite());
+
+        assert_eq!(
+            magnitude_power_with_derivative(0.0, 0.0, 0.0, 0.0, false),
+            Some((1.0, 0.0))
+        );
+        assert_eq!(
+            magnitude_power_with_derivative(Value::MAX, 0.0, 2.0, 0.0, false),
+            Some((Value::INFINITY, 0.0))
         );
     }
 }
