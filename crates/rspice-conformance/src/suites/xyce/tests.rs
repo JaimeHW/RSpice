@@ -22764,12 +22764,66 @@ fn print_ddx_evaluates_probe_derivative_at_operating_point() {
 
     let derivative = XyceTestRunner::evaluate_print_expression_with_probe_calls(
         "ddx(V(2)/(1.0+scalar*V(cntl)),v(cntl))",
-        context,
+        context.clone(),
         &mut call_value,
     )
     .expect("DDX print expression evaluates");
 
     assert!((derivative + 2.0 / 15.0).abs() < 1.0e-9);
+
+    let repeated = XyceTestRunner::evaluate_print_expression_with_probe_calls(
+        "ddx(1e20+V(cntl)*V(cntl),V(cntl))",
+        context.clone(),
+        &mut call_value,
+    )
+    .expect("DDX seeds every occurrence and does not lose small derivatives to cancellation");
+    assert_eq!(repeated, 4.0);
+
+    let nested = XyceTestRunner::evaluate_print_expression_with_probe_calls(
+        "ddx(ddx(V(cntl)^3,V(cntl)),V(cntl))",
+        context.clone(),
+        &mut call_value,
+    )
+    .expect("an inner DDX is constant with respect to an outer derivative");
+    assert_eq!(nested, 0.0);
+
+    let single_quoted_nested = XyceTestRunner::evaluate_print_expression_with_probe_calls(
+        "ddx('ddx(V(cntl)^3,V(cntl))',V(cntl))",
+        context.clone(),
+        &mut call_value,
+    )
+    .expect("single quotes group, rather than hide, a nested DDX expression");
+    assert_eq!(single_quoted_nested, 0.0);
+
+    let mut context = rspice_core::netlist::ParamContext::new();
+    context.set("SCALAR", 2.0);
+    let parameter_derivative = XyceTestRunner::evaluate_print_expression_with_probe_calls(
+        "ddx(scalar*scalar,scalar)",
+        context,
+        &mut call_value,
+    )
+    .expect("DDX parameter derivative evaluates");
+    assert!((parameter_derivative - 4.0).abs() < 1.0e-8);
+
+    let mut context = rspice_core::netlist::ParamContext::new();
+    context.set_global("GLOBAL_SCALAR", 3.0);
+    let global_parameter_derivative = XyceTestRunner::evaluate_print_expression_with_probe_calls(
+        "ddx(global_scalar*global_scalar,global_scalar)",
+        context,
+        &mut call_value,
+    )
+    .expect("DDX global parameter derivative evaluates");
+    assert!((global_parameter_derivative - 6.0).abs() < 1.0e-8);
+
+    let mut context = rspice_core::netlist::ParamContext::new();
+    context.define_function("DERIV", vec!["X".to_string()], "DDX(X*X,X)");
+    let function_derivative = XyceTestRunner::evaluate_print_expression_with_probe_calls(
+        "DERIV(V(CNTL))",
+        context,
+        &mut call_value,
+    )
+    .expect("DDX inside a user function evaluates after formal substitution");
+    assert!((function_derivative - 4.0).abs() < 1.0e-8);
 }
 
 #[test]
