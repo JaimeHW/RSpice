@@ -550,6 +550,38 @@ impl CircuitData {
                 .any(|dev| dev.has_self_heating_node())
     }
 
+    /// Hand every native BSIMSOI instance the engine's bypass tolerance triple,
+    /// or `None` to keep bypass off.
+    ///
+    /// Circuit construction is the only point at which a resolved
+    /// `SimulationConfig` and the device instances it governs are both in hand;
+    /// past that, an analysis receives a built circuit and never sees the
+    /// config that built it. The devices decide per iterate whether the freeze
+    /// applies, so the engine states the policy once and never again.
+    pub(crate) fn set_b3soi_bypass_tolerances(&self, tolerances: Option<(Value, Value, Value)>) {
+        for dev in &self.b3soi.devices {
+            dev.set_bypass_tolerances(tolerances);
+        }
+        for dev in &self.b3soi_fd.devices {
+            dev.set_bypass_tolerances(tolerances);
+        }
+        for dev in &self.b3soi_pd.devices {
+            dev.set_bypass_tolerances(tolerances);
+        }
+    }
+
+    /// Newton iterates the native BSIMSOI instances answered from a frozen
+    /// linearization, summed over the circuit.
+    pub fn b3soi_bypass_hits(&self) -> u64 {
+        self.b3soi
+            .devices
+            .iter()
+            .map(|dev| dev.bypass_hits())
+            .chain(self.b3soi_fd.devices.iter().map(|dev| dev.bypass_hits()))
+            .chain(self.b3soi_pd.devices.iter().map(|dev| dev.bypass_hits()))
+            .sum()
+    }
+
     pub(crate) fn set_b3soi_self_heating_startup_disabled(&self, disabled: bool) {
         for dev in &self.b3soi.devices {
             dev.set_self_heating_startup_disabled(disabled);

@@ -444,7 +444,7 @@ impl Bsim4v8Device {
         Value,
         Value,
         Value,
-        &'static str,
+        crate::op_label::OpLabel,
     ) {
         let op = &self.op;
         let bias = self.bias;
@@ -455,11 +455,11 @@ impl Bsim4v8Device {
             (bias.vgs - bias.vds, -bias.vds)
         };
         let region = if vgs_mode < op.von {
-            "subthreshold"
+            crate::op_label::OpLabel::SUBTHRESHOLD
         } else if vds_mode > op.vdsat {
-            "saturation"
+            crate::op_label::OpLabel::SATURATION
         } else {
-            "linear"
+            crate::op_label::OpLabel::LINEAR
         };
         (
             op.cd * self.multiplier,

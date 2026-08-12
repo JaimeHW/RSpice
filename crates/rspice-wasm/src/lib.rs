@@ -197,6 +197,34 @@ pub struct WasmError {
     pub requested: Option<usize>,
     #[serde(default)]
     pub limit: Option<usize>,
+    #[serde(default)]
+    pub subcircuit_name: Option<String>,
+    #[serde(default)]
+    pub canonical_subcircuit_name: Option<String>,
+    #[serde(default)]
+    pub instance_name: Option<String>,
+    #[serde(default)]
+    pub canonical_instance_name: Option<String>,
+    #[serde(default)]
+    pub qualified_instance_name: Option<String>,
+    #[serde(default)]
+    pub parameter_name: Option<String>,
+    #[serde(default)]
+    pub canonical_parameter_name: Option<String>,
+    #[serde(default)]
+    pub expression: Option<String>,
+    #[serde(default)]
+    pub output_directive: Option<String>,
+    #[serde(default)]
+    pub operator_name: Option<String>,
+    #[serde(default)]
+    pub function_name: Option<String>,
+    #[serde(default)]
+    pub identifier_name: Option<String>,
+    #[serde(default)]
+    pub missing_dependency: Option<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
     pub unresolved_output_symbols: Vec<WasmUnresolvedOutputSymbol>,
 }
 
@@ -230,6 +258,20 @@ struct JsWasmErrorDetails<'a> {
     resource: Option<&'a str>,
     requested: Option<usize>,
     limit: Option<usize>,
+    subcircuit_name: Option<&'a str>,
+    canonical_subcircuit_name: Option<&'a str>,
+    instance_name: Option<&'a str>,
+    canonical_instance_name: Option<&'a str>,
+    qualified_instance_name: Option<&'a str>,
+    parameter_name: Option<&'a str>,
+    canonical_parameter_name: Option<&'a str>,
+    expression: Option<&'a str>,
+    output_directive: Option<&'a str>,
+    operator_name: Option<&'a str>,
+    function_name: Option<&'a str>,
+    identifier_name: Option<&'a str>,
+    missing_dependency: Option<&'a str>,
+    reason: Option<&'a str>,
     unresolved_output_symbols: Vec<JsUnresolvedOutputSymbol<'a>>,
 }
 
@@ -304,6 +346,20 @@ impl WasmError {
             resource: None,
             requested: None,
             limit: None,
+            subcircuit_name: None,
+            canonical_subcircuit_name: None,
+            instance_name: None,
+            canonical_instance_name: None,
+            qualified_instance_name: None,
+            parameter_name: None,
+            canonical_parameter_name: None,
+            expression: None,
+            output_directive: None,
+            operator_name: None,
+            function_name: None,
+            identifier_name: None,
+            missing_dependency: None,
+            reason: None,
             unresolved_output_symbols: Vec::new(),
         }
     }
@@ -377,8 +433,68 @@ impl WasmError {
                     resource: None,
                     requested: None,
                     limit: None,
+                    subcircuit_name: None,
+                    canonical_subcircuit_name: None,
+                    instance_name: None,
+                    canonical_instance_name: None,
+                    qualified_instance_name: None,
+                    parameter_name: None,
+                    canonical_parameter_name: None,
+                    expression: None,
+                    output_directive: None,
+                    operator_name: None,
+                    function_name: None,
+                    identifier_name: None,
+                    missing_dependency: None,
+                    reason: None,
                     unresolved_output_symbols,
                 }
+            }
+            rspice_core::netlist::ParseError::OutputExpressionValidation(error) => {
+                use rspice_core::netlist::OutputExpressionIssue;
+
+                let (kind, operator_name, function_name, identifier_name) = match &error.issue {
+                    OutputExpressionIssue::UnknownFunction { function } => (
+                        "unknown_output_function",
+                        None,
+                        Some(function.clone()),
+                        None,
+                    ),
+                    OutputExpressionIssue::UnresolvedIdentifier { identifier } => (
+                        "unresolved_output_identifier",
+                        None,
+                        None,
+                        Some(identifier.clone()),
+                    ),
+                    OutputExpressionIssue::InvalidAccessor { operator, .. } => (
+                        "invalid_output_accessor",
+                        Some(operator.clone()),
+                        None,
+                        None,
+                    ),
+                    OutputExpressionIssue::UnresolvedDeviceParameter { .. } => {
+                        ("unresolved_output_device_parameter", None, None, None)
+                    }
+                    OutputExpressionIssue::Syntax { .. } => {
+                        ("invalid_output_expression_syntax", None, None, None)
+                    }
+                };
+                let mut structured = Self::new(message, kind, "output_expression_validation");
+                structured.primary_source = source_path(&error.origin);
+                structured.primary_line = Some(error.origin.line);
+                structured.expression = Some(error.expression);
+                structured.output_directive = Some(error.directive.to_string());
+                structured.operator_name = operator_name;
+                structured.function_name = function_name;
+                structured.identifier_name = identifier_name;
+                if let OutputExpressionIssue::UnresolvedDeviceParameter { device, parameter } =
+                    &error.issue
+                {
+                    structured.instance_name = Some(device.clone());
+                    structured.parameter_name = Some(parameter.clone());
+                }
+                structured.reason = Some(error.issue.reason());
+                structured
             }
             rspice_core::netlist::ParseError::StartupDirectiveConflict(error) => Self {
                 message,
@@ -398,8 +514,40 @@ impl WasmError {
                 resource: None,
                 requested: None,
                 limit: None,
+                subcircuit_name: None,
+                canonical_subcircuit_name: None,
+                instance_name: None,
+                canonical_instance_name: None,
+                qualified_instance_name: None,
+                parameter_name: None,
+                canonical_parameter_name: None,
+                expression: None,
+                output_directive: None,
+                operator_name: None,
+                function_name: None,
+                identifier_name: None,
+                missing_dependency: None,
+                reason: None,
                 unresolved_output_symbols: Vec::new(),
             },
+            rspice_core::netlist::ParseError::UnresolvedSubcircuitParameter(error) => {
+                let mut structured = Self::new(
+                    message,
+                    "unresolved_subcircuit_parameter",
+                    "subcircuit_parameter_resolution",
+                );
+                structured.subcircuit_name = Some(error.subcircuit_name);
+                structured.canonical_subcircuit_name = Some(error.canonical_subcircuit_name);
+                structured.instance_name = Some(error.instance_name);
+                structured.canonical_instance_name = Some(error.canonical_instance_name);
+                structured.qualified_instance_name = Some(error.qualified_instance_name);
+                structured.parameter_name = Some(error.parameter_name);
+                structured.canonical_parameter_name = Some(error.canonical_parameter_name);
+                structured.expression = Some(error.expression);
+                structured.missing_dependency = error.missing_dependency;
+                structured.reason = Some(error.reason);
+                structured
+            }
             _ => Self::new(message, "parse_error", "netlist_parse"),
         }
     }
@@ -510,6 +658,20 @@ fn wasm_error_to_js(error: WasmError) -> JsValue {
         resource: error.resource.as_deref(),
         requested: error.requested,
         limit: error.limit,
+        subcircuit_name: error.subcircuit_name.as_deref(),
+        canonical_subcircuit_name: error.canonical_subcircuit_name.as_deref(),
+        instance_name: error.instance_name.as_deref(),
+        canonical_instance_name: error.canonical_instance_name.as_deref(),
+        qualified_instance_name: error.qualified_instance_name.as_deref(),
+        parameter_name: error.parameter_name.as_deref(),
+        canonical_parameter_name: error.canonical_parameter_name.as_deref(),
+        expression: error.expression.as_deref(),
+        output_directive: error.output_directive.as_deref(),
+        operator_name: error.operator_name.as_deref(),
+        function_name: error.function_name.as_deref(),
+        identifier_name: error.identifier_name.as_deref(),
+        missing_dependency: error.missing_dependency.as_deref(),
+        reason: error.reason.as_deref(),
         unresolved_output_symbols: error
             .unresolved_output_symbols
             .iter()
@@ -539,6 +701,20 @@ fn wasm_error_to_js(error: WasmError) -> JsValue {
             "resource",
             "requested",
             "limit",
+            "subcircuitName",
+            "canonicalSubcircuitName",
+            "instanceName",
+            "canonicalInstanceName",
+            "qualifiedInstanceName",
+            "parameterName",
+            "canonicalParameterName",
+            "expression",
+            "outputDirective",
+            "operatorName",
+            "functionName",
+            "identifierName",
+            "missingDependency",
+            "reason",
             "unresolvedOutputSymbols",
         ] {
             let key = JsValue::from_str(field);
@@ -942,6 +1118,36 @@ mod tests {
         assert_eq!(error.first_startup_kind.as_deref(), Some("ic"));
         assert_eq!(error.conflicting_startup_kind.as_deref(), Some("nodeset"));
         assert!(error.unresolved_output_symbols.is_empty());
+    }
+
+    #[test]
+    fn unresolved_subcircuit_parameter_error_preserves_typed_hierarchy_identity() {
+        let error = WasmError::from_parse_error(
+            rspice_core::netlist::ParseError::UnresolvedSubcircuitParameter(Box::new(
+                rspice_core::netlist::UnresolvedSubcircuitParameterError {
+                    subcircuit_name: "cell".into(),
+                    canonical_subcircuit_name: "CELL".into(),
+                    instance_name: "x1".into(),
+                    canonical_instance_name: "X1".into(),
+                    qualified_instance_name: "TOP.X1".into(),
+                    parameter_name: "foo".into(),
+                    canonical_parameter_name: "FOO".into(),
+                    expression: "TIME + meh".into(),
+                    missing_dependency: Some("MEH".into()),
+                    reason: "Undefined parameter: MEH".into(),
+                },
+            )),
+        );
+
+        assert_eq!(error.kind, "unresolved_subcircuit_parameter");
+        assert_eq!(error.category, "subcircuit_parameter_resolution");
+        assert_eq!(error.subcircuit_name.as_deref(), Some("cell"));
+        assert_eq!(error.qualified_instance_name.as_deref(), Some("TOP.X1"));
+        assert_eq!(error.parameter_name.as_deref(), Some("foo"));
+        assert_eq!(error.canonical_parameter_name.as_deref(), Some("FOO"));
+        assert_eq!(error.expression.as_deref(), Some("TIME + meh"));
+        assert_eq!(error.missing_dependency.as_deref(), Some("MEH"));
+        assert_eq!(error.reason.as_deref(), Some("Undefined parameter: MEH"));
     }
 
     #[test]

@@ -31,7 +31,7 @@ impl Default for TempRunConfig {
 }
 
 impl TempRunConfig {
-    pub(super) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         if self.temperatures_c.is_empty() {
             return Err("Temperature sweep requires at least one temperature point".to_string());
         }
@@ -159,16 +159,6 @@ pub enum CornerFrequencySweep {
     Linear,
 }
 
-impl CornerFrequencySweep {
-    pub(super) fn as_keyword(self) -> &'static str {
-        match self {
-            Self::Decade => "dec",
-            Self::Octave => "oct",
-            Self::Linear => "lin",
-        }
-    }
-}
-
 /// Base analysis executed at each corner point.
 #[derive(Debug, Clone, Default)]
 pub enum CornerBaseMode {
@@ -198,15 +188,6 @@ impl CornerBaseMode {
         match self {
             Self::Ac { .. } => CornerMetricLabel::AcMagnitude,
             _ => CornerMetricLabel::Voltage,
-        }
-    }
-
-    pub(super) fn display_name(&self) -> &'static str {
-        match self {
-            Self::Op => "OP",
-            Self::DcSweep { .. } => "DC",
-            Self::Transient { .. } => "TRAN",
-            Self::Ac { .. } => "AC",
         }
     }
 }

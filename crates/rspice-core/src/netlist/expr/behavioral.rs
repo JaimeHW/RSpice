@@ -5,11 +5,16 @@
 //! the behavioral compiler and final circuit binding pass.
 
 use super::{
-    BinOpKind, Expr as NetExpr, ParamContext, UnaryOpKind, eval_expression_complex,
-    parse_expression as parse_net_expr,
+    BinOpKind, Expr as NetExpr, ParamContext,
+    ParseExpressionWithAbortError as NetExpressionParseWithAbortError, UnaryOpKind,
+    eval_expression_complex, parse_expression as parse_net_expr,
+    parse_expression_with_abort as parse_net_expr_with_abort,
 };
-use crate::Value;
-use std::collections::HashMap;
+use crate::{
+    Value,
+    abort_signal::{AbortSignal, NoAbort},
+};
+use std::collections::{HashMap, HashSet};
 
 /// Analysis quantities whose value is supplied by the active solver point.
 /// This spelling table is shared by retention, dependency inspection, and
@@ -280,7 +285,33 @@ pub fn prepare_behavioral_expression(
     expression: &str,
     params: &ParamContext,
 ) -> Result<String, String> {
-    prepare_behavioral_expression_impl(expression, params, false)
+    match prepare_behavioral_expression_impl(expression, params, false, &NoAbort) {
+        Ok(expression) => Ok(expression),
+        Err(BehavioralPreparationError::Semantic(error)) => Err(error),
+        Err(BehavioralPreparationError::Aborted) => {
+            unreachable!("NoAbort cannot cancel behavioral preparation")
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BehavioralPreparationError {
+    Aborted,
+    Semantic(String),
+}
+
+impl From<String> for BehavioralPreparationError {
+    fn from(error: String) -> Self {
+        Self::Semantic(error)
+    }
+}
+
+pub(crate) fn prepare_behavioral_expression_with_abort(
+    expression: &str,
+    params: &ParamContext,
+    abort: &dyn AbortSignal,
+) -> Result<String, BehavioralPreparationError> {
+    prepare_behavioral_expression_impl(expression, params, false, abort)
 }
 
 /// Prepare a behavioral expression while retaining its original spelling when
@@ -293,30 +324,178 @@ pub fn prepare_behavioral_expression_preserving_spelling(
     expression: &str,
     params: &ParamContext,
 ) -> Result<String, String> {
-    prepare_behavioral_expression_impl(expression, params, true)
+    match prepare_behavioral_expression_impl(expression, params, true, &NoAbort) {
+        Ok(expression) => Ok(expression),
+        Err(BehavioralPreparationError::Semantic(error)) => Err(error),
+        Err(BehavioralPreparationError::Aborted) => {
+            unreachable!("NoAbort cannot cancel behavioral preparation")
+        }
+    }
+}
+
+/// Expand `.FUNC` calls while preserving ordinary and global parameter leaves.
+///
+/// Output-only operators such as Xyce `DDX` need the authored differentiation
+/// target to survive function substitution. Ordinary behavioral preparation
+/// intentionally folds numeric parameters, so output evaluation uses this
+/// narrower expansion before applying its typed probe/operator rewrites.
+pub fn expand_output_user_functions(
+    expression: &str,
+    params: &ParamContext,
+) -> Result<String, String> {
+    let protected_identifiers = params
+        .all_params()
+        .into_iter()
+        .map(|(name, _)| name.to_ascii_uppercase())
+        .collect();
+    match expand_output_user_functions_with_abort(
+        expression,
+        params,
+        &protected_identifiers,
+        &NoAbort,
+    ) {
+        Ok(expression) => Ok(expression),
+        Err(BehavioralPreparationError::Semantic(error)) => Err(error),
+        Err(BehavioralPreparationError::Aborted) => {
+            unreachable!("NoAbort cannot cancel output function expansion")
+        }
+    }
+}
+
+pub(crate) fn expand_output_user_functions_with_abort(
+    expression: &str,
+    params: &ParamContext,
+    protected_identifiers: &HashSet<String>,
+    abort: &dyn AbortSignal,
+) -> Result<String, BehavioralPreparationError> {
+    if abort.is_aborted() {
+        return Err(BehavioralPreparationError::Aborted);
+    }
+    if !references_defined_function_with_abort(expression, params, abort)? {
+        return Ok(expression.to_string());
+    }
+    let expression = expand_spice_poly_expression(expression)?;
+    let mut probe_protector = ProbeProtector::with_protected_identifiers(protected_identifiers);
+    let protected_expression = probe_protector.protect_with_abort(&expression, abort)?;
+    let parsed = match parse_net_expr_with_abort(&protected_expression, abort) {
+        Ok(expression) => expression,
+        Err(NetExpressionParseWithAbortError::Aborted) => {
+            return Err(BehavioralPreparationError::Aborted);
+        }
+        Err(NetExpressionParseWithAbortError::Parse(error)) => {
+            return Err(BehavioralPreparationError::Semantic(error.to_string()));
+        }
+    };
+    let expanded = {
+        let mut expander =
+            FunctionExpander::new_preserving_parameters(params, &mut probe_protector, abort);
+        expander
+            .expand_expr(&parsed, 0)
+            .map_err(BehavioralPreparationError::Semantic)?
+    };
+    if abort.is_aborted() {
+        return Err(BehavioralPreparationError::Aborted);
+    }
+    probe_protector.restore_with_abort(&serialize_expr(&expanded), abort)
+}
+
+fn references_defined_function_with_abort(
+    expression: &str,
+    params: &ParamContext,
+    abort: &dyn AbortSignal,
+) -> Result<bool, BehavioralPreparationError> {
+    if params.function_count() == 0 {
+        return Ok(false);
+    }
+    let chars = expression.chars().collect::<Vec<_>>();
+    let mut index = 0usize;
+    while index < chars.len() {
+        if index % 64 == 0 && abort.is_aborted() {
+            return Err(BehavioralPreparationError::Aborted);
+        }
+        if chars[index] == '"' {
+            index += 1;
+            let mut escaped = false;
+            while index < chars.len() {
+                if index % 64 == 0 && abort.is_aborted() {
+                    return Err(BehavioralPreparationError::Aborted);
+                }
+                let character = chars[index];
+                index += 1;
+                if escaped {
+                    escaped = false;
+                } else if character == '\\' {
+                    escaped = true;
+                } else if character == '"' {
+                    break;
+                }
+            }
+            continue;
+        }
+        if !is_ident_start(chars[index]) {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        index += 1;
+        while index < chars.len() && is_ident_continue(chars[index]) {
+            if index % 64 == 0 && abort.is_aborted() {
+                return Err(BehavioralPreparationError::Aborted);
+            }
+            index += 1;
+        }
+        let name = chars[start..index].iter().collect::<String>();
+        while index < chars.len() && chars[index].is_whitespace() {
+            if index % 64 == 0 && abort.is_aborted() {
+                return Err(BehavioralPreparationError::Aborted);
+            }
+            index += 1;
+        }
+        if chars.get(index) == Some(&'(') && params.has_function(&name) {
+            return Ok(true);
+        }
+    }
+    if abort.is_aborted() {
+        return Err(BehavioralPreparationError::Aborted);
+    }
+    Ok(false)
 }
 
 fn prepare_behavioral_expression_impl(
     expression: &str,
     params: &ParamContext,
     preserve_unchanged_spelling: bool,
-) -> Result<String, String> {
+    abort: &dyn AbortSignal,
+) -> Result<String, BehavioralPreparationError> {
+    if abort.is_aborted() {
+        return Err(BehavioralPreparationError::Aborted);
+    }
     let expression = expand_spice_poly_expression(expression)?;
     let mut probe_protector = ProbeProtector::default();
-    let protected_expression = probe_protector.protect(&expression);
+    let protected_expression = probe_protector.protect_with_abort(&expression, abort)?;
 
     // Keep legacy behavior when the permissive parser cannot parse a
     // non-standard expression; strict parser will still validate later.
-    let parsed = match parse_net_expr(&protected_expression) {
+    let parsed = match parse_net_expr_with_abort(&protected_expression, abort) {
         Ok(expr) => expr,
-        Err(_) => return Ok(expression),
+        Err(NetExpressionParseWithAbortError::Aborted) => {
+            return Err(BehavioralPreparationError::Aborted);
+        }
+        Err(NetExpressionParseWithAbortError::Parse(_)) => return Ok(expression),
     };
     let canonical_original = preserve_unchanged_spelling.then(|| serialize_expr(&parsed));
 
     let expanded = {
-        let mut expander = FunctionExpander::new(params, &mut probe_protector);
-        expander.expand_expr(&parsed, 0)?
+        let mut expander = FunctionExpander::new(params, &mut probe_protector, abort);
+        match expander.expand_expr(&parsed, 0) {
+            Ok(expanded) => expanded,
+            Err(_) if abort.is_aborted() => return Err(BehavioralPreparationError::Aborted),
+            Err(error) => return Err(BehavioralPreparationError::Semantic(error)),
+        }
     };
+    if abort.is_aborted() {
+        return Err(BehavioralPreparationError::Aborted);
+    }
     let canonical_expanded = serialize_expr(&expanded);
     if canonical_original
         .as_ref()
@@ -327,7 +506,7 @@ fn prepare_behavioral_expression_impl(
         // element metadata stable and avoids needless textual churn.
         Ok(expression)
     } else {
-        Ok(probe_protector.restore(canonical_expanded))
+        probe_protector.restore_with_abort(&canonical_expanded, abort)
     }
 }
 
@@ -348,6 +527,24 @@ pub fn behavioral_expression_references_runtime_quantity(expression: &str) -> bo
             }
         },
     }
+}
+
+/// Validate a prepared behavioral expression and return its first ordinary
+/// identifier that remains unresolved after parameter expansion.
+///
+/// Runtime quantities and circuit-probe operands are not parameter
+/// dependencies. Callers use this after [`prepare_behavioral_expression`] to
+/// ensure that the presence of `TIME`, `FREQ`, or a probe cannot mask an
+/// unrelated undefined parameter in the same retained runtime expression.
+pub(crate) fn validate_prepared_behavioral_runtime_expression(
+    expression: &str,
+) -> Result<Option<String>, String> {
+    let parsed = parse_net_expr(expression).map_err(|error| error.to_string())?;
+    if let Some(identifier) = first_unresolved_behavioral_identifier(&parsed) {
+        return Ok(Some(identifier.to_ascii_uppercase()));
+    }
+    crate::expr::parse_expression_strict(expression).map_err(|error| error.to_string())?;
+    Ok(None)
 }
 
 /// Return whether an expression depends specifically on the active AC
@@ -705,6 +902,21 @@ fn first_unresolved_global_identifier(expression: &NetExpr) -> Option<&str> {
     }
 }
 
+fn first_unresolved_behavioral_identifier(expression: &NetExpr) -> Option<&str> {
+    match expression {
+        NetExpr::Param(name) if is_behavioral_runtime_symbol(name) => None,
+        NetExpr::Param(name) => Some(name.as_str()),
+        NetExpr::UnaryOp { operand, .. } => first_unresolved_behavioral_identifier(operand),
+        NetExpr::BinOp { left, right, .. } => first_unresolved_behavioral_identifier(left)
+            .or_else(|| first_unresolved_behavioral_identifier(right)),
+        NetExpr::FnCall { name, .. } if is_circuit_probe(name) => None,
+        NetExpr::FnCall { args, .. } => {
+            args.iter().find_map(first_unresolved_behavioral_identifier)
+        }
+        NetExpr::Number(_) | NetExpr::ComplexNumber(_) | NetExpr::StringLiteral(_) => None,
+    }
+}
+
 fn contains_runtime_identifier(expression: &str) -> bool {
     expression
         .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
@@ -751,6 +963,8 @@ struct FunctionExpander<'a, 'p> {
     parameter_body_cache: HashMap<String, NetExpr>,
     parameter_stack: Vec<(String, ParameterExpressionKind)>,
     fold_static_function_graph: bool,
+    expand_parameter_bindings: bool,
+    abort: &'a dyn AbortSignal,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -769,7 +983,11 @@ impl ParameterExpressionKind {
 }
 
 impl<'a, 'p> FunctionExpander<'a, 'p> {
-    fn new(params: &'a ParamContext, probe_protector: &'p mut ProbeProtector) -> Self {
+    fn new(
+        params: &'a ParamContext,
+        probe_protector: &'p mut ProbeProtector,
+        abort: &'a dyn AbortSignal,
+    ) -> Self {
         Self {
             params,
             probe_protector,
@@ -778,7 +996,19 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
             parameter_body_cache: HashMap::new(),
             parameter_stack: Vec::new(),
             fold_static_function_graph: params.function_count() > LARGE_FUNCTION_GRAPH_THRESHOLD,
+            expand_parameter_bindings: true,
+            abort,
         }
+    }
+
+    fn new_preserving_parameters(
+        params: &'a ParamContext,
+        probe_protector: &'p mut ProbeProtector,
+        abort: &'a dyn AbortSignal,
+    ) -> Self {
+        let mut expander = Self::new(params, probe_protector, abort);
+        expander.expand_parameter_bindings = false;
+        expander
     }
 
     fn expand_expr(&mut self, expr: &NetExpr, named_depth: usize) -> Result<NetExpr, String> {
@@ -796,6 +1026,9 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
         let mut expanded_nodes = 0usize;
 
         while let Some(task) = tasks.pop() {
+            if expanded_nodes % 64 == 0 && self.abort.is_aborted() {
+                return Err("behavioral expression preparation was cancelled".to_string());
+            }
             match task {
                 Task::Expand(expr, depth) => {
                     if depth > MAX_NAMED_EXPANSION_DEPTH {
@@ -823,6 +1056,9 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                             if is_behavioral_runtime_symbol(&name)
                                 && !self.params.has_parameter_binding(&name) =>
                         {
+                            values.push(NetExpr::Param(name));
+                        }
+                        NetExpr::Param(name) if !self.expand_parameter_bindings => {
                             values.push(NetExpr::Param(name));
                         }
                         NetExpr::Param(name) => {
@@ -877,16 +1113,35 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                                 {
                                     cached.clone()
                                 } else {
-                                    let protected = self.probe_protector.protect(expression);
-                                    let parsed = parse_net_expr(&protected).map_err(|error| {
-                                        format!(
-                                            "Failed to parse {} {} expression '{}': {}",
-                                            expression_kind.directive(),
-                                            name,
-                                            expression,
-                                            error
-                                        )
-                                    })?;
+                                    let protected = self
+                                        .probe_protector
+                                        .protect_with_abort(expression, self.abort)
+                                        .map_err(|error| match error {
+                                            BehavioralPreparationError::Aborted => {
+                                                "behavioral expression preparation was cancelled"
+                                                    .to_string()
+                                            }
+                                            BehavioralPreparationError::Semantic(error) => error,
+                                        })?;
+                                    let parsed =
+                                        match parse_net_expr_with_abort(&protected, self.abort) {
+                                            Ok(parsed) => parsed,
+                                            Err(NetExpressionParseWithAbortError::Aborted) => {
+                                                return Err(
+                                                "behavioral expression preparation was cancelled"
+                                                    .to_string(),
+                                            );
+                                            }
+                                            Err(NetExpressionParseWithAbortError::Parse(error)) => {
+                                                return Err(format!(
+                                                    "Failed to parse {} {} expression '{}': {}",
+                                                    expression_kind.directive(),
+                                                    name,
+                                                    expression,
+                                                    error
+                                                ));
+                                            }
+                                        };
                                     self.parameter_body_cache
                                         .insert(key.clone(), parsed.clone());
                                     parsed
@@ -1003,13 +1258,29 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                         cached.clone()
                     } else {
                         let expanded_body = expand_spice_poly_expression(&func_def.body)?;
-                        let protected_body = self.probe_protector.protect(&expanded_body);
-                        let parsed_body = parse_net_expr(&protected_body).map_err(|error| {
-                            format!(
-                                "Failed to parse .FUNC {} body '{}': {}",
-                                func_name, func_def.body, error
-                            )
-                        })?;
+                        let protected_body = self
+                            .probe_protector
+                            .protect_with_abort(&expanded_body, self.abort)
+                            .map_err(|error| match error {
+                                BehavioralPreparationError::Aborted => {
+                                    "behavioral expression preparation was cancelled".to_string()
+                                }
+                                BehavioralPreparationError::Semantic(error) => error,
+                            })?;
+                        let parsed_body =
+                            match parse_net_expr_with_abort(&protected_body, self.abort) {
+                                Ok(parsed) => parsed,
+                                Err(NetExpressionParseWithAbortError::Aborted) => {
+                                    return Err("behavioral expression preparation was cancelled"
+                                        .to_string());
+                                }
+                                Err(NetExpressionParseWithAbortError::Parse(error)) => {
+                                    return Err(format!(
+                                        "Failed to parse .FUNC {} body '{}': {}",
+                                        func_name, func_def.body, error
+                                    ));
+                                }
+                            };
                         self.body_cache
                             .insert(func_name.clone(), parsed_body.clone());
                         parsed_body
@@ -1104,21 +1375,39 @@ fn is_circuit_probe(name: &str) -> bool {
 #[derive(Debug, Default)]
 struct ProbeProtector {
     replacements: Vec<(String, String)>,
+    protected_identifiers: HashSet<String>,
 }
 
 impl ProbeProtector {
-    fn protect(&mut self, expression: &str) -> String {
+    fn with_protected_identifiers(identifiers: &HashSet<String>) -> Self {
+        Self {
+            replacements: Vec::new(),
+            protected_identifiers: identifiers.clone(),
+        }
+    }
+
+    fn protect_with_abort(
+        &mut self,
+        expression: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<String, BehavioralPreparationError> {
         let chars: Vec<char> = expression.chars().collect();
         let mut out = String::with_capacity(expression.len());
         let mut i = 0usize;
 
         while i < chars.len() {
+            if i % 64 == 0 && abort.is_aborted() {
+                return Err(BehavioralPreparationError::Aborted);
+            }
             let c = chars[i];
             if c == '"' {
                 let start = i;
                 i += 1;
                 let mut escaped = false;
                 while i < chars.len() {
+                    if i % 64 == 0 && abort.is_aborted() {
+                        return Err(BehavioralPreparationError::Aborted);
+                    }
                     let current = chars[i];
                     i += 1;
                     if escaped {
@@ -1137,19 +1426,48 @@ impl ProbeProtector {
                 let ident_start = i;
                 i += 1;
                 while i < chars.len() && is_ident_continue(chars[i]) {
+                    if i % 64 == 0 && abort.is_aborted() {
+                        return Err(BehavioralPreparationError::Aborted);
+                    }
                     i += 1;
+                }
+                while i < chars.len() && chars[i] == ':' {
+                    let segment_start = i + 1;
+                    if segment_start >= chars.len() || !is_ident_start(chars[segment_start]) {
+                        break;
+                    }
+                    i = segment_start + 1;
+                    while i < chars.len() && is_ident_continue(chars[i]) {
+                        if i % 64 == 0 && abort.is_aborted() {
+                            return Err(BehavioralPreparationError::Aborted);
+                        }
+                        i += 1;
+                    }
                 }
                 let ident: String = chars[ident_start..i].iter().collect();
 
+                if ident.contains(':')
+                    && self
+                        .protected_identifiers
+                        .contains(&ident.replace(':', ".").to_ascii_uppercase())
+                {
+                    out.push_str(&self.placeholder_for(&ident));
+                    continue;
+                }
+
                 let mut ws_idx = i;
                 while ws_idx < chars.len() && chars[ws_idx].is_whitespace() {
+                    if ws_idx % 64 == 0 && abort.is_aborted() {
+                        return Err(BehavioralPreparationError::Aborted);
+                    }
                     ws_idx += 1;
                 }
 
                 if is_circuit_probe(&ident)
                     && ws_idx < chars.len()
                     && chars[ws_idx] == '('
-                    && let Some((inner, end_idx)) = extract_parenthesized(&chars, ws_idx)
+                    && let Some((inner, end_idx)) =
+                        extract_parenthesized_with_abort(&chars, ws_idx, abort)?
                     && let Some(protected_inner) = self.protect_probe_inner(&inner)
                 {
                     out.push_str(&ident);
@@ -1168,7 +1486,10 @@ impl ProbeProtector {
             i += 1;
         }
 
-        out
+        if abort.is_aborted() {
+            return Err(BehavioralPreparationError::Aborted);
+        }
+        Ok(out)
     }
 
     fn protect_probe_inner(&mut self, inner: &str) -> Option<String> {
@@ -1201,12 +1522,82 @@ impl ProbeProtector {
         placeholder
     }
 
-    fn restore(&self, mut expression: String) -> String {
-        for (placeholder, original) in &self.replacements {
-            expression = expression.replace(placeholder, original);
+    fn restore_with_abort(
+        &self,
+        expression: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<String, BehavioralPreparationError> {
+        let replacements: std::collections::HashMap<&str, &str> = self
+            .replacements
+            .iter()
+            .map(|(placeholder, original)| (placeholder.as_str(), original.as_str()))
+            .collect();
+        let mut output = String::with_capacity(expression.len());
+        let mut index = 0usize;
+        while index < expression.len() {
+            if index % 64 == 0 && abort.is_aborted() {
+                return Err(BehavioralPreparationError::Aborted);
+            }
+            if expression[index..].starts_with("__RSPICE_")
+                && let Some(end) = expression[index..].find("__").and_then(|relative| {
+                    let after = index + relative + 2;
+                    expression[after..].find("__").map(|tail| after + tail + 2)
+                })
+                && let Some(original) = replacements.get(&expression[index..end])
+            {
+                output.push_str(original);
+                index = end;
+                continue;
+            }
+            let character = expression[index..]
+                .chars()
+                .next()
+                .expect("valid char boundary");
+            output.push(character);
+            index += character.len_utf8();
         }
-        expression
+        Ok(output)
     }
+}
+
+fn extract_parenthesized_with_abort(
+    chars: &[char],
+    open_idx: usize,
+    abort: &dyn AbortSignal,
+) -> Result<Option<(String, usize)>, BehavioralPreparationError> {
+    if chars.get(open_idx) != Some(&'(') {
+        return Ok(None);
+    }
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for index in open_idx..chars.len() {
+        if index % 64 == 0 && abort.is_aborted() {
+            return Err(BehavioralPreparationError::Aborted);
+        }
+        let character = chars[index];
+        if let Some(delimiter) = quote {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == delimiter {
+                quote = None;
+            }
+            continue;
+        }
+        if character == '"' {
+            quote = Some(character);
+        } else if character == '(' {
+            depth += 1;
+        } else if character == ')' {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                return Ok(Some((chars[open_idx + 1..index].iter().collect(), index)));
+            }
+        }
+    }
+    Ok(None)
 }
 
 fn split_probe_args(inner: &str) -> Option<Vec<&str>> {
@@ -1406,30 +1797,6 @@ fn is_ident_start(c: char) -> bool {
 
 fn is_ident_continue(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ':' | '`' | '@' | '#' | '$')
-}
-
-fn extract_parenthesized(chars: &[char], lparen_idx: usize) -> Option<(String, usize)> {
-    if chars.get(lparen_idx).copied() != Some('(') {
-        return None;
-    }
-
-    let mut depth = 0usize;
-    let mut i = lparen_idx;
-    while i < chars.len() {
-        match chars[i] {
-            '(' => depth += 1,
-            ')' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    let inner: String = chars[lparen_idx + 1..i].iter().collect();
-                    return Some((inner, i));
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    None
 }
 
 fn substitute_function_args(expr: &NetExpr, args: &HashMap<String, NetExpr>) -> NetExpr {

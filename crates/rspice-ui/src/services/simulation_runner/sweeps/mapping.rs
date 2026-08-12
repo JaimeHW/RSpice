@@ -62,7 +62,12 @@ pub(super) fn map_dc_sweep_results_with_abort(
     Ok((sweep_values, voltages))
 }
 
-pub(super) fn map_temperature_results(
+/// Lay solved temperature points onto the axis a parametric plot reads.
+///
+/// Reachable outside the sweep runners for the same reason
+/// [`map_corner_results`] is: a temperature step's family is assembled from the
+/// results of its per-point tasks rather than from a solve of its own.
+pub(crate) fn map_temperature_results(
     results: &[(Value, SweepPointResult)],
     metric_label: CornerMetricLabel,
     abort: &dyn AbortSignal,

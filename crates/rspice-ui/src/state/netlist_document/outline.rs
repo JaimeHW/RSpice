@@ -28,7 +28,7 @@ pub enum OutlineEntryKind {
 }
 
 /// Stable, canonical grouping used by the navigator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OutlineSectionKind {
     Source,
@@ -338,6 +338,18 @@ pub(crate) fn parse_include_directives(source: &str) -> Vec<IncludeDirective> {
                     + tokens[1].column,
             })
         })
+        .collect()
+}
+
+/// The tokens of one source card, in order, with quotes and trailing comments
+/// removed. An outline entry keeps only the head and one detail token, which
+/// is enough to name a declaration and not enough to describe it — a navigator
+/// that wants the model a device binds to reads the card through here rather
+/// than tokenizing SPICE a second time.
+pub(crate) fn card_tokens(card: &str) -> Vec<String> {
+    tokenize_card(card.trim_start())
+        .into_iter()
+        .map(|token| token.text)
         .collect()
 }
 

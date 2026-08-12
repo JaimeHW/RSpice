@@ -1448,6 +1448,69 @@ fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
     assert!(app.state.sim_setup.options_errors.is_empty());
 }
 
+/// A step ceiling is the one option an analysis cannot replace, only tighten:
+/// the plan's ceiling and the analysis's own reach the engine as two separate
+/// fields and the transient clamps against both. So a looser override does not
+/// bind, and the ledger has to report the bound the run will actually honour
+/// rather than the one that was typed.
+#[test]
+fn a_step_ceiling_looser_than_the_plans_reports_the_bound_the_run_honours() {
+    use crate::simulation::plan::AnalysisDraft;
+
+    fn ceiling_row(app: &RSpiceApp) -> (String, String, &'static str) {
+        let rows = super::page_solver::analysis_overrides(app);
+        let row = rows
+            .iter()
+            .find(|row| row.option == "Step ceiling")
+            .expect("an authored step ceiling earns a ledger row");
+        (row.preset.clone(), row.effective.clone(), row.origin)
+    }
+
+    fn author_ceiling(app: &mut RSpiceApp, authored: &str) {
+        let plan = app
+            .state
+            .sim_setup
+            .stable_analysis_plan_mut()
+            .expect("the test instance has a stable plan");
+        let id = plan
+            .instances()
+            .iter()
+            .find(|instance| matches!(instance.draft(), AnalysisDraft::Transient(_)))
+            .map(|instance| instance.id())
+            .expect("the default plan runs a transient");
+        let _ = plan.edit(id, |draft| {
+            if let AnalysisDraft::Transient(setup) = draft {
+                setup.max_step = authored.to_owned();
+            }
+        });
+    }
+
+    let mut app = RSpiceApp::test_instance();
+    // The plan's own ceiling, so the two bounds can be compared against a
+    // stated value rather than against whatever the default happens to be.
+    app.state.sim_setup.options.max_timestep = 1.0e-6;
+
+    author_ceiling(&mut app, "5n");
+    let (preset, effective, origin) = ceiling_row(&app);
+    assert_eq!(preset, "1u");
+    assert_eq!(
+        effective, "5n",
+        "a tighter override is the bound that binds"
+    );
+    assert_eq!(origin, "analysis override");
+
+    author_ceiling(&mut app, "10u");
+    let (_, effective, origin) = ceiling_row(&app);
+    assert_eq!(
+        effective, "1u",
+        "the run steps at the plan's ceiling, so the ledger may not report 10u"
+    );
+    assert_eq!(
+        origin, "plan preset · tighter than the override",
+        "and it has to say which of the two bounds won"
+    );
+}
+
 /// The active plan's identity, for seeds that hold only the session state.
 fn seeded_plan_id(state: &AppState) -> crate::product::SimulationPlanId {
     state

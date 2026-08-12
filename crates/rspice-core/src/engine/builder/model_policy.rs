@@ -466,6 +466,55 @@ pub(super) fn bjt_level_descriptor(level: f64) -> String {
     }
 }
 
+pub(super) fn effective_native_bjt_tnom_celsius(
+    element_name: &str,
+    model_name: &str,
+    model: Option<&crate::netlist::ModelDef>,
+    params: &HashMap<String, f64>,
+    global_tnom_celsius: Option<f64>,
+) -> Result<f64, SimulationError> {
+    let deferred_tnom = model.is_some_and(|model| {
+        model
+            .expr_params
+            .iter()
+            .chain(model.string_params.iter())
+            .any(|(name, _)| name.eq_ignore_ascii_case("TNOM"))
+            || model
+                .string_vector_params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("TNOM"))
+            || model
+                .real_vector_params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("TNOM"))
+            || model
+                .real_vector_expr_params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("TNOM"))
+            || model
+                .integer_vector_params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("TNOM"))
+    });
+    if deferred_tnom {
+        return Err(SimulationError::Circuit(format!(
+            "BJT '{element_name}': model '{model_name}' has a non-scalar or unresolved TNOM; TNOM must be a finite Celsius scalar above absolute zero"
+        )));
+    }
+
+    let tnom_celsius = params
+        .get("TNOM")
+        .copied()
+        .or(global_tnom_celsius)
+        .unwrap_or(27.0);
+    if !tnom_celsius.is_finite() || crate::constants::celsius_to_kelvin(tnom_celsius) <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "BJT '{element_name}': model '{model_name}' has invalid TNOM={tnom_celsius}; TNOM is Celsius and must be finite and above absolute zero"
+        )));
+    }
+    Ok(tnom_celsius)
+}
+
 pub(super) fn validate_bjt_model_level(
     element_name: &str,
     model: &str,

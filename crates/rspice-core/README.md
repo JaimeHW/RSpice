@@ -152,7 +152,7 @@ alongside the terminal equations.
 **Other** — switches (`switch.rs`), ideal op-amp (`opamp.rs`), GaN HEMT
 (`gan_hemt.rs`, in-tree physics-style model; ASM-HEMT/MVSG CMC
 qualification is feature-gated work through generated Rust from Verilog-A), thermal network elements (`thermal.rs`), tristate
-(`tristate.rs`), device bypass for latent devices (`model_bypass.rs`).
+(`tristate.rs`).
 
 **Extension points** — external Verilog-A devices via the `rspice-veriloga` compiler
 (`veriloga.rs`, behind the `veriloga` feature, with blake3-keyed on-disk

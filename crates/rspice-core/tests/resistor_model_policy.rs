@@ -5,7 +5,7 @@
 //! transient state natively, while unsupported parameter combinations still
 //! fail closed during model resolution.
 
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::{AnalysisCommand, Netlist, StepCommand, StepSweep, StepTarget};
 use rspice_core::solver::SimulationResult;
 
@@ -30,6 +30,49 @@ fn branch_current(result: &SimulationResult, branch: &str) -> f64 {
     result
         .branch_current_named(branch)
         .unwrap_or_else(|| panic!("missing branch {branch} in {:?}", result.branch_names))
+}
+
+#[test]
+fn xyce_numeric_resistor_models_remain_lexically_scoped_across_sibling_subcircuits() {
+    let deck = "* sibling subcircuits own distinct local RMOD cards\n\
+                XACTIVE 2 0 ACTIVE\n\
+                VIN 1 0 5\n\
+                VMON 1 2 0\n\
+                .subckt UNUSED a b\n\
+                R1 a b RMOD L=1\n\
+                .model RMOD R (RSH=1 DEFW=1)\n\
+                .ends\n\
+                .subckt ACTIVE a b\n\
+                R1 a b RMOD L=1\n\
+                .model RMOD R (RSH=.031 NARROW=0 DEFW=1)\n\
+                .ends\n\
+                .op\n\
+                .end\n";
+    let netlist = Netlist::parse(deck).expect("scoped resistor-model deck parses");
+    let model_names = netlist
+        .models
+        .iter()
+        .map(|model| model.name.to_ascii_uppercase())
+        .collect::<Vec<_>>();
+    assert_eq!(model_names, ["UNUSED::RMOD", "ACTIVE::RMOD"]);
+
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    let parameters = engine
+        .resolved_resistor_parameters(&netlist, "XACTIVE.R1")
+        .expect("scoped resistor parameters resolve")
+        .expect("flattened active resistor exists");
+    assert_eq!(parameters.reported_resistance.to_bits(), 0.031f64.to_bits());
+    assert_eq!(parameters.resistance.to_bits(), 0.031f64.to_bits());
+
+    let result = engine
+        .run_dc_op(&netlist)
+        .expect("active scoped resistor circuit solves");
+    let expected_current = 5.0 / 0.031;
+    let actual_current = branch_current(&result, "VMON");
+    assert!(
+        (actual_current - expected_current).abs() <= expected_current * 1.0e-12,
+        "active resistor must use ACTIVE::RMOD (0.031 ohm), got {actual_current} A"
+    );
 }
 
 fn step_command(netlist: &Netlist) -> &StepCommand {

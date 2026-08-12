@@ -965,9 +965,12 @@ impl Bjt {
         }
         if let Some(&v) = params.get("TNOM")
             && v.is_finite()
-            && v > 0.0
+            && crate::constants::celsius_to_kelvin(v) > 0.0
         {
-            self.tnom = if v > 200.0 { v } else { v + 273.15 };
+            // SPICE/Xyce BJT TNOM is declared U_DEGC: every authored model
+            // value is Celsius, including negative temperatures and values
+            // above 200 C. Device internals retain Kelvin.
+            self.tnom = crate::constants::celsius_to_kelvin(v);
         }
         if let Some(v) = params
             .get("KF")
@@ -1598,6 +1601,32 @@ mod tests {
             .map(|(key, value)| ((*key).to_string(), *value))
             .collect::<HashMap<_, _>>();
         Bjt::new_npn("q1".to_string(), 1, 2, 3).with_params(&params)
+    }
+
+    #[test]
+    fn explicit_celsius_tnom_matches_the_default_nominal_temperature() {
+        let default = model_with(&[]);
+        let explicit = model_with(&[("TNOM", 27.0)]);
+        let expected = crate::constants::celsius_to_kelvin(27.0);
+
+        assert_eq!(default.tnom.to_bits(), expected.to_bits());
+        assert_eq!(explicit.tnom.to_bits(), expected.to_bits());
+        assert_eq!(explicit.tnom.to_bits(), default.tnom.to_bits());
+    }
+
+    #[test]
+    fn bjt_tnom_is_always_interpreted_as_celsius() {
+        let below_freezing = model_with(&[("TNOM", -40.0)]);
+        let hot = model_with(&[("TNOM", 300.0)]);
+
+        assert_eq!(
+            below_freezing.tnom.to_bits(),
+            crate::constants::celsius_to_kelvin(-40.0).to_bits()
+        );
+        assert_eq!(
+            hot.tnom.to_bits(),
+            crate::constants::celsius_to_kelvin(300.0).to_bits()
+        );
     }
 
     #[test]

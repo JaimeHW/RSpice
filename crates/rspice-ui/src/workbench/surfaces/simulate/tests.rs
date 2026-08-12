@@ -2113,3 +2113,129 @@ fn a_corner_point_that_cannot_be_solved_is_retained_as_a_failure() {
         "a point that did not solve is not evidence that the limit holds"
     );
 }
+
+/// A temperature step whose transient base analysis measures the divider
+/// output. The upper leg carries a linear temperature coefficient, so the
+/// temperatures disagree by construction: `V(out)` falls as the deck heats up.
+fn temperature_evidence_run() -> SimulationRun {
+    use crate::services::simulation_runner::{CornerBaseMode, TempRunConfig};
+
+    let deck = "temperature evidence\n\
+         VDD vdd 0 DC 1.8\n\
+         R1 vdd out 1k TC1=0.01\n\
+         R2 out 0 1k\n\
+         C1 out 0 1p\n\
+         .tran 1n 100n\n\
+         .meas tran vout FIND V(out) AT=100n\n\
+         .end\n";
+    let contract = TempRunConfig {
+        temperatures_c: vec![27.0, 125.0],
+        base_mode: CornerBaseMode::Transient {
+            stop_time: 100.0e-9,
+            step_time: 1.0e-9,
+        },
+    };
+
+    crate::simulation::runner::pvt_point_evidence::run_temperature_declaration(deck, contract, 27.0)
+        .expect("the temperature declaration prepares, authorizes and runs")
+}
+
+/// The whole claim of the per-temperature expansion: a specification is
+/// answerable temperature by temperature, against measurements the executor
+/// really produced rather than fixtures a test wrote. Before the expansion a
+/// temperature step retained one scalar per node per temperature and no `.MEAS`
+/// result at all, so every scope here would have reported that the evidence was
+/// missing.
+#[test]
+fn a_temperature_step_answers_a_specification_at_each_of_its_own_temperatures() {
+    let run = temperature_evidence_run();
+
+    // Each declared temperature has its own retained measurement, and the
+    // temperature it was solved at is on the result rather than inferred from
+    // its position.
+    let mut measured: Vec<(f64, f64)> = run
+        .analyses
+        .iter()
+        .filter_map(|analysis| {
+            let point = analysis
+                .provenance
+                .as_ref()
+                .and_then(crate::state::AnalysisResultProvenance::pvt_point)?;
+            let value = analysis
+                .measurements
+                .iter()
+                .find(|measurement| measurement.name.eq_ignore_ascii_case("vout"))?
+                .value?;
+            Some((point.temperature_celsius(), value))
+        })
+        .collect();
+    measured.sort_by(|left, right| left.0.total_cmp(&right.0));
+    assert_eq!(
+        measured.len(),
+        2,
+        "one measurement per declared temperature"
+    );
+    assert_eq!(measured[0].0, 27.0);
+    assert_eq!(measured[1].0, 125.0);
+    assert!(
+        (measured[0].1 - 0.9).abs() < 1.0e-3,
+        "the 27 C leg is 1 k against 1 k, got {}",
+        measured[0].1
+    );
+    assert!(
+        (measured[1].1 - 1.8 / 2.98).abs() < 1.0e-3,
+        "the 125 C leg has derated to 1.98 k, got {}",
+        measured[1].1
+    );
+
+    let nominal = measurement_in_output_dataset(
+        &run,
+        &scoped("vout", Some(0.85), crate::state::SpecPointScope::Nominal),
+    )
+    .expect("the reference temperature answers a nominal limit");
+    assert!((nominal.value - measured[0].1).abs() < 1.0e-12);
+    assert!(nominal.is_complete_coverage());
+
+    let everywhere = measurement_in_output_dataset(
+        &run,
+        &scoped("vout", Some(0.85), crate::state::SpecPointScope::AllPoints),
+    )
+    .expect("the run set answers an unscoped limit");
+    assert!((everywhere.value - measured[1].1).abs() < 1.0e-12);
+    assert_eq!(everywhere.retained_measurements, 2);
+
+    let bound = scoped("vout", Some(0.85), crate::state::SpecPointScope::Nominal);
+    assert!(bound.passes(nominal.value), "nominal holds the limit");
+    assert!(
+        !bound.passes(everywhere.value),
+        "the hot temperature does not, which is the verdict the run set had no way to report"
+    );
+
+    // A temperature step declares no process axis, so every one of its points
+    // solved the run's reference models and a corner-scoped limit is answered
+    // by all of them rather than by a subset.
+    let reference_process = measurement_in_output_dataset(
+        &run,
+        &scoped(
+            "vout",
+            Some(0.85),
+            crate::state::SpecPointScope::SelectedCorners {
+                corners: vec!["TT".to_owned()],
+            },
+        ),
+    )
+    .expect("the reference process answers a limit scoped to it");
+    assert_eq!(reference_process.retained_measurements, 2);
+
+    // The per-point results are additional evidence, not a replacement for the
+    // parametric family: the same run still carries the axis a plot draws.
+    let Some(crate::state::AnalysisResultFamilyMetadata::Parametric { sweep_values, .. }) = run
+        .analyses
+        .iter()
+        .find(|analysis| analysis.analysis_type == AnalysisType::Parametric)
+        .and_then(|analysis| analysis.family_metadata.as_ref())
+    else {
+        panic!("the temperature declaration still produces its plotting family");
+    };
+    assert_eq!(sweep_values, &vec![27.0, 125.0]);
+}

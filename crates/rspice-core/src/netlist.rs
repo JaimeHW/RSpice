@@ -40,12 +40,10 @@ pub use add_resistors::*;
 pub use ast::*;
 pub use data_table::{FrequencyDataPoint, FrequencyDataTableError};
 pub use expr::{ParamContext, ParameterRedefinitionPolicy, RandomState, StatisticalParamMode};
+pub(crate) use flattener::flatten_netlist_with_models_config_with_abort;
 pub use flattener::{
     FlattenedNetlist, Flattener, FlattenerConfig, InstanceMetadata, XspiceAutoBridgeNodeHint,
-    flatten_netlist, flatten_netlist_with_models,
-};
-pub(crate) use flattener::{
-    flatten_netlist_with_models_config_with_abort, flatten_netlist_with_models_with_abort,
+    flatten_netlist, flatten_netlist_with_models, flatten_netlist_with_models_with_abort,
 };
 pub use hierarchy_path::{HierarchyPath, HierarchyPathConfig};
 pub use include::source_path_literal_to_host_path;
@@ -65,8 +63,11 @@ pub(crate) use output_symbols::{
     is_device_lead_current_accessor,
 };
 pub use output_symbols::{
-    OutputAnalysisKind, OutputDirectiveKind, OutputRequest, OutputSymbolDependency,
-    OutputSymbolKind, OutputSymbolValidationError, UnresolvedOutputSymbol, validate_output_symbols,
+    OutputAnalysisKind, OutputDirectiveKind, OutputExpressionIssue,
+    OutputExpressionValidationError, OutputRequest, OutputSymbolDependency, OutputSymbolKind,
+    OutputSymbolValidationError, UnresolvedOutputSymbol, validate_output_expressions,
+    validate_output_expressions_with_abort, validate_output_requests,
+    validate_output_requests_with_abort, validate_output_symbols,
     validate_output_symbols_with_abort,
 };
 pub use param_scope::{ParamResolver, ParamScope, ScopedParam};
@@ -197,6 +198,29 @@ pub struct GlobalSubcircuitPortBindingError {
     pub formal_port: String,
     pub position: usize,
     pub actual_node: String,
+}
+
+/// A retained subcircuit-local `.PARAM` definition could not be resolved.
+///
+/// The canonical definition name and the missing dependency are distinct
+/// identities. Keeping both typed prevents hierarchy diagnostics from
+/// collapsing a failure such as `FOO=(MEH != 1)` into the less useful bare
+/// `Undefined parameter: MEH` message.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error(
+    "Unable to resolve parameter {canonical_parameter_name} found in .PARAM statement '{parameter_name}={expression}' in subcircuit {canonical_subcircuit_name} instance {qualified_instance_name}: {reason}"
+)]
+pub struct UnresolvedSubcircuitParameterError {
+    pub subcircuit_name: String,
+    pub canonical_subcircuit_name: String,
+    pub instance_name: String,
+    pub canonical_instance_name: String,
+    pub qualified_instance_name: String,
+    pub parameter_name: String,
+    pub canonical_parameter_name: String,
+    pub expression: String,
+    pub missing_dependency: Option<String>,
+    pub reason: String,
 }
 
 /// A mutual-inductor card references an inductor that is not defined in the
@@ -344,10 +368,16 @@ pub enum ParseError {
     GlobalSubcircuitPortBinding(Box<GlobalSubcircuitPortBindingError>),
 
     #[error(transparent)]
+    UnresolvedSubcircuitParameter(Box<UnresolvedSubcircuitParameterError>),
+
+    #[error(transparent)]
     UndefinedMutualInductorReference(Box<UndefinedMutualInductorReferenceError>),
 
     #[error(transparent)]
     OutputSymbolValidation(Box<OutputSymbolValidationError>),
+
+    #[error(transparent)]
+    OutputExpressionValidation(Box<OutputExpressionValidationError>),
 
     #[error(transparent)]
     StartupDirectiveConflict(Box<StartupDirectiveConflictError>),
@@ -854,7 +884,8 @@ impl Netlist {
         finish_non_aborting_parse(Self::parse_with_abort(input, &NoAbort))
     }
 
-    /// Parse and immediately validate every output-symbol dependency.
+    /// Parse and immediately validate every authored output expression and
+    /// output-symbol dependency.
     ///
     /// Ordinary [`Self::parse`] intentionally supports incomplete ASTs used by
     /// editors and synthetic-result evaluators. Strict execution frontends can
@@ -864,7 +895,7 @@ impl Netlist {
         finish_non_aborting_parse(Self::parse_validated_with_abort(input, &NoAbort))
     }
 
-    /// Parse and validate output symbols with cooperative cancellation.
+    /// Parse and validate output requests with cooperative cancellation.
     pub fn parse_validated_with_abort(
         input: &str,
         abort: &dyn AbortSignal,
@@ -888,7 +919,7 @@ impl Netlist {
         finish_non_aborting_parse(Self::parse_with_options_and_abort(input, options, &NoAbort))
     }
 
-    /// Parse with explicit options and validate output symbols.
+    /// Parse with explicit options and validate output requests.
     pub fn parse_validated_with_options(
         input: &str,
         options: NetlistParseOptions,
@@ -898,7 +929,7 @@ impl Netlist {
         ))
     }
 
-    /// Parse with explicit options, validate output symbols, and cooperatively
+    /// Parse with explicit options, validate output requests, and cooperatively
     /// observe cancellation throughout both phases.
     pub fn parse_validated_with_options_and_abort(
         input: &str,
@@ -906,7 +937,7 @@ impl Netlist {
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
         let netlist = Self::parse_with_options_and_abort(input, options, abort)?;
-        validate_output_symbols_with_abort(&netlist, abort)?;
+        validate_output_requests_with_abort(&netlist, abort)?;
         Ok(netlist)
     }
 
@@ -939,7 +970,7 @@ impl Netlist {
         finish_non_aborting_parse(Self::parse_with_path_and_abort(input, file_path, &NoAbort))
     }
 
-    /// Parse with include resolution, validate output symbols, and observe
+    /// Parse with include resolution, validate output requests, and observe
     /// cooperative cancellation.
     pub fn parse_validated_with_path_and_abort(
         input: &str,
@@ -980,7 +1011,7 @@ impl Netlist {
     }
 
     /// Parse with include resolution and explicit options, then validate
-    /// output symbols.
+    /// output requests.
     pub fn parse_validated_with_path_and_options(
         input: &str,
         file_path: &std::path::Path,
@@ -992,7 +1023,7 @@ impl Netlist {
     }
 
     /// Parse with include resolution and explicit options, then validate
-    /// output symbols with cooperative cancellation.
+    /// output requests with cooperative cancellation.
     pub fn parse_validated_with_path_and_options_and_abort(
         input: &str,
         file_path: &std::path::Path,
@@ -1001,7 +1032,7 @@ impl Netlist {
     ) -> Result<Self, ParseWithAbortError> {
         let netlist =
             Self::parse_with_path_and_options_and_abort(input, file_path, options, abort)?;
-        validate_output_symbols_with_abort(&netlist, abort)?;
+        validate_output_requests_with_abort(&netlist, abort)?;
         Ok(netlist)
     }
 

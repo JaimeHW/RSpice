@@ -4,8 +4,8 @@ use super::*;
 /// device operating-point reporting (the Spectre-style OP info table).
 #[derive(Debug, Clone, Copy)]
 pub struct MosfetOpValues {
-    /// Operating region name: "cutoff" | "linear" | "saturation".
-    pub region: &'static str,
+    /// Operating region: cutoff, linear or saturation.
+    pub region: crate::op_label::OpLabel,
     /// Drain current (A).
     pub id: Value,
     /// Gate-source voltage (V).
@@ -37,9 +37,9 @@ impl Mosfet {
         };
         MosfetOpValues {
             region: match self.region {
-                MosRegion::Cutoff => "cutoff",
-                MosRegion::Linear => "linear",
-                MosRegion::Saturation => "saturation",
+                MosRegion::Cutoff => crate::op_label::OpLabel::CUTOFF,
+                MosRegion::Linear => crate::op_label::OpLabel::LINEAR,
+                MosRegion::Saturation => crate::op_label::OpLabel::SATURATION,
             },
             id,
             vgs: self.vgs,

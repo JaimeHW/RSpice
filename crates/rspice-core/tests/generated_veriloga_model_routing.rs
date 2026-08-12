@@ -98,7 +98,7 @@ mvar g bi b vm
 }
 
 #[test]
-fn bjt_hicum_level_230_routes_to_generated_hicum_l0() {
+fn bjt_hicum_l0_model_type_routes_to_generated_hicum_l0() {
     if !has_builtin("hicumL0va") {
         eprintln!("HICUM/L0 builtin not present; skipping generated model routing test");
         return;
@@ -108,7 +108,7 @@ fn bjt_hicum_level_230_routes_to_generated_hicum_l0() {
         r#"
 v1 c 0 dc 0
 q1 c b e qh area=1
-.model qh npn level=230
+.model qh hicuml0va
 .op
 .end
 "#,
@@ -244,7 +244,7 @@ m1 d g s b nmos1 tfin=15n l=30n nfin=10 nrs=1 nrd=1
 }
 
 #[test]
-fn bjt_vbic_level_4_routes_to_generated_vbic13() {
+fn bjt_vbic13_4t_model_type_ground_pads_the_absent_substrate_terminal() {
     assert!(
         has_builtin("vbic13_4t"),
         "commercial-ready VBIC source should be generated as vbic13_4t"
@@ -254,7 +254,7 @@ fn bjt_vbic_level_4_routes_to_generated_vbic13() {
         r#"
 v1 c 0 dc 0
 q1 c b e qv area=1
-.model qv npn level=4
+.model qv vbic13_4t
 .op
 .end
 "#,
@@ -268,7 +268,7 @@ q1 c b e qv area=1
             .entries
             .iter()
             .all(|entry| !entry.name.eq_ignore_ascii_case("q1")),
-        "VBIC LEVEL=4 should not also instantiate the native BJT evaluator"
+        "generated VBIC should not also instantiate the native BJT evaluator"
     );
 }
 
@@ -312,16 +312,19 @@ r1 a 0 rmod
     );
 }
 
+// The three-terminal VBIC artifacts have no `.model` type of their own —
+// `.model x vbic13` selects the four-terminal module — and BJT LEVEL selectors
+// belong to the native VBIC front. Direct instantiation by module name is how
+// a deck asks for them.
 #[test]
-fn bjt_vbic_level_11_routes_three_terminal_and_external_thermal_variants() {
+fn bjt_vbic13_three_terminal_and_external_thermal_variants_instantiate_by_module_name() {
     assert_eq!(builtins::node_count("vbic13"), Some(3));
     assert_eq!(builtins::node_count("vbic13_3t_et"), Some(4));
 
     let internal_thermal = build(
         r#"
 v1 c 0 dc 0
-q1 c b e qv
-.model qv npn level=11
+x1 c b e vbic13
 .op
 .end
 "#,
@@ -329,17 +332,16 @@ q1 c b e qv
     assert!(internal_thermal.has_generated_veriloga_devices());
     assert!(
         internal_thermal
-            .get_node_by_name("q1.__dt.internal")
+            .get_node_by_name("x1.__dt.internal")
             .is_some(),
-        "three-terminal LEVEL=11 must use the generated internal thermal state"
+        "three-terminal vbic13 must use the generated internal thermal state"
     );
 
     let external_thermal = build(
         r#"
 v1 c 0 dc 0
 rth thermal 0 1k
-q1 c b e thermal qv
-.model qv npn level=11
+x1 c b e thermal vbic13_3t_et
 .op
 .end
 "#,
@@ -348,12 +350,15 @@ q1 c b e thermal qv
     assert!(external_thermal.get_node_by_name("thermal").is_some());
     assert!(
         external_thermal
-            .get_node_by_name("q1.__dt.internal")
+            .get_node_by_name("x1.__dt.internal")
             .is_none(),
-        "fourth LEVEL=11 node must bind generated external dt, not create a substrate or hidden thermal node"
+        "fourth vbic13_3t_et node must bind generated external dt, not create a substrate or hidden thermal node"
     );
 }
 
+// LEVEL=11 stays on the native VBIC front even here, where the whole
+// generated catalog is compiled in. These two guard that: the catalog must not
+// change what a native VBIC deck solves to.
 #[test]
 fn bjt_vbic_level_11_zero_bias_operating_points_converge() {
     for transistor in ["q1 c b e qv", "q1 c b e thermal qv"] {
@@ -384,7 +389,7 @@ rth thermal 0 1k
 }
 
 #[test]
-fn bjt_vbic_level_11_forward_bias_preserves_generated_polarity() {
+fn bjt_vbic_level_11_forward_bias_preserves_npn_polarity() {
     for transistor in ["q1 c b e qv", "q1 c b e thermal qv"] {
         let deck = format!(
             r#"

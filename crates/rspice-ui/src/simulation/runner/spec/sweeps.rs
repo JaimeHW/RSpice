@@ -80,30 +80,27 @@ fn run_monte_carlo(
     })
 }
 
+/// Step a design parameter through the `.STEP` command the deck declares.
+///
+/// A temperature step is not this. It declares a PVT axis, expands into one
+/// task per temperature before the run is authorized, and has its family
+/// assembled from those results — so a temperature contract arriving here means
+/// a declaration reached an executor instead of being expanded.
 fn run_parametric(
     netlist: &str,
     options: SpecExecutionOptions,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
-    let data = if let Some(temp_cfg) = options.temp {
-        super::run_abort_aware_service(abort, || {
-            svc_runner::run_parametric_analysis_with_config_and_source_path_and_abort(
-                netlist,
-                &temp_cfg,
-                source_path,
-                abort,
-            )
-        })?
-    } else {
-        super::run_abort_aware_service(abort, || {
-            svc_runner::run_parametric_analysis_with_source_path_and_abort(
-                netlist,
-                source_path,
-                abort,
-            )
-        })?
-    };
+    if options.temp.is_some() {
+        return Err(SimulationError::InvalidConfig(
+            "sweep runner received a temperature step, which is solved one declared point at a time"
+                .to_owned(),
+        ));
+    }
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_parametric_analysis_with_source_path_and_abort(netlist, source_path, abort)
+    })?;
     let sweep_values = data.sweep_values;
     let mut waveforms = HashMap::with_capacity(data.voltages.len());
     for (name, values) in data.voltages {

@@ -65,10 +65,13 @@ pub use netlist_document::{
     DiagnosticSeverity, DocumentOwnership, FindDirection, FindError, FindMatch, FindOptions,
     GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput,
     NetlistDocument, NetlistDocumentId, NetlistOutline, OutlineEntry, OutlineEntryKind,
-    ReplaceScope, SourceLocator, ValidationDiagnostic, content_digest, find_all_in_source,
-    find_all_in_source_bounded, replace_in_source, replace_source_ranges,
+    OutlineSection, OutlineSectionKind, ReplaceScope, SourceLocator, ValidationDiagnostic,
+    content_digest, find_all_in_source, find_all_in_source_bounded, replace_in_source,
+    replace_source_ranges,
 };
-pub(crate) use netlist_document::{expand_retained_netlist_dependencies, parse_include_directives};
+pub(crate) use netlist_document::{
+    card_tokens, expand_retained_netlist_dependencies, parse_include_directives,
+};
 pub use params_string::{format_params_string, parse_params_string};
 pub use physical_layout::{
     LayoutDocumentError, LayoutEdit, LayoutGeometry, LayoutLayerPurpose, LayoutObjectId,

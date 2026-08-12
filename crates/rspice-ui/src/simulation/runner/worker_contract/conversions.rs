@@ -1451,50 +1451,15 @@ pub(super) fn intern_static_label(value: String) -> &'static str {
     known_static_label(&value).unwrap_or("unknown")
 }
 
+/// Labels a worker response may carry, interned back to the `&'static str`
+/// the host build uses.
+///
+/// The engine owns the vocabulary, so it is asked rather than restated.
+/// `unknown` is accepted because [`intern_static_label`] produces it, and a
+/// report that already crossed the boundary once has to survive crossing it
+/// again unchanged. A noise mechanism does not come through here: the summary
+/// carries it as owned text the whole way, so nothing interns it.
 pub(super) fn known_static_label(value: &str) -> Option<&'static str> {
-    match value {
-        "MOSFET" => "MOSFET",
-        "BSIM3" => "BSIM3",
-        "BSIM4" => "BSIM4",
-        "BJT" => "BJT",
-        "DIODE" => "DIODE",
-        "JFET" => "JFET",
-        "MESFET" => "MESFET",
-        "id" => "id",
-        "vgs" => "vgs",
-        "vds" => "vds",
-        "vbs" => "vbs",
-        "vth" => "vth",
-        "vdsat" => "vdsat",
-        "gm" => "gm",
-        "gds" => "gds",
-        "gmb" => "gmb",
-        "gmbs" => "gmbs",
-        "ic" => "ic",
-        "ib" => "ib",
-        "vbe" => "vbe",
-        "vce" => "vce",
-        "beta" => "beta",
-        "vd" => "vd",
-        "gd" => "gd",
-        "igs" => "igs",
-        "igd" => "igd",
-        "saturation" => "saturation",
-        "linear" => "linear",
-        "cutoff" => "cutoff",
-        "triode" => "triode",
-        "subthreshold" => "subthreshold",
-        "active" => "active",
-        "reverse" => "reverse",
-        "forward" => "forward",
-        "thermal" => "thermal",
-        "flicker" => "flicker",
-        "shot" => "shot",
-        "burst" => "burst",
-        "white" => "white",
-        "table" => "table",
-        "unknown" => "unknown",
-        _ => return None,
-    }
-    .into()
+    rspice_core::circuit::resolve_op_label(value)
+        .or_else(|| (value == "unknown").then_some("unknown"))
 }

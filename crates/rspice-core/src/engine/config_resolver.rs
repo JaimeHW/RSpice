@@ -266,6 +266,19 @@ pub fn resolve_simulation_config(
         if let Some(rshunt) = opts.rshunt {
             resolved.rshunt = Some(rshunt);
         }
+        // Written straight onto `resolved` rather than through a local: the
+        // bypass bounds have no second source to reconcile against, and a
+        // stated bound applies whether or not the same card also turns bypass
+        // on, so a later `.OPTIONS BYPASS` picks it up.
+        if let Some(bypass) = opts.bypass {
+            resolved.bypass_config.enabled = bypass;
+        }
+        if let Some(reltol) = opts.bypass_reltol {
+            resolved.bypass_config.reltol = reltol;
+        }
+        if let Some(abstol) = opts.bypass_abstol {
+            resolved.bypass_config.abstol = abstol;
+        }
     }
 
     if let Some(temp_k) = overrides.temperature_kelvin {

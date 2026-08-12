@@ -17,6 +17,25 @@ pub fn parse_expression(input: &str) -> Result<Expr, ExprError> {
     parser.parse()
 }
 
+#[derive(Debug)]
+pub(crate) enum ParseExpressionWithAbortError {
+    Aborted,
+    Parse(ExprError),
+}
+
+pub(crate) fn parse_expression_with_abort(
+    input: &str,
+    abort: &dyn crate::abort_signal::AbortSignal,
+) -> Result<Expr, ParseExpressionWithAbortError> {
+    let mut parser = ExprParser::with_abort(input, abort);
+    let result = parser.parse();
+    if parser.was_aborted() {
+        Err(ParseExpressionWithAbortError::Aborted)
+    } else {
+        result.map_err(ParseExpressionWithAbortError::Parse)
+    }
+}
+
 /// Parse and evaluate a SPICE expression with the given context
 pub fn eval_expression(input: &str, ctx: &ParamContext) -> Result<Value, ExprError> {
     let expr = parse_expression(input)?;

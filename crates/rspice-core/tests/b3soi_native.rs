@@ -1554,3 +1554,211 @@ fn xyce_level10_default_gain_stage_matches_xyce_ngspice_dc_op() {
     assert_rel("vth", param("vth"), 1.0875, 2.0e-5);
     assert_rel("vdsat", param("vdsat"), 2.35915e-1, 2.0e-5);
 }
+
+// ---------------------------------------------------------------------------
+// `.OPTIONS BYPASS`
+//
+// Bypass answers a Newton iterate from a device's frozen linearization. The
+// only thing that makes it shippable is that a converged answer does not move,
+// so every case below runs the same deck twice and compares. An agreement test
+// on its own would also pass if the option did nothing at all, so each one also
+// asserts on the count of evaluations actually skipped.
+// ---------------------------------------------------------------------------
+
+fn bypass_engine(reltol: Value, abstol: Value) -> Engine {
+    Engine::new(SimulationConfig {
+        bypass_config: rspice_core::engine::BypassConfig::with_tolerances(reltol, abstol),
+        ..SimulationConfig::default()
+    })
+}
+
+fn b3soidd_p1_model_card() -> &'static str {
+    include_str!("../../../tests/ngspice/bsim3soidd/pmosdd.mod")
+}
+
+/// A B3SOIDD inverter chain driven through its switching region: enough
+/// devices, and enough of the waveform spent quiescent, for bypass to have
+/// something to skip.
+fn b3soidd_inverter_chain_deck(vin: &str) -> String {
+    format!(
+        "* B3SOIDD inverter chain\n\
+         vdd dd 0 dc 2.5\n\
+         vss ss 0 dc 0\n\
+         ve e 0 dc 1.25\n\
+         vin in 0 {vin}\n\
+         mp1 na in dd e p1 w=20u l=0.25u\n\
+         mn1 na in ss e n1 w=10u l=0.25u\n\
+         mp2 nb na dd e p1 w=20u l=0.25u\n\
+         mn2 nb na ss e n1 w=10u l=0.25u\n\
+         mp3 out nb dd e p1 w=20u l=0.25u\n\
+         mn3 out nb ss e n1 w=10u l=0.25u\n\
+         cl out ss 20f\n\
+         .option gmin=1e-20 itl1=200 itl4=50\n\
+         {}\n\
+         {}\n\
+         .end\n",
+        b3soidd_n1_model_card(),
+        b3soidd_p1_model_card(),
+    )
+}
+
+fn final_voltage(result: &rspice_core::engine::TransientResult, index: usize) -> Value {
+    *result.voltages[index].last().expect("a sample")
+}
+
+#[test]
+fn bypass_skips_evaluations_without_moving_the_transient_answer() {
+    let deck = b3soidd_inverter_chain_deck("pulse(0 2.5 1n 0.4n 0.4n 4n 8n)");
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+
+    let off = engine();
+    let baseline = off
+        .run_tran(&netlist, 16.0e-9, 2.0e-11)
+        .expect("bypass-off transient runs");
+    assert_eq!(
+        off.convergence_quality().bypassed_device_evaluations,
+        0,
+        "the default configuration must not bypass anything"
+    );
+
+    let on = bypass_engine(1.0e-3, 1.0e-6);
+    let bypassed = on
+        .run_tran(&netlist, 16.0e-9, 2.0e-11)
+        .expect("bypass-on transient runs");
+
+    let skipped = on.convergence_quality().bypassed_device_evaluations;
+    assert!(
+        skipped > 0,
+        "bypass must actually skip evaluations, otherwise the agreement below proves nothing"
+    );
+
+    assert_eq!(
+        baseline.time.len(),
+        bypassed.time.len(),
+        "bypass must not change the accepted timestep count ({skipped} evaluations skipped)"
+    );
+    for (index, name) in baseline.node_names.iter().enumerate() {
+        let reference = final_voltage(&baseline, index);
+        let actual = final_voltage(&bypassed, index);
+        let tol = 1.0e-4 * reference.abs().max(1.0) + 1.0e-6;
+        assert!(
+            (actual - reference).abs() < tol,
+            "bypass moved v({name}): off={reference:.9e} on={actual:.9e} tol={tol:.3e}"
+        );
+    }
+}
+
+#[test]
+fn bypass_leaves_the_operating_point_untouched() {
+    // The frozen restamp is ngspice's transient branch (line755); the operating
+    // point takes line850 and is deliberately out of scope. Its answer must be
+    // bit-identical with the option on, and nothing may be skipped.
+    let deck = b3soidd_inverter_chain_deck("dc 0");
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+
+    let baseline = engine().run_dc_op(&netlist).expect("bypass-off OP runs");
+    let on = bypass_engine(1.0e-3, 1.0e-6);
+    let bypassed = on.run_dc_op(&netlist).expect("bypass-on OP runs");
+
+    assert_eq!(
+        on.convergence_quality().bypassed_device_evaluations,
+        0,
+        "the operating point must not bypass"
+    );
+    for (index, name) in baseline.node_names.iter().enumerate() {
+        assert_eq!(
+            baseline.node_voltages[index], bypassed.node_voltages[index],
+            "bypass moved the operating point at v({name})"
+        );
+    }
+}
+
+#[test]
+fn a_device_parked_at_vds_zero_converges_the_same_either_way() {
+    // The B3SOIDD charge partition (`dxpart` 0.4/0.6, b3soiddld.c:3720/3770)
+    // and the mode select behind it are discontinuous at vds = 0, and the
+    // partition multiplies `ag0`. The port's original rationale for bypass was
+    // that freezing a device parked there is what lets Newton contract. It is
+    // not: ngspice ships `CKTbypass = 0` (cktinit.c:54) and converges this case
+    // anyway. What is left is measurable and pinned here - the boundary is
+    // reached with the same answer whether or not the option is on.
+    let deck = format!(
+        "* B3SOIDD held at the vds = 0 mode boundary\n\
+         vd d 0 dc 1.25\n\
+         vs s 0 dc 1.25\n\
+         vg g 0 pulse(0 2.5 1n 1n 1n 4n 10n)\n\
+         ve e 0 dc 1.25\n\
+         m1 d g s e n1 w=10u l=0.25u\n\
+         cd d 0 10f\n\
+         .option gmin=1e-20 itl1=200 itl4=50\n\
+         {}\n\
+         .end\n",
+        b3soidd_n1_model_card()
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+
+    let off = engine();
+    let baseline = off
+        .run_tran(&netlist, 12.0e-9, 2.0e-11)
+        .expect("the vds = 0 case must converge with bypass off");
+    // Timestep cuts, not Newton iterations: `ConvergenceQuality` declares a
+    // `total_iterations` field that no analysis ever writes. A device
+    // limit-cycling at the boundary would show up as rejected steps.
+    let off_cuts = off.convergence_quality().timestep_reductions;
+
+    let on = bypass_engine(1.0e-3, 1.0e-6);
+    let bypassed = on
+        .run_tran(&netlist, 12.0e-9, 2.0e-11)
+        .expect("the vds = 0 case must converge with bypass on");
+    let quality = on.convergence_quality();
+    assert!(
+        quality.bypassed_device_evaluations > 0,
+        "the boundary case must exercise the hook for this comparison to mean anything"
+    );
+
+    assert_eq!(
+        (baseline.time.len(), off_cuts),
+        (bypassed.time.len(), quality.timestep_reductions),
+        "bypass changed the convergence effort at vds = 0 ({} evaluations skipped)",
+        quality.bypassed_device_evaluations
+    );
+    for (index, name) in baseline.node_names.iter().enumerate() {
+        let reference = final_voltage(&baseline, index);
+        let actual = final_voltage(&bypassed, index);
+        let tol = 1.0e-4 * reference.abs().max(1.0) + 1.0e-6;
+        assert!(
+            (actual - reference).abs() < tol,
+            "bypass moved v({name}) at the vds = 0 boundary: \
+             off={reference:.9e} on={actual:.9e} tol={tol:.3e}"
+        );
+    }
+}
+
+#[test]
+fn the_bypass_bounds_reach_the_devices_through_the_deck() {
+    // A bound stated in the deck and nowhere else has to change how much gets
+    // skipped, or the two keys the Solver page writes are decorative.
+    let base = b3soidd_inverter_chain_deck("pulse(0 2.5 1n 0.4n 0.4n 4n 8n)");
+    let with_bounds = |bounds: &str| {
+        base.replace(
+            ".option gmin=1e-20 itl1=200 itl4=50",
+            &format!(".option gmin=1e-20 itl1=200 itl4=50\n.option bypass {bounds}"),
+        )
+    };
+
+    let run = |source: &str| {
+        let netlist = Netlist::parse(source).expect("deck parses");
+        let engine = engine();
+        engine
+            .run_tran(&netlist, 16.0e-9, 2.0e-11)
+            .expect("transient runs");
+        engine.convergence_quality().bypassed_device_evaluations
+    };
+
+    let tight = run(&with_bounds("bypassreltol=1e-12 bypassabstol=1e-15"));
+    let loose = run(&with_bounds("bypassreltol=1e-2 bypassabstol=1e-4"));
+    assert!(
+        loose > tight,
+        "a looser bound must skip more: tight={tight}, loose={loose}"
+    );
+}

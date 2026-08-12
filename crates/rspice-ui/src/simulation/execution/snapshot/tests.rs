@@ -688,7 +688,7 @@ fn pvt_metadata_counts_the_exact_full_corner_matrix_declared_by_one_task() {
         snapshot
             .tasks
             .iter()
-            .filter(|task| task.corner_point.is_some())
+            .filter(|task| task.declared_point.is_some())
             .count(),
         8,
         "one solve per declared point, and a ninth task that solves nothing"
@@ -698,7 +698,7 @@ fn pvt_metadata_counts_the_exact_full_corner_matrix_declared_by_one_task() {
             .tasks
             .iter()
             .take(8)
-            .all(|task| task.corner_point.is_some() && task.pvt_point.is_some()),
+            .all(|task| task.declared_point.is_some() && task.pvt_point.is_some()),
         "every solving task is one attributed point of the declaration"
     );
     // Last, not first. Retained results must stay an ordered prefix of this
@@ -706,7 +706,7 @@ fn pvt_metadata_counts_the_exact_full_corner_matrix_declared_by_one_task() {
     // result before its points have produced theirs.
     let assembly = snapshot.tasks.last().expect("nine expanded tasks");
     assert!(matches!(assembly.task.spec, AnalysisSpec::Corner));
-    assert!(assembly.corner_point.is_none() && assembly.pvt_point.is_none());
+    assert!(assembly.declared_point.is_none() && assembly.pvt_point.is_none());
 }
 
 /// A diagonal sweep pairs the axes index by index, and axes of different
@@ -790,8 +790,22 @@ fn pvt_point_set_is_ordered_and_deduplicated_across_tasks() {
     assert_eq!(snapshot.pvt_points.len(), 2);
     assert_eq!(snapshot.pvt_points[0].temperature_celsius, 27.0);
     assert_eq!(snapshot.pvt_points[1].temperature_celsius, 85.0);
-    assert_eq!(snapshot.tasks.len(), 3);
     assert_eq!(snapshot.metadata().pvt_point_count, 2);
+    // The run-level set is a deduplicated axis: it is what the operating point
+    // is swept along, and 85 C named twice is one condition to solve it at. A
+    // declaration is not deduplicated against it, because it solves exactly the
+    // points it declared — so the two expanded 85 C solves here are the
+    // declaration's own, and the operating point still has two.
+    assert_eq!(snapshot.tasks.len(), 6);
+    assert_eq!(
+        snapshot
+            .tasks
+            .iter()
+            .filter(|task| task.declared_point.is_some())
+            .count(),
+        3,
+        "the temperature declaration solves the three temperatures it named"
+    );
 }
 
 #[test]
@@ -818,9 +832,13 @@ fn pvt_operating_point_dispatches_three_exact_temperatures_and_retains_only_fina
     ];
 
     let snapshot = PreparedRunSnapshot::new(swept).expect("three-point OP snapshot");
+    // The temperature declaration expands into its own three operating points,
+    // which are a different task's answer to the same axis. This is about the
+    // authored operating point, so its points are the ones taken here.
     let op_configs = snapshot
         .tasks
         .iter()
+        .filter(|task| task.declared_point.is_none())
         .filter_map(|task| match task.queued_analysis().config.as_ref() {
             Some(AnalysisConfig::DcOp(config)) => Some(config.clone()),
             _ => None,
@@ -983,9 +1001,13 @@ fn downstream_ordering_dependency_targets_the_final_expanded_op_point() {
     ];
 
     let snapshot = PreparedRunSnapshot::new(graph).expect("expanded dependency graph");
+    // The temperature declaration expands into operating points of its own.
+    // The dependency under test is the authored one's, so its points are the
+    // ones taken here.
     let op_tasks = snapshot
         .tasks
         .iter()
+        .filter(|task| task.declared_point.is_none())
         .filter(|task| matches!(task.task.config.as_ref(), Some(AnalysisConfig::DcOp(_))))
         .collect::<Vec<_>>();
     assert_eq!(op_tasks.len(), 2);
@@ -1240,6 +1262,12 @@ fn expanded_op_points_are_attributed_and_an_unexpanded_task_is_not() {
     assert_eq!(
         attributed,
         vec![
+            // The operating point swept along the run-level axis.
+            ("TT".to_owned(), -40.0, false),
+            ("TT".to_owned(), 27.0, true),
+            ("TT".to_owned(), 85.0, false),
+            // The temperature declaration's own points, which solve the same
+            // three conditions on their own tasks.
             ("TT".to_owned(), -40.0, false),
             ("TT".to_owned(), 27.0, true),
             ("TT".to_owned(), 85.0, false),
@@ -1254,7 +1282,7 @@ fn expanded_op_points_are_attributed_and_an_unexpanded_task_is_not() {
             .filter(|task| task.pvt_point().is_none())
             .count(),
         2,
-        "the temperature axis task and the transient run once for the whole space"
+        "the temperature declaration and the transient run once for the whole space"
     );
     for point in snapshot.tasks.iter().filter_map(PreparedTask::pvt_point) {
         assert_eq!(
@@ -1478,7 +1506,7 @@ fn an_analysis_ordered_after_a_corner_run_waits_for_its_last_point() {
     let last_point = snapshot
         .tasks
         .iter()
-        .rfind(|task| task.corner_point.is_some())
+        .rfind(|task| task.declared_point.is_some())
         .expect("the corner expanded into points");
     let dependent = snapshot
         .tasks

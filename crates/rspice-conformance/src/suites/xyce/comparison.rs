@@ -300,10 +300,8 @@ impl XyceTestRunner {
                 test.rows.len()
             ));
         }
-        if good.rows.len() < 2 {
-            return Err(format!(
-                "{label} xyce_verify comparison requires at least two DC points"
-            ));
+        if good.rows.is_empty() {
+            return Err(format!("{label} xyce_verify comparison has no DC points"));
         }
         for (row_index, good_result) in good_results.iter().enumerate().take(good.rows.len()) {
             if good.rows[row_index].len() != good.columns.len()
@@ -349,6 +347,75 @@ impl XyceTestRunner {
                     "{label} serialized Index differs at row {row_index}: good={good_index}, test={test_index}"
                 ));
             }
+        }
+
+        if good.rows.len() == 1 {
+            let requested_sweep = Self::xyce_prn_scientific_roundtrip(
+                good_results[0].sweep_value,
+                XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            )?;
+            let test_axis = Self::xyce_prn_scientific_roundtrip(
+                test.rows[0][1],
+                XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            )?;
+            if !test_axis.is_finite()
+                || (requested_sweep - test_axis).abs()
+                    > XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE
+            {
+                return Err(format!(
+                    "{label} one-point test axis does not match the requested sweep: requested={requested_sweep}, test={test_axis}"
+                ));
+            }
+
+            let mut mismatches = Vec::new();
+            for column_index in 2..good.columns.len() {
+                let raw_good_value = Self::xyce_prn_scientific_roundtrip(
+                    good.rows[0][column_index],
+                    XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+                )?;
+                let raw_test_value = Self::xyce_prn_scientific_roundtrip(
+                    test.rows[0][column_index],
+                    XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+                )?;
+                if !raw_good_value.is_finite() || !raw_test_value.is_finite() {
+                    return Err(format!(
+                        "{label} one-point comparison contains non-finite {}: good={raw_good_value}, test={raw_test_value}",
+                        good.columns[column_index]
+                    ));
+                }
+                let good_value = if raw_good_value.abs() <= XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE {
+                    0.0
+                } else {
+                    raw_good_value
+                };
+                let test_value = if raw_test_value.abs() <= XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE {
+                    0.0
+                } else {
+                    raw_test_value
+                };
+                let difference = good_value - test_value;
+                let normalized =
+                    if difference.abs() < XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE {
+                        0.0
+                    } else {
+                        difference
+                            / (XYCE_VERIFY_DEFAULT_RELATIVE_TOLERANCE * good_value.abs()
+                                + XYCE_VERIFY_DEFAULT_ABSOLUTE_TOLERANCE)
+                    };
+                if !normalized.is_finite() || normalized.abs() > 1.0 {
+                    mismatches.push(XyceValueMismatch {
+                        row: 0,
+                        probe: good.columns[column_index].clone(),
+                        expected: good_value,
+                        actual: test_value,
+                        relative_error: normalized.abs(),
+                    });
+                    if mismatches.len() >= self.config.max_mismatches {
+                        break;
+                    }
+                }
+            }
+            return Ok(mismatches);
         }
 
         // Release 7.10 xyce_verify treats its first numeric file as `good`,

@@ -1357,55 +1357,43 @@ fn require_static_label(value: &str, field: &str) -> Result<(), String> {
     }
 }
 
+/// A noise mechanism is checked for shape rather than membership.
+///
+/// It is not a static label: the summary keeps it as owned text on both sides
+/// of the file, so nothing is interned and no vocabulary has to cover it. Nor
+/// could one — half the mechanisms are composed by the Verilog-A code
+/// generator out of a model's own node and label names, and no build can list
+/// what a future catalog will contain. The engine owns the shape those names
+/// keep, so it is asked.
+fn require_noise_mechanism(value: &str, field: &str) -> Result<(), String> {
+    if rspice_core::analysis::is_persistable_noise_mechanism(value) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{field} is not a noise mechanism: '{}'",
+            value.chars().take(64).collect::<String>()
+        ))
+    }
+}
+
+/// Intern a persisted label for restoration.
+///
+/// Restoration is only ever reached through a document that already validated,
+/// and validation rejects a label this predicate cannot resolve, so the
+/// placeholder is what makes the function total rather than a decision to
+/// accept unrecognized text.
 fn intern_static_label(value: String) -> &'static str {
     known_static_label(&value).unwrap_or("unknown")
 }
 
+/// Labels a persisted result may carry, interned back to the `&'static str`
+/// the running build uses.
+///
+/// The vocabulary belongs to the engine, which is the only thing that knows
+/// what its device families report; asking it keeps the reader in step with
+/// the emitter instead of restating its list here.
 fn known_static_label(value: &str) -> Option<&'static str> {
-    match value {
-        "MOSFET" => "MOSFET",
-        "BSIM3" => "BSIM3",
-        "BSIM4" => "BSIM4",
-        "BJT" => "BJT",
-        "DIODE" => "DIODE",
-        "JFET" => "JFET",
-        "MESFET" => "MESFET",
-        "id" => "id",
-        "vgs" => "vgs",
-        "vds" => "vds",
-        "vbs" => "vbs",
-        "vth" => "vth",
-        "vdsat" => "vdsat",
-        "gm" => "gm",
-        "gds" => "gds",
-        "gmb" => "gmb",
-        "gmbs" => "gmbs",
-        "ic" => "ic",
-        "ib" => "ib",
-        "vbe" => "vbe",
-        "vce" => "vce",
-        "beta" => "beta",
-        "vd" => "vd",
-        "gd" => "gd",
-        "igs" => "igs",
-        "igd" => "igd",
-        "saturation" => "saturation",
-        "linear" => "linear",
-        "cutoff" => "cutoff",
-        "triode" => "triode",
-        "subthreshold" => "subthreshold",
-        "active" => "active",
-        "reverse" => "reverse",
-        "forward" => "forward",
-        "thermal" => "thermal",
-        "flicker" => "flicker",
-        "shot" => "shot",
-        "burst" => "burst",
-        "white" => "white",
-        "table" => "table",
-        _ => return None,
-    }
-    .into()
+    rspice_core::circuit::resolve_op_label(value)
 }
 
 #[derive(Debug, Clone)]
