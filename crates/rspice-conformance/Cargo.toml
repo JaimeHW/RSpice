@@ -24,14 +24,15 @@ rust-version.workspace = true
 # without compiling unrelated ngspice/Xyce runners or their corpora.
 default = ["circuit-suites"]
 # Keep the authoritative default census honest by linking every generated
-# capability required by an admitted deck. Select only the canonical VBIC
-# 3-terminal and 4-terminal artifacts plus their shared noise runtime: the
-# 3T-ET variant and the remaining compact-model catalog are not required by
-# these decks, so omitting them keeps the default compile cost bounded.
+# capability required by an admitted deck. Select the canonical VBIC
+# three-terminal, external-thermal, and four-terminal artifacts plus their
+# shared noise runtime. The remaining compact-model catalog stays outside the
+# default build so compile cost remains bounded.
 circuit-suites = [
     "veriloga-model-bsimsoi-va",
     "veriloga-builtins-noise",
     "veriloga-model-vbic13",
+    "veriloga-model-vbic13-3t-et",
     "veriloga-model-vbic13-4t",
 ]
 
