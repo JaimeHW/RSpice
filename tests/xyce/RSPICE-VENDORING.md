@@ -60,7 +60,7 @@ reported separately from `expected_unsupported`.
 
 Some upstream exclusions are helper, baseline, or control decks tested by an
 upstream wrapper owner. RSpice has independently reconstructed and qualified
-exact native contracts for 213 such decks. Those rows use
+exact native contracts for 214 such decks. Those rows use
 `rspice_independently_qualified` and name the exact expected native contract.
 The adapter executes them, preserves their upstream provenance on the result,
 and fails closed if execution becomes unsupported, fails, or selects a
@@ -82,6 +82,13 @@ literal control, proves both resolve `IS` to exactly 1.5, and compares their
 case-sensitive default PRN serialization exactly as the historical shell
 `diff` did. No numerical gold is invented; the excluded control is promoted
 only through this paired contract.
+
+The serial Certification BUG 307 A/B wrapper is reconstructed as an exact
+subcircuit-model-scope relation. RSpice runs the collision owner followed by
+the active-only control, proves that both select the qualified
+`myRMOD::RMOD` card and its 0.031-ohm geometry, and compares their default PRN
+serialization byte-for-byte. The separate D-I transient family keeps its
+existing verifier-backed contracts and retained numerical references.
 
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper

@@ -60,15 +60,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 213;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 214;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "c98223f2e7ba28361ce80ed7c01ba2248047a49290fa8ca017f9c9dcfa41d52a";
+    "71c31e781bd23e5fcbed0df9aafc2e50384833b48611a8c30cf04c655652d0fc";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "7cd727a441d08273badacb8e708c853729f759ece58195ad07ce7402b0be2316";
+    "0b68dd499e3add787c02d2e6f5dbff881d1cece9c42646692340f5cf12606c45";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "dd69049b96e83de9f12a0dfda29b55cc4855ce350250a7ae776f860c9ff1930e";
+    "e8c2ca470a9c4d149534758cf83c8a0d8637d89cb4fe2395a094e8c7993d4802";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -1399,6 +1399,182 @@ const XYCE_BUG352_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
         831,
         "adea694684c225d8cc84527b21205708c8891709f98e71838599920e1537884c",
         "51b8ed0ed86354d73459f4220498fdc8a6c6f8eb25d0f06ba6f6a932bb187f1b",
+    ),
+];
+
+// BUG_307's serial shell wrapper proves that an unused sibling subcircuit's
+// same-named local resistor model cannot escape its lexical scope. It runs the
+// collision owner followed by the active-only control and raw-diffs their
+// default PRN files; no numerical gold or xyce_verify result participates.
+const XYCE_BUG307_OWNER_CONTRACT: &str = "bug307_subcircuit_model_scope_wrapper_owner";
+const XYCE_BUG307_CONTROL_CONTRACT: &str = "bug307_subcircuit_model_scope_control";
+const XYCE_BUG307_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_307/bug_307_a.cir";
+const XYCE_BUG307_CONTROL_PATH: &str = "Netlists/Certification_Tests/BUG_307/bug_307_b.cir";
+const XYCE_BUG307_OWNER_RECORD: &str = "netlists/certification_tests/bug_307/bug_307_a.cir";
+const XYCE_BUG307_CONTROL_RECORD: &str = "netlists/certification_tests/bug_307/bug_307_b.cir";
+const XYCE_BUG307_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_307/exclude";
+const XYCE_BUG307_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG307_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG307_HISTORICAL_RECORD_COUNT: usize = 8;
+const XYCE_BUG307_HISTORICAL_RECORD_BYTES: usize = 1_910;
+const XYCE_BUG307_HISTORICAL_RECORDS_SHA256: &str =
+    "d12d9999702cb03a5d8a7c035cd7b117e0de4a2179939ce0682ffec1919f02a9";
+const XYCE_BUG307_HISTORICAL_RECORDS_BLAKE3: &str =
+    "88ccdc0f9679d72ca35300fd520095689940c4c51b33b41cefd70adcc1bbbeb9";
+const XYCE_BUG307_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 8] = [
+    (
+        "Netlists/Certification_Tests/BUG_307/CMakeLists.txt",
+        3_726,
+        "c29d61b2ee4044b6f4f23675f615d2239c5da183efef50fc4e0471d0786f185d",
+        "a8b77563dfd31851dee65a2ec285c8cc397dca56d9fdbf99dcdda94d4c324a80",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_307/Manifest.txt",
+        215,
+        "8efafd0b6ed4df706276aaf78bddaa63bbc662727ef49002e577b2ff0e559e07",
+        "c3e85eacadb2e4ec61b3f9f016b41744923e7d9928cdc9571f4d4ff726b1cadf",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_307/README",
+        2_221,
+        "21a3c2eac2ec269b7aca08ed370b36597d19f27ab39e18893652cdcd52134017",
+        "03de16d903037f8682982f23d5f10aa83c87a48cd4326071091286359c89d7e5",
+    ),
+    (
+        XYCE_BUG307_OWNER_PATH,
+        347,
+        "a1679ad22a5e7acbf4bed85efd47f92f3d59326f3f611889a822840b37de3c22",
+        "99c850d3ca6c4021d74d697b860fe4dc2b8541f41de98474f18175c08cfa1ef0",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_307/bug_307_a.cir.sh",
+        1_179,
+        "736ee04d110134b4133412591f4c94715bdfbf3d8910015905b0e00811fc11e3",
+        "9ab7ef6f1b0debea3c708f87ab3c270f53b0b8ea8db6a1a27e3a79fcd9a0d8cd",
+    ),
+    (
+        XYCE_BUG307_CONTROL_PATH,
+        263,
+        "0dddf35b3f467b1554a795dd94ff5494e9ec5b25369ce797b1d03641f307ba0b",
+        "1e56b30e9c542f761b112af245d49e005ddd91713e1a43bf94388b04f8e624c2",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_307/exclude",
+        258,
+        "52c58cc2998c3b34b62a17fcea871a7affc41d77058c78b7dfb5d4aab93e965f",
+        "ea052f70048b548f3877ffd8904c585b66a8fa986926c24483d29e7f02ad6382",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_307/tags",
+        16,
+        "fb8b1ab6aa8b694212335a76b1b87c077f22be7543f15c12de32a2da40b4f345",
+        "a5f2cee6f41471429bc22c4c40d36881f4c11d2387b20adbdc14efe2509f6589",
+    ),
+];
+const XYCE_BUG307_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 11] = [
+    (
+        "README",
+        2_221,
+        "21a3c2eac2ec269b7aca08ed370b36597d19f27ab39e18893652cdcd52134017",
+        "03de16d903037f8682982f23d5f10aa83c87a48cd4326071091286359c89d7e5",
+    ),
+    (
+        "bug_307_a.cir",
+        347,
+        "a1679ad22a5e7acbf4bed85efd47f92f3d59326f3f611889a822840b37de3c22",
+        "99c850d3ca6c4021d74d697b860fe4dc2b8541f41de98474f18175c08cfa1ef0",
+    ),
+    (
+        "bug_307_b.cir",
+        263,
+        "0dddf35b3f467b1554a795dd94ff5494e9ec5b25369ce797b1d03641f307ba0b",
+        "1e56b30e9c542f761b112af245d49e005ddd91713e1a43bf94388b04f8e624c2",
+    ),
+    (
+        "bug_307_d.cir",
+        944,
+        "b9d7e9ff10c06d2f35dc227f609d723cb6777c6446d3067564da3f94de012d26",
+        "b532796ea4f65c12e5f5712260fc54289ac5237d16bf5acd6813f78a8ea22217",
+    ),
+    (
+        "bug_307_e.cir",
+        946,
+        "a4694f025a973b5e10172ad60344d24595f3363ce24ae1c196d5cbb8be55a864",
+        "79afd80a2d97de4ef7a747c2b3d9f6d842aecb94653e916e850d7a65a5c4be37",
+    ),
+    (
+        "bug_307_f.cir",
+        1_052,
+        "fa455d1e81bc1990479771e38b46ef217435c540ac54377e993caa63b75ea348",
+        "8945c4563decbc1b26a6bf5bfe2ac89f567aaed7e0d0bfba12d5637e6467d5c2",
+    ),
+    (
+        "bug_307_g.cir",
+        1_106,
+        "76d8a3ce9d13a58756a5b4b2426f1d20abc44e8e8d73dee96e9d27918b07cd4a",
+        "bd81fea0f08c9ca161bee4c98771cbcb5a8b0a25c6d3c1dcfb20e23c9f5a8f07",
+    ),
+    (
+        "bug_307_h.cir",
+        1_172,
+        "1b2f289deba22de22f492701a6730ef1a9b2be688099b66ee2c93ad9cf717fac",
+        "2b9e43851db5fa15a9f6424b47424a23222c4c0692d3c2f906e5769b3103b4bf",
+    ),
+    (
+        "bug_307_i.cir",
+        480,
+        "4d74799d1c37789f8740735ed7c24988e34e73818fe3b93ff45f60b8c1d60bc9",
+        "0c6bc5bc4a13a511f66163745bb7a80c9cb12a41198ad5b5104f68e929216237",
+    ),
+    (
+        "bug_307_i.lib1",
+        228,
+        "aac03ef8a09ddb99aa3b3b6f6aa6152ed7531b4cf4918b522d9b9f2a8007de47",
+        "2e084709750590888d9f0015e7b35f29f714c969dd12931a7e4af3ca6e58d391",
+    ),
+    (
+        "bug_307_i.lib2",
+        280,
+        "2fa7440e06ce352b530e640997e36c8200e5feee86e6e5e79987aaf2b38332e0",
+        "8c2ee4a4a5d0ddd0de2c89bf14380bd79ef0395dae481bd4e6e471b640a3980a",
+    ),
+];
+const XYCE_BUG307_RETAINED_OUTPUTS: [(&str, usize, &str, &str); 6] = [
+    (
+        "bug_307_d.cir.prn",
+        306_701,
+        "d757e3ffad74d451c22847d4f6179f63ea1c263c074a47f2f6b7f668f23f8070",
+        "ebe6ec704c22124d446aa5fbcabde53e88f060a97cac8927705541c51879611b",
+    ),
+    (
+        "bug_307_e.cir.prn",
+        306_701,
+        "d757e3ffad74d451c22847d4f6179f63ea1c263c074a47f2f6b7f668f23f8070",
+        "ebe6ec704c22124d446aa5fbcabde53e88f060a97cac8927705541c51879611b",
+    ),
+    (
+        "bug_307_f.cir.prn",
+        306_701,
+        "d55abf3b13631a17aabfe6d83cd629dbe39b972816bde0344e3525c5c54a9199",
+        "f98be1f2910ed36ef4dfe9acfc0a48add52b9dcb3d78433b6b74b8809ffd9903",
+    ),
+    (
+        "bug_307_g.cir.prn",
+        306_701,
+        "d55abf3b13631a17aabfe6d83cd629dbe39b972816bde0344e3525c5c54a9199",
+        "f98be1f2910ed36ef4dfe9acfc0a48add52b9dcb3d78433b6b74b8809ffd9903",
+    ),
+    (
+        "bug_307_h.cir.prn",
+        306_701,
+        "d55abf3b13631a17aabfe6d83cd629dbe39b972816bde0344e3525c5c54a9199",
+        "f98be1f2910ed36ef4dfe9acfc0a48add52b9dcb3d78433b6b74b8809ffd9903",
+    ),
+    (
+        "bug_307_i.cir.prn",
+        306_701,
+        "d757e3ffad74d451c22847d4f6179f63ea1c263c074a47f2f6b7f668f23f8070",
+        "ebe6ec704c22124d446aa5fbcabde53e88f060a97cac8927705541c51879611b",
     ),
 ];
 
@@ -9367,6 +9543,7 @@ mod analysis_support;
 mod comparison;
 mod contracts;
 mod contracts_bug159;
+mod contracts_bug307;
 mod contracts_bug352;
 mod contracts_bug354;
 mod contracts_bug38;
