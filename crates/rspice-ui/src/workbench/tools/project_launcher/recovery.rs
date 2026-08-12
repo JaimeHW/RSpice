@@ -136,6 +136,8 @@ pub(super) fn recovery_page(
                     }
         });
 
+    const LEGACY_CHECKPOINT_ADVISORY: &str = "Legacy checkpoint ownership cannot be proven; open it non-destructively or use explicit recovery maintenance or migration";
+
     let selected = app
         .state
         .workbench
@@ -153,9 +155,11 @@ pub(super) fn recovery_page(
             .as_ref()
             .is_some_and(RecoveryCandidate::is_legacy_checkpoint)
         {
-            discard.on_hover_text(
-                "Legacy checkpoint ownership cannot be proven; open it non-destructively or use explicit recovery maintenance or migration",
-            )
+            // A legacy checkpoint may still be discardable, so this advisory
+            // has to read in both states; each call is inert in the other one.
+            discard
+                .on_hover_text(LEGACY_CHECKPOINT_ADVISORY)
+                .on_disabled_hover_text(LEGACY_CHECKPOINT_ADVISORY)
         } else {
             discard
         };
@@ -178,9 +182,9 @@ pub(super) fn recovery_page(
             .enabled(recoverable && replacement_block_reason.is_none())
             .show(ui);
         let response = if let Some(reason) = replacement_block_reason {
-            response.on_hover_text(reason)
+            response.on_disabled_hover_text(reason)
         } else if !recoverable && selected.is_some() {
-            response.on_hover_text("The selected checkpoint failed integrity validation")
+            response.on_disabled_hover_text("The selected checkpoint failed integrity validation")
         } else {
             response
         };
@@ -592,7 +596,7 @@ pub(super) fn safe_mode_page(
         let diagnostics = if diagnostics_folder_supported() {
             diagnostics
         } else {
-            diagnostics.on_hover_text(
+            diagnostics.on_disabled_hover_text(
                 "Diagnostic folders can be revealed only by supported desktop file managers",
             )
         };
@@ -604,9 +608,9 @@ pub(super) fn safe_mode_page(
             .enabled(!active && options.has_effect())
             .show(ui);
         let response = if active {
-            response.on_hover_text("Safe mode is already active for this launch")
+            response.on_disabled_hover_text("Safe mode is already active for this launch")
         } else if !options.has_effect() {
-            response.on_hover_text("Select at least one isolation option")
+            response.on_disabled_hover_text("Select at least one isolation option")
         } else {
             response
         };

@@ -404,7 +404,7 @@ fn action_button(
         .accessible_label(&accessible)
         .show(ui);
     let response = if !enabled && let Some(blocker) = blocker {
-        response.on_hover_text(blocker)
+        response.on_disabled_hover_text(blocker)
     } else {
         response
     };

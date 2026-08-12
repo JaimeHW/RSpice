@@ -249,7 +249,7 @@ fn schematic_section_header_action(
         ),
         Pos2::new(rect.right() - 8.0, rect.bottom() - 2.0),
     );
-    let response = ui.interact(
+    let mut response = ui.interact(
         action_rect,
         ui.id().with(("schematic-section-action", title, action)),
         if enabled {
@@ -258,6 +258,9 @@ fn schematic_section_header_action(
             Sense::hover()
         },
     );
+    if !enabled {
+        crate::ui::widgets::mark_response_disabled(&mut response);
+    }
     if response.hovered() && enabled {
         ui.painter()
             .rect_filled(action_rect, t.radius, t.color.bg_hover);
