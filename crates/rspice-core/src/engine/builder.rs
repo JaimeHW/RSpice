@@ -3432,6 +3432,57 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn native_bjt_inherits_global_tnom_and_model_tnom_overrides_it() {
+        for (model_suffix, expected_celsius) in [("BF=100", -40.0), ("BF=100 TNOM=27", 27.0)] {
+            let deck = format!(
+                "BJT nominal temperature precedence\n.options tnom=-40\nV1 c 0 1\nQ1 c b 0 QMOD\n.model QMOD NPN ({model_suffix})\n.end\n"
+            );
+            let netlist = Netlist::parse(&deck).expect("BJT TNOM precedence deck parses");
+            let mut config = SimulationConfig::default();
+            config.spice_dialect = SpiceDialect::Xyce;
+            let circuit = Engine::new(config)
+                .build_circuit(&netlist)
+                .expect("BJT TNOM precedence deck builds");
+            let [bjt] = circuit.bjts.devices.as_slice() else {
+                panic!("expected one native BJT");
+            };
+            assert_eq!(
+                bjt.tnom.to_bits(),
+                crate::constants::celsius_to_kelvin(expected_celsius).to_bits()
+            );
+        }
+    }
+
+    #[test]
+    fn native_bjt_rejects_invalid_effective_tnom() {
+        let deck = "BJT invalid nominal temperature\n\
+            V1 c 0 1\n\
+            Q1 c b 0 QMOD\n\
+            .model QMOD NPN (BF=100)\n\
+            .end\n";
+        let mut config = SimulationConfig::default();
+        config.spice_dialect = SpiceDialect::Xyce;
+
+        let mut invalid_model = Netlist::parse(deck).expect("BJT invalid-model fixture parses");
+        invalid_model.models[0]
+            .params
+            .push(("TNOM".to_string(), -273.15));
+        let model_error = Engine::new(config.clone())
+            .build_circuit(&invalid_model)
+            .expect_err("absolute-zero BJT model TNOM must fail");
+        assert!(model_error.to_string().contains("TNOM"));
+        assert!(model_error.to_string().contains("absolute zero"));
+
+        let mut invalid_global = Netlist::parse(deck).expect("BJT invalid-global fixture parses");
+        invalid_global.options.tnom = Some(f64::NAN);
+        let global_error = Engine::new(config)
+            .build_circuit(&invalid_global)
+            .expect_err("non-finite global BJT TNOM must fail");
+        assert!(global_error.to_string().contains("TNOM"));
+        assert!(global_error.to_string().contains("finite"));
+    }
+
     /// A geometry sitting exactly on a shared bin edge takes the *lower* bin.
     ///
     /// ngspice's ranges are inclusive at both ends and it returns the first
@@ -5770,7 +5821,17 @@ impl Engine {
                     // Look up model and apply parameters
                     if let Some(device_model) = model_def {
                         // Normalize keys so model cards remain case-insensitive.
-                        let params_map = model_params_upper_map(&device_model.params);
+                        let mut params_map = model_params_upper_map(&device_model.params);
+                        let effective_tnom = effective_native_bjt_tnom_celsius(
+                            &element.name,
+                            model,
+                            Some(device_model),
+                            &params_map,
+                            netlist.options.tnom,
+                        )?;
+                        params_map
+                            .entry("TNOM".to_string())
+                            .or_insert(effective_tnom);
                         bjt_level = params_map.get("LEVEL").copied();
                         validate_bjt_model_level(
                             &element.name,
@@ -5783,10 +5844,21 @@ impl Engine {
                     } else if let Some(params_map) =
                         builtin_bjt_model_map().get(&model.to_uppercase())
                     {
-                        bjt_level = params_map.get("LEVEL").copied();
+                        let mut effective_params = params_map.clone();
+                        let effective_tnom = effective_native_bjt_tnom_celsius(
+                            &element.name,
+                            model,
+                            None,
+                            &effective_params,
+                            netlist.options.tnom,
+                        )?;
+                        effective_params
+                            .entry("TNOM".to_string())
+                            .or_insert(effective_tnom);
+                        bjt_level = effective_params.get("LEVEL").copied();
                         // Fallback to embedded transistor library models when no
                         // explicit .MODEL card is present in the parsed netlist.
-                        bjt = bjt.with_params(params_map);
+                        bjt = bjt.with_params(&effective_params);
                         log::debug!(
                             "Applied embedded BJT fallback model '{}' to {}",
                             model,
