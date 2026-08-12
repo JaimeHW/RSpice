@@ -198,7 +198,7 @@ impl Bjt {
         }
         // ngspice vbicload.c stamps the `CKTgmin` parallel on Vbep
         // unconditionally, even when the parasitic diode currents are zero.
-        let gmin = self.junction_gmin;
+        let gmin = self.nonlinear_branch_gmin();
         branch.current = gmin * (vbx - vbp);
         branch.d_internal[IDX_VBX] = gmin;
         branch.d_internal[IDX_VBP] = -gmin;
@@ -325,7 +325,7 @@ impl Bjt {
         }
         // ngspice vbicload.c stamps the `CKTgmin` parallel on Vbcp
         // unconditionally, even when the parasitic diode currents are zero.
-        let gmin = self.junction_gmin;
+        let gmin = self.nonlinear_branch_gmin();
         branch.current = gmin * (vsi - vbp);
         branch.d_internal[IDX_VSI] = gmin;
         branch.d_internal[IDX_VBP] = -gmin;
@@ -503,7 +503,7 @@ impl Bjt {
         // nonsingular when the Kull epi exponential crosses its saturation
         // knife edge (the very rows ngspice reports as singular on decks it
         // cannot solve), and gmin stepping ramps them with `CKTgmin`.
-        let gmin = self.junction_gmin;
+        let gmin = self.nonlinear_branch_gmin();
         let d_irci_eff_dvrci_eff =
             d_iohm_dvrci_eff * inv_irci_scale + common * d_derf_dvrci_eff + gmin;
         let d_irci_eff_dvbci_eff =

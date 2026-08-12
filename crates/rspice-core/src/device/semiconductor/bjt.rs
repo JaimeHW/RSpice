@@ -710,6 +710,14 @@ pub struct Bjt {
     /// gmin stepping ramps this value through the device equations, not
     /// just the matrix diagonal.
     pub junction_gmin: Value,
+    /// Explicit Xyce VBIC model-card GMIN override.
+    ///
+    /// Xyce's generated VBIC 1.3 model uses the device-option GMIN only when
+    /// the model card omits `GMIN`; an authored value (including zero) owns
+    /// the six nonlinear shunt branches instead.  Keep the override distinct
+    /// from `junction_gmin`, which is updated by the engine's continuation
+    /// machinery and remains the ngspice/legacy-BJT contract.
+    pub vbic_model_gmin: Option<Value>,
     /// Forward-bias smoothing coefficient for B-C depletion charge (AJC)
     pub ajc: Value,
     /// B-C grading coefficient (MJC)
@@ -1112,6 +1120,7 @@ impl Bjt {
             tvbbe2: 0.0,
             tnbbe: 0.0,
             junction_gmin: 0.0,
+            vbic_model_gmin: None,
             ajc: -0.5,
             mjc: 0.33, // B-C grading coefficient
             tf: 4e-10, // Forward transit time (400ps)
@@ -1324,6 +1333,21 @@ impl Bjt {
     #[inline]
     fn instance_scale(&self) -> Value {
         (self.area * self.m).max(1e-18)
+    }
+
+    /// Conductance carried by each intrinsic nonlinear junction branch.
+    ///
+    /// Xyce's VBIC 1.3 model chooses an explicitly given model `GMIN` ahead
+    /// of the device-option value and multiplies the completed branch current
+    /// by instance `M`.  Native ngspice/legacy BJT paths continue to consume
+    /// the engine-supplied circuit junction GMIN directly.
+    #[inline]
+    fn nonlinear_branch_gmin(&self) -> Value {
+        if self.xyce_compatibility && self.charge_model == BjtChargeModel::Vbic {
+            self.vbic_model_gmin.unwrap_or(self.junction_gmin) * self.instance_scale()
+        } else {
+            self.junction_gmin
+        }
     }
 
     #[inline]

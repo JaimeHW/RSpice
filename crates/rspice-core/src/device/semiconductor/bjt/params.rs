@@ -107,6 +107,7 @@ impl Bjt {
         self.tvbbe1 = 0.0;
         self.tvbbe2 = 0.0;
         self.tnbbe = 0.0;
+        self.vbic_model_gmin = None;
     }
 
     #[inline]
@@ -190,6 +191,7 @@ impl Bjt {
         self.tvbbe1 = 0.0;
         self.tvbbe2 = 0.0;
         self.tnbbe = 0.0;
+        self.vbic_model_gmin = None;
         self.nei = 1.0;
         self.nen = 2.0;
         self.nci = 1.0;
@@ -600,14 +602,20 @@ impl Bjt {
         self.is = (is_temp * scale).max(1e-30);
         self.nf = nf_temp.max(1e-12);
         self.nr = nr_temp.max(1e-12);
-        self.re = re_temp.max(0.0);
-        self.rbx = rbx_temp.max(0.0);
-        self.rbi = rbi_temp.max(0.0);
+        // Xyce's VBIC equations multiply every completed current branch by
+        // instance M.  Scaling each linear branch resistance by 1/(AREA*M)
+        // is the equivalent native-MNA representation; the nonlinear branch
+        // current and charge parameters are already multiplied by `scale`
+        // below.  The same inverse-area rule is the classic BJT instance
+        // contract and keeps legacy AREA/M behavior physically consistent.
+        self.re = (re_temp / scale).max(0.0);
+        self.rbx = (rbx_temp / scale).max(0.0);
+        self.rbi = (rbi_temp / scale).max(0.0);
         // Xyce's legacy GP model has no temperature coefficient for IRB
         // (JRB/IOB are aliases), so retain the nominal current threshold.
         self.irb = self.irb_nominal.max(0.0);
-        self.rcx = rcx_temp.max(0.0);
-        self.rci = rci_temp.max(0.0);
+        self.rcx = (rcx_temp / scale).max(0.0);
+        self.rci = (rci_temp / scale).max(0.0);
         self.vje = vje_temp;
         self.vjc = vjc_temp;
         self.ps = ps_temp;
@@ -663,8 +671,8 @@ impl Bjt {
         self.ibenp = (ibenp_temp * scale).max(0.0);
         self.ibcip = (ibcip_temp * scale).max(0.0);
         self.ibcnp = (ibcnp_temp * scale).max(0.0);
-        self.rs = rs_temp.max(0.0);
-        self.rbp = rbp_temp.max(0.0);
+        self.rs = (rs_temp / scale).max(0.0);
+        self.rbp = (rbp_temp / scale).max(0.0);
         self.avc2 = if avc2_temp.is_finite() {
             avc2_temp.max(0.0)
         } else {
@@ -971,6 +979,13 @@ impl Bjt {
             // value is Celsius, including negative temperatures and values
             // above 200 C. Device internals retain Kelvin.
             self.tnom = crate::constants::celsius_to_kelvin(v);
+        }
+        if self.charge_model == BjtChargeModel::Vbic
+            && let Some(&v) = params.get("GMIN")
+            && v.is_finite()
+            && v >= 0.0
+        {
+            self.vbic_model_gmin = Some(v);
         }
         if let Some(v) = params
             .get("KF")
@@ -1603,6 +1618,17 @@ mod tests {
         Bjt::new_npn("q1".to_string(), 1, 2, 3).with_params(&params)
     }
 
+    fn vbic_model_with(params: &[(&str, Value)]) -> Bjt {
+        let mut params = params
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), *value))
+            .collect::<HashMap<_, _>>();
+        params.insert("LEVEL".to_string(), 11.0);
+        let mut bjt = Bjt::new_npn("q1".to_string(), 1, 2, 3);
+        bjt.xyce_compatibility = true;
+        bjt.with_params(&params)
+    }
+
     #[test]
     fn explicit_celsius_tnom_matches_the_default_nominal_temperature() {
         let default = model_with(&[]);
@@ -1627,6 +1653,47 @@ mod tests {
             hot.tnom.to_bits(),
             crate::constants::celsius_to_kelvin(300.0).to_bits()
         );
+    }
+
+    #[test]
+    fn xyce_vbic_model_gmin_overrides_the_continuation_value_and_scales_with_m() {
+        let mut bjt =
+            vbic_model_with(&[("GMIN", 0.0)]).with_instance_params(&[("M".to_string(), 100.0)]);
+        bjt.set_junction_gmin(1.0e-12);
+        assert_eq!(bjt.nonlinear_branch_gmin().to_bits(), 0.0f64.to_bits());
+
+        let mut inherited = vbic_model_with(&[]).with_instance_params(&[("M".to_string(), 100.0)]);
+        inherited.set_junction_gmin(1.0e-12);
+        assert_eq!(
+            inherited.nonlinear_branch_gmin().to_bits(),
+            1.0e-10f64.to_bits()
+        );
+    }
+
+    #[test]
+    fn vbic_multiplicity_scales_every_linear_parasitic_branch() {
+        let params = [
+            ("RE", 2.0),
+            ("RBX", 3.0),
+            ("RBI", 4.0),
+            ("RCX", 5.0),
+            ("RCI", 6.0),
+            ("RS", 7.0),
+            ("RBP", 8.0),
+        ];
+        let base = vbic_model_with(&params);
+        let scaled = vbic_model_with(&params).with_instance_params(&[("M".to_string(), 100.0)]);
+        for (base_value, scaled_value) in [
+            (base.re, scaled.re),
+            (base.rbx, scaled.rbx),
+            (base.rbi, scaled.rbi),
+            (base.rcx, scaled.rcx),
+            (base.rci, scaled.rci),
+            (base.rs, scaled.rs),
+            (base.rbp, scaled.rbp),
+        ] {
+            assert_eq!(scaled_value.to_bits(), (base_value / 100.0).to_bits());
+        }
     }
 
     #[test]

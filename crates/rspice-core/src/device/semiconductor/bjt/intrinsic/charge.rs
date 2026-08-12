@@ -8,7 +8,7 @@ impl Bjt {
         vbe_eff: Value,
         vbc_eff: Value,
     ) -> TransportChargeState {
-        let gmin = self.junction_gmin;
+        let gmin = self.nonlinear_branch_gmin();
         let ifi = self.diode_current(vbe_eff, self.nf) + gmin * vbe_eff;
         let iri = self.diode_current_with_is(self.is * self.isrr.max(0.0), vbc_eff, self.nr)
             + gmin * vbc_eff;
@@ -405,7 +405,7 @@ impl Bjt {
         // current carries a `CKTgmin` parallel. The parallels keep junction
         // rows nonsingular at saturation boundaries, and gmin stepping ramps
         // them through the device equations, not just the matrix diagonal.
-        let gmin = self.junction_gmin;
+        let gmin = self.nonlinear_branch_gmin();
         let (ibe_breakdown, dibe_breakdown_dvbe) =
             self.vbic13_reverse_be_breakdown_current(vbe_eff);
         let wbe = if self.charge_model == BjtChargeModel::Vbic {
