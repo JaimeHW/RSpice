@@ -454,12 +454,19 @@ impl<'a> ExprParser<'a> {
     fn parse_primary(&mut self) -> Result<Expr, ExprError> {
         self.skip_ws();
 
-        // Parenthesized expression
-        if self.consume('(') {
+        // Xyce treats braces as ordinary expression-grouping delimiters at
+        // every nesting depth, alongside parentheses.
+        if self.check('(') || self.check('{') {
+            let open = self.advance().expect("checked grouping delimiter");
+            let close = if open == '(' { ')' } else { '}' };
             let expr = self.parse_ternary()?; // Full expression inside parens
             self.skip_ws();
-            if !self.consume(')') {
-                return Err(ExprError::MissingCloseParen);
+            if !self.consume(close) {
+                return Err(if open == '(' {
+                    ExprError::MissingCloseParen
+                } else {
+                    ExprError::TrailingInput("missing closing brace".to_string())
+                });
             }
             return Ok(expr);
         }

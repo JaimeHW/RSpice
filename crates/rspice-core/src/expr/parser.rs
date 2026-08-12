@@ -58,6 +58,8 @@ pub enum Token {
     // Delimiters
     LParen,
     RParen,
+    LBrace,
+    RBrace,
     SingleQuote,
     Comma,
     Question,
@@ -336,6 +338,14 @@ impl<'a> Lexer<'a> {
                 ')' => {
                     self.next_char();
                     Token::RParen
+                }
+                '{' => {
+                    self.next_char();
+                    Token::LBrace
+                }
+                '}' => {
+                    self.next_char();
+                    Token::RBrace
                 }
                 ',' => {
                     self.next_char();
@@ -684,6 +694,12 @@ impl<'a> Parser<'a> {
                 self.expect(Token::RParen);
                 expr
             }
+            Token::LBrace => {
+                self.advance();
+                let expr = self.parse_conditional();
+                self.expect(Token::RBrace);
+                expr
+            }
             Token::SingleQuote => {
                 self.advance();
                 let expr = self.parse_conditional();
@@ -1019,6 +1035,16 @@ mod tests {
                 "the abort must be observed from inside strict lexer traversal"
             );
         }
+    }
+
+    #[test]
+    fn strict_parser_accepts_nested_curly_grouping_and_names_missing_brace() {
+        assert_eq!(eval_const("1+{{2*3}}"), 7.0);
+        let error = parse_expression_strict("{1+2").expect_err("missing brace must fail");
+        assert!(
+            error.to_string().contains("RBrace"),
+            "missing-brace diagnostic lost its delimiter: {error}"
+        );
     }
 
     fn eval_const_xyce(input: &str) -> f64 {

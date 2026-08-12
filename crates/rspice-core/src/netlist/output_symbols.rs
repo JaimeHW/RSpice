@@ -487,21 +487,52 @@ pub fn validate_output_expressions_with_abort(
         Err(ParseWithAbortError::Aborted) => return Err(ParseWithAbortError::Aborted),
         Err(ParseWithAbortError::Parse(_)) => None,
     };
+    let xyce_dialect =
+        netlist.params.expression_dialect() == crate::config::ExpressionDialect::Xyce;
     for (request_index, request) in netlist.output_requests.iter().enumerate() {
         poll_parse_abort(abort, request_index)?;
         for (expression_index, expression) in request.expressions.iter().enumerate() {
             poll_parse_abort(abort, expression_index)?;
             poll_parse_text(abort, expression)?;
+            let runtime_scalar_identifiers = output_runtime_scalar_identifiers(
+                netlist,
+                flattened_elements.as_deref(),
+                request.analysis,
+                Some(expression),
+                abort,
+            )?;
+            let authored_expression = expression;
+            let expanded_expression = super::expr::expand_output_user_functions_with_abort(
+                authored_expression,
+                &netlist.params,
+                &runtime_scalar_identifiers,
+                abort,
+            )
+            .map_err(|error| match error {
+                super::expr::BehavioralPreparationError::Aborted => ParseWithAbortError::Aborted,
+                super::expr::BehavioralPreparationError::Semantic(detail) => {
+                    output_expression_error(
+                        request,
+                        authored_expression,
+                        OutputExpressionIssue::Syntax { detail },
+                    )
+                }
+            })?;
+            if xyce_dialect && let Some(issue) = first_xyce_ddx_issue(&expanded_expression, abort)?
+            {
+                return Err(output_expression_error(request, authored_expression, issue));
+            }
             let protected = protect_xyce_output_operands(
-                expression,
+                &expanded_expression,
                 request.analysis,
                 flattened_elements.as_deref(),
+                &runtime_scalar_identifiers,
                 abort,
             )
             .map_err(|error| match error {
                 OutputOperandProtectionError::Aborted => ParseWithAbortError::Aborted,
                 OutputOperandProtectionError::Invalid(issue) => {
-                    output_expression_error(request, expression, issue)
+                    output_expression_error(request, authored_expression, issue)
                 }
             })?;
             let prepared = super::expr::prepare_behavioral_expression_with_abort(
@@ -514,7 +545,7 @@ pub fn validate_output_expressions_with_abort(
                 super::expr::BehavioralPreparationError::Semantic(reason) => {
                     output_expression_error(
                         request,
-                        expression,
+                        authored_expression,
                         OutputExpressionIssue::Syntax { detail: reason },
                     )
                 }
@@ -526,12 +557,13 @@ pub fn validate_output_expressions_with_abort(
                 &prepared,
                 request.analysis,
                 flattened_elements.as_deref(),
+                &runtime_scalar_identifiers,
                 abort,
             )
             .map_err(|error| match error {
                 OutputOperandProtectionError::Aborted => ParseWithAbortError::Aborted,
                 OutputOperandProtectionError::Invalid(issue) => {
-                    output_expression_error(request, expression, issue)
+                    output_expression_error(request, authored_expression, issue)
                 }
             })?;
             let parsed = match super::expr::parse_expression_with_abort(&prepared, abort) {
@@ -544,7 +576,7 @@ pub fn validate_output_expressions_with_abort(
                         OutputExpressionValidationError {
                             directive: request.directive,
                             origin: request.origin.clone(),
-                            expression: expression.clone(),
+                            expression: authored_expression.clone(),
                             issue: OutputExpressionIssue::Syntax {
                                 detail: error.to_string(),
                             },
@@ -554,34 +586,42 @@ pub fn validate_output_expressions_with_abort(
                 }
             };
             ensure_parse_not_aborted(abort)?;
-            let issue = if let Some(issue) = first_output_function_issue(&parsed, abort)? {
-                issue
-            } else if let Some(identifier) = first_unresolved_output_identifier(&parsed, abort)? {
-                OutputExpressionIssue::UnresolvedIdentifier {
-                    identifier: identifier.to_ascii_uppercase(),
-                }
-            } else if let Err(error) = crate::expr::parse_expression_strict_with_abort(
-                &protect_xyce_output_functions(&prepared, abort)?,
-                abort,
-            ) {
-                match error {
-                    crate::expr::ParseExpressionWithAbortError::Aborted => {
-                        return Err(ParseWithAbortError::Aborted);
+            let issue =
+                if let Some(issue) = first_output_function_issue(&parsed, xyce_dialect, abort)? {
+                    issue
+                } else if let Some(identifier) =
+                    first_unresolved_output_identifier(&parsed, &runtime_scalar_identifiers, abort)?
+                {
+                    OutputExpressionIssue::UnresolvedIdentifier {
+                        identifier: identifier.to_ascii_uppercase(),
                     }
-                    crate::expr::ParseExpressionWithAbortError::Parse(error) => {
-                        OutputExpressionIssue::Syntax {
-                            detail: error.to_string(),
+                } else if let Err(error) = crate::expr::parse_expression_strict_with_abort(
+                    &strict_output_validation_expression(
+                        &parsed,
+                        &runtime_scalar_identifiers,
+                        xyce_dialect,
+                        abort,
+                    )?,
+                    abort,
+                ) {
+                    match error {
+                        crate::expr::ParseExpressionWithAbortError::Aborted => {
+                            return Err(ParseWithAbortError::Aborted);
+                        }
+                        crate::expr::ParseExpressionWithAbortError::Parse(error) => {
+                            OutputExpressionIssue::Syntax {
+                                detail: error.to_string(),
+                            }
                         }
                     }
-                }
-            } else {
-                continue;
-            };
+                } else {
+                    continue;
+                };
             return Err(ParseError::OutputExpressionValidation(Box::new(
                 OutputExpressionValidationError {
                     directive: request.directive,
                     origin: request.origin.clone(),
-                    expression: expression.clone(),
+                    expression: authored_expression.clone(),
                     issue,
                 },
             ))
@@ -607,6 +647,7 @@ fn output_expression_error(
 
 fn first_output_function_issue(
     expression: &super::expr::Expr,
+    xyce_dialect: bool,
     abort: &dyn AbortSignal,
 ) -> Result<Option<OutputExpressionIssue>, ParseWithAbortError> {
     use super::expr::Expr;
@@ -618,7 +659,7 @@ fn first_output_function_issue(
         match expression {
             Expr::FnCall { name, args } => {
                 let upper = name.to_ascii_uppercase();
-                if let Some((minimum, maximum)) = output_only_function_arity(&upper) {
+                if let Some((minimum, maximum)) = output_only_function_arity(&upper, xyce_dialect) {
                     if !(minimum..=maximum).contains(&args.len()) {
                         return Ok(Some(OutputExpressionIssue::Syntax {
                             detail: format!(
@@ -655,9 +696,10 @@ fn first_output_function_issue(
     Ok(None)
 }
 
-fn output_only_function_arity(name: &str) -> Option<(usize, usize)> {
+fn output_only_function_arity(name: &str, xyce_dialect: bool) -> Option<(usize, usize)> {
     match name {
         "R" | "RE" | "REAL" | "IMG" | "IMAG" | "PH" | "PHASE" | "DB" => Some((1, 1)),
+        "DDX" if xyce_dialect => Some((2, 2)),
         "RAND" | "RANDOM" => Some((0, 0)),
         "UNIF" | "AUNIF" => Some((2, 2)),
         "GAUSS" | "AGAUSS" => Some((2, 3)),
@@ -665,8 +707,227 @@ fn output_only_function_arity(name: &str) -> Option<(usize, usize)> {
     }
 }
 
+fn first_xyce_ddx_issue(
+    source: &str,
+    abort: &dyn AbortSignal,
+) -> Result<Option<OutputExpressionIssue>, ParseWithAbortError> {
+    first_xyce_ddx_issue_in_source(source, abort)
+}
+
+fn first_xyce_ddx_issue_in_source(
+    source: &str,
+    abort: &dyn AbortSignal,
+) -> Result<Option<OutputExpressionIssue>, ParseWithAbortError> {
+    let bytes = source.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        poll_parse_abort(abort, index)?;
+        if bytes[index] == b'"' {
+            let delimiter = bytes[index];
+            index += 1;
+            while index < bytes.len()
+                && (bytes[index] != delimiter || is_backslash_escaped(bytes, index))
+            {
+                poll_parse_abort(abort, index)?;
+                index += 1;
+            }
+            index = index.saturating_add(1);
+            continue;
+        }
+        if !(bytes[index] as char).is_ascii_alphabetic() {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        index += 1;
+        while index < bytes.len()
+            && ((bytes[index] as char).is_ascii_alphanumeric() || bytes[index] == b'_')
+        {
+            poll_parse_abort(abort, index)?;
+            index += 1;
+        }
+        if !source[start..index].eq_ignore_ascii_case("DDX") {
+            continue;
+        }
+        let mut open = index;
+        while open < bytes.len() && (bytes[open] as char).is_ascii_whitespace() {
+            poll_parse_abort(abort, open)?;
+            open += 1;
+        }
+        if open == bytes.len() || bytes[open] != b'(' {
+            continue;
+        }
+        let Some(close) = matching_output_parenthesis_with_abort(bytes, open, abort)? else {
+            return Ok(Some(OutputExpressionIssue::Syntax {
+                detail: "DDX is missing its closing ')'".to_string(),
+            }));
+        };
+        let call = &source[start..=close];
+        let parsed = match super::expr::parse_expression_with_abort(call, abort) {
+            Ok(parsed) => parsed,
+            Err(super::expr::ParseExpressionWithAbortError::Aborted) => {
+                return Err(ParseWithAbortError::Aborted);
+            }
+            Err(super::expr::ParseExpressionWithAbortError::Parse(error)) => {
+                return Ok(Some(OutputExpressionIssue::Syntax {
+                    detail: format!("invalid DDX expression: {error}"),
+                }));
+            }
+        };
+        if let Some(issue) = validate_xyce_ddx_expression_tree(&parsed, abort)? {
+            return Ok(Some(issue));
+        }
+        index = close + 1;
+    }
+    ensure_parse_not_aborted(abort)?;
+    Ok(None)
+}
+
+fn validate_xyce_ddx_expression_tree(
+    expression: &super::expr::Expr,
+    abort: &dyn AbortSignal,
+) -> Result<Option<OutputExpressionIssue>, ParseWithAbortError> {
+    use super::expr::Expr;
+    let mut pending = vec![expression];
+    let mut visited = 0usize;
+    while let Some(expression) = pending.pop() {
+        poll_parse_abort(abort, visited)?;
+        visited = visited.saturating_add(1);
+        match expression {
+            Expr::FnCall { name, args } if name.eq_ignore_ascii_case("DDX") => {
+                if let Some(issue) = validate_one_xyce_ddx_expression(expression, abort)? {
+                    return Ok(Some(issue));
+                }
+                pending.extend(args.iter().rev());
+            }
+            Expr::FnCall { args, .. } => pending.extend(args.iter().rev()),
+            Expr::UnaryOp { operand, .. } => pending.push(operand),
+            Expr::BinOp { left, right, .. } => {
+                pending.push(right);
+                pending.push(left);
+            }
+            Expr::Number(_) | Expr::ComplexNumber(_) | Expr::StringLiteral(_) | Expr::Param(_) => {}
+        }
+    }
+    Ok(None)
+}
+
+fn validate_one_xyce_ddx_expression(
+    expression: &super::expr::Expr,
+    abort: &dyn AbortSignal,
+) -> Result<Option<OutputExpressionIssue>, ParseWithAbortError> {
+    use super::expr::Expr;
+    let Expr::FnCall { name, args } = expression else {
+        return Ok(Some(OutputExpressionIssue::Syntax {
+            detail: "DDX did not parse as a function call".to_string(),
+        }));
+    };
+    if !name.eq_ignore_ascii_case("DDX") {
+        return Ok(Some(OutputExpressionIssue::Syntax {
+            detail: "DDX did not parse as a DDX operator".to_string(),
+        }));
+    }
+    let [left, right] = args.as_slice() else {
+        return Ok(Some(OutputExpressionIssue::Syntax {
+            detail: format!("DDX expects exactly 2 arguments but got {}", args.len()),
+        }));
+    };
+    let Some(target) = xyce_ddx_target(right) else {
+        return Ok(Some(OutputExpressionIssue::Syntax {
+            detail: "DDX differentiation target must be a parameter, V(node), or I(device)"
+                .to_string(),
+        }));
+    };
+    if !xyce_ddx_left_contains_target(left, &target, abort)? {
+        return Ok(Some(OutputExpressionIssue::Syntax {
+            detail: format!(
+                "DDX differentiation target {} is not present in its first argument",
+                target.label()
+            ),
+        }));
+    }
+    Ok(None)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum XyceDdxTarget {
+    Parameter(String),
+    Voltage(String),
+    Current(String),
+}
+
+impl XyceDdxTarget {
+    fn label(&self) -> String {
+        match self {
+            Self::Parameter(name) => name.clone(),
+            Self::Voltage(node) => format!("V({node})"),
+            Self::Current(device) => format!("I({device})"),
+        }
+    }
+}
+
+fn xyce_ddx_target(expression: &super::expr::Expr) -> Option<XyceDdxTarget> {
+    use super::expr::Expr;
+    match expression {
+        Expr::Param(name) if super::expr::runtime_special_quantity(name).is_none() => {
+            Some(XyceDdxTarget::Parameter(name.trim().to_ascii_uppercase()))
+        }
+        Expr::FnCall { name, args } if name.eq_ignore_ascii_case("V") => {
+            let [argument] = args.as_slice() else {
+                return None;
+            };
+            xyce_ddx_atomic_reference(argument).map(XyceDdxTarget::Voltage)
+        }
+        Expr::FnCall { name, args } if name.eq_ignore_ascii_case("I") => {
+            let [Expr::Param(device)] = args.as_slice() else {
+                return None;
+            };
+            Some(XyceDdxTarget::Current(canonical_symbol(device)))
+        }
+        _ => None,
+    }
+}
+
+fn xyce_ddx_atomic_reference(expression: &super::expr::Expr) -> Option<String> {
+    match expression {
+        super::expr::Expr::Param(name) => Some(canonical_symbol(name)),
+        super::expr::Expr::Number(value) if value.is_finite() => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn xyce_ddx_left_contains_target(
+    expression: &super::expr::Expr,
+    target: &XyceDdxTarget,
+    abort: &dyn AbortSignal,
+) -> Result<bool, ParseWithAbortError> {
+    use super::expr::Expr;
+    let mut pending = vec![expression];
+    let mut visited = 0usize;
+    while let Some(expression) = pending.pop() {
+        poll_parse_abort(abort, visited)?;
+        visited = visited.saturating_add(1);
+        if xyce_ddx_target(expression).as_ref() == Some(target) {
+            return Ok(true);
+        }
+        match expression {
+            Expr::UnaryOp { operand, .. } => pending.push(operand),
+            Expr::BinOp { left, right, .. } => {
+                pending.push(right);
+                pending.push(left);
+            }
+            Expr::FnCall { name, .. }
+                if name.eq_ignore_ascii_case("V") || name.eq_ignore_ascii_case("I") => {}
+            Expr::FnCall { args, .. } => pending.extend(args.iter().rev()),
+            Expr::Number(_) | Expr::ComplexNumber(_) | Expr::StringLiteral(_) | Expr::Param(_) => {}
+        }
+    }
+    Ok(false)
+}
+
 fn first_unresolved_output_identifier<'a>(
     expression: &'a super::expr::Expr,
+    runtime_scalar_identifiers: &HashSet<String>,
     abort: &dyn AbortSignal,
 ) -> Result<Option<&'a str>, ParseWithAbortError> {
     use super::expr::Expr;
@@ -677,6 +938,7 @@ fn first_unresolved_output_identifier<'a>(
         visited = visited.saturating_add(1);
         match expression {
             Expr::Param(name) if super::expr::runtime_special_quantity(name).is_some() => {}
+            Expr::Param(name) if runtime_scalar_identifiers.contains(&canonical_symbol(name)) => {}
             Expr::Param(name) => return Ok(Some(name)),
             Expr::UnaryOp { operand, .. } => pending.push(operand),
             Expr::BinOp { left, right, .. } => {
@@ -688,6 +950,49 @@ fn first_unresolved_output_identifier<'a>(
         }
     }
     Ok(None)
+}
+
+fn output_runtime_scalar_identifiers(
+    netlist: &Netlist,
+    flattened_elements: Option<&[Element]>,
+    analysis: Option<OutputAnalysisKind>,
+    atomic_device_expression: Option<&str>,
+    abort: &dyn AbortSignal,
+) -> Result<HashSet<String>, ParseWithAbortError> {
+    let mut names = HashSet::new();
+    if let Some(authored) = atomic_device_expression {
+        let authored = canonical_symbol(authored.trim());
+        for (index, element) in flattened_elements
+            .unwrap_or(&netlist.elements)
+            .iter()
+            .enumerate()
+        {
+            poll_parse_abort(abort, index)?;
+            if element_supports_bare_output_scalar(&element.kind)
+                && canonical_symbol(&element.name) == authored
+            {
+                names.insert(authored.clone());
+                break;
+            }
+        }
+    }
+    let offset = names.len();
+    if analysis == Some(OutputAnalysisKind::Tran) {
+        for (index, measurement) in netlist.measurements.iter().enumerate() {
+            poll_parse_abort(abort, offset.saturating_add(index))?;
+            if OutputAnalysisKind::from_keyword(&measurement.analysis)
+                == Some(OutputAnalysisKind::Tran)
+                && matches!(
+                    measurement.measure_type,
+                    crate::analysis::MeasureType::Equation { .. }
+                )
+            {
+                names.insert(canonical_symbol(&measurement.name));
+            }
+        }
+    }
+    ensure_parse_not_aborted(abort)?;
+    Ok(names)
 }
 
 /// Validate authored output expressions without cancellation.
@@ -775,7 +1080,35 @@ pub fn validate_output_symbols_with_abort(
     let mut unresolved = Vec::new();
     for (request_index, request) in netlist.output_requests.iter().enumerate() {
         poll_parse_abort(abort, request_index)?;
-        let ordered = validation_order(request);
+        let mut expanded_dependencies = Vec::new();
+        for expression in &request.expressions {
+            let runtime_scalar_identifiers = output_runtime_scalar_identifiers(
+                netlist,
+                Some(&elements),
+                request.analysis,
+                Some(expression),
+                abort,
+            )?;
+            let expanded = super::expr::expand_output_user_functions_with_abort(
+                expression,
+                &netlist.params,
+                &runtime_scalar_identifiers,
+                abort,
+            )
+            .map_err(|error| match error {
+                super::expr::BehavioralPreparationError::Aborted => ParseWithAbortError::Aborted,
+                super::expr::BehavioralPreparationError::Semantic(detail) => {
+                    output_expression_error(
+                        request,
+                        expression,
+                        OutputExpressionIssue::Syntax { detail },
+                    )
+                }
+            })?;
+            expanded_dependencies.extend(extract_output_dependencies_with_context(&expanded, true));
+        }
+        let mut ordered = validation_order(request);
+        ordered.extend(expanded_dependencies.iter());
         let mut seen = HashSet::new();
         for dependency in ordered {
             poll_parse_text(abort, &dependency.symbol)?;
@@ -930,7 +1263,11 @@ pub fn validate_output_symbols(netlist: &Netlist) -> Result<(), ParseError> {
 
 fn validation_order(request: &OutputRequest) -> Vec<&OutputSymbolDependency> {
     if !request.directive.is_direct_output() {
-        return request.dependencies.iter().collect();
+        return request
+            .dependencies
+            .iter()
+            .filter(|dependency| request.expressions.is_empty() || !dependency.expression)
+            .collect();
     }
     // Xyce creates direct lead-current operators before solution-vector node
     // operators. Keep lexical order within each namespace.
@@ -947,12 +1284,6 @@ fn validation_order(request: &OutputRequest) -> Vec<&OutputSymbolDependency> {
     devices.sort_by_key(|dependency| canonical_symbol(&dependency.symbol));
     nodes.sort_by_key(|dependency| canonical_symbol(&dependency.symbol));
     devices.extend(nodes);
-    devices.extend(
-        request
-            .dependencies
-            .iter()
-            .filter(|dependency| dependency.expression),
-    );
     devices
 }
 
@@ -1539,6 +1870,7 @@ fn protect_xyce_output_operands(
     source: &str,
     analysis: Option<OutputAnalysisKind>,
     flattened_elements: Option<&[Element]>,
+    runtime_scalar_identifiers: &HashSet<String>,
     abort: &dyn AbortSignal,
 ) -> Result<String, OutputOperandProtectionError> {
     let bytes = source.as_bytes();
@@ -1555,6 +1887,9 @@ fn protect_xyce_output_operands(
             while index < bytes.len()
                 && (bytes[index] != delimiter || is_backslash_escaped(bytes, index))
             {
+                if index % 64 == 0 && abort.is_aborted() {
+                    return Err(OutputOperandProtectionError::Aborted);
+                }
                 index += 1;
             }
             index = index.saturating_add(1);
@@ -1577,12 +1912,19 @@ fn protect_xyce_output_operands(
             open += 1;
         }
         if open < bytes.len() && bytes[open] == b'(' && xyce_output_operand_operator(&operator) {
-            let Some(close) = matching_output_parenthesis(bytes, open) else {
-                return Err(OutputExpressionIssue::InvalidAccessor {
-                    operator,
-                    detail: "missing closing ')'".to_string(),
+            let close = match matching_output_parenthesis_with_abort(bytes, open, abort) {
+                Ok(Some(close)) => close,
+                Ok(None) => {
+                    return Err(OutputExpressionIssue::InvalidAccessor {
+                        operator,
+                        detail: "missing closing ')'".to_string(),
+                    }
+                    .into());
                 }
-                .into());
+                Err(ParseWithAbortError::Aborted) => {
+                    return Err(OutputOperandProtectionError::Aborted);
+                }
+                Err(ParseWithAbortError::Parse(_)) => unreachable!("parenthesis scan cannot parse"),
             };
             validate_xyce_output_accessor(&operator, &source[open + 1..close], analysis)?;
             protected.push_str(&source[copied_through..start]);
@@ -1606,7 +1948,9 @@ fn protect_xyce_output_operands(
             }
             let token = &source[start..end];
             if token.split(':').all(|segment| !segment.is_empty()) {
-                validate_output_device_parameter(token, flattened_elements)?;
+                if !runtime_scalar_identifiers.contains(&canonical_symbol(token)) {
+                    validate_output_device_parameter(token, flattened_elements)?;
+                }
                 protected.push_str(&source[copied_through..start]);
                 protected.push('0');
                 copied_through = end;
@@ -1619,6 +1963,18 @@ fn protect_xyce_output_operands(
         return Err(OutputOperandProtectionError::Aborted);
     }
     Ok(protected)
+}
+
+fn element_supports_bare_output_scalar(kind: &ElementKind) -> bool {
+    matches!(
+        kind,
+        ElementKind::VoltageSource(_)
+            | ElementKind::CurrentSource(_)
+            | ElementKind::Resistor { .. }
+            | ElementKind::Capacitor { .. }
+            | ElementKind::Inductor { .. }
+            | ElementKind::JilesAthertonInductor { .. }
+    )
 }
 
 fn validate_xyce_output_accessor(
@@ -1830,46 +2186,110 @@ fn known_output_parameter_for_element(kind: &ElementKind, parameter: &str) -> Op
     }
 }
 
-fn protect_xyce_output_functions(
-    source: &str,
+/// Serialize the validated permissive AST into the strict arithmetic grammar,
+/// neutralizing only typed runtime scalar leaves and output-only functions.
+/// Working from the AST avoids mistaking numeric exponents or engineering
+/// suffixes for identifiers with the same spelling.
+fn strict_output_validation_expression(
+    expression: &super::expr::Expr,
+    runtime_scalar_identifiers: &HashSet<String>,
+    xyce_dialect: bool,
     abort: &dyn AbortSignal,
 ) -> Result<String, ParseWithAbortError> {
-    let bytes = source.as_bytes();
-    let mut protected = String::with_capacity(source.len());
-    let mut copied_through = 0usize;
-    let mut index = 0usize;
-    while index < bytes.len() {
-        poll_parse_abort(abort, index)?;
-        if !(bytes[index] as char).is_ascii_alphabetic() {
-            index += 1;
-            continue;
-        }
-        let start = index;
-        index += 1;
-        while index < bytes.len()
-            && ((bytes[index] as char).is_ascii_alphanumeric() || bytes[index] == b'_')
-        {
-            index += 1;
-        }
-        let function = source[start..index].to_ascii_uppercase();
-        let mut open = index;
-        while open < bytes.len() && (bytes[open] as char).is_ascii_whitespace() {
-            open += 1;
-        }
-        if output_only_function_arity(&function).is_some()
-            && open < bytes.len()
-            && bytes[open] == b'('
-            && let Some(close) = matching_output_parenthesis(bytes, open)
-        {
-            protected.push_str(&source[copied_through..start]);
-            protected.push('0');
-            copied_through = close + 1;
-            index = copied_through;
+    use super::expr::{BinOpKind, Expr, UnaryOpKind};
+    enum Task<'a> {
+        Expression(&'a Expr),
+        Static(&'static str),
+        Owned(String),
+    }
+    let mut output = String::new();
+    let mut tasks = vec![Task::Expression(expression)];
+    let mut visited = 0usize;
+    while let Some(task) = tasks.pop() {
+        poll_parse_abort(abort, visited)?;
+        visited = visited.saturating_add(1);
+        match task {
+            Task::Static(text) => output.push_str(text),
+            Task::Owned(text) => {
+                for (index, character) in text.chars().enumerate() {
+                    poll_parse_abort(abort, index)?;
+                    output.push(character);
+                }
+            }
+            Task::Expression(Expr::Number(value)) => output.push_str(&value.to_string()),
+            Task::Expression(Expr::ComplexNumber(value)) => {
+                output.push_str(&value.real_projection().to_string());
+            }
+            Task::Expression(Expr::StringLiteral(value)) => {
+                output.push('"');
+                for (index, character) in value.chars().enumerate() {
+                    poll_parse_abort(abort, index)?;
+                    match character {
+                        '\\' => output.push_str("\\\\"),
+                        '"' => output.push_str("\\\""),
+                        _ => output.push(character),
+                    }
+                }
+                output.push('"');
+            }
+            Task::Expression(Expr::Param(name)) => {
+                if runtime_scalar_identifiers.contains(&canonical_symbol(name)) {
+                    output.push('0');
+                } else {
+                    output.push_str(name);
+                }
+            }
+            Task::Expression(Expr::UnaryOp { op, operand }) => {
+                tasks.push(Task::Static(")"));
+                tasks.push(Task::Expression(operand));
+                tasks.push(Task::Static(match op {
+                    UnaryOpKind::Neg => "(-",
+                    UnaryOpKind::Pos => "(+",
+                    UnaryOpKind::Not => "(!",
+                }));
+            }
+            Task::Expression(Expr::BinOp { op, left, right }) => {
+                let operator = match op {
+                    BinOpKind::Add => "+",
+                    BinOpKind::Sub => "-",
+                    BinOpKind::Mul => "*",
+                    BinOpKind::Div => "/",
+                    BinOpKind::Mod => "%",
+                    BinOpKind::Pow => "^",
+                    BinOpKind::Gt => ">",
+                    BinOpKind::Lt => "<",
+                    BinOpKind::Ge => ">=",
+                    BinOpKind::Le => "<=",
+                    BinOpKind::Eq => "==",
+                    BinOpKind::Ne => "!=",
+                    BinOpKind::And => "&&",
+                    BinOpKind::Or => "||",
+                };
+                tasks.push(Task::Static(")"));
+                tasks.push(Task::Expression(right));
+                tasks.push(Task::Static(operator));
+                tasks.push(Task::Expression(left));
+                tasks.push(Task::Static("("));
+            }
+            Task::Expression(Expr::FnCall { name, args }) => {
+                if output_only_function_arity(name, xyce_dialect).is_some() {
+                    output.push('0');
+                    continue;
+                }
+                tasks.push(Task::Static(")"));
+                for index in (0..args.len()).rev() {
+                    tasks.push(Task::Expression(&args[index]));
+                    if index != 0 {
+                        tasks.push(Task::Static(","));
+                    }
+                }
+                tasks.push(Task::Static("("));
+                tasks.push(Task::Owned(name.to_ascii_uppercase()));
+            }
         }
     }
-    protected.push_str(&source[copied_through..]);
     ensure_parse_not_aborted(abort)?;
-    Ok(protected)
+    Ok(output)
 }
 
 fn xyce_output_operand_operator(operator: &str) -> bool {
@@ -1931,10 +2351,15 @@ fn is_internal_node_accessor(operator: &str) -> bool {
     matches!(operator, "N" | "NR" | "NI" | "NM" | "NP" | "NDB")
 }
 
-fn matching_output_parenthesis(bytes: &[u8], open: usize) -> Option<usize> {
+fn matching_output_parenthesis_with_abort(
+    bytes: &[u8],
+    open: usize,
+    abort: &dyn AbortSignal,
+) -> Result<Option<usize>, ParseWithAbortError> {
     let mut depth = 0usize;
     let mut quote = None;
     for (index, byte) in bytes.iter().copied().enumerate().skip(open) {
+        poll_parse_abort(abort, index)?;
         if let Some(active) = quote {
             if byte == active && !is_backslash_escaped(bytes, index) {
                 quote = None;
@@ -1945,15 +2370,19 @@ fn matching_output_parenthesis(bytes: &[u8], open: usize) -> Option<usize> {
             b'\'' | b'"' => quote = Some(byte),
             b'(' => depth += 1,
             b')' => {
-                depth = depth.checked_sub(1)?;
+                let Some(next_depth) = depth.checked_sub(1) else {
+                    return Ok(None);
+                };
+                depth = next_depth;
                 if depth == 0 {
-                    return Some(index);
+                    return Ok(Some(index));
                 }
             }
             _ => {}
         }
     }
-    None
+    ensure_parse_not_aborted(abort)?;
+    Ok(None)
 }
 
 fn is_output_parameter_char(ch: char) -> bool {
@@ -2289,6 +2718,156 @@ mod tests {
         let valid = "valid output expression\nVA 0 1 5\nRB 1 2 100\nRC 2 0 100\n.TRAN 0 1\n.PRINT TRAN {ABS(V(1))}\n.END\n";
         Netlist::parse_validated_with_options(valid, options)
             .expect("a supported function and defined probe remain valid");
+    }
+
+    #[test]
+    fn xyce_nested_grouping_ddx_and_runtime_scalar_names_validate() {
+        let options = super::super::NetlistParseOptions {
+            expression_dialect: super::super::ExpressionDialect::Xyce,
+            ..super::super::NetlistParseOptions::default()
+        };
+        let source = "valid Xyce runtime output names
+VC 1 0 5
+R1 1 0 100
+.SUBCKT CELL A
+R2 A 0 200
+.ENDS
+X1 1 CELL
+.TRAN 0 1
+.PRINT TRAN {V(1)-{(V(1)-V(0))}} {DDX(V(1)*V(1),V(1))}
+.PRINT TRAN {VV1-VV2}
+.MEASURE TRAN VV1 PARAM='V(1)+1'
+.MEASURE TRAN VV2 EQN {V(1)+2}
+.END
+";
+        Netlist::parse_validated_with_options(source, options)
+            .expect("nested grouping, DDX, and live measures validate");
+
+        let atomic_devices = "atomic Xyce device outputs
+VC 1 0 5
+R1 1 0 100
+.SUBCKT CELL A
+R2 A 0 200
+.ENDS
+X1 1 CELL
+.DC VC 5 5 1
+.PRINT DC {VC} {R1} {X1:R2}
+.END
+";
+        Netlist::parse_validated_with_options(atomic_devices, options)
+            .expect("atomic source, passive, and flattened device values validate");
+        assert!(matches!(
+            Netlist::parse_validated_with_options(
+                &atomic_devices.replace("{R1}", "{R1+1}"),
+                options,
+            ),
+            Err(ParseError::OutputExpressionValidation(error))
+                if matches!(error.issue, OutputExpressionIssue::UnresolvedIdentifier { ref identifier } if identifier == "R1")
+        ));
+
+        for invalid_measure in [
+            source.replace(
+                ".MEASURE TRAN VV1 PARAM='V(1)+1'",
+                ".MEASURE AC VV1 PARAM='V(1)+1'",
+            ),
+            source.replace(
+                ".MEASURE TRAN VV1 PARAM='V(1)+1'",
+                ".MEASURE TRAN VV1 AVG V(1)",
+            ),
+        ] {
+            assert!(
+                matches!(
+                    Netlist::parse_validated_with_options(&invalid_measure, options),
+                    Err(ParseError::OutputExpressionValidation(error))
+                        if matches!(error.issue, OutputExpressionIssue::UnresolvedIdentifier { ref identifier } if identifier == "VV1")
+                ),
+                "only same-analysis live equation measurements may be referenced by output expressions"
+            );
+        }
+
+        let error = Netlist::parse_validated_with_options(
+            &source.replace("DDX(V(1)*V(1),V(1))", "DDX(V(1))"),
+            options,
+        )
+        .expect_err("DDX retains its exact two-argument contract");
+        assert!(matches!(
+            error,
+            ParseError::OutputExpressionValidation(error)
+                if matches!(error.issue, OutputExpressionIssue::Syntax { ref detail } if detail.contains("DDX") && detail.contains("2"))
+        ));
+
+        for invalid in [
+            "DDX(V(1),1)",
+            "DDX(V(1),VR(1))",
+            "DDX(V(1),V(1,0))",
+            "DDX(V(1),V(2))",
+            "DDX(V(1),I(VC))",
+            "'DDX(V(1),V(2))'",
+        ] {
+            let invalid_source = source.replace("DDX(V(1)*V(1),V(1))", invalid);
+            assert!(
+                matches!(
+                    Netlist::parse_validated_with_options(&invalid_source, options),
+                    Err(ParseError::OutputExpressionValidation(error))
+                        if matches!(error.issue, OutputExpressionIssue::Syntax { .. })
+                ),
+                "invalid derivative contract {invalid} was accepted"
+            );
+        }
+
+        let numeric_collision = "runtime identifier numeric boundaries
+V1 1 0 1
+.TRAN 0 1
+.PRINT TRAN {1e3+1e-3+1meg+E3}
+.MEASURE TRAN E3 PARAM='V(1)'
+.END
+";
+        Netlist::parse_validated_with_options(numeric_collision, options)
+            .expect("runtime names do not rewrite exponent or engineering suffix tokens");
+
+        let function_derivative = "DDX function formal
+V1 1 0 1
+.FUNC DERIV(X) {DDX(X*X,X)}
+.TRAN 0 1
+.PRINT TRAN {DERIV(V(1))}
+.END
+";
+        Netlist::parse_validated_with_options(function_derivative, options)
+            .expect("DDX accepts a referenced user-function formal target");
+        assert!(matches!(
+            Netlist::parse_validated_with_options(
+                &function_derivative.replace("DDX(X*X,X)", "DDX(X*X,1)"),
+                options,
+            ),
+            Err(ParseError::OutputExpressionValidation(error))
+                if matches!(error.issue, OutputExpressionIssue::Syntax { .. })
+        ));
+
+        for missing in ["V(MISSING)", "I(MISSING)"] {
+            let missing_dependency = format!(
+                "function dependency\nV1 1 0 1\n.FUNC OBSERVE(X) {{{missing}+X}}\n.TRAN 0 1\n.PRINT TRAN {{OBSERVE(1)}}\n.END\n"
+            );
+            let observed = Netlist::parse_validated_with_options(&missing_dependency, options);
+            assert!(
+                matches!(
+                    &observed,
+                    Err(ParseError::OutputSymbolValidation(error))
+                        if error.unresolved.len() == 1
+                            && error.unresolved[0].symbol.eq_ignore_ascii_case("MISSING")
+                ),
+                "expanded dependency {missing} was not validated exactly once: {observed:?}"
+            );
+        }
+
+        let ngspice_user_ddx = "ngspice user DDX function
+V1 1 0 1
+.FUNC DDX(A,B) {A+B}
+.TRAN 0 1
+.PRINT TRAN {DDX(V(1),2)}
+.END
+";
+        Netlist::parse_validated(ngspice_user_ddx)
+            .expect("non-Xyce user functions named DDX retain ordinary function semantics");
     }
 
     #[test]

@@ -969,6 +969,170 @@ pub(crate) fn compiled_expression_branch_partial(
     )
 }
 
+/// Evaluate the exact directional derivative of a real Xyce expression from
+/// caller-supplied scalar leaves.
+///
+/// Every entry in `derivative_targets` must be an alias for the same physical
+/// scalar and therefore have the same numeric value in `parameters`. This is
+/// the semantic primitive used by output-domain `DDX`: Xyce differentiates
+/// the expression AST directly, so numerical differencing is neither precise
+/// enough nor correct at branch points.
+pub fn evaluate_parameter_directional_derivative(
+    expression: &str,
+    parameters: &crate::netlist::expr::ParamContext,
+    derivative_targets: &[String],
+) -> Result<Value, String> {
+    let derivative_targets = derivative_targets
+        .iter()
+        .map(|target| target.to_ascii_uppercase())
+        .collect::<std::collections::BTreeSet<_>>();
+    fn convert(
+        expression: &crate::netlist::expr::Expr,
+        parameters: &crate::netlist::expr::ParamContext,
+        targets: &std::collections::BTreeSet<String>,
+    ) -> Result<Expr, String> {
+        use crate::netlist::expr::{BinOpKind, Expr as NetExpr, UnaryOpKind};
+        Ok(match expression {
+            NetExpr::Number(value) => Expr::Const(*value),
+            NetExpr::ComplexNumber(value) if value.is_real() => Expr::Const(value.re),
+            NetExpr::ComplexNumber(_) => {
+                return Err("DDX requires a real-valued expression".to_string());
+            }
+            NetExpr::StringLiteral(_) => {
+                return Err("DDX cannot differentiate a string literal".to_string());
+            }
+            NetExpr::Param(name)
+                if targets.contains(&name.to_ascii_uppercase()) =>
+            {
+                Expr::NodeVoltage("__RSPICE_DDX_TARGET".to_string())
+            }
+            NetExpr::Param(name) => Expr::Const(
+                parameters
+                    .get(name)
+                    .ok_or_else(|| format!("DDX scalar leaf '{name}' has no numeric value"))?,
+            ),
+            NetExpr::UnaryOp { op, operand } => match op {
+                UnaryOpKind::Neg => Expr::Unary {
+                    op: UnaryOp::Neg,
+                    operand: Box::new(convert(operand, parameters, targets)?),
+                },
+                UnaryOpKind::Pos => convert(operand, parameters, targets)?,
+                UnaryOpKind::Not => Expr::Unary {
+                    op: UnaryOp::Not,
+                    operand: Box::new(convert(operand, parameters, targets)?),
+                },
+            },
+            NetExpr::BinOp { op, left, right } => Expr::Binary {
+                op: match op {
+                    BinOpKind::Add => BinaryOp::Add,
+                    BinOpKind::Sub => BinaryOp::Sub,
+                    BinOpKind::Mul => BinaryOp::Mul,
+                    BinOpKind::Div => BinaryOp::Div,
+                    BinOpKind::Mod => BinaryOp::Mod,
+                    BinOpKind::Pow => BinaryOp::Pow,
+                    BinOpKind::Gt => BinaryOp::Gt,
+                    BinOpKind::Lt => BinaryOp::Lt,
+                    BinOpKind::Ge => BinaryOp::Ge,
+                    BinOpKind::Le => BinaryOp::Le,
+                    BinOpKind::Eq => BinaryOp::Eq,
+                    BinOpKind::Ne => BinaryOp::Ne,
+                    BinOpKind::And => BinaryOp::And,
+                    BinOpKind::Or => BinaryOp::Or,
+                },
+                left: Box::new(convert(left, parameters, targets)?),
+                right: Box::new(convert(right, parameters, targets)?),
+            },
+            NetExpr::FnCall { name, args } => Expr::Function {
+                func: Function::from_name(name)
+                    .filter(|function| {
+                        !matches!(
+                            function,
+                            Function::TableFile
+                                | Function::FastTable
+                                | Function::FastTableFile
+                                | Function::Cubic
+                                | Function::CubicFile
+                                | Function::Akima
+                                | Function::AkimaFile
+                                | Function::Wodicka
+                                | Function::WodickaFile
+                                | Function::Barycentric
+                                | Function::BarycentricFile
+                                | Function::Sdt
+                        )
+                    })
+                    .ok_or_else(|| {
+                        format!(
+                            "DDX cannot analytically differentiate unresolved or stateful function '{name}'"
+                        )
+                    })?,
+                args: args
+                    .iter()
+                    .map(|argument| convert(argument, parameters, targets))
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+        })
+    }
+
+    let parsed =
+        crate::netlist::expr::parse_expression(expression).map_err(|error| error.to_string())?;
+    if derivative_targets.is_empty() {
+        return Err("DDX has no derivative target".to_string());
+    }
+    let ast = convert(&parsed, parameters, &derivative_targets)?;
+    let program = compile(&ast);
+    let representative = derivative_targets
+        .iter()
+        .next()
+        .expect("non-empty target set");
+    let target_value = parameters.get(representative).ok_or_else(|| {
+        format!(
+            "DDX derivative target '{}' has no numeric value",
+            representative
+        )
+    })?;
+    for alias in derivative_targets.iter().skip(1) {
+        let alias_value = parameters
+            .get(alias)
+            .ok_or_else(|| format!("DDX derivative target '{alias}' has no numeric value"))?;
+        if alias_value.to_bits() != target_value.to_bits() {
+            return Err(format!(
+                "DDX derivative aliases '{representative}' and '{alias}' have different values"
+            ));
+        }
+    }
+    let node_values = vec![target_value; program.node_map.len()];
+    let target = program
+        .node_map
+        .iter()
+        .find_map(|(name, &index)| (name == "__RSPICE_DDX_TARGET").then_some(index))
+        .ok_or_else(|| {
+            format!(
+                "directional output derivative target '{}' is absent from the expression",
+                derivative_targets
+                    .iter()
+                    .next()
+                    .expect("non-empty target set")
+            )
+        })?;
+    let context = BehavioralDerivativeContext {
+        program: &program,
+        node_values: &node_values,
+        branch_values: &[],
+        time: parameters.get("TIME").unwrap_or(0.0),
+        frequency: parameters.get("FREQ").unwrap_or(0.0),
+        temperature: parameters.get("TEMP").unwrap_or(27.0),
+        gmin: parameters.get("GMIN").unwrap_or(crate::constants::GMIN),
+        expression_dialect: parameters.expression_dialect(),
+        target: DerivativeTarget::Node(target),
+    };
+    eval_behavioral_expr_with_derivative_at_boundary(&ast, &context)
+        .map(|(_, derivative)| derivative)
+        .ok_or_else(|| {
+            "directional output derivative could not be evaluated analytically".to_string()
+        })
+}
+
 fn eval_behavioral_expr_with_derivative_at_boundary(
     expr: &Expr,
     context: &BehavioralDerivativeContext<'_>,

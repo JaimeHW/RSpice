@@ -47,17 +47,17 @@ pub use api::{
     eval_expression, eval_expression_complex, eval_simple, eval_simple_complex, parse_expression,
 };
 pub(crate) use behavioral::{
-    BehavioralPreparationError, prepare_behavioral_expression_with_abort,
-    validate_prepared_behavioral_runtime_expression,
+    BehavioralPreparationError, expand_output_user_functions_with_abort,
+    prepare_behavioral_expression_with_abort, validate_prepared_behavioral_runtime_expression,
 };
 pub use behavioral::{
     ParameterCircuitProbe, ParameterCircuitProbeKind, RuntimeSpecialQuantity,
     behavioral_expression_references_frequency, behavioral_expression_references_runtime_quantity,
-    behavioral_expression_references_unbound_frequency, finalize_parameter_expressions,
-    materialize_available_parameter_expressions, parameter_expression_circuit_probe,
-    prepare_behavioral_expression, prepare_behavioral_expression_preserving_spelling,
-    runtime_special_quantity, validate_global_parameter_expressions,
-    validate_parameter_expressions,
+    behavioral_expression_references_unbound_frequency, expand_output_user_functions,
+    finalize_parameter_expressions, materialize_available_parameter_expressions,
+    parameter_expression_circuit_probe, prepare_behavioral_expression,
+    prepare_behavioral_expression_preserving_spelling, runtime_special_quantity,
+    validate_global_parameter_expressions, validate_parameter_expressions,
 };
 pub use context::{
     DEFAULT_RANDOM_SEED, FunctionDef, ParamContext, ParameterRedefinitionPolicy, RandomState,

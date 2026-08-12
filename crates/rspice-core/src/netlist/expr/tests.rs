@@ -8,6 +8,17 @@ use super::*;
 use crate::abort_signal::CountingAbort;
 use crate::config::ExpressionDialect;
 
+#[test]
+fn nested_curly_grouping_is_canonical_and_reports_its_delimiter() {
+    let parenthesized = parse_expression("1+((2*3))").expect("parenthesized grouping parses");
+    let braced = parse_expression("1+{{2*3}}").expect("nested curly grouping parses");
+    assert_eq!(format!("{parenthesized:?}"), format!("{braced:?}"));
+    assert!(matches!(
+        parse_expression("{1+2").expect_err("missing brace must fail"),
+        ExprError::TrailingInput(detail) if detail == "missing closing brace"
+    ));
+}
+
 fn eval_with(ctx: &ParamContext, input: &str) -> Value {
     eval_expression(input, ctx).unwrap_or_else(|e| panic!("eval `{input}` failed: {e}"))
 }
