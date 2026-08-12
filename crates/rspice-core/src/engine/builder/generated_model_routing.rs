@@ -137,10 +137,16 @@ pub(super) fn try_route_generated_bjt_model(
     spice_dialect: crate::config::SpiceDialect,
     temperature: f64,
 ) -> Result<bool, SimulationError> {
-    let target = generated_bjt_target(model_name, model_def)?;
-    let Some(target) = target.filter(|target| target.is_available()) else {
+    let target = generated_bjt_target(model_name, model_def, element.nodes.len(), spice_dialect)?;
+    let Some(target) = target else {
         return Ok(false);
     };
+    if !target.is_available() {
+        return Err(SimulationError::Circuit(format!(
+            "BJT '{}': model '{}' selects generated Verilog-A model '{}' under {:?} compatibility, but that exact model is not available in this build",
+            element.name, model_name, target.model_name, spice_dialect
+        )));
+    }
 
     let expected = expected_terminal_count(element, target)?;
     let max_implicit_ground_nodes = expected.saturating_sub(3);
@@ -300,20 +306,21 @@ fn generated_diode_target(
     })
 }
 
-/// Generated BJT models are selected by model type only.
+/// Resolve explicit generated BJT types and dialect-owned Q-level devices.
 ///
-/// A `Q` element's SPICE `LEVEL` belongs to the native BJT front and its
-/// fail-closed policy (`validate_bjt_model_level`): LEVEL=0/1/2 is legacy
-/// Gummel-Poon, LEVEL=4/9/11/12/13 is native VBIC, and every advanced CMC
-/// family is refused by name until it has reference-backed validation. Letting
-/// a level reach the generated catalog made all of that build-dependent — the
-/// same deck meant a different device depending on which `veriloga-model-*`
-/// features happened to be enabled — and handed Xyce/ngspice model cards to an
-/// ADMS parameter dialect that rejects them. The generated modules stay
-/// reachable by their own model type and by direct X-device instantiation.
+/// Xyce 7.10 registers its ADMS VBIC 1.3 devices directly as Q LEVEL=11
+/// (three electrical terminals, with an optional external thermal terminal)
+/// and Q LEVEL=12 (four electrical terminals). Selecting those modules is
+/// dialect semantics, not an opportunistic fallback. A build lacking that
+/// exact generated module must fail explicitly rather than silently selecting
+/// another BJT implementation. ngspice and BestAvailable selectors remain on
+/// the native BJT policy, while explicit module types remain available in
+/// every dialect.
 fn generated_bjt_target(
     model_name: &str,
     model_def: Option<&ModelDef>,
+    instance_terminal_count: usize,
+    spice_dialect: crate::config::SpiceDialect,
 ) -> Result<Option<GeneratedTarget>, SimulationError> {
     let type_name = model_def
         .map(|model| model.model_type.as_str())
@@ -348,7 +355,26 @@ fn generated_bjt_target(
             match_normalized(type_name, &["VBIC_4T_ET_CF"])
                 .then_some(GeneratedTarget::new("vbic_4T_et_cf"))
         });
-    Ok(explicit)
+    if explicit.is_some() {
+        return Ok(explicit);
+    }
+
+    let Some(model) = model_def else {
+        return Ok(None);
+    };
+    if spice_dialect != crate::config::SpiceDialect::Xyce
+        || is_lpnp_bjt_model_type(&model.model_type)
+        || resolve_bjt_type_from_model(&model.model_type).is_none()
+    {
+        return Ok(None);
+    }
+
+    Ok(match checked_model_level("BJT", model_name, model)? {
+        Some(11) if instance_terminal_count >= 4 => Some(GeneratedTarget::new("vbic13_3t_et")),
+        Some(11) => Some(GeneratedTarget::new("vbic13")),
+        Some(12) => Some(GeneratedTarget::new("vbic13_4t")),
+        _ => None,
+    })
 }
 
 fn generated_mos_target(
@@ -1145,5 +1171,50 @@ mod tests {
             message.contains("RB") || message.contains("RC"),
             "unexpected undeclared-parameter error: {message}"
         );
+    }
+
+    #[test]
+    fn xyce_q_levels_select_the_exact_registered_vbic_variant() {
+        for (level, terminals, expected) in [
+            (11, 3, "vbic13"),
+            (11, 4, "vbic13_3t_et"),
+            (12, 4, "vbic13_4t"),
+        ] {
+            let netlist = Netlist::parse(&format!(
+                "Xyce VBIC level routing\nQ1 c b e model\n.MODEL model NPN LEVEL={level}\n.END\n"
+            ))
+            .expect("VBIC level fixture parses");
+            let model = find_model_def(&netlist, "model").expect("fixture model exists");
+            let target = generated_bjt_target(
+                "model",
+                Some(model),
+                terminals,
+                crate::config::SpiceDialect::Xyce,
+            )
+            .expect("Xyce level resolves")
+            .expect("Xyce level selects a generated model");
+            assert_eq!(target.model_name, expected);
+        }
+    }
+
+    #[test]
+    fn non_xyce_and_unregistered_q_levels_do_not_select_generated_vbic() {
+        for (level, dialect) in [
+            (11, crate::config::SpiceDialect::BestAvailable),
+            (11, crate::config::SpiceDialect::Ngspice),
+            (13, crate::config::SpiceDialect::Xyce),
+        ] {
+            let netlist = Netlist::parse(&format!(
+                "non-Xyce VBIC level routing\nQ1 c b e model\n.MODEL model NPN LEVEL={level}\n.END\n"
+            ))
+            .expect("VBIC level fixture parses");
+            let model = find_model_def(&netlist, "model").expect("fixture model exists");
+            assert!(
+                generated_bjt_target("model", Some(model), 3, dialect)
+                    .expect("level classification succeeds")
+                    .is_none(),
+                "LEVEL={level} under {dialect:?} must not select a generated VBIC implementation"
+            );
+        }
     }
 }
