@@ -260,9 +260,21 @@ impl RSpiceApp {
             dialog = dialog.secondary(label);
         }
         if let Some(error) = error.as_deref() {
+            // The strip is the only thing on screen that explains a disabled
+            // primary, so where the refusal has an owner it names it. It names
+            // one only on the page that has a rail to send the operator to; a
+            // subflow keeps the dialog-level wording.
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
-                "Hardcopy configuration blocked",
+                self.state
+                    .dialogs
+                    .hardcopy
+                    .error_section
+                    .filter(|_| page == HardcopyDialogPage::Main)
+                    .map_or_else(
+                        || "Hardcopy configuration blocked".to_owned(),
+                        |section| format!("Blocked in {}", section.label()),
+                    ),
                 error,
             );
         }
@@ -807,8 +819,11 @@ fn section_navigation(
     {
         ui.set_width(NAV_WIDTH);
         ui.spacing_mut().item_spacing.y = 0.0;
+        let blocked_by = draft.error_section;
+        let blocking_message = draft.error.clone();
         for section in sections.iter().copied() {
             let selected = draft.section == section;
+            let blocked = blocked_by == Some(section);
             let detail = section_detail(draft, section);
             let entry = Frame::NONE
                 .fill(if selected {
@@ -837,28 +852,46 @@ fn section_navigation(
                                     }),
                             );
                             paint_section_icon(ui, section, selected);
-                            ui.vertical(|ui| {
-                                ui.label(
-                                    egui::RichText::new(section.label())
-                                        .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
-                                        .color(t.color.text),
-                                );
-                                // Truncated, never wrapped: a two-line summary
-                                // would push the entry past the height it was
-                                // allocated and ripple down the whole rail.
-                                ui.add(
-                                    egui::Label::new(
-                                        egui::RichText::new(detail)
-                                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                            .color(t.color.text_dim),
-                                    )
-                                    .truncate(),
-                                );
-                            });
+                            // The marker's track comes off the text before the
+                            // text is laid out. Taken afterwards, a summary
+                            // long enough to truncate would have claimed the
+                            // whole row and pushed the marker off the rail.
+                            let text_width = (ui.available_width()
+                                - if blocked { PROBLEM_MARKER_TRACK } else { 0.0 })
+                            .max(1.0);
+                            ui.allocate_ui_with_layout(
+                                vec2(text_width, ui.available_height()),
+                                Layout::top_down(Align::Min),
+                                |ui| {
+                                    ui.label(
+                                        egui::RichText::new(section.label())
+                                            .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
+                                            .color(t.color.text),
+                                    );
+                                    // Truncated, never wrapped: a two-line
+                                    // summary would push the entry past the
+                                    // height it was allocated and ripple down
+                                    // the whole rail.
+                                    ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(detail)
+                                                .font(theme::sans(
+                                                    tokens::FS_0,
+                                                    FontWeight::Regular,
+                                                ))
+                                                .color(t.color.text_dim),
+                                        )
+                                        .truncate(),
+                                    );
+                                },
+                            );
                         },
                     );
                 });
             let rect = entry.response.rect;
+            if blocked {
+                paint_problem_marker(ui, rect);
+            }
             if selected {
                 ui.painter().rect_filled(
                     Rect::from_min_max(rect.min, egui::pos2(rect.left() + 3.0, rect.bottom())),
@@ -867,19 +900,22 @@ fn section_navigation(
                 );
             }
             let response = entry.response.interact(Sense::click());
+            let name = section_entry_name(section, blocked);
             response.widget_info(|| {
                 egui::WidgetInfo::selected(
                     egui::WidgetType::SelectableLabel,
                     ui.is_enabled(),
                     selected,
-                    section.label(),
+                    name.as_str(),
                 )
             });
             theme::paint_focus_ring(ui, &response, rect);
-            if response
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .clicked()
-            {
+            let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+            let response = match blocking_message.as_deref() {
+                Some(message) if blocked => response.on_hover_text(message),
+                _ => response,
+            };
+            if response.clicked() {
                 draft.section = section;
             }
             ui.painter().hline(
@@ -943,6 +979,66 @@ fn section_navigation(
             },
         );
     }
+}
+
+/// What a rail entry or a section chip is called once its section holds a field
+/// the publisher refuses.
+///
+/// The suffix is the marker assistive technology reads: a painted glyph and a
+/// colour are nothing to a screen reader, and a rail that only says which
+/// section is wrong in red says it to some of the people using it.
+fn section_entry_name(section: HardcopySection, blocked: bool) -> String {
+    if blocked {
+        format!("{} · blocked", section.label())
+    } else {
+        section.label().to_owned()
+    }
+}
+
+/// The width a marked entry gives up from its summary: the glyph, and the
+/// gutter that keeps it off the text.
+const PROBLEM_MARKER_TRACK: f32 = 22.0;
+/// The rail entry's own horizontal inset, which the mark shares so it lines up
+/// with the column of text above and below it.
+const PROBLEM_MARKER_INSET: f32 = 12.0;
+
+/// A blocked section's mark: a filled warning triangle at the trailing edge of
+/// `entry`. It is painted rather than set in text because the icon vocabulary
+/// has no warning glyph and the shipped faces have no dependable one either,
+/// and painted into the entry's own rectangle rather than allocated inside it
+/// because a row that grows by a marker's height stops fitting its column.
+fn paint_problem_marker(ui: &Ui, entry: Rect) {
+    let t = Tokens::get(ui.ctx());
+    let rect = Rect::from_center_size(
+        egui::pos2(entry.right() - PROBLEM_MARKER_INSET - 7.0, entry.center().y),
+        vec2(14.0, 14.0),
+    );
+    let triangle = Rect::from_center_size(rect.center(), vec2(13.0, 11.5));
+    let painter = ui.painter();
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            egui::pos2(triangle.center().x, triangle.top()),
+            triangle.right_bottom(),
+            triangle.left_bottom(),
+        ],
+        t.color.err,
+        Stroke::NONE,
+    ));
+    // The exclamation is cut out of the fill in the panel's own colour, so the
+    // mark reads at rail density instead of turning into a solid lozenge.
+    painter.vline(
+        triangle.center().x,
+        egui::Rangef::new(triangle.top() + 4.0, triangle.bottom() - 4.0),
+        Stroke::new(1.5, t.color.bg_panel),
+    );
+    painter.rect_filled(
+        Rect::from_center_size(
+            egui::pos2(triangle.center().x, triangle.bottom() - 2.5),
+            vec2(1.5, 1.5),
+        ),
+        0.0,
+        t.color.bg_panel,
+    );
 }
 
 fn paint_section_icon(ui: &mut Ui, section: HardcopySection, selected: bool) {
@@ -1366,10 +1462,18 @@ fn section_tab_strip(
                 region_switch(ui, draft);
             }
             if split || draft.region == HardcopyRegion::Setup {
+                let blocked_by = draft.error_section;
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
                     for section in sections.iter().copied() {
-                        let label = format!("{}  {}", section.number(), section.label());
+                        // A chip carries its mark in its own text: it has no
+                        // room beside it for a glyph, and the text is what a
+                        // screen reader is given either way.
+                        let label = format!(
+                            "{}  {}",
+                            section.number(),
+                            section_entry_name(section, blocked_by == Some(section))
+                        );
                         if ui
                             .selectable_label(draft.section == section, label)
                             .clicked()
@@ -3460,6 +3564,149 @@ mod tests {
                 rect.height()
             );
         }
+    }
+
+    /// Every error-filled triangle the pass painted. The rail's problem marker
+    /// is a path rather than a rectangle, so `painted_rects` cannot see it, and
+    /// its colour is the only thing that distinguishes it from the section
+    /// icons drawn beside it.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn marker_rects(output: &egui::FullOutput, err: egui::Color32) -> Vec<Rect> {
+        fn walk(shape: &egui::Shape, err: egui::Color32, into: &mut Vec<Rect>) {
+            match shape {
+                egui::Shape::Path(path) if path.fill == err => {
+                    into.push(path.visual_bounding_rect());
+                }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, err, into);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut rects = Vec::new();
+        for clipped in &output.shapes {
+            walk(&clipped.shape, err, &mut rects);
+        }
+        rects
+    }
+
+    /// An invalid field is invisible from every other section, and a disabled
+    /// primary with a dialog-level banner says only that something is wrong.
+    /// The rail has to say where: marked by name in the accessibility tree,
+    /// marked on the surface by a glyph inside the entry it belongs to, and
+    /// neither at the cost of the row's height.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn a_blocked_section_is_marked_on_the_rail_from_every_other_section() {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let err = Tokens::get(&ctx).color.err;
+        let mut app = studio_app();
+        let viewport = vec2(1_440.0, 900.0);
+
+        let settled = settled_studio(&ctx, &mut app, viewport);
+        let clean = dialog_controls(&settled);
+        let clean_row = control_rect(&clean, HardcopySection::Page.label())
+            .expect("the rail names every section it offers");
+        assert!(
+            marker_rects(&settled, err)
+                .iter()
+                .all(|marker| !clean_row.contains_rect(*marker)),
+            "a valid configuration marks nothing"
+        );
+
+        // A margin wider than the page, entered while standing in Output.
+        app.state.dialogs.hardcopy.section = HardcopySection::Output;
+        app.state.dialogs.hardcopy.margin_left = "100".to_owned();
+        app.state.dialogs.hardcopy.refresh_preview();
+        assert_eq!(
+            app.state.dialogs.hardcopy.error_section,
+            Some(HardcopySection::Page)
+        );
+        // A blocked draft compiles no plan, so the settling probe would wait
+        // for a preview that can never arrive. Two passes are what the tree
+        // needs: one to lay the rail out and one to report it.
+        let _ = render_studio(&ctx, &mut app, viewport);
+        let blocked = render_studio(&ctx, &mut app, viewport);
+        let controls = dialog_controls(&blocked);
+
+        let marked = control_rect(&controls, "Page and pagination · blocked")
+            .expect("the rail entry names the section that holds the refused field");
+        // The entry sets its title as text inside itself as well. What has to
+        // carry the mark is the row a keyboard or screen reader lands on, which
+        // is the one that contains the other.
+        let title = control_rect(&controls, HardcopySection::Page.label())
+            .expect("the entry still draws its title");
+        assert!(
+            marked.contains_rect(title) && marked.height() > title.height(),
+            "the mark is on a label inside the entry rather than on the entry"
+        );
+        for section in [
+            HardcopySection::Source,
+            HardcopySection::Output,
+            HardcopySection::Identity,
+        ] {
+            assert!(
+                control_rect(&controls, &format!("{} · blocked", section.label())).is_none(),
+                "{section:?} holds nothing invalid and must not be marked"
+            );
+        }
+        assert!(
+            (marked.height() - clean_row.height()).abs() < 0.5,
+            "the marker grew the rail row from {:.0} pt to {:.0} pt",
+            clean_row.height(),
+            marked.height()
+        );
+        let markers: Vec<Rect> = marker_rects(&blocked, err)
+            .into_iter()
+            .filter(|marker| marked.contains_rect(*marker))
+            .collect();
+        assert_eq!(
+            markers.len(),
+            1,
+            "the marked entry carries exactly one painted mark"
+        );
+        assert!(
+            marked.right() - markers[0].right() < PROBLEM_MARKER_TRACK,
+            "the mark sits at the entry's trailing edge"
+        );
+
+        // The strip the primary's refusal is explained in names the same
+        // section, so the banner and the rail cannot send the operator to
+        // different places.
+        assert!(
+            controls
+                .iter()
+                .any(|(label, _)| label == "Blocked in Page and pagination"),
+            "the transaction strip names the section holding the primary"
+        );
+    }
+
+    /// Below the rail's width the chips are the rail, and a mark that only
+    /// existed in the wide layout would be missing on exactly the surfaces
+    /// where a section is hardest to find.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn the_narrow_strip_marks_the_blocked_section_too() {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = studio_app();
+        let viewport = vec2(390.0, 844.0);
+        let _ = settled_studio(&ctx, &mut app, viewport);
+
+        app.state.dialogs.hardcopy.region = HardcopyRegion::Setup;
+        app.state.dialogs.hardcopy.section = HardcopySection::Identity;
+        app.state.dialogs.hardcopy.margin_left = "100".to_owned();
+        app.state.dialogs.hardcopy.refresh_preview();
+        let _ = render_studio(&ctx, &mut app, viewport);
+        let controls = dialog_controls(&render_studio(&ctx, &mut app, viewport));
+
+        assert!(control_rect(&controls, "02  Page and pagination · blocked").is_some());
+        assert!(control_rect(&controls, "01  Source and scope").is_some());
     }
 
     /// The editor column at `measure`, laid out to its own natural height:

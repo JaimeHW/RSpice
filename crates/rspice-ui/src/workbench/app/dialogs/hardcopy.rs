@@ -103,6 +103,98 @@ impl HardcopySection {
     }
 }
 
+/// The section whose fields a refusal is about, where exactly one owns it.
+///
+/// Attribution is by contract variant, and by the typed field a variant names
+/// where it carries one. It is never taken from the rendered message: that is
+/// prose, and a reworded sentence would silently move a marker. A refusal that
+/// more than one section's controls can cause — or that no control causes at
+/// all — stays at the dialog level, because a marker on a section with nothing
+/// wrong in it costs the operator more than no marker does.
+fn contract_section(error: &HardcopyError) -> Option<HardcopySection> {
+    match error {
+        // Paper, orientation, margins, bleed, scale and tiling are authored in
+        // one section, and every length or count this dialog parses is one of
+        // them. The pagination refusals belong here too: what they name is the
+        // page grid those same controls ask for.
+        HardcopyError::InvalidLength(_)
+        | HardcopyError::InvalidPageDimension { .. }
+        | HardcopyError::MarginsExhaustPage
+        | HardcopyError::BleedExceedsMargins
+        | HardcopyError::InvalidScale(_)
+        | HardcopyError::ZeroScaleRatio
+        | HardcopyError::InvalidManualTiling { .. }
+        | HardcopyError::ManualTilingDoesNotCover { .. }
+        | HardcopyError::SinglePageOverflow { .. }
+        | HardcopyError::OverlapExhaustsPage
+        | HardcopyError::TooManyPages(_)
+        | HardcopyError::InvalidAuthoredSheetMedia(_)
+        | HardcopyError::AuthoredMediaRequiresSchematicSource => Some(HardcopySection::Page),
+        // The target and what it is able to carry.
+        HardcopyError::InvalidRasterResolution(_)
+        | HardcopyError::IncompatibleRenderTarget
+        | HardcopyError::TransparentBackgroundRequiresVectorExport
+        | HardcopyError::SearchableTextRequiresVectorOutput
+        | HardcopyError::SearchableTextRequiresEmbeddedFonts
+        | HardcopyError::PdfARequiresEmbeddedFonts
+        | HardcopyError::InvalidPrinterRollWidth
+        | HardcopyError::InvalidPrinterResolution(_)
+        | HardcopyError::InvalidPrinterRasterGeometry
+        | HardcopyError::InvalidCopyCount(_)
+        | HardcopyError::CollationRequiresMultipleCopies => Some(HardcopySection::Output),
+        // The sealed document and the extent of it this hardcopy publishes.
+        HardcopyError::IncompatibleScope { .. } | HardcopyError::EmptyContentExtent => {
+            Some(HardcopySection::Source)
+        }
+        // One refusal, one field, several owners. An unrecognised field is
+        // reported at the dialog level rather than guessed at.
+        HardcopyError::InvalidText { field, .. } => match *field {
+            "custom paper name" => Some(HardcopySection::Page),
+            "printer identity" => Some(HardcopySection::Output),
+            "custom watermark" => Some(HardcopySection::Identity),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A refused configuration: what the operator is told, and where to go about
+/// it. The two travel together so a marker cannot outlive the message it
+/// belongs to.
+struct BlockedSetup {
+    message: String,
+    section: Option<HardcopySection>,
+}
+
+impl BlockedSetup {
+    /// A refusal no section owns: it is about the workflow, the host, or the
+    /// retained document rather than about a field.
+    fn dialog(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            section: None,
+        }
+    }
+}
+
+impl From<HardcopyDialogError> for BlockedSetup {
+    fn from(error: HardcopyDialogError) -> Self {
+        Self {
+            message: error.to_string(),
+            section: error.section(),
+        }
+    }
+}
+
+impl From<HardcopyError> for BlockedSetup {
+    fn from(error: HardcopyError) -> Self {
+        Self {
+            message: error.to_string(),
+            section: contract_section(&error),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum HardcopyDialogError {
     #[error(transparent)]
@@ -119,6 +211,28 @@ pub(crate) enum HardcopyDialogError {
     OutsideSheetContentDecisionRequired,
     #[error("could not validate schematic drawing-sheet output: {0}")]
     SchematicOutputSource(String),
+}
+
+impl HardcopyDialogError {
+    fn section(&self) -> Option<HardcopySection> {
+        match self {
+            Self::Contract(error) => contract_section(error),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::MissingPrinterCapabilities => Some(HardcopySection::Output),
+            // The only unsigned integers the draft parses are the manual tile
+            // counts. A field added later is reported at the dialog level until
+            // it is given an owner here.
+            Self::InvalidUnsignedInteger { field } => match *field {
+                "manual columns" | "manual rows" => Some(HardcopySection::Page),
+                _ => None,
+            },
+            Self::OutsideSheetContentDecisionRequired => Some(HardcopySection::DrawingSheet),
+            // Raised when the retained document cannot answer a question about
+            // its own drawing sheet, which is a property of the source rather
+            // than of anything the sheet section can be set to.
+            Self::SchematicOutputSource(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -328,6 +442,10 @@ pub(crate) struct HardcopyDialogState {
     pub(crate) cancellation: crate::workbench::hardcopy_adapters::print::HardcopyCancellationToken,
     pub(crate) last_receipt: Option<HardcopyReceipt>,
     pub(crate) error: Option<String>,
+    /// The rail entry [`Self::error`] belongs to, where the contract named one.
+    /// Written only where the draft is validated, so a section is never marked
+    /// while its fields compile.
+    pub(crate) error_section: Option<HardcopySection>,
 }
 
 impl Default for HardcopyDialogState {
@@ -471,6 +589,7 @@ impl HardcopyDialogState {
                 crate::workbench::hardcopy_adapters::print::HardcopyCancellationToken::default(),
             last_receipt: None,
             error: None,
+            error_section: None,
         }
     }
 
@@ -546,6 +665,7 @@ impl HardcopyDialogState {
         self.schematic_page_authority = None;
         self.source_candidates.clear();
         self.error = None;
+        self.error_section = None;
         self.busy = false;
         self.printer_discovery_busy = false;
         self.cancellation.cancel();
@@ -610,6 +730,7 @@ impl HardcopyDialogState {
         }
         self.body_scroll_offset = 0.0;
         self.error = None;
+        self.error_section = None;
     }
 
     /// The scope the print-mapping page will commit: the selected kind
@@ -652,6 +773,7 @@ impl HardcopyDialogState {
         self.page = HardcopyDialogPage::Main;
         self.subflow_snapshot = None;
         self.error = None;
+        self.error_section = None;
         self.refresh_preview();
         Ok(())
     }
@@ -710,6 +832,7 @@ impl HardcopyDialogState {
         }
         self.page = HardcopyDialogPage::Main;
         self.error = None;
+        self.error_section = None;
         self.body_scroll_offset = 0.0;
         self.refresh_preview();
     }
@@ -865,54 +988,55 @@ impl HardcopyDialogState {
 
     pub(crate) fn refresh_preview(&mut self) {
         self.invalidate_preview_raster();
-        let plan = self
-            .source
-            .clone()
-            .zip(self.content_extent)
-            .ok_or_else(|| "The active document has no hardcopy adapter.".to_owned())
-            .and_then(|(source, fallback_extent)| {
-                self.build_setup()
-                    .map_err(|error| error.to_string())
-                    .and_then(|setup| {
-                        let extent = self.resolved_document.as_ref().map_or_else(
-                            || Ok(fallback_extent),
-                            |document| {
-                                document
-                                    .content_extent_for_setup(setup.schematic())
-                                    .map_err(|error| error.to_string())
-                            },
-                        )?;
-                        let sections = self.resolved_document.as_ref().map_or_else(
-                            || Ok(Vec::new()),
-                            |document| {
-                                document
-                                    .hardcopy_sections_for_setup(setup.schematic())
-                                    .map_err(|error| error.to_string())
-                            },
-                        )?;
-                        match sections {
-                            sections if !sections.is_empty() => {
-                                HardcopyPlan::compile_with_sections(source, setup, extent, sections)
-                                    .map_err(|error| error.to_string())
-                            }
-                            _ => HardcopyPlan::compile(source, setup, extent)
-                                .map_err(|error| error.to_string()),
-                        }
-                    })
-            });
-        match plan {
+        match self.compile_preview_plan() {
             Ok(plan) => {
                 self.preview_page = self
                     .preview_page
                     .min((plan.pagination().pages().len() as u32).saturating_sub(1));
                 self.preview_plan = Some(std::sync::Arc::new(plan));
                 self.error = None;
+                self.error_section = None;
             }
-            Err(error) => {
+            Err(blocked) => {
                 self.preview_plan = None;
-                self.error = Some(error);
+                self.error = Some(blocked.message);
+                self.error_section = blocked.section;
             }
         }
+    }
+
+    /// The plan the preview and the publication share. Every refusal on the way
+    /// keeps its type until this returns, so the studio can say which section a
+    /// blocked configuration is about instead of only that it is blocked.
+    fn compile_preview_plan(&self) -> Result<HardcopyPlan, BlockedSetup> {
+        let (source, fallback_extent) = self
+            .source
+            .clone()
+            .zip(self.content_extent)
+            .ok_or_else(|| BlockedSetup::dialog("The active document has no hardcopy adapter."))?;
+        let setup = self.build_setup()?;
+        let extent = self.resolved_document.as_ref().map_or_else(
+            || Ok(fallback_extent),
+            |document| {
+                document
+                    .content_extent_for_setup(setup.schematic())
+                    .map_err(|error| BlockedSetup::dialog(error.to_string()))
+            },
+        )?;
+        let sections = self.resolved_document.as_ref().map_or_else(
+            || Ok(Vec::new()),
+            |document| {
+                document
+                    .hardcopy_sections_for_setup(setup.schematic())
+                    .map_err(|error| BlockedSetup::dialog(error.to_string()))
+            },
+        )?;
+        if sections.is_empty() {
+            HardcopyPlan::compile(source, setup, extent)
+        } else {
+            HardcopyPlan::compile_with_sections(source, setup, extent, sections)
+        }
+        .map_err(BlockedSetup::from)
     }
 
     pub(crate) fn invalidate_preview_raster(&mut self) {
@@ -1070,7 +1194,10 @@ fn format_length(value: Length, unit: LengthUnit) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hardcopy::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
+    use crate::hardcopy::{
+        HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope, HardcopySetupStore,
+        SetupSaveDisposition,
+    };
     use crate::product::{ContentDigest, ObjectRevision};
 
     fn source() -> ActiveHardcopySource {
@@ -1250,6 +1377,306 @@ mod tests {
         assert_eq!(draft.next_source_resolution_generation(), 1);
         assert_eq!(draft.next_source_resolution_generation(), 2);
         assert_eq!(draft.next_source_resolution_generation(), 3);
+    }
+
+    /// A refused field is invisible from any other section, so the refusal has
+    /// to carry the section it belongs to — and it has to come from the
+    /// contract's own answer rather than from the sentence it renders.
+    #[test]
+    fn a_refused_field_names_the_section_that_owns_it() {
+        let mut draft = HardcopyDialogState::default();
+        draft.open(
+            HardcopyWorkflow::Export,
+            source(),
+            ContentExtent::try_new(
+                Length::from_micrometres(100_000),
+                Length::from_micrometres(100_000),
+            )
+            .unwrap(),
+            None,
+        );
+        assert_eq!(draft.error_section, None);
+
+        draft.margin_left = "100".to_owned();
+        draft.refresh_preview();
+        assert_eq!(draft.error_section, Some(HardcopySection::Page));
+
+        draft.margin_left = "0.35".to_owned();
+        draft.manual_columns = "0".to_owned();
+        draft.tiling = TilingMode::Manual {
+            columns: 2,
+            rows: 1,
+        };
+        draft.refresh_preview();
+        assert_eq!(draft.error_section, Some(HardcopySection::Page));
+
+        draft.tiling = TilingMode::Automatic;
+        draft.format = OutputFormat::Png { dpi: 300 };
+        draft.searchable_text = true;
+        draft.refresh_preview();
+        assert_eq!(draft.error_section, Some(HardcopySection::Output));
+
+        draft.searchable_text = false;
+        draft.watermark = Watermark::Custom(" untrimmed ".to_owned());
+        draft.refresh_preview();
+        assert_eq!(draft.error_section, Some(HardcopySection::Identity));
+
+        draft.watermark = Watermark::None;
+        draft.refresh_preview();
+        assert!(draft.error.is_none());
+        assert_eq!(draft.error_section, None);
+    }
+
+    /// Attribution is a whitelist. A refusal more than one section's controls
+    /// can cause, or that no control causes at all, has to stay at the dialog
+    /// level: a marker on a section with nothing wrong in it sends the operator
+    /// to a form that cannot help them.
+    #[test]
+    fn a_refusal_no_single_section_owns_stays_at_the_dialog_level() {
+        for error in [
+            // Page geometry and the Identity bands both decide this one.
+            HardcopyError::NoPrintableContentArea,
+            HardcopyError::GeometryUnderflow("header, legend, and provenance bands"),
+            // The print mapping is edited on a page of its own, not a section.
+            HardcopyError::TooManyPrintMappings(4_096),
+            HardcopyError::InvalidPrintGrayPercent(0),
+            HardcopyError::InvalidText {
+                field: "project print set mapping name",
+                maximum: 128,
+            },
+            // Nothing in the dialog can be set to repair a broken artifact,
+            // receipt, or persisted store.
+            HardcopyError::EmptyArtifact,
+            HardcopyError::UnsupportedSetupStoreSchema(0),
+        ] {
+            assert_eq!(contract_section(&error), None, "{error}");
+        }
+        assert_eq!(
+            HardcopyDialogError::SchematicOutputSource("unresolved".to_owned()).section(),
+            None
+        );
+        assert_eq!(
+            HardcopyDialogError::OutsideSheetContentDecisionRequired.section(),
+            Some(HardcopySection::DrawingSheet)
+        );
+        assert_eq!(
+            HardcopyDialogError::InvalidUnsignedInteger {
+                field: "manual rows"
+            }
+            .section(),
+            Some(HardcopySection::Page)
+        );
+    }
+
+    /// Which section is open and which region a narrow surface is showing are
+    /// properties of the looking, not of the hardcopy. If either reached the
+    /// setup, reading a different section would rewrite the document.
+    #[test]
+    fn looking_at_a_different_section_or_region_changes_no_setup() {
+        let mut draft = HardcopyDialogState::default();
+        draft.open(
+            HardcopyWorkflow::Export,
+            source(),
+            ContentExtent::try_new(
+                Length::from_micrometres(250_000),
+                Length::from_micrometres(160_000),
+            )
+            .unwrap(),
+            None,
+        );
+        let baseline = draft.build_setup().unwrap();
+        let mut store = HardcopySetupStore::default();
+        let first = store
+            .save(draft.source.as_ref().unwrap(), baseline.clone())
+            .unwrap();
+        assert_eq!(first.disposition(), SetupSaveDisposition::Inserted);
+        let digest = first.saved().content_digest();
+
+        for section in HardcopySection::ALL {
+            for region in [HardcopyRegion::Setup, HardcopyRegion::Preview] {
+                draft.section = section;
+                draft.region = region;
+                draft.refresh_preview();
+                let setup = draft.build_setup().unwrap();
+                assert_eq!(setup, baseline, "{section:?} / {region:?}");
+                let outcome = store.save(draft.source.as_ref().unwrap(), setup).unwrap();
+                assert_eq!(
+                    outcome.disposition(),
+                    SetupSaveDisposition::Unchanged,
+                    "{section:?} / {region:?}"
+                );
+                assert_eq!(outcome.saved().content_digest(), digest);
+                assert_eq!(outcome.saved().revision(), ObjectRevision::INITIAL);
+            }
+        }
+    }
+
+    /// Reopening a saved setup has to give back the setup that was saved. A
+    /// draft that reopens even slightly different would report a change nobody
+    /// made, and every reopen would dirty the project.
+    #[test]
+    fn a_saved_setup_reopens_as_itself() {
+        let mut draft = HardcopyDialogState::default();
+        draft.open(
+            HardcopyWorkflow::Export,
+            source(),
+            ContentExtent::try_new(
+                Length::from_micrometres(250_000),
+                Length::from_micrometres(160_000),
+            )
+            .unwrap(),
+            None,
+        );
+        draft.paper = PaperDraft::Standard(StandardPaper::A3);
+        draft.orientation = Orientation::Portrait;
+        draft.margin_top = "0.75".to_owned();
+        draft.margin_left = "0.6".to_owned();
+        draft.scale = ScaleMode::CustomPercent {
+            hundredths_percent: 7_550,
+        };
+        draft.custom_scale_percent = "75.5".to_owned();
+        draft.tiling = TilingMode::Manual {
+            columns: 2,
+            rows: 2,
+        };
+        draft.manual_columns = "2".to_owned();
+        draft.manual_rows = "2".to_owned();
+        draft.overlap = "0.125".to_owned();
+        draft.registration_marks = true;
+        draft.format = OutputFormat::PdfA;
+        draft.embed_fonts = true;
+        draft.searchable_text = true;
+        draft.include_legends = true;
+        draft.include_provenance = true;
+        draft.watermark = Watermark::Custom("REVIEW ONLY".to_owned());
+        draft.refresh_preview();
+        let configured = draft.build_setup().expect("the authored draft compiles");
+        assert_ne!(configured, HardcopySetup::default());
+
+        let mut store = HardcopySetupStore::default();
+        let saved = store
+            .save(draft.source.as_ref().unwrap(), configured.clone())
+            .unwrap();
+        assert_eq!(saved.disposition(), SetupSaveDisposition::Inserted);
+        let digest = saved.saved().content_digest();
+
+        let mut reopened = HardcopyDialogState::default();
+        reopened.open(
+            HardcopyWorkflow::Export,
+            source(),
+            ContentExtent::try_new(
+                Length::from_micrometres(250_000),
+                Length::from_micrometres(160_000),
+            )
+            .unwrap(),
+            Some(
+                store
+                    .setup_for(&source())
+                    .unwrap()
+                    .expect("the setup was inserted")
+                    .setup(),
+            ),
+        );
+        let round_tripped = reopened.build_setup().expect("a saved setup reopens valid");
+        assert_eq!(round_tripped, configured);
+
+        let again = store
+            .save(reopened.source.as_ref().unwrap(), round_tripped)
+            .unwrap();
+        assert_eq!(again.disposition(), SetupSaveDisposition::Unchanged);
+        assert_eq!(again.saved().content_digest(), digest);
+        assert_eq!(again.saved().revision(), ObjectRevision::INITIAL);
+    }
+
+    /// A receipt is bound to the plan that was executed, not to whatever the
+    /// dialog is showing when it lands. The two can differ — the draft stays
+    /// live while a publication is in flight — so the binding is measured.
+    #[test]
+    fn a_receipt_records_the_plan_that_was_published() {
+        let mut draft = HardcopyDialogState::default();
+        draft.open(
+            HardcopyWorkflow::Export,
+            source(),
+            ContentExtent::try_new(
+                Length::from_micrometres(250_000),
+                Length::from_micrometres(160_000),
+            )
+            .unwrap(),
+            None,
+        );
+        let published = draft.preview_plan.clone().expect("a compiled plan");
+        let pages = published.pagination().pages().len() as u32;
+        let receipt = HardcopyReceipt::record(
+            &published,
+            crate::hardcopy::HardcopyOutcome::ArtifactExported {
+                artifact: crate::hardcopy::HardcopyArtifactIdentity::try_new(
+                    crate::product::ContentDigest::from_bytes([0x77; 32]),
+                    4_096,
+                    pages,
+                    published.setup().render().format(),
+                )
+                .unwrap(),
+            },
+        )
+        .expect("an outcome that matches its plan is recordable");
+
+        // The operator keeps configuring while the artifact is written.
+        draft.orientation = Orientation::Portrait;
+        draft.paper = PaperDraft::Standard(StandardPaper::A3);
+        draft.refresh_preview();
+        let configured = draft
+            .preview_plan
+            .clone()
+            .expect("the edited draft compiles");
+        assert_ne!(configured.content_digest(), published.content_digest());
+
+        assert_eq!(receipt.plan_id(), published.id());
+        assert_eq!(receipt.plan_content_digest(), published.content_digest());
+        assert_ne!(receipt.plan_content_digest(), configured.content_digest());
+        assert_eq!(
+            receipt.source_content_digest(),
+            published.source().content_digest()
+        );
+        // The ledger re-derives every receipt's digest from its own material,
+        // so a receipt that had been edited to name another plan is refused.
+        crate::hardcopy::HardcopyReceiptLedger::default()
+            .append(receipt)
+            .expect("the receipt digests the plan it names");
+    }
+
+    /// The outcome a receipt carries is checked against the plan it names, so a
+    /// receipt cannot claim a page count the publication did not produce.
+    #[test]
+    fn a_receipt_cannot_claim_more_pages_than_the_plan_has() {
+        let mut draft = HardcopyDialogState::default();
+        draft.open(
+            HardcopyWorkflow::Export,
+            source(),
+            ContentExtent::try_new(
+                Length::from_micrometres(250_000),
+                Length::from_micrometres(160_000),
+            )
+            .unwrap(),
+            None,
+        );
+        let plan = draft.preview_plan.clone().expect("a compiled plan");
+        let pages = plan.pagination().pages().len() as u32;
+        let overclaimed = HardcopyReceipt::record(
+            &plan,
+            crate::hardcopy::HardcopyOutcome::ArtifactExported {
+                artifact: crate::hardcopy::HardcopyArtifactIdentity::try_new(
+                    crate::product::ContentDigest::from_bytes([0x78; 32]),
+                    4_096,
+                    pages + 1,
+                    plan.setup().render().format(),
+                )
+                .unwrap(),
+            },
+        );
+        assert!(matches!(
+            overclaimed,
+            Err(HardcopyError::ArtifactPageCountMismatch { .. })
+        ));
     }
 
     #[test]

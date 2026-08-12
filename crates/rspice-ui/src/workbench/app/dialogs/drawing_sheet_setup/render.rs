@@ -110,6 +110,12 @@ impl RSpiceApp {
             .primary_enabled(primary_enabled)
             .flush_body()
             .manual_body_scroll();
+        // The surface carries no transaction banner, so the footer is the only
+        // place a disabled primary can say what is holding it. From another
+        // section, naming which one holds it is the whole of the answer.
+        if let Some(reason) = blocked_reason(&problems) {
+            dialog = dialog.hint(reason);
+        }
         if !read_only {
             dialog = dialog.ghost(if dirty { "Discard changes" } else { "Cancel" });
         }
@@ -240,7 +246,7 @@ fn drawing_sheet_setup_body(
                     let nav = ui.allocate_ui_with_layout(
                         vec2(NAV_WIDTH, body_height),
                         Layout::top_down(Align::Min),
-                        |ui| section_navigation(ui, state, body_height),
+                        |ui| section_navigation(ui, state, problems, body_height),
                     );
                     ui.painter().vline(
                         nav.response.rect.right(),
@@ -327,7 +333,17 @@ fn stacked_body(
                 .show(ui, |ui| {
                     ui.horizontal_wrapped(|ui| {
                         for section in DrawingSheetSection::ALL {
-                            let label = format!("{}  {}", section.number(), section.label());
+                            // A chip carries its mark in its own text: it has
+                            // no room beside it for a glyph, and the text is
+                            // what a screen reader is given either way.
+                            let label = format!(
+                                "{}  {}",
+                                section.number(),
+                                section_entry_name(
+                                    section,
+                                    section_problem(problems, section).is_some()
+                                )
+                            );
                             if ui
                                 .selectable_label(state.section == section, label)
                                 .clicked()
@@ -342,13 +358,19 @@ fn stacked_body(
         });
 }
 
-fn section_navigation(ui: &mut Ui, state: &mut DrawingSheetSetupState, height: f32) {
+fn section_navigation(
+    ui: &mut Ui,
+    state: &mut DrawingSheetSetupState,
+    problems: &[FieldProblem],
+    height: f32,
+) {
     let t = Tokens::get(ui.ctx());
     Frame::NONE.fill(t.color.bg_panel).show(ui, |ui| {
         ui.set_width(NAV_WIDTH);
         ui.spacing_mut().item_spacing.y = 0.0;
         for section in DrawingSheetSection::ALL {
             let selected = state.section == section;
+            let problem = section_problem(problems, section);
             let detail = section_detail(state, section);
             let response = Frame::NONE
                 .fill(if selected {
@@ -375,22 +397,49 @@ fn section_navigation(ui: &mut Ui, state: &mut DrawingSheetSetupState, height: f
                                     .color(number_color),
                             );
                             paint_section_icon(ui, section, selected);
-                            ui.vertical(|ui| {
-                                ui.label(
-                                    egui::RichText::new(section.label())
-                                        .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
-                                        .color(t.color.text),
-                                );
-                                ui.label(
-                                    egui::RichText::new(detail)
-                                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                        .color(t.color.text_dim),
-                                );
-                            });
+                            // The marker's track comes off the text before the
+                            // text is laid out. Taken afterwards, a summary
+                            // wide enough to fill the row would have pushed the
+                            // marker off the rail.
+                            let text_width = (ui.available_width()
+                                - if problem.is_some() {
+                                    PROBLEM_MARKER_TRACK
+                                } else {
+                                    0.0
+                                })
+                            .max(1.0);
+                            ui.allocate_ui_with_layout(
+                                vec2(text_width, ui.available_height()),
+                                Layout::top_down(Align::Min),
+                                |ui| {
+                                    ui.label(
+                                        egui::RichText::new(section.label())
+                                            .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
+                                            .color(t.color.text),
+                                    );
+                                    // Truncated, never wrapped: a two-line
+                                    // summary would push the entry past the
+                                    // height the rail divided its column by.
+                                    ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(detail)
+                                                .font(theme::sans(
+                                                    tokens::FS_0,
+                                                    FontWeight::Regular,
+                                                ))
+                                                .color(t.color.text_dim),
+                                        )
+                                        .truncate(),
+                                    );
+                                },
+                            );
                         },
                     )
                 });
             let rect = response.response.rect;
+            if problem.is_some() {
+                paint_problem_marker(ui, rect);
+            }
             if selected {
                 ui.painter().rect_filled(
                     Rect::from_min_max(rect.min, egui::pos2(rect.left() + 3.0, rect.bottom())),
@@ -399,19 +448,23 @@ fn section_navigation(ui: &mut Ui, state: &mut DrawingSheetSetupState, height: f
                 );
             }
             let section_response = response.response.interact(Sense::click());
+            let name = section_entry_name(section, problem.is_some());
             section_response.widget_info(|| {
                 egui::WidgetInfo::selected(
                     egui::WidgetType::SelectableLabel,
                     ui.is_enabled(),
                     selected,
-                    section.label(),
+                    name.as_str(),
                 )
             });
             crate::ui::theme::paint_focus_ring(ui, &section_response, rect);
-            if section_response
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .clicked()
-            {
+            let section_response =
+                section_response.on_hover_cursor(egui::CursorIcon::PointingHand);
+            let section_response = match problem {
+                Some(message) => section_response.on_hover_text(message),
+                None => section_response,
+            };
+            if section_response.clicked() {
                 state.section = section;
                 state.commit_error = None;
             }
@@ -515,6 +568,113 @@ fn paint_section_icon(ui: &mut Ui, section: DrawingSheetSection, selected: bool)
                 .rect_stroke(front, 0.5, stroke, egui::StrokeKind::Inside);
         }
     }
+}
+
+/// The section that owns a validated field.
+///
+/// The table is the panels' own division: a field is repaired where its section
+/// draws it, so marking any other entry would send the operator to a form that
+/// does not contain it. A field no section claims is left unattributed rather
+/// than guessed at, and the guard below refuses one appearing silently.
+fn field_section(field: &str) -> Option<DrawingSheetSection> {
+    match field {
+        "width" | "height" | "custom-name" => Some(DrawingSheetSection::Format),
+        "margin-top" | "margin-right" | "margin-bottom" | "margin-left" | "margins" | "bleed" => {
+            Some(DrawingSheetSection::Margins)
+        }
+        "zones" => Some(DrawingSheetSection::Frame),
+        "title-offset-x" | "title-offset-y" | "title-fields" | "scale" => {
+            Some(DrawingSheetSection::TitleBlock)
+        }
+        _ => None,
+    }
+}
+
+/// The first problem a section holds, which is what its rail entry reports.
+fn section_problem(problems: &[FieldProblem], section: DrawingSheetSection) -> Option<&str> {
+    problems
+        .iter()
+        .find(|problem| field_section(problem.field) == Some(section))
+        .map(|problem| problem.message.as_str())
+}
+
+/// What a rail entry or a section chip is called once its section holds a field
+/// the sheet contract refuses.
+///
+/// The suffix is the marker assistive technology reads: a painted glyph and a
+/// colour are nothing to a screen reader, and a rail that only says which
+/// section is wrong in red says it to some of the people using it.
+fn section_entry_name(section: DrawingSheetSection, blocked: bool) -> String {
+    if blocked {
+        format!("{} · blocked", section.label())
+    } else {
+        section.label().to_owned()
+    }
+}
+
+/// Why the primary is disabled, in the footer's measure: how much is unresolved
+/// and where it lives. Sections are named in rail order so the phrase reads as
+/// a route through the surface.
+fn blocked_reason(problems: &[FieldProblem]) -> Option<String> {
+    let sections = DrawingSheetSection::ALL
+        .into_iter()
+        .filter(|section| section_problem(problems, *section).is_some())
+        .map(DrawingSheetSection::label)
+        .collect::<Vec<_>>();
+    if sections.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{} unresolved · {}",
+        problems.len(),
+        sections.join(", ")
+    ))
+}
+
+/// The width a marked entry gives up from its summary: the glyph, and the
+/// gutter that keeps it off the text.
+const PROBLEM_MARKER_TRACK: f32 = 22.0;
+/// The rail entry's own horizontal inset, which the mark shares so it lines up
+/// with the column of text above and below it.
+const PROBLEM_MARKER_INSET: f32 = 12.0;
+
+/// A blocked section's mark: a filled warning triangle at the trailing edge of
+/// `entry`. It is painted rather than set in text because the icon vocabulary
+/// has no warning glyph and the shipped faces have no dependable one either,
+/// and painted into the entry's own rectangle rather than allocated inside it
+/// because a row that grows by a marker's height stops fitting its column.
+fn paint_problem_marker(ui: &Ui, entry: Rect) {
+    let t = Tokens::get(ui.ctx());
+    let rect = Rect::from_center_size(
+        pos2(entry.right() - PROBLEM_MARKER_INSET - 7.0, entry.center().y),
+        vec2(14.0, 14.0),
+    );
+    let triangle = Rect::from_center_size(rect.center(), vec2(13.0, 11.5));
+    let painter = ui.painter();
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            pos2(triangle.center().x, triangle.top()),
+            triangle.right_bottom(),
+            triangle.left_bottom(),
+        ],
+        t.color.err,
+        Stroke::NONE,
+    ));
+    // The exclamation is cut out of the fill in the panel's own colour, so the
+    // mark reads at rail density instead of turning into a solid lozenge.
+    painter.vline(
+        triangle.center().x,
+        egui::Rangef::new(triangle.top() + 4.0, triangle.bottom() - 4.0),
+        Stroke::new(1.5, t.color.bg_panel),
+    );
+    painter.rect_filled(
+        Rect::from_center_size(
+            pos2(triangle.center().x, triangle.bottom() - 2.5),
+            vec2(1.5, 1.5),
+        ),
+        0.0,
+        t.color.bg_panel,
+    );
 }
 
 fn section_detail(state: &DrawingSheetSetupState, section: DrawingSheetSection) -> String {
@@ -2467,3 +2627,221 @@ const fn page_setup_primary_enabled(
 
 #[cfg(test)]
 mod tests;
+
+/// Where the rail's problem markers are measured. It is a module of its own
+/// because these cases render the whole dialog, which the narrow policy tests
+/// beside them deliberately do not.
+#[cfg(test)]
+mod blocked_sections {
+    use super::*;
+
+    /// Every control the dialog laid out this pass, at the rect it was laid out
+    /// at, with the text assistive technology is given for it.
+    fn dialog_controls(output: &egui::FullOutput) -> Vec<(String, Rect)> {
+        output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("the probe enables AccessKit, so every pass carries a tree")
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() != egui::accesskit::Role::Dialog)
+            .filter_map(|(_, node)| {
+                let bounds = node.bounds()?;
+                let rect = Rect::from_min_max(
+                    pos2(bounds.x0 as f32, bounds.y0 as f32),
+                    pos2(bounds.x1 as f32, bounds.y1 as f32),
+                );
+                let text = node.label().or_else(|| node.value()).unwrap_or_default();
+                rect.is_finite().then(|| (text.to_owned(), rect))
+            })
+            .collect()
+    }
+
+    fn control_rect(controls: &[(String, Rect)], label: &str) -> Option<Rect> {
+        controls
+            .iter()
+            .filter(|(found, _)| found == label)
+            .map(|(_, rect)| *rect)
+            .reduce(|held, rect| {
+                if rect.height() > held.height() {
+                    rect
+                } else {
+                    held
+                }
+            })
+    }
+
+    /// Every error-filled triangle the pass painted. The marker is a path, not
+    /// a rectangle, and its colour is the only thing separating it from the
+    /// section icons drawn beside it.
+    fn marker_rects(output: &egui::FullOutput, err: Color32) -> Vec<Rect> {
+        fn walk(shape: &egui::Shape, err: Color32, into: &mut Vec<Rect>) {
+            match shape {
+                egui::Shape::Path(path) if path.fill == err => {
+                    into.push(path.visual_bounding_rect());
+                }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, err, into);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut rects = Vec::new();
+        for clipped in &output.shapes {
+            walk(&clipped.shape, err, &mut rects);
+        }
+        rects
+    }
+
+    fn pass(ctx: &Context, app: &mut RSpiceApp, time: f64) -> egui::FullOutput {
+        ctx.run_ui(
+            egui::RawInput {
+                time: Some(time),
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1_440.0, 900.0))),
+                ..Default::default()
+            },
+            |ui| app.render_drawing_sheet_setup_dialog(ui),
+        )
+    }
+
+    /// The surface fades in when it opens, and a fade tints every shape it
+    /// paints toward the backdrop. A probe that reads a colour has to let the
+    /// animation finish or it measures the tint instead of the mark.
+    fn settled(ctx: &Context, app: &mut RSpiceApp, start: f64) -> egui::FullOutput {
+        let mut output = pass(ctx, app, start);
+        for step in 1..=12 {
+            output = pass(ctx, app, f64::from(step).mul_add(0.1, start));
+        }
+        output
+    }
+
+    /// The rail is the only thing on screen that can say which section holds a
+    /// refused field while another section is open, and the footer is the only
+    /// thing that can say why the primary will not move.
+    #[test]
+    fn a_refused_field_is_named_on_the_rail_and_in_the_footer() {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let err = Tokens::get(&ctx).color.err;
+        let mut app = RSpiceApp::test_instance();
+        crate::workbench::app::open_drawing_sheet_setup(&mut app);
+        app.state.dialogs.drawing_sheet_setup.section = DrawingSheetSection::Scope;
+
+        let clean = settled(&ctx, &mut app, 0.0);
+        let clean_controls = dialog_controls(&clean);
+        let clean_row = control_rect(&clean_controls, DrawingSheetSection::Format.label())
+            .expect("the rail names every section");
+        assert!(
+            marker_rects(&clean, err)
+                .iter()
+                .all(|marker| !clean_row.contains_rect(*marker)),
+            "a valid draft marks nothing"
+        );
+
+        app.state.dialogs.drawing_sheet_setup.draft.width = "twelve".to_owned();
+        let blocked = settled(&ctx, &mut app, 2.0);
+        let controls = dialog_controls(&blocked);
+
+        let marked = control_rect(&controls, "Size & orientation · blocked")
+            .expect("the rail entry names the section holding the refused field");
+        // The entry sets its title as text inside itself as well. What has to
+        // carry the mark is the row a keyboard or screen reader lands on, which
+        // is the one that contains the other.
+        let title = control_rect(&controls, DrawingSheetSection::Format.label())
+            .expect("the entry still draws its title");
+        assert!(
+            marked.contains_rect(title) && marked.height() > title.height(),
+            "the mark is on a label inside the entry rather than on the entry"
+        );
+        for section in [
+            DrawingSheetSection::Margins,
+            DrawingSheetSection::Frame,
+            DrawingSheetSection::TitleBlock,
+        ] {
+            assert!(
+                control_rect(&controls, &format!("{} · blocked", section.label())).is_none(),
+                "{section:?} holds nothing invalid and must not be marked"
+            );
+        }
+        assert!(
+            (marked.height() - clean_row.height()).abs() < 0.5,
+            "the marker grew the rail row from {:.0} pt to {:.0} pt",
+            clean_row.height(),
+            marked.height()
+        );
+        let painted = marker_rects(&blocked, err);
+        let markers: Vec<Rect> = painted
+            .iter()
+            .copied()
+            .filter(|marker| marked.contains_rect(*marker))
+            .collect();
+        assert_eq!(
+            markers.len(),
+            1,
+            "the marked entry {marked:?} carries exactly one painted mark, among {painted:?}"
+        );
+        assert!(
+            marked.right() - markers[0].right() < PROBLEM_MARKER_TRACK,
+            "the mark sits at the entry's trailing edge"
+        );
+        assert!(
+            controls
+                .iter()
+                .any(|(label, _)| label.contains("unresolved · Size & orientation")),
+            "the footer says why the primary is disabled: {:?}",
+            controls
+                .iter()
+                .map(|(label, _)| label.as_str())
+                .filter(|label| label.contains("unresolved"))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// A problem the rail cannot place is a problem an operator cannot find. A
+    /// field added to a panel without an owner here would disable the primary
+    /// from a section nothing marks, which is the defect this wave removed.
+    #[test]
+    fn every_field_a_panel_reports_has_a_section() {
+        let source = crate::source_guard::production_source(include_str!("render.rs"));
+        const CALL: &str = "field_error(problems, \"";
+        let mut seen = 0;
+        for (index, _) in source.match_indices(CALL) {
+            let rest = &source[index + CALL.len()..];
+            let field = &rest[..rest.find('"').expect("a closing quote")];
+            assert!(
+                field_section(field).is_some(),
+                "the panels report {field:?}, and no section owns it"
+            );
+            seen += 1;
+        }
+        assert!(
+            seen >= 14,
+            "the guard found only {seen} reported fields, so it is scanning the wrong region"
+        );
+    }
+
+    /// The footer names what is unresolved and where, and says nothing at all
+    /// when nothing is.
+    #[test]
+    fn the_footer_reason_names_every_section_in_rail_order() {
+        assert_eq!(blocked_reason(&[]), None);
+        let problems = vec![
+            FieldProblem {
+                field: "scale",
+                message: "bad scale".to_owned(),
+            },
+            FieldProblem {
+                field: "width",
+                message: "bad width".to_owned(),
+            },
+        ];
+        assert_eq!(
+            blocked_reason(&problems).as_deref(),
+            Some("2 unresolved · Size & orientation, Title block")
+        );
+    }
+}
