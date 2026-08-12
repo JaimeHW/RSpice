@@ -540,29 +540,6 @@ pub(crate) fn import_dropped_veriloga_source(
     Ok(())
 }
 
-pub(crate) fn request_veriloga_dependency_import(
-    app: &mut RSpiceApp,
-    importer_path: &str,
-) -> Result<(), String> {
-    if app.state.ui.code_workspace.veriloga.import_requested {
-        return Err("A Verilog-A import is already pending.".to_owned());
-    }
-    let selected = selected_veriloga_source(app)?;
-    if !selected.bundle().contains_file(importer_path) {
-        return Err(format!("The importer '{importer_path}' no longer exists."));
-    }
-    app.state.ui.code_workspace.veriloga.import_target = Some(super::page::VerilogAImportTarget {
-        project_id: app.state.workspace.project.id(),
-        bundle_id: selected.bundle().id(),
-        bundle_revision: selected.bundle().revision().get(),
-        closure_digest: selected.bundle().closure_digest(),
-        importer_path: importer_path.to_owned(),
-    });
-    app.state.ui.code_workspace.veriloga.root_import_target = None;
-    app.state.ui.code_workspace.veriloga.import_requested = true;
-    Ok(())
-}
-
 fn suggested_import_path(importer_path: &str, file_name: &str) -> String {
     importer_path.rsplit_once('/').map_or_else(
         || file_name.to_owned(),
@@ -2056,61 +2033,6 @@ endmodule
                 .veriloga
                 .root_import_target
                 .is_none()
-        );
-    }
-
-    #[test]
-    fn dependency_import_is_revision_bound_and_applies_atomically() {
-        let mut app = RSpiceApp::test_instance();
-        ensure_legacy_source(&mut app);
-        let selected = selected_veriloga_source(&app).unwrap();
-        let bundle_id = selected.bundle().id();
-        let root = selected.document().logical_path().to_owned();
-
-        request_veriloga_dependency_import(&mut app, &root).unwrap();
-        apply_import(
-            &mut app,
-            "constants.vams".to_owned(),
-            "`define SCALE 1\n".to_owned(),
-        );
-        let bundle = app
-            .state
-            .workspace
-            .project_sources
-            .get_bundle(bundle_id)
-            .unwrap();
-        assert_eq!(
-            bundle.file_content("constants.vams"),
-            Some("`define SCALE 1\n")
-        );
-        assert!(
-            bundle
-                .root()
-                .content()
-                .contains("`include \"constants.vams\"")
-        );
-
-        request_veriloga_dependency_import(&mut app, &root).unwrap();
-        app.state
-            .workspace
-            .replace_project_source_bundle_file(
-                bundle_id,
-                &root,
-                "module newer; endmodule\n".to_owned(),
-            )
-            .unwrap();
-        apply_import(
-            &mut app,
-            "stale.vams".to_owned(),
-            "`define STALE 1\n".to_owned(),
-        );
-        assert!(
-            !app.state
-                .workspace
-                .project_sources
-                .get_bundle(bundle_id)
-                .unwrap()
-                .contains_file("stale.vams")
         );
     }
 
