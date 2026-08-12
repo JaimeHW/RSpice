@@ -1170,6 +1170,141 @@ const XYCE_BUG48_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
     ),
 ];
 
+// BUG_159 is a removed-shell relational oracle. The empty owner deck selects
+// a wrapper that runs the two real worker decks in order and byte-diffs their
+// nonempty default PRN output. The only intended semantic difference is an
+// explicit BJT model TNOM=27 C versus the same omitted default.
+const XYCE_BUG159_CONTRACT: &str = "bug159_bjt_tnom_default_equivalence_wrapper";
+const XYCE_BUG159_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_159/bug_159.cir";
+const XYCE_BUG159_EXPLICIT_PATH: &str = "Netlists/Certification_Tests/BUG_159/bug_159_1.cir";
+const XYCE_BUG159_IMPLICIT_PATH: &str = "Netlists/Certification_Tests/BUG_159/bug_159_2.cir";
+const XYCE_BUG159_OWNER_RECORD: &str = "netlists/certification_tests/bug_159/bug_159.cir";
+const XYCE_BUG159_EXPLICIT_RECORD: &str = "netlists/certification_tests/bug_159/bug_159_1.cir";
+const XYCE_BUG159_IMPLICIT_RECORD: &str = "netlists/certification_tests/bug_159/bug_159_2.cir";
+const XYCE_BUG159_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_159/exclude";
+const XYCE_BUG159_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG159_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG159_HISTORICAL_RECORD_COUNT: usize = 12;
+const XYCE_BUG159_HISTORICAL_RECORD_BYTES: usize = 2_864;
+const XYCE_BUG159_HISTORICAL_RECORDS_SHA256: &str =
+    "793a771a9dfc706533d109d3292e45142ab3213b7d4480d1313a7ba06819378a";
+const XYCE_BUG159_HISTORICAL_RECORDS_BLAKE3: &str =
+    "569cdcdb0a3bd2f236246e0b6184cc01e54dd54ae78b13bf99534c2664b00eca";
+const XYCE_BUG159_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 12] = [
+    (
+        "Netlists/Certification_Tests/BUG_159/CMakeLists.txt",
+        1_551,
+        "0536246875f0f282a02d7ba1a71489c848c84ac7c4875c1f894e97af0c3eebda",
+        "d1b944849c0b2af29ca578ab3b3d234d6af0fe652e579f01ec2f9e337e878602",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_159/Manifest.txt",
+        75,
+        "5dd8bbb4fd2eeded4c316fe5001cf385e2190b89dad2be4ed8b2782c9e8662bf",
+        "0d583ff0b7679e7e95f29413acdf6c386ce5925ba95a34ed3ac9c61729c5b940",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_159/README",
+        979,
+        "5d6116dd296862775d9e4d300ef9d7c566d0e789c1abfcbf560f7f99da228043",
+        "c9cfa060797b9c6bc0b8e959b4c05e4dc6b93727a1c6a0b2ee09f374467e70e3",
+    ),
+    (
+        XYCE_BUG159_OWNER_PATH,
+        0,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_159/bug_159.cir.sh",
+        1_372,
+        "0be49b3e814edf2792bbe74af877d25e67648053ecff987826b806ba16f0fc8d",
+        "e3dcd59e70656e4613938f1f7d5d8543120de04a09c71bd39a68e3c48a4bd8fd",
+    ),
+    (
+        XYCE_BUG159_EXPLICIT_PATH,
+        676,
+        "838fd5c7594c56a5f57453bb9525a034b5bb34063200b562dce410d1b8c4fabe",
+        "b831d59a60fef20cddbd91393bdf422eafd9d9f775b009bef2c0e01517ea39e4",
+    ),
+    (
+        XYCE_BUG159_IMPLICIT_PATH,
+        667,
+        "c81fe2dfd5ad56947dc9605afa0911e90e6dd2e3b85ac9d6bb65fd426883beea",
+        "0c136fb6399d922fb88efea349b5989db7b1ea7739d988ee7e0c8563d1653988",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_159/exclude",
+        28,
+        "d1312e057f924f59537f82da2b137352b9493e643890379797c92a483d78e309",
+        "a87fc1e2a9df29c7fc653c0cbbf6d70eebde6e687401fcfca135bfe2be962293",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_159/tags",
+        16,
+        "fb8b1ab6aa8b694212335a76b1b87c077f22be7543f15c12de32a2da40b4f345",
+        "a5f2cee6f41471429bc22c4c40d36881f4c11d2387b20adbdc14efe2509f6589",
+    ),
+    (
+        "OutputData/Certification_Tests/BUG_159/bug_159_1.cir.prn",
+        213,
+        "ab4c34ff74ac0e474cf7d953e6533e51763f2776b345d64e8985fe871d9389d9",
+        "0e3ef59d22062c90b8ea6a0786fb4f58f6cda0c35f6ff0b1c3642ec1ca966a69",
+    ),
+    (
+        "OutputData/Certification_Tests/BUG_159/bug_159_2.cir.prn",
+        213,
+        "ab4c34ff74ac0e474cf7d953e6533e51763f2776b345d64e8985fe871d9389d9",
+        "0e3ef59d22062c90b8ea6a0786fb4f58f6cda0c35f6ff0b1c3642ec1ca966a69",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG159_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 4] = [
+    (
+        "README",
+        979,
+        "5d6116dd296862775d9e4d300ef9d7c566d0e789c1abfcbf560f7f99da228043",
+        "c9cfa060797b9c6bc0b8e959b4c05e4dc6b93727a1c6a0b2ee09f374467e70e3",
+    ),
+    (
+        "bug_159.cir",
+        0,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+    ),
+    (
+        "bug_159_1.cir",
+        676,
+        "838fd5c7594c56a5f57453bb9525a034b5bb34063200b562dce410d1b8c4fabe",
+        "b831d59a60fef20cddbd91393bdf422eafd9d9f775b009bef2c0e01517ea39e4",
+    ),
+    (
+        "bug_159_2.cir",
+        667,
+        "c81fe2dfd5ad56947dc9605afa0911e90e6dd2e3b85ac9d6bb65fd426883beea",
+        "0c136fb6399d922fb88efea349b5989db7b1ea7739d988ee7e0c8563d1653988",
+    ),
+];
+const XYCE_BUG159_RETAINED_OUTPUTS: [(&str, usize, &str, &str); 2] = [
+    (
+        "bug_159_1.cir.prn",
+        213,
+        "ab4c34ff74ac0e474cf7d953e6533e51763f2776b345d64e8985fe871d9389d9",
+        "0e3ef59d22062c90b8ea6a0786fb4f58f6cda0c35f6ff0b1c3642ec1ca966a69",
+    ),
+    (
+        "bug_159_2.cir.prn",
+        213,
+        "ab4c34ff74ac0e474cf7d953e6533e51763f2776b345d64e8985fe871d9389d9",
+        "0e3ef59d22062c90b8ea6a0786fb4f58f6cda0c35f6ff0b1c3642ec1ca966a69",
+    ),
+];
+
 // BUG_864_SON is a bounded expected-error contract. Release 7.10 executes
 // the deck, requires a nonzero exit, and accepts the run only when either
 // complete output stream contains the unresolved-definition diagnostic. The
@@ -9134,6 +9269,7 @@ impl AbortSignal for DeadlineAbort {
 mod analysis_support;
 mod comparison;
 mod contracts;
+mod contracts_bug159;
 mod contracts_bug354;
 mod contracts_bug38;
 mod contracts_bug39;

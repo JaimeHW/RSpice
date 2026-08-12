@@ -9513,6 +9513,53 @@ fn test_xyce_bug48_level54_native_bsim4_success_oracle() {
 }
 
 #[test]
+fn test_xyce_bug159_bjt_tnom_default_equivalence_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let owner = "Netlists/Certification_Tests/BUG_159/bug_159.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(owner),
+        "BUG159 empty owner must remain owned by its removed historical wrapper"
+    );
+    let owner_result = runner.run_test(root.join(owner));
+    assert!(
+        owner_result.passed
+            && !owner_result.expected_unsupported
+            && !owner_result.upstream_excluded,
+        "BUG159 should execute both BJT TNOM workers and reproduce their exact PRN relation, got {owner_result:?}"
+    );
+    assert_eq!(
+        owner_result.contract,
+        "bug159_bjt_tnom_default_equivalence_wrapper"
+    );
+    assert_eq!(owner_result.upstream_exclusion_source, None);
+    assert!(owner_result.mismatches.is_empty());
+
+    for worker in [
+        "Netlists/Certification_Tests/BUG_159/bug_159_1.cir",
+        "Netlists/Certification_Tests/BUG_159/bug_159_2.cir",
+    ] {
+        assert!(
+            !runner.requires_upstream_wrapper(worker),
+            "BUG159 workers are invoked by the owner and must not become wrapper owners"
+        );
+        let result = runner.run_test(root.join(worker));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{worker} must retain its independently-qualified static PRN contract, got {result:?}"
+        );
+        assert_eq!(result.contract, "static_prn_dc");
+        assert_eq!(
+            result.upstream_exclusion_source.as_deref(),
+            Some("Netlists/Certification_Tests/BUG_159/exclude")
+        );
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_bug402_temperature_option_scope_relational_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
