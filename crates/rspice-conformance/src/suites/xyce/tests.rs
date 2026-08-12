@@ -28967,3 +28967,63 @@ fn bug39_two_anchor_provenance_fails_closed_on_census_and_ownership_drift() {
     .expect("mutate BUG39 independent qualification");
     assert!(runner.validate_bug39_provenance(&contract).is_err());
 }
+
+#[test]
+fn bug402_release_710_temperature_option_contract_is_exact_and_executable() {
+    let records = XyceTestRunner::bug402_historical_oracle_provenance_records();
+    assert_eq!(records.len(), XYCE_BUG402_HISTORICAL_RECORD_COUNT);
+    assert_eq!(
+        format!("{:x}", Sha256::digest(records.join("\n").as_bytes())),
+        XYCE_BUG402_HISTORICAL_RECORDS_SHA256
+    );
+    assert_eq!(
+        blake3::hash(records.join("\n").as_bytes())
+            .to_hex()
+            .to_string(),
+        XYCE_BUG402_HISTORICAL_RECORDS_BLAKE3
+    );
+    XyceTestRunner::validate_bug402_historical_oracle_provenance()
+        .expect("BUG402 Release-7.10 wrapper and verifier identities remain bound");
+
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&corpus, XyceRunnerConfig::default());
+    runner
+        .validate_bug402_temperature_option_provenance()
+        .expect("exact retained BUG402 family and promotion provenance qualify");
+
+    let xyce_source = fs::read_to_string(corpus.join(XYCE_BUG402_XYCE_REFERENCE_PATH))
+        .expect("read canonical BUG402 worker");
+    let spice_source = fs::read_to_string(corpus.join(XYCE_BUG402_SPICE_MEMBER_PATH))
+        .expect("read legacy BUG402 worker");
+    XyceTestRunner::validate_bug402_temperature_source_pair(&xyce_source, &spice_source)
+        .expect("BUG402 workers differ only by the TEMP package selector");
+    assert!(
+        XyceTestRunner::validate_bug402_temperature_source_pair(
+            &xyce_source.replace("GMIN=1.0E-15", "GMIN=2.0E-15"),
+            &spice_source,
+        )
+        .is_err(),
+        "any non-selector source drift must fail closed"
+    );
+
+    for role in XyceBug402TemperatureRole::ALL {
+        let deck = XyceDeck {
+            path: corpus.join(role.path()),
+            section: XyceDeckSection::Netlists,
+            relative_path: role.path().to_string(),
+        };
+        let contract = runner
+            .bug402_temperature_option_contract(&deck)
+            .expect("BUG402 role is selected")
+            .expect("BUG402 role has exact provenance and equivalent typed semantics");
+        assert_eq!(contract.role, role);
+    }
+
+    let result = runner.run_test(corpus.join(XYCE_BUG402_OWNER_PATH));
+    assert!(
+        result.passed && !result.expected_unsupported && !result.upstream_excluded,
+        "BUG402 owner must execute the directional paired DC oracle: {result:?}"
+    );
+    assert_eq!(result.contract, XYCE_BUG402_OWNER_CONTRACT);
+    assert!(result.mismatches.is_empty());
+}

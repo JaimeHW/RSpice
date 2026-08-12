@@ -9414,6 +9414,44 @@ fn test_xyce_bug39_generated_gaussian_mean_sigma_oracles() {
 }
 
 #[test]
+fn test_xyce_bug402_temperature_option_scope_relational_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, expected_exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_402_SON/bug402son.cir",
+            "bug402_temperature_option_scope_relational_wrapper_owner",
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_402_SON/bug402XyceTempOptions.cir",
+            "bug402_temperature_option_scope_relational_xyce_reference",
+            Some("Netlists/Certification_Tests/BUG_402_SON/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_402_SON/bug402SpiceTempOptions.cir",
+            "bug402_temperature_option_scope_relational_spice_member",
+            Some("Netlists/Certification_Tests/BUG_402_SON/exclude"),
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should independently execute the exact BUG402 canonical-versus-legacy temperature-option relation, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(
+            result.upstream_exclusion_source.as_deref(),
+            expected_exclusion,
+            "only the two historically excluded workers retain exclusion provenance"
+        );
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_switch_initial_state_case_relational_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

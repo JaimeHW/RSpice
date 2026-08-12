@@ -1077,6 +1077,30 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.bug402_temperature_option_contract(deck) {
+            let role = XyceBug402TemperatureRole::for_record(&deck.relative_path)
+                .expect("BUG_402_SON detection selects only recognized records");
+            let result = match contract {
+                Ok(contract) => self.run_bug402_temperature_option_contract(deck, contract, start),
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    role.result_contract(),
+                    format!("BUG_402_SON temperature-option scope qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.source_multiplicity_family_contract(deck) {
             let result = match contract {
                 Ok(contract) => self.run_source_multiplicity_family_contract(deck, contract, start),

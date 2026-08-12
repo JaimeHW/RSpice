@@ -58,15 +58,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 210;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 212;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "3f2f3e015a2b0f638487e05473e5a7bca700e4653014cc869a83b0651139f961";
+    "d77b7acaf59a88a32dd1cee35eba07e561e6bbb911333837ba67f9f923c4a5d0";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "41e53acb1ba26af4c8b508e967fa344d1fcd930ab13a5f42484719d91b3b095b";
+    "76008916b8783849704c71640ff90de886dc424190cdb240d060f6ecaea1ef01";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "949ddefd4ac9a349081a5031cc23df37d1c01ec0ee9a1669c49d46e711117586";
+    "205c66a8357976a811ce07cc85558b2f31c57d69ed5f0af79db5865e1d8b67b8";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -697,6 +697,154 @@ const XYCE_BUG39_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 11] = [
         879,
         "148d072b44042d70d47ad191f462cd356b1868f4a3dddf49f9d25c271e0b13a0",
         "37bf9fd8b2e8b91e8f7baa45e985fe19450b18208753eb8533ac473ab6709a70",
+    ),
+];
+
+// Release 7.10's BUG_402_SON wrapper runs the canonical Xyce
+// `.OPTIONS DEVICE TEMP=35` deck first, then the legacy SPICE
+// `.OPTIONS TEMP=35` deck, and directionally compares their DC tables with
+// xyce_verify. The checked-in bug402son.cir is only the wrapper owner; it is
+// never simulated. Bind the complete retained family and every historical
+// harness artifact that defines this relational oracle before reproducing it.
+const XYCE_BUG402_OWNER_CONTRACT: &str = "bug402_temperature_option_scope_relational_wrapper_owner";
+const XYCE_BUG402_XYCE_REFERENCE_CONTRACT: &str =
+    "bug402_temperature_option_scope_relational_xyce_reference";
+const XYCE_BUG402_SPICE_MEMBER_CONTRACT: &str =
+    "bug402_temperature_option_scope_relational_spice_member";
+const XYCE_BUG402_PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
+const XYCE_BUG402_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG402_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG402_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_402_SON/bug402son.cir";
+const XYCE_BUG402_XYCE_REFERENCE_PATH: &str =
+    "Netlists/Certification_Tests/BUG_402_SON/bug402XyceTempOptions.cir";
+const XYCE_BUG402_SPICE_MEMBER_PATH: &str =
+    "Netlists/Certification_Tests/BUG_402_SON/bug402SpiceTempOptions.cir";
+const XYCE_BUG402_OWNER_RECORD: &str = "netlists/certification_tests/bug_402_son/bug402son.cir";
+const XYCE_BUG402_XYCE_REFERENCE_RECORD: &str =
+    "netlists/certification_tests/bug_402_son/bug402xycetempoptions.cir";
+const XYCE_BUG402_SPICE_MEMBER_RECORD: &str =
+    "netlists/certification_tests/bug_402_son/bug402spicetempoptions.cir";
+const XYCE_BUG402_HISTORICAL_EXCLUDE_PATH: &str =
+    "Netlists/Certification_Tests/BUG_402_SON/exclude";
+const XYCE_BUG402_HISTORICAL_RECORD_COUNT: usize = 13;
+const XYCE_BUG402_HISTORICAL_RECORD_BYTES: usize = 3_111;
+const XYCE_BUG402_HISTORICAL_RECORDS_SHA256: &str =
+    "1ff1a9451de049f1156dafc4c6ed183f46119020a18f011afc39ba3889f18326";
+const XYCE_BUG402_HISTORICAL_RECORDS_BLAKE3: &str =
+    "d709cca8f53047ea80f2eb83c3bf0e96edaca874302f1985e375e26874a59704";
+const XYCE_BUG402_RETAINED_RECORD_COUNT: usize = 4;
+const XYCE_BUG402_RETAINED_RECORD_BYTES: usize = 611;
+const XYCE_BUG402_RETAINED_RECORDS_SHA256: &str =
+    "8ce7e9cddff050048c59065652c124ef2d49a22710a1738d136f7092443b2b78";
+const XYCE_BUG402_RETAINED_RECORDS_BLAKE3: &str =
+    "21d37da187ca098ed60788969dcbafca286b7d093c9d425529f1d9a813af8c0c";
+const XYCE_BUG402_DC_POINT_COUNT: usize = 51;
+
+const XYCE_BUG402_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 13] = [
+    (
+        "Netlists/Certification_Tests/BUG_402_SON/CMakeLists.txt",
+        1_679,
+        "f527618218b4c20f09c7e081af2a889b2c96d20c06de57913fb59aa2b035ed94",
+        "2ee4f59fc80286e0a26ed85babb5b5e97f079af6ee79a89ef226794fdc82d485",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_402_SON/Manifest.txt",
+        104,
+        "52be93a816570755e87fdcbddfe264761a40747998f34f9ee2857d51c1339db3",
+        "3a763c27d89cd630fed8180a36b6346d0af065d29464a32312ac17709c26366a",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_402_SON/README",
+        385,
+        "869fcd0742641e619af164c016a9dee520b581c9cd272ace32cc2a2457bc835a",
+        "de6005465a28610ffa126624506fe999e0f28b59083eaea37ac4688845b07156",
+    ),
+    (
+        XYCE_BUG402_SPICE_MEMBER_PATH,
+        1_096,
+        "4fffcf69d172c4d614673de74539634997dd35776743408ebe160701ff339d4c",
+        "dd4b124276431c8b9baca2fb9840b79768ec5843ef4afb20e68ccba17549e007",
+    ),
+    (
+        XYCE_BUG402_XYCE_REFERENCE_PATH,
+        1_102,
+        "aefc2180e4bb6a5b39e3f4105546f3c5ba22af3b74f003d2d4d3c55f45938e9e",
+        "8624a2ec9239bc664b979f01400729da865ce90a887128c92f42da4d21c9af1d",
+    ),
+    (
+        XYCE_BUG402_OWNER_PATH,
+        115,
+        "95f417f0cc5ff658ef4a79e88f69bb9964be771688d6a75629483c3ddd2cd72d",
+        "9f19d4388692a257a348ab24a50885198ce2f10854eafc9f44ada4c96b37c2a7",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_402_SON/bug402son.cir.sh",
+        1_995,
+        "798c64c762c996fb82935fcf320921e6151e3917daa0652d26af90556372598b",
+        "aa134307353972d33f0cc8b3ccacf486258ab66ed85399fb021ab3751e98b710",
+    ),
+    (
+        XYCE_BUG402_HISTORICAL_EXCLUDE_PATH,
+        54,
+        "f79abe0ee683e65894a7a4d4d96e55bf1ebc8c545601f40c5f3c9e8c1de984b2",
+        "49588e88f0ffe165e0a0bfd101fc689f91523be673a1435321e208333877b4b2",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_402_SON/tags",
+        32,
+        "a1b81f4136c15ef5d8965a5ea19cb9245b6e7f8297476a01b4dd5743327cfd23",
+        "f3260384fe5fe9b068601a1b5828440bf38cbdda3bc6ff0f1cceb6165dcb233e",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+    (
+        "TestScripts/XyceVerify/DCSources.pm",
+        2_739,
+        "b2ddcab5ad5a89c428b9b4430190fa27ef7106da7e7afeb31452c81890a9a006",
+        "0905f9dc79d7c5bdbe17e3c2360cd063d6fcbf41823a410f98b236783d109ad7",
+    ),
+    (
+        "TestScripts/XyceVerify/DCSweep.pm",
+        9_301,
+        "2246da2374e6cce3ea516a50e472fb07f7481e8b0effb20d4a650e6b6cb1eda0",
+        "b9cc7d905d001ebe2ace44936b9631e4bdcbf42bca4d4b34c5866262cd11d9a3",
+    ),
+    (
+        XYCE_RELEASE_710_XYCE_VERIFY_PATH,
+        XYCE_RELEASE_710_XYCE_VERIFY_BYTES,
+        XYCE_RELEASE_710_XYCE_VERIFY_SHA256,
+        XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3,
+    ),
+];
+
+const XYCE_BUG402_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 4] = [
+    (
+        "bug402son.cir",
+        115,
+        "95f417f0cc5ff658ef4a79e88f69bb9964be771688d6a75629483c3ddd2cd72d",
+        "9f19d4388692a257a348ab24a50885198ce2f10854eafc9f44ada4c96b37c2a7",
+    ),
+    (
+        "bug402SpiceTempOptions.cir",
+        1_096,
+        "4fffcf69d172c4d614673de74539634997dd35776743408ebe160701ff339d4c",
+        "dd4b124276431c8b9baca2fb9840b79768ec5843ef4afb20e68ccba17549e007",
+    ),
+    (
+        "bug402XyceTempOptions.cir",
+        1_102,
+        "aefc2180e4bb6a5b39e3f4105546f3c5ba22af3b74f003d2d4d3c55f45938e9e",
+        "8624a2ec9239bc664b979f01400729da865ce90a887128c92f42da4d21c9af1d",
+    ),
+    (
+        "README",
+        385,
+        "869fcd0742641e619af164c016a9dee520b581c9cd272ace32cc2a2457bc835a",
+        "de6005465a28610ffa126624506fe999e0f28b59083eaea37ac4688845b07156",
     ),
 ];
 
@@ -6189,6 +6337,81 @@ struct XyceBug39GaussianMoments {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBug402TemperatureRole {
+    WrapperOwner,
+    XyceDeviceReference,
+    SpiceCompatibilityMember,
+}
+
+impl XyceBug402TemperatureRole {
+    const ALL: [Self; 3] = [
+        Self::WrapperOwner,
+        Self::XyceDeviceReference,
+        Self::SpiceCompatibilityMember,
+    ];
+
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::WrapperOwner => XYCE_BUG402_OWNER_CONTRACT,
+            Self::XyceDeviceReference => XYCE_BUG402_XYCE_REFERENCE_CONTRACT,
+            Self::SpiceCompatibilityMember => XYCE_BUG402_SPICE_MEMBER_CONTRACT,
+        }
+    }
+
+    fn path(self) -> &'static str {
+        match self {
+            Self::WrapperOwner => XYCE_BUG402_OWNER_PATH,
+            Self::XyceDeviceReference => XYCE_BUG402_XYCE_REFERENCE_PATH,
+            Self::SpiceCompatibilityMember => XYCE_BUG402_SPICE_MEMBER_PATH,
+        }
+    }
+
+    fn record(self) -> &'static str {
+        match self {
+            Self::WrapperOwner => XYCE_BUG402_OWNER_RECORD,
+            Self::XyceDeviceReference => XYCE_BUG402_XYCE_REFERENCE_RECORD,
+            Self::SpiceCompatibilityMember => XYCE_BUG402_SPICE_MEMBER_RECORD,
+        }
+    }
+
+    fn for_record(relative_path: &str) -> Option<Self> {
+        let record = XyceTestRunner::normalize_manifest_key(relative_path);
+        Self::ALL.into_iter().find(|role| role.record() == record)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct XyceBug402TemperatureContract {
+    xyce_reference_plan: XyceStaticDcPlan,
+    spice_member_plan: XyceStaticDcPlan,
+    role: XyceBug402TemperatureRole,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceBug402ModelFingerprint {
+    model_type: String,
+    numeric_params: Vec<(String, u64)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceBug402TemperatureSnapshot {
+    temperature_bits: u64,
+    gmin_bits: u64,
+    sweep_source: String,
+    sweep_start_bits: u64,
+    sweep_stop_bits: u64,
+    sweep_step_bits: u64,
+    probes: Vec<String>,
+    top_level_elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    subcircuit_name: String,
+    subcircuit_ports: Vec<String>,
+    subcircuit_elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    flattened_elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    models: BTreeMap<String, XyceBug402ModelFingerprint>,
+    flattened_models: BTreeMap<String, XyceBug402ModelFingerprint>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceBug38Role {
     WrapperOwner,
     ParenthesizedControl,
@@ -8374,6 +8597,7 @@ mod comparison;
 mod contracts;
 mod contracts_bug38;
 mod contracts_bug39;
+mod contracts_bug402;
 mod contracts_dc;
 mod contracts_frequency;
 mod contracts_sources;
