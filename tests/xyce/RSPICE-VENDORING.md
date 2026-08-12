@@ -90,6 +90,14 @@ the active-only control, proves that both select the qualified
 serialization byte-for-byte. The separate D-I transient family keeps its
 existing verifier-backed contracts and retained numerical references.
 
+Certification BUG 267 has no numerical gold or comparator: its Release-7.10
+shell wrapper only fails when the simulator process fails (the final missing-
+PRN branch itself falls through with success). RSpice preserves that success
+predicate and strengthens it with an exact typed contract for the retained
+relative include, the `FOOBAR -> BAR` ordinary/global parameter chain, the
+six-point DC grid, and the analytic voltage, source-current, and scalar-output
+values. No OutputData artifact or exclusion promotion is introduced.
+
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
 and verifier identities. The PARAMS1, PARSER nakedAlgebra, and Certification

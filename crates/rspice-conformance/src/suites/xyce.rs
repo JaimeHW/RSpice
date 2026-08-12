@@ -1305,6 +1305,85 @@ const XYCE_BUG159_RETAINED_OUTPUTS: [(&str, usize, &str, &str); 2] = [
     ),
 ];
 
+// BUG_267 is an include-backed global-parameter success regression. The
+// removed shell wrapper only treats a nonzero simulator exit as failure (its
+// final missing-PRN branch accidentally returns success), and supplies no
+// numerical gold. RSpice preserves that success contract while strengthening
+// it with the exact typed include/parameter graph and analytic six-point DC
+// response.
+const XYCE_BUG267_CONTRACT: &str = "bug267_global_parameter_include_success_wrapper";
+const XYCE_BUG267_PATH: &str = "Netlists/Certification_Tests/BUG_267/bug267.cir";
+const XYCE_BUG267_RECORD: &str = "netlists/certification_tests/bug_267/bug267.cir";
+const XYCE_BUG267_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG267_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG267_HISTORICAL_RECORD_COUNT: usize = 7;
+const XYCE_BUG267_HISTORICAL_RECORD_BYTES: usize = 1_661;
+const XYCE_BUG267_HISTORICAL_RECORDS_SHA256: &str =
+    "6f44b1e7c6895c933c71040e2c281131c5af5b1b05650597dda78d7df3ef1d07";
+const XYCE_BUG267_HISTORICAL_RECORDS_BLAKE3: &str =
+    "e2f556e28faf17e5382dfc5f4c43c6441083f20c99ddcfe6eb1b319fbd6148c9";
+const XYCE_BUG267_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
+    (
+        "Netlists/Certification_Tests/BUG_267/CMakeLists.txt",
+        1_647,
+        "825daed5de9c62722dedfa65f0fbeecc2712a9ee2d5f85cdc71c6f079b204940",
+        "0aecc8b1f3a4e84b69928eb45b018f13485955dbe7abdb002d0db99c90e9180d",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_267/Manifest.txt",
+        44,
+        "9586977dd9baebc7e88f810409e469706cb55e32078eaca9da142f1382bfd67b",
+        "bf2e982998532ae10e5389b0f0240cdc54646fda89cfdae37d62231d8b7fd0b7",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_267/analysis.cmds",
+        42,
+        "3b6f9f91c14b60d6ad5fdbd757711695dd0b3e77a63f1fccbd08e5ed15a55d9c",
+        "0f7d1b0ff3e6b9240cd05addc2397140a3887cd6a39ee671c35ca32490b8dbf6",
+    ),
+    (
+        XYCE_BUG267_PATH,
+        1_401,
+        "3748075f2831433673802f5d46aa76b2d9a8764b6b295ca2161cbff06c72ef86",
+        "696265490951770a677336288998054fadc57ca8c76f559037cca7251a96a494",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_267/bug267.cir.sh",
+        1_057,
+        "37118e725cb539b00f1a6a21464e8af0b966d8ff9cf2a4e3b617a1af481cc3fd",
+        "dede22cb8c7c633b47730afa2088dd5ec1c9fe5fde7f561eec5dc2be26d2bb2c",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_267/tags",
+        28,
+        "43901b249a3892a461ba23bc3dc95c74bdece2bfaee8f7b6e35d9f22359893ac",
+        "2deb82428ebb81c18d9fb719f046d5b461735881ab0d03644891ca3389f06420",
+    ),
+    // The direct shell wrapper does not source Perl, but the release
+    // regression framework still owns its process/result envelope. Keep the
+    // same framework-provenance binding as adjacent reconstructed wrappers.
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG267_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
+    (
+        "analysis.cmds",
+        42,
+        "3b6f9f91c14b60d6ad5fdbd757711695dd0b3e77a63f1fccbd08e5ed15a55d9c",
+        "0f7d1b0ff3e6b9240cd05addc2397140a3887cd6a39ee671c35ca32490b8dbf6",
+    ),
+    (
+        "bug267.cir",
+        1_401,
+        "3748075f2831433673802f5d46aa76b2d9a8764b6b295ca2161cbff06c72ef86",
+        "696265490951770a677336288998054fadc57ca8c76f559037cca7251a96a494",
+    ),
+];
+
 // BUG_352 proves that a diode model parameter authored as an expression is
 // resolved before device construction. The removed wrapper runs the
 // expression deck followed by its literal control and raw-diffs their default
@@ -9543,6 +9622,7 @@ mod analysis_support;
 mod comparison;
 mod contracts;
 mod contracts_bug159;
+mod contracts_bug267;
 mod contracts_bug307;
 mod contracts_bug352;
 mod contracts_bug354;
