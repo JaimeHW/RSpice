@@ -512,31 +512,6 @@ pub fn open_generated_primary(state: &mut AppState) -> bool {
     true
 }
 
-/// Select the existing project-owned primary without creating, replacing, or
-/// deleting source. Creation remains an explicit ownership workflow; document
-/// tabs may only project an identity that is already retained by the project.
-pub fn open_owned_primary(state: &mut AppState) -> bool {
-    let Some(source) = state
-        .ui
-        .netlist
-        .owned_document
-        .as_ref()
-        .map(|document| document.source().to_owned())
-    else {
-        return false;
-    };
-    state.ui.netlist.active_dependency_identity = None;
-    state.ui.netlist.active_dependency_root = None;
-    state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-    state.ui.netlist.active_document_initialized = true;
-    state.simulation.netlist_content = source;
-    state.ui.netlist.completion_open = false;
-    state.ui.netlist.completion_dismissed_at = None;
-    state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut state.ui.netlist);
-    true
-}
-
 pub fn compare_generated_revision(state: &mut AppState, index: usize) -> Result<(), String> {
     let previous = state
         .ui

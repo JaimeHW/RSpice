@@ -11,8 +11,6 @@ use super::data::Histogram;
 /// Statistical measures from a histogram
 #[derive(Debug, Clone, Default)]
 pub struct HistogramStats {
-    /// Sample count
-    pub count: usize,
     /// Mean (first moment)
     pub mean: f64,
     /// Variance
@@ -55,7 +53,6 @@ impl HistogramStats {
         }
 
         let mut stats = Self {
-            count: hist.total_count,
             min: hist.data_min,
             max: hist.data_max,
             ..Default::default()

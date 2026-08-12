@@ -928,10 +928,6 @@ impl Default for AnalysisLifecycleOutcome {
 }
 
 impl AnalysisLifecycleOutcome {
-    pub const fn severity(&self) -> AnalysisLifecycleSeverity {
-        self.severity
-    }
-
     pub fn message(&self) -> &str {
         &self.message
     }

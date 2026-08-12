@@ -328,42 +328,6 @@ impl SymbolSelection {
             && self.attributes.is_empty()
             && self.texts.is_empty()
     }
-
-    pub fn len(&self) -> usize {
-        self.pins.len() + self.shapes.len() + self.attributes.len() + self.texts.len()
-    }
-
-    pub fn union(&mut self, other: Self) {
-        self.pins.extend(other.pins);
-        self.shapes.extend(other.shapes);
-        self.attributes.extend(other.attributes);
-        self.texts.extend(other.texts);
-    }
-
-    pub fn toggle_pin(&mut self, name: impl Into<String>) {
-        let name = name.into();
-        if !self.pins.remove(&name) {
-            self.pins.insert(name);
-        }
-    }
-
-    pub fn toggle_shape(&mut self, index: usize) {
-        if !self.shapes.remove(&index) {
-            self.shapes.insert(index);
-        }
-    }
-
-    pub fn toggle_attribute(&mut self, kind: crate::state::SymbolAttributeKind) {
-        if !self.attributes.remove(&kind) {
-            self.attributes.insert(kind);
-        }
-    }
-
-    pub fn toggle_text(&mut self, id: u64) {
-        if !self.texts.remove(&id) {
-            self.texts.insert(id);
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

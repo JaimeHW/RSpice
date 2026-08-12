@@ -2368,27 +2368,6 @@ fn validate_physical_layout_document_catalog(
 }
 
 impl ProjectWorkspace {
-    /// Migrate legacy noncanonical ownership metadata into an explicit,
-    /// non-executable quarantine. An old boolean review can never be promoted
-    /// into the new versioned parser/engine receipt implicitly.
-    pub(crate) fn quarantine_unreceipted_netlist_profile(&mut self) -> bool {
-        let Some(descriptor) = self.netlist_descriptor.as_mut() else {
-            return false;
-        };
-        let dialect = descriptor
-            .imported_dialect
-            .unwrap_or(NetlistSourceDialect::RSpice);
-        if dialect.requires_compatibility_review()
-            && descriptor.execution_profile.is_none()
-            && descriptor.compatibility_reviewed
-        {
-            descriptor.compatibility_reviewed = false;
-            true
-        } else {
-            false
-        }
-    }
-
     pub fn physical_layout_documents(
         &self,
     ) -> &BTreeMap<String, crate::state::PhysicalLayoutDocument> {

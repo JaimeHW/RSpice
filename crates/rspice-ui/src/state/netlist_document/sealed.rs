@@ -8,17 +8,13 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use rspice_core::netlist::{
-    IncludeProcessor, ResolvedIncludeDependency, SealedSourceBundle, SealedSourceEdge,
-};
+use rspice_core::netlist::{IncludeProcessor, SealedSourceBundle, SealedSourceEdge};
 
 use super::{DependencyMetadata, NetlistDocumentId};
 
 #[derive(Debug)]
 pub(crate) struct ExpandedRetainedNetlist {
     pub source: String,
-    pub root_identity: PathBuf,
-    pub dependencies: Vec<ResolvedIncludeDependency>,
 }
 
 pub(crate) fn expand_retained_netlist_dependencies(
@@ -95,9 +91,5 @@ pub(crate) fn expand_retained_netlist_dependencies(
         .map_err(|error| {
             format!("Could not expand authenticated retained netlist dependencies: {error}")
         })?;
-    Ok(ExpandedRetainedNetlist {
-        source,
-        root_identity: root,
-        dependencies: processor.resolved_dependencies().to_vec(),
-    })
+    Ok(ExpandedRetainedNetlist { source })
 }

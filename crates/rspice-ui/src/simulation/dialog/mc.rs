@@ -42,13 +42,6 @@ pub enum McVariationSource {
 impl McVariationSource {
     pub const ALL: [Self; 2] = [Self::ParameterTolerance, Self::DeckStatistics];
 
-    pub const fn display_name(self) -> &'static str {
-        match self {
-            Self::ParameterTolerance => "Parameter tolerance",
-            Self::DeckStatistics => "Deck statistics",
-        }
-    }
-
     /// Whether the distribution and spread controls reach this trial's engine.
     pub const fn uses_stated_spread(self) -> bool {
         matches!(self, Self::ParameterTolerance)
