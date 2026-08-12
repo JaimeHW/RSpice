@@ -721,10 +721,24 @@ fn test_xyce_hard_coded_deck_paths_use_exact_vendored_case() {
     let referenced = include_str!("xyce_regression.rs")
         .split('"')
         .filter(|fragment| fragment.starts_with("Netlists/") && fragment.ends_with(".cir"))
+        // A `format!` template is not a hard-coded path. It names a family of
+        // decks whose members cannot be resolved here, so each one was
+        // reported as a deck the corpus is missing — four of them, which is
+        // what this assertion had been failing on rather than on any real
+        // drift.
+        .filter(|fragment| !fragment.contains(['{', '}']))
         .map(str::to_owned)
         .collect::<BTreeSet<_>>();
     let missing = referenced.difference(&filesystem).collect::<Vec<_>>();
 
+    // The filters above decide what this guard looks at, so it has to say it
+    // still looks at something. A guard that quietly narrows to nothing
+    // passes forever and reports drift never.
+    assert!(
+        referenced.len() > 500,
+        "the deck-path scan found only {} literals; it can no longer see the paths it exists to check",
+        referenced.len()
+    );
     assert!(
         missing.is_empty(),
         "hard-coded Xyce deck paths must match the vendored path and case exactly: {missing:#?}"
