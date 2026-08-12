@@ -1096,6 +1096,80 @@ const XYCE_BUG354_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 4] = [
     ),
 ];
 
+// BUG_48_SON proves that the historical MOS LEVEL=54 alias selects BSIM4.
+// Release 7.10 required only a successful simulator exit; its comparator was
+// commented out and no numerical gold was authoritative. RSpice strengthens
+// that success predicate with a typed native-device and finite-DC contract.
+const XYCE_BUG48_CONTRACT: &str = "bug48_level54_native_bsim4_success_wrapper";
+const XYCE_BUG48_PATH: &str = "Netlists/Certification_Tests/BUG_48_SON/test.cir";
+const XYCE_BUG48_RECORD: &str = "netlists/certification_tests/bug_48_son/test.cir";
+const XYCE_BUG48_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG48_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG48_HISTORICAL_RECORD_COUNT: usize = 7;
+const XYCE_BUG48_HISTORICAL_RECORD_BYTES: usize = 1_668;
+const XYCE_BUG48_HISTORICAL_RECORDS_SHA256: &str =
+    "f876dec2f93e404e5c6654d062f16697804e61893dc38b030ab0a78415f85235";
+const XYCE_BUG48_HISTORICAL_RECORDS_BLAKE3: &str =
+    "90d55291b11798a47c9cb097a57bc50a9de9636effcd4a680fa0fa1b093cf418";
+const XYCE_BUG48_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
+    (
+        "Netlists/Certification_Tests/BUG_48_SON/CMakeLists.txt",
+        1_657,
+        "87e1411241e7fd69350ed26f9459808dbda68310fb5d59347f73644654f72e10",
+        "8ff147aab4c92da1443d80b4a89d489d4f376301e81a085fe82e74ab9ebe2d17",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_48_SON/Manifest.txt",
+        33,
+        "65900e27f04a97ab6c441dde45ba3a30dc5095f2479d90578f384fda71f6e467",
+        "54b3b72677a577f8d7f7e22513a89a6ddf286b281d9c884d5d3569e31a0fe929",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_48_SON/README",
+        109,
+        "3d6c753db8e5ed4fab8a8be91b462203b8cc248ab23e2abd029c69f41aee0bde",
+        "10303ccc21e8d89817bc3044a71bb48c33e2d4c11934fa188b659b25e1b1f752",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_48_SON/tags",
+        46,
+        "a725c65e1fba0d3241656fedb9caf217f464e8a2b9e14b21bf823f43f83c1047",
+        "4933a5eed19ded7b1fe188959c216a5d1d7ab77b700e72aeb6fc8ae583e27923",
+    ),
+    (
+        XYCE_BUG48_PATH,
+        168,
+        "7c3361111e5e1687568aa8925623c90ac67093bc24c9942fceadf7a284f96f9e",
+        "2884f341df19d6adb50604ca6186f337f1a1c52f5ae1682245c005e7d48bcbdc",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_48_SON/test.cir.sh",
+        1_172,
+        "32e11b81f2e9d456ee862afcab7d6be1582ad1b260b4f14d2761d62794766683",
+        "d741a973bd78501657a6ffecf54ce0c3c5660612e2704cf96bd860421f667312",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG48_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
+    (
+        "README",
+        109,
+        "3d6c753db8e5ed4fab8a8be91b462203b8cc248ab23e2abd029c69f41aee0bde",
+        "10303ccc21e8d89817bc3044a71bb48c33e2d4c11934fa188b659b25e1b1f752",
+    ),
+    (
+        "test.cir",
+        168,
+        "7c3361111e5e1687568aa8925623c90ac67093bc24c9942fceadf7a284f96f9e",
+        "2884f341df19d6adb50604ca6186f337f1a1c52f5ae1682245c005e7d48bcbdc",
+    ),
+];
+
 // BUG_864_SON is a bounded expected-error contract. Release 7.10 executes
 // the deck, requires a nonzero exit, and accepts the run only when either
 // complete output stream contains the unresolved-definition diagnostic. The
@@ -9064,6 +9138,7 @@ mod contracts_bug354;
 mod contracts_bug38;
 mod contracts_bug39;
 mod contracts_bug402;
+mod contracts_bug48;
 mod contracts_bug864;
 mod contracts_dc;
 mod contracts_frequency;
