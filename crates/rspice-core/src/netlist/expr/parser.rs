@@ -17,16 +17,55 @@ use super::*;
 pub(in crate::netlist::expr) struct ExprParser<'a> {
     input: &'a str,
     pos: usize,
+    abort: Option<&'a dyn crate::abort_signal::AbortSignal>,
+    aborted: bool,
 }
 
 impl<'a> ExprParser<'a> {
     pub(in crate::netlist::expr) fn new(input: &'a str) -> Self {
-        Self { input, pos: 0 }
+        Self {
+            input,
+            pos: 0,
+            abort: None,
+            aborted: false,
+        }
+    }
+
+    pub(in crate::netlist::expr) fn with_abort(
+        input: &'a str,
+        abort: &'a dyn crate::abort_signal::AbortSignal,
+    ) -> Self {
+        Self {
+            input,
+            pos: 0,
+            abort: Some(abort),
+            aborted: false,
+        }
+    }
+
+    pub(in crate::netlist::expr) fn was_aborted(&self) -> bool {
+        self.aborted
+    }
+
+    fn poll_abort(&mut self) -> bool {
+        if self.aborted
+            || self
+                .abort
+                .is_some_and(crate::abort_signal::AbortSignal::is_aborted)
+        {
+            self.aborted = true;
+            true
+        } else {
+            false
+        }
     }
 
     /// Skip whitespace
     fn skip_ws(&mut self) {
         while self.pos < self.input.len() {
+            if self.poll_abort() {
+                return;
+            }
             let c = self.input[self.pos..].chars().next().unwrap();
             if c.is_whitespace() {
                 self.pos += c.len_utf8();
@@ -43,6 +82,9 @@ impl<'a> ExprParser<'a> {
 
     /// Consume current character
     fn advance(&mut self) -> Option<char> {
+        if self.poll_abort() {
+            return None;
+        }
         let c = self.peek()?;
         self.pos += c.len_utf8();
         Some(c)
@@ -56,8 +98,7 @@ impl<'a> ExprParser<'a> {
     /// Consume if current char matches
     fn consume(&mut self, c: char) -> bool {
         if self.check(c) {
-            self.advance();
-            true
+            self.advance().is_some()
         } else {
             false
         }
@@ -65,10 +106,15 @@ impl<'a> ExprParser<'a> {
 
     /// Parse an expression (entry point)
     pub(in crate::netlist::expr) fn parse(&mut self) -> Result<Expr, ExprError> {
+        if self.poll_abort() {
+            return Err(ExprError::UnexpectedChar('\0'));
+        }
         self.skip_ws();
         let expr = self.parse_ternary()?;
         self.skip_ws();
-        if self.pos < self.input.len() {
+        if self.aborted {
+            Err(ExprError::UnexpectedChar('\0'))
+        } else if self.pos < self.input.len() {
             Err(ExprError::TrailingInput(self.input[self.pos..].to_string()))
         } else {
             Ok(expr)
@@ -480,53 +526,61 @@ impl<'a> ExprParser<'a> {
     /// milli with `il` swallowed.
     fn parse_number(&mut self) -> Result<Expr, ExprError> {
         let start = self.pos;
-        let chars: Vec<char> = self.input[start..].chars().collect();
-        let mut i = 0;
-
-        // Consume integer part
-        while i < chars.len() && chars[i].is_ascii_digit() {
-            i += 1;
+        while self.peek().is_some_and(|ch| ch.is_ascii_digit()) {
+            if self.advance().is_none() {
+                break;
+            }
         }
 
-        // Consume decimal part
-        if i < chars.len() && chars[i] == '.' {
-            i += 1;
-            while i < chars.len() && chars[i].is_ascii_digit() {
-                i += 1;
+        if self.check('.') {
+            self.advance();
+            while self.peek().is_some_and(|ch| ch.is_ascii_digit()) {
+                if self.advance().is_none() {
+                    break;
+                }
             }
         }
 
         // A scientific exponent needs at least one digit; otherwise the
         // `e`/`E` is a unit letter (`2e` = 2.0, like `2x`).
-        if i < chars.len() && (chars[i] == 'e' || chars[i] == 'E') {
-            let mut j = i + 1;
-            if j < chars.len() && (chars[j] == '+' || chars[j] == '-') {
-                j += 1;
+        if self.peek().is_some_and(|ch| matches!(ch, 'e' | 'E')) {
+            let exponent_start = self.pos;
+            self.advance();
+            if self.peek().is_some_and(|ch| matches!(ch, '+' | '-')) {
+                self.advance();
             }
-            let digits_start = j;
-            while j < chars.len() && chars[j].is_ascii_digit() {
-                j += 1;
+            let digits_start = self.pos;
+            while self.peek().is_some_and(|ch| ch.is_ascii_digit()) {
+                if self.advance().is_none() {
+                    break;
+                }
             }
-            if j > digits_start {
-                i = j;
+            if self.pos == digits_start && !self.aborted {
+                self.pos = exponent_start;
             }
         }
 
-        let numeric_end = i;
+        let numeric_end = self.pos;
 
         // ngspice numparam scale factors (xpressn.c `parseunit`), plus
         // Xyce's engineering-expression imaginary suffix (`2.0J`).
         let mut multiplier = 1.0;
         let mut imaginary_literal = false;
-        if i < chars.len() && chars[i].is_ascii_alphabetic() {
-            let is_meg = i + 3 <= chars.len()
-                && chars[i..i + 3]
-                    .iter()
-                    .collect::<String>()
-                    .eq_ignore_ascii_case("meg");
-            imaginary_literal = chars[i].eq_ignore_ascii_case(&'j');
-            let x_scale_suffix = chars[i].eq_ignore_ascii_case(&'x')
-                && (i + 1 == chars.len() || !chars[i + 1].is_ascii_alphabetic());
+        if self.peek().is_some_and(|ch| ch.is_ascii_alphabetic()) {
+            let remaining = &self.input[self.pos..];
+            let first = remaining
+                .chars()
+                .next()
+                .expect("alphabetic suffix was just observed");
+            let is_meg = remaining
+                .get(..3)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("meg"));
+            imaginary_literal = first.eq_ignore_ascii_case(&'j');
+            let x_scale_suffix = first.eq_ignore_ascii_case(&'x')
+                && remaining
+                    .chars()
+                    .nth(1)
+                    .is_none_or(|next| !next.is_ascii_alphabetic());
             multiplier = if imaginary_literal {
                 1.0
             } else if is_meg {
@@ -534,7 +588,7 @@ impl<'a> ExprParser<'a> {
             } else if x_scale_suffix {
                 1e6
             } else {
-                match chars[i].to_ascii_uppercase() {
+                match first.to_ascii_uppercase() {
                     'T' => 1e12,
                     'G' => 1e9,
                     'K' => 1e3,
@@ -548,15 +602,14 @@ impl<'a> ExprParser<'a> {
                 }
             };
             // Swallow the unit and any trailing letters (`10kOhm`).
-            while i < chars.len() && chars[i].is_ascii_alphabetic() {
-                i += 1;
+            while self.peek().is_some_and(|ch| ch.is_ascii_alphabetic()) {
+                if self.advance().is_none() {
+                    break;
+                }
             }
         }
 
-        let byte_len: usize = chars[..i].iter().map(|c| c.len_utf8()).sum();
-        self.pos = start + byte_len;
-
-        let num_str: String = chars[..numeric_end].iter().collect();
+        let num_str = &self.input[start..numeric_end];
         match num_str.parse::<f64>() {
             Ok(v) => {
                 let value = v * multiplier;
@@ -566,7 +619,7 @@ impl<'a> ExprParser<'a> {
                     Ok(Expr::Number(value))
                 }
             }
-            Err(_) => Err(ExprError::InvalidNumber(num_str)),
+            Err(_) => Err(ExprError::InvalidNumber(num_str.to_string())),
         }
     }
 
@@ -577,7 +630,9 @@ impl<'a> ExprParser<'a> {
         self.advance();
         while let Some(c) = self.peek() {
             if is_expr_ident_continue(c) {
-                self.advance();
+                if self.advance().is_none() {
+                    break;
+                }
             } else {
                 break;
             }
@@ -598,7 +653,9 @@ impl<'a> ExprParser<'a> {
                         if matches!(ch, ',' | ')') {
                             break;
                         }
-                        self.advance();
+                        if self.advance().is_none() {
+                            break;
+                        }
                     }
                     let argument = self.input[argument_start..self.pos].trim();
                     if argument.is_empty() {

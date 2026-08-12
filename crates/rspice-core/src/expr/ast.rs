@@ -144,6 +144,82 @@ pub enum Function {
     If, // if(cond, then, else)
 }
 
+impl Function {
+    /// Resolve a built-in function name using the canonical expression grammar
+    /// and all accepted compatibility aliases.
+    ///
+    /// Keeping this table on the semantic enum gives behavioral parsing and
+    /// output-expression validation one source of truth. User-defined
+    /// functions intentionally return `None` here.
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        match name.to_ascii_uppercase().as_str() {
+            "ABS" | "M" | "MAG" => Some(Self::Abs),
+            "SQRT" => Some(Self::Sqrt),
+            "EXP" => Some(Self::Exp),
+            "LOG" => Some(Self::Log),
+            "LN" => Some(Self::Ln),
+            "LOG10" => Some(Self::Log10),
+            "SIN" => Some(Self::Sin),
+            "COS" => Some(Self::Cos),
+            "TAN" => Some(Self::Tan),
+            "ASIN" | "ARCSIN" => Some(Self::Asin),
+            "ACOS" | "ARCCOS" => Some(Self::Acos),
+            "ATAN" | "ARCTAN" => Some(Self::Atan),
+            "ATAN2" => Some(Self::Atan2),
+            "SINH" => Some(Self::Sinh),
+            "COSH" => Some(Self::Cosh),
+            "TANH" => Some(Self::Tanh),
+            "ASINH" => Some(Self::Asinh),
+            "ACOSH" => Some(Self::Acosh),
+            "ATANH" => Some(Self::Atanh),
+            "INT" | "TRUNC" => Some(Self::Trunc),
+            "FLOOR" => Some(Self::Floor),
+            "CEIL" | "CEILING" => Some(Self::Ceil),
+            "ROUND" | "NINT" => Some(Self::Round),
+            "SQR" => Some(Self::Sqr),
+            "MIN" => Some(Self::Min),
+            "MAX" => Some(Self::Max),
+            "POW" => Some(Self::Pow),
+            "PWR" => Some(Self::Pwr),
+            "PWRS" => Some(Self::Pwrs),
+            "LIMIT" => Some(Self::Limit),
+            "SGN" => Some(Self::Sign),
+            "SIGN" => Some(Self::HspiceSign),
+            "URAMP" => Some(Self::Uramp),
+            "STP" | "STEP" => Some(Self::Stp),
+            "U" | "USTEP" => Some(Self::Ustep),
+            "U2" => Some(Self::U2),
+            "EQ0" => Some(Self::Eq0),
+            "NE0" => Some(Self::Ne0),
+            "GT0" => Some(Self::Gt0),
+            "LT0" => Some(Self::Lt0),
+            "GE0" => Some(Self::Ge0),
+            "LE0" => Some(Self::Le0),
+            "TABLE" => Some(Self::Table),
+            "TABLEFILE" => Some(Self::TableFile),
+            "FASTTABLE" => Some(Self::FastTable),
+            "FASTTABLEFILE" => Some(Self::FastTableFile),
+            "CUBIC" => Some(Self::Cubic),
+            "CUBICFILE" => Some(Self::CubicFile),
+            "AKIMA" | "SPLINE" => Some(Self::Akima),
+            "AKIMAFILE" | "SPLINEFILE" => Some(Self::AkimaFile),
+            "WODICKA" => Some(Self::Wodicka),
+            "WODICKAFILE" => Some(Self::WodickaFile),
+            "BLI" => Some(Self::Barycentric),
+            "BLIFILE" => Some(Self::BarycentricFile),
+            "SDT" => Some(Self::Sdt),
+            "PWL" => Some(Self::Pwl),
+            "MOD" | "FMOD" => Some(Self::Mod),
+            "SPICE_PULSE" => Some(Self::SpicePulse),
+            "SPICE_SIN" => Some(Self::SpiceSin),
+            "SPICE_EXP" => Some(Self::SpiceExp),
+            "SPICE_SFFM" => Some(Self::SpiceSffm),
+            "IF" | "TERNARY_FCN" => Some(Self::If),
+            _ => None,
+        }
+    }
+}
+
 /// One-dimensional lookup data resolved and precomputed during circuit build.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LookupTable {

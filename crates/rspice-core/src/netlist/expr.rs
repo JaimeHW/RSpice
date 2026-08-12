@@ -42,10 +42,14 @@ mod tests;
 
 use parser::ExprParser;
 
+pub(crate) use api::{ParseExpressionWithAbortError, parse_expression_with_abort};
 pub use api::{
     eval_expression, eval_expression_complex, eval_simple, eval_simple_complex, parse_expression,
 };
-pub(crate) use behavioral::validate_prepared_behavioral_runtime_expression;
+pub(crate) use behavioral::{
+    BehavioralPreparationError, prepare_behavioral_expression_with_abort,
+    validate_prepared_behavioral_runtime_expression,
+};
 pub use behavioral::{
     ParameterCircuitProbe, ParameterCircuitProbeKind, RuntimeSpecialQuantity,
     behavioral_expression_references_frequency, behavioral_expression_references_runtime_quantity,

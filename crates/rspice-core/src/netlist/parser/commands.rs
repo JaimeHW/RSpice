@@ -416,6 +416,7 @@ pub(super) fn parse_command(
                 directive,
                 origin.clone(),
                 &remaining_command_source(stream),
+                remaining_command_expressions(stream),
             ));
             parse_save_command(stream, line_num, saves, false)?;
         }
@@ -431,6 +432,7 @@ pub(super) fn parse_command(
                 directive,
                 origin.clone(),
                 &remaining_command_source(stream),
+                remaining_command_expressions(stream),
             ));
             parse_save_command(stream, line_num, saves, true)?;
         }
@@ -571,6 +573,17 @@ fn remaining_command_source(stream: &TokenStream) -> String {
         .map(|token| token.lexeme)
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn remaining_command_expressions(stream: &TokenStream) -> Vec<String> {
+    let mut copy = stream.clone();
+    copy.collect_line()
+        .into_iter()
+        .filter_map(|token| match token.kind {
+            TokenKind::Expression(expression) => Some(expression),
+            _ => None,
+        })
+        .collect()
 }
 
 fn parse_preprocess_command(

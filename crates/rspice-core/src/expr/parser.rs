@@ -4,6 +4,7 @@
 //! Uses a simple recursive descent parser with operator precedence.
 
 use super::ast::{BinaryOp, Expr, Function, UnaryOp};
+use crate::abort_signal::AbortSignal;
 use std::iter::Peekable;
 use std::str::Chars;
 
@@ -69,19 +70,50 @@ pub enum Token {
 /// Tokenizer for expressions
 pub struct Lexer<'a> {
     chars: Peekable<Chars<'a>>,
+    abort: Option<&'a dyn AbortSignal>,
+    aborted: bool,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Self {
         Self {
             chars: input.chars().peekable(),
+            abort: None,
+            aborted: false,
+        }
+    }
+
+    fn with_abort(input: &'a str, abort: &'a dyn AbortSignal) -> Self {
+        Self {
+            chars: input.chars().peekable(),
+            abort: Some(abort),
+            aborted: false,
+        }
+    }
+
+    fn poll_abort(&mut self) -> bool {
+        if self.aborted || self.abort.is_some_and(AbortSignal::is_aborted) {
+            self.aborted = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn next_char(&mut self) -> Option<char> {
+        if self.poll_abort() {
+            None
+        } else {
+            self.chars.next()
         }
     }
 
     fn skip_whitespace(&mut self) {
         while let Some(&c) = self.chars.peek() {
             if c.is_whitespace() {
-                self.chars.next();
+                if self.next_char().is_none() {
+                    break;
+                }
             } else {
                 break;
             }
@@ -92,7 +124,11 @@ impl<'a> Lexer<'a> {
         let mut s = String::new();
         while let Some(&c) = self.chars.peek() {
             if c.is_ascii_digit() || c == '.' {
-                s.push(self.chars.next().unwrap());
+                if let Some(character) = self.next_char() {
+                    s.push(character);
+                } else {
+                    break;
+                }
             } else {
                 break;
             }
@@ -110,12 +146,19 @@ impl<'a> Lexer<'a> {
             }
             let mut digits = 0usize;
             while matches!(probe.peek(), Some(c) if c.is_ascii_digit()) {
+                if self.poll_abort() {
+                    return Token::Eof;
+                }
                 probe.next();
                 digits += 1;
             }
             if digits > 0 {
                 for _ in 0..span + digits {
-                    s.push(self.chars.next().unwrap());
+                    if let Some(character) = self.next_char() {
+                        s.push(character);
+                    } else {
+                        break;
+                    }
                 }
             }
         }
@@ -133,7 +176,14 @@ impl<'a> Lexer<'a> {
         let mut tail = String::new();
         if matches!(self.chars.peek(), Some(c) if c.is_ascii_alphabetic()) {
             while matches!(self.chars.peek(), Some(c) if c.is_ascii_alphabetic()) {
-                tail.push(self.chars.next().unwrap());
+                if let Some(character) = self.next_char() {
+                    tail.push(character);
+                } else {
+                    break;
+                }
+            }
+            if self.aborted {
+                return Token::Eof;
             }
             let upper = tail.to_ascii_uppercase();
             multiplier = if upper.starts_with("MEG") {
@@ -184,7 +234,11 @@ impl<'a> Lexer<'a> {
                 || c == '$'
                 || is_bang_name_char
             {
-                s.push(self.chars.next().unwrap());
+                if let Some(character) = self.next_char() {
+                    s.push(character);
+                } else {
+                    break;
+                }
             } else {
                 break;
             }
@@ -193,14 +247,14 @@ impl<'a> Lexer<'a> {
     }
 
     fn read_string(&mut self, quote: char) -> Token {
-        self.chars.next();
+        self.next_char();
         let mut value = String::new();
-        while let Some(c) = self.chars.next() {
+        while let Some(c) = self.next_char() {
             if c == quote {
                 return Token::StringLiteral(value);
             }
             if c == '\\' {
-                if let Some(escaped) = self.chars.next() {
+                if let Some(escaped) = self.next_char() {
                     value.push(escaped);
                 }
             } else {
@@ -213,19 +267,27 @@ impl<'a> Lexer<'a> {
     fn consume_spaced_equals(&mut self) -> bool {
         let mut probe = self.chars.clone();
         while matches!(probe.peek(), Some(c) if c.is_whitespace()) {
+            if self.poll_abort() {
+                return false;
+            }
             probe.next();
         }
         if probe.peek() != Some(&'=') {
             return false;
         }
         while matches!(self.chars.peek(), Some(c) if c.is_whitespace()) {
-            self.chars.next();
+            if self.next_char().is_none() {
+                return false;
+            }
         }
-        self.chars.next();
+        self.next_char();
         true
     }
 
     pub fn next_token(&mut self) -> Token {
+        if self.poll_abort() {
+            return Token::Eof;
+        }
         self.skip_whitespace();
 
         match self.chars.peek() {
@@ -235,60 +297,60 @@ impl<'a> Lexer<'a> {
                 'a'..='z' | 'A'..='Z' | '_' | '$' => Token::Ident(self.read_ident()),
                 '"' => self.read_string(c),
                 '\'' => {
-                    self.chars.next();
+                    self.next_char();
                     Token::SingleQuote
                 }
                 '+' => {
-                    self.chars.next();
+                    self.next_char();
                     Token::Plus
                 }
                 '-' => {
-                    self.chars.next();
+                    self.next_char();
                     Token::Minus
                 }
                 '*' => {
-                    self.chars.next();
+                    self.next_char();
                     if self.chars.peek() == Some(&'*') {
-                        self.chars.next();
+                        self.next_char();
                         Token::Caret // ngspice accepts ** as power
                     } else {
                         Token::Star
                     }
                 }
                 '/' => {
-                    self.chars.next();
+                    self.next_char();
                     Token::Slash
                 }
                 '%' => {
-                    self.chars.next();
+                    self.next_char();
                     Token::Percent
                 }
                 '^' => {
-                    self.chars.next();
+                    self.next_char();
                     Token::Caret
                 }
                 '(' => {
-                    self.chars.next();
+                    self.next_char();
                     Token::LParen
                 }
                 ')' => {
-                    self.chars.next();
+                    self.next_char();
                     Token::RParen
                 }
                 ',' => {
-                    self.chars.next();
+                    self.next_char();
                     Token::Comma
                 }
                 '?' => {
-                    self.chars.next();
+                    self.next_char();
                     Token::Question
                 }
                 ':' => {
-                    self.chars.next();
+                    self.next_char();
                     Token::Colon
                 }
                 '<' => {
-                    self.chars.next();
+                    self.next_char();
                     if self.consume_spaced_equals() {
                         Token::Le
                     } else {
@@ -296,7 +358,7 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 '>' => {
-                    self.chars.next();
+                    self.next_char();
                     if self.consume_spaced_equals() {
                         Token::Ge
                     } else {
@@ -304,16 +366,16 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 '=' => {
-                    self.chars.next();
+                    self.next_char();
                     if self.chars.peek() == Some(&'=') {
-                        self.chars.next();
+                        self.next_char();
                         Token::Eq
                     } else {
                         Token::Eq // Single = also means equality in SPICE
                     }
                 }
                 '!' => {
-                    self.chars.next();
+                    self.next_char();
                     if self.consume_spaced_equals() {
                         Token::Ne
                     } else {
@@ -321,21 +383,21 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 '&' => {
-                    self.chars.next();
+                    self.next_char();
                     if self.chars.peek() == Some(&'&') {
-                        self.chars.next();
+                        self.next_char();
                     }
                     Token::And
                 }
                 '|' => {
-                    self.chars.next();
+                    self.next_char();
                     if self.chars.peek() == Some(&'|') {
-                        self.chars.next();
+                        self.next_char();
                     }
                     Token::Or
                 }
                 _ => {
-                    self.chars.next();
+                    self.next_char();
                     Token::Invalid(c)
                 }
             },
@@ -359,6 +421,20 @@ impl<'a> Parser<'a> {
             current,
             errors: Vec::new(),
         }
+    }
+
+    fn with_abort(input: &'a str, abort: &'a dyn AbortSignal) -> Self {
+        let mut lexer = Lexer::with_abort(input, abort);
+        let current = lexer.next_token();
+        Self {
+            lexer,
+            current,
+            errors: Vec::new(),
+        }
+    }
+
+    fn was_aborted(&self) -> bool {
+        self.lexer.aborted
     }
 
     fn advance(&mut self) {
@@ -730,71 +806,7 @@ impl<'a> Parser<'a> {
             }
             self.expect(Token::RParen);
 
-            let func = match upper.as_str() {
-                "ABS" | "M" => Some(Function::Abs),
-                "SQRT" => Some(Function::Sqrt),
-                "EXP" => Some(Function::Exp),
-                "LOG" => Some(Function::Log),
-                "LN" => Some(Function::Ln),
-                "LOG10" => Some(Function::Log10),
-                "SIN" => Some(Function::Sin),
-                "COS" => Some(Function::Cos),
-                "TAN" => Some(Function::Tan),
-                "ASIN" | "ARCSIN" => Some(Function::Asin),
-                "ACOS" | "ARCCOS" => Some(Function::Acos),
-                "ATAN" | "ARCTAN" => Some(Function::Atan),
-                "ATAN2" => Some(Function::Atan2),
-                "SINH" => Some(Function::Sinh),
-                "COSH" => Some(Function::Cosh),
-                "TANH" => Some(Function::Tanh),
-                "ASINH" => Some(Function::Asinh),
-                "ACOSH" => Some(Function::Acosh),
-                "ATANH" => Some(Function::Atanh),
-                "INT" | "TRUNC" => Some(Function::Trunc),
-                "FLOOR" => Some(Function::Floor),
-                "CEIL" | "CEILING" => Some(Function::Ceil),
-                "ROUND" | "NINT" => Some(Function::Round),
-                "SQR" => Some(Function::Sqr),
-                "MIN" => Some(Function::Min),
-                "MAX" => Some(Function::Max),
-                "POW" => Some(Function::Pow),
-                "PWR" => Some(Function::Pwr),
-                "PWRS" => Some(Function::Pwrs),
-                "LIMIT" => Some(Function::Limit),
-                "SGN" => Some(Function::Sign),
-                "SIGN" => Some(Function::HspiceSign),
-                "URAMP" => Some(Function::Uramp),
-                "STP" | "STEP" => Some(Function::Stp),
-                "U" | "USTEP" => Some(Function::Ustep),
-                "U2" => Some(Function::U2),
-                "EQ0" => Some(Function::Eq0),
-                "NE0" => Some(Function::Ne0),
-                "GT0" => Some(Function::Gt0),
-                "LT0" => Some(Function::Lt0),
-                "GE0" => Some(Function::Ge0),
-                "LE0" => Some(Function::Le0),
-                "TABLE" => Some(Function::Table),
-                "TABLEFILE" => Some(Function::TableFile),
-                "FASTTABLE" => Some(Function::FastTable),
-                "FASTTABLEFILE" => Some(Function::FastTableFile),
-                "CUBIC" => Some(Function::Cubic),
-                "CUBICFILE" => Some(Function::CubicFile),
-                "AKIMA" | "SPLINE" => Some(Function::Akima),
-                "AKIMAFILE" | "SPLINEFILE" => Some(Function::AkimaFile),
-                "WODICKA" => Some(Function::Wodicka),
-                "WODICKAFILE" => Some(Function::WodickaFile),
-                "BLI" => Some(Function::Barycentric),
-                "BLIFILE" => Some(Function::BarycentricFile),
-                "SDT" => Some(Function::Sdt),
-                "PWL" => Some(Function::Pwl),
-                "MOD" | "FMOD" => Some(Function::Mod),
-                "SPICE_PULSE" => Some(Function::SpicePulse),
-                "SPICE_SIN" => Some(Function::SpiceSin),
-                "SPICE_EXP" => Some(Function::SpiceExp),
-                "SPICE_SFFM" => Some(Function::SpiceSffm),
-                "IF" | "TERNARY_FCN" => Some(Function::If),
-                _ => None,
-            };
+            let func = Function::from_name(&upper);
 
             if let Some(f) = func {
                 self.validate_function_arity(name, f, &args);
@@ -942,6 +954,29 @@ pub fn parse_expression_strict(input: &str) -> Result<Expr, ParseError> {
     }
 }
 
+#[derive(Debug)]
+pub(crate) enum ParseExpressionWithAbortError {
+    Aborted,
+    Parse(ParseError),
+}
+
+pub(crate) fn parse_expression_strict_with_abort(
+    input: &str,
+    abort: &dyn AbortSignal,
+) -> Result<Expr, ParseExpressionWithAbortError> {
+    let mut parser = Parser::with_abort(input, abort);
+    let expression = parser.parse();
+    if parser.was_aborted() {
+        Err(ParseExpressionWithAbortError::Aborted)
+    } else if parser.errors.is_empty() {
+        Ok(expression)
+    } else {
+        Err(ParseExpressionWithAbortError::Parse(ParseError::new(
+            parser.errors.join("; "),
+        )))
+    }
+}
+
 /// Parse an expression string into AST
 pub fn parse_expression(input: &str) -> Expr {
     match parse_expression_strict(input) {
@@ -960,6 +995,7 @@ pub fn parse_expression(input: &str) -> Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::abort_signal::CountingAbort;
     use crate::expr::{Context, Vm, compile};
 
     fn eval_const(input: &str) -> f64 {
@@ -968,6 +1004,21 @@ mod tests {
         let program = compile(&ast);
         let mut vm = Vm::new();
         vm.execute(&program, &Context::dc(&[], &[]))
+    }
+
+    #[test]
+    fn strict_expression_parser_polls_abort_during_token_traversal() {
+        for expression in ["1".repeat(4096), format!("{}1", " ".repeat(4096))] {
+            let abort = CountingAbort::new(128);
+            assert!(matches!(
+                parse_expression_strict_with_abort(&expression, &abort),
+                Err(ParseExpressionWithAbortError::Aborted)
+            ));
+            assert!(
+                abort.count() > 128,
+                "the abort must be observed from inside strict lexer traversal"
+            );
+        }
     }
 
     fn eval_const_xyce(input: &str) -> f64 {

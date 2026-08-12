@@ -214,6 +214,14 @@ pub struct WasmError {
     #[serde(default)]
     pub expression: Option<String>,
     #[serde(default)]
+    pub output_directive: Option<String>,
+    #[serde(default)]
+    pub operator_name: Option<String>,
+    #[serde(default)]
+    pub function_name: Option<String>,
+    #[serde(default)]
+    pub identifier_name: Option<String>,
+    #[serde(default)]
     pub missing_dependency: Option<String>,
     #[serde(default)]
     pub reason: Option<String>,
@@ -258,6 +266,10 @@ struct JsWasmErrorDetails<'a> {
     parameter_name: Option<&'a str>,
     canonical_parameter_name: Option<&'a str>,
     expression: Option<&'a str>,
+    output_directive: Option<&'a str>,
+    operator_name: Option<&'a str>,
+    function_name: Option<&'a str>,
+    identifier_name: Option<&'a str>,
     missing_dependency: Option<&'a str>,
     reason: Option<&'a str>,
     unresolved_output_symbols: Vec<JsUnresolvedOutputSymbol<'a>>,
@@ -342,6 +354,10 @@ impl WasmError {
             parameter_name: None,
             canonical_parameter_name: None,
             expression: None,
+            output_directive: None,
+            operator_name: None,
+            function_name: None,
+            identifier_name: None,
             missing_dependency: None,
             reason: None,
             unresolved_output_symbols: Vec::new(),
@@ -425,10 +441,60 @@ impl WasmError {
                     parameter_name: None,
                     canonical_parameter_name: None,
                     expression: None,
+                    output_directive: None,
+                    operator_name: None,
+                    function_name: None,
+                    identifier_name: None,
                     missing_dependency: None,
                     reason: None,
                     unresolved_output_symbols,
                 }
+            }
+            rspice_core::netlist::ParseError::OutputExpressionValidation(error) => {
+                use rspice_core::netlist::OutputExpressionIssue;
+
+                let (kind, operator_name, function_name, identifier_name) = match &error.issue {
+                    OutputExpressionIssue::UnknownFunction { function } => (
+                        "unknown_output_function",
+                        None,
+                        Some(function.clone()),
+                        None,
+                    ),
+                    OutputExpressionIssue::UnresolvedIdentifier { identifier } => (
+                        "unresolved_output_identifier",
+                        None,
+                        None,
+                        Some(identifier.clone()),
+                    ),
+                    OutputExpressionIssue::InvalidAccessor { operator, .. } => (
+                        "invalid_output_accessor",
+                        Some(operator.clone()),
+                        None,
+                        None,
+                    ),
+                    OutputExpressionIssue::UnresolvedDeviceParameter { .. } => {
+                        ("unresolved_output_device_parameter", None, None, None)
+                    }
+                    OutputExpressionIssue::Syntax { .. } => {
+                        ("invalid_output_expression_syntax", None, None, None)
+                    }
+                };
+                let mut structured = Self::new(message, kind, "output_expression_validation");
+                structured.primary_source = source_path(&error.origin);
+                structured.primary_line = Some(error.origin.line);
+                structured.expression = Some(error.expression);
+                structured.output_directive = Some(error.directive.to_string());
+                structured.operator_name = operator_name;
+                structured.function_name = function_name;
+                structured.identifier_name = identifier_name;
+                if let OutputExpressionIssue::UnresolvedDeviceParameter { device, parameter } =
+                    &error.issue
+                {
+                    structured.instance_name = Some(device.clone());
+                    structured.parameter_name = Some(parameter.clone());
+                }
+                structured.reason = Some(error.issue.reason());
+                structured
             }
             rspice_core::netlist::ParseError::StartupDirectiveConflict(error) => Self {
                 message,
@@ -456,6 +522,10 @@ impl WasmError {
                 parameter_name: None,
                 canonical_parameter_name: None,
                 expression: None,
+                output_directive: None,
+                operator_name: None,
+                function_name: None,
+                identifier_name: None,
                 missing_dependency: None,
                 reason: None,
                 unresolved_output_symbols: Vec::new(),
@@ -596,6 +666,10 @@ fn wasm_error_to_js(error: WasmError) -> JsValue {
         parameter_name: error.parameter_name.as_deref(),
         canonical_parameter_name: error.canonical_parameter_name.as_deref(),
         expression: error.expression.as_deref(),
+        output_directive: error.output_directive.as_deref(),
+        operator_name: error.operator_name.as_deref(),
+        function_name: error.function_name.as_deref(),
+        identifier_name: error.identifier_name.as_deref(),
         missing_dependency: error.missing_dependency.as_deref(),
         reason: error.reason.as_deref(),
         unresolved_output_symbols: error
@@ -635,6 +709,10 @@ fn wasm_error_to_js(error: WasmError) -> JsValue {
             "parameterName",
             "canonicalParameterName",
             "expression",
+            "outputDirective",
+            "operatorName",
+            "functionName",
+            "identifierName",
             "missingDependency",
             "reason",
             "unresolvedOutputSymbols",

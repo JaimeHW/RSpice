@@ -159,6 +159,10 @@ pub(crate) fn map_parse_error(error: rspice_core::error::ParseError) -> crate::c
                 }),
             )
         }
+        rspice_core::netlist::ParseError::OutputExpressionValidation(validation) => (
+            error.to_string(),
+            (validation.origin.line != 0).then_some(validation.origin.line),
+        ),
         rspice_core::netlist::ParseError::StartupDirectiveConflict(conflict) => (
             error.to_string(),
             (conflict.conflicting.line != 0).then_some(conflict.conflicting.line),
@@ -283,5 +287,27 @@ mod tests {
             }
             other => panic!("expected parse error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn output_expression_error_maps_to_the_authored_card_location() {
+        let mapped = map_parse_error(
+            rspice_core::netlist::ParseError::OutputExpressionValidation(Box::new(
+                rspice_core::netlist::OutputExpressionValidationError {
+                    directive: rspice_core::netlist::OutputDirectiveKind::Print,
+                    origin: rspice_core::netlist::NetlistSourceLocation::in_file("deck.cir", 9),
+                    expression: "FABS(V(1))".into(),
+                    issue: rspice_core::netlist::OutputExpressionIssue::UnknownFunction {
+                        function: "FABS".into(),
+                    },
+                },
+            )),
+        );
+        let crate::cli::CliError::ParseError { message, line, .. } = mapped else {
+            panic!("typed output-expression failure must remain a CLI parse error")
+        };
+        assert_eq!(line, Some(9));
+        assert!(message.contains("FABS"));
+        assert!(message.contains("deck.cir:9"));
     }
 }

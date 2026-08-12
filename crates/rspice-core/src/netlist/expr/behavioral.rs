@@ -5,10 +5,15 @@
 //! the behavioral compiler and final circuit binding pass.
 
 use super::{
-    BinOpKind, Expr as NetExpr, ParamContext, UnaryOpKind, eval_expression_complex,
-    parse_expression as parse_net_expr,
+    BinOpKind, Expr as NetExpr, ParamContext,
+    ParseExpressionWithAbortError as NetExpressionParseWithAbortError, UnaryOpKind,
+    eval_expression_complex, parse_expression as parse_net_expr,
+    parse_expression_with_abort as parse_net_expr_with_abort,
 };
-use crate::Value;
+use crate::{
+    Value,
+    abort_signal::{AbortSignal, NoAbort},
+};
 use std::collections::HashMap;
 
 /// Analysis quantities whose value is supplied by the active solver point.
@@ -280,7 +285,33 @@ pub fn prepare_behavioral_expression(
     expression: &str,
     params: &ParamContext,
 ) -> Result<String, String> {
-    prepare_behavioral_expression_impl(expression, params, false)
+    match prepare_behavioral_expression_impl(expression, params, false, &NoAbort) {
+        Ok(expression) => Ok(expression),
+        Err(BehavioralPreparationError::Semantic(error)) => Err(error),
+        Err(BehavioralPreparationError::Aborted) => {
+            unreachable!("NoAbort cannot cancel behavioral preparation")
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BehavioralPreparationError {
+    Aborted,
+    Semantic(String),
+}
+
+impl From<String> for BehavioralPreparationError {
+    fn from(error: String) -> Self {
+        Self::Semantic(error)
+    }
+}
+
+pub(crate) fn prepare_behavioral_expression_with_abort(
+    expression: &str,
+    params: &ParamContext,
+    abort: &dyn AbortSignal,
+) -> Result<String, BehavioralPreparationError> {
+    prepare_behavioral_expression_impl(expression, params, false, abort)
 }
 
 /// Prepare a behavioral expression while retaining its original spelling when
@@ -293,30 +324,50 @@ pub fn prepare_behavioral_expression_preserving_spelling(
     expression: &str,
     params: &ParamContext,
 ) -> Result<String, String> {
-    prepare_behavioral_expression_impl(expression, params, true)
+    match prepare_behavioral_expression_impl(expression, params, true, &NoAbort) {
+        Ok(expression) => Ok(expression),
+        Err(BehavioralPreparationError::Semantic(error)) => Err(error),
+        Err(BehavioralPreparationError::Aborted) => {
+            unreachable!("NoAbort cannot cancel behavioral preparation")
+        }
+    }
 }
 
 fn prepare_behavioral_expression_impl(
     expression: &str,
     params: &ParamContext,
     preserve_unchanged_spelling: bool,
-) -> Result<String, String> {
+    abort: &dyn AbortSignal,
+) -> Result<String, BehavioralPreparationError> {
+    if abort.is_aborted() {
+        return Err(BehavioralPreparationError::Aborted);
+    }
     let expression = expand_spice_poly_expression(expression)?;
     let mut probe_protector = ProbeProtector::default();
-    let protected_expression = probe_protector.protect(&expression);
+    let protected_expression = probe_protector.protect_with_abort(&expression, abort)?;
 
     // Keep legacy behavior when the permissive parser cannot parse a
     // non-standard expression; strict parser will still validate later.
-    let parsed = match parse_net_expr(&protected_expression) {
+    let parsed = match parse_net_expr_with_abort(&protected_expression, abort) {
         Ok(expr) => expr,
-        Err(_) => return Ok(expression),
+        Err(NetExpressionParseWithAbortError::Aborted) => {
+            return Err(BehavioralPreparationError::Aborted);
+        }
+        Err(NetExpressionParseWithAbortError::Parse(_)) => return Ok(expression),
     };
     let canonical_original = preserve_unchanged_spelling.then(|| serialize_expr(&parsed));
 
     let expanded = {
-        let mut expander = FunctionExpander::new(params, &mut probe_protector);
-        expander.expand_expr(&parsed, 0)?
+        let mut expander = FunctionExpander::new(params, &mut probe_protector, abort);
+        match expander.expand_expr(&parsed, 0) {
+            Ok(expanded) => expanded,
+            Err(_) if abort.is_aborted() => return Err(BehavioralPreparationError::Aborted),
+            Err(error) => return Err(BehavioralPreparationError::Semantic(error)),
+        }
     };
+    if abort.is_aborted() {
+        return Err(BehavioralPreparationError::Aborted);
+    }
     let canonical_expanded = serialize_expr(&expanded);
     if canonical_original
         .as_ref()
@@ -784,6 +835,7 @@ struct FunctionExpander<'a, 'p> {
     parameter_body_cache: HashMap<String, NetExpr>,
     parameter_stack: Vec<(String, ParameterExpressionKind)>,
     fold_static_function_graph: bool,
+    abort: &'a dyn AbortSignal,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -802,7 +854,11 @@ impl ParameterExpressionKind {
 }
 
 impl<'a, 'p> FunctionExpander<'a, 'p> {
-    fn new(params: &'a ParamContext, probe_protector: &'p mut ProbeProtector) -> Self {
+    fn new(
+        params: &'a ParamContext,
+        probe_protector: &'p mut ProbeProtector,
+        abort: &'a dyn AbortSignal,
+    ) -> Self {
         Self {
             params,
             probe_protector,
@@ -811,6 +867,7 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
             parameter_body_cache: HashMap::new(),
             parameter_stack: Vec::new(),
             fold_static_function_graph: params.function_count() > LARGE_FUNCTION_GRAPH_THRESHOLD,
+            abort,
         }
     }
 
@@ -829,6 +886,9 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
         let mut expanded_nodes = 0usize;
 
         while let Some(task) = tasks.pop() {
+            if expanded_nodes % 64 == 0 && self.abort.is_aborted() {
+                return Err("behavioral expression preparation was cancelled".to_string());
+            }
             match task {
                 Task::Expand(expr, depth) => {
                     if depth > MAX_NAMED_EXPANSION_DEPTH {
@@ -910,16 +970,35 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                                 {
                                     cached.clone()
                                 } else {
-                                    let protected = self.probe_protector.protect(expression);
-                                    let parsed = parse_net_expr(&protected).map_err(|error| {
-                                        format!(
-                                            "Failed to parse {} {} expression '{}': {}",
-                                            expression_kind.directive(),
-                                            name,
-                                            expression,
-                                            error
-                                        )
-                                    })?;
+                                    let protected = self
+                                        .probe_protector
+                                        .protect_with_abort(expression, self.abort)
+                                        .map_err(|error| match error {
+                                            BehavioralPreparationError::Aborted => {
+                                                "behavioral expression preparation was cancelled"
+                                                    .to_string()
+                                            }
+                                            BehavioralPreparationError::Semantic(error) => error,
+                                        })?;
+                                    let parsed =
+                                        match parse_net_expr_with_abort(&protected, self.abort) {
+                                            Ok(parsed) => parsed,
+                                            Err(NetExpressionParseWithAbortError::Aborted) => {
+                                                return Err(
+                                                "behavioral expression preparation was cancelled"
+                                                    .to_string(),
+                                            );
+                                            }
+                                            Err(NetExpressionParseWithAbortError::Parse(error)) => {
+                                                return Err(format!(
+                                                    "Failed to parse {} {} expression '{}': {}",
+                                                    expression_kind.directive(),
+                                                    name,
+                                                    expression,
+                                                    error
+                                                ));
+                                            }
+                                        };
                                     self.parameter_body_cache
                                         .insert(key.clone(), parsed.clone());
                                     parsed
@@ -1036,13 +1115,29 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                         cached.clone()
                     } else {
                         let expanded_body = expand_spice_poly_expression(&func_def.body)?;
-                        let protected_body = self.probe_protector.protect(&expanded_body);
-                        let parsed_body = parse_net_expr(&protected_body).map_err(|error| {
-                            format!(
-                                "Failed to parse .FUNC {} body '{}': {}",
-                                func_name, func_def.body, error
-                            )
-                        })?;
+                        let protected_body = self
+                            .probe_protector
+                            .protect_with_abort(&expanded_body, self.abort)
+                            .map_err(|error| match error {
+                                BehavioralPreparationError::Aborted => {
+                                    "behavioral expression preparation was cancelled".to_string()
+                                }
+                                BehavioralPreparationError::Semantic(error) => error,
+                            })?;
+                        let parsed_body =
+                            match parse_net_expr_with_abort(&protected_body, self.abort) {
+                                Ok(parsed) => parsed,
+                                Err(NetExpressionParseWithAbortError::Aborted) => {
+                                    return Err("behavioral expression preparation was cancelled"
+                                        .to_string());
+                                }
+                                Err(NetExpressionParseWithAbortError::Parse(error)) => {
+                                    return Err(format!(
+                                        "Failed to parse .FUNC {} body '{}': {}",
+                                        func_name, func_def.body, error
+                                    ));
+                                }
+                            };
                         self.body_cache
                             .insert(func_name.clone(), parsed_body.clone());
                         parsed_body
@@ -1140,12 +1235,19 @@ struct ProbeProtector {
 }
 
 impl ProbeProtector {
-    fn protect(&mut self, expression: &str) -> String {
+    fn protect_with_abort(
+        &mut self,
+        expression: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<String, BehavioralPreparationError> {
         let chars: Vec<char> = expression.chars().collect();
         let mut out = String::with_capacity(expression.len());
         let mut i = 0usize;
 
         while i < chars.len() {
+            if i % 64 == 0 && abort.is_aborted() {
+                return Err(BehavioralPreparationError::Aborted);
+            }
             let c = chars[i];
             if c == '"' {
                 let start = i;
@@ -1201,7 +1303,10 @@ impl ProbeProtector {
             i += 1;
         }
 
-        out
+        if abort.is_aborted() {
+            return Err(BehavioralPreparationError::Aborted);
+        }
+        Ok(out)
     }
 
     fn protect_probe_inner(&mut self, inner: &str) -> Option<String> {

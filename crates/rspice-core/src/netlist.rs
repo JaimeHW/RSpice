@@ -63,8 +63,11 @@ pub(crate) use output_symbols::{
     is_device_lead_current_accessor,
 };
 pub use output_symbols::{
-    OutputAnalysisKind, OutputDirectiveKind, OutputRequest, OutputSymbolDependency,
-    OutputSymbolKind, OutputSymbolValidationError, UnresolvedOutputSymbol, validate_output_symbols,
+    OutputAnalysisKind, OutputDirectiveKind, OutputExpressionIssue,
+    OutputExpressionValidationError, OutputRequest, OutputSymbolDependency, OutputSymbolKind,
+    OutputSymbolValidationError, UnresolvedOutputSymbol, validate_output_expressions,
+    validate_output_expressions_with_abort, validate_output_requests,
+    validate_output_requests_with_abort, validate_output_symbols,
     validate_output_symbols_with_abort,
 };
 pub use param_scope::{ParamResolver, ParamScope, ScopedParam};
@@ -372,6 +375,9 @@ pub enum ParseError {
 
     #[error(transparent)]
     OutputSymbolValidation(Box<OutputSymbolValidationError>),
+
+    #[error(transparent)]
+    OutputExpressionValidation(Box<OutputExpressionValidationError>),
 
     #[error(transparent)]
     StartupDirectiveConflict(Box<StartupDirectiveConflictError>),
@@ -878,7 +884,8 @@ impl Netlist {
         finish_non_aborting_parse(Self::parse_with_abort(input, &NoAbort))
     }
 
-    /// Parse and immediately validate every output-symbol dependency.
+    /// Parse and immediately validate every authored output expression and
+    /// output-symbol dependency.
     ///
     /// Ordinary [`Self::parse`] intentionally supports incomplete ASTs used by
     /// editors and synthetic-result evaluators. Strict execution frontends can
@@ -888,7 +895,7 @@ impl Netlist {
         finish_non_aborting_parse(Self::parse_validated_with_abort(input, &NoAbort))
     }
 
-    /// Parse and validate output symbols with cooperative cancellation.
+    /// Parse and validate output requests with cooperative cancellation.
     pub fn parse_validated_with_abort(
         input: &str,
         abort: &dyn AbortSignal,
@@ -912,7 +919,7 @@ impl Netlist {
         finish_non_aborting_parse(Self::parse_with_options_and_abort(input, options, &NoAbort))
     }
 
-    /// Parse with explicit options and validate output symbols.
+    /// Parse with explicit options and validate output requests.
     pub fn parse_validated_with_options(
         input: &str,
         options: NetlistParseOptions,
@@ -922,7 +929,7 @@ impl Netlist {
         ))
     }
 
-    /// Parse with explicit options, validate output symbols, and cooperatively
+    /// Parse with explicit options, validate output requests, and cooperatively
     /// observe cancellation throughout both phases.
     pub fn parse_validated_with_options_and_abort(
         input: &str,
@@ -930,7 +937,7 @@ impl Netlist {
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
         let netlist = Self::parse_with_options_and_abort(input, options, abort)?;
-        validate_output_symbols_with_abort(&netlist, abort)?;
+        validate_output_requests_with_abort(&netlist, abort)?;
         Ok(netlist)
     }
 
@@ -963,7 +970,7 @@ impl Netlist {
         finish_non_aborting_parse(Self::parse_with_path_and_abort(input, file_path, &NoAbort))
     }
 
-    /// Parse with include resolution, validate output symbols, and observe
+    /// Parse with include resolution, validate output requests, and observe
     /// cooperative cancellation.
     pub fn parse_validated_with_path_and_abort(
         input: &str,
@@ -1004,7 +1011,7 @@ impl Netlist {
     }
 
     /// Parse with include resolution and explicit options, then validate
-    /// output symbols.
+    /// output requests.
     pub fn parse_validated_with_path_and_options(
         input: &str,
         file_path: &std::path::Path,
@@ -1016,7 +1023,7 @@ impl Netlist {
     }
 
     /// Parse with include resolution and explicit options, then validate
-    /// output symbols with cooperative cancellation.
+    /// output requests with cooperative cancellation.
     pub fn parse_validated_with_path_and_options_and_abort(
         input: &str,
         file_path: &std::path::Path,
@@ -1025,7 +1032,7 @@ impl Netlist {
     ) -> Result<Self, ParseWithAbortError> {
         let netlist =
             Self::parse_with_path_and_options_and_abort(input, file_path, options, abort)?;
-        validate_output_symbols_with_abort(&netlist, abort)?;
+        validate_output_requests_with_abort(&netlist, abort)?;
         Ok(netlist)
     }
 

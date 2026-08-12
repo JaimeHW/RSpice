@@ -18,6 +18,7 @@ pub use ast::{BinaryOp, Expr, Function, LookupInterpolation, LookupTable, UnaryO
 pub use compiler::compile;
 pub use file_table::{resolve_file_lookup_functions, resolve_file_lookup_functions_with_limits};
 pub use parser::{ParseError, parse_expression, parse_expression_strict};
+pub(crate) use parser::{ParseExpressionWithAbortError, parse_expression_strict_with_abort};
 pub(crate) use power::{
     normalize_expression_boundary, ordered_limit, ordered_sign, real_function_pow,
     real_function_pow_with_derivative, real_function_pwr, real_function_pwr_with_derivative,

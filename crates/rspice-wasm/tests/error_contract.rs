@@ -50,6 +50,29 @@ fn output_symbol_error_preserves_stable_kind_origin_and_exact_order() {
 }
 
 #[test]
+fn output_expression_error_preserves_structured_function_and_identifier_fields() {
+    let function = summarize_netlist_detailed(
+        "typed output function\nV1 1 0 1\n.TRAN 0 1\n.PRINT TRAN {FABS(V(1))}\n.END\n",
+    )
+    .expect_err("unknown output function must fail browser validation");
+    assert_eq!(function.kind, "unknown_output_function");
+    assert_eq!(function.category, "output_expression_validation");
+    assert_eq!(function.primary_line, Some(4));
+    assert_eq!(function.expression.as_deref(), Some("FABS(V(1))"));
+    assert_eq!(function.output_directive.as_deref(), Some(".PRINT"));
+    assert_eq!(function.function_name.as_deref(), Some("FABS"));
+    assert_eq!(function.identifier_name, None);
+
+    let identifier = summarize_netlist_detailed(
+        "typed output identifier\nV1 1 0 1\n.TRAN 0 1\n.PRINT TRAN {BAR}\n.END\n",
+    )
+    .expect_err("unresolved output identifier must fail browser validation");
+    assert_eq!(identifier.kind, "unresolved_output_identifier");
+    assert_eq!(identifier.identifier_name.as_deref(), Some("BAR"));
+    assert_eq!(identifier.function_name, None);
+}
+
+#[test]
 fn fourier_directive_uses_the_core_four_tag() {
     let error =
         summarize_netlist_detailed("typed fourier error\nV1 1 0 1\n.FOUR 1k V(MISSING)\n.END\n")

@@ -89,6 +89,10 @@ struct ParseErrorAttributes {
     parameter_name: Option<String>,
     canonical_parameter_name: Option<String>,
     expression: Option<String>,
+    output_directive: Option<String>,
+    operator_name: Option<String>,
+    function_name: Option<String>,
+    identifier_name: Option<String>,
     missing_dependency: Option<String>,
     reason: Option<String>,
     formal_port: Option<String>,
@@ -244,6 +248,44 @@ fn output_symbol_validation_attributes(
     attributes
 }
 
+fn output_expression_validation_attributes(
+    error: &rspice_core::netlist::OutputExpressionValidationError,
+) -> ParseErrorAttributes {
+    use rspice_core::netlist::OutputExpressionIssue;
+
+    let mut attributes = ParseErrorAttributes::new("invalid_output_expression");
+    attributes.category = Some("output_expression_validation");
+    attributes.set_primary(&error.origin);
+    attributes.expression = Some(error.expression.clone());
+    attributes.output_directive = Some(error.directive.to_string());
+    attributes.reason = Some(error.issue.reason());
+    match &error.issue {
+        OutputExpressionIssue::UnknownFunction { function } => {
+            attributes.kind = "unknown_output_function";
+            attributes.function_name = Some(function.clone());
+        }
+        OutputExpressionIssue::UnresolvedIdentifier { identifier } => {
+            attributes.kind = "unresolved_output_identifier";
+            attributes.identifier_name = Some(identifier.clone());
+        }
+        OutputExpressionIssue::InvalidAccessor { operator, detail } => {
+            attributes.kind = "invalid_output_accessor";
+            attributes.operator_name = Some(operator.clone());
+            attributes.detail = Some(detail.clone());
+        }
+        OutputExpressionIssue::UnresolvedDeviceParameter { device, parameter } => {
+            attributes.kind = "unresolved_output_device_parameter";
+            attributes.device = Some(device.clone());
+            attributes.parameter_name = Some(parameter.clone());
+        }
+        OutputExpressionIssue::Syntax { detail } => {
+            attributes.kind = "invalid_output_expression_syntax";
+            attributes.detail = Some(detail.clone());
+        }
+    }
+    attributes
+}
+
 fn startup_directive_kind_name(kind: rspice_core::netlist::StartupDirectiveKind) -> &'static str {
     match kind {
         rspice_core::netlist::StartupDirectiveKind::Ic => "ic",
@@ -345,6 +387,9 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
             undefined_mutual_inductor_reference_attributes(error)
         }
         CoreParseError::OutputSymbolValidation(error) => output_symbol_validation_attributes(error),
+        CoreParseError::OutputExpressionValidation(error) => {
+            output_expression_validation_attributes(error)
+        }
         CoreParseError::StartupDirectiveConflict(error) => {
             startup_directive_conflict_attributes(error)
         }
@@ -490,6 +535,10 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
             attributes.canonical_parameter_name,
         )?;
         value.setattr("expression", attributes.expression)?;
+        value.setattr("output_directive", attributes.output_directive)?;
+        value.setattr("operator_name", attributes.operator_name)?;
+        value.setattr("function_name", attributes.function_name)?;
+        value.setattr("identifier_name", attributes.identifier_name)?;
         value.setattr("missing_dependency", attributes.missing_dependency)?;
         value.setattr("reason", attributes.reason)?;
         value.setattr("formal_port", attributes.formal_port)?;
@@ -551,7 +600,8 @@ mod tests {
     use super::*;
     use rspice_core::netlist::{
         DuplicateSubcircuitPortBindingError, GlobalSubcircuitPortBindingError,
-        NetlistSourceLocation, OutputDirectiveKind, OutputSymbolKind, OutputSymbolValidationError,
+        NetlistSourceLocation, OutputDirectiveKind, OutputExpressionIssue,
+        OutputExpressionValidationError, OutputSymbolKind, OutputSymbolValidationError,
         StartupDirectiveConflictError, StartupDirectiveKind, UndefinedMutualInductorReferenceError,
         UnresolvedOutputSymbol, UnresolvedSubcircuitParameterError,
     };
@@ -582,6 +632,33 @@ mod tests {
         assert_eq!(attributes.canonical_instance_name.as_deref(), Some("XINV1"));
         assert_eq!(attributes.first_position, Some(4));
         assert_eq!(attributes.conflicting_actual_node.as_deref(), Some("VDD"));
+    }
+
+    #[test]
+    fn output_expression_validation_exposes_structured_python_attributes() {
+        let error = OutputExpressionValidationError {
+            directive: OutputDirectiveKind::Print,
+            origin: NetlistSourceLocation {
+                path: Some(std::path::PathBuf::from("bad_function.cir")),
+                line: 9,
+            },
+            expression: "fabs(v(1))".into(),
+            issue: OutputExpressionIssue::UnknownFunction {
+                function: "FABS".into(),
+            },
+        };
+        let attributes = output_expression_validation_attributes(&error);
+        assert_eq!(attributes.kind, "unknown_output_function");
+        assert_eq!(attributes.category, Some("output_expression_validation"));
+        assert_eq!(attributes.line, Some(9));
+        assert_eq!(attributes.expression.as_deref(), Some("fabs(v(1))"));
+        assert_eq!(attributes.output_directive.as_deref(), Some(".PRINT"));
+        assert_eq!(attributes.function_name.as_deref(), Some("FABS"));
+        assert_eq!(attributes.identifier_name, None);
+        assert_eq!(
+            attributes.reason.as_deref(),
+            Some("unknown function 'FABS'")
+        );
     }
 
     #[test]
@@ -656,6 +733,28 @@ mod tests {
             assert!(
                 stub.contains(declaration),
                 "public Python type stub is missing {declaration:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn output_expression_error_is_declared_by_the_public_type_stub() {
+        let stub = include_str!("../../rspice.pyi");
+        for declaration in [
+            "\"unknown_output_function\"",
+            "\"unresolved_output_identifier\"",
+            "\"invalid_output_accessor\"",
+            "\"unresolved_output_device_parameter\"",
+            "\"invalid_output_expression_syntax\"",
+            "\"output_expression_validation\"",
+            "output_directive: str | None",
+            "operator_name: str | None",
+            "function_name: str | None",
+            "identifier_name: str | None",
+        ] {
+            assert!(
+                stub.contains(declaration),
+                "Python type stub omitted {declaration}"
             );
         }
     }

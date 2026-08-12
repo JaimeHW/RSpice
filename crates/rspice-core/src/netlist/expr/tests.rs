@@ -5,10 +5,26 @@
 //! reproduce the identical draw sequence on every platform and run.
 
 use super::*;
+use crate::abort_signal::CountingAbort;
 use crate::config::ExpressionDialect;
 
 fn eval_with(ctx: &ParamContext, input: &str) -> Value {
     eval_expression(input, ctx).unwrap_or_else(|e| panic!("eval `{input}` failed: {e}"))
+}
+
+#[test]
+fn permissive_expression_parser_polls_abort_during_token_traversal() {
+    for expression in ["1".repeat(4096), format!("{}1", " ".repeat(4096))] {
+        let abort = CountingAbort::new(128);
+        assert!(matches!(
+            parse_expression_with_abort(&expression, &abort),
+            Err(ParseExpressionWithAbortError::Aborted)
+        ));
+        assert!(
+            abort.count() > 128,
+            "the abort must be observed from inside parser traversal"
+        );
+    }
 }
 
 #[test]
@@ -1958,4 +1974,20 @@ fn forward_declared_static_global_dependencies_flatten_for_scalar_devices() {
         .collect();
 
     assert_eq!(capacitances, vec![3.0, 3.0]);
+}
+
+#[test]
+fn behavioral_preparation_polls_abort_inside_one_large_expression() {
+    let expression = (0..4096)
+        .map(|index| format!("TIME+{index}"))
+        .collect::<Vec<_>>()
+        .join("+");
+    let abort = crate::abort_signal::CountingAbort::new(8);
+    let error = prepare_behavioral_expression_with_abort(&expression, &ParamContext::new(), &abort)
+        .expect_err("large single-expression preparation must be cancellable");
+    assert_eq!(error, BehavioralPreparationError::Aborted);
+    assert!(
+        abort.count() >= 9,
+        "abort was not polled during preparation"
+    );
 }

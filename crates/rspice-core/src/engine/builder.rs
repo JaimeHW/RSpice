@@ -4756,7 +4756,7 @@ impl Engine {
                 .map_err(|error| map_build_parse_error("startup validation", error))?;
             &startup_validated
         };
-        crate::netlist::validate_output_symbols_with_abort(netlist, abort)
+        crate::netlist::validate_output_requests_with_abort(netlist, abort)
             .map_err(|error| map_build_parse_error("output validation", error))?;
         check_build_abort(abort)?;
         let mut circuit = CircuitData::new();
