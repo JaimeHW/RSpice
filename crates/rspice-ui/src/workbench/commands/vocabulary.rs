@@ -189,6 +189,7 @@ pub enum Command {
     GenerateNetlist,
     FindCodeDocument,
     ValidateCodeDocument,
+    ManageSourceDocument,
     CompareGeneratedRevisions,
     ClearResults,
     ToggleLinkedCursors,
@@ -617,6 +618,11 @@ impl Command {
             Self::ValidateCodeDocument => {
                 spec("validate-code", "Validate active Code document", "Code")
             }
+            Self::ManageSourceDocument => spec(
+                "manage-source-document",
+                "Manage source document\u{2026}",
+                "Code",
+            ),
             Self::CompareGeneratedRevisions => spec(
                 "compare-generated-revisions",
                 "Compare generated revisions",
@@ -1113,6 +1119,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::GenerateNetlist,
     Command::FindCodeDocument,
     Command::ValidateCodeDocument,
+    Command::ManageSourceDocument,
     Command::CompareGeneratedRevisions,
     Command::ExportWaveformsCsv,
     Command::ClearResults,

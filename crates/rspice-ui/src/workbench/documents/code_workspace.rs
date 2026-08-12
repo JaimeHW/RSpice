@@ -52,9 +52,12 @@ pub use page::{
 };
 pub(crate) use page::{CodeSourceEditorBufferCache, CodeSourceEditorBufferIdentity};
 pub(crate) use source_files::{
-    import_dropped_automation_source, open_source_workspace_dialog,
-    source_bundle_contains_document, source_bundle_document_is_editable,
-    source_document_is_editable, source_file_mutation_block_reason,
+    assign_automation_source_role, commit_source_file_dialog, commit_source_history_restore,
+    commit_source_workspace_dialog, import_dropped_automation_source, open_source_file_dialog,
+    open_source_history, open_source_workspace_dialog, request_automation_source_import,
+    poll_automation_source_import, source_bundle_contains_document,
+    source_bundle_document_is_editable, source_document_is_editable,
+    source_file_mutation_block_reason,
 };
 pub(crate) use source_search::open_source_search;
 pub(crate) use veriloga::{
@@ -96,6 +99,49 @@ pub(crate) fn active_document_label(
             crate::workbench::MessageId::CodePageAutomation,
         ),
     }
+}
+
+/// The bundle language a page edits, or `None` for the netlist page, whose
+/// deck is not a project source bundle at all.
+pub(crate) const fn page_source_language(
+    page: CodeWorkspacePage,
+) -> Option<crate::state::ProjectSourceLanguage> {
+    match page {
+        CodeWorkspacePage::Netlist => None,
+        CodeWorkspacePage::VerilogA => Some(crate::state::ProjectSourceLanguage::VerilogA),
+        CodeWorkspacePage::Automation => {
+            Some(crate::state::ProjectSourceLanguage::RSpiceAutomation)
+        }
+    }
+}
+
+/// The bundle file a language page is showing.
+///
+/// Selection is optional state: a page that has never had a file chosen shows
+/// the bundle root. The navigator, the document well, and the lifecycle dialog
+/// must agree on which file that is, so they all read it here.
+pub(crate) fn active_bundle_path(
+    workspace: &crate::state::ProjectWorkspace,
+    code: &CodeWorkspaceRuntimeState,
+    language: crate::state::ProjectSourceLanguage,
+) -> Option<String> {
+    let explicit = match language {
+        crate::state::ProjectSourceLanguage::VerilogA => code
+            .veriloga
+            .selected_file
+            .as_ref()
+            .map(|selection| selection.logical_path.clone()),
+        crate::state::ProjectSourceLanguage::RSpiceAutomation => {
+            code.automation.selected_file.clone()
+        }
+    };
+    explicit.or_else(|| {
+        let owner = crate::state::ProjectSourceOwner::code_workspace(language);
+        workspace
+            .project_sources
+            .bundle_for_owner(&owner)
+            .map(|bundle| bundle.root().logical_path().to_owned())
+    })
 }
 
 /// The netlist page names the artifact it is editing. A generated primary has

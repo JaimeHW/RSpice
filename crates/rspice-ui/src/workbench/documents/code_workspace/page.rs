@@ -811,6 +811,11 @@ pub(crate) struct CodeSourceEditorBufferCache {
 #[derive(Debug, Clone, Default)]
 pub struct CodeWorkspaceRuntimeState {
     pub page: CodeWorkspacePage,
+    /// Whether the source-document lifecycle dialog is showing. The
+    /// transactions below stay independent of it: a file operation opened from
+    /// the navigator brings the dialog up around its own review section, and
+    /// closing the dialog abandons the draft rather than committing it.
+    pub(crate) source_document_dialog: bool,
     pub source_workspace_dialog: Option<CodeSourceWorkspaceDialogState>,
     pub source_file_dialog: Option<CodeSourceFileDialogState>,
     pub source_history: Option<CodeSourceHistoryState>,

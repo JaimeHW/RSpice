@@ -7,11 +7,11 @@ use crate::state::{
 };
 use crate::workbench::RSpiceApp;
 
-use super::CodeSourceImportState;
 #[cfg(test)]
+use super::CodeSourceEditorBufferIdentity;
+use super::CodeSourceImportState;
 use super::{
-    CodeSourceEditorBufferIdentity, CodeSourceFileAction, CodeSourceFileDialogState,
-    CodeSourceHistoryState, VerilogAFileSelection,
+    CodeSourceFileAction, CodeSourceFileDialogState, CodeSourceHistoryState, VerilogAFileSelection,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -100,7 +100,6 @@ pub(crate) fn open_source_workspace_dialog(
     Ok(())
 }
 
-#[cfg(test)]
 pub(crate) fn commit_source_workspace_dialog(app: &mut RSpiceApp) -> Result<String, String> {
     let draft = app
         .state
@@ -165,7 +164,6 @@ pub(crate) fn commit_source_workspace_dialog(app: &mut RSpiceApp) -> Result<Stri
     Ok(message)
 }
 
-#[cfg(test)]
 fn new_veriloga_workspace_bundle(
     root_path: &str,
     build_profile_path: &str,
@@ -219,7 +217,6 @@ pub(super) fn new_imported_veriloga_workspace_bundle(
     .map_err(|error| error.to_string())
 }
 
-#[cfg(test)]
 fn new_veriloga_workspace_bundle_with_source(
     root_path: &str,
     source: String,
@@ -277,7 +274,6 @@ pub(super) fn verilog_a_module_name_for_profile(root_path: &str) -> String {
     verilog_a_module_name(root_path)
 }
 
-#[cfg(test)]
 fn new_automation_workspace_bundle(
     draft: &super::CodeSourceWorkspaceDialogState,
 ) -> Result<ProjectSourceBundle, String> {
@@ -420,7 +416,6 @@ fn new_automation_workspace_bundle(
     .map_err(|error| error.to_string())
 }
 
-#[cfg(test)]
 pub(crate) fn assign_automation_source_role(
     app: &mut RSpiceApp,
     logical_path: &str,
@@ -591,7 +586,6 @@ fn source_document_blocks_graph_mutation(
         && bundle.role_for_path(logical_path) == Some(ProjectSourceRole::AutomationEnvironmentLock)
 }
 
-#[cfg(test)]
 pub(crate) fn open_source_file_dialog(
     app: &mut RSpiceApp,
     language: ProjectSourceLanguage,
@@ -610,7 +604,6 @@ pub(crate) fn open_source_file_dialog(
     open_source_file_dialog_in_bundle(app, language, bundle_id, action, source_path, importer_path)
 }
 
-#[cfg(test)]
 pub(crate) fn open_source_file_dialog_in_bundle(
     app: &mut RSpiceApp,
     language: ProjectSourceLanguage,
@@ -686,7 +679,6 @@ pub(crate) fn open_source_file_dialog_in_bundle(
     Ok(())
 }
 
-#[cfg(test)]
 pub(crate) fn commit_source_file_dialog(app: &mut RSpiceApp) -> Result<String, String> {
     let draft = app
         .state
@@ -821,7 +813,6 @@ pub(crate) fn commit_source_file_dialog(app: &mut RSpiceApp) -> Result<String, S
     Ok(message)
 }
 
-#[cfg(test)]
 pub(crate) fn open_source_history(
     app: &mut RSpiceApp,
     language: ProjectSourceLanguage,
@@ -838,7 +829,6 @@ pub(crate) fn open_source_history(
     open_source_history_in_bundle(app, language, bundle_id, source_path)
 }
 
-#[cfg(test)]
 pub(crate) fn open_source_history_in_bundle(
     app: &mut RSpiceApp,
     language: ProjectSourceLanguage,
@@ -877,7 +867,6 @@ pub(crate) fn open_source_history_in_bundle(
     Ok(())
 }
 
-#[cfg(test)]
 pub(crate) fn request_automation_source_import(
     app: &mut RSpiceApp,
     importer_path: &str,
@@ -917,8 +906,14 @@ pub(crate) fn request_automation_source_import(
     Ok(())
 }
 
-#[cfg(target_arch = "wasm32")]
+/// Advance a pending Automation dependency import.
+///
+/// The request only records intent; the picker runs from the frame loop so the
+/// browser build can hand the file back asynchronously. A request that is
+/// never polled leaves `source_import` set forever, and every later import is
+/// then refused as already pending — so this must stay wired into the frame.
 pub(crate) fn poll_automation_source_import(app: &mut RSpiceApp) {
+    #[cfg(target_arch = "wasm32")]
     poll_browser_automation_import_completion(app);
 
     let Some(request) = app.state.ui.code_workspace.source_import.as_mut() else {
@@ -938,6 +933,38 @@ pub(crate) fn poll_automation_source_import(app: &mut RSpiceApp) {
         return;
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let Some(request) = app.state.ui.code_workspace.source_import.take() else {
+            return;
+        };
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter(
+                "Automation source",
+                &["py", "yaml", "yml", "toml", "lock", "json", "csv"],
+            )
+            .set_title("Import Automation dependency")
+            .pick_file()
+        else {
+            return;
+        };
+        match read_imported_text(&path) {
+            Ok((file_name, contents)) => {
+                if let Err(error) =
+                    apply_automation_source_import(app, request, file_name, contents)
+                {
+                    app.state.push_user_message(ConsoleMessage::error(format!(
+                        "Automation source import failed: {error}"
+                    )));
+                }
+            }
+            Err(error) => app.state.push_user_message(ConsoleMessage::error(format!(
+                "Automation source import failed: {error}"
+            ))),
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
     {
         let token = match crate::workbench::browser::file_import::try_begin_text_import(
             crate::workbench::browser::file_import::BrowserTextImportKind::Automation,
@@ -964,6 +991,34 @@ pub(crate) fn poll_automation_source_import(app: &mut RSpiceApp) {
             },
         );
     }
+}
+
+/// Read a picked file as project source, refusing anything the project source
+/// registry would not be allowed to hold.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_imported_text(path: &std::path::Path) -> Result<(String, String), String> {
+    let metadata = std::fs::metadata(path).map_err(|error| error.to_string())?;
+    if metadata.len() > crate::state::MAX_PROJECT_CODE_SOURCE_BYTES as u64 {
+        return Err(format!(
+            "Selected source exceeds the supported {}-byte limit",
+            crate::state::MAX_PROJECT_CODE_SOURCE_BYTES
+        ));
+    }
+    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+    if bytes.len() > crate::state::MAX_PROJECT_CODE_SOURCE_BYTES {
+        return Err(format!(
+            "Selected source exceeds the supported {}-byte limit",
+            crate::state::MAX_PROJECT_CODE_SOURCE_BYTES
+        ));
+    }
+    let contents = String::from_utf8(bytes)
+        .map_err(|error| format!("Selected source is not valid UTF-8: {error}"))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.trim().is_empty())
+        .ok_or_else(|| "Selected source has no valid UTF-8 file name".to_owned())?;
+    Ok((file_name.to_owned(), contents))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1092,7 +1147,6 @@ pub(crate) fn import_dropped_automation_source(
     apply_automation_source_import(app, request, file_name, contents)
 }
 
-#[cfg(test)]
 pub(crate) fn commit_source_history_restore(app: &mut RSpiceApp) -> Result<String, String> {
     let draft = app
         .state
@@ -1181,7 +1235,6 @@ pub(crate) fn commit_source_history_restore(app: &mut RSpiceApp) -> Result<Strin
     Ok(message)
 }
 
-#[cfg(test)]
 fn default_file_name(language: ProjectSourceLanguage) -> &'static str {
     match language {
         ProjectSourceLanguage::VerilogA => "untitled.va",
@@ -1189,7 +1242,6 @@ fn default_file_name(language: ProjectSourceLanguage) -> &'static str {
     }
 }
 
-#[cfg(test)]
 fn duplicate_file_name(path: &str) -> String {
     let (directory, file) = path
         .rsplit_once('/')
@@ -1244,7 +1296,6 @@ fn unique_suggestion(
     format!("{requested}.new")
 }
 
-#[cfg(test)]
 fn new_file_template(language: ProjectSourceLanguage, path: &str) -> String {
     match language {
         ProjectSourceLanguage::VerilogA if path.to_ascii_lowercase().ends_with(".vams") => {

@@ -109,27 +109,11 @@ fn role_label(role: Option<ProjectSourceRole>) -> &'static str {
 }
 
 fn active_path(app: &RSpiceApp, language: ProjectSourceLanguage) -> Option<String> {
-    let explicit = match language {
-        ProjectSourceLanguage::VerilogA => app
-            .state
-            .ui
-            .code_workspace
-            .veriloga
-            .selected_file
-            .as_ref()
-            .map(|selection| selection.logical_path.clone()),
-        ProjectSourceLanguage::RSpiceAutomation => {
-            app.state.ui.code_workspace.automation.selected_file.clone()
-        }
-    };
-    explicit.or_else(|| {
-        let owner = ProjectSourceOwner::code_workspace(language);
-        app.state
-            .workspace
-            .project_sources
-            .bundle_for_owner(&owner)
-            .map(|bundle| bundle.root().logical_path().to_owned())
-    })
+    crate::workbench::documents::code_workspace::active_bundle_path(
+        &app.state.workspace,
+        &app.state.ui.code_workspace,
+        language,
+    )
 }
 
 fn select(app: &mut RSpiceApp, language: ProjectSourceLanguage, logical_path: &str) {
@@ -336,7 +320,10 @@ mod tests {
 
         select(&mut app, language, &target);
 
-        assert_eq!(active_path(&app, language).as_deref(), Some(target.as_str()));
+        assert_eq!(
+            active_path(&app, language).as_deref(),
+            Some(target.as_str())
+        );
     }
 
     /// A row states the role the bundle recorded. Nothing here is inferred

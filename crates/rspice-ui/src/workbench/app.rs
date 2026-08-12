@@ -131,6 +131,10 @@ pub(crate) use dialogs::project_revision_history::{
     ProjectRevisionHistoryDialogState, open_project_revision_history,
 };
 
+pub(crate) use dialogs::source_document::{
+    open_source_document_dialog, source_document_dialog_is_available,
+};
+
 pub(crate) use dialogs::create_model_bound_symbol::{
     CreateModelBoundSymbolDialogState, open_create_model_bound_symbol_dialog,
 };
@@ -486,6 +490,11 @@ impl RSpiceApp {
         self.terminate_automation_runtime_after_project_change();
         #[cfg(not(target_arch = "wasm32"))]
         self.automation_runtime.poll_discovery();
+        // Both source imports record intent and complete from the frame loop.
+        // Neither was driven from anywhere, so a requested import stayed
+        // pending forever and blocked every later one.
+        crate::workbench::documents::code_workspace::poll_veriloga_import(self);
+        crate::workbench::documents::code_workspace::poll_automation_source_import(self);
         crate::workbench::documents::code_workspace::poll_automation_workflow(self);
         crate::workbench::documents::code_workspace::settle_pending_python_execute(self);
         crate::workbench::documents::code_workspace::poll_managed_automation_runtime(self);
@@ -755,6 +764,7 @@ impl RSpiceApp {
         self.render_selection_bulk_edit_dialog(ctx);
         self.render_design_review_comments_dialog(ctx);
         self.render_project_revision_history_dialog(ctx);
+        self.render_source_document_dialog(ctx);
         self.render_create_model_bound_symbol_dialog(ctx);
         self.render_symbol_definition_dialogs(ctx);
         self.render_configuration_sets_dialog(ctx);
@@ -780,6 +790,7 @@ impl RSpiceApp {
         self.process_copy_cell_dialog(ctx);
         self.process_rename_cell_dialog(ctx);
         self.process_library_deletion_review_dialog(ctx);
+        self.process_analysis_removal_review_dialog(ctx);
         #[cfg(not(target_arch = "wasm32"))]
         self.process_autosave_restore_dialog(ctx);
         self.process_pending_library_deletions();

@@ -1175,6 +1175,14 @@ fn netlist_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 "Open model qualification",
                 layout,
             );
+            context_separator(ui, layout);
+            toolbar_icon_command(
+                ui,
+                app,
+                Command::ManageSourceDocument,
+                WorkbenchIcon::Folder,
+                layout,
+            );
         }
         CodeWorkspacePage::Automation => {
             toolbar_text_command(
@@ -1183,6 +1191,14 @@ fn netlist_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 Command::AutomationConsole,
                 WorkbenchIcon::Terminal,
                 "Automation console",
+                layout,
+            );
+            context_separator(ui, layout);
+            toolbar_icon_command(
+                ui,
+                app,
+                Command::ManageSourceDocument,
+                WorkbenchIcon::Folder,
                 layout,
             );
         }

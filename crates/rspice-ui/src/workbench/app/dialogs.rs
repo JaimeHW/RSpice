@@ -43,6 +43,7 @@ pub(in crate::workbench) mod replace_instance;
 pub(in crate::workbench) mod review_primitives;
 pub(in crate::workbench) mod schematic_command;
 pub(in crate::workbench) mod selection;
+pub(in crate::workbench) mod source_document;
 pub(in crate::workbench) mod state;
 pub(in crate::workbench) mod symbol_definition;
 pub(in crate::workbench) mod unpublish_web;

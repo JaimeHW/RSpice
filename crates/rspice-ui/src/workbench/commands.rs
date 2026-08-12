@@ -705,6 +705,13 @@ impl Command {
                         != crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
                     && !state.simulation.netlist_content.trim().is_empty()
             }
+            // Unlike its neighbours this one belongs to the two language
+            // pages, not the netlist page: it manages a project source
+            // bundle, which the deck is not.
+            Self::ManageSourceDocument => {
+                state.workbench.workspace == Workspace::Netlist
+                    && crate::workbench::app::source_document_dialog_is_available(state)
+            }
             Self::CompareGeneratedRevisions => {
                 netlist_page_is_visible(state)
                     && !state.ui.netlist.generated_history.is_empty()
@@ -1639,6 +1646,14 @@ impl Command {
             Self::FindCodeDocument => app.state.ui.netlist.find.open = true,
             Self::ValidateCodeDocument => {
                 crate::workbench::workflows::netlist_workflow::validate_visible_netlist_source(app);
+            }
+            Self::ManageSourceDocument => {
+                if let Err(error) =
+                    crate::workbench::app::open_source_document_dialog(&mut app.state)
+                {
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+                }
             }
             Self::CompareGeneratedRevisions => {
                 app.state.ui.netlist.comparison_dialog.open = true;
