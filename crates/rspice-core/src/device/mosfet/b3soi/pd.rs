@@ -676,7 +676,7 @@ impl B3SoiPd {
         Value,
         Value,
         Value,
-        crate::circuit::OpLabel,
+        crate::op_label::OpLabel,
     ) {
         let op = &self.op;
         let bias = self.bias;
@@ -686,11 +686,11 @@ impl B3SoiPd {
             (bias.vgs - bias.vds, -bias.vds)
         };
         let region = if vgs_mode < op.von {
-            crate::circuit::OpLabel::SUBTHRESHOLD
+            crate::op_label::OpLabel::SUBTHRESHOLD
         } else if vds_mode > op.vdsat {
-            crate::circuit::OpLabel::SATURATION
+            crate::op_label::OpLabel::SATURATION
         } else {
-            crate::circuit::OpLabel::LINEAR
+            crate::op_label::OpLabel::LINEAR
         };
         (
             op.ids, bias.vgs, bias.vds, bias.vbs, op.von, op.vdsat, op.gm, op.gds, op.gmbs, region,

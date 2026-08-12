@@ -31,9 +31,40 @@ pub use introspection::{DeviceOpEntry, DeviceOpReport};
 mod linear_stamping;
 mod magnetic;
 mod nonlinear;
-mod op_label;
+pub use crate::op_label::{OP_LABELS, OpLabel};
 pub(crate) use nonlinear::NonlinearDeviceStateSnapshot;
-pub use op_label::{OP_LABELS, OpLabel, resolve_op_label};
+
+/// Resolve persisted text back to the interned label this build emits.
+///
+/// This is the reader's half of the vocabulary, and the reason the vocabulary
+/// outlives its emitters: a label stays resolvable after the family that used
+/// to report it changes, so a project written by an older build still opens.
+///
+/// It lives here rather than beside the vocabulary because the fixed half is a
+/// leaf the device families read down into, while this half has to ask the
+/// compiled Verilog-A catalog — which sits above them.
+pub fn resolve_op_label(text: &str) -> Option<&'static str> {
+    crate::op_label::declared_op_label(text).or_else(|| generated_catalog_op_label(text))
+}
+
+/// Labels contributed by the Verilog-A models compiled into this build.
+///
+/// A model's canonical name is its device family, and each external terminal
+/// names the current entering it. Both are generated, so the catalog answers
+/// for them; a build without the catalog has no such labels to resolve.
+fn generated_catalog_op_label(text: &str) -> Option<&'static str> {
+    for descriptor in crate::device::veriloga_builtins::generated_veriloga_model_descriptors() {
+        if descriptor.model_name == text {
+            return Some(descriptor.model_name);
+        }
+        for terminal in descriptor.terminals {
+            if terminal.current_parameter == text {
+                return Some(terminal.current_parameter);
+            }
+        }
+    }
+    None
+}
 pub(crate) mod xyce_dae;
 pub(crate) mod xyce_load;
 

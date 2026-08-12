@@ -5,7 +5,7 @@ use super::*;
 #[derive(Debug, Clone, Copy)]
 pub struct MosfetOpValues {
     /// Operating region: cutoff, linear or saturation.
-    pub region: crate::circuit::OpLabel,
+    pub region: crate::op_label::OpLabel,
     /// Drain current (A).
     pub id: Value,
     /// Gate-source voltage (V).
@@ -37,9 +37,9 @@ impl Mosfet {
         };
         MosfetOpValues {
             region: match self.region {
-                MosRegion::Cutoff => crate::circuit::OpLabel::CUTOFF,
-                MosRegion::Linear => crate::circuit::OpLabel::LINEAR,
-                MosRegion::Saturation => crate::circuit::OpLabel::SATURATION,
+                MosRegion::Cutoff => crate::op_label::OpLabel::CUTOFF,
+                MosRegion::Linear => crate::op_label::OpLabel::LINEAR,
+                MosRegion::Saturation => crate::op_label::OpLabel::SATURATION,
             },
             id,
             vgs: self.vgs,

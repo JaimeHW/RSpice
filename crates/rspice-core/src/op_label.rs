@@ -1,20 +1,24 @@
 //! The vocabulary of labels a device operating-point report may carry.
 //!
-//! A [`DeviceOpEntry`](super::DeviceOpEntry) names its device family, its
-//! operating region and each reported quantity with a `&'static str`. Frontends
-//! persist those reports and read them back by interning the stored text into
-//! the same `&'static str`, so a reader can only restore a label it already
-//! knows. That makes the emitter's label set part of the file format rather
-//! than an internal detail: a family that reports a quantity nobody listed
-//! writes a project that cannot be read, and refusing the write is the only
-//! honest outcome left.
+//! A [`DeviceOpEntry`](crate::circuit::DeviceOpEntry) names its device family,
+//! its operating region and each reported quantity with a `&'static str`.
+//! Frontends persist those reports and read them back by interning the stored
+//! text into the same `&'static str`, so a reader can only restore a label it
+//! already knows. That makes the emitter's label set part of the file format
+//! rather than an internal detail: a family that reports a quantity nobody
+//! listed writes a project that cannot be read, and refusing the write is the
+//! only honest outcome left.
 //!
 //! `OpLabel` is that set, expressed as a type. It has no constructor from an
 //! arbitrary string, so the report emitter cannot name a quantity the reader
-//! would fail to resolve, and [`resolve_op_label`] is the reader's side of the
-//! same table. A generated Verilog-A catalog contributes its own labels, which
-//! are resolved from the catalog itself for the same reason: the compiled
-//! catalog is the only place that knows them.
+//! would fail to resolve.
+//!
+//! A vocabulary of names is data, so this is a leaf: the device families that
+//! emit a label and the circuit store that assembles the report both read
+//! down into it. The reader's half lives in
+//! [`crate::circuit::resolve_op_label`] instead, because it also answers for
+//! the labels a compiled Verilog-A catalog contributes and so has to reach the
+//! device layer this module sits below.
 
 /// A label that may appear in a persisted operating-point report.
 ///
@@ -85,7 +89,9 @@ macro_rules! op_labels {
         /// generated Verilog-A catalog contributes.
         pub const OP_LABELS: &[OpLabel] = &[$(OpLabel::$name,)+];
 
-        fn declared_op_label(text: &str) -> Option<&'static str> {
+        /// The fixed half of the vocabulary, which every build resolves
+        /// identically. `crate::circuit` composes the catalog's half onto it.
+        pub(crate) fn declared_op_label(text: &str) -> Option<&'static str> {
             match text {
                 $($text => Some($text),)+
                 _ => None,
@@ -164,34 +170,6 @@ op_labels! {
     B = "b",
 }
 
-/// Resolve persisted text back to the interned label this build emits.
-///
-/// This is the reader's half of the vocabulary, and the reason the vocabulary
-/// outlives its emitters: a label stays resolvable after the family that used
-/// to report it changes, so a project written by an older build still opens.
-pub fn resolve_op_label(text: &str) -> Option<&'static str> {
-    declared_op_label(text).or_else(|| generated_catalog_op_label(text))
-}
-
-/// Labels contributed by the Verilog-A models compiled into this build.
-///
-/// A model's canonical name is its device family, and each external terminal
-/// names the current entering it. Both are generated, so the catalog answers
-/// for them; a build without the catalog has no such labels to resolve.
-fn generated_catalog_op_label(text: &str) -> Option<&'static str> {
-    for descriptor in crate::device::veriloga_builtins::generated_veriloga_model_descriptors() {
-        if descriptor.model_name == text {
-            return Some(descriptor.model_name);
-        }
-        for terminal in descriptor.terminals {
-            if terminal.current_parameter == text {
-                return Some(terminal.current_parameter);
-            }
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,7 +178,7 @@ mod tests {
     fn every_declared_label_resolves_to_itself() {
         for label in OP_LABELS {
             assert_eq!(
-                resolve_op_label(label.as_str()),
+                declared_op_label(label.as_str()),
                 Some(label.as_str()),
                 "{label} is declared but does not resolve"
             );
@@ -220,7 +198,7 @@ mod tests {
 
     #[test]
     fn text_outside_the_vocabulary_does_not_resolve() {
-        assert_eq!(resolve_op_label("not-a-reported-quantity"), None);
-        assert_eq!(resolve_op_label("ID"), None, "labels are case-sensitive");
+        assert_eq!(declared_op_label("not-a-reported-quantity"), None);
+        assert_eq!(declared_op_label("ID"), None, "labels are case-sensitive");
     }
 }

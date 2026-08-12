@@ -596,11 +596,11 @@ impl Mosfet {
     }
 
     /// Operating-point family label for classic MOSFET-backed devices.
-    pub fn device_kind(&self) -> crate::circuit::OpLabel {
+    pub fn device_kind(&self) -> crate::op_label::OpLabel {
         if self.level == 9 {
-            crate::circuit::OpLabel::MOS9
+            crate::op_label::OpLabel::MOS9
         } else {
-            crate::circuit::OpLabel::MOSFET
+            crate::op_label::OpLabel::MOSFET
         }
     }
 

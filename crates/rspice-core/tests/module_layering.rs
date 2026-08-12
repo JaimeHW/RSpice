@@ -86,6 +86,13 @@ const LAYERS: &[(&str, u32)] = &[
     // Structured convergence-quality reporting. Wired into the drivers in
     // Phase 5b; it depends only on `Value` and stays a leaf.
     ("diagnostics", 0),
+    // The labels an operating-point report may name a family, a region or a
+    // quantity with. A vocabulary of names is data, on the same argument as
+    // `codemodels`: the device families that emit a label and the circuit
+    // store that assembles the report both read down into it instead of the
+    // families reaching ten ranks up. The reader's half, which also answers
+    // for the compiled Verilog-A catalog, stays in `circuit` for that reason.
+    ("op_label", 0),
     // A kernel library beneath the solvers.
     ("simd", 1),
     // SPICE RAW waveform files, read and written. A leaf by construction:

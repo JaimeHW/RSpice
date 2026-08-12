@@ -118,6 +118,10 @@ pub mod library;
 pub(crate) mod naming;
 pub mod netlist;
 pub mod numerics;
+/// The vocabulary of labels a device operating-point report may carry. A leaf:
+/// the device families that emit one and the circuit store that assembles the
+/// report both read down into it.
+pub mod op_label;
 pub mod solver;
 pub mod time_compat;
 pub mod xspice;
