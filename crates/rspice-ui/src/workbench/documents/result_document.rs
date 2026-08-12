@@ -2523,45 +2523,6 @@ pub(crate) fn active_axis_is_pinned(state: &AppState, axis: PaneAxis) -> bool {
     }
 }
 
-/// Render an interval so the field it came from can read it back without loss.
-pub(crate) fn format_axis_range((minimum, maximum): (f64, f64)) -> String {
-    format!(
-        "{} … {}",
-        format_axis_bound(minimum),
-        format_axis_bound(maximum)
-    )
-}
-
-fn format_axis_bound(value: f64) -> String {
-    if value == 0.0 {
-        "0".to_owned()
-    } else if (1.0e-3..1.0e6).contains(&value.abs()) {
-        format!("{value:.7}")
-    } else {
-        format!("{value:.7e}")
-    }
-}
-
-/// Read an interval typed as `min … max`, in engineering notation.
-///
-/// Accepts the ellipsis [`format_axis_range`] writes back, plus `..`, a comma
-/// or plain space, so a pair copied out of a datasheet or a netlist parses
-/// without being reformatted first.
-///
-/// A reversed or degenerate interval is refused rather than quietly sorted.
-/// On a logarithmic axis those are not the same request, and silently
-/// swapping the bounds would hide a typo that changes what the reader sees.
-pub(crate) fn parse_axis_range(text: &str) -> Option<(f64, f64)> {
-    let cleaned = text.replace('…', " ").replace("..", " ").replace(',', " ");
-    let mut parts = cleaned.split_whitespace();
-    let minimum = crate::quantity::engineering::parse_engineering_value(parts.next()?).ok()?;
-    let maximum = crate::quantity::engineering::parse_engineering_value(parts.next()?).ok()?;
-    if parts.next().is_some() {
-        return None;
-    }
-    (minimum.is_finite() && maximum.is_finite() && maximum > minimum).then_some((minimum, maximum))
-}
-
 /// Pin the active sheet's axis to an explicit interval, or clear it back to
 /// automatic fit.
 ///
@@ -5491,50 +5452,6 @@ mod availability_tests {
                 .any(|label| label.contains("stop where it failed")),
             "no pane published the incomplete-evidence reason: {labels:?}"
         );
-    }
-
-    #[test]
-    fn a_typed_interval_round_trips_through_the_field_that_shows_it() {
-        for range in [
-            (0.0, 5.0),
-            (-1.5e-3, 2.25e-3),
-            (1.0e6, 1.0e9),
-            (-1.0e-15, 1.0e-14),
-        ] {
-            let text = format_axis_range(range);
-            let parsed = parse_axis_range(&text)
-                .unwrap_or_else(|| panic!("{text} did not read back as an interval"));
-            assert!(
-                (parsed.0 - range.0).abs() <= range.0.abs() * 1.0e-6
-                    && (parsed.1 - range.1).abs() <= range.1.abs() * 1.0e-6,
-                "{range:?} rendered as {text} and read back as {parsed:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn an_interval_parses_from_the_separators_an_engineer_would_paste() {
-        for text in ["1m … 5m", "1m..5m", "1m,5m", "1m 5m", "  1m   5m  "] {
-            assert_eq!(
-                parse_axis_range(text),
-                Some((1.0e-3, 5.0e-3)),
-                "failed on {text:?}"
-            );
-        }
-        assert_eq!(parse_axis_range("-2.5 -1.5"), Some((-2.5, -1.5)));
-    }
-
-    #[test]
-    fn a_reversed_or_degenerate_interval_is_refused_rather_than_sorted() {
-        // On a log axis "5m … 1m" is not the same request as "1m … 5m", and
-        // quietly swapping them would hide the typo behind a correct-looking
-        // plot.
-        assert_eq!(parse_axis_range("5m … 1m"), None);
-        assert_eq!(parse_axis_range("1m … 1m"), None);
-        assert_eq!(parse_axis_range("1m"), None);
-        assert_eq!(parse_axis_range("1m … 2m … 3m"), None);
-        assert_eq!(parse_axis_range(""), None);
-        assert_eq!(parse_axis_range("wide open"), None);
     }
 
     /// An explicit interval has to land in the store the sheet reads.

@@ -3330,6 +3330,50 @@ fn diagnostic_severity_name(
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_typed_interval_round_trips_through_the_field_that_shows_it() {
+        for range in [
+            (0.0, 5.0),
+            (-1.5e-3, 2.25e-3),
+            (1.0e6, 1.0e9),
+            (-1.0e-15, 1.0e-14),
+        ] {
+            let text = format_axis_range(range);
+            let parsed = parse_axis_range(&text)
+                .unwrap_or_else(|| panic!("{text} did not read back as an interval"));
+            assert!(
+                (parsed.0 - range.0).abs() <= range.0.abs() * 1.0e-6
+                    && (parsed.1 - range.1).abs() <= range.1.abs() * 1.0e-6,
+                "{range:?} rendered as {text} and read back as {parsed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_interval_parses_from_the_separators_an_engineer_would_paste() {
+        for text in ["1m … 5m", "1m..5m", "1m,5m", "1m 5m", "  1m   5m  "] {
+            assert_eq!(
+                parse_axis_range(text),
+                Some((1.0e-3, 5.0e-3)),
+                "failed on {text:?}"
+            );
+        }
+        assert_eq!(parse_axis_range("-2.5 -1.5"), Some((-2.5, -1.5)));
+    }
+
+    #[test]
+    fn a_reversed_or_degenerate_interval_is_refused_rather_than_sorted() {
+        // On a log axis "5m … 1m" is not the same request as "1m … 5m", and
+        // quietly swapping them would hide the typo behind a correct-looking
+        // plot.
+        assert_eq!(parse_axis_range("5m … 1m"), None);
+        assert_eq!(parse_axis_range("1m … 1m"), None);
+        assert_eq!(parse_axis_range("1m"), None);
+        assert_eq!(parse_axis_range("1m … 2m … 3m"), None);
+        assert_eq!(parse_axis_range(""), None);
+        assert_eq!(parse_axis_range("wide open"), None);
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn inspector_header_exposes_its_workspace_heading() {
