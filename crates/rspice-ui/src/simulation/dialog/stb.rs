@@ -265,7 +265,10 @@ mod tests {
         let state: StbDialogState = serde_json::from_str(persisted).expect("legacy state decodes");
 
         assert_eq!(state.num_points, "25");
-        assert!(state.compute_nyquist, "Nyquist defaults on for old projects");
+        assert!(
+            state.compute_nyquist,
+            "Nyquist defaults on for old projects"
+        );
 
         let encoded = serde_json::to_value(&state).expect("state encodes");
         for retired in ["gain_margin", "phase_margin", "crossover_freq"] {

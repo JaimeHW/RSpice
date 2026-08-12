@@ -34,6 +34,81 @@ impl DeviceOpReport {
 }
 
 impl CircuitData {
+    fn accumulate_floating_component_current(
+        component_by_node: &[Option<usize>],
+        net_current: &mut [Value],
+        current_scale: &mut [Value],
+        node_pos: NodeId,
+        node_neg: NodeId,
+        current: Value,
+    ) {
+        let component_of = |node: NodeId| component_by_node.get(node).copied().flatten();
+        let component_pos = component_of(node_pos);
+        let component_neg = component_of(node_neg);
+        if component_pos.is_some() && component_pos == component_neg {
+            // A source wholly inside one conductive component establishes
+            // differential behavior but contributes neither net current nor
+            // tolerance scale to that component's common-mode KCL.
+            return;
+        }
+        let mut add = |node: NodeId, signed_current: Value| {
+            let Some(Some(component)) = component_by_node.get(node) else {
+                return;
+            };
+            net_current[*component] += signed_current;
+            current_scale[*component] += current.abs();
+        };
+        add(node_pos, current);
+        add(node_neg, -current);
+    }
+
+    fn driven_floating_component_nodes(
+        &self,
+        net_current: &[Value],
+        current_scale: &[Value],
+        abstol: Value,
+        reltol: Value,
+    ) -> Vec<String> {
+        self.dc_floating_component_nodes
+            .iter()
+            .enumerate()
+            .filter(|(component, _)| {
+                if !self
+                    .dc_floating_component_is_certain
+                    .get(*component)
+                    .copied()
+                    .unwrap_or(false)
+                {
+                    return false;
+                }
+                let net = net_current[*component];
+                let scale = current_scale[*component];
+                !net.is_finite() || net.abs() > abstol.max(0.0) + reltol.max(0.0) * scale.abs()
+            })
+            .flat_map(|(_, nodes)| nodes.iter().cloned())
+            .collect()
+    }
+
+    /// Floating components with a nonzero net installed independent-source
+    /// current. This is safe before solving and follows the circuit-owned DC
+    /// values, including loaded PWL/PAT snapshots and live `.DC` sweep values.
+    pub(crate) fn independent_dc_drive_nodes(&self, abstol: Value, reltol: Value) -> Vec<String> {
+        let component_count = self.dc_floating_component_nodes.len();
+        let mut net_current = vec![0.0; component_count];
+        let mut current_scale = vec![0.0; component_count];
+        for index in 0..self.current_sources.len() {
+            Self::accumulate_floating_component_current(
+                &self.dc_floating_component_by_node,
+                &mut net_current,
+                &mut current_scale,
+                self.current_sources.node_pos[index],
+                self.current_sources.node_neg[index],
+                self.current_sources.dc_values[index],
+            );
+        }
+        self.driven_floating_component_nodes(&net_current, &current_scale, abstol, reltol)
+    }
+
     /// Nodes that no chain of DC-conducting elements ties to ground.
     ///
     /// Their DC voltage is set by the solver's conditioning shunt rather than
@@ -42,6 +117,55 @@ impl CircuitData {
     /// its topology could not be analyzed.
     pub fn no_dc_path_nodes(&self) -> &[String] {
         &self.no_dc_path_nodes
+    }
+
+    /// Floating-component identifier for one nodal matrix row.
+    pub(crate) fn dc_floating_component_for_matrix_row(&self, row: usize) -> Option<usize> {
+        let component = self
+            .dc_floating_component_by_node
+            .get(row.checked_add(1)?)
+            .copied()
+            .flatten()?;
+        self.dc_floating_component_is_certain
+            .get(component)
+            .copied()
+            .unwrap_or(false)
+            .then_some(component)
+    }
+
+    /// Nodal matrix rows belonging to one statically identified floating
+    /// component after final node remapping.
+    pub(crate) fn dc_floating_component_matrix_rows(&self, component: usize) -> Vec<usize> {
+        self.dc_floating_component_by_node
+            .iter()
+            .enumerate()
+            .skip(1)
+            .filter_map(|(node, candidate)| (*candidate == Some(component)).then_some(node - 1))
+            .collect()
+    }
+
+    /// No-DC-path nodes in components driven by a current-source equation.
+    ///
+    /// Unlike an unforced capacitive island, these nodes cannot be assigned a
+    /// finite operating point without making the result depend on the solver's
+    /// conditioning shunt. The DC driver rejects them unless the deck supplies
+    /// an explicit global shunt through `.OPTIONS RSHUNT`.
+    pub fn fatal_no_dc_path_nodes(&self) -> &[String] {
+        &self.fatal_no_dc_path_nodes
+    }
+
+    /// Conductance installed from `.OPTIONS RSHUNT`, in siemens.
+    ///
+    /// This is part of the assembled physical circuit and is zero when the
+    /// option is absent. It is kept separate from numerical GMIN so callers
+    /// can explain effective topology and checkpoint identity precisely.
+    pub fn global_shunt_conductance(&self) -> Value {
+        self.global_shunt_conductance
+    }
+
+    /// Whether `.OPTIONS RSHUNT` installed a physical shunt on electrical nodes.
+    pub fn has_global_shunt(&self) -> bool {
+        self.global_shunt_conductance > 0.0
     }
 
     /// Whether a matrix row inside the nodal prefix represents a private

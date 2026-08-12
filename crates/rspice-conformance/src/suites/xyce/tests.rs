@@ -28720,3 +28720,310 @@ fn bug38_two_record_provenance_and_independent_execution_fail_closed() {
     .expect("mutate BUG38 control qualification");
     assert!(runner.validate_bug38_provenance(&contract).is_err());
 }
+
+fn bug39_fixture() -> (tempfile::TempDir, Vec<String>, Vec<String>) {
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let root = tempfile::tempdir().expect("create BUG_39_SON fixture");
+    let family_relative = "Netlists/Certification_Tests/BUG_39_SON";
+    let family_dir = root.path().join(family_relative);
+    fs::create_dir_all(&family_dir).expect("create BUG39 fixture family");
+    for (file_name, _, _, _) in XYCE_BUG39_RETAINED_ARTIFACTS {
+        fs::copy(
+            source_root.join(family_relative).join(file_name),
+            family_dir.join(file_name),
+        )
+        .expect("copy canonical BUG39 retained artifact");
+    }
+
+    let wrapper_rows = [
+        XyceBug39GaussianRole::AgaussAbsolute,
+        XyceBug39GaussianRole::GaussRelative,
+    ]
+    .into_iter()
+    .map(|role| format!("{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}", role.path()))
+    .collect::<Vec<_>>();
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{}\n", wrapper_rows.join("\n")),
+    )
+    .expect("write BUG39 wrapper ownership");
+
+    let exclusion_rows = [
+        XyceBug39GaussianRole::AgaussAbsolute,
+        XyceBug39GaussianRole::GaussRelative,
+    ]
+    .into_iter()
+    .map(|role| {
+        format!(
+            "{}\t{XYCE_BUG39_HISTORICAL_EXCLUDE_PATH}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{}",
+            role.path(),
+            role.result_contract()
+        )
+    })
+    .collect::<Vec<_>>();
+    let exclusion_refs = exclusion_rows
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&exclusion_refs),
+    )
+    .expect("write BUG39 independent qualifications");
+    (root, wrapper_rows, exclusion_rows)
+}
+
+#[test]
+fn bug39_release_710_oracle_generated_sources_and_sampled_plans_are_exact() {
+    let records = XyceTestRunner::bug39_historical_oracle_provenance_records();
+    assert_eq!(records.len(), XYCE_BUG39_HISTORICAL_ORACLE_RECORD_COUNT);
+    assert_eq!(
+        blake3::hash(records.join("\n").as_bytes())
+            .to_hex()
+            .to_string(),
+        XYCE_BUG39_HISTORICAL_ORACLE_BLAKE3
+    );
+    assert!(records.iter().all(|record| record.starts_with(&format!(
+        "{XYCE_BUG39_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG39_UPSTREAM_RELEASE_TAG}\t"
+    ))));
+    XyceTestRunner::validate_bug39_historical_oracle_provenance()
+        .expect("BUG39 Release-7.10 anchors/wrappers/exclude/Manifest identities remain bound");
+
+    let (root, _, _) = bug39_fixture();
+    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    for role in [
+        XyceBug39GaussianRole::AgaussAbsolute,
+        XyceBug39GaussianRole::GaussRelative,
+    ] {
+        let source = XyceTestRunner::bug39_generated_source(role)
+            .expect("historical generated source is reproduced exactly in memory");
+        assert_eq!(source.len(), role.generated_source_bytes());
+        assert_eq!(
+            format!("{:x}", Sha256::digest(source.as_bytes())),
+            role.generated_source_sha256()
+        );
+        assert_eq!(
+            blake3::hash(source.as_bytes()).to_hex().to_string(),
+            role.generated_source_blake3()
+        );
+        assert!(
+            source.contains("\n.DC I1 -1 -1 -.1\n.print DC FORMAT=NOINDEX PRECISION=19 R1:R R2:R ")
+        );
+        assert!(source.ends_with("R9999:R R10000:R \n.end\n"));
+        assert!(
+            XyceTestRunner::dc_print_precisions(&source).is_err(),
+            "the ordinary <=16-digit serialization parser must reject authored PRECISION=19"
+        );
+        assert!(
+            !root
+                .path()
+                .join("Netlists/Certification_Tests/BUG_39_SON")
+                .join(role.generated_file_name())
+                .exists()
+        );
+        let mut mutated = source.clone();
+        mutated.replace_range(0..1, ";");
+        assert!(
+            XyceTestRunner::validate_bug39_generated_source_identity(role, &mutated).is_err(),
+            "any historical generated-source drift must fail closed"
+        );
+
+        let anchor_path = root.path().join(role.path());
+        let deck = XyceDeck {
+            path: anchor_path.clone(),
+            section: XyceDeckSection::Netlists,
+            relative_path: role.path().to_string(),
+        };
+        let contract = runner
+            .bug39_gaussian_contract(&deck)
+            .expect("BUG39 role is selected")
+            .expect("exact BUG39 provenance qualifies");
+        let (plan, netlist) = runner
+            .bug39_sampled_plan(&contract)
+            .expect("build exact sampled BUG39 plan");
+        assert_eq!(
+            netlist.params.statistical_mode(),
+            StatisticalParamMode::Sample
+        );
+        assert_eq!(netlist.params.expression_dialect(), ExpressionDialect::Xyce);
+        assert_eq!(plan.print.probes.len(), XYCE_BUG39_SAMPLE_COUNT);
+        assert_eq!(plan.print.probes.first().map(String::as_str), Some("R1:R"));
+        assert_eq!(
+            plan.print.probes.last().map(String::as_str),
+            Some("R10000:R")
+        );
+        assert_eq!(plan.print_format.as_deref(), Some("NOINDEX"));
+        assert_eq!(plan.source, source);
+        XyceTestRunner::validate_bug39_print_plan(&plan.print)
+            .expect("dedicated ordered probe validation is exact and linear");
+        let mut changed_print = XycePrintRequest {
+            probes: plan.print.probes.clone(),
+        };
+        changed_print.probes.swap(0, 1);
+        assert!(XyceTestRunner::validate_bug39_print_plan(&changed_print).is_err());
+        XyceTestRunner::validate_bug39_sampled_netlist(role, &netlist)
+            .expect("typed BUG39 topology/expression/analysis/output contract is exact");
+    }
+}
+
+#[test]
+fn bug39_population_mean_and_sigma_predicate_is_strict_and_independent() {
+    let samples = (0..XYCE_BUG39_SAMPLE_COUNT)
+        .map(|index| if index % 2 == 0 { 99.0 } else { 101.0 })
+        .collect::<Vec<_>>();
+    let moments = XyceTestRunner::bug39_population_moments(&samples)
+        .expect("finite exact-size sample population has moments");
+    assert_eq!(moments.mean.to_bits(), 100.0_f64.to_bits());
+    assert_eq!(
+        moments.population_standard_deviation.to_bits(),
+        1.0_f64.to_bits()
+    );
+    XyceTestRunner::validate_bug39_moment_predicate(moments)
+        .expect("exact historical mean and population sigma pass");
+    assert!(XyceTestRunner::bug39_moment_errors_pass(
+        XYCE_BUG39_MOMENT_TOLERANCE - f64::EPSILON,
+        XYCE_BUG39_MOMENT_TOLERANCE - f64::EPSILON,
+    ));
+    assert!(!XyceTestRunner::bug39_moment_errors_pass(
+        XYCE_BUG39_MOMENT_TOLERANCE,
+        0.0,
+    ));
+    assert!(!XyceTestRunner::bug39_moment_errors_pass(
+        0.0,
+        XYCE_BUG39_MOMENT_TOLERANCE,
+    ));
+    assert!(
+        XyceTestRunner::validate_bug39_moment_predicate(XyceBug39GaussianMoments {
+            mean: XYCE_BUG39_MEAN + 0.051,
+            population_standard_deviation: 1.0,
+        })
+        .is_err(),
+        "mean must independently satisfy the strict historical tolerance"
+    );
+    assert!(
+        XyceTestRunner::validate_bug39_moment_predicate(XyceBug39GaussianMoments {
+            mean: 100.0,
+            population_standard_deviation: XYCE_BUG39_EXPECTED_SIGMA + 0.051,
+        })
+        .is_err(),
+        "population sigma must independently satisfy the strict historical tolerance"
+    );
+    assert!(XyceTestRunner::bug39_population_moments(&samples[..9999]).is_err());
+    let mut non_finite = samples;
+    non_finite[5000] = Value::NAN;
+    assert!(XyceTestRunner::bug39_population_moments(&non_finite).is_err());
+}
+
+#[test]
+fn bug39_two_anchor_provenance_fails_closed_on_census_and_ownership_drift() {
+    let (root, wrapper_rows, exclusion_rows) = bug39_fixture();
+    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    let deck = XyceDeck {
+        path: root.path().join(XYCE_BUG39_AGAUSS_PATH),
+        section: XyceDeckSection::Netlists,
+        relative_path: XYCE_BUG39_AGAUSS_PATH.to_string(),
+    };
+    let contract = runner
+        .bug39_gaussian_contract(&deck)
+        .expect("AGAUSS role is selected")
+        .expect("exact BUG39 family qualifies");
+    runner
+        .validate_bug39_provenance(&contract)
+        .expect("exact BUG39 family revalidates");
+
+    fs::write(&contract.anchor_path, "anchor mutation\n").expect("mutate BUG39 anchor");
+    assert!(runner.validate_bug39_provenance(&contract).is_err());
+    fs::write(&contract.anchor_path, "").expect("restore BUG39 anchor");
+
+    let extra = contract.anchor_path.with_file_name("unexpected.cir");
+    fs::write(&extra, "unexpected BUG39 sibling\n").expect("add BUG39 sibling");
+    assert!(runner.validate_bug39_provenance(&contract).is_err());
+    fs::remove_file(extra).expect("remove BUG39 sibling");
+
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{}\n", wrapper_rows[1]),
+    )
+    .expect("remove AGAUSS wrapper ownership");
+    assert!(runner.validate_bug39_provenance(&contract).is_err());
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{}\n", wrapper_rows.join("\n")),
+    )
+    .expect("restore BUG39 wrapper ownership");
+
+    let wrong_exclusions = exclusion_rows
+        .iter()
+        .map(|row| row.replace(XYCE_BUG39_AGAUSS_CONTRACT, "wrong_bug39_agauss_contract"))
+        .collect::<Vec<_>>();
+    let wrong_refs = wrong_exclusions
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&wrong_refs),
+    )
+    .expect("mutate BUG39 independent qualification");
+    assert!(runner.validate_bug39_provenance(&contract).is_err());
+}
+
+#[test]
+fn bug402_release_710_temperature_option_contract_is_exact_and_executable() {
+    let records = XyceTestRunner::bug402_historical_oracle_provenance_records();
+    assert_eq!(records.len(), XYCE_BUG402_HISTORICAL_RECORD_COUNT);
+    assert_eq!(
+        format!("{:x}", Sha256::digest(records.join("\n").as_bytes())),
+        XYCE_BUG402_HISTORICAL_RECORDS_SHA256
+    );
+    assert_eq!(
+        blake3::hash(records.join("\n").as_bytes())
+            .to_hex()
+            .to_string(),
+        XYCE_BUG402_HISTORICAL_RECORDS_BLAKE3
+    );
+    XyceTestRunner::validate_bug402_historical_oracle_provenance()
+        .expect("BUG402 Release-7.10 wrapper and verifier identities remain bound");
+
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&corpus, XyceRunnerConfig::default());
+    runner
+        .validate_bug402_temperature_option_provenance()
+        .expect("exact retained BUG402 family and promotion provenance qualify");
+
+    let xyce_source = fs::read_to_string(corpus.join(XYCE_BUG402_XYCE_REFERENCE_PATH))
+        .expect("read canonical BUG402 worker");
+    let spice_source = fs::read_to_string(corpus.join(XYCE_BUG402_SPICE_MEMBER_PATH))
+        .expect("read legacy BUG402 worker");
+    XyceTestRunner::validate_bug402_temperature_source_pair(&xyce_source, &spice_source)
+        .expect("BUG402 workers differ only by the TEMP package selector");
+    assert!(
+        XyceTestRunner::validate_bug402_temperature_source_pair(
+            &xyce_source.replace("GMIN=1.0E-15", "GMIN=2.0E-15"),
+            &spice_source,
+        )
+        .is_err(),
+        "any non-selector source drift must fail closed"
+    );
+
+    for role in XyceBug402TemperatureRole::ALL {
+        let deck = XyceDeck {
+            path: corpus.join(role.path()),
+            section: XyceDeckSection::Netlists,
+            relative_path: role.path().to_string(),
+        };
+        let contract = runner
+            .bug402_temperature_option_contract(&deck)
+            .expect("BUG402 role is selected")
+            .expect("BUG402 role has exact provenance and equivalent typed semantics");
+        assert_eq!(contract.role, role);
+    }
+
+    let result = runner.run_test(corpus.join(XYCE_BUG402_OWNER_PATH));
+    assert!(
+        result.passed && !result.expected_unsupported && !result.upstream_excluded,
+        "BUG402 owner must execute the directional paired DC oracle: {result:?}"
+    );
+    assert_eq!(result.contract, XYCE_BUG402_OWNER_CONTRACT);
+    assert!(result.mismatches.is_empty());
+}

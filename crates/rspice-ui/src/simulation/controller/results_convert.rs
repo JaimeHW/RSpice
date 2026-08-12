@@ -129,7 +129,10 @@ impl SimulationController {
         self.convert_to_analysis_result_with_metadata_owned(sim_result, analysis_type, &label)
     }
 
-    pub(super) fn convert_to_analysis_result_with_metadata_owned(
+    /// Reachable across `simulation` because the corner family is assembled
+    /// from the point results after the batch and must be retained through the
+    /// same conversion an engine-produced result goes through.
+    pub(in crate::simulation) fn convert_to_analysis_result_with_metadata_owned(
         &self,
         sim_result: crate::simulation::SimulationResult,
         analysis_type: AnalysisType,

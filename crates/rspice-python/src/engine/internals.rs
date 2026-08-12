@@ -61,10 +61,21 @@ impl PyEngine {
         stop_time: f64,
         max_step: f64,
         start_time: f64,
+        startup_mode: Option<rspice_core::engine::TransientStartupMode>,
     ) -> PyResult<PyTransientResult> {
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| {
-            engine.run_tran_with_abort(&netlist.inner, stop_time, max_step, abort)
+            if let Some(startup_mode) = startup_mode {
+                engine.run_tran_with_startup_mode_and_abort(
+                    &netlist.inner,
+                    stop_time,
+                    max_step,
+                    startup_mode,
+                    abort,
+                )
+            } else {
+                engine.run_tran_with_abort(&netlist.inner, stop_time, max_step, abort)
+            }
         })?;
         PyTransientResult::new_with_start(result, start_time)
     }

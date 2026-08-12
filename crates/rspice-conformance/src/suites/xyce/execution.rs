@@ -1049,6 +1049,58 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.bug39_gaussian_contract(deck) {
+            let result = match contract {
+                Ok(contract) => self.run_bug39_gaussian_contract(deck, contract, start),
+                Err(reason) => {
+                    let role = XyceBug39GaussianRole::for_record(&deck.relative_path)
+                        .expect("BUG_39_SON detection selects only recognized records");
+                    self.failure_result(
+                        deck,
+                        start,
+                        role.result_contract(),
+                        format!(
+                            "BUG_39_SON generated Gaussian provenance qualification failed: {reason}"
+                        ),
+                        Vec::new(),
+                    )
+                }
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.bug402_temperature_option_contract(deck) {
+            let role = XyceBug402TemperatureRole::for_record(&deck.relative_path)
+                .expect("BUG_402_SON detection selects only recognized records");
+            let result = match contract {
+                Ok(contract) => self.run_bug402_temperature_option_contract(deck, contract, start),
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    role.result_contract(),
+                    format!("BUG_402_SON temperature-option scope qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.source_multiplicity_family_contract(deck) {
             let result = match contract {
                 Ok(contract) => self.run_source_multiplicity_family_contract(deck, contract, start),
@@ -4385,7 +4437,13 @@ impl XyceTestRunner {
         let mut best_mismatches = None;
         let mut simulation_error = None;
         let mut fallback_errors = Vec::new();
-        match engine.run_tran_with_abort(&netlist, tran.stop, max_step, &abort) {
+        match engine.run_tran_with_startup_mode_and_abort(
+            &netlist,
+            tran.stop,
+            max_step,
+            rspice_core::engine::TransientStartupMode::from_uic(tran.uic),
+            &abort,
+        ) {
             Ok(result) => {
                 let mismatches = match self
                     .compare_static_tran_primary_reference(&reference, &plan, &netlist, &result)
@@ -4489,7 +4547,13 @@ impl XyceTestRunner {
 
         let locked_engine =
             self.create_xyce_static_tran_engine(Some(reference_time_grid.clone()), initial_step);
-        match locked_engine.run_tran_with_abort(&netlist, tran.stop, locked_max_step, &abort) {
+        match locked_engine.run_tran_with_startup_mode_and_abort(
+            &netlist,
+            tran.stop,
+            locked_max_step,
+            rspice_core::engine::TransientStartupMode::from_uic(tran.uic),
+            &abort,
+        ) {
             Ok(locked_result) => {
                 match self.compare_tran_prn_reference(
                     &reference,
@@ -4564,10 +4628,11 @@ impl XyceTestRunner {
                     initial_step,
                     rspice_core::numerics::integration::IntegrationMethod::BackwardEuler,
                 );
-            match backward_euler_engine.run_tran_with_abort(
+            match backward_euler_engine.run_tran_with_startup_mode_and_abort(
                 &netlist,
                 tran.stop,
                 locked_max_step,
+                rspice_core::engine::TransientStartupMode::from_uic(tran.uic),
                 &abort,
             ) {
                 Ok(backward_euler_result) => {
@@ -4644,7 +4709,13 @@ impl XyceTestRunner {
                     initial_step,
                     rspice_core::numerics::integration::IntegrationMethod::Gear2,
                 );
-            match gear12_engine.run_tran_with_abort(&netlist, tran.stop, locked_max_step, &abort) {
+            match gear12_engine.run_tran_with_startup_mode_and_abort(
+                &netlist,
+                tran.stop,
+                locked_max_step,
+                rspice_core::engine::TransientStartupMode::from_uic(tran.uic),
+                &abort,
+            ) {
                 Ok(gear12_result) => {
                     match self.compare_tran_prn_reference(
                         &reference,
@@ -12744,7 +12815,13 @@ impl XyceTestRunner {
             initial_step,
         );
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        engine.run_tran_with_abort(netlist, plan.tran.stop, max_step, &abort)
+        engine.run_tran_with_startup_mode_and_abort(
+            netlist,
+            plan.tran.stop,
+            max_step,
+            rspice_core::engine::TransientStartupMode::from_uic(plan.tran.uic),
+            &abort,
+        )
     }
 
     pub(super) fn run_static_dc_results(

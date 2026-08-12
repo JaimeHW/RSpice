@@ -2924,7 +2924,13 @@ impl XyceTestRunner {
         let engine = self.create_xyce_static_tran_engine(None, initial_step);
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let result = engine
-            .run_tran_with_abort(&netlist, tran.stop, max_step, &abort)
+            .run_tran_with_startup_mode_and_abort(
+                &netlist,
+                tran.stop,
+                max_step,
+                rspice_core::engine::TransientStartupMode::from_uic(tran.uic),
+                &abort,
+            )
             .map_err(|error| {
                 format!(
                     "startup warning record '{}' failed native transient execution: {error}",

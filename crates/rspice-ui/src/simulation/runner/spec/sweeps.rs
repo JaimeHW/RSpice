@@ -23,7 +23,10 @@ pub(super) fn run_sweep_spec(
             run_monte_carlo(variation_source, netlist, source_path, abort)
         }
         AnalysisSpec::Parametric => run_parametric(netlist, options, source_path, abort),
-        AnalysisSpec::Corner => run_corner(netlist, options, source_path, abort),
+        // A corner declaration is expanded into one task per declared point
+        // before the run is authorized, and its plotting family is assembled
+        // from those results. Nothing solves the declaration itself, so a
+        // corner spec arriving here is a routing fault, not a request.
         other => Err(super::misrouted_spec_error("sweep", &other)),
     }
 }
@@ -114,56 +117,6 @@ fn run_parametric(
     Ok(SimulationResult::Parametric {
         target: data.target,
         sweep_values,
-        waveforms,
-        num_failures: data.num_failures,
-    })
-}
-
-fn run_corner(
-    netlist: &str,
-    options: SpecExecutionOptions,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> Result<SimulationResult, SimulationError> {
-    let data = if let Some(corner_cfg) = options.corner {
-        super::run_abort_aware_service(abort, || {
-            svc_runner::run_corner_analysis_with_config_and_source_path_and_abort(
-                netlist,
-                &corner_cfg,
-                source_path,
-                abort,
-            )
-        })?
-    } else {
-        super::run_abort_aware_service(abort, || {
-            svc_runner::run_corner_analysis_with_source_path_and_abort(netlist, source_path, abort)
-        })?
-    };
-    let x_values = data.x_values;
-    let x_label = data.x_label;
-    let x_unit = data.x_unit;
-    let temperatures_c = data.temperatures_c;
-    let corner_labels = data.corner_labels;
-    let mut waveforms = HashMap::with_capacity(data.voltages.len());
-    for (name, values) in data.voltages {
-        super::ensure_not_aborted(abort)?;
-        let waveform = WaveformData {
-            name: name.clone(),
-            x_values: x_values.clone(),
-            y_values: values,
-            y_unit: "V".to_string(),
-            is_complex: false,
-            y_imag: None,
-        };
-        waveforms.insert(name, waveform);
-    }
-
-    Ok(SimulationResult::Corner {
-        x_values,
-        x_label,
-        x_unit,
-        temperatures_c,
-        corner_labels,
         waveforms,
         num_failures: data.num_failures,
     })

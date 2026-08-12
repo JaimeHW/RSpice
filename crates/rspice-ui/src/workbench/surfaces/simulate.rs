@@ -271,6 +271,35 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     });
     simulation_workflow_dialog(ui.ctx(), app);
+    drain_lifecycle_refusal(ui.ctx(), app);
+}
+
+/// Carry a refused plan command to a reader who is not on the Analyses page.
+///
+/// Only that one route draws the lifecycle strip, so this is the whole of the
+/// error surface for the other seven. It sits here because this is the single
+/// entry point every route passes through, which is what keeps the drain out of
+/// the twenty-odd places that announce an outcome.
+///
+/// The guard is the outcome's sequence, not its text: three of the announcing
+/// sites are on the render path rather than in a click handler, and a text
+/// comparison would let a restated refusal toast again the moment an unrelated
+/// receipt passed through. A receipt advances the guard without toasting, so a
+/// registry edit never becomes noise.
+fn drain_lifecycle_refusal(ctx: &egui::Context, app: &mut RSpiceApp) {
+    let outcome = &app.state.workbench.analysis_lifecycle_status;
+    if outcome.sequence() <= app.state.workbench.analysis_lifecycle_toasted_sequence {
+        return;
+    }
+    let refusal = outcome.is_refusal().then(|| outcome.message().to_owned());
+    app.state.workbench.analysis_lifecycle_toasted_sequence =
+        app.state.workbench.analysis_lifecycle_status.sequence();
+    if let Some(message) = refusal {
+        app.state
+            .ui
+            .toasts
+            .error_with_title(ctx, "Plan change refused", message);
+    }
 }
 
 fn analysis_workspace(
@@ -1474,7 +1503,16 @@ fn lifecycle_receipt_strip(ui: &mut Ui, app: &RSpiceApp) -> egui::Response {
         .map_or(0, |plan| plan.tombstones().len());
     let width = ui.available_width().max(1.0);
     let compact = width <= 760.0;
-    let detail = &app.state.workbench.analysis_lifecycle_status;
+    let outcome = &app.state.workbench.analysis_lifecycle_status;
+    let detail = outcome.message();
+    // A refusal is told from a receipt by the outcome's own severity. Reading
+    // the wording instead would make the colour depend on how each of the
+    // announcing sites happens to phrase itself.
+    let detail_color = if outcome.is_refusal() {
+        t.color.err
+    } else {
+        t.color.text_dim
+    };
     let title_width = 94.0;
     let tombstone_width = 104.0;
     let detail_width = if compact {
@@ -1485,7 +1523,7 @@ fn lifecycle_receipt_strip(ui: &mut Ui, app: &RSpiceApp) -> egui::Response {
     let detail_galley = ui.painter().layout(
         detail.to_owned(),
         theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
+        detail_color,
         detail_width,
     );
     // The receipt is a status band, not an expanding log viewer. Its exact
@@ -1531,7 +1569,7 @@ fn lifecycle_receipt_strip(ui: &mut Ui, app: &RSpiceApp) -> egui::Response {
     } else {
         egui::pos2(rect.left() + 9.0 + title_width + 8.0, rect.top() + 6.0)
     };
-    painter.galley(detail_position, detail_galley, t.color.text_dim);
+    painter.galley(detail_position, detail_galley, detail_color);
     response.on_hover_text(detail)
 }
 

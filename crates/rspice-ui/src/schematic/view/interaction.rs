@@ -1730,7 +1730,10 @@ fn request_probe_signal(
     state.sim_setup = setup;
     state.workspace = workspace;
     state.workbench.preflight.invalidate();
-    state.workbench.analysis_lifecycle_status = receipt.status_line();
+    state
+        .workbench
+        .analysis_lifecycle_status
+        .record_receipt(receipt.status_line());
     ProbeSignalOutcome::SavedOutputCreated { plan_name }
 }
 

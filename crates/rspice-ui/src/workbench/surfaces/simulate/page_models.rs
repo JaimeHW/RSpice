@@ -195,14 +195,18 @@ fn corner_options(app: &RSpiceApp, library: &str) -> Vec<String> {
 
 fn set_corner(app: &mut RSpiceApp, library: &str, corner: &str) {
     let Some(entry) = app.state.model_library_manager.get_library_mut(library) else {
-        app.state.workbench.analysis_lifecycle_status =
-            format!("Library {library} is no longer loaded.");
+        app.state
+            .workbench
+            .analysis_lifecycle_status
+            .record_refusal(format!("Library {library} is no longer loaded."));
         return;
     };
     entry.selected_corner = Some(corner.to_owned());
     app.invalidate_simulation_preflight();
-    app.state.workbench.analysis_lifecycle_status =
-        format!("{library} now resolves its {corner} section.");
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_receipt(format!("{library} now resolves its {corner} section."));
 }
 
 fn binding_policy(ui: &mut Ui, app: &RSpiceApp) {

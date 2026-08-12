@@ -2515,7 +2515,7 @@ fn add_generated_xspice_auto_bridge_resistor(
         )));
     }
 
-    let resistance = resolve_resistor_instance_value(
+    let resolved = resolve_resistor_effective_parameters(
         generated,
         &element.name,
         *value,
@@ -2525,6 +2525,7 @@ fn add_generated_xspice_auto_bridge_resistor(
         temperature,
         spice_dialect,
     )?;
+    let resistance = resolved.resistance;
     let small_signal_resistance =
         resolve_resistor_small_signal_value(&element.name, resistance, instance_params)?;
     let np = circuit.get_or_create_node(&element.nodes[0]);
@@ -2542,21 +2543,23 @@ fn add_generated_xspice_auto_bridge_resistor(
             )));
         }
         let branch = circuit.allocate_branch_named(&element.name);
-        circuit.resistor_branches.add(
+        circuit.resistor_branches.add_with_reported(
             element.name.clone(),
             np,
             nn,
             branch,
             resistance,
             small_signal_resistance,
+            resolved.reported_resistance,
         );
     } else {
-        circuit.resistors.add_with_small_signal(
+        circuit.resistors.add_with_small_signal_and_reported(
             element.name.clone(),
             np,
             nn,
             resistance,
             small_signal_resistance,
+            resolved.reported_resistance,
         );
     }
     Ok(())
@@ -2601,7 +2604,9 @@ fn add_generated_xspice_auto_bridge_capacitor(
     let np = circuit.get_or_create_node(&element.nodes[0]);
     let nn = circuit.get_or_create_node(&element.nodes[1]);
     if let Some(ic) = *initial_voltage {
-        if spice_dialect == SpiceDialect::Xyce {
+        if capacitor_ic_dc_mode(spice_dialect)
+            == crate::netlist::CapacitorIcDcMode::EnforcedConstraint
+        {
             let branch = circuit.allocate_branch_named(&element.name);
             circuit.capacitors.add_with_ic_branch(
                 element.name.clone(),
@@ -2622,6 +2627,15 @@ fn add_generated_xspice_auto_bridge_capacitor(
             .add(element.name.clone(), np, nn, capacitance);
     }
     Ok(())
+}
+
+#[inline]
+fn capacitor_ic_dc_mode(spice_dialect: SpiceDialect) -> crate::netlist::CapacitorIcDcMode {
+    if spice_dialect == SpiceDialect::Xyce {
+        crate::netlist::CapacitorIcDcMode::EnforcedConstraint
+    } else {
+        crate::netlist::CapacitorIcDcMode::TransientSeedOnly
+    }
 }
 
 fn add_generated_xspice_auto_bridge_inductor(
@@ -3327,6 +3341,42 @@ mod tests {
                 }
             ))) if requested == generated.len() && limit == generated.len() - 1
         ));
+    }
+
+    #[test]
+    fn generated_auto_bridge_resistor_retains_raw_reportable_value() {
+        let generated = Netlist::parse(
+            "generated bridge resistor\n\
+             RAUTO bridge 0 8 RMOD M=2 TEMP=37\n\
+             .model RMOD R (R=3 TC1=0.1 TNOM=27)\n\
+             .end\n",
+        )
+        .expect("generated bridge resistor deck parses");
+        let element = generated
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("RAUTO"))
+            .expect("generated resistor exists");
+        let mut circuit = CircuitData::new();
+
+        add_generated_xspice_auto_bridge_resistor(
+            &mut circuit,
+            &generated,
+            element,
+            crate::constants::TEMP_REFERENCE,
+            SpiceDialect::Xyce,
+        )
+        .expect("generated resistor is added to the auto-bridge subcircuit");
+
+        assert_eq!(circuit.resistors.names, ["RAUTO"]);
+        assert_eq!(
+            circuit.resistors.conductances[0].recip().to_bits(),
+            24.0_f64.to_bits()
+        );
+        assert_eq!(
+            circuit.resistors.reported_resistances[0].to_bits(),
+            8.0_f64.to_bits()
+        );
     }
 
     #[test]
@@ -4710,6 +4760,7 @@ impl Engine {
             .map_err(|error| map_build_parse_error("output validation", error))?;
         check_build_abort(abort)?;
         let mut circuit = CircuitData::new();
+        circuit.global_shunt_conductance = self.nodal_shunt_conductance();
         circuit.b3soi_gmin_scale = if self.config.b3soi_gmin_scaling {
             1.0e-6
         } else {
@@ -4892,7 +4943,19 @@ impl Engine {
             }
         }
 
-        circuit.no_dc_path_nodes = collect_floating_nodes(&flat_elements);
+        let floating_nodes = collect_floating_nodes(
+            &flat_elements,
+            self.nodal_shunt_conductance() > 0.0,
+            capacitor_ic_dc_mode(self.config.spice_dialect),
+        );
+        if !floating_nodes.analysis_complete {
+            log::debug!(
+                "Static DC topology is partial; post-solve diagnostics will require component-local matrix rank proof"
+            );
+        }
+        let dc_floating_components = floating_nodes.floating_components;
+        let dc_floating_component_is_certain = floating_nodes.floating_component_is_certain;
+        circuit.no_dc_path_nodes = floating_nodes.no_dc_path_nodes;
 
         for (element_index, element) in flat_elements.iter().enumerate() {
             if element_index.is_multiple_of(64) {
@@ -4958,7 +5021,7 @@ impl Engine {
                         continue;
                     }
 
-                    let resistance = resolve_resistor_instance_value(
+                    let resolved = resolve_resistor_effective_parameters(
                         netlist,
                         &element.name,
                         *value,
@@ -4968,6 +5031,7 @@ impl Engine {
                         self.config.temperature,
                         self.config.spice_dialect,
                     )?;
+                    let resistance = resolved.resistance;
                     let thermal_state = resolve_resistor_thermal_state(
                         &element.name,
                         netlist,
@@ -4998,22 +5062,24 @@ impl Engine {
                             )));
                         }
                         let branch = circuit.allocate_branch_named(&element.name);
-                        circuit.resistor_branches.add(
+                        circuit.resistor_branches.add_with_reported(
                             element.name.clone(),
                             np,
                             nn,
                             branch,
                             resistance,
                             small_signal_resistance,
+                            resolved.reported_resistance,
                         );
                         continue;
                     }
-                    circuit.resistors.add_with_small_signal(
+                    circuit.resistors.add_with_small_signal_and_reported(
                         element.name.clone(),
                         np,
                         nn,
                         resistance,
                         small_signal_resistance,
+                        resolved.reported_resistance,
                     );
                     if self.config.spice_dialect == SpiceDialect::Xyce {
                         circuit.record_xyce_topology_device(
@@ -5129,7 +5195,9 @@ impl Engine {
                         self.config.spice_dialect,
                     )?;
                     if let Some(ic) = *initial_voltage {
-                        if self.config.spice_dialect == SpiceDialect::Xyce {
+                        if capacitor_ic_dc_mode(self.config.spice_dialect)
+                            == crate::netlist::CapacitorIcDcMode::EnforcedConstraint
+                        {
                             let branch = circuit.allocate_branch_named(&element.name);
                             circuit.capacitors.add_with_ic_branch(
                                 element.name.clone(),
@@ -5347,9 +5415,11 @@ impl Engine {
                         );
                     }
                 }
-                ElementKind::VoltageSourceDeferred(_) | ElementKind::CurrentSourceDeferred(_) => {
+                ElementKind::VoltageSourceDeferred(_)
+                | ElementKind::CurrentSourceDeferred(_)
+                | ElementKind::PspiceChebyshev { .. } => {
                     return Err(SimulationError::Circuit(format!(
-                        "Source '{}' still has unresolved subcircuit parameter scope after flattening",
+                        "Source '{}' still has unresolved parameter scope after flattening",
                         element.name
                     )));
                 }
@@ -8147,6 +8217,10 @@ impl Engine {
         // Ensure ground reference exists
         // If no node "0" was specified, auto-select a reference node
         circuit.ensure_ground_reference();
+        circuit
+            .set_dc_floating_components(dc_floating_components, dc_floating_component_is_certain);
+        circuit.fatal_no_dc_path_nodes =
+            circuit.independent_dc_drive_nodes(self.current_abstol(), self.residual_reltol());
 
         // Resolve behavioral source expression references after final node IDs
         // are stabilized (including any automatic ground remap).

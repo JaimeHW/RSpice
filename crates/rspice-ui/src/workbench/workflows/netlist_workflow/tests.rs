@@ -103,8 +103,13 @@ fn generated_bundle_fixture() -> Vec<u8> {
     // SPICE is already the canonical dialect, so the fixture renders each
     // document unchanged and the bundle under test is exactly what the
     // generator produced.
-    crate::io::build_generated_bundle(&artifact, crate::io::NetlistFormat::Spice, true, str::to_owned)
-        .unwrap()
+    crate::io::build_generated_bundle(
+        &artifact,
+        crate::io::NetlistFormat::Spice,
+        true,
+        str::to_owned,
+    )
+    .unwrap()
 }
 
 #[test]

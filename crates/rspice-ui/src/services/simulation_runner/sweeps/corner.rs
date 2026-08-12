@@ -1,182 +1,20 @@
-//! Corner analysis.
+//! Binding a process corner's model section into a deck.
 //!
-//! Runs the design at each declared process/voltage/temperature corner and
-//! collects the results per corner.
+//! A corner declaration is solved one PVT point at a time, and each point's
+//! task carries its own deck. This is where that deck gets the process
+//! corner's real model cards in place of the reference ones.
 
 use super::super::error::{
     ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically,
 };
-use super::execution::{expand_corner_points_with_abort, run_corner_sweep};
-use super::mapping::map_corner_results;
-use super::netlist_mutation::infer_nominal_supply_voltage;
-use super::sweep_points::extract_temp_points_with_abort;
-use super::types::{
-    CornerData, CornerRunConfig, REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END,
-};
+use super::types::{CornerRunConfig, REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END};
 use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
 use rspice_core::abort_signal::NoAbort;
-use std::collections::HashMap;
-use std::path::Path;
 
-/// Run corner analysis from `.TEMP` commands with cancellation and no source
-/// path. Test-only; see [`run_corner_analysis_with_source_path_and_abort`].
-#[cfg(test)]
-pub fn run_corner_analysis_with_abort(
-    netlist_text: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<CornerData> {
-    run_corner_analysis_with_source_path_and_abort(netlist_text, None, abort)
-}
-
-/// Run corner analysis from `.TEMP` commands in the netlist -- temperature-only
-/// TT/nominal sweeps -- with source-path resolution and cooperative
-/// cancellation through parsing, point execution, and result mapping.
-pub fn run_corner_analysis_with_source_path_and_abort(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<CornerData> {
-    let netlist = super::super::parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    let max_batch_runs = super::super::build_engine_config(&netlist, None)
-        .resource_limits
-        .max_batch_runs;
-    let temperatures = extract_temp_points_with_abort(&netlist, max_batch_runs, abort)?;
-
-    if temperatures.is_empty() {
-        return Err(ServiceRunError::Failure(
-            "Corner analysis requires at least one .TEMP command".to_string(),
-        ));
-    }
-
-    let config = CornerRunConfig {
-        temperatures_c: temperatures,
-        ..Default::default()
-    };
-    run_corner_analysis_with_netlist(&netlist, &config, abort)
-}
-
-/// Run corner analysis with explicit process/voltage/temperature configuration,
-/// reporting failures as strings. Test-only; see
-/// [`run_corner_analysis_with_config_and_source_path_and_abort`].
-#[cfg(test)]
-pub fn run_corner_analysis_with_config(
-    netlist_text: &str,
-    config: &CornerRunConfig,
-) -> Result<CornerData, String> {
-    run_corner_analysis_with_config_and_abort(netlist_text, config, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run an explicitly configured corner analysis with cooperative cancellation
-/// and no source path. Test-only; see [`run_corner_analysis_with_config`].
-#[cfg(test)]
-pub fn run_corner_analysis_with_config_and_abort(
-    netlist_text: &str,
-    config: &CornerRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<CornerData> {
-    run_corner_analysis_with_config_and_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run an explicitly configured corner analysis with source-path resolution
-/// and cooperative cancellation.
-pub fn run_corner_analysis_with_config_and_source_path_and_abort(
-    netlist_text: &str,
-    config: &CornerRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<CornerData> {
-    ensure_not_aborted(abort)?;
-    config.validate().map_err(ServiceRunError::Failure)?;
-    ensure_not_aborted(abort)?;
-    if config.model_bindings.is_empty() {
-        let netlist =
-            super::super::parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-        return run_corner_analysis_with_netlist(&netlist, config, abort);
-    }
-    run_corner_analysis_with_bound_models(netlist_text, config, source_path, abort)
-}
-
-fn run_corner_analysis_with_bound_models(
-    netlist_text: &str,
-    config: &CornerRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<CornerData> {
-    let points = expand_corner_points_with_abort(
-        config,
-        rspice_core::ResourceLimits::default().max_batch_runs,
-        abort,
-    )?;
-    if points.is_empty() {
-        return Err(ServiceRunError::Failure(
-            "Corner analysis produced no corner points".to_owned(),
-        ));
-    }
-    let source_without_reference = strip_reference_model_binding_with_abort(netlist_text, abort)?;
-    // Driven by the expanded points rather than by the process axis. A filtered
-    // space can declare a process every one of its points removed, and
-    // materializing a section no point is solved against would spend the parse
-    // and could fail on a deck the run never reaches.
-    let mut process_netlists = HashMap::new();
-    for (point_index, point) in points.iter().enumerate() {
-        poll_periodically(abort, point_index)?;
-        if process_netlists.contains_key(&point.process) {
-            continue;
-        }
-        let source = materialize_corner_process_source_from_stripped(
-            &source_without_reference,
-            config,
-            point.process,
-            abort,
-        )?;
-        process_netlists.insert(point.process, source);
-    }
-
-    let mut parsed_by_process = HashMap::new();
-    for (process_index, (process, source)) in process_netlists.into_iter().enumerate() {
-        poll_periodically(abort, process_index)?;
-        let parsed = super::super::parse_runner_netlist_with_abort(&source, source_path, abort)
-            .map_err(|error| match error {
-                ServiceRunError::Aborted => ServiceRunError::Aborted,
-                error @ ServiceRunError::ResourceLimit(_) => error,
-                ServiceRunError::Failure(message) => ServiceRunError::Failure(format!(
-                    "{} model-section binding failed: {message}",
-                    process.as_keyword()
-                )),
-            })?;
-        parsed_by_process.insert(process, parsed);
-    }
-
-    let mut results = Vec::with_capacity(points.len());
-    for (point_index, point) in points.iter().enumerate() {
-        poll_periodically(abort, point_index)?;
-        let netlist = parsed_by_process.get(&point.process).ok_or_else(|| {
-            ServiceRunError::Failure(format!(
-                "No parsed model binding exists for {}",
-                point.process.as_keyword()
-            ))
-        })?;
-        let nominal_voltage = match config.nominal_voltage {
-            Some(voltage) => voltage,
-            None => infer_nominal_supply_voltage(netlist, abort)?.unwrap_or(1.0),
-        };
-        results.extend(run_corner_sweep(
-            netlist,
-            std::slice::from_ref(point),
-            config,
-            nominal_voltage,
-            abort,
-        )?);
-    }
-    finish_corner_data(&points, results, config, abort)
-}
-
-/// Freeze the exact executable source for one process corner. This is shared
-/// by the aggregate corner runner and OP PVT task expansion so a process axis
-/// cannot be retained as metadata while the solver silently uses the
-/// reference model cards.
+/// Freeze the exact executable source for one process corner. This is what
+/// keeps a process axis from being retained as metadata while the solver
+/// silently uses the reference model cards.
 pub(crate) fn materialize_corner_process_source(
     source: &str,
     config: &CornerRunConfig,
@@ -215,66 +53,6 @@ fn materialize_corner_process_source_from_stripped(
         }
     }
     inject_model_cards_with_abort(stripped_source, &model_cards, abort)
-}
-
-fn run_corner_analysis_with_netlist(
-    netlist: &rspice_core::Netlist,
-    config: &CornerRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<CornerData> {
-    ensure_not_aborted(abort)?;
-    config.validate().map_err(ServiceRunError::Failure)?;
-    ensure_not_aborted(abort)?;
-    let max_batch_runs = super::super::build_engine_config(netlist, None)
-        .resource_limits
-        .max_batch_runs;
-    let points = expand_corner_points_with_abort(config, max_batch_runs, abort)?;
-    if points.is_empty() {
-        return Err(ServiceRunError::Failure(
-            "Corner analysis produced no corner points".to_string(),
-        ));
-    }
-
-    let nominal_voltage = match config.nominal_voltage {
-        Some(voltage) => voltage,
-        None => infer_nominal_supply_voltage(netlist, abort)?.unwrap_or(1.0),
-    };
-    let results = run_corner_sweep(netlist, &points, config, nominal_voltage, abort)?;
-    if results.is_empty() {
-        return Err(ServiceRunError::Failure(
-            "Corner analysis produced no converged corner points".to_string(),
-        ));
-    }
-
-    finish_corner_data(&points, results, config, abort)
-}
-
-fn finish_corner_data(
-    points: &[super::types::CornerPoint],
-    results: Vec<(super::types::CornerPoint, super::types::SweepPointResult)>,
-    config: &CornerRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<CornerData> {
-    ensure_not_aborted(abort)?;
-    if results.is_empty() {
-        return Err(ServiceRunError::Failure(
-            "Corner analysis produced no converged corner points".to_owned(),
-        ));
-    }
-    let num_failures = points.len().saturating_sub(results.len());
-    let metric = config.base_mode.metric_label();
-    let (x_values, x_label, x_unit, temperatures_c, corner_labels, voltages) =
-        map_corner_results(&results, metric, abort)?;
-
-    Ok(CornerData {
-        x_values,
-        x_label,
-        x_unit,
-        temperatures_c,
-        corner_labels,
-        voltages,
-        num_failures,
-    })
 }
 
 #[cfg(test)]
@@ -499,13 +277,23 @@ mod tests {
             }],
             ..CornerRunConfig::default()
         };
-        let deck = "binding test\nV1 in 0 1\nR1 in out 1k\nD1 out 0 DFAST\n.op\n.end\n";
+        let deck = format!(
+            "binding test\nV1 in 0 1\nR1 in out 1k\nD1 out 0 DFAST\n\
+             {REFERENCE_MODEL_BINDING_BEGIN} 1\n.model DFAST D (IS=1e-9)\n\
+             {REFERENCE_MODEL_BINDING_END}\n.op\n.end\n"
+        );
 
-        let result = run_corner_analysis_with_config(deck, &config)
+        let bound = materialize_corner_process_source(&deck, &config, CornerProcess::FF, &NoAbort)
             .expect("the selected FF section supplies DFAST");
 
-        assert_eq!(result.temperatures_c.len(), 1);
-        assert_eq!(result.corner_labels, vec!["FF_1.000000V_27.000000C"]);
+        assert!(bound.contains(".model DFAST D (IS=1e-12)"), "{bound}");
+        assert!(!bound.contains("IS=1e-9"), "{bound}");
+        assert!(
+            materialize_corner_process_source(&deck, &config, CornerProcess::TT, &NoAbort)
+                .expect_err("TT is not a point of this contract")
+                .to_string()
+                .contains("not an enabled point")
+        );
     }
 
     #[test]
@@ -538,27 +326,27 @@ mod tests {
     }
 
     #[test]
-    fn corner_honors_early_abort_before_invalid_input() {
+    fn process_binding_honors_an_abort_raised_while_it_reads_the_deck() {
         let abort = AbortOnPoll::new(1);
-        let result = run_corner_analysis_with_abort("invalid", &abort);
-
-        assert!(matches!(result, Err(ServiceRunError::Aborted)));
-    }
-
-    #[test]
-    fn corner_honors_abort_during_nested_point_expansion() {
         let config = CornerRunConfig {
-            temperatures_c: (0..128).map(|index| index as f64).collect(),
+            process_corners: vec![CornerProcess::FF],
+            model_bindings: vec![CornerModelBinding {
+                process: CornerProcess::FF,
+                source_label: "models.lib [FF]".to_owned(),
+                section: Some("FF".to_owned()),
+                materialized_model_cards: ".model DFAST D (IS=1e-12)".to_owned(),
+            }],
             ..CornerRunConfig::default()
         };
-        let abort = AbortOnPoll::new(10);
-        let result = run_corner_analysis_with_config_and_abort(
-            "corner cancellation\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n",
+
+        let result = materialize_corner_process_source(
+            "abort\nR1 1 0 1k\n.op\n.end\n",
             &config,
+            CornerProcess::FF,
             &abort,
         );
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
-        assert!(abort.polls.load(Ordering::Relaxed) >= 10);
+        assert!(abort.polls.load(Ordering::Relaxed) >= 1);
     }
 }

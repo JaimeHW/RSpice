@@ -22,6 +22,34 @@ mod solve;
 mod stamping;
 mod tolerances;
 
+/// Linear equation family used by an accepted transient startup state.
+///
+/// Xyce Core windings can require the current-seeded inductor equations when
+/// the ordinary ideal-short operating-point system is singular. Keeping this
+/// provenance typed prevents a later audit from reconstructing a different
+/// system and turning that mismatch into a topology error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::engine) enum TransientOperatingPointLinearSystem {
+    IdealInductorShorts,
+    CurrentSeededInductors,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(in crate::engine) struct AcceptedTransientOperatingPointContract {
+    pub(in crate::engine) linear_system: TransientOperatingPointLinearSystem,
+    pub(in crate::engine) nodal_gmin: Value,
+    /// Present when the state was accepted by the nonlinear transient
+    /// operating-point equations. Linear startup has no nonlinear probe.
+    pub(in crate::engine) junction_gmin: Option<Value>,
+}
+
+pub(in crate::engine) struct TransientOperatingPointSolution {
+    pub(in crate::engine) values: Vec<Value>,
+    /// `None` denotes a NODESET-constrained recovery seed rather than an
+    /// accepted unconstrained operating point.
+    pub(in crate::engine) accepted_contract: Option<AcceptedTransientOperatingPointContract>,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct NewtonDampingState {
     pub(in crate::engine::convergence) bank_rose_alpha: Value,

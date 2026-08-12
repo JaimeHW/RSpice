@@ -500,7 +500,11 @@ fn stb_margin_measurements(
         rspice_core::MeasureResult::success("stb_crossovers", margins.num_crossovers as f64),
         rspice_core::MeasureResult::success(
             "stb_conditionally_stable",
-            if margins.conditionally_stable { 1.0 } else { 0.0 },
+            if margins.conditionally_stable {
+                1.0
+            } else {
+                0.0
+            },
         ),
     ]
 }

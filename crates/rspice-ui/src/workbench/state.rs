@@ -884,6 +884,128 @@ impl SimulationPage {
     }
 }
 
+/// Whether a Simulation Studio plan command changed the plan or was refused.
+///
+/// A receipt and a refusal are told apart here rather than by reading the
+/// message, because the two are shown differently and only one of them has to
+/// follow the reader off the Analyses page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AnalysisLifecycleSeverity {
+    /// Everything the command asked for was committed, and the message is the
+    /// transaction's receipt.
+    #[default]
+    Receipt,
+    /// Something the command asked for was refused, and the message names what
+    /// and why. A command that commits one step and is refused the next is a
+    /// refusal: the reader has to be told about the part that did not happen.
+    Refusal,
+}
+
+/// The last outcome any Simulation Studio plan command announced.
+///
+/// Only the Analyses route draws this; the other seven routes drain refusals
+/// out of it into the toast system. That drain is keyed on `sequence`, which is
+/// why the sequence advances on a *change* of outcome and not on every
+/// restatement: three of the writers sit on the render path rather than in a
+/// click handler, and a per-frame bump would toast the same refusal forever.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalysisLifecycleOutcome {
+    severity: AnalysisLifecycleSeverity,
+    message: String,
+    sequence: u64,
+}
+
+impl Default for AnalysisLifecycleOutcome {
+    /// The field is `#[serde(skip)]`, so a restored session gets this and never
+    /// the struct literal's value. It has to read as a real status line.
+    fn default() -> Self {
+        Self {
+            severity: AnalysisLifecycleSeverity::Receipt,
+            message: "No lifecycle command has been committed this session.".to_owned(),
+            sequence: 0,
+        }
+    }
+}
+
+impl AnalysisLifecycleOutcome {
+    pub const fn severity(&self) -> AnalysisLifecycleSeverity {
+        self.severity
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// Advances only when the announced outcome differs from the one already
+    /// held. Readers compare it against the last value they acted on.
+    pub const fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    pub const fn is_refusal(&self) -> bool {
+        matches!(self.severity, AnalysisLifecycleSeverity::Refusal)
+    }
+
+    /// Announce a committed change.
+    pub fn record_receipt(&mut self, message: impl Into<String>) {
+        self.record(AnalysisLifecycleSeverity::Receipt, message);
+    }
+
+    /// Announce a command that changed nothing, and why.
+    pub fn record_refusal(&mut self, message: impl Into<String>) {
+        self.record(AnalysisLifecycleSeverity::Refusal, message);
+    }
+
+    fn record(&mut self, severity: AnalysisLifecycleSeverity, message: impl Into<String>) {
+        let message = message.into();
+        if self.severity == severity && self.message == message {
+            return;
+        }
+        self.severity = severity;
+        self.message = message;
+        self.sequence += 1;
+    }
+}
+
+/// Which specifications the specification registry lists.
+///
+/// The classes name evidence, not release policy. A specification carries no
+/// severity, so a "blocking only" view would be a control with nothing behind
+/// it; what the page does resolve for every row is whether the active dataset
+/// answered the limit, and how completely. The registry owns that
+/// classification — this only says which of its outcomes to show.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SpecificationEvidenceFilter {
+    #[default]
+    All,
+    /// Limits the dataset answered with a failure, including a measurement
+    /// that ran and did not succeed.
+    Failing,
+    /// Limits no measurement in the dataset answers at all.
+    WithoutEvidence,
+    /// Limits judged on the worst of several retained measurements, so the
+    /// verdict speaks for the points the dataset kept and no others.
+    Partial,
+}
+
+impl SpecificationEvidenceFilter {
+    pub const ALL: [Self; 4] = [
+        Self::All,
+        Self::Failing,
+        Self::WithoutEvidence,
+        Self::Partial,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::All => "All requirements",
+            Self::Failing => "Failing only",
+            Self::WithoutEvidence => "Without evidence",
+            Self::Partial => "Partial evidence",
+        }
+    }
+}
+
 /// Documents another live-session participant currently holds the write
 /// lease on, projected each frame by the live-session engine. Runtime-only:
 /// empty whenever no live session is attached. The netlist entry doubles as
@@ -1114,7 +1236,13 @@ pub struct WorkbenchState {
     pub simulation_surface_editor_anchor_y: Option<f32>,
     /// Last analysis lifecycle outcome announced by the transaction owner.
     #[serde(skip)]
-    pub analysis_lifecycle_status: String,
+    pub analysis_lifecycle_status: AnalysisLifecycleOutcome,
+    /// Sequence of the outcome the Simulation Studio has already surfaced away
+    /// from the Analyses page. Runtime-only, and deliberately not part of the
+    /// outcome itself: the writers announce, and this records what a reader did
+    /// about it.
+    #[serde(skip)]
+    pub analysis_lifecycle_toasted_sequence: u64,
     /// Active Simulation Studio transaction. Drafts are runtime-only and are
     /// committed atomically by the dialog's primary action.
     #[serde(skip)]
@@ -1173,6 +1301,21 @@ pub struct WorkbenchState {
     /// In-progress edit of the selected saved output's source expression.
     #[serde(skip)]
     pub saved_output_expression_draft: Option<String>,
+    /// Filter over the saved-output registry on the outputs page.
+    ///
+    /// Runtime-only, like the drafts above but for a different reason: a
+    /// filter narrows what one reader is looking at and changes nothing the
+    /// plan holds. Restoring it would reopen the project on someone's partial
+    /// reading of the registry and make the missing rows look deleted.
+    #[serde(skip)]
+    pub saved_output_filter: String,
+    /// Filter over the specification registry, runtime-only for the same
+    /// reason as the saved-output filter.
+    #[serde(skip)]
+    pub specification_filter: String,
+    /// Which evidence classes the specification registry shows.
+    #[serde(skip)]
+    pub specification_evidence_filter: SpecificationEvidenceFilter,
     /// Selected model name within the currently selected model library.
     #[serde(default)]
     pub selected_model: Option<String>,
@@ -1333,8 +1476,8 @@ impl Default for WorkbenchState {
             simulation_surface_scroll_y: 0.0,
             simulation_surface_pending_scroll_delta_y: 0.0,
             simulation_surface_editor_anchor_y: None,
-            analysis_lifecycle_status: "No lifecycle command has been committed this session."
-                .to_owned(),
+            analysis_lifecycle_status: AnalysisLifecycleOutcome::default(),
+            analysis_lifecycle_toasted_sequence: 0,
             simulation_workflow: None,
             selected_specification: None,
             selected_design_variable: None,
@@ -1347,6 +1490,9 @@ impl Default for WorkbenchState {
             design_variable_bounds_draft: None,
             saved_output_name_draft: None,
             saved_output_expression_draft: None,
+            saved_output_filter: String::new(),
+            specification_filter: String::new(),
+            specification_evidence_filter: SpecificationEvidenceFilter::default(),
             selected_model: None,
             analysis_query: String::new(),
             navigator_query: String::new(),

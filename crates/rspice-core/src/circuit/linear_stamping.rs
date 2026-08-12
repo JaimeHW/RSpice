@@ -10,6 +10,30 @@
 use super::*;
 
 impl CircuitData {
+    #[inline]
+    fn stamp_global_shunt_direct(&self, matrix: &mut StaticMatrix) {
+        if self.global_shunt_conductance == 0.0 {
+            return;
+        }
+        for index in 0..self.num_nodes {
+            if !self.is_non_electrical_state_matrix_index(index) {
+                matrix.add(index, index, self.global_shunt_conductance);
+            }
+        }
+    }
+
+    #[inline]
+    fn stamp_global_shunt(&self, matrix: &mut TripletMatrix) {
+        if self.global_shunt_conductance == 0.0 {
+            return;
+        }
+        for index in 0..self.num_nodes {
+            if !self.is_non_electrical_state_matrix_index(index) {
+                matrix.push(index, index, self.global_shunt_conductance);
+            }
+        }
+    }
+
     /// Provide a finite operating-point constraint for private LEVEL=1 Core
     /// states.  The transient companion replaces this identity with the
     /// physical hidden magnetization equation at every Newton assembly.
@@ -634,6 +658,7 @@ impl CircuitData {
 
     /// Stamp all linear devices for DC analysis using O(1) direct stamping
     pub fn stamp_dc_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
+        self.stamp_global_shunt_direct(matrix);
         self.resistors.stamp_all_direct(matrix);
         let num_nodes = self.num_nodes;
         self.resistor_branches
@@ -672,6 +697,7 @@ impl CircuitData {
     /// branch incidence (`2*v - r_eq*i = -v_eq`), which silently corrupted
     /// every transient solve containing an inductor.
     fn stamp_transient_linear_base_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
+        self.stamp_global_shunt_direct(matrix);
         self.resistors.stamp_all_direct(matrix);
         let num_nodes = self.num_nodes;
         self.resistor_branches
@@ -833,6 +859,7 @@ impl CircuitData {
         rhs: &mut [Value],
         scale: Value,
     ) {
+        self.stamp_global_shunt_direct(matrix);
         self.resistors.stamp_all_direct(matrix);
         let num_nodes = self.num_nodes;
         self.resistor_branches
@@ -860,6 +887,7 @@ impl CircuitData {
     /// Stamp all linear devices for DC analysis
     pub fn stamp_dc(&self, matrix: &mut TripletMatrix, rhs: &mut [Value]) {
         let num_nodes = self.num_nodes;
+        self.stamp_global_shunt(matrix);
         self.resistors.stamp_all(matrix);
         self.resistor_branches.stamp_all(matrix, rhs, num_nodes);
         self.capacitors

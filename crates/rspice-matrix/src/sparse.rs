@@ -1316,6 +1316,61 @@ impl StaticMatrix {
             .collect()
     }
 
+    /// Determine whether the principal submatrix selected by `indices` is
+    /// singular under this matrix's solver policy.
+    ///
+    /// This is a diagnostic operation for tying a rank deficiency to one
+    /// known MNA component. It deliberately copies only the selected block;
+    /// hot-path solves should continue to operate on the original matrix.
+    pub fn principal_submatrix_is_singular(&self, indices: &[usize]) -> Result<bool, SolverError> {
+        self.check_stamping_error()?;
+        if indices.is_empty() {
+            return Err(SolverError::InvalidCircuit(
+                "principal submatrix requires at least one index".to_string(),
+            ));
+        }
+
+        let mut local_by_global = vec![None; self.nrows.max(self.ncols)];
+        for (local, global) in indices.iter().copied().enumerate() {
+            if global >= self.nrows || global >= self.ncols {
+                return Err(SolverError::InvalidCircuit(format!(
+                    "principal submatrix index {global} is outside {}x{} matrix",
+                    self.nrows, self.ncols
+                )));
+            }
+            if local_by_global[global].replace(local).is_some() {
+                return Err(SolverError::InvalidCircuit(format!(
+                    "principal submatrix index {global} is duplicated"
+                )));
+            }
+        }
+
+        let mut triplets = Vec::new();
+        for (local, _) in indices.iter().enumerate() {
+            triplets.push((local, local, 0.0));
+        }
+        for (local_col, global_col) in indices.iter().copied().enumerate() {
+            for position in self.csc.col_ptr()[global_col]..self.csc.col_ptr()[global_col + 1] {
+                let global_row = self.csc.row_idx()[position];
+                if let Some(local_row) = local_by_global[global_row] {
+                    triplets.push((local_row, local_col, self.values[position]));
+                }
+            }
+        }
+
+        let mut principal = Self::from_triplets_with_options(
+            indices.len(),
+            indices.len(),
+            &triplets,
+            self.solver_options,
+        )?;
+        match principal.solve(&vec![0.0; indices.len()]) {
+            Ok(_) => Ok(false),
+            Err(SolverError::SingularMatrix) => Ok(true),
+            Err(error) => Err(error),
+        }
+    }
+
     /// Get CSC index for (row, col) - for pre-indexed stamping
     #[inline]
     pub fn get_index(&self, row: usize, col: usize) -> Option<CscIndex> {
@@ -1421,10 +1476,81 @@ impl StaticMatrix {
         solution: &[Value],
         rhs: &[Value],
         reltol: Value,
-        mut row_abstol: F,
+        row_abstol: F,
     ) -> Result<Value, SolverError>
     where
         F: FnMut(usize) -> Value,
+    {
+        self.scaled_residual_inf_norm_by_row_prefix(solution, rhs, reltol, self.nrows, row_abstol)
+    }
+
+    /// Compute the infinity norm of the scaled residual over a leading row
+    /// prefix. This is useful for MNA checks whose equation kind is defined by
+    /// row position, such as evaluating electrical KCL rows without allowing
+    /// auxiliary branch-constraint rows to control the result.
+    pub fn scaled_residual_inf_norm_by_row_prefix<F>(
+        &self,
+        solution: &[Value],
+        rhs: &[Value],
+        reltol: Value,
+        row_count: usize,
+        row_abstol: F,
+    ) -> Result<Value, SolverError>
+    where
+        F: FnMut(usize) -> Value,
+    {
+        let mut residual_inf: Value = 0.0;
+        self.visit_scaled_residuals_by_row_prefix(
+            solution,
+            rhs,
+            reltol,
+            row_count,
+            row_abstol,
+            |_, normalized| residual_inf = residual_inf.max(normalized),
+        )?;
+        Ok(residual_inf)
+    }
+
+    /// Compute each scaled residual over a leading row prefix.
+    ///
+    /// Unlike the infinity-norm helpers, this allocates one value per selected
+    /// row so callers can associate a failed equation with topology metadata.
+    /// Newton iteration should continue to use the allocation-free norm API.
+    pub fn scaled_residual_norms_by_row_prefix<F>(
+        &self,
+        solution: &[Value],
+        rhs: &[Value],
+        reltol: Value,
+        row_count: usize,
+        row_abstol: F,
+    ) -> Result<Vec<Value>, SolverError>
+    where
+        F: FnMut(usize) -> Value,
+    {
+        let mut residuals = vec![Value::INFINITY; row_count];
+        self.visit_scaled_residuals_by_row_prefix(
+            solution,
+            rhs,
+            reltol,
+            row_count,
+            row_abstol,
+            |row, normalized| residuals[row] = normalized,
+        )?;
+        Ok(residuals)
+    }
+
+    fn visit_scaled_residuals_by_row_prefix<F, V>(
+        &self,
+        solution: &[Value],
+        rhs: &[Value],
+        reltol: Value,
+        row_count: usize,
+        mut row_abstol: F,
+        mut visit: V,
+    ) -> Result<(), SolverError>
+    where
+        F: FnMut(usize) -> Value,
+        V: FnMut(usize, Value),
     {
         self.check_stamping_error()?;
         if self.nrows != rhs.len() {
@@ -1441,6 +1567,12 @@ impl StaticMatrix {
                 solution.len()
             )));
         }
+        if row_count > self.nrows {
+            return Err(SolverError::InvalidCircuit(format!(
+                "Residual row prefix {row_count} exceeds matrix row count {}",
+                self.nrows
+            )));
+        }
 
         let safe_reltol = if reltol.is_finite() && reltol > 0.0 {
             reltol
@@ -1449,11 +1581,13 @@ impl StaticMatrix {
         };
 
         if solution.iter().any(|value| !value.is_finite()) {
-            return Ok(Value::INFINITY);
+            for row in 0..row_count {
+                visit(row, Value::INFINITY);
+            }
+            return Ok(());
         }
 
-        let mut residual_inf: Value = 0.0;
-        for row in 0..self.nrows {
+        for row in 0..row_count {
             let mut row_ax = 0.0;
             let mut row_ax_gross = 0.0;
             for position in self.residual_layout.row_ptr[row]..self.residual_layout.row_ptr[row + 1]
@@ -1465,7 +1599,10 @@ impl StaticMatrix {
             }
             let row_rhs = rhs[row];
             if !row_rhs.is_finite() || !row_ax.is_finite() {
-                return Ok(Value::INFINITY);
+                for remaining in row..row_count {
+                    visit(remaining, Value::INFINITY);
+                }
+                return Ok(());
             }
             let residual = (row_ax - row_rhs).abs();
             let abstol = row_abstol(row);
@@ -1491,10 +1628,10 @@ impl StaticMatrix {
             let noise_floor = CANCELLATION_NOISE_TERMS * Value::EPSILON * row_ax_gross;
             let scale = safe_abstol + noise_floor + safe_reltol * row_ax.abs().max(row_rhs.abs());
             let normalized = residual / scale.max(safe_abstol);
-            residual_inf = residual_inf.max(normalized);
+            visit(row, normalized);
         }
 
-        Ok(residual_inf)
+        Ok(())
     }
 
     /// Compute the unscaled infinity norm of `A*x-b` without allocating.
@@ -4708,6 +4845,62 @@ mod tests {
             .scaled_residual_inf_norm_by_row(&solution, &rhs, reltol, |row| abstols[row])
             .unwrap();
         assert_eq!(actual.to_bits(), expected.to_bits());
+    }
+
+    #[test]
+    fn scaled_residual_row_prefix_excludes_later_equation_kinds() {
+        let matrix = StaticMatrix::from_triplets(2, 2, &[(0, 0, 1.0), (1, 1, 1.0)]).unwrap();
+        let solution = [1.0, 100.0];
+        let rhs = [1.0, 0.0];
+
+        let all_rows = matrix
+            .scaled_residual_inf_norm_by_row(&solution, &rhs, 1.0e-3, |_| 1.0e-12)
+            .unwrap();
+        let first_row = matrix
+            .scaled_residual_inf_norm_by_row_prefix(&solution, &rhs, 1.0e-3, 1, |_| 1.0e-12)
+            .unwrap();
+        let per_row = matrix
+            .scaled_residual_norms_by_row_prefix(&solution, &rhs, 1.0e-3, 2, |_| 1.0e-12)
+            .unwrap();
+
+        assert!(all_rows > 1.0);
+        assert_eq!(first_row, 0.0);
+        assert_eq!(per_row[0], first_row);
+        assert_eq!(per_row[1], all_rows);
+        assert!(matches!(
+            matrix.scaled_residual_inf_norm_by_row_prefix(&solution, &rhs, 1.0e-3, 3, |_| 1.0e-12,),
+            Err(SolverError::InvalidCircuit(_))
+        ));
+    }
+
+    #[test]
+    fn deficient_rows_identify_unconstrained_equations() {
+        let matrix = StaticMatrix::from_triplets(2, 2, &[(0, 1, 2.0)]).unwrap();
+
+        assert_eq!(matrix.deficient_rows(), [1]);
+    }
+
+    #[test]
+    fn principal_submatrix_singularity_is_component_local() {
+        let matrix = StaticMatrix::from_triplets(
+            3,
+            3,
+            &[
+                (0, 0, 1.0),
+                (0, 1, -1.0),
+                (1, 0, -1.0),
+                (1, 1, 1.0),
+                (2, 2, 2.0),
+            ],
+        )
+        .unwrap();
+
+        assert!(matrix.principal_submatrix_is_singular(&[0, 1]).unwrap());
+        assert!(!matrix.principal_submatrix_is_singular(&[2]).unwrap());
+        assert!(matches!(
+            matrix.principal_submatrix_is_singular(&[0, 0]),
+            Err(SolverError::InvalidCircuit(_))
+        ));
     }
 
     #[test]

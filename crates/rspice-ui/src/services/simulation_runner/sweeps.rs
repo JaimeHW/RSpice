@@ -13,9 +13,12 @@ mod sweep_points;
 mod types;
 
 pub(crate) use corner::materialize_corner_process_source;
+pub(crate) use mapping::map_corner_results;
 pub(crate) use netlist_mutation::{apply_voltage_corner, infer_nominal_supply_voltage};
 pub(crate) use sweep_points::expand_step_sweep_values;
-pub(crate) use types::{REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END};
+pub(crate) use types::{
+    REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END, SweepPointResult,
+};
 
 /// Expand exactly the PVT tuples consumed by the corner runner without
 /// exposing its internal result type. Preflight uses this same expansion so
@@ -35,10 +38,6 @@ pub(crate) fn expand_corner_pvt_points(
     })
 }
 
-pub use corner::{
-    run_corner_analysis_with_config_and_source_path_and_abort,
-    run_corner_analysis_with_source_path_and_abort,
-};
 pub use parametric::{
     run_parametric_analysis_with_config_and_source_path_and_abort,
     run_parametric_analysis_with_source_path_and_abort,

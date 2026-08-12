@@ -107,7 +107,7 @@ pub use pss_noise::OscPnoiseResult;
 pub use result::{TransientDeviceOpTrace, TransientResult, TransientStoreTrace};
 pub use stb::StbAnalysisResult;
 pub use step::{MaterializedStepRun, StepPlan, StepPlanLimits};
-pub use transient::{TransientCheckpoint, netlist_fingerprint};
+pub use transient::{TransientCheckpoint, TransientStartupMode, netlist_fingerprint};
 pub use waveform::{CompressionConfig, TransientResultCompressed, WaveformRecorder};
 
 pub(crate) use source_values::extract_dc_value_with_limits;

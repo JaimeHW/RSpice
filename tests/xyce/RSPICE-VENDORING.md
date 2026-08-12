@@ -60,11 +60,20 @@ reported separately from `expected_unsupported`.
 
 Some upstream exclusions are helper, baseline, or control decks tested by an
 upstream wrapper owner. RSpice has independently reconstructed and qualified
-exact native contracts for 205 such decks. Those rows use
+exact native contracts for 212 such decks. Those rows use
 `rspice_independently_qualified` and name the exact expected native contract.
 The adapter executes them, preserves their upstream provenance on the result,
 and fails closed if execution becomes unsupported, fails, or selects a
 different contract. A removed-wrapper marker by itself is not a promotion.
+
+The Certification BUG 402 temperature-option family pins its complete
+Release-7.10.0 wrapper provenance and proves that legacy `.OPTIONS TEMP=35`
+and canonical `.OPTIONS DEVICE TEMP=35` produce the same 51-point DC result.
+The native oracle preserves the upstream comparison direction: the Xyce
+`DEVICE` spelling is GOODFILE and the SPICE-compatible unscoped spelling is
+TESTFILE. It additionally validates both printed sweep coordinates against the
+authored grid, closing a dormant coordinate-loop typo in the historical Perl
+verifier without weakening its directional integrated-RMS value comparison.
 
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper

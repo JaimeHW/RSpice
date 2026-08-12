@@ -443,21 +443,13 @@ pub(crate) enum SaveContinuationEvent {
     SavedWithNewerChanges(crate::product::TransactionId),
     Cancelled(crate::product::TransactionId),
     Conflict(crate::product::TransactionId),
-    Failed(
-        crate::product::TransactionId,
-        String,
-    ),
-    PublishedButNotAdopted(
-        crate::product::TransactionId,
-        String,
-    ),
+    Failed(crate::product::TransactionId, String),
+    PublishedButNotAdopted(crate::product::TransactionId, String),
 }
 
 #[cfg(target_arch = "wasm32")]
 impl SaveContinuationEvent {
-    pub(crate) fn transaction(
-        &self,
-    ) -> crate::product::TransactionId {
+    pub(crate) fn transaction(&self) -> crate::product::TransactionId {
         match self {
             Self::Saved(transaction)
             | Self::SavedWithNewerChanges(transaction)
@@ -1579,10 +1571,8 @@ mod tests {
     fn only_verified_canonical_completion_authorizes_an_immediate_destructive_action() {
         assert!(SaveRequestOutcome::CanonicalComplete.authorizes_immediate_destructive_action());
         assert!(
-            !SaveRequestOutcome::CanonicalPending(
-                crate::product::TransactionId::new()
-            )
-            .authorizes_immediate_destructive_action()
+            !SaveRequestOutcome::CanonicalPending(crate::product::TransactionId::new())
+                .authorizes_immediate_destructive_action()
         );
         assert!(!SaveRequestOutcome::CopyOnly.authorizes_immediate_destructive_action());
         assert!(!SaveRequestOutcome::CopyPending.authorizes_immediate_destructive_action());

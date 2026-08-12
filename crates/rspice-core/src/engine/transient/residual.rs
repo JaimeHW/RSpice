@@ -3685,7 +3685,7 @@ Q1 C B E 0 QN
             circuit.link_indices(&matrix);
             circuit.voltage_sources.set_transient_context(1e-9, 1e-6);
             circuit.current_sources.set_transient_context(1e-9, 1e-6);
-            let (base, _mode) = engine
+            let (base, _mode, _accepted_contract) = engine
                 .solve_transient_initial_solution(
                     &netlist,
                     &mut circuit,

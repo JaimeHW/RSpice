@@ -166,9 +166,18 @@ impl AccuracyPolicy {
         }
 
         tighten(&mut config.tolerance, self.ceilings.tolerance);
-        tighten(&mut convergence.voltage_reltol, self.ceilings.voltage_reltol);
-        tighten(&mut convergence.voltage_abstol, self.ceilings.voltage_abstol);
-        tighten(&mut convergence.current_abstol, self.ceilings.current_abstol);
+        tighten(
+            &mut convergence.voltage_reltol,
+            self.ceilings.voltage_reltol,
+        );
+        tighten(
+            &mut convergence.voltage_abstol,
+            self.ceilings.voltage_abstol,
+        );
+        tighten(
+            &mut convergence.current_abstol,
+            self.ceilings.current_abstol,
+        );
         tighten(
             &mut convergence.residual_reltol,
             self.ceilings.residual_reltol,
@@ -328,7 +337,10 @@ mod tests {
     fn serde_round_trips_every_tier_in_snake_case() {
         for accuracy in AnalysisAccuracy::ALL {
             let json = serde_json::to_string(&accuracy).expect("serialize");
-            assert_eq!(json, format!("\"{}\"", accuracy.display_name().to_lowercase()));
+            assert_eq!(
+                json,
+                format!("\"{}\"", accuracy.display_name().to_lowercase())
+            );
             let back: AnalysisAccuracy = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(back, accuracy);
         }

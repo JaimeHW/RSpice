@@ -658,7 +658,7 @@ fn model_identity_set_order_does_not_change_snapshot_identity() {
 }
 
 #[test]
-fn pvt_metadata_counts_the_exact_full_corner_matrix_inside_one_task() {
+fn pvt_metadata_counts_the_exact_full_corner_matrix_declared_by_one_task() {
     use crate::services::simulation_runner::CornerProcess;
     let mut matrix = parts();
     let mut corner = corner_task(
@@ -677,8 +677,36 @@ fn pvt_metadata_counts_the_exact_full_corner_matrix_inside_one_task() {
 
     let snapshot = PreparedRunSnapshot::new(matrix).expect("full corner matrix snapshot");
     assert_eq!(snapshot.pvt_points.len(), 8);
-    assert_eq!(snapshot.tasks.len(), 1);
     assert_eq!(snapshot.metadata().pvt_point_count, 8);
+    // Nine tasks for eight declared points: the eight solves, then the
+    // declaration, whose turn assembles the family and reaches no engine. The
+    // declaration used to sit beside the points and solve all eight again
+    // inside its own executor, so the sweep cost sixteen solves. What counts
+    // the solves is the number of tasks carrying a point.
+    assert_eq!(snapshot.tasks.len(), 9);
+    assert_eq!(
+        snapshot
+            .tasks
+            .iter()
+            .filter(|task| task.corner_point.is_some())
+            .count(),
+        8,
+        "one solve per declared point, and a ninth task that solves nothing"
+    );
+    assert!(
+        snapshot
+            .tasks
+            .iter()
+            .take(8)
+            .all(|task| task.corner_point.is_some() && task.pvt_point.is_some()),
+        "every solving task is one attributed point of the declaration"
+    );
+    // Last, not first. Retained results must stay an ordered prefix of this
+    // list even when a run stops part-way, and the assembly cannot produce a
+    // result before its points have produced theirs.
+    let assembly = snapshot.tasks.last().expect("nine expanded tasks");
+    assert!(matches!(assembly.task.spec, AnalysisSpec::Corner));
+    assert!(assembly.corner_point.is_none() && assembly.pvt_point.is_none());
 }
 
 /// A diagonal sweep pairs the axes index by index, and axes of different
@@ -882,6 +910,7 @@ fn process_and_voltage_axes_change_the_authorized_op_execution_contract() {
         snapshot
             .tasks
             .iter()
+            .filter(|task| task.authored_instance_id == instance_id("op"))
             .filter(|task| { matches!(task.task.config.as_ref(), Some(AnalysisConfig::DcOp(_))) })
             .count(),
         4
@@ -1001,6 +1030,7 @@ fn identical_coordinates_with_different_model_contracts_do_not_deduplicate() {
     let op_sources = snapshot
         .tasks
         .iter()
+        .filter(|task| task.authored_instance_id == instance_id("op"))
         .filter_map(|task| {
             matches!(task.task.config.as_ref(), Some(AnalysisConfig::DcOp(_)))
                 .then(|| task.executable_netlist_override.as_deref())
@@ -1267,9 +1297,13 @@ fn a_corner_axis_marks_exactly_one_point_nominal_and_names_its_contract() {
     pvt.tasks.push(prepared("corner", "Corner", corner));
 
     let snapshot = PreparedRunSnapshot::new(pvt).expect("PVT snapshot");
+    // Scoped to the operating point that was expanded over the axis. The
+    // corner declaration expands over the same four points in its own right,
+    // and its attribution is asserted where that expansion is the subject.
     let points: Vec<_> = snapshot
         .tasks
         .iter()
+        .filter(|task| task.authored_instance_id == instance_id("op"))
         .filter_map(PreparedTask::pvt_point)
         .collect();
 
@@ -1289,5 +1323,205 @@ fn a_corner_axis_marks_exactly_one_point_nominal_and_names_its_contract() {
             .filter(|point| point.process() == "SS")
             .count(),
         2
+    );
+}
+
+/// The deck a corner run's base analysis is declared against, with a `.MEAS`
+/// statement so the retained result carries more than waveforms.
+const CORNER_EVIDENCE_DECK: &str = "corner evidence\n\
+     VDD vdd 0 DC 1.8\n\
+     R1 vdd out 1k\n\
+     R2 out 0 1k\n\
+     C1 out 0 1p\n\
+     .tran 1n 100n\n\
+     .meas tran vout FIND V(out) AT=100n\n\
+     .end\n";
+
+/// A two-point transient corner declaration with a real supply and process
+/// axis, paired diagonally so the nominal point and one derated point are the
+/// whole space.
+fn transient_corner_task() -> QueuedAnalysis {
+    use crate::services::simulation_runner::{CornerBaseMode, CornerProcess, CornerRunConfig};
+
+    QueuedAnalysis {
+        numeric_override: None,
+        spec: AnalysisSpec::Corner,
+        config: None,
+        spec_options: SpecExecutionOptions {
+            corner: Some(CornerRunConfig {
+                process_corners: vec![CornerProcess::TT, CornerProcess::SS],
+                voltages: vec![1.8, 1.62],
+                temperatures_c: vec![27.0, 125.0],
+                full_matrix: false,
+                nominal_voltage: Some(1.8),
+                base_mode: CornerBaseMode::Transient {
+                    stop_time: 100.0e-9,
+                    step_time: 1.0e-9,
+                },
+                model_bindings: vec![
+                    corner_binding(CornerProcess::TT, "tt.lib", "1e-12"),
+                    corner_binding(CornerProcess::SS, "ss.lib", "1e-13"),
+                ],
+                points: Vec::new(),
+            }),
+            ..SpecExecutionOptions::default()
+        },
+        analysis_line: ".corner".to_owned(),
+    }
+}
+
+fn transient_corner_parts() -> SnapshotParts {
+    let mut corner_run = parts();
+    corner_run.executable_netlist = CORNER_EVIDENCE_DECK.to_owned();
+    corner_run.tasks = vec![prepared("corner", "Corner", transient_corner_task())];
+    corner_run
+}
+
+/// A corner run's base analysis is the thing declared over the points, so each
+/// point has to become a task of that analysis kind. Until it did, a corner
+/// transient produced one scalar per node and no `.MEAS` result at all.
+#[test]
+fn a_transient_corner_run_expands_into_one_task_per_declared_point() {
+    let snapshot =
+        PreparedRunSnapshot::new(transient_corner_parts()).expect("transient corner snapshot");
+
+    let point_tasks: Vec<_> = snapshot
+        .tasks
+        .iter()
+        .filter(|task| task.pvt_point().is_some())
+        .collect();
+    assert_eq!(point_tasks.len(), 2);
+    assert!(
+        point_tasks
+            .iter()
+            .all(|task| matches!(task.task.spec, AnalysisSpec::Transient { .. })),
+        "the corner's base analysis is what each point runs"
+    );
+    assert!(
+        point_tasks.iter().all(|task| task.task.config.is_none()),
+        "a point task keeps the corner contract on its request so the supply \
+         corner reaches the elaborated circuit"
+    );
+
+    let attributed: Vec<_> = point_tasks
+        .iter()
+        .filter_map(|task| task.pvt_point())
+        .map(|point| {
+            (
+                point.process().to_owned(),
+                point.supply_voltage(),
+                point.temperature_celsius(),
+                point.is_nominal(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        attributed,
+        vec![
+            ("TT".to_owned(), Some(1.8), 27.0, true),
+            ("SS".to_owned(), Some(1.62), 125.0, false),
+        ]
+    );
+
+    for (task, expected_temperature) in point_tasks.iter().zip([27.0, 125.0]) {
+        let deck = task
+            .executable_netlist_override
+            .as_deref()
+            .expect("a point task always writes its own deck");
+        let parsed = rspice_core::Netlist::parse(deck).expect("point deck parses");
+        assert_eq!(
+            parsed.options.temp,
+            Some(expected_temperature),
+            "the point's temperature is stated by its own deck"
+        );
+        assert!(
+            deck.contains("IS=1e-12") || deck.contains("IS=1e-13"),
+            "the point's deck carries the process models its corner binds"
+        );
+    }
+
+    // The declaration keeps its own task and its own identity, but it is no
+    // longer a solve: it comes last, after the two points, and its turn
+    // assembles the family from them.
+    assert_eq!(snapshot.tasks.len(), point_tasks.len() + 1);
+    let unexpanded = prepared("corner", "Corner", transient_corner_task());
+    assert!(
+        point_tasks
+            .iter()
+            .all(|task| task.authored_instance_id == unexpanded.instance_id
+                && task.instance_id != unexpanded.instance_id),
+        "a point carries the declaration's authorship without taking its identity"
+    );
+    let assembly = snapshot.tasks.last().expect("the declaration is retained");
+    assert_eq!(assembly.instance_id, unexpanded.instance_id);
+    assert_eq!(assembly.config_digest, unexpanded.config_digest);
+    assert!(matches!(assembly.task.spec, AnalysisSpec::Corner));
+    assert_eq!(assembly.executable_netlist_override, None);
+}
+
+/// The declaration produces no execution artifact, so anything ordered after it
+/// binds to the last *point* — the task whose completion means the declared
+/// space has been solved — and not to the assembly that follows it.
+#[test]
+fn an_analysis_ordered_after_a_corner_run_waits_for_its_last_point() {
+    let mut dependent_run = transient_corner_parts();
+    dependent_run.tasks.push(prepared_with(
+        "after-corner",
+        ObjectRevision::INITIAL,
+        vec![instance_id("corner")],
+        "Transient",
+        transient_task(),
+    ));
+
+    let snapshot = PreparedRunSnapshot::new(dependent_run).expect("dependent corner snapshot");
+
+    let last_point = snapshot
+        .tasks
+        .iter()
+        .rfind(|task| task.corner_point.is_some())
+        .expect("the corner expanded into points");
+    let dependent = snapshot
+        .tasks
+        .iter()
+        .find(|task| task.instance_id == instance_id("after-corner"))
+        .expect("the dependent keeps its own identity");
+    assert_eq!(dependent.dependencies, vec![last_point.instance_id]);
+    assert_ne!(
+        last_point.instance_id,
+        instance_id("corner"),
+        "the declaration's own identity is no longer dispatchable"
+    );
+}
+
+/// A point's configuration digest is its identity as a payload. Two points of
+/// one contract must never share it — a filtered space and a full expansion
+/// already collide on their axes — and preparing the same declaration twice
+/// must land on the same digests or a retained result could never be matched
+/// back to the point that produced it.
+#[test]
+fn every_corner_point_earns_its_own_reproducible_configuration_digest() {
+    let first = PreparedRunSnapshot::new(transient_corner_parts()).expect("first preparation");
+    let second = PreparedRunSnapshot::new(transient_corner_parts()).expect("second preparation");
+
+    let digests = |snapshot: &PreparedRunSnapshot| {
+        snapshot
+            .tasks
+            .iter()
+            .filter(|task| task.pvt_point().is_some())
+            .map(|task| (task.instance_id, task.config_digest))
+            .collect::<Vec<_>>()
+    };
+
+    let first_digests = digests(&first);
+    assert_eq!(first_digests.len(), 2);
+    assert_ne!(
+        first_digests[0].1, first_digests[1].1,
+        "two points of one contract are two payloads"
+    );
+    assert_ne!(first_digests[0].0, first_digests[1].0);
+    assert_eq!(
+        first_digests,
+        digests(&second),
+        "the same declaration prepares to the same point identities and digests"
     );
 }

@@ -262,6 +262,12 @@ fn pending_change(app: &RSpiceApp) -> PendingChange {
 
 /// Apply through the same transaction the dialog uses, so the change produces
 /// a configuration receipt and invalidates preflight.
+///
+/// A refusal here is not a draft error — the draft parsed and validated, and
+/// the transaction declined it — so it is announced on the plan's lifecycle
+/// channel rather than added to `options_errors`, which the modal dialog owns
+/// for standing draft validation. Clearing that list keeps a stale dialog error
+/// from outliving the value it was about.
 fn apply_options(app: &mut RSpiceApp, options: &SimulationOptions) {
     match commit_options_transaction(app, options, false) {
         Ok(_) => {
@@ -271,7 +277,11 @@ fn apply_options(app: &mut RSpiceApp, options: &SimulationOptions) {
             app.state.sim_setup.options_errors.clear();
         }
         Err(error) => {
-            app.state.sim_setup.options_errors = vec![error];
+            app.state.sim_setup.options_errors.clear();
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .record_refusal(format!("Solver options were not committed: {error}"));
         }
     }
 }
@@ -1581,10 +1591,24 @@ fn commit_on_release(app: &mut RSpiceApp, response: &egui::Response) {
 
 /// Apply the draft if it is valid and different; otherwise record why it is
 /// not applied and leave the effective options alone.
-fn commit_draft(app: &mut RSpiceApp) {
+pub(super) fn commit_draft(app: &mut RSpiceApp) {
     match pending_change(app) {
         PendingChange::None => app.state.sim_setup.options_errors.clear(),
-        PendingChange::Invalid(errors) => app.state.sim_setup.options_errors = errors,
+        PendingChange::Invalid(errors) => {
+            // Releasing a field is an event, and the reason it was not applied
+            // has to travel with it: the policy strip states the same thing,
+            // but it sits at the top of a page whose fields scroll well past
+            // it. The list still goes to `options_errors` because the modal
+            // dialog edits this same draft and draws them beside the fields.
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .record_refusal(format!(
+                    "Solver options were not applied · {}",
+                    errors.join(" · ")
+                ));
+            app.state.sim_setup.options_errors = errors;
+        }
         PendingChange::Ready(options) => apply_options(app, &options),
     }
 }

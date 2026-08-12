@@ -17,13 +17,13 @@ mod transaction;
 use std::path::Path;
 use std::path::PathBuf;
 
+pub(crate) use crate::product::TransactionId;
 #[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) use persistence::BrowserBindingBackend;
 #[cfg(target_arch = "wasm32")]
 pub(crate) use persistence::BrowserWriteTarget;
 pub(crate) use persistence::{BrowserBindingReceipt, NativeBindingReceipt, PersistenceBinding};
 pub(crate) use registry::ProjectDocumentId;
-pub(crate) use crate::product::TransactionId;
 use transaction::{LifecycleTransaction, TransactionKind};
 
 use crate::io::{ProjectExecutionContext, ProjectFile, ProjectSimulationResults};

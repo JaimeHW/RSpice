@@ -379,10 +379,14 @@ impl XyceTestRunner {
                 "{label} xyce_verify axis has invalid span {axis_start}..{axis_stop}"
             ));
         }
-        // The one-variable DC verifier treats V(1) as the independent
-        // variable after removing Index. It validates only the good axis
-        // against the requested sweep and starts dependent comparisons at
-        // V(2); the test V(1) values supply errNorm's integration grid.
+        // The intended one-variable DC verifier contract treats V(1) as the
+        // independent variable after removing Index. This adapter validates
+        // the good axis against the requested sweep and starts dependent
+        // comparisons at V(2); the test V(1) values supply errNorm's
+        // integration grid. Release 7.10's Perl check of the good axis was
+        // accidentally dormant due to a misspelled loop variable. Dedicated
+        // family contracts such as BUG402 may strengthen this by validating
+        // both axes before entering the historical value comparison.
         for column_index in 2..good.columns.len() {
             let mut errors = Vec::with_capacity(good.rows.len());
             for row_index in 0..good.rows.len() {
@@ -1018,10 +1022,11 @@ impl XyceTestRunner {
             } else {
                 self.create_xyce_engine()
             };
-            let result = match engine.run_tran_with_abort(
+            let result = match engine.run_tran_with_startup_mode_and_abort(
                 &run.netlist,
                 plan.tran.stop,
                 max_step,
+                rspice_core::engine::TransientStartupMode::from_uic(plan.tran.uic),
                 abort,
             ) {
                 Ok(result) => result,

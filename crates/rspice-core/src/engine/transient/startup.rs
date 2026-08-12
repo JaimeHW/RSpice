@@ -1,3 +1,4 @@
+use super::super::convergence::AcceptedTransientOperatingPointContract;
 use super::{
     AbortSignal, AnalysisCommand, Engine, Netlist, SOURCE_ACTIVE_DELTA, STARTUP_RECOVERY_DELTA_V,
     SimulationError, SpiceDialect, Value,
@@ -294,7 +295,7 @@ impl Engine {
         let mut transient_seed = match self
             .solve_linear_transient_operating_point_with_abort(circuit, matrix, 0.0, abort)
         {
-            Ok(seed) => seed,
+            Ok(seed) => seed.values,
             Err(err) => {
                 if !xyce_inductor_ic_active || !circuit.has_nonlinear_devices() {
                     log::debug!("t=0 transient seed solve failed: {err}");
@@ -388,11 +389,12 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
-        let Ok(mut transient_seed) =
+        let Ok(transient_seed) =
             self.solve_linear_transient_operating_point_with_abort(circuit, matrix, 0.0, abort)
         else {
             return Ok(None);
         };
+        let mut transient_seed = transient_seed.values;
 
         for value in &mut transient_seed {
             if !value.is_finite() {
@@ -469,7 +471,14 @@ impl Engine {
         circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         abort: &dyn AbortSignal,
-    ) -> Result<(Vec<Value>, InitialSolutionMode), SimulationError> {
+    ) -> Result<
+        (
+            Vec<Value>,
+            InitialSolutionMode,
+            Option<AcceptedTransientOperatingPointContract>,
+        ),
+        SimulationError,
+    > {
         let transient_node_hints = self.collect_node_voltage_hints(netlist, circuit);
         let transient_op = if circuit.has_nonlinear_devices() {
             self.solve_nonlinear_transient_op_with_node_hints_and_abort(
@@ -485,7 +494,12 @@ impl Engine {
 
         match transient_op {
             Ok(solution) => {
-                return Ok((solution, InitialSolutionMode::TransientOperatingPoint));
+                let mode = if solution.accepted_contract.is_some() {
+                    InitialSolutionMode::TransientOperatingPoint
+                } else {
+                    InitialSolutionMode::LinearizedSeed
+                };
+                return Ok((solution.values, mode, solution.accepted_contract));
             }
             Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
             Err(transient_err) => {
@@ -501,13 +515,14 @@ impl Engine {
         }
         match self.solve_direct_dc_startup_with_abort(netlist, circuit, matrix, abort) {
             Ok(solution) => {
-                return self.transient_startup_from_dc_solution(
+                let (solution, mode) = self.transient_startup_from_dc_solution(
                     circuit,
                     matrix,
                     solution,
                     abort,
                     InitialSolutionMode::DcOperatingPoint,
-                );
+                )?;
+                return Ok((solution, mode, None));
             }
             Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
             Err(direct_dc_err) => {
@@ -525,13 +540,14 @@ impl Engine {
             match self.solve_dc_operating_point_with_abort(netlist, circuit, matrix, abort) {
                 Ok(solution) => {
                     log::warn!("Transient startup recovered using configured DC startup aids.");
-                    return self.transient_startup_from_dc_solution(
+                    let (solution, mode) = self.transient_startup_from_dc_solution(
                         circuit,
                         matrix,
                         solution,
                         abort,
                         InitialSolutionMode::DcOperatingPoint,
-                    );
+                    )?;
+                    return Ok((solution, mode, None));
                 }
                 Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
                 Err(configured_dc_err) => {
@@ -545,7 +561,7 @@ impl Engine {
 
         if let Some(seed) = self.t0_linearized_transient_startup_seed(circuit, matrix, abort)? {
             log::warn!("Transient startup using source-consistent linearized t=0 seed.");
-            return Ok((seed, InitialSolutionMode::LinearizedSeed));
+            return Ok((seed, InitialSolutionMode::LinearizedSeed, None));
         }
 
         log::warn!(
@@ -560,9 +576,9 @@ impl Engine {
                     log::warn!(
                         "Transient startup using source-consistent t=0 seed after DC OP fallback."
                     );
-                    Ok((seed, InitialSolutionMode::LinearizedSeed))
+                    Ok((seed, InitialSolutionMode::LinearizedSeed, None))
                 } else {
-                    Ok((solution, InitialSolutionMode::DcOperatingPoint))
+                    Ok((solution, InitialSolutionMode::DcOperatingPoint, None))
                 }
             }
             Err(SimulationError::Aborted) => Err(SimulationError::Aborted),
@@ -587,7 +603,7 @@ impl Engine {
                         log::warn!(
                             "Transient startup recovered using robust DC convergence fallback."
                         );
-                        return Ok((solution, InitialSolutionMode::RobustDcFallback));
+                        return Ok((solution, InitialSolutionMode::RobustDcFallback, None));
                     }
                     Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
                     Err(robust_err) => {
@@ -627,6 +643,7 @@ impl Engine {
                                     return Ok((
                                         continuation_seed,
                                         InitialSolutionMode::LinearizedSeed,
+                                        None,
                                     ));
                                 }
                                 Err(seed_err) => {
@@ -655,7 +672,7 @@ impl Engine {
                         log::warn!(
                             "Transient startup using linearized initial seed after DC OP failure."
                         );
-                        Ok((solution, InitialSolutionMode::LinearizedSeed))
+                        Ok((solution, InitialSolutionMode::LinearizedSeed, None))
                     }
                     Err(linear_err) => Err(SimulationError::Circuit(format!(
                         "Transient startup failed: primary DC error: {}; linearized fallback error: {}",
@@ -894,22 +911,6 @@ impl Engine {
         preferred_min_timestep.min(ngspice_delmin)
     }
 
-    /// Xyce's machine-precision transient recovery floor at `current_time`.
-    ///
-    /// `StepErrorControl::updateMinTimeStep` in Xyce 7.10 recomputes this as
-    /// `currentTime * 10 * MachinePrecision()` after every accepted point.
-    /// The controller supplies its own tiny positive implementation floor at
-    /// time zero, where the canonical expression is exactly zero.
-    ///
-    /// The quantity itself lives in [`crate::numerics`], because a source
-    /// waveform needs the same number to decide whether the transient has
-    /// landed on one of its breakpoints, and reaching up into the engine for it
-    /// would put the circuit store above the analyses that drive it.
-    #[inline]
-    pub(crate) fn xyce_hard_min_timestep(current_time: Value) -> Value {
-        crate::numerics::xyce_hard_min_timestep(current_time)
-    }
-
     #[inline]
     pub(super) fn ngspice_breakpoint_tolerance(hinted_max_step: Value) -> Value {
         let hinted_max_step = if hinted_max_step.is_finite() && hinted_max_step > 0.0 {
@@ -936,24 +937,6 @@ mod tests {
             (lhs - rhs).abs() <= 1e-15 * scale,
             "left={lhs:.16e}, right={rhs:.16e}"
         );
-    }
-
-    #[test]
-    fn xyce_hard_minimum_tracks_current_time_machine_precision() {
-        let transition_time = 5.380_978_556_560e-4;
-        assert_eq!(
-            Engine::xyce_hard_min_timestep(0.0).to_bits(),
-            0.0f64.to_bits()
-        );
-        assert_eq!(
-            Engine::xyce_hard_min_timestep(transition_time).to_bits(),
-            (transition_time * 10.0 * Value::EPSILON).to_bits()
-        );
-        assert_eq!(
-            Engine::xyce_hard_min_timestep(-transition_time).to_bits(),
-            (transition_time * 10.0 * Value::EPSILON).to_bits()
-        );
-        assert_eq!(Engine::xyce_hard_min_timestep(Value::NAN), 0.0);
     }
 
     #[test]
@@ -1043,14 +1026,5 @@ mod tests {
     fn breakpoint_tolerance_matches_xspice_minbreak_rule() {
         assert_close(Engine::ngspice_breakpoint_tolerance(1e-11), 1e-21);
         assert_close(Engine::ngspice_breakpoint_tolerance(0.5e-9), 5e-20);
-    }
-
-    #[test]
-    fn xyce_hard_min_timestep_avoids_intermediate_overflow() {
-        let minimum = Engine::xyce_hard_min_timestep(Value::MAX);
-
-        assert!(minimum.is_finite());
-        assert!(minimum > 0.0);
-        assert_eq!(minimum, Value::MAX * (10.0 * Value::EPSILON));
     }
 }

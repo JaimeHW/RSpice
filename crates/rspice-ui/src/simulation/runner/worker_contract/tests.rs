@@ -1324,7 +1324,9 @@ fn analysis_spec_round_trips_supported_variants() {
         AnalysisSpec::Pstb,
         AnalysisSpec::Parametric,
         AnalysisSpec::Corner,
-        AnalysisSpec::MonteCarlo { variation_source: Default::default() },
+        AnalysisSpec::MonteCarlo {
+            variation_source: Default::default(),
+        },
         AnalysisSpec::Stb {
             probe_node: "Vprobe".to_string(),
             start_freq: 1.0,
@@ -1451,7 +1453,9 @@ fn analysis_spec_round_trips_supported_variants() {
 #[test]
 fn worker_spec_request_preserves_monte_carlo() {
     let request = SimulationRequest::Spec {
-        spec: Box::new(AnalysisSpec::MonteCarlo { variation_source: Default::default() }),
+        spec: Box::new(AnalysisSpec::MonteCarlo {
+            variation_source: Default::default(),
+        }),
         options: Box::new(SpecExecutionOptions::default()),
     };
     let input = NetlistInput {
