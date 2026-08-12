@@ -31,7 +31,9 @@ pub use introspection::{DeviceOpEntry, DeviceOpReport};
 mod linear_stamping;
 mod magnetic;
 mod nonlinear;
+mod op_label;
 pub(crate) use nonlinear::NonlinearDeviceStateSnapshot;
+pub use op_label::{OP_LABELS, OpLabel, resolve_op_label};
 pub(crate) mod xyce_dae;
 pub(crate) mod xyce_load;
 

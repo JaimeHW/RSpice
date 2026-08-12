@@ -912,7 +912,7 @@ impl Vdmos {
     }
 
     /// Operating-point quantities cached by the last accepted update.
-    pub fn op_values(&self) -> (Value, Value, Value, Value, Value, &'static str) {
+    pub fn op_values(&self) -> (Value, Value, Value, Value, Value, crate::circuit::OpLabel) {
         (
             self.id,
             self.prev_vgs,
@@ -923,13 +923,13 @@ impl Vdmos {
         )
     }
 
-    fn region_name(region: VdmosRegion) -> &'static str {
+    fn region_name(region: VdmosRegion) -> crate::circuit::OpLabel {
         match region {
-            VdmosRegion::Cutoff => "cutoff",
-            VdmosRegion::Triode => "triode",
-            VdmosRegion::Saturation => "saturation",
-            VdmosRegion::QuasiSaturation => "quasi-saturation",
-            VdmosRegion::BodyDiode => "body-diode",
+            VdmosRegion::Cutoff => crate::circuit::OpLabel::CUTOFF,
+            VdmosRegion::Triode => crate::circuit::OpLabel::TRIODE,
+            VdmosRegion::Saturation => crate::circuit::OpLabel::SATURATION,
+            VdmosRegion::QuasiSaturation => crate::circuit::OpLabel::QUASI_SATURATION,
+            VdmosRegion::BodyDiode => crate::circuit::OpLabel::BODY_DIODE,
         }
     }
 

@@ -20,6 +20,49 @@ pub struct DeviceOpEntry {
     pub params: Vec<(&'static str, Value)>,
 }
 
+impl DeviceOpEntry {
+    /// Build an entry from the canonical label vocabulary.
+    ///
+    /// Labels arrive typed rather than as free strings because frontends
+    /// persist this report and restore it by interning: text outside
+    /// [`OP_LABELS`] is text the reader cannot turn back into a label, so an
+    /// emitter is given no way to write it. Reporting a new quantity therefore
+    /// starts by naming it in the vocabulary, which is what keeps the reader in
+    /// step.
+    pub fn new(
+        name: String,
+        device_kind: OpLabel,
+        region: Option<OpLabel>,
+        params: Vec<(OpLabel, Value)>,
+    ) -> Self {
+        Self {
+            name,
+            device_kind: device_kind.as_str(),
+            region: region.map(OpLabel::as_str),
+            params: params
+                .into_iter()
+                .map(|(label, value)| (label.as_str(), value))
+                .collect(),
+        }
+    }
+
+    /// True when every label this entry carries can be read back.
+    ///
+    /// The typed constructor already guarantees it; this re-checks the finished
+    /// entry so a struct literal written inside the crate, or a generated
+    /// catalog label with no catalog behind it, cannot slip past unnoticed.
+    pub fn labels_resolve(&self) -> bool {
+        resolve_op_label(self.device_kind).is_some()
+            && self
+                .region
+                .is_none_or(|region| resolve_op_label(region).is_some())
+            && self
+                .params
+                .iter()
+                .all(|(name, _)| resolve_op_label(name).is_some())
+    }
+}
+
 /// Per-device operating-point report for an entire solved circuit —
 /// the data behind a Spectre-style OP info table.
 #[derive(Debug, Clone, Default)]
@@ -30,6 +73,12 @@ pub struct DeviceOpReport {
 impl DeviceOpReport {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    /// True when every label in the report can be read back by a frontend that
+    /// persisted it. See [`DeviceOpEntry::labels_resolve`].
+    pub fn labels_resolve(&self) -> bool {
+        self.entries.iter().all(DeviceOpEntry::labels_resolve)
     }
 }
 
@@ -252,204 +301,209 @@ impl CircuitData {
 
         for mosfet in &self.mosfets.devices {
             let op = mosfet.op_values();
-            entries.push(DeviceOpEntry {
-                name: mosfet.name.clone(),
-                device_kind: mosfet.device_kind(),
-                region: Some(op.region),
-                params: vec![
-                    ("id", op.id),
-                    ("vgs", op.vgs),
-                    ("vds", op.vds),
-                    ("vbs", op.vbs),
-                    ("vth", op.vth),
-                    ("vdsat", op.vdsat),
-                    ("gm", op.gm),
-                    ("gds", op.gds),
-                    ("gmb", op.gmb),
+            entries.push(DeviceOpEntry::new(
+                mosfet.name.clone(),
+                mosfet.device_kind(),
+                Some(op.region),
+                vec![
+                    (OpLabel::ID, op.id),
+                    (OpLabel::VGS, op.vgs),
+                    (OpLabel::VDS, op.vds),
+                    (OpLabel::VBS, op.vbs),
+                    (OpLabel::VTH, op.vth),
+                    (OpLabel::VDSAT, op.vdsat),
+                    (OpLabel::GM, op.gm),
+                    (OpLabel::GDS, op.gds),
+                    (OpLabel::GMB, op.gmb),
                 ],
-            });
+            ));
         }
 
         for dev in &self.bsim3v3.devices {
             let (id, vgs, vds, vbs, vth, vdsat, gm, gds, gmbs, region) = dev.op_values();
-            entries.push(DeviceOpEntry {
-                name: dev.name.clone(),
-                device_kind: "BSIM3",
-                region: Some(region),
-                params: vec![
-                    ("id", id),
-                    ("vgs", vgs),
-                    ("vds", vds),
-                    ("vbs", vbs),
-                    ("vth", vth),
-                    ("vdsat", vdsat),
-                    ("gm", gm),
-                    ("gds", gds),
-                    ("gmb", gmbs),
+            entries.push(DeviceOpEntry::new(
+                dev.name.clone(),
+                OpLabel::BSIM3,
+                Some(region),
+                vec![
+                    (OpLabel::ID, id),
+                    (OpLabel::VGS, vgs),
+                    (OpLabel::VDS, vds),
+                    (OpLabel::VBS, vbs),
+                    (OpLabel::VTH, vth),
+                    (OpLabel::VDSAT, vdsat),
+                    (OpLabel::GM, gm),
+                    (OpLabel::GDS, gds),
+                    (OpLabel::GMB, gmbs),
                 ],
-            });
+            ));
         }
 
         for dev in &self.bsim4v8.devices {
             let (id, vgs, vds, vbs, vth, vdsat, output_vdsat, gm, gds, gmbs, region) =
                 dev.op_values();
-            entries.push(DeviceOpEntry {
-                name: dev.name.clone(),
-                device_kind: "BSIM4",
-                region: Some(region),
-                params: vec![
-                    ("id", id),
-                    ("vgs", vgs),
-                    ("vds", vds),
-                    ("vbs", vbs),
-                    ("vth", vth),
-                    ("vdsat", vdsat),
-                    ("output_vdsat", output_vdsat),
-                    ("gm", gm),
-                    ("gds", gds),
-                    ("gmb", gmbs),
+            entries.push(DeviceOpEntry::new(
+                dev.name.clone(),
+                OpLabel::BSIM4,
+                Some(region),
+                vec![
+                    (OpLabel::ID, id),
+                    (OpLabel::VGS, vgs),
+                    (OpLabel::VDS, vds),
+                    (OpLabel::VBS, vbs),
+                    (OpLabel::VTH, vth),
+                    (OpLabel::VDSAT, vdsat),
+                    (OpLabel::OUTPUT_VDSAT, output_vdsat),
+                    (OpLabel::GM, gm),
+                    (OpLabel::GDS, gds),
+                    (OpLabel::GMB, gmbs),
                 ],
-            });
+            ));
         }
 
         for dev in &self.b3soi_fd.devices {
             let (id, vgs, vds, vbs, vth, vdsat, gm, gds, gmbs, region) = dev.op_values();
-            entries.push(DeviceOpEntry {
-                name: dev.name.clone(),
-                device_kind: "B3SOIFD",
-                region: Some(region),
-                params: vec![
-                    ("id", id),
-                    ("is", -id),
-                    ("vgs", vgs),
-                    ("vds", vds),
-                    ("vbs", vbs),
-                    ("vth", vth),
-                    ("vdsat", vdsat),
-                    ("gm", gm),
-                    ("gds", gds),
-                    ("gmb", gmbs),
+            entries.push(DeviceOpEntry::new(
+                dev.name.clone(),
+                OpLabel::B3SOIFD,
+                Some(region),
+                vec![
+                    (OpLabel::ID, id),
+                    (OpLabel::IS, -id),
+                    (OpLabel::VGS, vgs),
+                    (OpLabel::VDS, vds),
+                    (OpLabel::VBS, vbs),
+                    (OpLabel::VTH, vth),
+                    (OpLabel::VDSAT, vdsat),
+                    (OpLabel::GM, gm),
+                    (OpLabel::GDS, gds),
+                    (OpLabel::GMB, gmbs),
                 ],
-            });
+            ));
         }
 
         for dev in &self.b3soi.devices {
             let (id, vgs, vds, vbs, vth, vdsat, gm, gds, gmbs, region) = dev.op_values();
-            entries.push(DeviceOpEntry {
-                name: dev.name.clone(),
-                device_kind: "B3SOIDD",
-                region: Some(region),
-                params: vec![
-                    ("id", id),
-                    ("is", -id),
-                    ("vgs", vgs),
-                    ("vds", vds),
-                    ("vbs", vbs),
-                    ("vth", vth),
-                    ("vdsat", vdsat),
-                    ("gm", gm),
-                    ("gds", gds),
-                    ("gmb", gmbs),
+            entries.push(DeviceOpEntry::new(
+                dev.name.clone(),
+                OpLabel::B3SOIDD,
+                Some(region),
+                vec![
+                    (OpLabel::ID, id),
+                    (OpLabel::IS, -id),
+                    (OpLabel::VGS, vgs),
+                    (OpLabel::VDS, vds),
+                    (OpLabel::VBS, vbs),
+                    (OpLabel::VTH, vth),
+                    (OpLabel::VDSAT, vdsat),
+                    (OpLabel::GM, gm),
+                    (OpLabel::GDS, gds),
+                    (OpLabel::GMB, gmbs),
                 ],
-            });
+            ));
         }
 
         for dev in &self.b3soi_pd.devices {
             let (id, vgs, vds, vbs, vth, vdsat, gm, gds, gmbs, region) = dev.op_values();
-            entries.push(DeviceOpEntry {
-                name: dev.name.clone(),
-                device_kind: "B3SOIPD",
-                region: Some(region),
-                params: vec![
-                    ("id", id),
-                    ("is", -id),
-                    ("vgs", vgs),
-                    ("vds", vds),
-                    ("vbs", vbs),
-                    ("vth", vth),
-                    ("vdsat", vdsat),
-                    ("gm", gm),
-                    ("gds", gds),
-                    ("gmb", gmbs),
+            entries.push(DeviceOpEntry::new(
+                dev.name.clone(),
+                OpLabel::B3SOIPD,
+                Some(region),
+                vec![
+                    (OpLabel::ID, id),
+                    (OpLabel::IS, -id),
+                    (OpLabel::VGS, vgs),
+                    (OpLabel::VDS, vds),
+                    (OpLabel::VBS, vbs),
+                    (OpLabel::VTH, vth),
+                    (OpLabel::VDSAT, vdsat),
+                    (OpLabel::GM, gm),
+                    (OpLabel::GDS, gds),
+                    (OpLabel::GMB, gmbs),
                 ],
-            });
+            ));
         }
 
         for dev in &self.ekv26s.devices {
             let op = dev.op_values();
-            entries.push(DeviceOpEntry {
-                name: dev.name.clone(),
-                device_kind: "EKV26",
-                region: None,
-                params: vec![
-                    ("id", op.id),
-                    ("vgs", op.vgs),
-                    ("vds", op.vds),
-                    ("vbs", op.vbs),
+            entries.push(DeviceOpEntry::new(
+                dev.name.clone(),
+                OpLabel::EKV26,
+                None,
+                vec![
+                    (OpLabel::ID, op.id),
+                    (OpLabel::VGS, op.vgs),
+                    (OpLabel::VDS, op.vds),
+                    (OpLabel::VBS, op.vbs),
                 ],
-            });
+            ));
         }
 
         for dev in &self.ekv3s.devices {
             let op = dev.op_values();
-            entries.push(DeviceOpEntry {
-                name: dev.name.clone(),
-                device_kind: "EKV3",
-                region: None,
-                params: vec![
-                    ("id", op.id),
-                    ("vgs", op.vgs),
-                    ("vds", op.vds),
-                    ("vbs", op.vbs),
-                    ("gm", op.gm),
+            entries.push(DeviceOpEntry::new(
+                dev.name.clone(),
+                OpLabel::EKV3,
+                None,
+                vec![
+                    (OpLabel::ID, op.id),
+                    (OpLabel::VGS, op.vgs),
+                    (OpLabel::VDS, op.vds),
+                    (OpLabel::VBS, op.vbs),
+                    (OpLabel::GM, op.gm),
                 ],
-            });
+            ));
         }
 
         for vdmos in &self.vdmoses.devices {
             let (id, vgs, vds, diode_id, power, region) = vdmos.op_values();
-            entries.push(DeviceOpEntry {
-                name: vdmos.name.clone(),
-                device_kind: "VDMOS",
-                region: Some(region),
-                params: vec![
-                    ("id", id),
-                    ("vgs", vgs),
-                    ("vds", vds),
-                    ("idiode", diode_id),
-                    ("power", power),
+            entries.push(DeviceOpEntry::new(
+                vdmos.name.clone(),
+                OpLabel::VDMOS,
+                Some(region),
+                vec![
+                    (OpLabel::ID, id),
+                    (OpLabel::VGS, vgs),
+                    (OpLabel::VDS, vds),
+                    (OpLabel::IDIODE, diode_id),
+                    (OpLabel::POWER, power),
                 ],
-            });
+            ));
         }
 
         for bjt in &self.bjts.devices {
             let (vbe, vbc, ic, ib, gm) = bjt.op_values();
             let (_, _, ie) = bjt.operating_point_currents();
             let beta = if ib.abs() > 1e-30 { ic / ib } else { 0.0 };
-            entries.push(DeviceOpEntry {
-                name: bjt.name.clone(),
-                device_kind: "BJT",
-                region: None,
-                params: vec![
-                    ("ic", ic),
-                    ("ib", ib),
-                    ("ie", ie),
-                    ("vbe", vbe),
-                    ("vce", vbe - vbc),
-                    ("beta", beta),
-                    ("gm", gm),
+            entries.push(DeviceOpEntry::new(
+                bjt.name.clone(),
+                OpLabel::BJT,
+                None,
+                vec![
+                    (OpLabel::IC, ic),
+                    (OpLabel::IB, ib),
+                    (OpLabel::IE, ie),
+                    (OpLabel::VBE, vbe),
+                    (OpLabel::VCE, vbe - vbc),
+                    (OpLabel::BETA, beta),
+                    (OpLabel::GM, gm),
                 ],
-            });
+            ));
         }
 
         for diode in &self.diodes.devices {
             let (vd, id, gd, cd) = diode.op_values();
-            entries.push(DeviceOpEntry {
-                name: diode.name.clone(),
-                device_kind: "DIODE",
-                region: None,
-                params: vec![("vd", vd), ("id", id), ("gd", gd), ("cd", cd)],
-            });
+            entries.push(DeviceOpEntry::new(
+                diode.name.clone(),
+                OpLabel::DIODE,
+                None,
+                vec![
+                    (OpLabel::VD, vd),
+                    (OpLabel::ID, id),
+                    (OpLabel::GD, gd),
+                    (OpLabel::CD, cd),
+                ],
+            ));
         }
 
         // Xyce LEVEL=2 self-consistent thermal resistors expose their
@@ -460,42 +514,44 @@ impl CircuitData {
             let Some(state) = self.resistors.thermal.get(index).and_then(Option::as_ref) else {
                 continue;
             };
-            entries.push(DeviceOpEntry {
-                name: name.clone(),
-                device_kind: "RESISTOR",
-                region: None,
-                params: vec![
-                    ("r", state.output_resistance),
-                    ("temp", state.temperature_celsius),
+            entries.push(DeviceOpEntry::new(
+                name.clone(),
+                OpLabel::RESISTOR,
+                None,
+                vec![
+                    (OpLabel::R, state.output_resistance),
+                    (OpLabel::TEMP, state.temperature_celsius),
                 ],
-            });
+            ));
         }
 
         for jfet in &self.jfets {
             let (vgs, vds, ids, gm, gds, igs, igd) = jfet.op_values();
             let device_kind = match jfet.params.channel_model {
                 crate::device::JfetChannelModel::ShichmanHodges
-                | crate::device::JfetChannelModel::XyceSydney => "JFET",
-                crate::device::JfetChannelModel::ParkerSkellern => "JFET2",
-                crate::device::JfetChannelModel::XyceModifiedShockley => "JFET2_XYCE",
-                crate::device::JfetChannelModel::LegacyMesfet => "MESFET",
-                crate::device::JfetChannelModel::Hfet1 if jfet.params.hfet_level == 6 => "HFET2",
-                crate::device::JfetChannelModel::Hfet1 => "HFET1",
+                | crate::device::JfetChannelModel::XyceSydney => OpLabel::JFET,
+                crate::device::JfetChannelModel::ParkerSkellern => OpLabel::JFET2,
+                crate::device::JfetChannelModel::XyceModifiedShockley => OpLabel::JFET2_XYCE,
+                crate::device::JfetChannelModel::LegacyMesfet => OpLabel::MESFET,
+                crate::device::JfetChannelModel::Hfet1 if jfet.params.hfet_level == 6 => {
+                    OpLabel::HFET2
+                }
+                crate::device::JfetChannelModel::Hfet1 => OpLabel::HFET1,
             };
-            entries.push(DeviceOpEntry {
-                name: jfet.name.clone(),
+            entries.push(DeviceOpEntry::new(
+                jfet.name.clone(),
                 device_kind,
-                region: None,
-                params: vec![
-                    ("id", ids),
-                    ("vgs", vgs),
-                    ("vds", vds),
-                    ("gm", gm),
-                    ("gds", gds),
-                    ("igs", igs),
-                    ("igd", igd),
+                None,
+                vec![
+                    (OpLabel::ID, ids),
+                    (OpLabel::VGS, vgs),
+                    (OpLabel::VDS, vds),
+                    (OpLabel::GM, gm),
+                    (OpLabel::GDS, gds),
+                    (OpLabel::IGS, igs),
+                    (OpLabel::IGD, igd),
                 ],
-            });
+            ));
         }
 
         // A solution-dependent capacitor exposes its effective instantaneous
@@ -513,19 +569,19 @@ impl CircuitData {
             {
                 continue;
             }
-            entries.push(DeviceOpEntry {
-                name: name.clone(),
-                device_kind: "CAPACITOR",
-                region: None,
-                params: vec![(
-                    "c",
+            entries.push(DeviceOpEntry::new(
+                name.clone(),
+                OpLabel::CAPACITOR,
+                None,
+                vec![(
+                    OpLabel::C,
                     self.capacitors
                         .effective_capacitances
                         .get(index)
                         .copied()
                         .unwrap_or(Value::NAN),
                 )],
-            });
+            ));
         }
 
         // Xyce nonlinear-core internal probes are exposed through the
@@ -555,13 +611,13 @@ impl CircuitData {
                         * (XYCE_H_CGS_FACTOR * h_si
                             + binding.device.xyce_core_reported_magnetization()))
             };
-            entries.push(DeviceOpEntry {
-                name: name.to_string(),
-                device_kind: "NONLINEAR_CORE",
-                region: None,
-                params: vec![
+            entries.push(DeviceOpEntry::new(
+                name.to_string(),
+                OpLabel::NONLINEAR_CORE,
+                None,
+                vec![
                     (
-                        "m",
+                        OpLabel::M,
                         if binding.device.is_xyce_core_level2() {
                             binding.device.xyce_core_reported_magnetization()
                         } else {
@@ -569,16 +625,16 @@ impl CircuitData {
                         },
                     ),
                     (
-                        "h",
+                        OpLabel::H,
                         if binding.core_bh_si_units {
                             h_si
                         } else {
                             XYCE_H_CGS_FACTOR * h_si
                         },
                     ),
-                    ("b", b_output),
+                    (OpLabel::B, b_output),
                 ],
-            });
+            ));
         }
 
         // Shared multi-winding Xyce Core devices publish the same canonical
@@ -596,13 +652,13 @@ impl CircuitData {
                         * (XYCE_H_CGS_FACTOR * h_si
                             + binding.device.xyce_core_reported_magnetization()))
             };
-            entries.push(DeviceOpEntry {
-                name: name.to_string(),
-                device_kind: "NONLINEAR_CORE",
-                region: None,
-                params: vec![
+            entries.push(DeviceOpEntry::new(
+                name.to_string(),
+                OpLabel::NONLINEAR_CORE,
+                None,
+                vec![
                     (
-                        "m",
+                        OpLabel::M,
                         if binding.device.is_xyce_core_level2() {
                             binding.device.xyce_core_reported_magnetization()
                         } else {
@@ -610,16 +666,16 @@ impl CircuitData {
                         },
                     ),
                     (
-                        "h",
+                        OpLabel::H,
                         if binding.core_bh_si_units {
                             h_si
                         } else {
                             XYCE_H_CGS_FACTOR * h_si
                         },
                     ),
-                    ("b", b_output),
+                    (OpLabel::B, b_output),
                 ],
-            });
+            ));
         }
 
         // Generated compact models expose every external lead current from
@@ -628,6 +684,10 @@ impl CircuitData {
         // instance designator or a presumed D/G/S/B position. A compatible
         // SPICE card route may add a small set of explicit conventional
         // aliases (for example diode ID -> current entering terminal `a`).
+        //
+        // These labels are the one family the fixed vocabulary cannot name,
+        // because the catalog compiled into the build decides them. They are
+        // resolved back out of that same catalog on read.
         #[cfg(feature = "veriloga-builtins-base")]
         for device in self.generated_veriloga_devices.iter() {
             let currents = device.terminal_currents();
@@ -636,12 +696,14 @@ impl CircuitData {
             let mut params = terminals
                 .iter()
                 .zip(currents.iter().copied())
-                .map(|(terminal, current)| (terminal.current_parameter, current))
+                .map(|(terminal, current)| {
+                    (OpLabel::generated(terminal.current_parameter), current)
+                })
                 .collect::<Vec<_>>();
             for alias in device.terminal_current_aliases() {
                 if params
                     .iter()
-                    .any(|(parameter, _)| parameter.eq_ignore_ascii_case(alias.parameter))
+                    .any(|(parameter, _)| parameter.as_str().eq_ignore_ascii_case(alias.parameter))
                 {
                     continue;
                 }
@@ -651,18 +713,24 @@ impl CircuitData {
                     .find(|(_, terminal)| terminal.name.eq_ignore_ascii_case(alias.terminal))
                     && let Some(current) = currents.get(index).copied()
                 {
-                    params.push((alias.parameter, current));
+                    params.push((OpLabel::generated(alias.parameter), current));
                 }
             }
-            entries.push(DeviceOpEntry {
-                name: device.instance_name.clone(),
-                device_kind: device.model_name,
-                region: None,
+            entries.push(DeviceOpEntry::new(
+                device.instance_name.clone(),
+                OpLabel::generated(device.model_name),
+                None,
                 params,
-            });
+            ));
         }
 
-        DeviceOpReport { entries }
+        let report = DeviceOpReport { entries };
+        debug_assert!(
+            report.labels_resolve(),
+            "an operating-point report carries a label no reader can restore; \
+             name it in the label vocabulary"
+        );
+        report
     }
 
     /// Read-only access to linear resistor storage (names, nodes, conductances).

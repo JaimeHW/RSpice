@@ -1986,4 +1986,147 @@ fn missing_persisted_lifecycle_restores_as_explicit_legacy_unknown() {
     assert_eq!(restored.lifecycle, SimulationRunLifecycle::LegacyUnknown);
 }
 
+/// Solve a deck and hand back the operating-point report the engine really
+/// produced, so the round trip below is judged against emitted labels rather
+/// than against labels a fixture chose.
+fn solved_device_op_report(deck: &str) -> rspice_core::circuit::DeviceOpReport {
+    let netlist = rspice_core::netlist::Netlist::parse(deck).expect("op deck parses");
+    let (_, report) =
+        rspice_core::engine::Engine::new(rspice_core::engine::SimulationConfig::default())
+            .run_dc_op_with_report(&netlist)
+            .expect("operating point solves");
+    report
+}
+
+fn run_retaining(report: rspice_core::circuit::DeviceOpReport) -> SimulationRun {
+    let mut run = SimulationRun::new(61);
+    run.mark_running().expect("fixture run starts");
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .expect("fixture run completes");
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::DcOp, "Operating point").with_device_op(report),
+    );
+    seal_legacy_unattributed(&mut run);
+    run
+}
+
+/// A retained operating-point report is engine output, and every label in it
+/// has to be one the reader can restore, because a label it cannot resolve
+/// fails validation and refuses the whole project.
+///
+/// Both families here were refused: the diode reports a junction capacitance
+/// and the VDMOS reports a device family, an operating region and a dissipation
+/// figure that the reader's vocabulary never carried, so an operating point
+/// containing either could not be written at all.
+#[test]
+fn a_run_retaining_a_device_operating_point_saves_and_reopens() {
+    let diode = "\
+* junction diode operating point
+v1 in 0 dc 5
+r1 in a 1k
+d1 a 0 dmod
+.model dmod D IS=1e-14 N=1.5
+.op
+.end
+";
+    let vdmos = "\
+* power VDMOS operating point
+vd d 0 dc 10
+vg g 0 dc 5
+m1 d g 0 0 irfmod W=0.386 L=2.5u
+.MODEL irfmod NMOS LEVEL=18 VTO=3.5 RS=0.005 M=3
+.op
+.end
+";
+
+    for (family, deck, quantity) in [("DIODE", diode, "cd"), ("VDMOS", vdmos, "power")] {
+        let report = solved_device_op_report(deck);
+        let emitted = report
+            .entries
+            .iter()
+            .find(|entry| entry.device_kind == family)
+            .unwrap_or_else(|| panic!("the {family} deck reports that family"));
+        assert!(
+            emitted.params.iter().any(|(name, _)| *name == quantity),
+            "the {family} entry reports {quantity}, the quantity the reader used to refuse"
+        );
+
+        let mut simulation = SimulationState::default();
+        simulation.next_run_id = 61;
+        simulation.runs = vec![run_retaining(report.clone())];
+
+        let persisted = ProjectSimulationResults::from_state(&simulation);
+        persisted
+            .validate()
+            .unwrap_or_else(|error| panic!("a {family} operating point is persistable: {error}"));
+
+        let mut reloaded = SimulationState::default();
+        persisted
+            .apply_to_state(&mut reloaded)
+            .unwrap_or_else(|error| panic!("a saved {family} operating point reopens: {error}"));
+
+        let restored = reloaded.runs[0].analyses[0]
+            .device_op
+            .as_ref()
+            .expect("the reopened run still carries its operating-point report");
+        assert_eq!(restored.entries.len(), report.entries.len());
+        for (before, after) in report.entries.iter().zip(&restored.entries) {
+            assert_eq!(before.name, after.name);
+            assert_eq!(before.device_kind, after.device_kind);
+            assert_eq!(before.region, after.region);
+            assert_eq!(
+                before
+                    .params
+                    .iter()
+                    .map(|(name, _)| *name)
+                    .collect::<Vec<_>>(),
+                after
+                    .params
+                    .iter()
+                    .map(|(name, _)| *name)
+                    .collect::<Vec<_>>(),
+                "{family} quantity names survive the round trip"
+            );
+        }
+    }
+}
+
+/// The reader's accept set is the engine's own label vocabulary, so nothing the
+/// engine can name is refused on write. This is the property that failed: the
+/// reader carried a hand-copied subset, and every family that had outgrown it
+/// wrote a project the reader would not take back.
+#[test]
+fn the_project_reader_accepts_every_label_the_engine_can_emit() {
+    for label in rspice_core::circuit::OP_LABELS {
+        require_static_label(label.as_str(), "device_op label")
+            .unwrap_or_else(|error| panic!("{error}"));
+    }
+}
+
+/// Completing the vocabulary is not the same as dropping the check: text the
+/// engine has no label for still refuses the write, because restoring it would
+/// invent a quantity the report never carried.
+#[test]
+fn an_operating_point_label_outside_the_vocabulary_is_still_refused() {
+    let report = rspice_core::circuit::DeviceOpReport {
+        entries: vec![rspice_core::circuit::DeviceOpEntry {
+            name: "XU1".to_owned(),
+            device_kind: "DIODE",
+            region: None,
+            params: vec![("vd", 0.7), ("vendor-quantity", 1.0)],
+        }],
+    };
+    let mut simulation = SimulationState::default();
+    simulation.next_run_id = 61;
+    simulation.runs = vec![run_retaining(report)];
+
+    let error = ProjectSimulationResults::from_state(&simulation)
+        .validate()
+        .expect_err("an unrecognized quantity refuses the write");
+    assert!(
+        error.contains("unknown static label 'vendor-quantity'"),
+        "{error}"
+    );
+}
+
 mod migration;

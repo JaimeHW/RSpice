@@ -1192,6 +1192,19 @@ fn worker_device_op_report_preserves_core_static_labels() {
     }
 }
 
+/// The worker boundary interns against the engine's own vocabulary, so a label
+/// the engine can emit crosses it unchanged rather than degrading to `unknown`.
+#[test]
+fn the_worker_boundary_interns_every_label_the_engine_can_emit() {
+    for label in rspice_core::circuit::OP_LABELS {
+        assert_eq!(
+            super::conversions::known_static_label(label.as_str()),
+            Some(label.as_str()),
+            "{label} would degrade crossing the worker boundary"
+        );
+    }
+}
+
 #[test]
 fn analysis_config_round_trips_supported_variants() {
     let configs = vec![

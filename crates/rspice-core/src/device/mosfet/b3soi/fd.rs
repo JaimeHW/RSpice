@@ -434,7 +434,7 @@ impl B3SoiFd {
         Value,
         Value,
         Value,
-        &'static str,
+        crate::circuit::OpLabel,
     ) {
         let op = &self.op;
         let bias = self.bias;
@@ -444,11 +444,11 @@ impl B3SoiFd {
             (bias.vgs - bias.vds, -bias.vds)
         };
         let region = if vgs_mode < op.von {
-            "subthreshold"
+            crate::circuit::OpLabel::SUBTHRESHOLD
         } else if vds_mode > op.vdsat {
-            "saturation"
+            crate::circuit::OpLabel::SATURATION
         } else {
-            "linear"
+            crate::circuit::OpLabel::LINEAR
         };
         (
             op.ids, bias.vgs, bias.vds, bias.vbs, op.von, op.vdsat, op.gm, op.gds, op.gmbs, region,

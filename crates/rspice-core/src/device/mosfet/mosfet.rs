@@ -596,8 +596,12 @@ impl Mosfet {
     }
 
     /// Operating-point family label for classic MOSFET-backed devices.
-    pub fn device_kind(&self) -> &'static str {
-        if self.level == 9 { "MOS9" } else { "MOSFET" }
+    pub fn device_kind(&self) -> crate::circuit::OpLabel {
+        if self.level == 9 {
+            crate::circuit::OpLabel::MOS9
+        } else {
+            crate::circuit::OpLabel::MOSFET
+        }
     }
 
     /// True when this instance runs the legacy BSIM1/BSIM2 equations rather

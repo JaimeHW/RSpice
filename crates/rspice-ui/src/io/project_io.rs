@@ -1357,46 +1357,29 @@ fn require_static_label(value: &str, field: &str) -> Result<(), String> {
     }
 }
 
+/// Intern a persisted label for restoration.
+///
+/// Restoration is only ever reached through a document that already validated,
+/// and validation rejects a label this predicate cannot resolve, so the
+/// placeholder is what makes the function total rather than a decision to
+/// accept unrecognized text.
 fn intern_static_label(value: String) -> &'static str {
     known_static_label(&value).unwrap_or("unknown")
 }
 
+/// Labels a persisted result may carry, interned back to the `&'static str`
+/// the running build uses.
+///
+/// The operating-point half of the vocabulary belongs to the engine, which is
+/// the only thing that knows what its device families report; asking it keeps
+/// the reader in step with the emitter instead of restating its list here.
 fn known_static_label(value: &str) -> Option<&'static str> {
+    rspice_core::circuit::resolve_op_label(value).or_else(|| known_noise_mechanism_label(value))
+}
+
+/// Noise mechanisms named by the ranked contributor table this crate builds.
+fn known_noise_mechanism_label(value: &str) -> Option<&'static str> {
     match value {
-        "MOSFET" => "MOSFET",
-        "BSIM3" => "BSIM3",
-        "BSIM4" => "BSIM4",
-        "BJT" => "BJT",
-        "DIODE" => "DIODE",
-        "JFET" => "JFET",
-        "MESFET" => "MESFET",
-        "id" => "id",
-        "vgs" => "vgs",
-        "vds" => "vds",
-        "vbs" => "vbs",
-        "vth" => "vth",
-        "vdsat" => "vdsat",
-        "gm" => "gm",
-        "gds" => "gds",
-        "gmb" => "gmb",
-        "gmbs" => "gmbs",
-        "ic" => "ic",
-        "ib" => "ib",
-        "vbe" => "vbe",
-        "vce" => "vce",
-        "beta" => "beta",
-        "vd" => "vd",
-        "gd" => "gd",
-        "igs" => "igs",
-        "igd" => "igd",
-        "saturation" => "saturation",
-        "linear" => "linear",
-        "cutoff" => "cutoff",
-        "triode" => "triode",
-        "subthreshold" => "subthreshold",
-        "active" => "active",
-        "reverse" => "reverse",
-        "forward" => "forward",
         "thermal" => "thermal",
         "flicker" => "flicker",
         "shot" => "shot",
