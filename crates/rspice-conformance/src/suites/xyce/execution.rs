@@ -4,6 +4,7 @@
 //! 96,731-line file. Methods keep `impl XyceTestRunner` so call sites are
 //! unchanged; private ones are `pub(super)` so siblings can reach them.
 
+use super::contracts_bug352::Bug352Role;
 use super::*;
 
 impl XyceTestRunner {
@@ -312,6 +313,23 @@ impl XyceTestRunner {
                 Err(error) => {
                     self.failure_result(deck, start, XYCE_BUG159_CONTRACT, error, Vec::new())
                 }
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(role) = Bug352Role::for_record(&deck.relative_path) {
+            let contract = role.contract();
+            let result = match self.validate_bug352_oracle(deck, role, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
             if self.config.verbose {
                 println!(

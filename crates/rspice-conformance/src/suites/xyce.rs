@@ -60,15 +60,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 212;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 213;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "d77b7acaf59a88a32dd1cee35eba07e561e6bbb911333837ba67f9f923c4a5d0";
+    "c98223f2e7ba28361ce80ed7c01ba2248047a49290fa8ca017f9c9dcfa41d52a";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "76008916b8783849704c71640ff90de886dc424190cdb240d060f6ecaea1ef01";
+    "7cd727a441d08273badacb8e708c853729f759ece58195ad07ce7402b0be2316";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "5db1000fb44e67a13731a6f9d1bce118f7a545b08f1ebbebf2a92df3a9fa1c48";
+    "b977c4f5007821d9d54e550c75f5ea61d200c93e82cbe96ac578acb71b47791e";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -1302,6 +1302,103 @@ const XYCE_BUG159_RETAINED_OUTPUTS: [(&str, usize, &str, &str); 2] = [
         213,
         "ab4c34ff74ac0e474cf7d953e6533e51763f2776b345d64e8985fe871d9389d9",
         "0e3ef59d22062c90b8ea6a0786fb4f58f6cda0c35f6ff0b1c3642ec1ca966a69",
+    ),
+];
+
+// BUG_352 proves that a diode model parameter authored as an expression is
+// resolved before device construction. The removed wrapper runs the
+// expression deck followed by its literal control and raw-diffs their default
+// PRN files; no numerical gold participates in the executable oracle.
+const XYCE_BUG352_OWNER_CONTRACT: &str = "bug352_diode_model_expression_equivalence_wrapper_owner";
+const XYCE_BUG352_CONTROL_CONTRACT: &str =
+    "bug352_diode_model_expression_equivalence_literal_control";
+const XYCE_BUG352_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_352/BUG_352a.cir";
+const XYCE_BUG352_CONTROL_PATH: &str = "Netlists/Certification_Tests/BUG_352/BUG_352b.cir";
+const XYCE_BUG352_OWNER_RECORD: &str = "netlists/certification_tests/bug_352/bug_352a.cir";
+const XYCE_BUG352_CONTROL_RECORD: &str = "netlists/certification_tests/bug_352/bug_352b.cir";
+const XYCE_BUG352_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_352/exclude";
+const XYCE_BUG352_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG352_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG352_HISTORICAL_RECORD_COUNT: usize = 9;
+const XYCE_BUG352_HISTORICAL_RECORD_BYTES: usize = 2_132;
+const XYCE_BUG352_HISTORICAL_RECORDS_SHA256: &str =
+    "877197b218aecdd03eb4eec89cfffebd4dcc4de480425f210d613fd8f233e6df";
+const XYCE_BUG352_HISTORICAL_RECORDS_BLAKE3: &str =
+    "2841b048fb8a0b1ae78571ecc8a0f341013fcc9491e3b2c97f4639792072b502";
+const XYCE_BUG352_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 9] = [
+    (
+        "Netlists/Certification_Tests/BUG_352/CMakeLists.txt",
+        1_947,
+        "bcc6b130ed1ee65220b92581af3ff6d771ef5f4f90db300cc2404d0f014d4665",
+        "04424eacdcdef62b81f291869c5dd8f0f9777811b2f8ef33036a653d3b15bf08",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_352/Manifest.txt",
+        62,
+        "2577f06f92166598a4199ff6328bd69d13100207a7631823a13ad83d36dcbd7b",
+        "835ad44ed1a5672564a40367742f753a7593b2fd7fedae92e29a58e98936209a",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_352/README",
+        831,
+        "adea694684c225d8cc84527b21205708c8891709f98e71838599920e1537884c",
+        "51b8ed0ed86354d73459f4220498fdc8a6c6f8eb25d0f06ba6f6a932bb187f1b",
+    ),
+    (
+        XYCE_BUG352_OWNER_PATH,
+        161,
+        "26b8ffcee2b2e3c8f667a58d7c19c3aed5e8afcdc973a5ca905b52eab8fa12b1",
+        "f3a709f923870e76226ce430323725128d241c6e11b4259a6c364d6b50fafe06",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_352/BUG_352a.cir.sh",
+        1_412,
+        "33f0dba1f3201c9899c59116118c153c74ec7c892b8dc5cace6fb9aa1fdd9774",
+        "070d5e90b85909d4c3aa71ee4b4824cf9804eaaed3a64aaa323673d89cec7a73",
+    ),
+    (
+        XYCE_BUG352_CONTROL_PATH,
+        130,
+        "7693247e71be35c0eae15bce8dbc1187663db39d3981c554454f93a8a250b215",
+        "9d3f638aa4df5e86c4b29243219b8f1a6af89019419ebc2c61728b8653a12beb",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_352/exclude",
+        41,
+        "f4cb80e294a2e917da749acd1e3cf26c44b7d3b420f6907c4700574346d9f065",
+        "d171440460d8afd9c65f336b91d6f3475c015a9d6a3dbb85ec63e13e395e9e3f",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_352/tags",
+        28,
+        "43901b249a3892a461ba23bc3dc95c74bdece2bfaee8f7b6e35d9f22359893ac",
+        "2deb82428ebb81c18d9fb719f046d5b461735881ab0d03644891ca3389f06420",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG352_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
+    (
+        "BUG_352a.cir",
+        161,
+        "26b8ffcee2b2e3c8f667a58d7c19c3aed5e8afcdc973a5ca905b52eab8fa12b1",
+        "f3a709f923870e76226ce430323725128d241c6e11b4259a6c364d6b50fafe06",
+    ),
+    (
+        "BUG_352b.cir",
+        130,
+        "7693247e71be35c0eae15bce8dbc1187663db39d3981c554454f93a8a250b215",
+        "9d3f638aa4df5e86c4b29243219b8f1a6af89019419ebc2c61728b8653a12beb",
+    ),
+    (
+        "README",
+        831,
+        "adea694684c225d8cc84527b21205708c8891709f98e71838599920e1537884c",
+        "51b8ed0ed86354d73459f4220498fdc8a6c6f8eb25d0f06ba6f6a932bb187f1b",
     ),
 ];
 
@@ -9270,6 +9367,7 @@ mod analysis_support;
 mod comparison;
 mod contracts;
 mod contracts_bug159;
+mod contracts_bug352;
 mod contracts_bug354;
 mod contracts_bug38;
 mod contracts_bug39;
