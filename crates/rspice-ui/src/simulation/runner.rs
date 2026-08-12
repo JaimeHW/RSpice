@@ -21,6 +21,11 @@ use super::status::{SimulationProgress, SimulationStatus};
 
 #[cfg(test)]
 mod device_e2e_tests;
+/// Reachable from anywhere in the crate under test because the surfaces that
+/// judge a specification live outside `crate::simulation` and must be able to
+/// ask the executor for real per-point evidence rather than invent it.
+#[cfg(test)]
+pub(crate) mod pvt_point_evidence;
 mod spec;
 #[cfg(any(target_arch = "wasm32", test))]
 mod wasm_worker;
@@ -710,6 +715,10 @@ pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observe
                 &config,
                 &input.netlist,
                 input.source_path.as_deref(),
+                // A configuration-backed request states its own conditions:
+                // an operating point carries its typed run point, and every
+                // other deck stands exactly as written.
+                None,
                 &signal,
             ) {
                 Ok(r) => {

@@ -1391,7 +1391,7 @@ fn a_scope_change_commits_as_a_plan_transaction_and_a_rejected_one_changes_nothi
         "an accepted edit moves the plan revision"
     );
     assert!(
-        !app.state.workbench.analysis_lifecycle_status.is_empty(),
+        !app.state.workbench.analysis_lifecycle_status.is_refusal(),
         "the transaction reports its receipt"
     );
 
@@ -1413,4 +1413,37 @@ fn a_scope_change_commits_as_a_plan_transaction_and_a_rejected_one_changes_nothi
         after_accept,
         "a rejected edit does not move the plan revision"
     );
+}
+
+/// A solver value the page refuses to apply has to say so on the channel the
+/// surface drains, not only into the modal dialog's own error list. The list
+/// is still written, because the dialog edits this same draft and draws the
+/// errors beside the fields.
+#[test]
+fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
+    let mut app = RSpiceApp::test_instance();
+    let committed = app.state.workbench.analysis_lifecycle_status.sequence();
+    app.state.sim_setup.options_draft.reltol = "not a number".to_owned();
+
+    super::page_solver::commit_draft(&mut app);
+
+    let outcome = &app.state.workbench.analysis_lifecycle_status;
+    assert!(outcome.is_refusal(), "{}", outcome.message());
+    assert!(
+        outcome.sequence() > committed,
+        "a refusal is an event the surface has not drained yet"
+    );
+    assert!(
+        outcome.message().contains("were not applied"),
+        "{}",
+        outcome.message()
+    );
+    assert!(!app.state.sim_setup.options_errors.is_empty());
+
+    // Repairing the value applies it, and the channel carries the receipt.
+    app.state.sim_setup.options_draft.reltol = "2e-3".to_owned();
+    super::page_solver::commit_draft(&mut app);
+    let outcome = &app.state.workbench.analysis_lifecycle_status;
+    assert!(!outcome.is_refusal(), "{}", outcome.message());
+    assert!(app.state.sim_setup.options_errors.is_empty());
 }

@@ -95,7 +95,12 @@ pub(super) fn map_temperature_results(
     Ok((sweep_values, voltages))
 }
 
-pub(super) fn map_corner_results(
+/// Lay solved corner points onto the shared axis a corner plot reads.
+///
+/// Reachable outside the sweep runners because the corner family is assembled
+/// from the results of the per-point tasks rather than from a solve of its
+/// own; this is the single assembler both would otherwise have to agree with.
+pub(crate) fn map_corner_results(
     results: &[(CornerPoint, SweepPointResult)],
     metric_label: CornerMetricLabel,
     abort: &dyn AbortSignal,

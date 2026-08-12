@@ -9380,6 +9380,40 @@ fn test_xyce_bug38_subckt_formal_parentheses_relational_oracle() {
 }
 
 #[test]
+fn test_xyce_bug39_generated_gaussian_mean_sigma_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        (
+            "Netlists/Certification_Tests/BUG_39_SON/agauss.cir",
+            "bug39_agauss_generated_mean_sigma_wrapper",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_39_SON/gauss.cir",
+            "bug39_gauss_generated_mean_sigma_wrapper",
+        ),
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} must remain owned by its removed historical wrapper"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should independently execute the exact generated Gaussian population and satisfy the historical strict mean/sigma predicate, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(
+            result.upstream_exclusion_source.as_deref(),
+            Some("Netlists/Certification_Tests/BUG_39_SON/exclude")
+        );
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_switch_initial_state_case_relational_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

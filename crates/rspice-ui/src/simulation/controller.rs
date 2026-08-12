@@ -52,9 +52,9 @@ mod analysis_plan;
 mod analysis_run_config;
 mod analysis_spec_build;
 mod manual_deck;
+pub(crate) mod prepared_run;
 #[cfg(test)]
 mod projection_ratchet;
-pub(crate) mod prepared_run;
 mod results_convert;
 mod results_post;
 mod results_update;
@@ -132,6 +132,10 @@ pub struct SimulationController {
     successful_analysis_instances: HashSet<crate::product::AnalysisInstanceId>,
     /// Batch-local numerical artifacts keyed by their exact producer task.
     execution_artifacts: HashMap<crate::product::AnalysisInstanceId, ExecutionArtifactEnvelope>,
+    /// The corner declarations this batch expanded into points. A corner
+    /// declaration is not dispatched, so its plotting family is assembled from
+    /// the point results once the batch is complete.
+    corner_families: crate::simulation::corner_family::CornerFamilyRegistry,
     /// Current analysis index (1-based for display: "Analysis 2/4")
     current_analysis_idx: usize,
     /// Total number of analyses in current batch
@@ -175,6 +179,7 @@ impl SimulationController {
             pending_analyses: VecDeque::new(),
             successful_analysis_instances: HashSet::new(),
             execution_artifacts: HashMap::new(),
+            corner_families: crate::simulation::corner_family::CornerFamilyRegistry::default(),
             current_analysis_idx: 0,
             total_analyses: 0,
             cached_netlist: None,
@@ -329,6 +334,10 @@ impl SimulationController {
             state.push_sim_message(ConsoleMessage::warning(advisory.clone()));
         }
 
+        self.corner_families.clear();
+        for task in dispatch.tasks() {
+            self.corner_families.register(task);
+        }
         let queued_names = dispatch
             .tasks()
             .map(|entry| entry.label())
@@ -425,6 +434,7 @@ impl SimulationController {
         self.pending_analyses.clear();
         self.successful_analysis_instances.clear();
         self.execution_artifacts.clear();
+        self.corner_families.clear();
         self.cached_netlist = None;
         self.clear_prepared_run();
         self.current_config = None;
@@ -588,6 +598,19 @@ impl SimulationController {
         };
 
         self.current_analysis_idx += 1;
+
+        // A corner declaration's turn assembles the family from the point
+        // results the queue has already retained. It never reaches the runner:
+        // the points are the solve, and handing the declaration to an executor
+        // is what used to make an N-point sweep cost 2N. Its saved outputs are
+        // taken here all the same, because a declaration that skips the runner
+        // still produces a result an output contract was written against.
+        if matches!(spec, AnalysisSpec::Corner) {
+            self.current_saved_output_contracts = next_analysis.saved_output_contracts().to_vec();
+            self.assemble_corner_family(state, &analysis_name, provenance);
+            return;
+        }
+
         self.current_config = config.clone();
         self.current_spec = Some(spec.clone());
         self.current_spec_options = Some(next_analysis.spec_options().clone());
@@ -727,6 +750,63 @@ impl SimulationController {
         }
     }
 
+    /// Complete a corner declaration's task without an engine call.
+    ///
+    /// The declaration keeps its place in the queue because the run's
+    /// authenticated receipt has a task for it and retained results must stay
+    /// an exact ordered prefix of that list. Its points are already retained by
+    /// the time its turn comes, so the family is a reduction of them.
+    fn assemble_corner_family(
+        &mut self,
+        state: &mut AppState,
+        analysis_name: &str,
+        provenance: AnalysisResultProvenance,
+    ) {
+        let declaration = provenance.source_instance_id();
+        let target_run_id = self.target_run_id(state);
+        let assembled = target_run_id
+            .and_then(|run_id| state.simulation.run_by_sequence(run_id))
+            .ok_or_else(|| "corner family has no target simulation run".to_owned())
+            .and_then(|run| self.corner_families.family_for(declaration, run));
+        let mut analysis = match assembled {
+            Ok(result) => self.convert_to_analysis_result_with_metadata_owned(
+                result,
+                AnalysisType::Corner,
+                analysis_name,
+            ),
+            Err(error) => {
+                state.push_sim_message(ConsoleMessage::error(format!("{analysis_name}: {error}")));
+                AnalysisResult::failed(1, AnalysisType::Corner, analysis_name, error)
+            }
+        };
+        self.materialize_current_saved_outputs(&mut analysis);
+
+        // Retention already fails the run when the family did, so only a
+        // retention error of its own needs answering here.
+        if let Err(error) =
+            self.retain_completed_analysis(state, target_run_id, analysis, provenance)
+        {
+            log::error!("{error}");
+            state.push_sim_message(ConsoleMessage::error(error));
+            if let Some(run_id) = target_run_id
+                && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
+            {
+                run.success = false;
+            }
+        }
+        if let Some(run_id) = target_run_id {
+            state
+                .simulation
+                .select_latest_analysis_in_run_sequence(run_id);
+        }
+
+        if self.pending_analyses.is_empty() {
+            self.finish_simulation_batch(state);
+        } else {
+            self.start_next_analysis(state);
+        }
+    }
+
     fn target_run_id(&self, state: &AppState) -> Option<u64> {
         self.current_run_id
             .or_else(|| state.simulation.runs.first().map(|run| run.id))
@@ -769,6 +849,7 @@ impl SimulationController {
     fn finish_simulation_batch(&mut self, state: &mut AppState) {
         let completed_analysis_count = self.total_analyses;
         let completed_run_id = self.target_run_id(state);
+        self.corner_families.clear();
         let run_success = completed_run_id
             .and_then(|run_id| state.simulation.run_by_sequence(run_id))
             .map(|run| run.success)
@@ -1329,6 +1410,17 @@ impl SimulationController {
                             &current_label,
                         )
                     };
+                    // Point results are one analysis solved at several
+                    // conditions, so the analysis name alone repeats across
+                    // every sibling. The point is what tells them apart.
+                    if let Some(point) = self
+                        .current_provenance
+                        .as_ref()
+                        .and_then(AnalysisResultProvenance::pvt_point)
+                    {
+                        analysis_result.label =
+                            format!("{} \u{00b7} {}", analysis_result.label, point.label());
+                    }
                     self.retain_periodic_noise_result_metadata(&mut analysis_result);
                     if let Some(AnalysisResultPayload::OperatingPoint {
                         effective_source_content_digest,
@@ -1435,6 +1527,7 @@ impl SimulationController {
                     self.pending_analyses.clear();
                     self.successful_analysis_instances.clear();
                     self.execution_artifacts.clear();
+                    self.corner_families.clear();
                     self.cached_netlist = None;
                     self.current_config = None;
                     self.current_spec = None;

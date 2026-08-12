@@ -149,8 +149,10 @@ fn commit_import(app: &mut RSpiceApp, plan_id: SimulationPlanId, file_name: &str
 /// lifecycle status, which is the channel `commit_plan_change` itself writes on
 /// failure.
 fn refuse(app: &mut RSpiceApp, error: &str) {
-    app.state.workbench.analysis_lifecycle_status =
-        format!("Design-variable import refused · {error}");
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_refusal(format!("Design-variable import refused · {error}"));
 }
 
 /// Parse a spec sheet and put every row through the create dialog's contract.
@@ -569,7 +571,9 @@ mod tests {
 
         commit_import(&mut app, plan_id, "loads.csv", sheet);
 
-        let status = &app.state.workbench.analysis_lifecycle_status;
+        let outcome = &app.state.workbench.analysis_lifecycle_status;
+        let status = outcome.message();
+        assert!(outcome.is_refusal(), "{status}");
         assert!(status.contains("line 3"), "{status}");
         assert!(
             status.contains("outside the inclusive allowed range"),
@@ -602,7 +606,9 @@ mod tests {
             "name,quantity,expression\nRTERM,Resistance,50 ohm\nrload,Resistance,22 kohm\n",
         );
 
-        let status = &app.state.workbench.analysis_lifecycle_status;
+        let outcome = &app.state.workbench.analysis_lifecycle_status;
+        let status = outcome.message();
+        assert!(outcome.is_refusal(), "{status}");
         assert!(status.contains("rload"), "{status}");
         assert_eq!(
             serde_json::to_value(&app.state.workspace).expect("workspace still serializes"),
@@ -624,14 +630,9 @@ mod tests {
             "name,quantity,expression\nRLOAD,Resistance,10 kohm\nRLOAD,Resistance,22 kohm\n",
         );
 
-        assert!(
-            app.state
-                .workbench
-                .analysis_lifecycle_status
-                .contains("RLOAD"),
-            "{}",
-            app.state.workbench.analysis_lifecycle_status
-        );
+        let outcome = &app.state.workbench.analysis_lifecycle_status;
+        assert!(outcome.is_refusal(), "{}", outcome.message());
+        assert!(outcome.message().contains("RLOAD"), "{}", outcome.message());
         assert_eq!(
             serde_json::to_value(&app.state.workspace).expect("workspace still serializes"),
             before

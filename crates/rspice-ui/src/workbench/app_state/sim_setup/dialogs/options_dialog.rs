@@ -89,7 +89,10 @@ pub(in crate::workbench) fn commit_options_transaction(
     }
     app.state.sim_setup = candidate;
     app.invalidate_simulation_preflight();
-    app.state.workbench.analysis_lifecycle_status = receipt.status_line();
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_receipt(receipt.status_line());
     Ok(true)
 }
 

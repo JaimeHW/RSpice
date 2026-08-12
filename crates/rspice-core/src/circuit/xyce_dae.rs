@@ -288,7 +288,9 @@ impl CircuitData {
 
         self.xyce_linear_f_operator.add_product(solution, f)?;
         for node_row in 0..self.num_nodes {
-            f[node_row] += nodal_gmin * solution[node_row];
+            if !self.is_non_electrical_state_matrix_index(node_row) {
+                f[node_row] += (self.global_shunt_conductance + nodal_gmin) * solution[node_row];
+            }
         }
 
         for &source_index in self.xyce_load_plan.current_sources() {

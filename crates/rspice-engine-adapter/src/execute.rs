@@ -354,12 +354,19 @@ fn run_directive(
             step,
             stop,
             max_step,
+            uic,
             ..
         } => {
             // ngspice's default transient print ceiling: (tstop)/50 unless
             // the deck asks for a finer explicit ceiling.
             let ceiling = max_step.unwrap_or_else(|| (*stop / 50.0).max(*step));
-            let result = engine.run_tran_with_abort(netlist, *stop, ceiling, deadline)?;
+            let result = engine.run_tran_with_startup_mode_and_abort(
+                netlist,
+                *stop,
+                ceiling,
+                rspice_core::engine::TransientStartupMode::from_uic(*uic),
+                deadline,
+            )?;
             if result.time.is_empty() {
                 return Err(DirectiveFailure::NonFinite);
             }

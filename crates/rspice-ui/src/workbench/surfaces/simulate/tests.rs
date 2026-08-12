@@ -42,7 +42,10 @@ fn lifecycle_receipt_height_is_stable_across_short_and_verbose_receipts() {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        app.state.workbench.analysis_lifecycle_status = detail.to_owned();
+        app.state
+            .workbench
+            .analysis_lifecycle_status
+            .record_receipt(detail);
         let mut height = 0.0;
         let _ = ctx.run_ui(
             egui::RawInput {
@@ -585,13 +588,19 @@ fn validating_a_dependent_checks_every_transitive_prerequisite_draft() {
         app.state
             .workbench
             .analysis_lifecycle_status
+            .message()
             .contains(&pss.to_string())
     );
     assert!(
         app.state
             .workbench
             .analysis_lifecycle_status
+            .message()
             .starts_with("Validate rejected fail-closed")
+    );
+    assert!(
+        app.state.workbench.analysis_lifecycle_status.is_refusal(),
+        "a rejected validation is a refusal, not a receipt"
     );
 }
 
@@ -717,6 +726,7 @@ fn disabled_dependents_can_prepare_required_prerequisites_in_one_action() {
         app.state
             .workbench
             .analysis_lifecycle_status
+            .message()
             .contains("Prerequisite repair completed atomically")
     );
 }
@@ -766,6 +776,7 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
         app.state
             .workbench
             .analysis_lifecycle_status
+            .message()
             .contains("Enter the exact oscillator node")
     );
 
@@ -792,6 +803,7 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
         app.state
             .workbench
             .analysis_lifecycle_status
+            .message()
             .contains("without creating a duplicate instance")
     );
 }
@@ -936,6 +948,7 @@ fn unavailable_analysis_cannot_be_inserted_through_the_surface_action() {
         app.state
             .workbench
             .analysis_lifecycle_status
+            .message()
             .contains("not available")
     );
 }
@@ -1624,5 +1637,472 @@ fn an_unattributed_measurement_never_answers_a_narrowed_specification() {
         )
         .is_some(),
         "an unscoped limit still reads every retained point"
+    );
+}
+
+// ------------------------------------------------- refused-command reporting
+
+/// Run one Simulation Studio frame on the given setup route.
+///
+/// The drain lives in the surface entry point rather than in any page, so a
+/// test of it has to go through `show` and not through `pages::show`.
+fn simulate_frame(app: &mut RSpiceApp, page: crate::workbench::state::SimulationPage) {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    app.state.workbench.simulation_page = page;
+    let _ = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1_280.0, 900.0))),
+            ..egui::RawInput::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| super::show(ui, app));
+        },
+    );
+}
+
+/// Seven of the eight routes never draw the lifecycle strip, so a refusal on
+/// one of them has to leave the surface to be seen at all. A receipt must not:
+/// the registry pages commit routinely, and toasting every one of them would
+/// bury the refusals among them.
+#[test]
+fn a_refusal_away_from_the_analyses_page_is_reported_and_a_receipt_is_not() {
+    use crate::ui::widgets::ToastKind;
+    use crate::workbench::state::SimulationPage;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_receipt("Receipt #3 · Edit committed for instance 1.");
+    simulate_frame(&mut app, SimulationPage::Variables);
+    assert!(
+        app.state.ui.toasts.activity().is_empty(),
+        "a committed receipt is not an error the reader has to be chased with"
+    );
+
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_refusal("Remove rejected fail-closed: another analysis is bound to it.");
+    simulate_frame(&mut app, SimulationPage::Variables);
+    let reported = app.state.ui.toasts.activity();
+    assert_eq!(
+        reported.len(),
+        1,
+        "the refusal reaches the reader exactly once"
+    );
+    assert_eq!(reported[0].kind(), ToastKind::Error);
+    assert!(
+        reported[0].message().contains("another analysis is bound"),
+        "{}",
+        reported[0].message()
+    );
+}
+
+/// The guard is a sequence, not a snapshot of the message, and it has to hold
+/// for as long as the outcome stands. Three of the announcing sites sit on the
+/// render path, so an unguarded drain would repeat the same refusal every
+/// frame for as long as the plan stayed broken.
+#[test]
+fn a_standing_refusal_is_reported_once_and_not_again_on_the_next_frame() {
+    use crate::workbench::state::SimulationPage;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_refusal("Reorder rejected fail-closed: the position is out of range.");
+    simulate_frame(&mut app, SimulationPage::Outputs);
+    assert_eq!(app.state.ui.toasts.activity().len(), 1);
+
+    simulate_frame(&mut app, SimulationPage::Outputs);
+    simulate_frame(&mut app, SimulationPage::Outputs);
+    assert_eq!(
+        app.state.ui.toasts.activity().len(),
+        1,
+        "a refusal that is merely still true is not a new refusal"
+    );
+
+    // Restating it verbatim is the render path doing its job, not a new event.
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_refusal("Reorder rejected fail-closed: the position is out of range.");
+    simulate_frame(&mut app, SimulationPage::Outputs);
+    assert_eq!(app.state.ui.toasts.activity().len(), 1);
+}
+
+/// Two refusals in a row are two events, and the second must not be swallowed
+/// by the guard that suppresses the first one's restatement.
+#[test]
+fn two_different_refusals_in_a_row_are_both_reported() {
+    use crate::workbench::state::SimulationPage;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_refusal("Design-variable import refused · line 3 · out of range");
+    simulate_frame(&mut app, SimulationPage::RunSet);
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_refusal("Run set · blocked · the declared space exceeds the task budget");
+    simulate_frame(&mut app, SimulationPage::RunSet);
+
+    let reported = app.state.ui.toasts.activity();
+    assert_eq!(reported.len(), 2);
+    // The activity centre lists the newest record first.
+    assert!(reported[0].message().contains("task budget"));
+    assert!(reported[1].message().contains("line 3"));
+}
+
+/// A receipt between two refusals must not let the earlier one through again
+/// silently: the guard advances on every outcome, refusal or not.
+#[test]
+fn a_receipt_advances_the_guard_without_reporting_anything() {
+    use crate::workbench::state::SimulationPage;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_refusal("Clone rejected fail-closed: the instance no longer exists.");
+    simulate_frame(&mut app, SimulationPage::Specifications);
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_receipt("Receipt #4 · Edit committed for instance 2.");
+    simulate_frame(&mut app, SimulationPage::Specifications);
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_refusal("Clone rejected fail-closed: the instance no longer exists.");
+    simulate_frame(&mut app, SimulationPage::Specifications);
+
+    assert_eq!(
+        app.state.ui.toasts.activity().len(),
+        2,
+        "the refusal is a fresh event once a receipt has replaced it"
+    );
+}
+
+/// The field is `#[serde(skip)]`, so serde fills it from `Default` and never
+/// from the struct literal. A `Default` that was empty would leave the strip
+/// blank after every session restore.
+#[test]
+fn a_restored_session_shows_a_lifecycle_line_rather_than_a_blank_strip() {
+    use crate::workbench::state::{AnalysisLifecycleOutcome, WorkbenchState};
+
+    assert!(!AnalysisLifecycleOutcome::default().message().is_empty());
+
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_receipt("Receipt #9 · Insert committed for instance 5.");
+    let saved = serde_json::to_value(&app.state.workbench).expect("the workbench serializes");
+    let restored: WorkbenchState = serde_json::from_value(saved).expect("the workbench restores");
+
+    assert!(
+        !restored.analysis_lifecycle_status.message().is_empty(),
+        "a restored session must not open on an empty lifecycle strip"
+    );
+    assert_eq!(
+        restored.analysis_lifecycle_status,
+        AnalysisLifecycleOutcome::default(),
+        "the outcome is runtime-only, so a restore starts from the default line"
+    );
+    assert_eq!(restored.analysis_lifecycle_toasted_sequence, 0);
+}
+
+/// Identical wording, opposite severity: the strip has to paint these
+/// differently, which it can only do by reading the severity.
+#[test]
+fn the_lifecycle_strip_separates_a_refusal_from_a_receipt_by_severity() {
+    fn collect(shape: &egui::epaint::Shape, found: &mut Vec<egui::Color32>) {
+        match shape {
+            egui::epaint::Shape::Text(text) if text.galley.job.text.starts_with("Instance 4") => {
+                found.extend(text.galley.job.sections.iter().map(|s| s.format.color));
+            }
+            egui::epaint::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    collect(shape, found);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let detail_colors = |refusal: bool| {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        let wording = "Instance 4 · dependency binding · revision 7 to 8.";
+        if refusal {
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .record_refusal(wording);
+        } else {
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .record_receipt(wording);
+        }
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(960.0, 240.0))),
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        let _ = lifecycle_receipt_strip(ui, &app);
+                    });
+            },
+        );
+        let mut found = Vec::new();
+        for clipped in &output.shapes {
+            collect(&clipped.shape, &mut found);
+        }
+        assert!(!found.is_empty(), "the strip paints its detail line");
+        (found, Tokens::get(&ctx).color)
+    };
+
+    let (receipt, palette) = detail_colors(false);
+    let (refusal, _) = detail_colors(true);
+    assert_ne!(
+        receipt, refusal,
+        "the same wording must not paint the same way for a receipt and a refusal"
+    );
+    assert!(refusal.iter().all(|color| *color == palette.err));
+    assert!(receipt.iter().all(|color| *color == palette.text_dim));
+}
+
+/// Three announcing sites sit on the render path rather than in a click
+/// handler: the surface resolves the active instance, the editor resolves the
+/// selection, and the editor re-serializes the draft, each of them every frame.
+/// A plan that stays unavailable therefore restates the same refusal forever,
+/// and the sequence must not move with it.
+#[test]
+fn a_render_path_refusal_restated_every_frame_does_not_spin_the_sequence() {
+    use crate::workbench::state::SimulationPage;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.sim_setup.analysis_plan = None;
+    for _ in 0..4 {
+        simulate_frame(&mut app, SimulationPage::Analyses);
+    }
+
+    let outcome = &app.state.workbench.analysis_lifecycle_status;
+    assert!(outcome.is_refusal(), "{}", outcome.message());
+    assert_eq!(
+        outcome.sequence(),
+        1,
+        "four frames of the same standing refusal are one event"
+    );
+    assert_eq!(app.state.ui.toasts.activity().len(), 1);
+}
+
+/// A supply-and-process corner declaration whose transient base analysis
+/// measures the divider output. The supply axis is what makes the corners
+/// disagree: `V(out)` is half the supply the point was solved at.
+fn corner_evidence_run() -> SimulationRun {
+    use crate::services::simulation_runner::{
+        CornerBaseMode, CornerModelBinding, CornerProcess, CornerRunConfig,
+    };
+
+    let deck = "corner evidence\n\
+         VDD vdd 0 DC 1.8\n\
+         R1 vdd out 1k\n\
+         R2 out 0 1k\n\
+         C1 out 0 1p\n\
+         .tran 1n 100n\n\
+         .meas tran vout FIND V(out) AT=100n\n\
+         .end\n";
+    let binding = |process: CornerProcess, label: &str, saturation_current: &str| {
+        CornerModelBinding {
+            process,
+            source_label: label.to_owned(),
+            section: Some(process.as_keyword().to_owned()),
+            materialized_model_cards: format!(".model DPROCESS D (IS={saturation_current})"),
+        }
+    };
+    let contract = CornerRunConfig {
+        process_corners: vec![CornerProcess::TT, CornerProcess::SS],
+        voltages: vec![1.8, 1.62],
+        temperatures_c: vec![27.0, 125.0],
+        full_matrix: false,
+        nominal_voltage: Some(1.8),
+        base_mode: CornerBaseMode::Transient {
+            stop_time: 100.0e-9,
+            step_time: 1.0e-9,
+        },
+        model_bindings: vec![
+            binding(CornerProcess::TT, "tt.lib", "1e-12"),
+            binding(CornerProcess::SS, "ss.lib", "1e-13"),
+        ],
+        points: Vec::new(),
+    };
+
+    crate::simulation::runner::pvt_point_evidence::run_corner_declaration(deck, contract, 27.0)
+        .expect("the corner declaration prepares, authorizes and runs")
+}
+
+/// The whole claim of the per-point expansion: a specification is answerable
+/// corner by corner, against measurements the executor really produced rather
+/// than fixtures a test wrote. Before the expansion the corner run retained
+/// one scalar per node and no `.MEAS` result at all, so every scope here
+/// would have reported that the evidence was missing.
+#[test]
+fn a_corner_run_answers_a_specification_at_each_of_its_own_points() {
+    let run = corner_evidence_run();
+
+    let attributed_points = run
+        .analyses
+        .iter()
+        .filter_map(|analysis| {
+            analysis
+                .provenance
+                .as_ref()
+                .and_then(crate::state::AnalysisResultProvenance::pvt_point)
+        })
+        .count();
+    assert_eq!(
+        attributed_points, 2,
+        "each declared point produced its own attributed result"
+    );
+
+    let nominal = measurement_in_output_dataset(
+        &run,
+        &scoped("vout", Some(0.85), crate::state::SpecPointScope::Nominal),
+    )
+    .expect("the nominal point answers a nominal limit");
+    assert!(
+        (nominal.value - 0.9).abs() < 1.0e-3,
+        "the nominal point solved at the full supply, got {}",
+        nominal.value
+    );
+    assert!(nominal.is_complete_coverage());
+
+    let everywhere = measurement_in_output_dataset(
+        &run,
+        &scoped("vout", Some(0.85), crate::state::SpecPointScope::AllPoints),
+    )
+    .expect("the run set answers an unscoped limit");
+    assert!(
+        (everywhere.value - 0.81).abs() < 1.0e-3,
+        "the worst point is the derated supply, got {}",
+        everywhere.value
+    );
+    assert_eq!(everywhere.retained_measurements, 2);
+
+    let slow = measurement_in_output_dataset(
+        &run,
+        &scoped(
+            "vout",
+            Some(0.85),
+            crate::state::SpecPointScope::SelectedCorners {
+                corners: vec!["SS".to_owned()],
+            },
+        ),
+    )
+    .expect("the SS corner answers a limit scoped to it");
+    assert_eq!(slow.value, everywhere.value);
+    assert_eq!(slow.retained_measurements, 1);
+
+    let bound = scoped("vout", Some(0.85), crate::state::SpecPointScope::Nominal);
+    assert!(bound.passes(nominal.value), "nominal holds the limit");
+    assert!(
+        !bound.passes(everywhere.value),
+        "the derated corner does not, which is the verdict the run set had no way to report"
+    );
+
+    // The per-point results are additional evidence, not a replacement for the
+    // corner family: the same run still carries the axis a corner plot draws.
+    let Some(crate::state::AnalysisResultFamilyMetadata::Corner { corner_labels, .. }) = run
+        .analyses
+        .iter()
+        .find(|analysis| analysis.analysis_type == AnalysisType::Corner)
+        .and_then(|analysis| analysis.family_metadata.as_ref())
+    else {
+        panic!("the corner declaration still produces its plotting family");
+    };
+    assert_eq!(corner_labels.len(), 2);
+}
+
+/// A corner that will not solve is a result about that corner, not an absence.
+/// Dropping it would let a specification scoped to every point report a pass
+/// it was never given evidence for.
+#[test]
+fn a_corner_point_that_cannot_be_solved_is_retained_as_a_failure() {
+    use crate::services::simulation_runner::{
+        CornerBaseMode, CornerModelBinding, CornerProcess, CornerRunConfig,
+    };
+
+    // The base analysis names a sweep source the deck does not define, so
+    // every point fails in the engine rather than in preparation.
+    let deck = "corner failure\n\
+         VDD vdd 0 DC 1.8\n\
+         R1 vdd out 1k\n\
+         R2 out 0 1k\n\
+         .op\n\
+         .end\n";
+    let contract = CornerRunConfig {
+        process_corners: vec![CornerProcess::TT],
+        voltages: vec![1.8, 1.62],
+        temperatures_c: vec![27.0],
+        full_matrix: true,
+        nominal_voltage: Some(1.8),
+        base_mode: CornerBaseMode::DcSweep {
+            source_name: "VMISSING".to_owned(),
+            start: 0.0,
+            stop: 1.0,
+            step: 0.5,
+        },
+        model_bindings: vec![CornerModelBinding {
+            process: CornerProcess::TT,
+            source_label: "tt.lib".to_owned(),
+            section: Some("TT".to_owned()),
+            materialized_model_cards: ".model DPROCESS D (IS=1e-12)".to_owned(),
+        }],
+        points: Vec::new(),
+    };
+
+    let run =
+        crate::simulation::runner::pvt_point_evidence::run_corner_declaration(deck, contract, 27.0)
+            .expect("a run whose points fail still completes preparation");
+
+    let failed: Vec<_> = run
+        .analyses
+        .iter()
+        .filter(|analysis| !analysis.success)
+        .filter(|analysis| {
+            analysis
+                .provenance
+                .as_ref()
+                .and_then(crate::state::AnalysisResultProvenance::pvt_point)
+                .is_some()
+        })
+        .collect();
+    assert_eq!(failed.len(), 2, "both points are reported, not dropped");
+    assert!(
+        failed
+            .iter()
+            .all(|analysis| analysis.error_message.is_some()),
+        "a failed point says why it failed"
+    );
+    assert_eq!(
+        measurement_in_output_dataset(
+            &run,
+            &scoped("vout", Some(0.85), crate::state::SpecPointScope::AllPoints),
+        ),
+        None,
+        "a point that did not solve is not evidence that the limit holds"
     );
 }

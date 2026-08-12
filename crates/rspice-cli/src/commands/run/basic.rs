@@ -413,6 +413,7 @@ pub(super) fn run_transient(
     tstep: f64,
     tstart: f64,
     max_step: Option<f64>,
+    uic: bool,
 ) -> Result<(), CliError> {
     // --tran-stop overrides the deck's stop time so checkpoint segments can
     // share byte-identical source (the checkpoint fingerprint covers it).
@@ -452,24 +453,40 @@ pub(super) fn run_transient(
     };
 
     let checkpointing = ctx.args.checkpoint.is_some() || ctx.args.resume.is_some();
+    let startup_mode = rspice_core::engine::TransientStartupMode::from_uic(uic);
     let result = if checkpointing {
         // Segmented integration: restore the saved state (when resuming),
         // run to this segment's stop time, and persist the new state (when
         // checkpointing). The core validates the netlist fingerprint, so a
         // checkpoint can never silently continue a different circuit.
-        let run =
-            if let Some(ref resume_path) = ctx.args.resume {
-                let checkpoint = rspice_core::engine::TransientCheckpoint::load(resume_path)
-                    .map_err(|e| CliError::SimulationError {
+        let run = if let Some(ref resume_path) = ctx.args.resume {
+            let checkpoint =
+                rspice_core::engine::TransientCheckpoint::load(resume_path).map_err(|e| {
+                    CliError::SimulationError {
                         message: format!("cannot resume from {}: {e}", resume_path.display()),
                         analysis: Some("Transient".to_string()),
-                    })?;
-                ctx.engine
-                    .run_tran_resume(ctx.netlist, &checkpoint, tstop, internal_max_step)
-            } else {
-                ctx.engine
-                    .run_tran_checkpointed(ctx.netlist, tstop, internal_max_step)
-            };
+                    }
+                })?;
+            if checkpoint.startup_mode() != Some(startup_mode) {
+                return Err(CliError::SimulationError {
+                    message: format!(
+                        "checkpoint startup mode {:?} does not match the selected .TRAN startup mode {:?}",
+                        checkpoint.startup_mode(),
+                        startup_mode
+                    ),
+                    analysis: Some("Transient".to_string()),
+                });
+            }
+            ctx.engine
+                .run_tran_resume(ctx.netlist, &checkpoint, tstop, internal_max_step)
+        } else {
+            ctx.engine.run_tran_checkpointed_with_startup_mode(
+                ctx.netlist,
+                tstop,
+                internal_max_step,
+                startup_mode,
+            )
+        };
         pb.finish_and_clear();
         match run {
             Ok((result, checkpoint)) => {
@@ -503,10 +520,11 @@ pub(super) fn run_transient(
             rel_tol: compression_tol,
             min_interval: tstep / 10.0,
         };
-        let result = ctx.engine.run_tran_compressed_with_abort(
+        let result = ctx.engine.run_tran_compressed_with_startup_mode_and_abort(
             ctx.netlist,
             tstop,
             internal_max_step,
+            startup_mode,
             compression,
             &crate::abort::ProgressAbort::new(&pb),
         );
@@ -525,10 +543,11 @@ pub(super) fn run_transient(
             Err(e) => Err(e),
         }
     } else {
-        let result = ctx.engine.run_tran_with_abort(
+        let result = ctx.engine.run_tran_with_startup_mode_and_abort(
             ctx.netlist,
             tstop,
             internal_max_step,
+            startup_mode,
             &crate::abort::ProgressAbort::new(&pb),
         );
         pb.finish_and_clear();

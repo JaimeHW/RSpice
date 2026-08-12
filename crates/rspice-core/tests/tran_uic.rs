@@ -1,7 +1,7 @@
 //! `.TRAN ... UIC`: skip the operating point and integrate from user
 //! initial conditions, ngspice-style.
 
-use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
+use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect, TransientStartupMode};
 use rspice_core::netlist::{AnalysisCommand, Netlist};
 
 fn out_waveform(deck: &str) -> (Vec<f64>, Vec<f64>) {
@@ -195,4 +195,44 @@ l1 mid 0 1 ic=2
         (initial - 2.0).abs() < 1e-12,
         "inductor IC=2 must seed the branch current under UIC, got {initial}"
     );
+}
+
+#[test]
+fn mixed_tran_cards_require_and_honor_explicit_selected_startup_mode() {
+    let netlist = Netlist::parse(
+        "selected transient startup mode\n\
+         v1 in 0 5\n\
+         r1 in out 1k\n\
+         c1 out 0 1u\n\
+         .tran 10u 1m\n\
+         .tran 10u 1m uic\n\
+         .end\n",
+    )
+    .expect("mixed transient deck parses");
+    let engine = Engine::default();
+
+    let error = engine
+        .run_tran(&netlist, 1.0e-3, 10.0e-6)
+        .expect_err("the compatibility API must not guess between mixed startup modes");
+    assert!(error.to_string().contains("explicit TransientStartupMode"));
+
+    let operating_point = engine
+        .run_tran_with_startup_mode(
+            &netlist,
+            1.0e-3,
+            10.0e-6,
+            TransientStartupMode::OperatingPoint,
+        )
+        .expect("the selected ordinary .TRAN executes");
+    let uic = engine
+        .run_tran_with_startup_mode(&netlist, 1.0e-3, 10.0e-6, TransientStartupMode::Uic)
+        .expect("the selected UIC .TRAN executes");
+    let op_out = operating_point
+        .try_voltage_waveform_named("out")
+        .expect("ordinary output waveform");
+    let uic_out = uic
+        .try_voltage_waveform_named("out")
+        .expect("UIC output waveform");
+    assert!((op_out[0] - 5.0).abs() <= 1.0e-9);
+    assert!(uic_out[0].abs() <= 1.0e-12);
 }

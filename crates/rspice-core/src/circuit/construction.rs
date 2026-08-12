@@ -41,6 +41,11 @@ impl CircuitData {
             b3soi_pd: B3SoiPds::new(),
             b3soi_gmin_scale: 1.0e-6,
             no_dc_path_nodes: Vec::new(),
+            fatal_no_dc_path_nodes: Vec::new(),
+            global_shunt_conductance: 0.0,
+            dc_floating_component_by_node: Vec::new(),
+            dc_floating_component_nodes: Vec::new(),
+            dc_floating_component_is_certain: Vec::new(),
             bsim3v3: Bsim3v3s::new(),
             bsim4v8: Bsim4v8s::new(),
             ekv26s: EkvMosfets::new(),
@@ -145,6 +150,30 @@ impl CircuitData {
                     .iter()
                     .find_map(|(candidate, &id)| candidate.eq_ignore_ascii_case(name).then_some(id))
             })
+    }
+
+    /// Retain the parser-certified partition of nodes that lack a
+    /// DC-conducting path to ground after final node remapping.
+    pub(crate) fn set_dc_floating_components(
+        &mut self,
+        components: Vec<Vec<String>>,
+        component_is_certain: Vec<bool>,
+    ) {
+        debug_assert_eq!(components.len(), component_is_certain.len());
+        let mut component_by_node = vec![None; self.num_nodes.saturating_add(1)];
+        for (component_index, nodes) in components.iter().enumerate() {
+            for node in nodes {
+                if let Some(node_id) = self.get_node_by_name(node)
+                    && node_id > 0
+                    && let Some(slot) = component_by_node.get_mut(node_id)
+                {
+                    *slot = Some(component_index);
+                }
+            }
+        }
+        self.dc_floating_component_by_node = component_by_node;
+        self.dc_floating_component_nodes = components;
+        self.dc_floating_component_is_certain = component_is_certain;
     }
 
     /// Resolve behavioral expression references against current node/branch maps.

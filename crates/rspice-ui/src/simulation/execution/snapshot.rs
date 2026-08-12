@@ -32,6 +32,10 @@ use super::canonical::{
 };
 use super::permit::ConsumedExecutionPermit;
 
+mod corner_points;
+
+use corner_points::expand_corner_run_point_tasks;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PreparationStage {
     DesignChecks,
@@ -358,6 +362,10 @@ pub(in crate::simulation) struct PreparedTask {
     /// it; a task that runs once for the whole declared space has no point,
     /// and naming one would attribute its results to a corner it never solved.
     pvt_point: Option<crate::state::AnalysisResultPvtPoint>,
+    /// The corner declaration this task solves one point of. The declaration is
+    /// never dispatched, so this is the only record of what its family is
+    /// called, which base analysis it ran, and where this point sits in it.
+    corner_point: Option<crate::simulation::corner_family::CornerRunPoint>,
 }
 
 impl PreparedTask {
@@ -388,6 +396,7 @@ impl PreparedTask {
             touchstone_export: None,
             executable_netlist_override: None,
             pvt_point: None,
+            corner_point: None,
         }
     }
 
@@ -579,6 +588,7 @@ pub(in crate::simulation) struct AuthorizedTaskDispatch {
     project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     touchstone_export: TouchstoneExportPolicy,
     pvt_point: Option<crate::state::AnalysisResultPvtPoint>,
+    corner_point: Option<crate::simulation::corner_family::CornerRunPoint>,
 }
 
 /// A prepared task paired with the exact batch-local artifacts required by
@@ -691,6 +701,13 @@ impl AuthorizedTaskDispatch {
         &self,
     ) -> Option<&crate::state::AnalysisResultPvtPoint> {
         self.pvt_point.as_ref()
+    }
+
+    /// The corner declaration this task solves one point of, when it is one.
+    pub(in crate::simulation) const fn corner_point(
+        &self,
+    ) -> Option<&crate::simulation::corner_family::CornerRunPoint> {
+        self.corner_point.as_ref()
     }
 
     pub(in crate::simulation) fn resolve_dependency_artifacts(
@@ -897,7 +914,7 @@ impl PreparedRunSnapshot {
             parts.reference_process,
             parts.reference_temperature_celsius,
         )?;
-        parts.tasks = expand_operating_point_tasks(
+        parts.tasks = expand_pvt_point_tasks(
             parts.tasks,
             &pvt_points,
             &parts.executable_netlist,
@@ -1349,6 +1366,7 @@ impl PreparedRunSnapshot {
                     project_veriloga_runtimes: project_veriloga_runtimes.clone(),
                     touchstone_export,
                     pvt_point: prepared.pvt_point,
+                    corner_point: prepared.corner_point,
                 }
             })
             .collect();
@@ -1460,7 +1478,16 @@ fn point_is_nominal(
     }
 }
 
-fn expand_operating_point_tasks(
+/// Expand every task that is declared over the run set's PVT points into one
+/// prepared task per point.
+///
+/// Two declarations reach this: an operating point bound to the run-set axis,
+/// and a corner run, whose base analysis *is* the thing declared over the
+/// points. Both expand through the same per-point ingredients — the process
+/// corner materialized into the point's own deck, the point recorded on the
+/// task so its result can be attributed, and an instance identity derived
+/// from the point so two points can never share one.
+fn expand_pvt_point_tasks(
     tasks: Vec<PreparedTask>,
     pvt_points: &[PreparedPvtPoint],
     executable_netlist: &str,
@@ -1513,6 +1540,59 @@ fn expand_operating_point_tasks(
             }
         ) {
             prepared.executable_netlist_override = inherited_op_source_override;
+        }
+
+        // A corner run is not one analysis swept along an axis: it is a base
+        // analysis solved once per PVT point, and collapsing those solves into
+        // one scalar per node is what threw the waveforms and the `.MEAS`
+        // results away. Each point earns its own task so its result carries
+        // its own evidence and the point that produced it.
+        //
+        // The declaration is no longer solved. Solving it would solve every
+        // point a second time, and the family a corner plot reads is one scalar
+        // per node per point — a view over the point results. It stays a task
+        // because the run's authenticated receipt is built from this list and
+        // the retained results must line up with it one for one; its turn in
+        // the queue assembles the family instead of reaching the engine.
+        //
+        // Its position after the points is load-bearing. Results must remain an
+        // exact ordered prefix of the receipt's tasks even when a run is
+        // aborted or a task is blocked, and the assembly cannot produce a
+        // result until its points have. Any earlier position would leave a hole
+        // at the declaration's own index in every partial run.
+        //
+        // Its points are deliberately not its dependencies. The queue is
+        // strictly vector order — a `VecDeque` popped from the front with one
+        // task in flight — so the position alone orders it, whereas a
+        // dependency edge would skip the family outright the moment a single
+        // corner failed to converge, which is the corner a plot most needs.
+        //
+        // A dependent of the declaration binds to the last *point*: the
+        // assembly produces no execution artifact, and the last point is the
+        // task whose completion means the declared space has been solved. That
+        // is the same rule the operating-point expansion below applies.
+        if matches!(prepared.task.spec, AnalysisSpec::Corner) {
+            let points = expand_corner_run_point_tasks(
+                &prepared,
+                executable_netlist,
+                reference_process,
+                reference_temperature_celsius,
+            )?;
+            let last = points
+                .last()
+                .expect("corner expansion refuses an empty declared space");
+            final_task.insert(
+                original_identity,
+                (
+                    last.instance_id,
+                    last.source_revision,
+                    last.config_digest,
+                    last.executable_netlist_override.clone(),
+                ),
+            );
+            expanded.extend(points);
+            expanded.push(prepared);
+            continue;
         }
 
         let Some(base_config) = operating_point_config(&prepared.task.spec) else {
@@ -1670,7 +1750,7 @@ fn prepare_pvt_point_source(
         if point.voltage.is_some() {
             return Err(PreparationError::new(
                 PreparationStage::AnalysisPlan,
-                "Operating-point PVT voltage is missing its authenticated corner contract",
+                "PVT run point voltage is missing its authenticated corner contract",
             ));
         }
         return Ok((None, None));
@@ -1686,7 +1766,7 @@ fn prepare_pvt_point_source(
         PreparationError::new(
             PreparationStage::ModelBindings,
             format!(
-                "Failed to materialize {} operating-point process corner: {error}",
+                "Failed to materialize the {} PVT process corner: {error}",
                 point.process.short_name()
             ),
         )
@@ -1714,7 +1794,7 @@ fn prepare_pvt_point_source(
             .ok_or_else(|| {
                 PreparationError::new(
                     PreparationStage::AnalysisPlan,
-                    "Operating-point PVT voltage axis requires a non-zero independent DC supply or an explicit nominal voltage",
+                    "A PVT supply axis requires a non-zero independent DC supply or an explicit nominal voltage",
                 )
             })?,
         })

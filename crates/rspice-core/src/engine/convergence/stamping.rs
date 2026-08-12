@@ -270,6 +270,7 @@ impl Engine {
         rhs: &mut [Value],
         time: Value,
         gmin: Value,
+        stamp_generic_switches: bool,
     ) {
         Self::stamp_nodal_gmin(circuit, matrix, gmin);
 
@@ -279,6 +280,43 @@ impl Engine {
             .voltage_sources
             .update_transient_rhs(rhs, time, |br_ordinal| num_nodes + br_ordinal);
         circuit.current_sources.update_transient_rhs(rhs, time);
-        circuit.stamp_generic_switches(matrix, rhs, time);
+        if stamp_generic_switches {
+            circuit.stamp_generic_switches(matrix, rhs, time);
+        }
+    }
+
+    /// Assemble the complete linear transient-startup system identified by an
+    /// accepted operating-point contract. The solver and post-solve physical
+    /// audit share this routine so behavioral and XSPICE contributions cannot
+    /// silently drift between acceptance and verification.
+    pub(in crate::engine::convergence) fn stamp_linear_transient_operating_point_system(
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        time: Value,
+        gmin: Value,
+        linear_system: TransientOperatingPointLinearSystem,
+    ) {
+        match linear_system {
+            TransientOperatingPointLinearSystem::IdealInductorShorts => {
+                Self::stamp_transient_operating_point_linear(
+                    circuit, matrix, rhs, time, gmin, true,
+                );
+            }
+            TransientOperatingPointLinearSystem::CurrentSeededInductors => {
+                Self::stamp_transient_current_seed_linear(circuit, matrix, rhs, time, gmin, true);
+            }
+        }
+
+        if !circuit.behavioral_sources.is_empty()
+            && !circuit.behavioral_sources.has_solution_dependent_sources()
+        {
+            let zero_solution = vec![0.0; rhs.len()];
+            circuit.stamp_behavioral_sources(matrix, rhs, &zero_solution, time);
+        }
+        if circuit.has_xspice_devices() {
+            let zero_solution = vec![0.0; rhs.len()];
+            circuit.stamp_xspice_transient_trial(matrix, rhs, time, 0.0, &zero_solution);
+        }
     }
 }

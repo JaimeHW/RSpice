@@ -34,3 +34,34 @@ pub fn xyce_hard_min_timestep(current_time: Value) -> Value {
         0.0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xyce_hard_minimum_tracks_current_time_machine_precision() {
+        let transition_time = 5.380_978_556_560e-4;
+        assert_eq!(xyce_hard_min_timestep(0.0).to_bits(), 0.0f64.to_bits());
+        assert_eq!(
+            xyce_hard_min_timestep(transition_time).to_bits(),
+            (transition_time * 10.0 * Value::EPSILON).to_bits()
+        );
+        assert_eq!(
+            xyce_hard_min_timestep(-transition_time).to_bits(),
+            (transition_time * 10.0 * Value::EPSILON).to_bits()
+        );
+        assert_eq!(xyce_hard_min_timestep(Value::NAN), 0.0);
+        assert_eq!(xyce_hard_min_timestep(Value::INFINITY), 0.0);
+        assert_eq!(xyce_hard_min_timestep(Value::NEG_INFINITY), 0.0);
+    }
+
+    #[test]
+    fn xyce_hard_min_timestep_avoids_intermediate_overflow() {
+        let minimum = xyce_hard_min_timestep(Value::MAX);
+
+        assert!(minimum.is_finite());
+        assert!(minimum > 0.0);
+        assert_eq!(minimum, Value::MAX * (10.0 * Value::EPSILON));
+    }
+}

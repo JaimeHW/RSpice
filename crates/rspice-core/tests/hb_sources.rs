@@ -124,3 +124,23 @@ c1 d 0 1p
         "second harmonic must be sub-millivolt at this drive: |h2| = {h2:.6}"
     );
 }
+
+#[test]
+fn rshunt_is_present_in_the_harmonic_balance_conductance_operator() {
+    let deck = "\
+* RSHUNT-only HB transfer
+i1 0 out sin(0 1m 1meg)
+.options rshunt=1k
+    .end
+";
+    let result = run_hb(deck, 1.0e6, 4);
+    let fundamental = coefficient(&result, "out", 1);
+    assert!(
+        result.converged,
+        "HB must converge; computed fundamental was {fundamental}"
+    );
+    assert!(
+        (fundamental.norm() - 1.0).abs() <= 1.0e-6,
+        "1 mA through the 1 kOhm RSHUNT must produce a 1 V peak, got {fundamental}"
+    );
+}

@@ -367,14 +367,17 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
     app.state.request_run_set_simulation();
     sync_tuning_session(app);
     let candidate_count = variable_change_count + binding_change_count;
-    app.state.workbench.analysis_lifecycle_status = format!(
-        "Tuning receipt #{} · revision {} to {} · {} candidate{} queued.",
-        receipt.sequence(),
-        receipt.source_revision().get(),
-        receipt.committed_revision().get(),
-        candidate_count,
-        if candidate_count == 1 { "" } else { "s" }
-    );
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_receipt(format!(
+            "Tuning receipt #{} · revision {} to {} · {} candidate{} queued.",
+            receipt.sequence(),
+            receipt.source_revision().get(),
+            receipt.committed_revision().get(),
+            candidate_count,
+            if candidate_count == 1 { "" } else { "s" }
+        ));
     Ok(())
 }
 

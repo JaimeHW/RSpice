@@ -464,6 +464,7 @@ pub(super) fn synthesize_laplace(
 /// and travels with the generated elements, so a failure points at the source
 /// the user actually wrote and nothing downstream has to guess where the
 /// realization came from.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn synthesize_rational_transfer(
     name: &str,
     node_pos: &str,
@@ -480,6 +481,29 @@ pub(super) fn synthesize_rational_transfer(
         message: format!("{} source '{name}': {message}", form.label()),
     };
 
+    let require_stable_filter = matches!(form, crate::netlist::SynthesizedTransferForm::Chebyshev);
+
+    if num.is_empty() || den.is_empty() {
+        return Err(fail(
+            "transfer function requires non-empty numerator and denominator polynomials"
+                .to_string(),
+        ));
+    }
+    if num
+        .iter()
+        .chain(&den)
+        .any(|coefficient| !coefficient.is_finite())
+    {
+        return Err(fail(
+            "transfer-function coefficients must all be finite".to_string(),
+        ));
+    }
+    if den.last() == Some(&0.0) {
+        return Err(fail(
+            "transfer function denominator must have a non-zero leading coefficient".to_string(),
+        ));
+    }
+
     let n = den.len() - 1; // denominator degree
     if num.len() - 1 > n {
         return Err(fail(format!(
@@ -492,7 +516,30 @@ pub(super) fn synthesize_rational_transfer(
     // Monic denominator.
     let lead = *den.last().expect("non-empty denominator");
     let a: Vec<Value> = den.iter().map(|c| c / lead).collect();
-    let num: Vec<Value> = num.iter().map(|c| c / lead).collect();
+    let normalized_num: Vec<Value> = num.iter().map(|c| c / lead).collect();
+    if require_stable_filter
+        && (den
+            .iter()
+            .zip(&a)
+            .any(|(before, after)| *before != 0.0 && *after == 0.0)
+            || num
+                .iter()
+                .zip(&normalized_num)
+                .any(|(before, after)| *before != 0.0 && *after == 0.0))
+    {
+        return Err(fail(
+            "filter normalization lost a required nonzero coefficient".to_string(),
+        ));
+    }
+    let num = normalized_num;
+    if a.iter()
+        .chain(&num)
+        .any(|coefficient| !coefficient.is_finite())
+    {
+        return Err(fail(
+            "transfer-function normalization produced non-finite coefficients".to_string(),
+        ));
+    }
 
     // Direct feedthrough and strictly-proper remainder: N = d·D + R.
     let d = if num.len() - 1 == n && n > 0 {
@@ -555,19 +602,34 @@ pub(super) fn synthesize_rational_transfer(
 
     let a_hat: Vec<Value> = (0..n).map(|k| a[k] / omega0.powi((n - k) as i32)).collect();
     let b_hat: Vec<Value> = (0..n).map(|k| r[k] / omega0.powi((n - k) as i32)).collect();
+    if a_hat
+        .iter()
+        .chain(&b_hat)
+        .any(|coefficient| !coefficient.is_finite())
+    {
+        return Err(fail(
+            "state-space scaling produced non-finite coefficients".to_string(),
+        ));
+    }
+    let dc_determined = a_hat[0] != 0.0;
+    let scaling_lost_nonzero = a[..n]
+        .iter()
+        .zip(&a_hat)
+        .chain(r.iter().zip(&b_hat))
+        .any(|(before, after)| *before != 0.0 && *after == 0.0);
+    if require_stable_filter
+        && (!dc_determined || scaling_lost_nonzero || b_hat.iter().all(|value| *value == 0.0))
+    {
+        return Err(fail(
+            "filter coefficients lost a required nonzero term during state-space scaling"
+                .to_string(),
+        ));
+    }
 
     let state_node = |i: usize| format!("{}.__X{}", name, i);
     let cap_value = 1.0 / omega0;
-    // The state nodes are reached only by these elements, and their operating
-    // point comes from the realization's equations rather than from a resistive
-    // path to ground. Marking them is what keeps the floating-node check from
-    // refusing every filter this function builds.
-    let internal = || crate::netlist::ElementProvenance::SynthesizedTransferState {
-        owner: name.to_string(),
-        form,
-    };
-
     for i in 1..=n {
+        let node = state_node(i);
         elements.push(Element {
             name: format!("{}.__CX{}", name, i),
             kind: ElementKind::Capacitor {
@@ -578,8 +640,12 @@ pub(super) fn synthesize_rational_transfer(
                 instance_params: Vec::new(),
                 deferred_params: Vec::new(),
             },
-            nodes: vec![state_node(i), "0".to_string()],
-            provenance: internal(),
+            nodes: vec![node.clone(), "0".to_string()],
+            provenance: crate::netlist::ElementProvenance::GeneratedDynamicInternalNode {
+                owner: name.to_string(),
+                form,
+                node,
+            },
         });
     }
 
@@ -594,7 +660,11 @@ pub(super) fn synthesize_rational_transfer(
                 multiplicity: SourceMultiplicity::default(),
             },
             nodes: vec!["0".to_string(), state_node(i)],
-            provenance: internal(),
+            provenance: crate::netlist::ElementProvenance::GeneratedDynamicStateDerivative {
+                owner: name.to_string(),
+                form,
+                dc_determined,
+            },
         });
     }
 
@@ -613,7 +683,11 @@ pub(super) fn synthesize_rational_transfer(
             multiplicity: SourceMultiplicity::default(),
         },
         nodes: vec!["0".to_string(), state_node(n)],
-        provenance: internal(),
+        provenance: crate::netlist::ElementProvenance::GeneratedDynamicStateDerivative {
+            owner: name.to_string(),
+            form,
+            dc_determined,
+        },
     });
 
     // Output: y = Σ b̂_k z_{k+1} + d·u.
