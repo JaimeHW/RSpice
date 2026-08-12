@@ -531,11 +531,13 @@ impl<'a> Lexer<'a> {
         let mut end = 1; // Skip opening quote
         let mut content = String::new();
         let chars: Vec<char> = input.chars().collect();
+        let mut terminated = false;
 
         while end < chars.len() {
             let c = chars[end];
             if c == '"' {
                 end += 1;
+                terminated = true;
                 break;
             } else if c == '\\' && end + 1 < chars.len() {
                 // Escape sequence
@@ -546,6 +548,10 @@ impl<'a> Lexer<'a> {
                 content.push(c);
                 end += 1;
             }
+        }
+
+        if !terminated {
+            return Err(LexError::UnterminatedString(self.line));
         }
 
         let byte_len: usize = chars[..end].iter().map(|c| c.len_utf8()).sum();

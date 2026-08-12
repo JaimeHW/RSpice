@@ -11,7 +11,9 @@ use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use std::cell::RefCell;
 
-use super::state::{ProjectLauncherFilter, VerificationPage, WorkbenchState, Workspace};
+use super::state::{
+    ProjectLauncherFilter, SpecificationEvidenceFilter, VerificationPage, WorkbenchState, Workspace,
+};
 
 pub(crate) mod code_context;
 mod registry;
@@ -1741,9 +1743,9 @@ impl Command {
                 }
             }
             Self::EditSpecifications => {
-                app.state.ui.results.viewer = crate::workbench::ResultViewer::Specs;
-                crate::workbench::documents::result_document::open_specification_editor(&mut app.state);
-                activate_workspace(app, Workspace::Results);
+                crate::workbench::documents::result_document::open_specification_editor(
+                    &mut app.state,
+                );
             }
             Self::VerificationPage(VerificationPage::Drc) => {
                 app.state.push_user_message(
@@ -2197,7 +2199,12 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
             }
         }
         Workspace::Simulate => {
-            app.state.workbench.analysis_query.clear();
+            // The studio's view state is what narrows its two registries.
+            // Everything else on these pages is the plan itself, which a
+            // view reset has no business touching.
+            app.state.workbench.saved_output_filter.clear();
+            app.state.workbench.specification_filter.clear();
+            app.state.workbench.specification_evidence_filter = SpecificationEvidenceFilter::All;
         }
         Workspace::Results => {
             let viewer = app.state.ui.results.viewer;

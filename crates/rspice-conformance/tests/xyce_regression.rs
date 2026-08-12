@@ -721,10 +721,24 @@ fn test_xyce_hard_coded_deck_paths_use_exact_vendored_case() {
     let referenced = include_str!("xyce_regression.rs")
         .split('"')
         .filter(|fragment| fragment.starts_with("Netlists/") && fragment.ends_with(".cir"))
+        // A `format!` template is not a hard-coded path. It names a family of
+        // decks whose members cannot be resolved here, so each one was
+        // reported as a deck the corpus is missing — four of them, which is
+        // what this assertion had been failing on rather than on any real
+        // drift.
+        .filter(|fragment| !fragment.contains(['{', '}']))
         .map(str::to_owned)
         .collect::<BTreeSet<_>>();
     let missing = referenced.difference(&filesystem).collect::<Vec<_>>();
 
+    // The filters above decide what this guard looks at, so it has to say it
+    // still looks at something. A guard that quietly narrows to nothing
+    // passes forever and reports drift never.
+    assert!(
+        referenced.len() > 500,
+        "the deck-path scan found only {} literals; it can no longer see the paths it exists to check",
+        referenced.len()
+    );
     assert!(
         missing.is_empty(),
         "hard-coded Xyce deck paths must match the vendored path and case exactly: {missing:#?}"
@@ -9579,6 +9593,27 @@ fn test_xyce_bug267_global_parameter_include_success_oracle() {
         result.contract,
         "bug267_global_parameter_include_success_wrapper"
     );
+    assert_eq!(result.upstream_exclusion_source, None);
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
+fn test_xyce_bug302_print_delimiter_relational_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_302/bug_302.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "BUG302 must remain owned by its removed historical wrapper"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported && !result.upstream_excluded,
+        "BUG302 should execute its typed eight-member delimiter relation, got {result:?}"
+    );
+    assert_eq!(result.contract, "bug302_print_delimiter_relational_wrapper");
     assert_eq!(result.upstream_exclusion_source, None);
     assert!(result.mismatches.is_empty());
 }

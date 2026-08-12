@@ -5,6 +5,20 @@
 //! interactions out via [`egui::Response`] (or small result enums) — they
 //! never reach into application state.
 
+/// Report a widget's own disabled state on the response it returns.
+///
+/// A widget that draws its own disabled look — rather than deferring to
+/// [`egui::Ui::add_enabled_ui`] — has to say so here too. `Ui::allocate_*` and
+/// `Ui::interact` copy `enabled` from the **`Ui`**, which is still enabled, and
+/// every disabled tooltip in egui keys off the response's own flag. Without
+/// this the reason a call site attaches to a blocked control is dropped with
+/// no diagnostic: the code reads as if it explains itself and nothing renders.
+/// Hover for a disabled response is resolved from the rect rather than the
+/// flag, so clearing it costs no hit testing.
+pub(crate) fn mark_response_disabled(response: &mut egui::Response) {
+    response.flags.remove(egui::response::Flags::ENABLED);
+}
+
 mod button;
 mod chip;
 mod dialog;

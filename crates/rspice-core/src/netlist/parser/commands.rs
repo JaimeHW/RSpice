@@ -429,12 +429,7 @@ pub(super) fn parse_command(
             } else {
                 OutputDirectiveKind::Plot
             };
-            let request = OutputRequest::from_source(
-                directive,
-                origin.clone(),
-                &remaining_command_source(stream),
-                remaining_command_expressions(stream),
-            );
+            let (output_source, output_expressions) = remaining_print_operand_source(stream);
             let delimiter = parse_save_command(
                 stream,
                 line_num,
@@ -443,7 +438,15 @@ pub(super) fn parse_command(
                 Some(diagnostics),
                 Some(origin),
             )?;
-            output_requests.push(request.with_print_delimiter(delimiter));
+            output_requests.push(
+                OutputRequest::from_source(
+                    directive,
+                    origin.clone(),
+                    &output_source,
+                    output_expressions,
+                )
+                .with_print_delimiter(delimiter),
+            );
         }
         _ => {
             // An unrecognized dot-command means whatever it requests will not
@@ -593,6 +596,67 @@ fn remaining_command_expressions(stream: &TokenStream) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+/// Return only the authored output operands from a `.PRINT`/`.PLOT` tail.
+///
+/// Formatting metadata can itself resemble an output expression (for example,
+/// `FILE="V(MISSING)"` or a custom delimiter string).  It must not enter the
+/// typed dependency graph, so remove the leading analysis selector and every
+/// recognized output option assignment before constructing `OutputRequest`.
+fn remaining_print_operand_source(stream: &TokenStream) -> (String, Vec<String>) {
+    let mut copy = stream.clone();
+    let tokens = copy.collect_line();
+    let mut kept = Vec::new();
+    let mut index = 0usize;
+    let mut first_operand = true;
+
+    while index < tokens.len() {
+        if matches!(tokens[index].kind, TokenKind::Comma) {
+            kept.push(tokens[index].clone());
+            index += 1;
+            continue;
+        }
+        if let TokenKind::Ident(raw) = &tokens[index].kind {
+            let upper = raw.to_ascii_uppercase();
+            if first_operand && OutputAnalysisKind::from_keyword(&upper).is_some() {
+                first_operand = false;
+                kept.push(tokens[index].clone());
+                index += 1;
+                continue;
+            }
+            first_operand = false;
+            if index + 1 < tokens.len()
+                && matches!(tokens[index + 1].kind, TokenKind::Equals)
+                && is_xyce_print_option_name(&upper)
+            {
+                index = (index + 3).min(tokens.len());
+                continue;
+            }
+            if upper == "NOINDEX" {
+                index += 1;
+                continue;
+            }
+        } else {
+            first_operand = false;
+        }
+        kept.push(tokens[index].clone());
+        index += 1;
+    }
+
+    let source = kept
+        .iter()
+        .map(|token| token.lexeme.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let expressions = kept
+        .into_iter()
+        .filter_map(|token| match token.kind {
+            TokenKind::Expression(expression) => Some(expression),
+            _ => None,
+        })
+        .collect();
+    (source, expressions)
 }
 
 fn parse_preprocess_command(
@@ -943,6 +1007,7 @@ pub(super) fn parse_save_command(
                         match xyce_print_delimiter_from_token(&value.kind) {
                             Some(parsed) => delimiter = parsed,
                             None => {
+                                delimiter = PrintDelimiter::Whitespace;
                                 let message =
                                     "Invalid value of DELIMITER in .PRINT statment, ignoring";
                                 log::warn!("line {line_num}: {message}");
@@ -5155,6 +5220,75 @@ mod tests {
         assert_eq!(
             diagnostic.origin.as_ref().map(|origin| origin.line),
             Some(3)
+        );
+    }
+
+    #[test]
+    fn print_metadata_is_not_treated_as_an_output_dependency() {
+        let netlist = Netlist::parse_validated(
+            "print metadata isolation\n\
+             V1 out 0 1\n\
+             .PRINT DC DELIMITER=\"V(MISSING)\" FILE=\"I(NOSUCH)\" V(out)\n\
+             .DC V1 0 1 1\n\
+             .END\n",
+        )
+        .expect("accessor-shaped print metadata must not enter output validation");
+
+        let [request] = netlist.output_requests.as_slice() else {
+            panic!("expected one typed output request");
+        };
+        assert_eq!(
+            request.print_delimiter,
+            Some(PrintDelimiter::Custom("V(MISSING)".to_string()))
+        );
+        assert_eq!(request.dependencies.len(), 1);
+        assert!(!format!("{:?}", request.dependencies).contains("MISSING"));
+        assert!(!format!("{:?}", request.dependencies).contains("NOSUCH"));
+    }
+
+    #[test]
+    fn repeated_print_delimiters_use_last_assignment_with_invalid_fallback() {
+        let netlist = Netlist::parse(
+            "last delimiter wins\n\
+             V1 out 0 1\n\
+             .PRINT DC DELIMITER=COMMA DELIMITER=BAD V(out)\n\
+             .PRINT DC DELIMITER=BAD DELIMITER=TAB V(out)\n\
+             .DC V1 0 1 1\n\
+             .END\n",
+        )
+        .expect("repeated delimiters retain Xyce last-write semantics");
+
+        assert_eq!(
+            netlist
+                .output_requests
+                .iter()
+                .map(|request| request.print_delimiter.clone())
+                .collect::<Vec<_>>(),
+            vec![Some(PrintDelimiter::Whitespace), Some(PrintDelimiter::Tab)]
+        );
+        assert_eq!(
+            netlist
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "xyce-invalid-print-delimiter")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn unterminated_custom_print_delimiter_fails_lexing() {
+        let error = Netlist::parse(
+            "unterminated delimiter\n\
+             V1 out 0 1\n\
+             .PRINT DC DELIMITER=\"| V(out)\n\
+             .DC V1 0 1 1\n\
+             .END\n",
+        )
+        .expect_err("unterminated quoted delimiter must fail closed");
+        assert!(
+            error.to_string().contains("Unterminated string"),
+            "unexpected error: {error}"
         );
     }
 

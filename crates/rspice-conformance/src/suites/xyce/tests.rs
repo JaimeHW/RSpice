@@ -22058,7 +22058,7 @@ fn generated_vbic_lead_currents_flow_through_dc_prn_comparison() {
 VC c 0 dc 1
 VB b 0 dc 0.7
 Q1 c b 0 QB
-.MODEL QB NPN LEVEL=11
+.MODEL QB VBIC13
 .DC VC 1 1 1
 .PRINT DC IC(Q1) IB(Q1) IE(Q1)
 .OP

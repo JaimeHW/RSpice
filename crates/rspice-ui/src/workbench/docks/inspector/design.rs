@@ -2563,7 +2563,7 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
                 .show(ui);
             let clicked = response.clicked();
             if !writable {
-                response.on_hover_text(
+                response.on_disabled_hover_text(
                     "The active schematic is read-only; a missing saved-output contract cannot be created.",
                 );
             }

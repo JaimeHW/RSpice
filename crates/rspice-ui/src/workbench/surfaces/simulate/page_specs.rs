@@ -404,7 +404,10 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
         },
     );
     if author {
-        open_specification_editor(app);
+        // The limits are plan-owned data with one editor; this page reads
+        // them and hands off rather than giving the same records a second
+        // author.
+        crate::workbench::documents::result_document::open_specification_editor(&mut app.state);
     }
     if let Some(index) = picked_class {
         app.state.workbench.specification_evidence_filter = SpecificationEvidenceFilter::ALL[index];
@@ -412,19 +415,6 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     if let Some(measurement) = pick {
         app.state.workbench.selected_specification = Some(measurement);
     }
-}
-
-/// Route to the surface that owns specification authoring.
-///
-/// The limits are plan-owned data with one editor; duplicating that editor
-/// here would give the same records two authors. The page reads them and
-/// hands off.
-fn open_specification_editor(app: &mut RSpiceApp) {
-    app.state.ui.results.viewer = crate::workbench::ResultViewer::Specs;
-    crate::workbench::documents::result_document::open_specification_editor(&mut app.state);
-    app.state
-        .workbench
-        .activate(crate::workbench::state::Workspace::Results);
 }
 
 /// Distance from the nearest bound, in the specification's own unit.

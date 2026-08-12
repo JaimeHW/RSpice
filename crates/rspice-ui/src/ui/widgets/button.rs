@@ -7,6 +7,8 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 
+use super::mark_response_disabled;
+
 fn trailing_shortcut(text: &str) -> Option<&str> {
     let (prefix, suffix) = text.rsplit_once('(')?;
     let shortcut = suffix.strip_suffix(')')?.trim();
@@ -183,6 +185,9 @@ impl<'a> Button<'a> {
                 Sense::hover()
             },
         );
+        if !self.enabled {
+            mark_response_disabled(&mut response);
+        }
 
         response.widget_info(|| {
             WidgetInfo::labeled(
@@ -342,6 +347,9 @@ impl<'a> IconButton<'a> {
                 Sense::hover()
             },
         );
+        if !self.enabled {
+            mark_response_disabled(&mut response);
+        }
         let accessible_label = self.tooltip.unwrap_or_else(|| self.icon.accessible_label());
         response.widget_info(|| {
             if self.toggle {
@@ -396,7 +404,15 @@ impl<'a> IconButton<'a> {
             .paint(painter, icon_rect, icon_color.gamma_multiply(opacity));
 
         if let Some(tooltip) = self.tooltip {
-            response = response.on_hover_text(tooltip);
+            // An icon button carries no visible label, so the tooltip is the
+            // only place its name is written. It has to survive being
+            // disabled, which is the state a reader is most likely to be
+            // hovering it to understand.
+            response = if self.enabled {
+                response.on_hover_text(tooltip)
+            } else {
+                response.on_disabled_hover_text(tooltip)
+            };
         }
         if self.enabled {
             response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -423,6 +439,90 @@ mod tests {
         .accesskit_update
         .expect("AccessKit tree update")
         .nodes
+    }
+
+    /// Every string these buttons and their tooltips paint, in one pass.
+    fn painted_text(mut add_contents: impl FnMut(&mut egui::Ui)) -> Vec<String> {
+        fn walk(shape: &egui::epaint::Shape, out: &mut Vec<String>) {
+            match shape {
+                egui::epaint::Shape::Text(text) => out.push(text.galley.text().to_owned()),
+                egui::epaint::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        // A tooltip opens on the pointer, and a headless pass has none. This
+        // is egui's own switch for laying every popup out anyway; it does not
+        // bypass the check that decides *which* tooltip a response owns, so a
+        // disabled tooltip still only appears if the response reports itself
+        // disabled.
+        ctx.memory_mut(|memory| memory.set_everything_is_visible(true));
+        // Two passes: a tooltip is an `Area`, which cannot place itself until
+        // a previous pass has measured it.
+        let mut shapes = Vec::new();
+        for _ in 0..2 {
+            shapes = ctx
+                .run_ui(Default::default(), |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| add_contents(ui));
+                })
+                .shapes;
+        }
+
+        let mut painted = Vec::new();
+        for clipped in &shapes {
+            walk(&clipped.shape, &mut painted);
+        }
+        painted
+    }
+
+    #[test]
+    fn a_disabled_button_shows_the_reason_its_call_site_attached() {
+        let painted = painted_text(|ui| {
+            Button::new("Run simulation")
+                .enabled(false)
+                .show(ui)
+                .on_disabled_hover_text("No analysis is selected");
+        });
+
+        assert!(
+            painted.iter().any(|text| text == "No analysis is selected"),
+            "the disabled reason was never painted: {painted:?}"
+        );
+    }
+
+    #[test]
+    fn an_enabled_button_withholds_the_disabled_reason() {
+        let painted = painted_text(|ui| {
+            Button::new("Run simulation")
+                .show(ui)
+                .on_disabled_hover_text("No analysis is selected");
+        });
+
+        assert!(
+            !painted.iter().any(|text| text == "No analysis is selected"),
+            "a reachable button explained why it was blocked: {painted:?}"
+        );
+    }
+
+    #[test]
+    fn a_disabled_icon_button_keeps_the_tooltip_that_names_it() {
+        let painted = painted_text(|ui| {
+            IconButton::new(Icon::Grid)
+                .tooltip("Grid visibility")
+                .enabled(false)
+                .show(ui);
+        });
+
+        assert!(
+            painted.iter().any(|text| text == "Grid visibility"),
+            "an icon-only button lost its only label: {painted:?}"
+        );
     }
 
     #[test]

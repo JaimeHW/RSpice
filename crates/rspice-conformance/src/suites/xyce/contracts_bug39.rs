@@ -819,12 +819,14 @@ impl XyceTestRunner {
                 && step.to_bits() == (-0.1_f64).to_bits() => {}
             _ => return Err(format!("{LABEL} generated one-point DC analysis changed")),
         }
-        if netlist.saves.signals.len() != XYCE_BUG39_SAMPLE_COUNT + 4
+        if netlist.saves.signals.len() != XYCE_BUG39_SAMPLE_COUNT
             || netlist.output_requests.len() != 1
             || netlist.output_requests[0].directive != OutputDirectiveKind::Print
             || netlist.output_requests[0].analysis
                 != Some(rspice_core::netlist::OutputAnalysisKind::Dc)
             || netlist.output_requests[0].name.is_some()
+            || netlist.output_requests[0].print_delimiter
+                != Some(rspice_core::netlist::PrintDelimiter::Whitespace)
             || !netlist.output_requests[0].dependencies.is_empty()
         {
             return Err(format!(
@@ -834,18 +836,7 @@ impl XyceTestRunner {
                 netlist.output_requests.first()
             ));
         }
-        for (signal, expected) in
-            netlist.saves.signals[..4]
-                .iter()
-                .zip(["format", "noindex", "precision", "19"])
-        {
-            if !matches!(signal, rspice_core::netlist::SaveSignal::Raw(raw) if raw == expected) {
-                return Err(format!(
-                    "{LABEL} generated print option token '{expected}' changed: {signal:?}"
-                ));
-            }
-        }
-        for (offset, signal) in netlist.saves.signals[4..].iter().enumerate() {
+        for (offset, signal) in netlist.saves.signals.iter().enumerate() {
             let index = offset + 1;
             if !matches!(
                 signal,
