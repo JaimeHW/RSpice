@@ -367,14 +367,12 @@ fn every_page_and_scene_setting_moves_the_ink_on_the_page() {
     assert!(inert.is_empty(), "{}", inert.join("\n"));
 }
 
-/// Tiling is a refusal mode, not an output setting.
-///
-/// Automatic computes the page grid the content needs; single-page and manual
-/// can only agree with it or be refused, so no two publishable configurations
-/// differ by this control alone. It is kept honest here rather than asserted
-/// into the effective table.
+/// Single-page mode is a guard over the scale, and the scale control is what
+/// makes a drawing fit. Deriving a scale here instead would be a second
+/// spelling of fit-to-printable-area, so what this pins is that the refusal is
+/// real and that the remedy it names is the one that works.
 #[test]
-fn tiling_modes_decide_what_is_refused_rather_than_what_is_printed() {
+fn single_page_mode_refuses_overflow_and_the_scale_it_names_publishes_it() {
     let automatic = draft();
     let mut single = draft();
     single.tiling = TilingMode::SinglePage;
@@ -387,11 +385,25 @@ fn tiling_modes_decide_what_is_refused_rather_than_what_is_printed() {
     let mut refused = draft();
     tiled(&mut refused);
     refused.tiling = TilingMode::SinglePage;
+    let refusal = plan(&refused).expect_err("content that overflows cannot be one page");
     assert!(
-        plan(&refused)
-            .expect_err("content that overflows cannot be one page")
-            .contains("single-page mode needs"),
+        refusal.contains("single-page mode needs"),
         "single-page mode silently accepted overflowing content"
+    );
+    assert!(
+        refusal.contains("fit-to-printable-area"),
+        "the refusal does not name the control that fixes it: {refusal}"
+    );
+
+    let mut fitted = refused;
+    fitted.scale = ScaleMode::FitPrintableArea;
+    assert_eq!(
+        plan(&fitted)
+            .expect("the named scale publishes what single-page mode refused")
+            .pagination()
+            .pages()
+            .len(),
+        1
     );
 }
 
@@ -428,12 +440,11 @@ fn strip_plan_metadata(artifact: &[u8]) -> Vec<u8> {
     stripped
 }
 
-/// Manual tiling offers a grid the contract accepts in exactly one shape: the
-/// grid automatic tiling already computes. The numbers are therefore a
-/// restatement, not a choice, and this pins that rather than pretending the
-/// fields select anything.
+/// The manual grid chooses how many sheets the drawing is spread over, so the
+/// fields have to move ink and not merely restate the automatic answer. A grid
+/// too small to cover is the one thing they may not ask for.
 #[test]
-fn manual_tiling_admits_only_the_grid_automatic_tiling_already_computes() {
+fn the_manual_grid_decides_how_many_sheets_the_drawing_is_spread_over() {
     let mut automatic = draft();
     tiled(&mut automatic);
     let pagination = plan(&automatic).expect("automatic tiling plans");
@@ -441,23 +452,37 @@ fn manual_tiling_admits_only_the_grid_automatic_tiling_already_computes() {
         pagination.pagination().columns(),
         pagination.pagination().rows(),
     );
-    assert!(columns > 1 || rows > 1, "the fixture is not tiled");
+    assert!(columns > 1, "the fixture does not tile across");
 
     let mut manual = draft();
     tiled(&mut manual);
     manual.tiling = TilingMode::Manual { columns, rows };
-    manual.manual_columns = columns.to_string();
-    manual.manual_rows = rows.to_string();
-    assert_eq!(
-        ink(&manual).expect("the automatic grid is the accepted manual grid"),
-        ink(&automatic).expect("automatic tiling publishes"),
-        "restating the automatic grid changed the page"
-    );
-
     manual.manual_columns = (columns + 1).to_string();
-    let refusal = plan(&manual).expect_err("a different grid is refused");
+    manual.manual_rows = rows.to_string();
+    let wider = plan(&manual).expect("a grid larger than the minimum covers the content");
+    assert_eq!(
+        wider.pagination().pages().len(),
+        usize::from(columns + 1) * usize::from(rows),
+        "the requested grid is not the grid that was published"
+    );
+    assert_ne!(
+        ink(&manual).expect("the wider grid publishes"),
+        ink(&automatic).expect("automatic tiling publishes"),
+        "asking for more sheets published the same pages"
+    );
+    // The surplus the extra sheet buys is overlap, and the seam it leaves is
+    // wider than the overlap the operator declared rather than equal to it.
+    let declared = Length::parse_decimal(&manual.overlap, manual.display_unit).unwrap();
+    let seam = wider
+        .pagination()
+        .tile_overlap()
+        .expect("a tiled grid has a seam");
+    assert!(seam > declared, "the extra sheet was not spent on the seam");
+
+    manual.manual_columns = (columns - 1).to_string();
+    let refusal = plan(&manual).expect_err("a grid that cannot cover is refused");
     assert!(
-        refusal.contains("does not equal the required"),
+        refusal.contains("is smaller than the"),
         "unexpected refusal: {refusal}"
     );
 }

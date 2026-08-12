@@ -215,7 +215,7 @@ fn single_page_and_manual_tiling_reject_uncovered_content() {
             source(),
             one_to_one_setup(
                 TilingMode::Manual {
-                    columns: 3,
+                    columns: 1,
                     rows: 1
                 },
                 Length::from_micrometres(10_000),
@@ -223,8 +223,77 @@ fn single_page_and_manual_tiling_reject_uncovered_content() {
             content,
         ),
         Err(HardcopyError::ManualTilingDoesNotCover {
-            columns: 3,
+            columns: 1,
             required_columns: 2,
+            ..
+        })
+    ));
+}
+
+/// A chosen grid wider than the minimum is a covering, not an error: the
+/// overhang divides evenly across the sheets asked for, every sheet carries
+/// content of its own, and the surplus lands on the seams. A grid so fine that
+/// a sheet would repeat its neighbour is where the decision space ends.
+#[test]
+fn manual_tiling_spreads_the_overhang_across_every_sheet_it_is_given() {
+    let plan = HardcopyPlan::compile(
+        source(),
+        one_to_one_setup(
+            TilingMode::Manual {
+                columns: 3,
+                rows: 1,
+            },
+            Length::from_micrometres(10_000),
+        ),
+        ContentExtent::try_new(
+            Length::from_micrometres(400_000),
+            Length::from_micrometres(100_000),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let pagination = plan.pagination();
+    let viewport = pagination.geometry().content_rect().width.micrometres();
+    assert_eq!(pagination.columns(), 3);
+    assert_eq!(pagination.pages().len(), 3);
+    let origins = pagination
+        .pages()
+        .iter()
+        .map(|page| page.scaled_content_window().x.micrometres())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        origins,
+        [0, 70_300, 140_600],
+        "the overhang past the first sheet was not divided evenly"
+    );
+    // The last origin plus one viewport lands exactly on the content edge, so
+    // the grid covers and no sheet reaches past what there is to print.
+    assert_eq!(origins[2] + viewport, 400_000);
+    assert_eq!(
+        pagination.tile_overlap(),
+        Some(Length::from_micrometres(viewport - 70_300)),
+        "the seam the sheets actually leave is not reported"
+    );
+
+    assert!(matches!(
+        HardcopyPlan::compile(
+            source(),
+            one_to_one_setup(
+                TilingMode::Manual {
+                    columns: 102,
+                    rows: 1
+                },
+                Length::from_micrometres(10_000),
+            ),
+            ContentExtent::try_new(
+                Length::from_micrometres(259_500),
+                Length::from_micrometres(100_000),
+            )
+            .unwrap(),
+        ),
+        Err(HardcopyError::ManualTilingExceedsContent {
+            columns: 102,
+            maximum_columns: 101,
             ..
         })
     ));

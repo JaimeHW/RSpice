@@ -1203,6 +1203,14 @@ impl ScaleRatio {
     pub const fn denominator(self) -> u64 {
         self.denominator
     }
+
+    /// The ratio in the unit the custom-scale field commits, so a derived scale
+    /// and a typed one are reported in one currency.
+    #[must_use]
+    pub fn hundredths_percent(self) -> u32 {
+        let scaled = u128::from(self.numerator) * 10_000 / u128::from(self.denominator);
+        u32::try_from(scaled).unwrap_or(u32::MAX)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1249,6 +1257,50 @@ impl PreviewPage {
     }
 }
 
+/// The most sheets one axis can carry before a sheet would repeat what the one
+/// before it already showed: the first sheet, plus one for every micrometre the
+/// scaled content runs past it.
+fn fillable_tiles(overhang: u64) -> u16 {
+    u16::try_from(overhang.saturating_add(1))
+        .unwrap_or(MAX_MANUAL_AXIS_PAGES)
+        .min(MAX_MANUAL_AXIS_PAGES)
+}
+
+/// Tile origins along one axis of the scaled content, and the widest gap
+/// between two of them.
+///
+/// A derived grid advances by the declared step and leaves the shortfall on the
+/// final sheet, which is what makes the declared overlap the exact overlap. A
+/// grid the operator asked for divides the overhang evenly across the sheets
+/// they asked for instead, so every one of them carries content it alone
+/// carries and the declared overlap becomes the narrowest seam rather than
+/// every seam. Even division also keeps every origin inside the content, which
+/// a fixed step cannot do once the grid is wider than the content requires.
+fn tile_axis(overhang: u64, declared_step: u64, tiles: u16, chosen_grid: bool) -> (u64, Vec<u64>) {
+    let divisions = u64::from(tiles.saturating_sub(1));
+    if divisions == 0 {
+        return (declared_step, vec![0]);
+    }
+    if !chosen_grid {
+        return (
+            declared_step,
+            (0..u64::from(tiles))
+                .map(|index| index * declared_step)
+                .collect(),
+        );
+    }
+    // Split into whole and remainder rather than widening: `whole * index` can
+    // never pass `overhang`, and the remainder term is bounded by the divisor.
+    let whole = overhang / divisions;
+    let remainder = overhang % divisions;
+    (
+        overhang.div_ceil(divisions),
+        (0..u64::from(tiles))
+            .map(|index| whole * index + remainder * index / divisions)
+            .collect(),
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreviewPagination {
     geometry: ValidatedPageGeometry,
@@ -1256,6 +1308,10 @@ pub struct PreviewPagination {
     scaled_content: ContentExtent,
     columns: u16,
     rows: u16,
+    /// The widest gap between adjacent tile origins on each axis, which is the
+    /// seam that governs how much a taped joint has to spare.
+    column_step: Length,
+    row_step: Length,
     pages: Vec<PreviewPage>,
     sections: Vec<HardcopyContentSection>,
 }
@@ -1298,6 +1354,8 @@ impl PreviewPagination {
         }
         let required_columns = minimum_tiles(scaled_content.width.0, viewport.width.0, overlap)?;
         let required_rows = minimum_tiles(scaled_content.height.0, viewport.height.0, overlap)?;
+        let horizontal_overhang = scaled_content.width.0.saturating_sub(viewport.width.0);
+        let vertical_overhang = scaled_content.height.0.saturating_sub(viewport.height.0);
         let (columns, rows) = match setup.tiling.mode {
             TilingMode::Automatic => (required_columns, required_rows),
             TilingMode::SinglePage => {
@@ -1310,12 +1368,22 @@ impl PreviewPagination {
                 (1, 1)
             }
             TilingMode::Manual { columns, rows } => {
-                if columns != required_columns || rows != required_rows {
+                if columns < required_columns || rows < required_rows {
                     return Err(HardcopyError::ManualTilingDoesNotCover {
                         columns,
                         rows,
                         required_columns,
                         required_rows,
+                    });
+                }
+                let maximum_columns = fillable_tiles(horizontal_overhang);
+                let maximum_rows = fillable_tiles(vertical_overhang);
+                if columns > maximum_columns || rows > maximum_rows {
+                    return Err(HardcopyError::ManualTilingExceedsContent {
+                        columns,
+                        rows,
+                        maximum_columns,
+                        maximum_rows,
                     });
                 }
                 (columns, rows)
@@ -1325,13 +1393,24 @@ impl PreviewPagination {
         if page_count == 0 || page_count > MAX_PREVIEW_PAGES {
             return Err(HardcopyError::TooManyPages(page_count));
         }
-        let step_x = viewport.width.0 - overlap;
-        let step_y = viewport.height.0 - overlap;
+        let chosen_grid = matches!(setup.tiling.mode, TilingMode::Manual { .. });
+        let (step_x, column_origins) = tile_axis(
+            horizontal_overhang,
+            viewport.width.0 - overlap,
+            columns,
+            chosen_grid,
+        );
+        let (step_y, row_origins) = tile_axis(
+            vertical_overhang,
+            viewport.height.0 - overlap,
+            rows,
+            chosen_grid,
+        );
         let mut pages = Vec::with_capacity(page_count as usize);
         for row in 0..rows {
             for column in 0..columns {
-                let x = u64::from(column) * step_x;
-                let y = u64::from(row) * step_y;
+                let x = column_origins[usize::from(column)];
+                let y = row_origins[usize::from(row)];
                 let width = viewport.width.0.min(scaled_content.width.0 - x);
                 let height = viewport.height.0.min(scaled_content.height.0 - y);
                 let number = u32::from(row) * u32::from(columns) + u32::from(column) + 1;
@@ -1358,6 +1437,8 @@ impl PreviewPagination {
             scaled_content,
             columns,
             rows,
+            column_step: Length(step_x),
+            row_step: Length(step_y),
             pages,
             sections: Vec::new(),
         })
@@ -1376,6 +1457,7 @@ impl PreviewPagination {
         let mut pages = Vec::new();
         let mut first_geometry = None;
         let mut first_scale = None;
+        let mut first_steps = None;
         let mut scaled_right = 0_u64;
         let mut scaled_bottom = 0_u64;
         for (index, section) in sections.iter().copied().enumerate() {
@@ -1402,6 +1484,7 @@ impl PreviewPagination {
             if first_geometry.is_none() {
                 first_geometry = Some(child.geometry);
                 first_scale = Some(child.scale);
+                first_steps = Some((child.column_step, child.row_step));
             }
             let scaled_origin_x = scale_floor(origin_x.0, child.scale)?;
             let scaled_origin_y = scale_floor(origin_y.0, child.scale)?;
@@ -1443,6 +1526,9 @@ impl PreviewPagination {
         }
         let aggregate_rows = u16::try_from(pages.len())
             .map_err(|_| HardcopyError::TooManyPages(pages.len() as u32))?;
+        let first_step = first_steps.ok_or(HardcopyError::InvalidContentSections(
+            "aggregate has no tile step",
+        ))?;
         Ok(Self {
             geometry: first_geometry.ok_or(HardcopyError::InvalidContentSections(
                 "aggregate has no page geometry",
@@ -1457,6 +1543,8 @@ impl PreviewPagination {
             // ordered page sequence as one column.
             columns: 1,
             rows: aggregate_rows,
+            column_step: first_step.0,
+            row_step: first_step.1,
             pages,
             sections: sections.to_vec(),
         })
@@ -1467,6 +1555,14 @@ impl PreviewPagination {
         self.geometry
     }
 
+    /// The scale the plan resolved. Two of the scale modes derive it from the
+    /// page rather than take it from the operator, so this is the only place
+    /// the number they chose can be read back.
+    #[must_use]
+    pub const fn scale(&self) -> ScaleRatio {
+        self.scale
+    }
+
     #[must_use]
     pub const fn columns(&self) -> u16 {
         self.columns
@@ -1475,6 +1571,27 @@ impl PreviewPagination {
     #[must_use]
     pub const fn rows(&self) -> u16 {
         self.rows
+    }
+
+    /// The narrowest seam this layout leaves between adjacent sheets, or `None`
+    /// where the grid has no seam. A grid the operator asked for absorbs its
+    /// surplus here, so the declared overlap is the floor and this is the value
+    /// that reaches the paper. Sections carry independent local grids, so their
+    /// aggregate page sequence has no single seam to report.
+    #[must_use]
+    pub fn tile_overlap(&self) -> Option<Length> {
+        if !self.sections.is_empty() {
+            return None;
+        }
+        let viewport = self.geometry.content_rect;
+        let horizontal =
+            (self.columns > 1).then(|| viewport.width.0.saturating_sub(self.column_step.0));
+        let vertical = (self.rows > 1).then(|| viewport.height.0.saturating_sub(self.row_step.0));
+        match (horizontal, vertical) {
+            (Some(across), Some(down)) => Some(Length(across.min(down))),
+            (Some(only), None) | (None, Some(only)) => Some(Length(only)),
+            (None, None) => None,
+        }
     }
 
     #[must_use]
@@ -2356,19 +2473,30 @@ pub enum HardcopyError {
     ScaledGeometryOverflow,
     #[error("pagination requires {0} pages, above the hard limit")]
     TooManyPages(u32),
-    #[error("single-page mode needs a {required_columns} by {required_rows} page grid")]
+    #[error(
+        "single-page mode needs a {required_columns} by {required_rows} page grid at this scale; the fit-to-printable-area scale is what puts this content on one page"
+    )]
     SinglePageOverflow {
         required_columns: u16,
         required_rows: u16,
     },
     #[error(
-        "manual {columns} by {rows} tiling does not equal the required {required_columns} by {required_rows} grid"
+        "manual {columns} by {rows} tiling is smaller than the {required_columns} by {required_rows} grid this content covers; ask for a larger grid, or scale the content down to reach fewer pages"
     )]
     ManualTilingDoesNotCover {
         columns: u16,
         rows: u16,
         required_columns: u16,
         required_rows: u16,
+    },
+    #[error(
+        "manual {columns} by {rows} tiling asks for more sheets than the content can fill; at most {maximum_columns} by {maximum_rows} sheets carry content of their own at this scale"
+    )]
+    ManualTilingExceedsContent {
+        columns: u16,
+        rows: u16,
+        maximum_columns: u16,
+        maximum_rows: u16,
     },
     #[error("could not serialize canonical hardcopy content: {0}")]
     CanonicalSerialization(String),

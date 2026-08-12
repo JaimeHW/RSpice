@@ -256,6 +256,12 @@ pub(super) fn page_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAc
             field(ui, "Scale", |ui| {
                 let selected = if scale_kind == 2 {
                     format!("Custom · {}%", draft.custom_scale_percent)
+                } else if let Some(resolved) = resolved_scale(draft) {
+                    // The two fit modes derive the number the drawing is
+                    // published at, and the closed control is where a derived
+                    // number stops being a silent one. The list below still
+                    // names the modes in full.
+                    resolved
                 } else {
                     scale_label(scale_kind).to_owned()
                 };
@@ -308,15 +314,21 @@ pub(super) fn page_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAc
                 let selected = match tiling_kind {
                     0 => automatic.clone(),
                     1 => "Single page".to_owned(),
-                    _ => "Manual rows and columns".to_owned(),
+                    _ => manual_label(draft),
                 };
                 egui::ComboBox::from_id_salt("hardcopy-pagination")
                     .selected_text(selected)
                     .width(ui.available_width())
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut tiling_kind, 0, automatic);
-                        ui.selectable_value(&mut tiling_kind, 1, "Single page");
-                        ui.selectable_value(&mut tiling_kind, 2, "Manual rows and columns");
+                        ui.selectable_value(&mut tiling_kind, 1, "Single page")
+                            .on_hover_text(
+                                "Refuse to publish rather than spread this drawing over more than one sheet. Choose the fit-to-printable-area scale to make it fit.",
+                            );
+                        ui.selectable_value(&mut tiling_kind, 2, "Manual rows and columns")
+                            .on_hover_text(
+                                "Publish on exactly this grid. Asking for more sheets than the drawing needs widens every seam past the tile overlap below.",
+                            );
                         if tiling_kind == 2 {
                             ui.separator();
                             ui.label("Manual page grid");
@@ -386,6 +398,48 @@ pub(super) fn page_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAc
         action = BodyAction::CustomPaper;
     }
     action
+}
+
+/// The closed reading of a scale mode that derives its own percentage. Kept
+/// short because the control has to say it inside one line of the narrow
+/// column; the list it opens carries the full names.
+fn resolved_scale(draft: &HardcopyDialogState) -> Option<String> {
+    let mode = match draft.scale {
+        ScaleMode::FitPrintableArea => "Fit page",
+        ScaleMode::FitWidth => "Fit width",
+        ScaleMode::EngineeringOneToOne | ScaleMode::CustomPercent { .. } => return None,
+    };
+    let tenths = draft
+        .preview_plan
+        .as_ref()?
+        .pagination()
+        .scale()
+        .hundredths_percent()
+        / 10;
+    Some(format!("{mode} · {}.{}%", tenths / 10, tenths % 10))
+}
+
+/// The grid the fields ask for, and the seam it actually leaves. A grid wider
+/// than the drawing needs spends the surplus on overlap, so the tile-overlap
+/// field beside this one states a floor and this states what reaches the paper.
+fn manual_label(draft: &HardcopyDialogState) -> String {
+    let grid = format!("Manual · {} × {}", draft.manual_columns, draft.manual_rows);
+    let Some(seam) = draft
+        .preview_plan
+        .as_ref()
+        .filter(|_| matches!(draft.tiling, TilingMode::Manual { .. }))
+        .and_then(|plan| plan.pagination().tile_overlap())
+    else {
+        return format!("{grid} pages");
+    };
+    let unit = match draft.display_unit {
+        LengthUnit::Inches => "in",
+        LengthUnit::Millimetres => "mm",
+    };
+    format!(
+        "{grid} · seam {} {unit}",
+        format_length_local(seam, draft.display_unit)
+    )
 }
 
 /// 03 — how much of the authored drawing sheet is drawn.

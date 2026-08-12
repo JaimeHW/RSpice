@@ -334,11 +334,29 @@ impl ScaleMode {
     }
 }
 
+/// How many sheets the scaled content is spread across.
+///
+/// Scaling belongs to [`ScaleMode`] and is not repeated here: fitting a drawing
+/// onto one sheet is [`ScaleMode::FitPrintableArea`], so a tiling mode that
+/// derived its own scale would be a second spelling of it and would leave two
+/// settings writing one number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "kebab-case")]
 pub enum TilingMode {
+    /// The fewest sheets that cover the content, each advancing by exactly the
+    /// declared overlap and the shortfall left on the last sheet.
     Automatic,
+    /// Refuse to spread the content at all. A guard over the scale rather than
+    /// a scale of its own: it publishes what `Automatic` would and fails closed
+    /// where `Automatic` would quietly reach for a second sheet.
     SinglePage,
+    /// Spread the content across exactly this grid. Any grid that covers the
+    /// content is legal, so asking for more sheets than the minimum is how an
+    /// operator buys wider seams for trimming and taping; the surplus is
+    /// absorbed by dividing the overhang evenly, which makes the declared
+    /// overlap a floor. A grid below the minimum is refused rather than
+    /// silently clipped, and so is one so fine that a sheet would repeat its
+    /// neighbour.
     Manual { columns: u16, rows: u16 },
 }
 
