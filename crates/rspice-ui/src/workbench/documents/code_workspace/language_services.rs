@@ -141,6 +141,37 @@ pub(crate) enum LanguageToolView {
     CodeActions,
 }
 
+impl LanguageToolView {
+    /// Every view the index can answer, in the order the tools surface offers
+    /// them: what the document declares, what the caret is on, then what the
+    /// whole project says about it.
+    pub(crate) const ALL: [Self; 9] = [
+        Self::DocumentSymbols,
+        Self::Completion,
+        Self::Hover,
+        Self::SignatureHelp,
+        Self::Definitions,
+        Self::Declarations,
+        Self::References,
+        Self::WorkspaceSymbols,
+        Self::CodeActions,
+    ];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::DocumentSymbols => "Document symbols",
+            Self::Completion => "Completion",
+            Self::Hover => "Hover",
+            Self::SignatureHelp => "Signature help",
+            Self::Definitions => "Definitions",
+            Self::Declarations => "Declarations",
+            Self::References => "References",
+            Self::WorkspaceSymbols => "Workspace symbols",
+            Self::CodeActions => "Code actions",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct CodeLanguageToolsState {
     pub index: LanguageServiceIndex,

@@ -262,35 +262,25 @@ fn outline_row(ui: &mut Ui, row: &SourceOutlineRow) -> bool {
     )
 }
 
-/// The id the visible page's document well gives its editor.
-///
-/// It has to be reconstructed exactly, including the bundle identity the
-/// Verilog-A well mixes in, or the reveal request lands on an editor that is
-/// not on screen and the row silently does nothing.
 fn code_editor_id(
     app: &RSpiceApp,
     language: ProjectSourceLanguage,
     active_path: &str,
 ) -> Option<egui::Id> {
-    match language {
-        ProjectSourceLanguage::VerilogA => {
-            let owner = ProjectSourceOwner::code_workspace(language);
-            let bundle_id = app
-                .state
-                .workspace
-                .project_sources
-                .bundle_for_owner(&owner)
-                .map(crate::state::ProjectSourceBundle::id)?;
-            Some(egui::Id::new((
-                "workbench.veriloga.source",
-                bundle_id,
-                active_path,
-            )))
-        }
-        ProjectSourceLanguage::RSpiceAutomation => {
-            Some(egui::Id::new(("workbench.automation.source", active_path)))
-        }
-    }
+    let owner = ProjectSourceOwner::code_workspace(language);
+    let bundle_id = app
+        .state
+        .workspace
+        .project_sources
+        .bundle_for_owner(&owner)
+        .map(crate::state::ProjectSourceBundle::id)?;
+    Some(
+        crate::workbench::documents::code_workspace::source_editor_id(
+            language,
+            bundle_id,
+            active_path,
+        ),
+    )
 }
 
 #[cfg(test)]

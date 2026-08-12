@@ -698,7 +698,11 @@ impl Command {
             // workspace: from Verilog-A or Automation they would set a dialog
             // open with nothing on screen, and it would then appear
             // unprompted the moment the user came back.
-            Self::FindCodeDocument => netlist_page_is_visible(state),
+            // Find now exists on all three code pages: the netlist page has
+            // its own deck find, and the two language pages search their
+            // bundle. It was restricted to the netlist page only while the
+            // bundle search had no surface.
+            Self::FindCodeDocument => state.workbench.workspace == Workspace::Netlist,
             Self::ValidateCodeDocument => {
                 netlist_page_is_visible(state)
                     && state.ui.netlist.active_document
@@ -712,6 +716,16 @@ impl Command {
                 state.workbench.workspace == Workspace::Netlist
                     && crate::workbench::app::source_document_dialog_is_available(state)
             }
+            Self::SourceLanguageTools => {
+                state.workbench.workspace == Workspace::Netlist
+                    && crate::workbench::app::language_tools_are_available(state)
+            }
+            // This gate was written for the compile command and never
+            // attached, so the button stayed enabled with no bundle, no
+            // selected source, an empty root, a compile already running, or a
+            // read-only project -- and then the surface refused the request it
+            // had just been handed.
+            Self::CompileVerilogA => code_context::resolve_veriloga_compile(app).is_some(),
             Self::CompareGeneratedRevisions => {
                 netlist_page_is_visible(state)
                     && !state.ui.netlist.generated_history.is_empty()
@@ -1643,7 +1657,14 @@ impl Command {
                 crate::workbench::menu_bar::action_view_netlist(&mut app.state);
                 activate_workspace(app, Workspace::Netlist);
             }
-            Self::FindCodeDocument => app.state.ui.netlist.find.open = true,
+            Self::FindCodeDocument => {
+                if let Err(error) =
+                    crate::workbench::documents::code_workspace::open_active_source_search(app)
+                {
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+                }
+            }
             Self::ValidateCodeDocument => {
                 crate::workbench::workflows::netlist_workflow::validate_visible_netlist_source(app);
             }
@@ -1651,6 +1672,12 @@ impl Command {
                 if let Err(error) =
                     crate::workbench::app::open_source_document_dialog(&mut app.state)
                 {
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+                }
+            }
+            Self::SourceLanguageTools => {
+                if let Err(error) = crate::workbench::app::open_active_language_tools(app) {
                     app.state
                         .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
                 }

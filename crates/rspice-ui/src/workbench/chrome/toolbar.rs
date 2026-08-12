@@ -1175,14 +1175,7 @@ fn netlist_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 "Open model qualification",
                 layout,
             );
-            context_separator(ui, layout);
-            toolbar_icon_command(
-                ui,
-                app,
-                Command::ManageSourceDocument,
-                WorkbenchIcon::Folder,
-                layout,
-            );
+            source_page_tools(ui, app, layout);
         }
         CodeWorkspacePage::Automation => {
             toolbar_text_command(
@@ -1193,17 +1186,38 @@ fn netlist_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 "Automation console",
                 layout,
             );
-            context_separator(ui, layout);
-            toolbar_icon_command(
-                ui,
-                app,
-                Command::ManageSourceDocument,
-                WorkbenchIcon::Folder,
-                layout,
-            );
+            source_page_tools(ui, app, layout);
         }
     }
     toolbar_icon_command(ui, app, Command::RunSimulation, WorkbenchIcon::Run, layout);
+}
+
+/// The three tools every bundle-backed source page shares: navigate the index,
+/// manage the document, search the closure. Both language pages carry the same
+/// group in the same order, so it is written once.
+fn source_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    context_separator(ui, layout);
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::SourceLanguageTools,
+        WorkbenchIcon::Target,
+        layout,
+    );
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::ManageSourceDocument,
+        WorkbenchIcon::Folder,
+        layout,
+    );
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::FindCodeDocument,
+        WorkbenchIcon::Search,
+        layout,
+    );
 }
 
 /// The netlist page's set follows the document it is showing: a generated

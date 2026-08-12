@@ -135,6 +135,10 @@ pub(crate) use dialogs::source_document::{
     open_source_document_dialog, source_document_dialog_is_available,
 };
 
+pub(crate) use dialogs::source_language_tools::{
+    language_tools_are_available, open_active_language_tools,
+};
+
 pub(crate) use dialogs::create_model_bound_symbol::{
     CreateModelBoundSymbolDialogState, open_create_model_bound_symbol_dialog,
 };
@@ -765,6 +769,8 @@ impl RSpiceApp {
         self.render_design_review_comments_dialog(ctx);
         self.render_project_revision_history_dialog(ctx);
         self.render_source_document_dialog(ctx);
+        self.render_source_find_dialog(ctx);
+        self.render_source_language_tools_dialog(ctx);
         self.render_create_model_bound_symbol_dialog(ctx);
         self.render_symbol_definition_dialogs(ctx);
         self.render_configuration_sets_dialog(ctx);

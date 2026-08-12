@@ -36,8 +36,9 @@ pub use editor::{
     show_code_document_interaction_versioned, show_code_document_with_debug_versioned,
 };
 pub(crate) use language_services::{
-    CodeLanguageToolsState, LanguageToolView, SourceIndexCache, SourceOutlineRow, document_outline,
-    open_language_tools,
+    CodeLanguageToolsState, LanguageToolView, SourceCodeAction, SourceIndexCache, SourceOutlineRow,
+    SourceSymbol, commit_language_code_action, commit_language_completion, commit_language_rename,
+    document_outline, open_language_tools,
 };
 pub use page::{
     AutomationArtifactStore, AutomationBreakpoint, AutomationBreakpointKind, AutomationDebugPhase,
@@ -59,7 +60,10 @@ pub(crate) use source_files::{
     source_bundle_document_is_editable, source_document_is_editable,
     source_file_mutation_block_reason,
 };
-pub(crate) use source_search::open_source_search;
+pub(crate) use source_search::{
+    CodeSourceSearchResults, SOURCE_SEARCH_RESULT_LIMIT, commit_source_search_replace,
+    open_active_source_search, open_source_search, source_search_results,
+};
 pub(crate) use veriloga::{
     SelectedVerilogASource, active_veriloga_file_path, commit_veriloga_compile_dialog,
     compile_project_bundle_receipt, compile_project_bundle_virtual_for_provenance,
@@ -142,6 +146,27 @@ pub(crate) fn active_bundle_path(
             .bundle_for_owner(&owner)
             .map(|bundle| bundle.root().logical_path().to_owned())
     })
+}
+
+/// The id the document well gives the editor showing this bundle file.
+///
+/// It has to match what the well constructs, including the bundle identity the
+/// Verilog-A well mixes in, or a reveal request lands on an editor that is not
+/// on screen and the caller silently does nothing. One owner, so a navigator
+/// row and a search result cannot disagree about where they are pointing.
+pub(crate) fn source_editor_id(
+    language: crate::state::ProjectSourceLanguage,
+    bundle_id: crate::state::ProjectSourceId,
+    logical_path: &str,
+) -> egui::Id {
+    match language {
+        crate::state::ProjectSourceLanguage::VerilogA => {
+            egui::Id::new(("workbench.veriloga.source", bundle_id, logical_path))
+        }
+        crate::state::ProjectSourceLanguage::RSpiceAutomation => {
+            egui::Id::new(("workbench.automation.source", logical_path))
+        }
+    }
 }
 
 /// The netlist page names the artifact it is editing. A generated primary has

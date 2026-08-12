@@ -190,6 +190,7 @@ pub enum Command {
     FindCodeDocument,
     ValidateCodeDocument,
     ManageSourceDocument,
+    SourceLanguageTools,
     CompareGeneratedRevisions,
     ClearResults,
     ToggleLinkedCursors,
@@ -621,6 +622,11 @@ impl Command {
             Self::ManageSourceDocument => spec(
                 "manage-source-document",
                 "Manage source document\u{2026}",
+                "Code",
+            ),
+            Self::SourceLanguageTools => spec(
+                "source-language-tools",
+                "Source navigation and language tools\u{2026}",
                 "Code",
             ),
             Self::CompareGeneratedRevisions => spec(
@@ -1120,6 +1126,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::FindCodeDocument,
     Command::ValidateCodeDocument,
     Command::ManageSourceDocument,
+    Command::SourceLanguageTools,
     Command::CompareGeneratedRevisions,
     Command::ExportWaveformsCsv,
     Command::ClearResults,

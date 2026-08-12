@@ -54,16 +54,6 @@ pub(crate) struct CodeCommandContext {
     pub platform: CommandPlatform,
 }
 
-impl CodeCommandContext {
-    #[must_use]
-    pub(crate) fn is_netlist_root(&self) -> bool {
-        matches!(
-            self.document_kind,
-            CodeDocumentKind::GeneratedNetlist | CodeDocumentKind::OwnedNetlist
-        )
-    }
-}
-
 #[must_use]
 pub(crate) fn resolve(app: &RSpiceApp) -> Option<CodeCommandContext> {
     if app.state.workbench.workspace != Workspace::Netlist
