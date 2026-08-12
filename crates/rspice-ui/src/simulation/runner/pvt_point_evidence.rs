@@ -20,7 +20,7 @@ use crate::simulation::execution::{
 use crate::simulation::multi_run::{AnalysisRunType, AnalysisSpec};
 use crate::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
-    SimulationRun, SimulationRunIntent,
+    SimulationRun, SimulationRunIntent, SimulationRunProvenance,
 };
 
 use super::SimulationError;
@@ -31,6 +31,11 @@ use super::SimulationError;
 /// A point that fails to solve is retained as a failed result rather than
 /// dropped, because a corner that did not converge is the answer to a
 /// specification asked about that corner.
+///
+/// The run is sealed with the dispatch's own receipt, the way the controller
+/// seals one. Without it a test could not tell whether the results it is
+/// judging are an authentic ordered prefix of the authorized task graph — which
+/// is the property a project save and reload depends on.
 pub(crate) fn run_corner_declaration(
     deck: &str,
     contract: crate::services::simulation_runner::CornerRunConfig,
@@ -96,7 +101,19 @@ pub(crate) fn run_corner_declaration(
         .map_err(|error| error.to_string())?;
 
     let bridge = crate::simulation::EngineBridge::new();
+    // Points are retained through the controller's own conversion. A hand-built
+    // result would decide for itself what evidence a point keeps, and the
+    // corner family is assembled from exactly that evidence.
+    let retainer = crate::simulation::SimulationController::new();
+    let mut corner_families = crate::simulation::corner_family::CornerFamilyRegistry::default();
+    for task in dispatch.tasks() {
+        corner_families.register(task);
+    }
+    let receipt = dispatch
+        .prepared_run_receipt(AnalysisResultSourceDomain::SimulationPlan)
+        .map_err(|error| error.to_string())?;
     let mut run = SimulationRun::new(1);
+    run.restore_provenance(SimulationRunProvenance::Prepared(receipt))?;
     for (index, task) in dispatch.into_tasks().into_iter().enumerate() {
         let provenance = AnalysisResultProvenance::new_with_authored_source_domain(
             AnalysisResultSourceDomain::SimulationPlan,
@@ -110,6 +127,24 @@ pub(crate) fn run_corner_declaration(
         .with_pvt_point(task.pvt_point().cloned());
         let analysis_type = analysis_type_for(task.spec());
         let label = task.label().to_owned();
+        let id = u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1);
+
+        // The declaration's own turn assembles the family from the points that
+        // already ran, exactly as the controller does. It costs no engine call,
+        // which is the whole point of it still being a task.
+        if matches!(task.spec(), AnalysisSpec::Corner) {
+            let analysis = match corner_families.family_for(task.instance_id(), &run) {
+                Ok(result) => retainer.convert_to_analysis_result_with_metadata_owned(
+                    result,
+                    AnalysisType::Corner,
+                    &label,
+                ),
+                Err(error) => AnalysisResult::failed(id, AnalysisType::Corner, label, error),
+            };
+            run.add_analysis(analysis.with_provenance(provenance));
+            continue;
+        }
+
         let resolved = task
             .resolve_dependency_artifacts(&HashMap::new())
             .map_err(|error| error.to_string())?;
@@ -130,16 +165,12 @@ pub(crate) fn run_corner_declaration(
             ),
         };
 
-        let id = u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1);
         let analysis = match outcome {
-            Ok(result) => {
-                let retained = AnalysisResult::new(id, analysis_type, label)
-                    .with_measurements(measurements_of(&result));
-                match corner_family_of(&result) {
-                    Some(family) => retained.with_family_metadata(family),
-                    None => retained,
-                }
-            }
+            Ok(result) => retainer.convert_to_analysis_result_with_metadata_owned(
+                result,
+                analysis_type,
+                &label,
+            ),
             Err(SimulationError::Aborted) => {
                 return Err("corner evidence run was aborted".to_owned());
             }
@@ -147,53 +178,15 @@ pub(crate) fn run_corner_declaration(
         };
         run.add_analysis(analysis.with_provenance(provenance));
     }
+    // Sealed the way the controller seals a finished batch, so the run a test
+    // receives is one a project could actually persist.
+    run.mark_running()?;
+    run.finish_lifecycle(if run.success {
+        crate::state::SimulationRunLifecycle::Completed
+    } else {
+        crate::state::SimulationRunLifecycle::Failed
+    })?;
     Ok(run)
-}
-
-/// The `.MEAS` results a finished analysis retained.
-///
-/// Only the families that evaluate measurement statements carry any; the
-/// corner family result is one collapsed scalar per node and has none, which
-/// is the gap the per-point expansion exists to close.
-fn measurements_of(
-    result: &crate::simulation::SimulationResult,
-) -> Vec<rspice_core::MeasureResult> {
-    use crate::simulation::SimulationResult;
-    match result {
-        SimulationResult::Transient { measurements, .. }
-        | SimulationResult::Ac { measurements, .. }
-        | SimulationResult::DcSweep { measurements, .. } => measurements.clone(),
-        _ => Vec::new(),
-    }
-}
-
-/// The plotting family a corner declaration still produces after expansion.
-///
-/// Mirrors the controller's own conversion so a test can ask whether the
-/// corner plot survived without reaching into the controller.
-fn corner_family_of(
-    result: &crate::simulation::SimulationResult,
-) -> Option<crate::state::AnalysisResultFamilyMetadata> {
-    let crate::simulation::SimulationResult::Corner {
-        x_values,
-        x_label,
-        x_unit,
-        temperatures_c,
-        corner_labels,
-        num_failures,
-        ..
-    } = result
-    else {
-        return None;
-    };
-    Some(crate::state::AnalysisResultFamilyMetadata::Corner {
-        x_values: x_values.clone(),
-        x_label: x_label.clone(),
-        x_unit: x_unit.clone(),
-        temperatures_c: temperatures_c.clone(),
-        corner_labels: corner_labels.clone(),
-        failed_corners: *num_failures,
-    })
 }
 
 fn analysis_type_for(spec: &AnalysisSpec) -> AnalysisType {

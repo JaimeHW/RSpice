@@ -4,7 +4,7 @@
 //! which part of the declaration could not be expanded.
 
 use rspice_core::abort_signal::AbortSignal;
-use rspice_core::netlist::{AnalysisCommand, StepSweep};
+use rspice_core::netlist::StepSweep;
 use rspice_core::{ResourceKind, ResourceLimits, Value};
 use std::fmt;
 
@@ -288,49 +288,6 @@ fn expand_step_sweep_values_impl(
         }
         StepSweep::Data { .. } => Ok(Vec::new()),
     }
-}
-
-pub(super) fn extract_temp_points_with_abort(
-    netlist: &rspice_core::Netlist,
-    max_batch_runs: usize,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Vec<Value>> {
-    let mut temperatures: Vec<Value> = Vec::new();
-    let mut sorted_temperatures: Vec<Value> = Vec::new();
-    for (analysis_index, analysis) in netlist.analyses.iter().enumerate() {
-        poll_periodically(abort, analysis_index)?;
-        if let AnalysisCommand::Temp {
-            temperatures: temps,
-        } = analysis
-        {
-            for (temp_index, &temp) in temps.iter().enumerate() {
-                poll_periodically(abort, temp_index)?;
-                let insertion = sorted_temperatures
-                    .partition_point(|existing| existing.total_cmp(&temp).is_lt());
-                let already_present = insertion
-                    .checked_sub(1)
-                    .and_then(|index| sorted_temperatures.get(index))
-                    .is_some_and(|existing| (*existing - temp).abs() < 1e-15)
-                    || sorted_temperatures
-                        .get(insertion)
-                        .is_some_and(|existing| (*existing - temp).abs() < 1e-15);
-                if !already_present {
-                    let requested = temperatures.len().saturating_add(1);
-                    if requested > max_batch_runs {
-                        return Err(ServiceRunError::resource_limit(
-                            ResourceKind::BatchRuns,
-                            requested,
-                            max_batch_runs,
-                        ));
-                    }
-                    temperatures.push(temp);
-                    sorted_temperatures.insert(insertion, temp);
-                }
-            }
-        }
-    }
-    super::super::error::ensure_not_aborted(abort)?;
-    Ok(temperatures)
 }
 
 #[cfg(test)]

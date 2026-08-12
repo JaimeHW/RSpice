@@ -194,7 +194,7 @@ pub enum CornerBaseMode {
 }
 
 impl CornerBaseMode {
-    pub(super) fn metric_label(&self) -> CornerMetricLabel {
+    pub(crate) fn metric_label(&self) -> CornerMetricLabel {
         match self {
             Self::Ac { .. } => CornerMetricLabel::AcMagnitude,
             _ => CornerMetricLabel::Voltage,
@@ -460,14 +460,16 @@ impl CornerPoint {
     }
 }
 
+/// One scalar per node at a single swept point, in a node order the caller
+/// keeps identical across points: the mappers pair names and values by index.
 #[derive(Debug, Clone)]
-pub(super) struct SweepPointResult {
-    pub(super) node_names: Vec<String>,
-    pub(super) node_values: Vec<Value>,
+pub(crate) struct SweepPointResult {
+    pub(crate) node_names: Vec<String>,
+    pub(crate) node_values: Vec<Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum CornerMetricLabel {
+pub(crate) enum CornerMetricLabel {
     Voltage,
     AcMagnitude,
 }
@@ -479,24 +481,6 @@ impl CornerMetricLabel {
             Self::AcMagnitude => format!("|V({})|", node_name),
         }
     }
-}
-
-/// Temperature/process/voltage corner sweep data.
-#[derive(Debug, Clone)]
-pub struct CornerData {
-    /// X-axis values for each executed corner point.
-    pub x_values: Vec<Value>,
-    /// X-axis label for corner traces.
-    pub x_label: String,
-    /// X-axis unit for corner traces.
-    pub x_unit: String,
-    /// Temperature for each executed corner point.
-    pub temperatures_c: Vec<Value>,
-    /// Human-readable corner labels in execution order.
-    pub corner_labels: Vec<String>,
-    /// Per-node values for each corner point.
-    pub voltages: Vec<(String, Vec<Value>)>,
-    pub num_failures: usize,
 }
 
 #[cfg(test)]

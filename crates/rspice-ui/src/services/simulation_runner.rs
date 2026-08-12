@@ -91,15 +91,13 @@ pub use sparameter::{
 pub use stb::run_stb_analysis_with_sweep_and_source_path_and_abort;
 pub use sweeps::{
     CornerBaseMode, CornerFrequencySweep, CornerModelBinding, CornerPoint, CornerProcess,
-    CornerRunConfig, TempRunConfig, run_corner_analysis_with_config_and_source_path_and_abort,
-    run_corner_analysis_with_source_path_and_abort,
-    run_parametric_analysis_with_config_and_source_path_and_abort,
+    CornerRunConfig, TempRunConfig, run_parametric_analysis_with_config_and_source_path_and_abort,
     run_parametric_analysis_with_source_path_and_abort,
 };
 pub(crate) use sweeps::{
-    REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END, apply_voltage_corner,
-    expand_corner_pvt_points, expand_step_sweep_values, infer_nominal_supply_voltage,
-    materialize_corner_process_source,
+    REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END, SweepPointResult,
+    apply_voltage_corner, expand_corner_pvt_points, expand_step_sweep_values,
+    infer_nominal_supply_voltage, map_corner_results, materialize_corner_process_source,
 };
 pub use tf::{
     TfAccuracy, TfNormalization, TfQuantity, TfRunConfig, run_tf_analysis_with_config_and_abort,

@@ -678,19 +678,35 @@ fn pvt_metadata_counts_the_exact_full_corner_matrix_declared_by_one_task() {
     let snapshot = PreparedRunSnapshot::new(matrix).expect("full corner matrix snapshot");
     assert_eq!(snapshot.pvt_points.len(), 8);
     assert_eq!(snapshot.metadata().pvt_point_count, 8);
-    assert_eq!(
-        snapshot.tasks.len(),
-        9,
-        "the declaration stays one task and each of its eight points earns another"
-    );
+    // Nine tasks for eight declared points: the eight solves, then the
+    // declaration, whose turn assembles the family and reaches no engine. The
+    // declaration used to sit beside the points and solve all eight again
+    // inside its own executor, so the sweep cost sixteen solves. What counts
+    // the solves is the number of tasks carrying a point.
+    assert_eq!(snapshot.tasks.len(), 9);
     assert_eq!(
         snapshot
             .tasks
             .iter()
-            .filter(|task| matches!(task.task.spec, AnalysisSpec::Corner))
+            .filter(|task| task.corner_point.is_some())
             .count(),
-        1
+        8,
+        "one solve per declared point, and a ninth task that solves nothing"
     );
+    assert!(
+        snapshot
+            .tasks
+            .iter()
+            .take(8)
+            .all(|task| task.corner_point.is_some() && task.pvt_point.is_some()),
+        "every solving task is one attributed point of the declaration"
+    );
+    // Last, not first. Retained results must stay an ordered prefix of this
+    // list even when a run stops part-way, and the assembly cannot produce a
+    // result before its points have produced theirs.
+    let assembly = snapshot.tasks.last().expect("nine expanded tasks");
+    assert!(matches!(assembly.task.spec, AnalysisSpec::Corner));
+    assert!(assembly.corner_point.is_none() && assembly.pvt_point.is_none());
 }
 
 /// A diagonal sweep pairs the axes index by index, and axes of different
@@ -1424,21 +1440,57 @@ fn a_transient_corner_run_expands_into_one_task_per_declared_point() {
         );
     }
 
-    let corner_declaration = snapshot
+    // The declaration keeps its own task and its own identity, but it is no
+    // longer a solve: it comes last, after the two points, and its turn
+    // assembles the family from them.
+    assert_eq!(snapshot.tasks.len(), point_tasks.len() + 1);
+    let unexpanded = prepared("corner", "Corner", transient_corner_task());
+    assert!(
+        point_tasks
+            .iter()
+            .all(|task| task.authored_instance_id == unexpanded.instance_id
+                && task.instance_id != unexpanded.instance_id),
+        "a point carries the declaration's authorship without taking its identity"
+    );
+    let assembly = snapshot.tasks.last().expect("the declaration is retained");
+    assert_eq!(assembly.instance_id, unexpanded.instance_id);
+    assert_eq!(assembly.config_digest, unexpanded.config_digest);
+    assert!(matches!(assembly.task.spec, AnalysisSpec::Corner));
+    assert_eq!(assembly.executable_netlist_override, None);
+}
+
+/// The declaration produces no execution artifact, so anything ordered after it
+/// binds to the last *point* — the task whose completion means the declared
+/// space has been solved — and not to the assembly that follows it.
+#[test]
+fn an_analysis_ordered_after_a_corner_run_waits_for_its_last_point() {
+    let mut dependent_run = transient_corner_parts();
+    dependent_run.tasks.push(prepared_with(
+        "after-corner",
+        ObjectRevision::INITIAL,
+        vec![instance_id("corner")],
+        "Transient",
+        transient_task(),
+    ));
+
+    let snapshot = PreparedRunSnapshot::new(dependent_run).expect("dependent corner snapshot");
+
+    let last_point = snapshot
         .tasks
         .iter()
-        .filter(|task| matches!(task.task.spec, AnalysisSpec::Corner))
-        .collect::<Vec<_>>();
-    assert_eq!(corner_declaration.len(), 1);
-    let unexpanded = prepared("corner", "Corner", transient_corner_task());
-    assert_eq!(
-        corner_declaration[0].instance_id,
-        unexpanded.instance_id,
-        "the declaration keeps its identity, so the corner family a plot reads \
-         is produced exactly as before"
+        .rfind(|task| task.corner_point.is_some())
+        .expect("the corner expanded into points");
+    let dependent = snapshot
+        .tasks
+        .iter()
+        .find(|task| task.instance_id == instance_id("after-corner"))
+        .expect("the dependent keeps its own identity");
+    assert_eq!(dependent.dependencies, vec![last_point.instance_id]);
+    assert_ne!(
+        last_point.instance_id,
+        instance_id("corner"),
+        "the declaration's own identity is no longer dispatchable"
     );
-    assert_eq!(corner_declaration[0].config_digest, unexpanded.config_digest);
-    assert_eq!(corner_declaration[0].executable_netlist_override, None);
 }
 
 /// A point's configuration digest is its identity as a payload. Two points of

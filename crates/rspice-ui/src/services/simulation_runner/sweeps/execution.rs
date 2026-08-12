@@ -7,7 +7,6 @@
 use super::super::error::{
     ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically,
 };
-use super::netlist_mutation::apply_voltage_corner;
 use super::types::{
     CornerBaseMode, CornerFrequencySweep, CornerPoint, CornerRunConfig, SweepPointResult,
 };
@@ -16,29 +15,14 @@ use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
 
+/// Turn a corner contract into the exact points it declares.
+///
+/// Uncancellable on purpose: this runs during run preparation, before any
+/// solve, and is bounded by the batch limit checked below.
 pub(super) fn expand_corner_points(
     config: &CornerRunConfig,
     max_batch_runs: usize,
 ) -> ServiceRunResult<Vec<CornerPoint>> {
-    expand_corner_points_impl(config, max_batch_runs, None)
-}
-
-pub(super) fn expand_corner_points_with_abort(
-    config: &CornerRunConfig,
-    max_batch_runs: usize,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Vec<CornerPoint>> {
-    expand_corner_points_impl(config, max_batch_runs, Some(abort))
-}
-
-fn expand_corner_points_impl(
-    config: &CornerRunConfig,
-    max_batch_runs: usize,
-    abort: Option<&dyn AbortSignal>,
-) -> ServiceRunResult<Vec<CornerPoint>> {
-    if let Some(abort) = abort {
-        ensure_not_aborted(abort)?;
-    }
     // An explicit list is the space. It reaches here from a run set that
     // removed points from its cross product, and re-deriving the matrix from
     // the axes would put every one of them back. This is the only expansion
@@ -59,12 +43,7 @@ fn expand_corner_points_impl(
                 "Corner expansion allocation for {requested} explicit points failed: {error}"
             ))
         })?;
-        for (index, point) in config.points.iter().enumerate() {
-            if let Some(abort) = abort {
-                poll_periodically(abort, index)?;
-            }
-            points.push(*point);
-        }
+        points.extend(config.points.iter().copied());
         return Ok(points);
     }
     if config.process_corners.is_empty()
@@ -105,19 +84,9 @@ fn expand_corner_points_impl(
     })?;
 
     if config.full_matrix {
-        for (process_index, process) in config.process_corners.iter().enumerate() {
-            if let Some(abort) = abort {
-                poll_periodically(abort, process_index)?;
-            }
-            for (voltage_index, &voltage) in config.voltages.iter().enumerate() {
-                if let Some(abort) = abort {
-                    poll_periodically(abort, voltage_index)?;
-                }
-                for (temperature_index, &temperature_c) in config.temperatures_c.iter().enumerate()
-                {
-                    if let Some(abort) = abort {
-                        poll_periodically(abort, temperature_index)?;
-                    }
+        for process in &config.process_corners {
+            for &voltage in &config.voltages {
+                for &temperature_c in &config.temperatures_c {
                     points.push(CornerPoint {
                         process: *process,
                         voltage,
@@ -126,9 +95,6 @@ fn expand_corner_points_impl(
                 }
             }
         }
-        if let Some(abort) = abort {
-            ensure_not_aborted(abort)?;
-        }
         return Ok(points);
     }
 
@@ -136,92 +102,13 @@ fn expand_corner_points_impl(
     // lengths, so the modulus below only ever shares a single-valued axis
     // across the points — it never cycles a longer one back to its start.
     for idx in 0..requested {
-        if let Some(abort) = abort {
-            poll_periodically(abort, idx)?;
-        }
         points.push(CornerPoint {
             process: config.process_corners[idx % config.process_corners.len()],
             voltage: config.voltages[idx % config.voltages.len()],
             temperature_c: config.temperatures_c[idx % config.temperatures_c.len()],
         });
     }
-    if let Some(abort) = abort {
-        ensure_not_aborted(abort)?;
-    }
     Ok(points)
-}
-
-pub(super) fn run_corner_sweep(
-    netlist: &rspice_core::Netlist,
-    points: &[CornerPoint],
-    config: &CornerRunConfig,
-    nominal_voltage: Value,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Vec<(CornerPoint, SweepPointResult)>> {
-    ensure_not_aborted(abort)?;
-    if !nominal_voltage.is_finite() || nominal_voltage <= 0.0 {
-        return Err(ServiceRunError::Failure(
-            "Corner analysis nominal voltage must be a positive finite value".to_string(),
-        ));
-    }
-
-    let base_sim_config = super::super::build_engine_config(netlist, None);
-    if points.len() > base_sim_config.resource_limits.max_batch_runs {
-        return Err(ServiceRunError::resource_limit(
-            rspice_core::ResourceKind::BatchRuns,
-            points.len(),
-            base_sim_config.resource_limits.max_batch_runs,
-        ));
-    }
-    let mut results = Vec::new();
-    results.try_reserve_exact(points.len()).map_err(|error| {
-        ServiceRunError::Failure(format!(
-            "Corner result allocation for {} points failed: {error}",
-            points.len()
-        ))
-    })?;
-
-    for (point_index, point) in points.iter().enumerate() {
-        poll_periodically(abort, point_index)?;
-        if !point.voltage.is_finite() || point.voltage <= 0.0 {
-            return Err(ServiceRunError::Failure(format!(
-                "Corner voltage must be positive and finite (got {})",
-                point.voltage
-            )));
-        }
-        if !point.temperature_c.is_finite() {
-            return Err(ServiceRunError::Failure(format!(
-                "Corner temperature must be finite (got {})",
-                point.temperature_c
-            )));
-        }
-
-        ensure_not_aborted(abort)?;
-        let mut corner_netlist = netlist.clone();
-        ensure_not_aborted(abort)?;
-        apply_voltage_corner(&mut corner_netlist, point.voltage, nominal_voltage, abort)?;
-
-        let mut sim_config = base_sim_config.clone();
-        sim_config.temperature = point.temperature_c + 273.15;
-        let engine = Engine::new(sim_config);
-
-        match run_base_mode_point(&engine, &corner_netlist, &config.base_mode, abort) {
-            Ok(result) => results.push((*point, result)),
-            Err(ServiceRunError::Aborted) => return Err(ServiceRunError::Aborted),
-            Err(error @ ServiceRunError::ResourceLimit(_)) => return Err(error),
-            Err(ServiceRunError::Failure(error)) => {
-                log::warn!(
-                    "Corner {} ({}) failed: {}",
-                    point.label(),
-                    config.base_mode.display_name(),
-                    error
-                );
-            }
-        }
-    }
-
-    ensure_not_aborted(abort)?;
-    Ok(results)
 }
 
 pub(super) fn run_temperature_sweep(

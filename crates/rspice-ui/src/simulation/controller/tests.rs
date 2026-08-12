@@ -1705,3 +1705,135 @@ fn ui_progress_fraction_uses_runner_fraction_or_running_floor() {
         1.0
     );
 }
+
+/// A corner declaration keeps a task so the run's receipt has an entry for it,
+/// but its turn must not reach the runner: the points are the solve. If it were
+/// dispatched, the declared space would be solved a second time.
+#[test]
+fn a_corner_declarations_turn_assembles_its_family_without_reaching_the_runner() {
+    use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
+    use crate::services::simulation_runner::{CornerBaseMode, CornerProcess, CornerRunConfig};
+    use crate::simulation::dialog::corner::ProcessCorner;
+    use crate::simulation::execution::{
+        ExecutionPermitIssuer, ExecutionTargetCapabilities, PreparedRunSnapshot, PreparedTask,
+        RunSourceReceipt, SavePolicy, SnapshotParts,
+    };
+
+    let corner = QueuedAnalysis {
+        numeric_override: None,
+        spec: AnalysisSpec::Corner,
+        config: None,
+        spec_options: SpecExecutionOptions {
+            corner: Some(CornerRunConfig {
+                process_corners: vec![CornerProcess::TT],
+                voltages: vec![1.8, 1.62],
+                temperatures_c: vec![27.0],
+                full_matrix: true,
+                nominal_voltage: Some(1.8),
+                base_mode: CornerBaseMode::Op,
+                model_bindings: Vec::new(),
+                points: Vec::new(),
+            }),
+            ..SpecExecutionOptions::default()
+        },
+        analysis_line: ".corner".to_owned(),
+    };
+    let snapshot = PreparedRunSnapshot::new(SnapshotParts {
+        intent: SimulationRunIntent::SimulateRunSet,
+        simulation_plan_id: Some(SimulationPlanId::new()),
+        project_revision: 3,
+        topology_revision: 4,
+        source_digest: ContentDigest::from_bytes([0x81; 32]),
+        reference_process: ProcessCorner::TT,
+        reference_temperature_celsius: 27.0,
+        tasks: vec![PreparedTask::new(
+            AnalysisInstanceId::new(),
+            ObjectRevision::INITIAL,
+            Vec::new(),
+            "Corner",
+            corner,
+        )],
+        executable_netlist: "corner\nVDD vdd 0 DC 1.8\nR1 vdd out 1k\nR2 out 0 1k\n.op\n.end\n"
+            .to_owned(),
+        save_policy: SavePolicy::RetainEngineProducedResults,
+        model_identities: Vec::new(),
+        project_model_sources: Vec::new(),
+        project_veriloga_runtimes: Default::default(),
+        target: ExecutionTargetCapabilities::current(),
+        receipt: RunSourceReceipt::SchematicDrc(ContentDigest::from_bytes([0x82; 32])),
+        advisories: Vec::new(),
+        manual_source: None,
+        cross_probe: None,
+        touchstone_export: TouchstoneExportPolicy::disabled(),
+        sealed_source_dependencies: Vec::new(),
+    })
+    .expect("corner snapshot validates");
+    let digest = snapshot.digest();
+    let proof = ExecutionPermitIssuer::default()
+        .issue(digest)
+        .expect("permit issues")
+        .consume(digest, digest)
+        .expect("permit consumes");
+    let dispatch = snapshot
+        .authorize_dispatch(proof)
+        .expect("snapshot authorizes");
+
+    let mut controller = SimulationController::new();
+    for task in dispatch.tasks() {
+        controller.corner_families.register(task);
+    }
+    let mut tasks = dispatch.into_tasks();
+    assert_eq!(tasks.len(), 3, "two declared points and the assembly");
+
+    // Both points ran and neither converged. That is still evidence about those
+    // corners, and the declaration must answer for it in its own position
+    // rather than being dispatched to find out.
+    let mut state = AppState::default();
+    let run_sequence = state.simulation.start_run().id;
+    for _ in 0..2 {
+        let point = tasks.pop_front().expect("a declared point");
+        let provenance = AnalysisResultProvenance::new(
+            point.instance_id(),
+            point.source_revision(),
+            point.snapshot_digest(),
+            point.dependencies().to_vec(),
+        )
+        .expect("point provenance")
+        .with_pvt_point(point.pvt_point().cloned());
+        state
+            .simulation
+            .run_by_sequence_mut(run_sequence)
+            .expect("active run")
+            .add_analysis(
+                AnalysisResult::failed(1, AnalysisType::DcOp, point.label(), "solver failed")
+                    .with_provenance(provenance),
+            );
+    }
+    let declaration = tasks.front().expect("the assembly is last").instance_id();
+
+    controller.current_run_id = Some(run_sequence);
+    controller.current_analysis_idx = 2;
+    controller.total_analyses = 3;
+    controller.pending_analyses = tasks;
+    controller.start_next_analysis(&mut state);
+
+    assert!(
+        !controller.is_running(),
+        "the assembly must never be handed to the runner"
+    );
+    assert_eq!(
+        controller.total_analyses, 0,
+        "the batch finished in the same call, so nothing is awaiting an engine"
+    );
+    let run = state
+        .simulation
+        .run_by_sequence(run_sequence)
+        .expect("completed run remains");
+    assert_eq!(run.analyses.len(), 3);
+    let family = run
+        .find_analysis_by_source_instance(declaration)
+        .expect("the declaration retained a result in its own position");
+    assert_eq!(family.analysis_type, AnalysisType::Corner);
+    assert!(!family.success, "no corner converged, so the family failed");
+    assert_eq!(run.analyses[2].id, family.id, "and it is retained last");
+}
