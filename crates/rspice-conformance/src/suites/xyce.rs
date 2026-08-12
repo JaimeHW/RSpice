@@ -35,12 +35,13 @@ use rspice_core::netlist::{
     AnalysisCommand, DcSecondSweep, DcSweepMode, DeviceInitialConditionError,
     DeviceInitialConditionSource, DuplicateSubcircuitPortBindingError, ElementKind,
     ElementProvenance, FreqVariation, MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError,
-    Netlist, NetlistParseOptions, OutputDirectiveKind, OutputSymbolKind,
+    Netlist, NetlistParseOptions, OutputDirectiveKind, OutputExpressionIssue, OutputSymbolKind,
     ParameterRedefinitionPolicy, ParametricValue, ParseError, StartupDiagnosticCode,
     StartupDiagnosticStage, StartupDirectiveKind, StartupDirectiveScope, StatisticalParamMode,
     StepCommand, StepSweep, StepTarget, SubcircuitDef, UnresolvedSubcircuitParameterError,
     XYCE_DEFAULT_ZERO_RESISTANCE_TOL, flatten_netlist, flatten_netlist_with_models,
-    flatten_netlist_with_models_with_abort, validate_output_symbols,
+    flatten_netlist_with_models_with_abort, validate_output_expressions_with_abort,
+    validate_output_symbols, validate_output_symbols_with_abort,
 };
 use rspice_core::numerics::integration::TransientLteReference;
 use rspice_core::{Complex64, Engine, Value};
@@ -967,6 +968,131 @@ const XYCE_BUG402_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 4] = [
         385,
         "869fcd0742641e619af164c016a9dee520b581c9cd272ace32cc2a2457bc835a",
         "de6005465a28610ffa126624506fe999e0f28b59083eaea37ac4688845b07156",
+    ),
+];
+
+const XYCE_BUG354_FUNCTION_PATH: &str = "Netlists/Certification_Tests/BUG_354_SON/bad_function.cir";
+const XYCE_BUG354_LEAD_CURRENT_PATH: &str =
+    "Netlists/Certification_Tests/BUG_354_SON/bad_leadcurrent.cir";
+const XYCE_BUG354_PARAMETER_PATH: &str =
+    "Netlists/Certification_Tests/BUG_354_SON/bad_parameter.cir";
+const XYCE_BUG354_FUNCTION_RECORD: &str =
+    "netlists/certification_tests/bug_354_son/bad_function.cir";
+const XYCE_BUG354_LEAD_CURRENT_RECORD: &str =
+    "netlists/certification_tests/bug_354_son/bad_leadcurrent.cir";
+const XYCE_BUG354_PARAMETER_RECORD: &str =
+    "netlists/certification_tests/bug_354_son/bad_parameter.cir";
+const XYCE_BUG354_FUNCTION_SOURCE_BLAKE3: &str =
+    "ebaa47b9ad2236255aa47c2f7e3dab8d3bd544bbcf0d83ca5b443859fcf9ecc2";
+const XYCE_BUG354_LEAD_CURRENT_SOURCE_BLAKE3: &str =
+    "7b6dd2464c7638740c94a2c2f711855d5076f8ff3f83c8af6130c4668daf76cc";
+const XYCE_BUG354_PARAMETER_SOURCE_BLAKE3: &str =
+    "fe21209b8cce1da0fdcfa110995a7ee3598f26c20f1157560c662dca5428821e";
+const XYCE_BUG354_PHYSICAL_CENSUS_BLAKE3: &str =
+    "b18f00d6d7641e631c96fd17db56bbd9b5a09dbe4ffbea9295f120c806bd7ffa";
+const XYCE_BUG354_MANIFEST_CENSUS_BLAKE3: &str =
+    "d895cc88602ef2af2f180ac3849d9896f577dbaf37c9f65b34140c008ab7864b";
+const XYCE_BUG354_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG354_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG354_HISTORICAL_TIMEOUT_MS: u128 = 30_000;
+const XYCE_BUG354_HISTORICAL_RECORD_COUNT: usize = 11;
+const XYCE_BUG354_HISTORICAL_RECORD_BYTES: usize = 2_699;
+const XYCE_BUG354_HISTORICAL_RECORDS_SHA256: &str =
+    "bf8a3aea6966f912948443da0361ff159bc989ed11ef93b7343a2f45c6156a06";
+const XYCE_BUG354_HISTORICAL_RECORDS_BLAKE3: &str =
+    "2f4903a613cb20f1e27285fa2634adbd43e75d74d15cb01b8d19f71bfa5b2bd8";
+const XYCE_BUG354_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 11] = [
+    (
+        "Netlists/Certification_Tests/BUG_354_SON/CMakeLists.txt",
+        4_699,
+        "e73d08da637d40031570ef7b24a428ffa65ae6be87766f48349d0c5ffdbb8952",
+        "6e6f23bd0f47b8dc30e463184c6615b895acef67f6a1a02c73d4f415aa915760",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_354_SON/Manifest.txt",
+        132,
+        "413ab42380dd5161d9009914b0412504f57638874ac6d4687eb3e2f7fef5a6c5",
+        "aee7bfe7537430cc438b7ae34bca14ff3c963dcc12eb2c9fa8f2ba4a0b558faa",
+    ),
+    (
+        XYCE_BUG354_FUNCTION_PATH,
+        117,
+        "de0a3b29d62c8aa5ca2204bcc1a1a78c02a58bb8150774d050482619860310fb",
+        "eb4dcb54436aeb0d2479cd3d8adae364a0f2d31e277b637b3d972a886c188c4f",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_354_SON/bad_function.cir.sh",
+        1_369,
+        "f81a348237f09a695df74391f6f41a6108d2c26e1e0c742730115c559f8c9eae",
+        "d050e20cc6bc981d8dae880c74c3b022cb894ea42fff2f92210105a769a18392",
+    ),
+    (
+        XYCE_BUG354_LEAD_CURRENT_PATH,
+        119,
+        "34c89b53637f25b02797aeef5fbbd6701dc64f505297113e84a3dd7b8f68d5a0",
+        "ee6893cba54dd03be7f2576ea25b2a15de9466db930e40cbfa01632162ba3b89",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_354_SON/bad_leadcurrent.cir.sh",
+        1_369,
+        "f81a348237f09a695df74391f6f41a6108d2c26e1e0c742730115c559f8c9eae",
+        "d050e20cc6bc981d8dae880c74c3b022cb894ea42fff2f92210105a769a18392",
+    ),
+    (
+        XYCE_BUG354_PARAMETER_PATH,
+        113,
+        "61059a561c3622d046a7b39966976997f0c18b8f90bbd0494d91d94787f44901",
+        "5adf7955644a95ea09536f0d8ba4865a6fcb1a55b9d18a7ef5c2b3314e9ba5cc",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_354_SON/bad_parameter.cir.sh",
+        1_369,
+        "f81a348237f09a695df74391f6f41a6108d2c26e1e0c742730115c559f8c9eae",
+        "d050e20cc6bc981d8dae880c74c3b022cb894ea42fff2f92210105a769a18392",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_354_SON/options",
+        13,
+        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
+        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_354_SON/tags",
+        37,
+        "5aa3c799dbcc4d28aa47a0c6afe4708f86e4a59e36691e8312c7bca63bfc262b",
+        "979508f32619a518a60b1e89576d249d9f292fdfbd580936d7a07785f532bca0",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG354_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 4] = [
+    (
+        "bad_function.cir",
+        117,
+        "de0a3b29d62c8aa5ca2204bcc1a1a78c02a58bb8150774d050482619860310fb",
+        "eb4dcb54436aeb0d2479cd3d8adae364a0f2d31e277b637b3d972a886c188c4f",
+    ),
+    (
+        "bad_leadcurrent.cir",
+        119,
+        "34c89b53637f25b02797aeef5fbbd6701dc64f505297113e84a3dd7b8f68d5a0",
+        "ee6893cba54dd03be7f2576ea25b2a15de9466db930e40cbfa01632162ba3b89",
+    ),
+    (
+        "bad_parameter.cir",
+        113,
+        "61059a561c3622d046a7b39966976997f0c18b8f90bbd0494d91d94787f44901",
+        "5adf7955644a95ea09536f0d8ba4865a6fcb1a55b9d18a7ef5c2b3314e9ba5cc",
+    ),
+    (
+        "options",
+        13,
+        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
+        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
     ),
 ];
 
@@ -2151,11 +2277,12 @@ impl XyceStartupOracleKind {
     }
 
     fn conflict_error_policy(self) -> Option<XyceUpstreamExpectedErrorPolicy> {
-        (self == Self::IcNodeSetConflict).then_some(XyceUpstreamExpectedErrorPolicy {
-            requires_nonzero_exit: true,
-            search_streams: XyceUpstreamErrorSearchStreams::EitherCompleteStdoutOrStderr,
-            ordered_patterns: &["Cannot set both .IC and .NODESET simultaneously"],
-        })
+        (self == Self::IcNodeSetConflict).then_some(
+            XyceUpstreamExpectedErrorPolicy::NonzeroExitWithOrderedPatterns {
+                search_streams: XyceUpstreamErrorSearchStreams::EitherCompleteStdoutOrStderr,
+                ordered_patterns: &["Cannot set both .IC and .NODESET simultaneously"],
+            },
+        )
     }
 
     fn is_message_input(self) -> bool {
@@ -2201,6 +2328,9 @@ enum XyceExpectedFailureKind {
     Issue455DuplicateDcSourceFunction,
     Bug204InvalidDcSweepArity,
     Bug281InvalidDcSweepArity,
+    Bug354BadFunction,
+    Bug354BadLeadCurrent,
+    Bug354BadParameter,
     Bug401BadDeviceLine,
     Bug401ExtraSpace,
     Bug401WorseDeviceLine,
@@ -2430,6 +2560,9 @@ impl XyceExpectedFailureKind {
             XYCE_ISSUE455_EXPECTED_FAILURE_RECORD => Some(Self::Issue455DuplicateDcSourceFunction),
             XYCE_BUG204_EXPECTED_FAILURE_RECORD => Some(Self::Bug204InvalidDcSweepArity),
             XYCE_BUG281_EXPECTED_FAILURE_RECORD => Some(Self::Bug281InvalidDcSweepArity),
+            XYCE_BUG354_FUNCTION_RECORD => Some(Self::Bug354BadFunction),
+            XYCE_BUG354_LEAD_CURRENT_RECORD => Some(Self::Bug354BadLeadCurrent),
+            XYCE_BUG354_PARAMETER_RECORD => Some(Self::Bug354BadParameter),
             XYCE_BUG401_BAD_DEVICE_EXPECTED_FAILURE_RECORD => Some(Self::Bug401BadDeviceLine),
             XYCE_BUG401_EXTRA_SPACE_EXPECTED_FAILURE_RECORD => Some(Self::Bug401ExtraSpace),
             XYCE_BUG401_WORSE_DEVICE_EXPECTED_FAILURE_RECORD => Some(Self::Bug401WorseDeviceLine),
@@ -2526,6 +2659,9 @@ impl XyceExpectedFailureKind {
             Self::Issue455DuplicateDcSourceFunction => XYCE_ISSUE455_EXPECTED_FAILURE_RECORD,
             Self::Bug204InvalidDcSweepArity => XYCE_BUG204_EXPECTED_FAILURE_RECORD,
             Self::Bug281InvalidDcSweepArity => XYCE_BUG281_EXPECTED_FAILURE_RECORD,
+            Self::Bug354BadFunction => XYCE_BUG354_FUNCTION_RECORD,
+            Self::Bug354BadLeadCurrent => XYCE_BUG354_LEAD_CURRENT_RECORD,
+            Self::Bug354BadParameter => XYCE_BUG354_PARAMETER_RECORD,
             Self::Bug401BadDeviceLine => XYCE_BUG401_BAD_DEVICE_EXPECTED_FAILURE_RECORD,
             Self::Bug401ExtraSpace => XYCE_BUG401_EXTRA_SPACE_EXPECTED_FAILURE_RECORD,
             Self::Bug401WorseDeviceLine => XYCE_BUG401_WORSE_DEVICE_EXPECTED_FAILURE_RECORD,
@@ -2593,6 +2729,9 @@ impl XyceExpectedFailureKind {
             Self::Issue455DuplicateDcSourceFunction => XYCE_ISSUE455_SOURCE_BLAKE3,
             Self::Bug204InvalidDcSweepArity => XYCE_BUG204_SOURCE_BLAKE3,
             Self::Bug281InvalidDcSweepArity => XYCE_BUG281_SOURCE_BLAKE3,
+            Self::Bug354BadFunction => XYCE_BUG354_FUNCTION_SOURCE_BLAKE3,
+            Self::Bug354BadLeadCurrent => XYCE_BUG354_LEAD_CURRENT_SOURCE_BLAKE3,
+            Self::Bug354BadParameter => XYCE_BUG354_PARAMETER_SOURCE_BLAKE3,
             Self::Bug401BadDeviceLine => XYCE_BUG401_BAD_DEVICE_SOURCE_BLAKE3,
             Self::Bug401ExtraSpace => XYCE_BUG401_EXTRA_SPACE_SOURCE_BLAKE3,
             Self::Bug401WorseDeviceLine => XYCE_BUG401_WORSE_DEVICE_SOURCE_BLAKE3,
@@ -2690,6 +2829,15 @@ impl XyceExpectedFailureKind {
             Self::Bug281InvalidDcSweepArity => {
                 "expected_failure_bug281_invalid_dc_sweep_arity_parse"
             }
+            Self::Bug354BadFunction => {
+                "expected_failure_bug354_unknown_print_function_output_validation"
+            }
+            Self::Bug354BadLeadCurrent => {
+                "expected_failure_bug354_unknown_iv_print_function_output_validation"
+            }
+            Self::Bug354BadParameter => {
+                "expected_failure_bug354_unresolved_print_identifier_output_validation"
+            }
             Self::Bug401BadDeviceLine => "expected_failure_bug401_bad_device_line_build",
             Self::Bug401ExtraSpace => "expected_failure_bug401_extra_space_build",
             Self::Bug401WorseDeviceLine => "expected_failure_bug401_worse_device_line_parse",
@@ -2718,6 +2866,9 @@ impl XyceExpectedFailureKind {
     }
 
     fn upstream_error_policy(self) -> XyceUpstreamExpectedErrorPolicy {
+        if self.is_bug354_family() {
+            return XyceUpstreamExpectedErrorPolicy::NonzeroExitOnly;
+        }
         let ordered_patterns = match self {
             Self::Bug67BehavioralExpression => {
                 &[r"Syntax error in number of nodes in expression: \{POLY I[(]V6[)] 300u 1\}"][..]
@@ -2829,6 +2980,9 @@ impl XyceExpectedFailureKind {
                 "in file bug_281.cir at or near line 7",
                 ".DC line not formatted correctly, found unexpected number of fields",
             ][..],
+            Self::Bug354BadFunction | Self::Bug354BadLeadCurrent | Self::Bug354BadParameter => {
+                unreachable!("BUG354 uses the nonzero-only wrapper")
+            }
             Self::Bug401BadDeviceLine => &[
                 "in file bad-device-line.cir at or near line 5",
                 "Invalid device type for device AN",
@@ -2867,11 +3021,17 @@ impl XyceExpectedFailureKind {
                 "Invalid notation encountered",
             ][..],
         };
-        XyceUpstreamExpectedErrorPolicy {
-            requires_nonzero_exit: true,
+        XyceUpstreamExpectedErrorPolicy::NonzeroExitWithOrderedPatterns {
             search_streams: XyceUpstreamErrorSearchStreams::EitherCompleteStdoutOrStderr,
             ordered_patterns,
         }
+    }
+
+    fn is_bug354_family(self) -> bool {
+        matches!(
+            self,
+            Self::Bug354BadFunction | Self::Bug354BadLeadCurrent | Self::Bug354BadParameter
+        )
     }
 
     fn expected_output_symbols(self) -> Option<&'static [XyceExpectedOutputSymbol]> {
@@ -3429,6 +3589,25 @@ impl XyceExpectedFailureKind {
                 category: XyceExpectedFailureCategory::InvalidDcSweepArity,
                 identifiers: vec!["VIN".to_string(), "STEP".to_string(), "line 7".to_string()],
             },
+            Self::Bug354BadFunction => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::OutputValidation,
+                category: XyceExpectedFailureCategory::UnknownOutputFunction,
+                identifiers: vec!["FABS".to_string(), "bad_function.cir:9".to_string()],
+            },
+            Self::Bug354BadLeadCurrent => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::OutputValidation,
+                category: XyceExpectedFailureCategory::UnknownOutputFunction,
+                identifiers: vec![
+                    "IV".to_string(),
+                    "RB".to_string(),
+                    "bad_leadcurrent.cir:9".to_string(),
+                ],
+            },
+            Self::Bug354BadParameter => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::OutputValidation,
+                category: XyceExpectedFailureCategory::UnresolvedOutputIdentifier,
+                identifiers: vec!["BAR".to_string(), "bad_parameter.cir:10".to_string()],
+            },
             Self::Bug401BadDeviceLine => XyceExpectedFailureObservation {
                 stage: XyceExpectedFailureStage::CircuitBuild,
                 category: XyceExpectedFailureCategory::UnknownXspiceModel,
@@ -3581,6 +3760,15 @@ impl XyceExpectedFailureKind {
                     physical_names_blake3: XYCE_BUG401_PHYSICAL_CENSUS_BLAKE3,
                     manifest_owner_count: 3,
                     manifest_records_blake3: XYCE_BUG401_MANIFEST_CENSUS_BLAKE3,
+                    require_manifest_bijection: true,
+                })
+            }
+            Self::Bug354BadFunction | Self::Bug354BadLeadCurrent | Self::Bug354BadParameter => {
+                Some(XyceExpectedFailureFamilyCensus {
+                    physical_cir_count: 3,
+                    physical_names_blake3: XYCE_BUG354_PHYSICAL_CENSUS_BLAKE3,
+                    manifest_owner_count: 3,
+                    manifest_records_blake3: XYCE_BUG354_MANIFEST_CENSUS_BLAKE3,
                     require_manifest_bijection: true,
                 })
             }
@@ -3746,6 +3934,7 @@ enum XyceExpectedFailureStage {
     NetlistParse,
     CircuitBuild,
     ExternalDataLoad,
+    OutputValidation,
     DcOperatingPoint,
 }
 
@@ -3780,6 +3969,8 @@ enum XyceExpectedFailureCategory {
     InvalidNumericNotation,
     UndefinedMutualInductorReference,
     ConflictingStartupDirectives,
+    UnknownOutputFunction,
+    UnresolvedOutputIdentifier,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3795,10 +3986,12 @@ enum XyceUpstreamErrorSearchStreams {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct XyceUpstreamExpectedErrorPolicy {
-    requires_nonzero_exit: bool,
-    search_streams: XyceUpstreamErrorSearchStreams,
-    ordered_patterns: &'static [&'static str],
+enum XyceUpstreamExpectedErrorPolicy {
+    NonzeroExitOnly,
+    NonzeroExitWithOrderedPatterns {
+        search_streams: XyceUpstreamErrorSearchStreams,
+        ordered_patterns: &'static [&'static str],
+    },
 }
 
 /// Configuration for the Xyce corpus runner.
@@ -8867,6 +9060,7 @@ impl AbortSignal for DeadlineAbort {
 mod analysis_support;
 mod comparison;
 mod contracts;
+mod contracts_bug354;
 mod contracts_bug38;
 mod contracts_bug39;
 mod contracts_bug402;

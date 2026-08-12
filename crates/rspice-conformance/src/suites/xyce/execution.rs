@@ -1309,10 +1309,12 @@ impl XyceTestRunner {
     ) -> Option<XyceTestResult> {
         if let Some(kind) = XyceExpectedFailureKind::for_record(&deck.relative_path) {
             let contract = kind.result_contract();
-            return Some(match self.validate_expected_failure_oracle(deck, kind) {
-                Ok(()) => self.passed_result(deck, start, contract),
-                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
-            });
+            return Some(
+                match self.validate_expected_failure_oracle(deck, kind, start) {
+                    Ok(()) => self.passed_result(deck, start, contract),
+                    Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+                },
+            );
         }
 
         let reference_path = self.static_prn_reference_path(&deck.path)?;

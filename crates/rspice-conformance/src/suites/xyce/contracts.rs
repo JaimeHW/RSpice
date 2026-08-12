@@ -2865,11 +2865,13 @@ impl XyceTestRunner {
             let policy = kind.conflict_error_policy().ok_or_else(|| {
                 "IC/NODESET conflict is missing its removed-wrapper error policy".to_string()
             })?;
-            if !policy.requires_nonzero_exit
-                || policy.search_streams
-                    != XyceUpstreamErrorSearchStreams::EitherCompleteStdoutOrStderr
-                || policy.ordered_patterns != ["Cannot set both .IC and .NODESET simultaneously"]
-            {
+            if !matches!(
+                policy,
+                XyceUpstreamExpectedErrorPolicy::NonzeroExitWithOrderedPatterns {
+                    search_streams: XyceUpstreamErrorSearchStreams::EitherCompleteStdoutOrStderr,
+                    ordered_patterns: ["Cannot set both .IC and .NODESET simultaneously"],
+                }
+            ) {
                 return Err(
                     "IC/NODESET conflict has an incomplete removed-wrapper error policy"
                         .to_string(),

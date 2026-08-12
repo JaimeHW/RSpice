@@ -24019,12 +24019,23 @@ fn expected_failure_oracles_retain_exact_removed_wrapper_policies() {
 
     for (kind, patterns) in cases {
         let policy = kind.upstream_error_policy();
-        assert!(policy.requires_nonzero_exit);
         assert_eq!(
-            policy.search_streams,
-            XyceUpstreamErrorSearchStreams::EitherCompleteStdoutOrStderr
+            policy,
+            XyceUpstreamExpectedErrorPolicy::NonzeroExitWithOrderedPatterns {
+                search_streams: XyceUpstreamErrorSearchStreams::EitherCompleteStdoutOrStderr,
+                ordered_patterns: patterns,
+            }
         );
-        assert_eq!(policy.ordered_patterns, patterns);
+    }
+    for kind in [
+        XyceExpectedFailureKind::Bug354BadFunction,
+        XyceExpectedFailureKind::Bug354BadLeadCurrent,
+        XyceExpectedFailureKind::Bug354BadParameter,
+    ] {
+        assert_eq!(
+            kind.upstream_error_policy(),
+            XyceUpstreamExpectedErrorPolicy::NonzeroExitOnly
+        );
     }
     assert_eq!(
         XyceExpectedFailureKind::Bug204InvalidDcSweepArity.retained_non_oracle_artifact(),
@@ -24045,7 +24056,7 @@ fn expected_failure_oracles_retain_exact_removed_wrapper_policies() {
 }
 
 #[test]
-fn expected_failure_oracle_census_is_exactly_forty_eight_distinct_records() {
+fn expected_failure_oracle_census_is_exactly_fifty_one_distinct_records() {
     let root = expected_failure_test_root();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let mut records = runner
@@ -24087,6 +24098,18 @@ fn expected_failure_oracle_census_is_exactly_forty_eight_distinct_records() {
             (
                 XYCE_BUG281_EXPECTED_FAILURE_RECORD.to_string(),
                 XyceExpectedFailureKind::Bug281InvalidDcSweepArity,
+            ),
+            (
+                XYCE_BUG354_FUNCTION_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug354BadFunction,
+            ),
+            (
+                XYCE_BUG354_LEAD_CURRENT_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug354BadLeadCurrent,
+            ),
+            (
+                XYCE_BUG354_PARAMETER_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug354BadParameter,
             ),
             (
                 XYCE_BUG387_EXPECTED_FAILURE_RECORD.to_string(),
@@ -24264,7 +24287,7 @@ fn expected_failure_oracle_census_is_exactly_forty_eight_distinct_records() {
         .collect::<BTreeSet<_>>();
     assert_eq!(
         contracts.len(),
-        48,
+        51,
         "each record requires a distinct contract"
     );
 }
@@ -24433,6 +24456,18 @@ fn expected_failure_oracles_run_end_to_end_with_distinct_contracts() {
         (
             "Netlists/Certification_Tests/BUG_281/bug_281.cir",
             "expected_failure_bug281_invalid_dc_sweep_arity_parse",
+        ),
+        (
+            XYCE_BUG354_FUNCTION_PATH,
+            "expected_failure_bug354_unknown_print_function_output_validation",
+        ),
+        (
+            XYCE_BUG354_LEAD_CURRENT_PATH,
+            "expected_failure_bug354_unknown_iv_print_function_output_validation",
+        ),
+        (
+            XYCE_BUG354_PARAMETER_PATH,
+            "expected_failure_bug354_unresolved_print_identifier_output_validation",
         ),
         (
             "Netlists/Certification_Tests/BUG_401/bad-device-line.cir",
