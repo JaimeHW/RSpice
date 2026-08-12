@@ -9503,6 +9503,30 @@ fn test_xyce_bug864_unresolved_subcircuit_parameter_error_oracle() {
 }
 
 #[test]
+fn test_xyce_bug1025_bounded_no_analysis_error_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_1025/null.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "BUG1025 must remain owned by its removed historical wrapper"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported && !result.upstream_excluded,
+        "BUG1025 should reproduce its bounded typed no-analysis failure, got {result:?}"
+    );
+    assert_eq!(
+        result.contract,
+        "expected_failure_bug1025_no_analysis_selection"
+    );
+    assert_eq!(result.upstream_exclusion_source, None);
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_bug48_level54_native_bsim4_success_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

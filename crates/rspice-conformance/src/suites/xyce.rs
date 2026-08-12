@@ -2012,6 +2012,92 @@ const XYCE_BUG864_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
     ),
 ];
 
+// BUG_1025 is an active Release-7.10 error-exit wrapper. Its zero-byte deck
+// must terminate without hanging and report that no analysis was specified.
+const XYCE_BUG1025_CONTRACT: &str = "expected_failure_bug1025_no_analysis_selection";
+const XYCE_BUG1025_PATH: &str = "Netlists/Certification_Tests/BUG_1025/null.cir";
+const XYCE_BUG1025_RECORD: &str = "netlists/certification_tests/bug_1025/null.cir";
+const XYCE_BUG1025_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG1025_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG1025_UPSTREAM_DIAGNOSTIC: &str = "No analysis specified";
+const XYCE_BUG1025_HISTORICAL_TIMEOUT_MS: u128 = 30_000;
+const XYCE_BUG1025_HISTORICAL_RECORD_COUNT: usize = 8;
+const XYCE_BUG1025_HISTORICAL_RECORD_BYTES: usize = 1_889;
+const XYCE_BUG1025_HISTORICAL_RECORDS_SHA256: &str =
+    "d67ca4c781e711e0d29cc14727d80296cb6290beeff721e7490c7e12989db889";
+const XYCE_BUG1025_HISTORICAL_RECORDS_BLAKE3: &str =
+    "b1b71953813d7f00717edd434c09d5fb5a4ad6df8382ffe37fa22910e1d73369";
+const XYCE_BUG1025_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 8] = [
+    (
+        "Netlists/Certification_Tests/BUG_1025/CMakeLists.txt",
+        1_356,
+        "1ea70ec1cc0f40b76c7e209a35b9ccde6e2490cc3ff62a1cd15805d26accf941",
+        "0d2c7be96c8440e8a53dd0a82a00872a1d030e0a9b83962fe0fc7b63fc4946f2",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1025/Manifest.txt",
+        41,
+        "e5558d15bca478eaa99c091ba4083f255b5a68238edd8cc642499aa60dd7b543",
+        "370e2d8c4e57b14bc49664148d33b002e5e77b065c0309c1b11d8c31e05d9112",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1025/README",
+        516,
+        "e09c5d7175fcdfa718d02583f15ebf5a77a66b547c9d1ab4722ee96c4010832f",
+        "9940ce3431afe2f3af6e146a306a51a8cbd178e9a30966e298a0607b37828867",
+    ),
+    (
+        XYCE_BUG1025_PATH,
+        0,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1025/null.cir.sh",
+        1_341,
+        "b1dd593d0bcacd74b59bb9be54f577014d808cbeacca7ec3be8eac361f40b4ae",
+        "0e4c4a07cf732f43f8a17cd54b9466b8a8245ccc5b22540a208e5889b6af5c9f",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1025/options",
+        13,
+        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
+        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1025/tags",
+        29,
+        "0deb9da8f0cea8fd20aa6d68268d59713531be5740c7b3d33a1cd683f747eedd",
+        "66a8be0b3e1d07fd4d908e7e6ed6ced3af2090e699f54236a98d857c60e05dd1",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG1025_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
+    (
+        "README",
+        516,
+        "e09c5d7175fcdfa718d02583f15ebf5a77a66b547c9d1ab4722ee96c4010832f",
+        "9940ce3431afe2f3af6e146a306a51a8cbd178e9a30966e298a0607b37828867",
+    ),
+    (
+        "null.cir",
+        0,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+    ),
+    (
+        "options",
+        13,
+        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
+        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
+    ),
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct XyceAbmLookupOrderCaseSpec {
     family: &'static str,
@@ -9899,6 +9985,7 @@ impl AbortSignal for DeadlineAbort {
 mod analysis_support;
 mod comparison;
 mod contracts;
+mod contracts_bug1025;
 mod contracts_bug159;
 mod contracts_bug267;
 mod contracts_bug302;

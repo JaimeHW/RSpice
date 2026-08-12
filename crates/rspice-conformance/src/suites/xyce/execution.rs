@@ -272,6 +272,24 @@ impl XyceTestRunner {
             return result;
         }
 
+        if Self::normalize_manifest_key(&deck.relative_path) == XYCE_BUG1025_RECORD {
+            let result = match self.validate_bug1025_oracle(deck, start) {
+                Ok(()) => self.passed_result(deck, start, XYCE_BUG1025_CONTRACT),
+                Err(error) => {
+                    self.failure_result(deck, start, XYCE_BUG1025_CONTRACT, error, Vec::new())
+                }
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if Self::normalize_manifest_key(&deck.relative_path) == XYCE_BUG864_RECORD {
             let result = match self.validate_bug864_oracle(deck, start) {
                 Ok(()) => self.passed_result(deck, start, XYCE_BUG864_CONTRACT),
