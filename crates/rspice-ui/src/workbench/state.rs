@@ -1315,9 +1315,6 @@ pub struct WorkbenchState {
     /// Selected model name within the currently selected model library.
     #[serde(default)]
     pub selected_model: Option<String>,
-    /// Filter local to the simulation analysis catalog.
-    #[serde(default)]
-    pub analysis_query: String,
     #[serde(default)]
     pub navigator_query: String,
     /// Netlist outline groups the engineer has collapsed. Collapsed rather
@@ -1495,7 +1492,6 @@ impl Default for WorkbenchState {
             specification_filter: String::new(),
             specification_evidence_filter: SpecificationEvidenceFilter::default(),
             selected_model: None,
-            analysis_query: String::new(),
             navigator_query: String::new(),
             netlist_outline_collapsed: std::collections::BTreeSet::new(),
             command_query: String::new(),

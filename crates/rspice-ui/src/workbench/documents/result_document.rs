@@ -29,8 +29,19 @@ mod table;
 mod transfer_function;
 mod virtual_rows;
 
+/// Route to the one surface that authors specification limits.
+///
+/// The whole route, not just the document: the editor is a Results viewer, so
+/// opening it without selecting that viewer and activating Results arms a
+/// surface nobody is looking at. Three call sites had written those three
+/// steps out identically, which is three places for the route to drift from
+/// the one editor it is supposed to protect.
 pub(crate) fn open_specification_editor(state: &mut AppState) {
+    state.ui.results.viewer = crate::workbench::ResultViewer::Specs;
     specs::open_editor(state);
+    state
+        .workbench
+        .activate(crate::workbench::state::Workspace::Results);
 }
 
 pub(crate) fn harmonic_balance_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
