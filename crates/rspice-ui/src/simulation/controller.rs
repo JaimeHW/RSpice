@@ -132,10 +132,10 @@ pub struct SimulationController {
     successful_analysis_instances: HashSet<crate::product::AnalysisInstanceId>,
     /// Batch-local numerical artifacts keyed by their exact producer task.
     execution_artifacts: HashMap<crate::product::AnalysisInstanceId, ExecutionArtifactEnvelope>,
-    /// The corner declarations this batch expanded into points. A corner
-    /// declaration is not dispatched, so its plotting family is assembled from
-    /// the point results once the batch is complete.
-    corner_families: crate::simulation::corner_family::CornerFamilyRegistry,
+    /// The PVT declarations this batch expanded into points. A declaration is
+    /// not dispatched, so its plotting family is assembled from the point
+    /// results when its own turn in the queue comes.
+    point_families: crate::simulation::point_family::PointFamilyRegistry,
     /// Current analysis index (1-based for display: "Analysis 2/4")
     current_analysis_idx: usize,
     /// Total number of analyses in current batch
@@ -179,7 +179,7 @@ impl SimulationController {
             pending_analyses: VecDeque::new(),
             successful_analysis_instances: HashSet::new(),
             execution_artifacts: HashMap::new(),
-            corner_families: crate::simulation::corner_family::CornerFamilyRegistry::default(),
+            point_families: crate::simulation::point_family::PointFamilyRegistry::default(),
             current_analysis_idx: 0,
             total_analyses: 0,
             cached_netlist: None,
@@ -334,9 +334,9 @@ impl SimulationController {
             state.push_sim_message(ConsoleMessage::warning(advisory.clone()));
         }
 
-        self.corner_families.clear();
+        self.point_families.clear();
         for task in dispatch.tasks() {
-            self.corner_families.register(task);
+            self.point_families.register(task);
         }
         let queued_names = dispatch
             .tasks()
@@ -434,7 +434,7 @@ impl SimulationController {
         self.pending_analyses.clear();
         self.successful_analysis_instances.clear();
         self.execution_artifacts.clear();
-        self.corner_families.clear();
+        self.point_families.clear();
         self.cached_netlist = None;
         self.clear_prepared_run();
         self.current_config = None;
@@ -599,15 +599,21 @@ impl SimulationController {
 
         self.current_analysis_idx += 1;
 
-        // A corner declaration's turn assembles the family from the point
-        // results the queue has already retained. It never reaches the runner:
-        // the points are the solve, and handing the declaration to an executor
-        // is what used to make an N-point sweep cost 2N. Its saved outputs are
+        // A PVT declaration's turn assembles the family from the point results
+        // the queue has already retained. It never reaches the runner: the
+        // points are the solve, and handing the declaration to an executor is
+        // what used to make an N-point sweep cost 2N. Its saved outputs are
         // taken here all the same, because a declaration that skips the runner
         // still produces a result an output contract was written against.
-        if matches!(spec, AnalysisSpec::Corner) {
+        //
+        // The registry decides, not the spec: it holds exactly the declarations
+        // this dispatch expanded, so a parametric run that steps a design
+        // parameter rather than a temperature is not in it and still reaches
+        // the engine that sweeps it.
+        if self.point_families.declares(next_analysis.instance_id()) {
+            let analysis_type = self.spec_to_analysis_type(&spec);
             self.current_saved_output_contracts = next_analysis.saved_output_contracts().to_vec();
-            self.assemble_corner_family(state, &analysis_name, provenance);
+            self.assemble_point_family(state, &analysis_name, analysis_type, provenance);
             return;
         }
 
@@ -750,33 +756,34 @@ impl SimulationController {
         }
     }
 
-    /// Complete a corner declaration's task without an engine call.
+    /// Complete a PVT declaration's task without an engine call.
     ///
     /// The declaration keeps its place in the queue because the run's
     /// authenticated receipt has a task for it and retained results must stay
     /// an exact ordered prefix of that list. Its points are already retained by
     /// the time its turn comes, so the family is a reduction of them.
-    fn assemble_corner_family(
+    fn assemble_point_family(
         &mut self,
         state: &mut AppState,
         analysis_name: &str,
+        analysis_type: AnalysisType,
         provenance: AnalysisResultProvenance,
     ) {
         let declaration = provenance.source_instance_id();
         let target_run_id = self.target_run_id(state);
         let assembled = target_run_id
             .and_then(|run_id| state.simulation.run_by_sequence(run_id))
-            .ok_or_else(|| "corner family has no target simulation run".to_owned())
-            .and_then(|run| self.corner_families.family_for(declaration, run));
+            .ok_or_else(|| "PVT family has no target simulation run".to_owned())
+            .and_then(|run| self.point_families.family_for(declaration, run));
         let mut analysis = match assembled {
             Ok(result) => self.convert_to_analysis_result_with_metadata_owned(
                 result,
-                AnalysisType::Corner,
+                analysis_type,
                 analysis_name,
             ),
             Err(error) => {
                 state.push_sim_message(ConsoleMessage::error(format!("{analysis_name}: {error}")));
-                AnalysisResult::failed(1, AnalysisType::Corner, analysis_name, error)
+                AnalysisResult::failed(1, analysis_type, analysis_name, error)
             }
         };
         self.materialize_current_saved_outputs(&mut analysis);
@@ -849,7 +856,7 @@ impl SimulationController {
     fn finish_simulation_batch(&mut self, state: &mut AppState) {
         let completed_analysis_count = self.total_analyses;
         let completed_run_id = self.target_run_id(state);
-        self.corner_families.clear();
+        self.point_families.clear();
         let run_success = completed_run_id
             .and_then(|run_id| state.simulation.run_by_sequence(run_id))
             .map(|run| run.success)
@@ -1527,7 +1534,7 @@ impl SimulationController {
                     self.pending_analyses.clear();
                     self.successful_analysis_instances.clear();
                     self.execution_artifacts.clear();
-                    self.corner_families.clear();
+                    self.point_families.clear();
                     self.cached_netlist = None;
                     self.current_config = None;
                     self.current_spec = None;

@@ -3961,8 +3961,6 @@ mod tests {
         CAPABILITY_BANNER_GAP, CAPABILITY_BANNER_ICON_SIZE, CAPABILITY_BANNER_MARGIN,
         EMPTY_HINT_PADDING_X, EMPTY_HINT_PADDING_Y, EXPRESSION_HEADER_HEIGHT, FLOW_DETAIL_TOP,
         FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP, FLOW_TEXT_LEFT, NAV_PROPERTY_PADDING_X,
-        NETLIST_OUTLINE_ICON_GAP, NETLIST_OUTLINE_PADDING_X, NETLIST_OUTLINE_ROW_HEIGHT,
-        NETLIST_OUTLINE_TOUCH_ROW_HEIGHT, NetlistNavigatorProjection, NetlistNavigatorRowKind,
         PANEL_SEARCH_MARGIN_X, SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT, active_mc_sample_trail,
         flow_row_geometry, header, panel_search, panel_search_field_width,
         responsive_result_control_height, select_result_analysis, select_result_dataset,
@@ -4250,73 +4248,6 @@ mod tests {
         assert_eq!(CAPABILITY_BANNER_MARGIN, 8);
         assert_eq!(CAPABILITY_BANNER_ICON_SIZE, 15.0);
         assert_eq!(CAPABILITY_BANNER_GAP, 7.0);
-    }
-
-    #[test]
-    fn netlist_navigator_projects_exact_live_counts_and_include_lines() {
-        let source = "Precision amplifier\n.include models/base.lib\n.lib corners/process.lib TT\n.param gain=10 offset=1m\nR1 in out 1k\nXAMP in out opamp\n.model nch nmos\n.ac dec 10 1 1g\n.meas ac peak max v(out)\n.end\n";
-        let projection = NetlistNavigatorProjection::from_source(source, "", "top.sp", true);
-
-        assert_eq!(projection.line_count, 10);
-        let count = |kind| {
-            projection
-                .structure_rows
-                .iter()
-                .find(|row| row.kind == kind)
-                .and_then(|row| row.meta.as_deref())
-        };
-        assert_eq!(count(NetlistNavigatorRowKind::Root), Some("root"));
-        assert_eq!(count(NetlistNavigatorRowKind::Parameters), Some("1"));
-        assert_eq!(count(NetlistNavigatorRowKind::Instances), Some("2"));
-        let instances = projection
-            .structure_rows
-            .iter()
-            .find(|row| row.kind == NetlistNavigatorRowKind::Instances)
-            .expect("instances row exists");
-        assert!(instances.contains_line(5));
-        assert!(instances.contains_line(6));
-        assert_eq!(count(NetlistNavigatorRowKind::Models), Some("1"));
-        assert_eq!(count(NetlistNavigatorRowKind::Analyses), Some("1"));
-        assert_eq!(count(NetlistNavigatorRowKind::Measurements), Some("1"));
-        assert_eq!(projection.include_rows.len(), 2);
-        assert_eq!(projection.include_rows[0].label, "models/base.lib");
-        assert_eq!(projection.include_rows[0].target_line, Some(2));
-        assert_eq!(projection.include_rows[1].label, "corners/process.lib");
-        assert_eq!(projection.include_rows[1].target_line, Some(3));
-        assert!(projection.show_source_mapping);
-    }
-
-    #[test]
-    fn netlist_navigator_filter_matches_symbols_and_exact_source_lines() {
-        let source = "deck\n.param gain=10\nR1 in out 1k\nR2 out 0 2k\n.end\n";
-
-        let symbol = NetlistNavigatorProjection::from_source(source, "r2", "top.sp", true);
-        assert_eq!(symbol.structure_rows.len(), 1);
-        assert_eq!(
-            symbol.structure_rows[0].kind,
-            NetlistNavigatorRowKind::Instances
-        );
-        assert_eq!(symbol.structure_rows[0].meta.as_deref(), Some("2"));
-        assert_eq!(symbol.structure_rows[0].target_line, Some(4));
-        assert!(!symbol.structure_rows[0].contains_line(3));
-        assert!(symbol.structure_rows[0].contains_line(4));
-        assert!(!symbol.show_source_mapping);
-
-        let line = NetlistNavigatorProjection::from_source(source, "line 2", "top.sp", true);
-        assert_eq!(line.structure_rows.len(), 1);
-        assert_eq!(
-            line.structure_rows[0].kind,
-            NetlistNavigatorRowKind::Parameters
-        );
-        assert_eq!(line.structure_rows[0].target_line, Some(2));
-    }
-
-    #[test]
-    fn netlist_navigator_geometry_matches_mockup_and_touch_contract() {
-        assert_eq!(NETLIST_OUTLINE_ROW_HEIGHT, 27.0);
-        assert_eq!(NETLIST_OUTLINE_TOUCH_ROW_HEIGHT, 44.0);
-        assert_eq!(NETLIST_OUTLINE_PADDING_X, 9.0);
-        assert_eq!(NETLIST_OUTLINE_ICON_GAP, 7.0);
     }
 
     #[test]

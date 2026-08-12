@@ -159,22 +159,31 @@ fn issue_summary(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation
     card(ui, &title, Some(status), |ui| {
         card_body(ui, |ui| {
             for error in &validation.errors {
+                let text = egui::RichText::new(format!("{} · {}", error.id, error.message))
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.err);
+                // A refusal is a control only when it names a dimension to send
+                // the operator to. Composition and budget refusals name none, so
+                // they are read as statements rather than sensing a click that
+                // would resolve to nothing.
+                let Some(dimension_id) = error.dimension_id.clone() else {
+                    ui.add(egui::Label::new(text).wrap())
+                        .on_hover_text("Composition or budget refusal");
+                    continue;
+                };
                 let response = ui
-                    .add(
-                        egui::Label::new(
-                            egui::RichText::new(format!("{} · {}", error.id, error.message))
-                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.err),
-                        )
-                        .wrap()
-                        .sense(Sense::click()),
+                    .add(egui::Label::new(text).wrap().sense(Sense::click()))
+                    .on_hover_text("Select the dimension this refusal is about");
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        ui.is_enabled(),
+                        format!("Select the dimension {} is about", error.id),
                     )
-                    .on_hover_text(error.dimension_id.as_deref().map_or(
-                        "Composition or budget refusal",
-                        |_| "Select the dimension this refusal is about",
-                    ));
+                });
+                theme::paint_focus_ring(ui, &response, response.rect);
                 if response.clicked() {
-                    focus = error.dimension_id.clone();
+                    focus = Some(dimension_id);
                 }
             }
             for warning in &validation.warnings {
@@ -330,6 +339,14 @@ fn axis_card(
                         .sense(Sense::click()),
                     )
                     .on_hover_text("Edit this dimension");
+                title.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        ui.is_enabled(),
+                        format!("Edit dimension {}", dimension.name),
+                    )
+                });
+                theme::paint_focus_ring(ui, &title, title.rect);
                 if title.clicked() {
                     event = Some(AxisEvent::Select);
                 }

@@ -32,9 +32,9 @@ use super::canonical::{
 };
 use super::permit::ConsumedExecutionPermit;
 
-mod corner_points;
+mod declared_points;
 
-use corner_points::expand_corner_run_point_tasks;
+use declared_points::{expand_corner_run_point_tasks, expand_temperature_run_point_tasks};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PreparationStage {
@@ -362,10 +362,10 @@ pub(in crate::simulation) struct PreparedTask {
     /// it; a task that runs once for the whole declared space has no point,
     /// and naming one would attribute its results to a corner it never solved.
     pvt_point: Option<crate::state::AnalysisResultPvtPoint>,
-    /// The corner declaration this task solves one point of. The declaration is
-    /// never dispatched, so this is the only record of what its family is
-    /// called, which base analysis it ran, and where this point sits in it.
-    corner_point: Option<crate::simulation::corner_family::CornerRunPoint>,
+    /// The PVT declaration this task solves one point of. The declaration is
+    /// never dispatched, so this is the only record of which base analysis it
+    /// ran and where this point sits in the space it declared.
+    declared_point: Option<crate::simulation::point_family::DeclaredRunPoint>,
 }
 
 impl PreparedTask {
@@ -396,7 +396,7 @@ impl PreparedTask {
             touchstone_export: None,
             executable_netlist_override: None,
             pvt_point: None,
-            corner_point: None,
+            declared_point: None,
         }
     }
 
@@ -588,7 +588,7 @@ pub(in crate::simulation) struct AuthorizedTaskDispatch {
     project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     touchstone_export: TouchstoneExportPolicy,
     pvt_point: Option<crate::state::AnalysisResultPvtPoint>,
-    corner_point: Option<crate::simulation::corner_family::CornerRunPoint>,
+    declared_point: Option<crate::simulation::point_family::DeclaredRunPoint>,
 }
 
 /// A prepared task paired with the exact batch-local artifacts required by
@@ -703,11 +703,11 @@ impl AuthorizedTaskDispatch {
         self.pvt_point.as_ref()
     }
 
-    /// The corner declaration this task solves one point of, when it is one.
-    pub(in crate::simulation) const fn corner_point(
+    /// The PVT declaration this task solves one point of, when it is one.
+    pub(in crate::simulation) const fn declared_point(
         &self,
-    ) -> Option<&crate::simulation::corner_family::CornerRunPoint> {
-        self.corner_point.as_ref()
+    ) -> Option<&crate::simulation::point_family::DeclaredRunPoint> {
+        self.declared_point.as_ref()
     }
 
     pub(in crate::simulation) fn resolve_dependency_artifacts(
@@ -1366,7 +1366,7 @@ impl PreparedRunSnapshot {
                     project_veriloga_runtimes: project_veriloga_runtimes.clone(),
                     touchstone_export,
                     pvt_point: prepared.pvt_point,
-                    corner_point: prepared.corner_point,
+                    declared_point: prepared.declared_point,
                 }
             })
             .collect();
@@ -1481,12 +1481,12 @@ fn point_is_nominal(
 /// Expand every task that is declared over the run set's PVT points into one
 /// prepared task per point.
 ///
-/// Two declarations reach this: an operating point bound to the run-set axis,
-/// and a corner run, whose base analysis *is* the thing declared over the
-/// points. Both expand through the same per-point ingredients — the process
-/// corner materialized into the point's own deck, the point recorded on the
-/// task so its result can be attributed, and an instance identity derived
-/// from the point so two points can never share one.
+/// Three declarations reach this: an operating point bound to the run-set
+/// axis, and the corner run and the temperature step, whose base analysis *is*
+/// the thing declared over the points. All expand through the same per-point
+/// ingredients — the process corner materialized into the point's own deck,
+/// the point recorded on the task so its result can be attributed, and an
+/// instance identity derived from the point so two points can never share one.
 fn expand_pvt_point_tasks(
     tasks: Vec<PreparedTask>,
     pvt_points: &[PreparedPvtPoint],
@@ -1542,15 +1542,16 @@ fn expand_pvt_point_tasks(
             prepared.executable_netlist_override = inherited_op_source_override;
         }
 
-        // A corner run is not one analysis swept along an axis: it is a base
-        // analysis solved once per PVT point, and collapsing those solves into
-        // one scalar per node is what threw the waveforms and the `.MEAS`
-        // results away. Each point earns its own task so its result carries
-        // its own evidence and the point that produced it.
+        // A corner run and a temperature step are not one analysis swept along
+        // an axis: each is a base analysis solved once per declared point, and
+        // collapsing those solves into one scalar per node is what threw the
+        // waveforms and the `.MEAS` results away. Each point earns its own task
+        // so its result carries its own evidence and the point that produced
+        // it.
         //
         // The declaration is no longer solved. Solving it would solve every
-        // point a second time, and the family a corner plot reads is one scalar
-        // per node per point — a view over the point results. It stays a task
+        // point a second time, and the family its plot reads is one scalar per
+        // node per point — a view over the point results. It stays a task
         // because the run's authenticated receipt is built from this list and
         // the retained results must line up with it one for one; its turn in
         // the queue assembles the family instead of reaching the engine.
@@ -1565,22 +1566,39 @@ fn expand_pvt_point_tasks(
         // strictly vector order — a `VecDeque` popped from the front with one
         // task in flight — so the position alone orders it, whereas a
         // dependency edge would skip the family outright the moment a single
-        // corner failed to converge, which is the corner a plot most needs.
+        // point failed to converge, which is the point a plot most needs.
         //
         // A dependent of the declaration binds to the last *point*: the
         // assembly produces no execution artifact, and the last point is the
         // task whose completion means the declared space has been solved. That
         // is the same rule the operating-point expansion below applies.
-        if matches!(prepared.task.spec, AnalysisSpec::Corner) {
-            let points = expand_corner_run_point_tasks(
+        let declared_point_tasks = match &prepared.task.spec {
+            AnalysisSpec::Corner => Some(expand_corner_run_point_tasks(
                 &prepared,
                 executable_netlist,
                 reference_process,
                 reference_temperature_celsius,
-            )?;
+            )?),
+            // A parametric run declares a PVT space only when it carries a
+            // temperature contract. Without one it steps a design parameter,
+            // which the engine sweeps for itself inside a single solve and
+            // which is not a condition a specification can be scoped to.
+            AnalysisSpec::Parametric => match prepared.task.spec_options.temp.as_ref() {
+                Some(contract) => Some(expand_temperature_run_point_tasks(
+                    &prepared,
+                    contract,
+                    executable_netlist,
+                    reference_process,
+                    reference_temperature_celsius,
+                )?),
+                None => None,
+            },
+            _ => None,
+        };
+        if let Some(points) = declared_point_tasks {
             let last = points
                 .last()
-                .expect("corner expansion refuses an empty declared space");
+                .expect("an expansion refuses an empty declared space");
             final_task.insert(
                 original_identity,
                 (

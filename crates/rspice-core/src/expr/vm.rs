@@ -38,6 +38,7 @@ pub enum Instruction {
     Mul,
     Div,
     Pow,
+    FunctionPow,
 
     // Comparison (pop 2, push 1)
     Lt,
@@ -86,8 +87,9 @@ pub enum Instruction {
     Max,
     Pwr,
     Pwrs,
-    Limit,
+    Limit(usize),
     Sign,
+    HspiceSign,
     Uramp,
     Stp,
     Ustep,
@@ -316,6 +318,10 @@ impl Vm {
                     let dialect = ctx.expression_dialect;
                     self.binary_op(|a, b| super::real_pow(a, b, dialect));
                 }
+                Instruction::FunctionPow => {
+                    let dialect = ctx.expression_dialect;
+                    self.binary_op(|a, b| super::real_function_pow(a, b, dialect));
+                }
 
                 // Comparisons
                 Instruction::Lt => self.binary_op(|a, b| if a < b { 1.0 } else { 0.0 }),
@@ -401,14 +407,11 @@ impl Vm {
                 Instruction::Ceil => self.unary_op(|a| a.ceil()),
                 Instruction::Round => self.unary_op(|a| a.round_ties_even()),
                 Instruction::Sqr => self.unary_op(|a| a * a),
-                Instruction::Sign => self.unary_op(|a| {
-                    if a > EXPR_ZERO_TOLERANCE {
-                        1.0
-                    } else if a < -EXPR_ZERO_TOLERANCE {
-                        -1.0
-                    } else {
-                        0.0
-                    }
+                Instruction::Sign => {
+                    self.unary_op(super::ordered_sign);
+                }
+                Instruction::HspiceSign => self.binary_op(|magnitude, polarity| {
+                    magnitude.abs() * super::ordered_sign(polarity)
                 }),
                 Instruction::Uramp => self.unary_op(|a| a.max(0.0)),
                 Instruction::Stp => {
@@ -446,8 +449,13 @@ impl Vm {
                 // Multi-arg functions
                 Instruction::Min => self.binary_op(|a, b| a.min(b)),
                 Instruction::Max => self.binary_op(|a, b| a.max(b)),
-                Instruction::Pwr => self.binary_op(|a, b| a.abs().powf(b)),
-                Instruction::Pwrs => self.binary_op(|a, b| a.signum() * a.abs().powf(b)),
+                Instruction::Pwr => {
+                    let dialect = ctx.expression_dialect;
+                    self.binary_op(|a, b| super::real_function_pwr(a, b, dialect));
+                }
+                Instruction::Pwrs => {
+                    self.binary_op(super::real_function_pwrs);
+                }
                 Instruction::Mod => self.binary_op(|a, b| if b != 0.0 { a % b } else { 0.0 }),
                 Instruction::Table(arg_count) => {
                     if *arg_count >= 3 && self.stack.len() >= *arg_count {
@@ -555,15 +563,26 @@ impl Vm {
                     self.stack.push(state.trial_integral);
                 }
 
-                Instruction::Limit => {
-                    // limit(x, lo, hi) - pop 3, push 1
-                    if self.stack.len() >= 3 {
+                Instruction::Limit(arg_count) => match arg_count {
+                    2 if self.stack.len() >= 2 => {
+                        // The behavioral VM has no statistical sampling mode.
+                        // Xyce's two-argument HSPICE LIMIT therefore evaluates
+                        // to its nominal first argument without consuming the
+                        // variation operand.
+                        let start = self.stack.len() - 2;
+                        let nominal = self.stack[start];
+                        self.stack.truncate(start);
+                        self.stack.push(nominal);
+                    }
+                    3 if self.stack.len() >= 3 => {
                         let hi = self.stack.pop().unwrap();
                         let lo = self.stack.pop().unwrap();
                         let x = self.stack.pop().unwrap();
-                        self.stack.push(x.clamp(lo, hi));
+                        self.stack
+                            .push(super::ordered_limit(x, lo, hi, ctx.expression_dialect).0);
                     }
-                }
+                    _ => {}
+                },
 
                 Instruction::IfElse => {
                     // if(cond, then, else) - pop 3, push 1

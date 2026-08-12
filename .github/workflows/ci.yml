@@ -166,6 +166,7 @@ jobs:
           cargo test --locked -p rspice-matrix -p rspice-cli -p rspice-veriloga -p rspice-bench
           -p rspice-publication-contract -p rspice-publish -p rspice-viewer
       - name: Gate KLU correctness, fill, and kernel latency
+        id: klu-qualification
         # Absolute per-factor-nonzero budgets are deliberately loose enough
         # for shared hosted runners, but tight enough to catch an accidental
         # return to allocating/refactoring symbolically on every Newton step.
@@ -182,7 +183,12 @@ jobs:
           --max-fill-ratio 1.60
           --out target/klu-ci-qualification.json
       - name: Upload KLU qualification
-        if: always()
+        # The gate writes its report before it rules on the budgets, so a
+        # budget failure must still publish its measurements. Condition on the
+        # gate having run rather than on the job being healthy: `always()` also
+        # fires for the forty steps ahead of it, and `if-no-files-found: error`
+        # then reports a missing KLU artifact on top of whatever actually broke.
+        if: ${{ !cancelled() && steps.klu-qualification.conclusion != 'skipped' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: klu-ci-qualification

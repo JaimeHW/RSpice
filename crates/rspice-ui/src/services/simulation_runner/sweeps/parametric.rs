@@ -1,14 +1,11 @@
 //! Parametric sweep.
 //!
-//! Sweeps one or more design parameters and returns a result set per point.
+//! Steps one design parameter and returns a result set per point.
 
 use super::super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted};
-use super::execution::run_temperature_sweep;
-use super::mapping::{
-    describe_step_target, map_dc_sweep_results_with_abort, map_temperature_results,
-};
+use super::mapping::{describe_step_target, map_dc_sweep_results_with_abort};
 use super::sweep_points::expand_step_sweep_values_with_abort;
-use super::types::{CornerBaseMode, ParametricData, TempRunConfig};
+use super::types::ParametricData;
 use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
 use rspice_core::abort_signal::NoAbort;
@@ -33,9 +30,16 @@ pub fn run_parametric_analysis_with_abort(
     run_parametric_analysis_with_source_path_and_abort(netlist_text, None, abort)
 }
 
-/// Run parametric analysis by executing the first `.STEP` command in the
-/// netlist, with source-path resolution and cooperative
+/// Run parametric analysis by executing the first design-parameter `.STEP`
+/// command in the netlist, with source-path resolution and cooperative
 /// cancellation through parsing, point expansion, solves, and mapping.
+///
+/// A `.STEP TEMP` is passed over rather than executed. Temperature is a PVT
+/// axis: it is planned as its own declaration and expanded into one solve per
+/// temperature before the run is authorized, so executing it here would solve
+/// the same space a second time. It also used to shadow the parameter step a
+/// deck declaring both had asked for, because the first `.STEP` in the deck
+/// won and the temperature card is normally written first.
 pub fn run_parametric_analysis_with_source_path_and_abort(
     netlist_text: &str,
     source_path: Option<&Path>,
@@ -48,12 +52,13 @@ pub fn run_parametric_analysis_with_source_path_and_abort(
         .analyses
         .iter()
         .find_map(|analysis| match analysis {
-            AnalysisCommand::Step(step) => Some(step),
+            AnalysisCommand::Step(step) if step.target != StepTarget::Temp => Some(step),
             _ => None,
         })
         .ok_or_else(|| {
             ServiceRunError::Failure(
-                "Parametric analysis requires a .STEP command in the netlist".to_string(),
+                "Parametric analysis requires a design-parameter .STEP command in the netlist"
+                    .to_string(),
             )
         })?;
 
@@ -74,18 +79,10 @@ pub fn run_parametric_analysis_with_source_path_and_abort(
         ));
     }
 
-    let results = if step_cmd.target == StepTarget::Temp {
-        let cfg = TempRunConfig {
-            temperatures_c: values.clone(),
-            base_mode: CornerBaseMode::Op,
-        };
-        return run_parametric_analysis_with_netlist_and_config(&netlist, &cfg, "TEMP", abort);
-    } else {
-        let engine = Engine::new(engine_config);
-        engine
-            .run_step_command_with_abort(&netlist, step_cmd, &values, abort)
-            .map_err(|error| ServiceRunError::from_core("Parametric analysis error", error))?
-    };
+    let engine = Engine::new(engine_config);
+    let results = engine
+        .run_step_command_with_abort(&netlist, step_cmd, &values, abort)
+        .map_err(|error| ServiceRunError::from_core("Parametric analysis error", error))?;
 
     if results.is_empty() {
         return Err(ServiceRunError::Failure(
@@ -102,46 +99,6 @@ pub fn run_parametric_analysis_with_source_path_and_abort(
 
     Ok(ParametricData {
         target: describe_step_target(step_cmd),
-        sweep_values,
-        voltages,
-        num_failures,
-    })
-}
-
-/// Run an explicitly configured temperature sweep with source-path resolution
-/// and cooperative cancellation.
-pub fn run_parametric_analysis_with_config_and_source_path_and_abort(
-    netlist_text: &str,
-    config: &TempRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<ParametricData> {
-    let netlist = super::super::parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_parametric_analysis_with_netlist_and_config(&netlist, config, "TEMP", abort)
-}
-
-fn run_parametric_analysis_with_netlist_and_config(
-    netlist: &rspice_core::Netlist,
-    config: &TempRunConfig,
-    target: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<ParametricData> {
-    ensure_not_aborted(abort)?;
-    config.validate().map_err(ServiceRunError::Failure)?;
-
-    let results = run_temperature_sweep(netlist, &config.temperatures_c, &config.base_mode, abort)?;
-    if results.is_empty() {
-        return Err(ServiceRunError::Failure(
-            "Parametric analysis produced no converged sweep points".to_string(),
-        ));
-    }
-
-    let num_failures = config.temperatures_c.len().saturating_sub(results.len());
-    let metric_label = config.base_mode.metric_label();
-    let (sweep_values, voltages) = map_temperature_results(&results, metric_label, abort)?;
-
-    Ok(ParametricData {
-        target: target.to_string(),
         sweep_values,
         voltages,
         num_failures,
@@ -213,6 +170,31 @@ R2 out 0 1k
             .expect("V(out) trace");
         assert!((out_values[0] - 0.5).abs() < 1e-12);
         assert!((out_values[1] - (1.0 / 3.0)).abs() < 1e-12);
+    }
+
+    /// A deck that declares both steps asked for both, and the temperature one
+    /// is already solved point by point by its own declaration. Taking it here
+    /// as well ran the same sweep twice and never ran the parameter step.
+    #[test]
+    fn a_temperature_step_never_shadows_the_parameter_step_beside_it() {
+        let data = run_parametric_analysis(
+            "both steps\n\
+             .param rload=1k\n\
+             V1 in 0 1\n\
+             R1 in out {rload}\n\
+             R2 out 0 1k\n\
+             .step temp list -40 27 85\n\
+             .step param rload list 1k 3k\n\
+             .end\n",
+        )
+        .expect("the parameter step is the one this runner executes");
+
+        assert!(
+            data.target.eq_ignore_ascii_case("PARAM rload"),
+            "{}",
+            data.target
+        );
+        assert_eq!(data.sweep_values, vec![1000.0, 3000.0]);
     }
 
     #[test]

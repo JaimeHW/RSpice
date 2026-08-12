@@ -5,10 +5,37 @@
 //! reproduce the identical draw sequence on every platform and run.
 
 use super::*;
+use crate::abort_signal::CountingAbort;
 use crate::config::ExpressionDialect;
+
+#[test]
+fn nested_curly_grouping_is_canonical_and_reports_its_delimiter() {
+    let parenthesized = parse_expression("1+((2*3))").expect("parenthesized grouping parses");
+    let braced = parse_expression("1+{{2*3}}").expect("nested curly grouping parses");
+    assert_eq!(format!("{parenthesized:?}"), format!("{braced:?}"));
+    assert!(matches!(
+        parse_expression("{1+2").expect_err("missing brace must fail"),
+        ExprError::TrailingInput(detail) if detail == "missing closing brace"
+    ));
+}
 
 fn eval_with(ctx: &ParamContext, input: &str) -> Value {
     eval_expression(input, ctx).unwrap_or_else(|e| panic!("eval `{input}` failed: {e}"))
+}
+
+#[test]
+fn permissive_expression_parser_polls_abort_during_token_traversal() {
+    for expression in ["1".repeat(4096), format!("{}1", " ".repeat(4096))] {
+        let abort = CountingAbort::new(128);
+        assert!(matches!(
+            parse_expression_with_abort(&expression, &abort),
+            Err(ParseExpressionWithAbortError::Aborted)
+        ));
+        assert!(
+            abort.count() > 128,
+            "the abort must be observed from inside parser traversal"
+        );
+    }
 }
 
 #[test]
@@ -1004,6 +1031,7 @@ fn limit_three_arg_clamp_is_unchanged() {
     assert_eq!(eval_with(&ctx, "limit(5, 0, 2)"), 2.0);
     assert_eq!(eval_with(&ctx, "limit(-5, 0, 2)"), 0.0);
     assert_eq!(eval_with(&ctx, "limit(1, 0, 2)"), 1.0);
+    assert_eq!(eval_with(&ctx, "limit(1, 2, 0)"), 2.0);
 }
 
 #[test]
@@ -1029,6 +1057,12 @@ fn statistical_functions_validate_arguments() {
         eval_expression("limit(1)", &ctx),
         Err(ExprError::WrongArgCount(_))
     ));
+    for expression in ["pwr(2,3,4)", "pwrs(2,3,4)", "sgn(1,2)", "sign(1,2)"] {
+        assert!(matches!(
+            eval_expression(expression, &ctx),
+            Err(ExprError::WrongArgCount(_))
+        ));
+    }
 }
 
 #[test]
@@ -1951,4 +1985,20 @@ fn forward_declared_static_global_dependencies_flatten_for_scalar_devices() {
         .collect();
 
     assert_eq!(capacitances, vec![3.0, 3.0]);
+}
+
+#[test]
+fn behavioral_preparation_polls_abort_inside_one_large_expression() {
+    let expression = (0..4096)
+        .map(|index| format!("TIME+{index}"))
+        .collect::<Vec<_>>()
+        .join("+");
+    let abort = crate::abort_signal::CountingAbort::new(8);
+    let error = prepare_behavioral_expression_with_abort(&expression, &ParamContext::new(), &abort)
+        .expect_err("large single-expression preparation must be cancellable");
+    assert_eq!(error, BehavioralPreparationError::Aborted);
+    assert!(
+        abort.count() >= 9,
+        "abort was not polled during preparation"
+    );
 }

@@ -168,6 +168,11 @@ pub struct B3SoiDd {
     /// device state (`bias`, `op`, mode, charge partition) is frozen and the
     /// stamps reuse the previous evaluation.
     bypass_active: std::cell::Cell<bool>,
+    /// Running count of Newton iterates this device answered from the frozen
+    /// linearization. An accuracy comparison between bypass off and on is
+    /// vacuous unless this is non-zero, so the count is the evidence that the
+    /// option did anything at all.
+    bypass_hits: std::cell::Cell<u64>,
     /// Set at the start of every timestep attempt (ngspice `MODEINITPRED`):
     /// the next `update` must perform a full evaluation so the bypass anchor
     /// always belongs to the current timestep.
@@ -303,6 +308,7 @@ impl B3SoiDd {
             startup_seed_pending: std::cell::Cell::new(false),
             bypass_tolerances: std::cell::Cell::new(None),
             bypass_active: std::cell::Cell::new(false),
+            bypass_hits: std::cell::Cell::new(0),
             force_full_eval: std::cell::Cell::new(true),
             last_limited: std::cell::Cell::new(false),
             last_dc_update_terminals: std::cell::Cell::new(None),
@@ -372,18 +378,24 @@ impl B3SoiDd {
         self.bias_was_limited.set(false);
     }
 
-    /// Enable the ngspice-style transient device bypass with the engine's
+    /// Enable the ngspice transient device bypass with the engine's
     /// `(reltol, current abstol, vntol)` triple, or disable it with `None`.
     ///
-    /// Bypass is more than a speed optimization: the B3SOIDD charge partition
-    /// (`dxpart` 0.4/0.6) and mode select are discontinuous at `vds = 0`, so a
-    /// device parked at that boundary injects an `ag0`-amplified charge-current
-    /// jump on every re-evaluation and Newton limit-cycles at any timestep.
-    /// Freezing the evaluation once the branch voltages and predicted currents
-    /// are stationary (b3soiddld.c:589-643) is how ngspice converges there.
+    /// This is a speed option and nothing more. ngspice ships `CKTbypass = 0`
+    /// (cktinit.c:54, cktntask.c:105) and its own B3SOIDD decks never set it,
+    /// so the block at b3soiddld.c:589-647 is not on the path by which ngspice
+    /// converges anything; it is opt-in through `.options bypass`. Freezing a
+    /// stationary device trades a bounded accuracy risk for skipped
+    /// evaluations, so the default stays off and a run being compared against
+    /// another should leave it off.
     pub fn set_bypass_tolerances(&self, tolerances: Option<(Value, Value, Value)>) {
         self.bypass_tolerances.set(tolerances);
         self.bypass_active.set(false);
+    }
+
+    /// Newton iterates this device answered from its frozen linearization.
+    pub fn bypass_hits(&self) -> u64 {
+        self.bypass_hits.get()
     }
 
     /// `DEBUG=-1` (ngspice `debugMod == -1`): evaluate charges for probes but
@@ -687,7 +699,7 @@ impl B3SoiDd {
         Value,
         Value,
         Value,
-        &'static str,
+        crate::op_label::OpLabel,
     ) {
         let op = &self.op;
         let bias = self.bias;
@@ -697,11 +709,11 @@ impl B3SoiDd {
             (bias.vgs - bias.vds, -bias.vds)
         };
         let region = if vgs_mode < op.von {
-            "subthreshold"
+            crate::op_label::OpLabel::SUBTHRESHOLD
         } else if vds_mode > op.vdsat {
-            "saturation"
+            crate::op_label::OpLabel::SATURATION
         } else {
-            "linear"
+            crate::op_label::OpLabel::LINEAR
         };
         (
             op.ids, bias.vgs, bias.vds, bias.vbs, op.von, op.vdsat, op.gm, op.gds, op.gmbs, region,
@@ -1153,13 +1165,20 @@ impl NonlinearDevice for B3SoiDd {
         let predicted_bias = self.predictor_bias.take();
         let raw_bias = predicted_bias.unwrap_or(node_bias);
         let using_prediction = predicted_bias.is_some() && !biases_match(raw_bias, node_bias);
-        // ngspice transient bypass (b3soiddld.c:589-643): when the previous
+        // ngspice transient bypass (b3soiddld.c:589-647): when the previous
         // iterate evaluated without limiting and the new branch voltages plus
         // predicted currents are stationary within tolerances, freeze the
-        // evaluation (bias, op, mode, charge partition). This is what lets
-        // Newton contract on a device parked at the discontinuous vds = 0
-        // mode/charge-partition boundary.
+        // evaluation (bias, op, mode, charge partition) and restamp it.
+        //
+        // ngspice splits the two directions the bypass can take. Transient and
+        // AC set `ByPass` and jump to line755, which keeps the charge and
+        // capacitance work that the frozen linearization needs; the operating
+        // point jumps to line850 and skips charges entirely. Restamping a
+        // frozen linearization is the line755 shape, so bypass stays out of the
+        // operating point, which has its own exact-match reuse and no timestep
+        // to reject a prematurely frozen device.
         if let Some((reltol, abstol, vntol)) = self.bypass_tolerances.get()
+            && !self.dc_mode.get()
             && !self.force_full_eval.get()
             && !self.last_limited.get()
             && self.has_history
@@ -1168,6 +1187,7 @@ impl NonlinearDevice for B3SoiDd {
             let raw = raw_bias;
             if self.bypass_check(raw, reltol, abstol, vntol) {
                 self.bypass_active.set(true);
+                self.bypass_hits.set(self.bypass_hits.get() + 1);
                 return;
             }
         }

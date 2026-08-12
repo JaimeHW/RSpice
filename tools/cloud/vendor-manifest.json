@@ -1,17 +1,17 @@
 {
   "source_repository": "JaimeHW/RSpice-Cloud",
-  "source_sha": "8845d78b23f64397703ca51dd6dbfe494830e358",
+  "source_sha": "cb4fb61c62f7c16e15262a3882a762d8bc88f1ba",
   "crates": [
     "rspice-cloud-domain",
     "rspice-cloud-contract",
     "rspice-cloud-client"
   ],
   "files": {
-    "crates/rspice-cloud-client/Cargo.toml": "b27ed21e53b32970d960e9d7a1210c64e57d215e899a0d95d6ee97b0325483aa",
+    "crates/rspice-cloud-client/Cargo.toml": "df071a14339b228f1d2dc68eb8adfe65f863d0f002356396bc6bf98257bfe0ba",
     "crates/rspice-cloud-client/src/artifacts.rs": "a319893b96bb2257087326d269c396c05c9a1dc2c7f5c987f15c25c52a3f9913",
     "crates/rspice-cloud-client/src/auth.rs": "3c62b57e9ce880f879655db7d30618a3348f7b7aca0e2109e47e16e38df128ee",
     "crates/rspice-cloud-client/src/circuits.rs": "1daf463d90b52c5ab902daa6c89e7393a5fdd59344d06e80704ee000f616926e",
-    "crates/rspice-cloud-client/src/client.rs": "9cd31aa8a4e34af947d98c508177276337654466d945ff1edcd70131f812e956",
+    "crates/rspice-cloud-client/src/client.rs": "0fe430e58d7b979baade2e66cd39fd673e02ff29f8c76aed677464a91b7df85c",
     "crates/rspice-cloud-client/src/clock.rs": "058222dce28740080e7126f78036013f363e763195e66510ecd6c262d7d1bc6e",
     "crates/rspice-cloud-client/src/collaboration.rs": "c21aa5a69a9a48dc6c6a823c6b2243da021c4997c0623d54b78fb138384a8dd7",
     "crates/rspice-cloud-client/src/config.rs": "db3e4585a29d03b9cc743cea55ab5eff3ec20f4883cd5e0a8393d3b10565dca3",
@@ -34,9 +34,9 @@
     "crates/rspice-cloud-client/src/wasm_transfer.rs": "6b91a8c0e7705f3855d473d6efded5d0b3834cbd3ad524726764029a89f6948d",
     "crates/rspice-cloud-client/src/wasm_transport.rs": "1ad312306f054d66433d7e16fbd34c19be8659c410e0b628744e62cc0613f549",
     "crates/rspice-cloud-client/src/workspaces.rs": "9b9964db381f95847055de0773b118562114bc552d8b8714d96c7b067961bfa1",
-    "crates/rspice-cloud-contract/Cargo.toml": "34d6eb54157afcd6048b8280d763f3be23caf50df68db95929f25651a8e915d9",
-    "crates/rspice-cloud-contract/src/lib.rs": "55c0a595852d9a34f8e89f1153e9a42903ca8663f9d16170ce30f6323ffef257",
-    "crates/rspice-cloud-domain/Cargo.toml": "5efa4501f8b2dfefa7e6c6e30fc9e9fe2112617a204616830fd0ab63ceef3031",
+    "crates/rspice-cloud-contract/Cargo.toml": "0ea4fbe2ba625188eee2f343fc457f84994a3d829f42455f8cfb881139bbaaa6",
+    "crates/rspice-cloud-contract/src/lib.rs": "a6cb47e912b04504da00b1b8212e82d29dd6da493b109268c5eee8e115f822c4",
+    "crates/rspice-cloud-domain/Cargo.toml": "741bb30551403a63ac6023fb143bd1bfd137c1652a7a03ecd73589907b7d43cb",
     "crates/rspice-cloud-domain/src/execution.rs": "819d1045f0798ac021e50510610d83e990045a5cf9e8b2858cf92421ee92dcc5",
     "crates/rspice-cloud-domain/src/ids.rs": "6c92efbca49f32dbaffa7c14477c7a0b51997901c6b47cfbdbb73f06f8228deb",
     "crates/rspice-cloud-domain/src/lib.rs": "a8d980e867d5e224b1561c3615267c2e07cc288f2519face326dbcf9e8588bae",

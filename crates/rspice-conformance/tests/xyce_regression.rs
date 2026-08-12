@@ -922,6 +922,18 @@ fn test_xyce_typed_expected_failure_wrapper_cases_run() {
             "expected_failure_bug281_invalid_dc_sweep_arity_parse",
         ),
         (
+            "Netlists/Certification_Tests/BUG_354_SON/bad_function.cir",
+            "expected_failure_bug354_unknown_print_function_output_validation",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_354_SON/bad_leadcurrent.cir",
+            "expected_failure_bug354_unknown_iv_print_function_output_validation",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_354_SON/bad_parameter.cir",
+            "expected_failure_bug354_unresolved_print_identifier_output_validation",
+        ),
+        (
             "Netlists/Certification_Tests/BUG_401/bad-device-line.cir",
             "expected_failure_bug401_bad_device_line_build",
         ),
@@ -974,8 +986,8 @@ fn test_xyce_typed_expected_failure_wrapper_cases_run() {
     }
     assert_eq!(
         observed_contracts.len(),
-        40,
-        "the expected-failure oracle census is exactly forty distinct physical records"
+        43,
+        "the expected-failure oracle census is exactly forty-three distinct physical records"
     );
 }
 
@@ -9408,6 +9420,234 @@ fn test_xyce_bug39_generated_gaussian_mean_sigma_oracles() {
         assert_eq!(
             result.upstream_exclusion_source.as_deref(),
             Some("Netlists/Certification_Tests/BUG_39_SON/exclude")
+        );
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
+fn test_xyce_bug39_deterministic_expression_gold_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        (
+            "Netlists/Certification_Tests/BUG_39_SON/bug39_int.cir",
+            "bug39_int_single_point_xyce_verify_dc_wrapper",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_39_SON/bug39_limit.cir",
+            "bug39_limit_nominal_single_point_xyce_verify_dc_wrapper",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_39_SON/bug39_pow.cir",
+            "bug39_pow_single_point_xyce_verify_dc_wrapper",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_39_SON/bug39_sign.cir",
+            "bug39_sign_single_point_xyce_verify_dc_wrapper",
+        ),
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} must remain owned by its removed historical wrapper"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should execute its exact deterministic one-point DC/gold contract, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(result.upstream_exclusion_source, None);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
+fn test_xyce_bug864_unresolved_subcircuit_parameter_error_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_864_SON/bug_864_son.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "BUG864 must remain owned by its removed historical wrapper"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported && !result.upstream_excluded,
+        "BUG864 should reproduce its typed bounded unresolved-parameter failure, got {result:?}"
+    );
+    assert_eq!(
+        result.contract,
+        "expected_failure_bug864_unresolved_subcircuit_parameter_build"
+    );
+    assert_eq!(result.upstream_exclusion_source, None);
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
+fn test_xyce_bug48_level54_native_bsim4_success_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_48_SON/test.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "BUG48 must remain owned by its removed historical wrapper"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported && !result.upstream_excluded,
+        "BUG48 should execute its typed native BSIM4 success contract, got {result:?}"
+    );
+    assert_eq!(
+        result.contract,
+        "bug48_level54_native_bsim4_success_wrapper"
+    );
+    assert_eq!(result.upstream_exclusion_source, None);
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
+fn test_xyce_bug159_bjt_tnom_default_equivalence_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let owner = "Netlists/Certification_Tests/BUG_159/bug_159.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(owner),
+        "BUG159 empty owner must remain owned by its removed historical wrapper"
+    );
+    let owner_result = runner.run_test(root.join(owner));
+    assert!(
+        owner_result.passed
+            && !owner_result.expected_unsupported
+            && !owner_result.upstream_excluded,
+        "BUG159 should execute both BJT TNOM workers and reproduce their exact PRN relation, got {owner_result:?}"
+    );
+    assert_eq!(
+        owner_result.contract,
+        "bug159_bjt_tnom_default_equivalence_wrapper"
+    );
+    assert_eq!(owner_result.upstream_exclusion_source, None);
+    assert!(owner_result.mismatches.is_empty());
+
+    for worker in [
+        "Netlists/Certification_Tests/BUG_159/bug_159_1.cir",
+        "Netlists/Certification_Tests/BUG_159/bug_159_2.cir",
+    ] {
+        assert!(
+            !runner.requires_upstream_wrapper(worker),
+            "BUG159 workers are invoked by the owner and must not become wrapper owners"
+        );
+        let result = runner.run_test(root.join(worker));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{worker} must retain its independently-qualified static PRN contract, got {result:?}"
+        );
+        assert_eq!(result.contract, "static_prn_dc");
+        assert_eq!(
+            result.upstream_exclusion_source.as_deref(),
+            Some("Netlists/Certification_Tests/BUG_159/exclude")
+        );
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
+fn test_xyce_bug267_global_parameter_include_success_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_267/bug267.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "BUG267 must remain owned by its removed historical wrapper"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported && !result.upstream_excluded,
+        "BUG267 should execute its typed include/global-parameter DC contract, got {result:?}"
+    );
+    assert_eq!(
+        result.contract,
+        "bug267_global_parameter_include_success_wrapper"
+    );
+    assert_eq!(result.upstream_exclusion_source, None);
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
+fn test_xyce_bug352_diode_model_expression_equivalence_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, expected_wrapper, expected_exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_352/BUG_352a.cir",
+            "bug352_diode_model_expression_equivalence_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_352/BUG_352b.cir",
+            "bug352_diode_model_expression_equivalence_literal_control",
+            false,
+            Some("Netlists/Certification_Tests/BUG_352/exclude"),
+        ),
+    ] {
+        assert_eq!(runner.requires_upstream_wrapper(relative), expected_wrapper);
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should reproduce the exact model-expression/literal PRN relation, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(
+            result.upstream_exclusion_source.as_deref(),
+            expected_exclusion
+        );
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
+fn test_xyce_bug307_subcircuit_model_scope_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, expected_wrapper, expected_exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_307/bug_307_a.cir",
+            "bug307_subcircuit_model_scope_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_307/bug_307_b.cir",
+            "bug307_subcircuit_model_scope_control",
+            false,
+            Some("Netlists/Certification_Tests/BUG_307/exclude"),
+        ),
+    ] {
+        assert_eq!(runner.requires_upstream_wrapper(relative), expected_wrapper);
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should reproduce the exact scoped-model raw-PRN relation, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(
+            result.upstream_exclusion_source.as_deref(),
+            expected_exclusion
         );
         assert!(result.mismatches.is_empty());
     }

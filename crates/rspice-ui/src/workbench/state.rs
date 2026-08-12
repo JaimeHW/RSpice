@@ -1324,6 +1324,11 @@ pub struct WorkbenchState {
     pub analysis_query: String,
     #[serde(default)]
     pub navigator_query: String,
+    /// Netlist outline groups the engineer has collapsed. Collapsed rather
+    /// than expanded, so a deck that gains a category discloses it instead of
+    /// hiding it behind a preference nobody set.
+    #[serde(default)]
+    pub netlist_outline_collapsed: std::collections::BTreeSet<crate::state::OutlineSectionKind>,
     #[serde(default)]
     pub command_query: String,
     /// The inspector's open inline-edit session. Runtime-only: a partially
@@ -1496,6 +1501,7 @@ impl Default for WorkbenchState {
             selected_model: None,
             analysis_query: String::new(),
             navigator_query: String::new(),
+            netlist_outline_collapsed: std::collections::BTreeSet::new(),
             command_query: String::new(),
             inline_edit: InlineEdit::default(),
             drawer: None,

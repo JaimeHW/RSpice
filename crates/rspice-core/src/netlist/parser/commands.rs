@@ -416,6 +416,7 @@ pub(super) fn parse_command(
                 directive,
                 origin.clone(),
                 &remaining_command_source(stream),
+                remaining_command_expressions(stream),
             ));
             parse_save_command(stream, line_num, saves, false)?;
         }
@@ -431,6 +432,7 @@ pub(super) fn parse_command(
                 directive,
                 origin.clone(),
                 &remaining_command_source(stream),
+                remaining_command_expressions(stream),
             ));
             parse_save_command(stream, line_num, saves, true)?;
         }
@@ -571,6 +573,17 @@ fn remaining_command_source(stream: &TokenStream) -> String {
         .map(|token| token.lexeme)
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn remaining_command_expressions(stream: &TokenStream) -> Vec<String> {
+    let mut copy = stream.clone();
+    copy.collect_line()
+        .into_iter()
+        .filter_map(|token| match token.kind {
+            TokenKind::Expression(expression) => Some(expression),
+            _ => None,
+        })
+        .collect()
 }
 
 fn parse_preprocess_command(
@@ -1446,6 +1459,29 @@ pub(super) fn parse_options_command(
                     unknown_warned,
                     diagnostics,
                 );
+            }
+            // Spelled unscoped, as ngspice spells `bypass`. A `BYPASS` package
+            // would have to enumerate every key it accepts before an
+            // unenumerated one leaked back out to the global namespace, and
+            // three keys do not need a namespace to stay apart.
+            (_, "BYPASS") => {
+                options.bypass = Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
+            (_, "BYPASSRELTOL" | "BYPASS_RELTOL") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.bypass_reltol = Some(parse_non_negative_real_option(
+                    "BYPASSRELTOL",
+                    value,
+                    line_num,
+                )?);
+            }
+            (_, "BYPASSABSTOL" | "BYPASS_ABSTOL") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.bypass_abstol = Some(parse_non_negative_real_option(
+                    "BYPASSABSTOL",
+                    value,
+                    line_num,
+                )?);
             }
             (_, "RELTOL") => {
                 let value = expect_value(stream, line_num, params)?;

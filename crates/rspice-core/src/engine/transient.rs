@@ -7085,6 +7085,12 @@ impl Engine {
             );
         }
 
+        // The devices keep the tally; the circuit is local to this body, so the
+        // count has to be lifted into the run's diagnostics before it is
+        // dropped. Transient is the only phase in which bypass can fire.
+        let bypassed = circuit.b3soi_bypass_hits();
+        self.record_convergence(|quality| quality.bypassed_device_evaluations = bypassed);
+
         let final_checkpoint = TransientCheckpoint::capture(
             fingerprint,
             netlist_identity,

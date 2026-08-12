@@ -4,6 +4,8 @@
 //! 96,731-line file. Methods keep `impl XyceTestRunner` so call sites are
 //! unchanged; private ones are `pub(super)` so siblings can reach them.
 
+use super::contracts_bug307::Bug307Role;
+use super::contracts_bug352::Bug352Role;
 use super::*;
 
 impl XyceTestRunner {
@@ -256,6 +258,112 @@ impl XyceTestRunner {
         if let Some(kind) = XyceRemoveUnusedKind::for_record(&deck.relative_path) {
             let contract = "removeunused_dynamic_gold_dc_wrapper";
             let result = match self.validate_removeunused_oracle(deck, kind, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if Self::normalize_manifest_key(&deck.relative_path) == XYCE_BUG864_RECORD {
+            let result = match self.validate_bug864_oracle(deck, start) {
+                Ok(()) => self.passed_result(deck, start, XYCE_BUG864_CONTRACT),
+                Err(error) => {
+                    self.failure_result(deck, start, XYCE_BUG864_CONTRACT, error, Vec::new())
+                }
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if Self::normalize_manifest_key(&deck.relative_path) == XYCE_BUG48_RECORD {
+            let result = match self.validate_bug48_oracle(deck, start) {
+                Ok(()) => self.passed_result(deck, start, XYCE_BUG48_CONTRACT),
+                Err(error) => {
+                    self.failure_result(deck, start, XYCE_BUG48_CONTRACT, error, Vec::new())
+                }
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if Self::normalize_manifest_key(&deck.relative_path) == XYCE_BUG159_OWNER_RECORD {
+            let result = match self.validate_bug159_oracle(deck, start) {
+                Ok(()) => self.passed_result(deck, start, XYCE_BUG159_CONTRACT),
+                Err(error) => {
+                    self.failure_result(deck, start, XYCE_BUG159_CONTRACT, error, Vec::new())
+                }
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if Self::normalize_manifest_key(&deck.relative_path) == XYCE_BUG267_RECORD {
+            let result = match self.validate_bug267_oracle(deck, start) {
+                Ok(()) => self.passed_result(deck, start, XYCE_BUG267_CONTRACT),
+                Err(error) => {
+                    self.failure_result(deck, start, XYCE_BUG267_CONTRACT, error, Vec::new())
+                }
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(role) = Bug352Role::for_record(&deck.relative_path) {
+            let contract = role.contract();
+            let result = match self.validate_bug352_oracle(deck, role, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(role) = Bug307Role::for_record(&deck.relative_path) {
+            let contract = role.contract();
+            let result = match self.validate_bug307_oracle(deck, role, start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
@@ -1077,6 +1185,32 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.bug39_deterministic_contract(deck) {
+            let role = XyceBug39DeterministicRole::for_record(&deck.relative_path)
+                .expect("BUG_39_SON deterministic detection selects only recognized records");
+            let result = match contract {
+                Ok(contract) => self.run_bug39_deterministic_contract(deck, contract, start),
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    role.result_contract(),
+                    format!(
+                        "BUG_39_SON deterministic expression provenance qualification failed: {reason}"
+                    ),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.bug402_temperature_option_contract(deck) {
             let role = XyceBug402TemperatureRole::for_record(&deck.relative_path)
                 .expect("BUG_402_SON detection selects only recognized records");
@@ -1265,10 +1399,12 @@ impl XyceTestRunner {
     ) -> Option<XyceTestResult> {
         if let Some(kind) = XyceExpectedFailureKind::for_record(&deck.relative_path) {
             let contract = kind.result_contract();
-            return Some(match self.validate_expected_failure_oracle(deck, kind) {
-                Ok(()) => self.passed_result(deck, start, contract),
-                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
-            });
+            return Some(
+                match self.validate_expected_failure_oracle(deck, kind, start) {
+                    Ok(()) => self.passed_result(deck, start, contract),
+                    Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+                },
+            );
         }
 
         let reference_path = self.static_prn_reference_path(&deck.path)?;

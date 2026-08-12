@@ -528,7 +528,7 @@ fn hash_effective_device_initial_condition_overlay(hasher: &mut blake3::Hasher, 
 /// expanded include/SPEF content and public post-parse AST edits are included.
 pub(crate) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"rspice-transient-elaborated-netlist-v3\0");
+    hasher.update(b"rspice-transient-elaborated-netlist-v4\0");
     hash_field(&mut hasher, "title", &netlist.title);
     hash_field(&mut hasher, "elements", &netlist.elements);
     hash_field(&mut hasher, "analyses", &netlist.analyses);
@@ -562,6 +562,7 @@ pub(crate) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
                 (
                     request.directive,
                     request.name.as_deref(),
+                    request.expressions.as_slice(),
                     request.dependencies.as_slice(),
                 )
             })

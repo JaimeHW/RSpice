@@ -1582,11 +1582,12 @@ fn eval_complex_builtin_function(
             require_arg_count(name, args, 2)?;
             Ok(complex_pow(args[0], args[1]))
         }
-        "PWR" => Ok(ComplexValue::real(
+        "PWR" => Ok(ComplexValue::real({
+            require_arg_count(name, args, 2)?;
             checked_real_arg(name, args, 0)?
                 .abs()
-                .powf(checked_real_arg(name, args, 1)?),
-        )),
+                .powf(checked_real_arg(name, args, 1)?)
+        })),
         "PWRS" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
             require_arg_count(name, args, 2)?;
             Ok(from_num_complex(xyce_complex_pwrs(
@@ -1595,9 +1596,10 @@ fn eval_complex_builtin_function(
             )))
         }
         "PWRS" => {
+            require_arg_count(name, args, 2)?;
             let base = checked_real_arg(name, args, 0)?;
             Ok(ComplexValue::real(
-                base.signum() * base.abs().powf(checked_real_arg(name, args, 1)?),
+                crate::expr::ordered_sign(base) * base.abs().powf(checked_real_arg(name, args, 1)?),
             ))
         }
         "LIMIT" => match args.len() {
@@ -1607,7 +1609,7 @@ fn eval_complex_builtin_function(
                 if ctx.statistical_mode() == StatisticalParamMode::Nominal {
                     return Ok(ComplexValue::real(nom));
                 }
-                let sign = if ctx.random().next_symmetric() >= 0.0 {
+                let sign = if ctx.random().next_symmetric() > 0.0 {
                     1.0
                 } else {
                     -1.0
@@ -1618,7 +1620,9 @@ fn eval_complex_builtin_function(
                 let x = checked_real_arg(name, args, 0)?;
                 let min = checked_real_arg(name, args, 1)?;
                 let max = checked_real_arg(name, args, 2)?;
-                Ok(ComplexValue::real(x.clamp(min, max)))
+                Ok(ComplexValue::real(
+                    crate::expr::ordered_limit(x, min, max, ctx.expression_dialect()).0,
+                ))
             }
             _ => Err(ExprError::WrongArgCount("LIMIT".to_string())),
         },
@@ -1682,14 +1686,9 @@ fn eval_complex_builtin_function(
             }))
         }
         "SGN" => {
+            require_arg_count(name, args, 1)?;
             let x = checked_real_arg(name, args, 0)?;
-            Ok(ComplexValue::real(if x > 0.0 {
-                1.0
-            } else if x < 0.0 {
-                -1.0
-            } else {
-                0.0
-            }))
+            Ok(ComplexValue::real(crate::expr::ordered_sign(x)))
         }
         "SIGN" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
             require_arg_count(name, args, 2)?;
@@ -1703,8 +1702,9 @@ fn eval_complex_builtin_function(
             Ok(ComplexValue::real(args[0].magnitude() * sign))
         }
         "SIGN" => {
+            require_arg_count(name, args, 1)?;
             let x = checked_real_arg(name, args, 0)?;
-            Ok(ComplexValue::real(x.signum()))
+            Ok(ComplexValue::real(crate::expr::ordered_sign(x)))
         }
         "TABLE" | "PWL" => eval_real_table_function(name, args),
         "SINH" if ctx.expression_dialect() == ExpressionDialect::Xyce => {

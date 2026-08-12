@@ -60,7 +60,7 @@ reported separately from `expected_unsupported`.
 
 Some upstream exclusions are helper, baseline, or control decks tested by an
 upstream wrapper owner. RSpice has independently reconstructed and qualified
-exact native contracts for 212 such decks. Those rows use
+exact native contracts for 214 such decks. Those rows use
 `rspice_independently_qualified` and name the exact expected native contract.
 The adapter executes them, preserves their upstream provenance on the result,
 and fails closed if execution becomes unsupported, fails, or selects a
@@ -74,6 +74,29 @@ The native oracle preserves the upstream comparison direction: the Xyce
 TESTFILE. It additionally validates both printed sweep coordinates against the
 authored grid, closing a dormant coordinate-loop typo in the historical Perl
 verifier without weakening its directional integrated-RMS value comparison.
+
+The Certification BUG 352 model-expression family likewise reproduces its
+actual Release-7.10 wrapper rather than the README's stale verifier example.
+The native oracle runs the parameterized diode-model owner followed by the
+literal control, proves both resolve `IS` to exactly 1.5, and compares their
+case-sensitive default PRN serialization exactly as the historical shell
+`diff` did. No numerical gold is invented; the excluded control is promoted
+only through this paired contract.
+
+The serial Certification BUG 307 A/B wrapper is reconstructed as an exact
+subcircuit-model-scope relation. RSpice runs the collision owner followed by
+the active-only control, proves that both select the qualified
+`myRMOD::RMOD` card and its 0.031-ohm geometry, and compares their default PRN
+serialization byte-for-byte. The separate D-I transient family keeps its
+existing verifier-backed contracts and retained numerical references.
+
+Certification BUG 267 has no numerical gold or comparator: its Release-7.10
+shell wrapper only fails when the simulator process fails (the final missing-
+PRN branch itself falls through with success). RSpice preserves that success
+predicate and strengthens it with an exact typed contract for the retained
+relative include, the `FOOBAR -> BAR` ordinary/global parameter chain, the
+six-point DC grid, and the analytic voltage, source-current, and scalar-output
+values. No OutputData artifact or exclusion promotion is introduced.
 
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper

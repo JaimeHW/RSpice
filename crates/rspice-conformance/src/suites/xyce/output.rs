@@ -1878,15 +1878,23 @@ impl XyceTestRunner {
 
     pub(super) fn evaluate_print_expression_internal<F>(
         expression: &str,
-        context: rspice_core::netlist::ParamContext,
+        mut context: rspice_core::netlist::ParamContext,
         call_value: &mut F,
         override_probe: Option<(&str, Value)>,
     ) -> Result<Value, String>
     where
         F: FnMut(&str) -> Result<Value, String>,
     {
+        if let Some((name, value)) = override_probe
+            && let Some(parameter) = Self::parse_scalar_parameter_probe(name)
+            && context.has_any_parameter_binding(&parameter)
+        {
+            context.set(&parameter, value);
+        }
+        let expression =
+            rspice_core::netlist::expr::expand_output_user_functions(expression, &context)?;
         let (rewritten, context) =
-            Self::rewrite_print_ddx_calls(expression, context, call_value, override_probe)?;
+            Self::rewrite_print_ddx_calls(&expression, context, call_value, override_probe)?;
         let (rewritten, context, _) =
             Self::rewrite_print_expression_calls_maybe(&rewritten, context, |call| {
                 Self::print_probe_value(call, call_value, override_probe)
@@ -1929,6 +1937,27 @@ impl XyceTestRunner {
         let mut placeholder_index = 0usize;
 
         while index < expression.len() {
+            if expression[index..].starts_with('"') {
+                let start = index;
+                index += 1;
+                let mut escaped = false;
+                while index < expression.len() {
+                    let character = expression[index..]
+                        .chars()
+                        .next()
+                        .expect("valid char boundary");
+                    index += character.len_utf8();
+                    if escaped {
+                        escaped = false;
+                    } else if character == '\\' {
+                        escaped = true;
+                    } else if character == '"' {
+                        break;
+                    }
+                }
+                rewritten.push_str(&expression[start..index]);
+                continue;
+            }
             if let Some(open_index) = Self::print_ddx_call_open_index(expression, index) {
                 let close_index = Self::matching_parenthesis_index(expression, open_index)?;
                 let call = &expression[index..=close_index];
@@ -1981,6 +2010,7 @@ impl XyceTestRunner {
         }
 
         let expression = args[0].trim();
+        let contained_nested_ddx = Self::print_expression_contains_named_call(expression, "DDX");
         let variable = args[1].trim();
         if Self::parse_voltage_probe(variable).is_none()
             && Self::parse_current_probe(variable).is_none()
@@ -1988,6 +2018,7 @@ impl XyceTestRunner {
             && Self::parse_lead_current_probe(variable).is_none()
             && Self::parse_device_operating_point_probe(variable).is_none()
             && Self::parse_device_parameter_probe(variable).is_none()
+            && Self::parse_scalar_parameter_probe(variable).is_none()
         {
             return Err(format!(
                 "DDX derivative variable '{variable}' is not a supported print probe"
@@ -1995,21 +2026,40 @@ impl XyceTestRunner {
         }
 
         let normalized_variable = Self::normalize_probe(variable);
-        let center = Self::print_probe_value(variable, call_value, override_probe)?;
-        if !center.is_finite() {
-            return Err(format!(
-                "DDX derivative variable '{variable}' evaluated to non-finite value {center}"
-            ));
-        }
-
-        Self::central_difference_derivative(center, |point| {
-            Self::evaluate_print_expression_internal(
-                expression,
-                context.clone(),
-                call_value,
-                Some((&normalized_variable, point)),
-            )
-        })
+        let (expression, context) =
+            Self::rewrite_print_ddx_calls(expression, context.clone(), call_value, override_probe)?;
+        let mut target_probe_placeholders = Vec::new();
+        let mut probe_index = 0usize;
+        let (expression, context, _) =
+            Self::rewrite_print_expression_calls_maybe(&expression, context, |probe| {
+                if Self::normalize_probe(probe) == normalized_variable {
+                    target_probe_placeholders.push(format!("__rspice_probe_{probe_index}"));
+                }
+                probe_index = probe_index.saturating_add(1);
+                Self::print_probe_value(probe, call_value, override_probe)
+            })?;
+        let (expression, context, _) =
+            Self::rewrite_print_device_parameter_tokens_maybe(&expression, context, |probe| {
+                Self::print_probe_value(probe, call_value, override_probe)
+            })?;
+        let targets = if let Some(parameter) = Self::parse_scalar_parameter_probe(variable) {
+            vec![parameter]
+        } else {
+            if target_probe_placeholders.is_empty() {
+                if contained_nested_ddx {
+                    return Ok(0.0);
+                }
+                return Err(format!(
+                    "DDX derivative variable '{variable}' is absent from its expression"
+                ));
+            }
+            target_probe_placeholders
+        };
+        rspice_core::device::behavioral::evaluate_parameter_directional_derivative(
+            &expression,
+            &context,
+            &targets,
+        )
     }
 
     pub(super) fn print_ddx_call_open_index(expression: &str, index: usize) -> Option<usize> {
@@ -2206,8 +2256,8 @@ impl XyceTestRunner {
         let bytes = expression.as_bytes();
         let mut index = 0usize;
         while index < bytes.len() {
-            if matches!(bytes[index], b'\'' | b'"') {
-                let quote = bytes[index];
+            if bytes[index] == b'"' {
+                let quote = b'"';
                 index += 1;
                 while index < bytes.len() && bytes[index] != quote {
                     index += 1;

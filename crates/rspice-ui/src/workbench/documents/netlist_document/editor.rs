@@ -568,7 +568,7 @@ fn parse_buffer_with_context(
     match parsed {
         Ok(netlist) => {
             let mut diagnostics = parser_diagnostics(&netlist, Some(&parse_source));
-            if let Err(error) = rspice_core::netlist::validate_output_symbols(&netlist) {
+            if let Err(error) = rspice_core::netlist::validate_output_requests(&netlist) {
                 diagnostics.extend(parse_error_diagnostics_at(error, Some(&parse_source)));
             }
             diagnostics.extend(unknown_reference_diagnostics(buffer));
@@ -728,6 +728,11 @@ fn parse_error_diagnostic_at(
         ParseError::OutputSymbolValidation(_) => {
             unreachable!("aggregate output-symbol errors are expanded before scalar mapping")
         }
+        ParseError::OutputExpressionValidation(error) => Diagnostic::error(format!(
+            "{}\nDirective: {} · expression: {{{}}}",
+            error, error.directive, error.expression
+        ))
+        .with_source_location(&error.origin, editor_source_path),
         ParseError::StartupDirectiveConflict(error) => Diagnostic::error(format!(
             "{}\nFirst startup mode: {} at {} · conflicting mode: {} at {}",
             error,
@@ -1409,6 +1414,25 @@ mod tests {
         assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
         assert_eq!(&source[diagnostic.span.clone().unwrap()], "nchh");
         assert_eq!(diagnostic.fix.as_ref().unwrap().replacement, "nch");
+    }
+
+    #[test]
+    fn output_expression_diagnostic_is_localized_to_the_authored_request() {
+        let error = rspice_core::netlist::ParseError::OutputExpressionValidation(Box::new(
+            rspice_core::netlist::OutputExpressionValidationError {
+                directive: rspice_core::netlist::OutputDirectiveKind::Print,
+                origin: rspice_core::netlist::NetlistSourceLocation::in_file("deck.cir", 9),
+                expression: "FABS(V(1))".into(),
+                issue: rspice_core::netlist::OutputExpressionIssue::UnknownFunction {
+                    function: "FABS".into(),
+                },
+            },
+        ));
+        let diagnostic = parse_error_diagnostic_at(error, Some(Path::new("deck.cir")));
+        assert_eq!(diagnostic.line, Some(8));
+        assert_eq!(diagnostic.source_line, Some(8));
+        assert!(diagnostic.message.contains(".PRINT"));
+        assert!(diagnostic.message.contains("FABS"));
     }
 
     #[test]

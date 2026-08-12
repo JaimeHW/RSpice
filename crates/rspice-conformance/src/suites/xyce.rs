@@ -35,11 +35,13 @@ use rspice_core::netlist::{
     AnalysisCommand, DcSecondSweep, DcSweepMode, DeviceInitialConditionError,
     DeviceInitialConditionSource, DuplicateSubcircuitPortBindingError, ElementKind,
     ElementProvenance, FreqVariation, MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError,
-    Netlist, NetlistParseOptions, OutputDirectiveKind, OutputSymbolKind,
+    Netlist, NetlistParseOptions, OutputDirectiveKind, OutputExpressionIssue, OutputSymbolKind,
     ParameterRedefinitionPolicy, ParametricValue, ParseError, StartupDiagnosticCode,
     StartupDiagnosticStage, StartupDirectiveKind, StartupDirectiveScope, StatisticalParamMode,
-    StepCommand, StepSweep, StepTarget, SubcircuitDef, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
-    flatten_netlist, flatten_netlist_with_models, validate_output_symbols,
+    StepCommand, StepSweep, StepTarget, SubcircuitDef, UnresolvedSubcircuitParameterError,
+    XYCE_DEFAULT_ZERO_RESISTANCE_TOL, flatten_netlist, flatten_netlist_with_models,
+    flatten_netlist_with_models_with_abort, validate_output_expressions_with_abort,
+    validate_output_symbols, validate_output_symbols_with_abort,
 };
 use rspice_core::numerics::integration::TransientLteReference;
 use rspice_core::{Complex64, Engine, Value};
@@ -58,15 +60,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 212;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 214;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "d77b7acaf59a88a32dd1cee35eba07e561e6bbb911333837ba67f9f923c4a5d0";
+    "71c31e781bd23e5fcbed0df9aafc2e50384833b48611a8c30cf04c655652d0fc";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "76008916b8783849704c71640ff90de886dc424190cdb240d060f6ecaea1ef01";
+    "0b68dd499e3add787c02d2e6f5dbff881d1cece9c42646692340f5cf12606c45";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "205c66a8357976a811ce07cc85558b2f31c57d69ed5f0af79db5865e1d8b67b8";
+    "fb319a4561b04fb21f7d06dab3891c33d45410082d0848a055336862336f4f73";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -550,6 +552,10 @@ const XYCE_BUG38_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
 // generated-oracle artifacts before reproducing either contract in memory.
 const XYCE_BUG39_AGAUSS_CONTRACT: &str = "bug39_agauss_generated_mean_sigma_wrapper";
 const XYCE_BUG39_GAUSS_CONTRACT: &str = "bug39_gauss_generated_mean_sigma_wrapper";
+const XYCE_BUG39_INT_CONTRACT: &str = "bug39_int_single_point_xyce_verify_dc_wrapper";
+const XYCE_BUG39_LIMIT_CONTRACT: &str = "bug39_limit_nominal_single_point_xyce_verify_dc_wrapper";
+const XYCE_BUG39_POW_CONTRACT: &str = "bug39_pow_single_point_xyce_verify_dc_wrapper";
+const XYCE_BUG39_SIGN_CONTRACT: &str = "bug39_sign_single_point_xyce_verify_dc_wrapper";
 const XYCE_BUG39_PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const XYCE_BUG39_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
 const XYCE_BUG39_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
@@ -557,6 +563,14 @@ const XYCE_BUG39_AGAUSS_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/ag
 const XYCE_BUG39_GAUSS_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/gauss.cir";
 const XYCE_BUG39_AGAUSS_RECORD: &str = "netlists/certification_tests/bug_39_son/agauss.cir";
 const XYCE_BUG39_GAUSS_RECORD: &str = "netlists/certification_tests/bug_39_son/gauss.cir";
+const XYCE_BUG39_INT_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/bug39_int.cir";
+const XYCE_BUG39_LIMIT_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/bug39_limit.cir";
+const XYCE_BUG39_POW_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/bug39_pow.cir";
+const XYCE_BUG39_SIGN_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/bug39_sign.cir";
+const XYCE_BUG39_INT_RECORD: &str = "netlists/certification_tests/bug_39_son/bug39_int.cir";
+const XYCE_BUG39_LIMIT_RECORD: &str = "netlists/certification_tests/bug_39_son/bug39_limit.cir";
+const XYCE_BUG39_POW_RECORD: &str = "netlists/certification_tests/bug_39_son/bug39_pow.cir";
+const XYCE_BUG39_SIGN_RECORD: &str = "netlists/certification_tests/bug_39_son/bug39_sign.cir";
 const XYCE_BUG39_HISTORICAL_EXCLUDE_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/exclude";
 const XYCE_BUG39_EMPTY_CONTENT_BLAKE3: &str =
     "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262";
@@ -569,15 +583,22 @@ const XYCE_BUG39_OWNER_MANIFEST_BLAKE3: &str =
     "106b025524124c209ed099f9d13e8c0523494320c91811e091b3e0657356fe68";
 const XYCE_BUG39_HISTORICAL_EXCLUSION_BLAKE3: &str =
     "c39fe61b2e9e34fa277f15016d40925329a3965a53083237959ecc9cac7daadd";
-const XYCE_BUG39_REQUIRED_ORACLE_RECORD_COUNT: usize = 6;
-const XYCE_BUG39_REQUIRED_ORACLE_BYTES: usize = 1_445;
+const XYCE_BUG39_DETERMINISTIC_CANDIDATE_COUNT: usize = 4;
+const XYCE_BUG39_DETERMINISTIC_CANDIDATE_BLAKE3: &str =
+    "60eaf1c149554b9a114a4348101c4f6e31f9531ffd66547d03d13488f126d267";
+const XYCE_BUG39_DETERMINISTIC_CONTENT_BLAKE3: &str =
+    "15c9f12196f084ffaf6cf329aab3fdc86c78786836b70774de20f890cd973540";
+const XYCE_BUG39_DETERMINISTIC_OWNER_BLAKE3: &str =
+    "f01c785308ef7ff2d9477720cd4fefead2531f9699a3580d46fa40472bcf77b6";
+const XYCE_BUG39_REQUIRED_ORACLE_RECORD_COUNT: usize = 23;
+const XYCE_BUG39_REQUIRED_ORACLE_BYTES: usize = 5_559;
 const XYCE_BUG39_REQUIRED_ORACLE_SHA256: &str =
-    "ccc2a87ce1c24f82aec8a4547463c283fa3446a48fa764f20bc0afc53fae3075";
+    "9942679e83b82ebcb3ad5d749fc61ba58af88ff3e23d08e550f83d80fc876f7f";
 const XYCE_BUG39_REQUIRED_ORACLE_BLAKE3: &str =
-    "27b787d2427d338b17e0b60e85f071224159b580390789d42361e7b89e8f5a09";
-const XYCE_BUG39_HISTORICAL_ORACLE_RECORD_COUNT: usize = 7;
+    "e43bcfb707f28a3fdf35004dc01157e67940fdf1a7c6e74727cff3756ff438f0";
+const XYCE_BUG39_HISTORICAL_ORACLE_RECORD_COUNT: usize = 24;
 const XYCE_BUG39_HISTORICAL_ORACLE_BLAKE3: &str =
-    "00a93cf40bfee578f78fe7d680fb928b2610dd2893d6f958afc255ad3285c324";
+    "f4a60b0bbb5d306718efd7371cfd84181650c71617c8b3ad908859a5e33f5b21";
 const XYCE_BUG39_RETAINED_RECORD_COUNT: usize = 11;
 const XYCE_BUG39_RETAINED_RECORDS_BLAKE3: &str =
     "6ea5836525a3b58413107c49bf1819d150a1e1f5b7dffa8985e30b78bc92a832";
@@ -586,7 +607,7 @@ const XYCE_BUG39_MEAN: Value = 100.0;
 const XYCE_BUG39_EXPECTED_SIGMA: Value = 1.0;
 const XYCE_BUG39_MOMENT_TOLERANCE: Value = 5.0e-2;
 
-const XYCE_BUG39_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
+const XYCE_BUG39_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 24] = [
     (
         "Netlists/Certification_Tests/BUG_39_SON/README",
         879,
@@ -612,6 +633,78 @@ const XYCE_BUG39_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
         "c779be31922b96ba6cfe8acfa07ce002852d9cffac791ceddce88480a22ad0df",
     ),
     (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_int.cir",
+        168,
+        "ed26197d4f299a496f0c714a08c328cda560c1194c25ae0b415f73ff8bb1898c",
+        "62367769e743519c676f1283ee41d33a7310f9556b330f9a5da1178eaac5ec3b",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_int.cir.prn.gs",
+        105,
+        "340ab7510b526e583cac2b6ac15388df3217514dc96fe4620514ac47defa015c",
+        "2b05b73a06220bce643b7961dcfe068fe7c14a9bf806100d23e6ee2f66b05629",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_int.cir.sh",
+        1_097,
+        "7c38fcf5e57bbbc015ff4d7c099205c6f0801d4eaee0ac87ea5c1b22baeba9f0",
+        "cf22359501be453ee5822bb84a002554a1fd844c504bb1c90cfabc08146f0380",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_limit.cir",
+        482,
+        "9b1f3329062d0d7dc1f49b8a94fd88262a796e8dd92ae1c6a2d4fc579f12910f",
+        "32e9d468ab49ec892c36f7672d1d2962f54557c9df8c89f1103185863cc1c007",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_limit.cir.prn.gs",
+        111,
+        "8eba99b9cfba84e66b518177060d38dc0a8fde786fd0bfc86d9818a35bee212f",
+        "190fe153a2f5887f562ed8d1fdd2546acbab3b2d733bbc9fb2e0bb9f47e703aa",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_limit.cir.sh",
+        1_099,
+        "2bba1611c424ea3332f38cd930a4227599848b98ef84c566874f0c718f22dbc2",
+        "ab0acfba22a5fbc0c43d10295f607ec93068f3dfaf25cb02b383a1c52342dd2e",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_pow.cir",
+        149,
+        "76625ca95d8a4f51f6161ba610e9d569c0c161bd228cff987f6c049cc21c0f78",
+        "175baf98941dd1e24a7942aef300a9ecc4edfa7a6e8c5cf06094e4ed55606916",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_pow.cir.prn.gs",
+        105,
+        "ec7adbfa8d794ff0a8c10f0f119c74b57b3f7effb843472c6148fee4cfc2c0d6",
+        "356a59eaec3ff2e5a3dee35f0510dce0b73b512ed5f21e96bef03fc10ff149af",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_pow.cir.sh",
+        1_097,
+        "9f12693fd5d0690197861e8a51612a44c84a59b7a3d7ee94bdc4bbec6fccc11c",
+        "57de1dc11d431315e6a3f8155c6c1510785afa0e2ab35e0095c043fd7fd5e4ce",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_sign.cir",
+        152,
+        "ea2e5d157bf39d575b2c33c3ef179dfbf9f879f21383ba001eed4bfc300e142d",
+        "cb8c1dfdb32f8e36242b05d475735df124d818337bf9798246ee5e6bcd75ab51",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_sign.cir.prn.gs",
+        105,
+        "9d1a472e7b465d0c2caa45a16d99328334ea0a894c3fa7da844faa465b393236",
+        "cc173d820146330a519e07328559bf51061a815906837487f06be67c0b7cf545",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_sign.cir.sh",
+        1_098,
+        "308f59a5d46011dd8cd80a4be0b175c49cb58904b82b5f96241b32697a670f15",
+        "d6a1c069603d12b1bc7e9089de080381ff20bf0e20b3b4e0db96f180bb1f14fd",
+    ),
+    (
         XYCE_BUG39_GAUSS_PATH,
         0,
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -624,10 +717,40 @@ const XYCE_BUG39_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
         "b35c1382598a5a766c72608d166b89f112a727ed5a401007725aa813b2812874",
     ),
     (
+        "Netlists/Certification_Tests/BUG_39_SON/tags",
+        46,
+        "99021efbf1ed8e6a6563e2cf21f130d010a308452e1b7a2895660e3ac8d904d5",
+        "2b5db3920215b065bab2f4ca1f443963363fcab5e31c9788788e6ca7cf664e34",
+    ),
+    (
         XYCE_BUG39_HISTORICAL_EXCLUDE_PATH,
         21,
         "20533602deb07138a58ed4a233abb4f381c2a1ee77d2d5d2bf4a599fe24446db",
         "193cec42858538b08aea1096c2a0fd7ddffd4666761078b36ace1a7ffee5ec87",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+    (
+        "TestScripts/XyceVerify/DCSources.pm",
+        2_739,
+        "b2ddcab5ad5a89c428b9b4430190fa27ef7106da7e7afeb31452c81890a9a006",
+        "0905f9dc79d7c5bdbe17e3c2360cd063d6fcbf41823a410f98b236783d109ad7",
+    ),
+    (
+        "TestScripts/XyceVerify/DCSweep.pm",
+        9_301,
+        "2246da2374e6cce3ea516a50e472fb07f7481e8b0effb20d4a650e6b6cb1eda0",
+        "b9cc7d905d001ebe2ace44936b9631e4bdcbf42bca4d4b34c5866262cd11d9a3",
+    ),
+    (
+        XYCE_RELEASE_710_XYCE_VERIFY_PATH,
+        XYCE_RELEASE_710_XYCE_VERIFY_BYTES,
+        XYCE_RELEASE_710_XYCE_VERIFY_SHA256,
+        XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3,
     ),
 ];
 
@@ -845,6 +968,769 @@ const XYCE_BUG402_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 4] = [
         385,
         "869fcd0742641e619af164c016a9dee520b581c9cd272ace32cc2a2457bc835a",
         "de6005465a28610ffa126624506fe999e0f28b59083eaea37ac4688845b07156",
+    ),
+];
+
+const XYCE_BUG354_FUNCTION_PATH: &str = "Netlists/Certification_Tests/BUG_354_SON/bad_function.cir";
+const XYCE_BUG354_LEAD_CURRENT_PATH: &str =
+    "Netlists/Certification_Tests/BUG_354_SON/bad_leadcurrent.cir";
+const XYCE_BUG354_PARAMETER_PATH: &str =
+    "Netlists/Certification_Tests/BUG_354_SON/bad_parameter.cir";
+const XYCE_BUG354_FUNCTION_RECORD: &str =
+    "netlists/certification_tests/bug_354_son/bad_function.cir";
+const XYCE_BUG354_LEAD_CURRENT_RECORD: &str =
+    "netlists/certification_tests/bug_354_son/bad_leadcurrent.cir";
+const XYCE_BUG354_PARAMETER_RECORD: &str =
+    "netlists/certification_tests/bug_354_son/bad_parameter.cir";
+const XYCE_BUG354_FUNCTION_SOURCE_BLAKE3: &str =
+    "ebaa47b9ad2236255aa47c2f7e3dab8d3bd544bbcf0d83ca5b443859fcf9ecc2";
+const XYCE_BUG354_LEAD_CURRENT_SOURCE_BLAKE3: &str =
+    "7b6dd2464c7638740c94a2c2f711855d5076f8ff3f83c8af6130c4668daf76cc";
+const XYCE_BUG354_PARAMETER_SOURCE_BLAKE3: &str =
+    "fe21209b8cce1da0fdcfa110995a7ee3598f26c20f1157560c662dca5428821e";
+const XYCE_BUG354_PHYSICAL_CENSUS_BLAKE3: &str =
+    "b18f00d6d7641e631c96fd17db56bbd9b5a09dbe4ffbea9295f120c806bd7ffa";
+const XYCE_BUG354_MANIFEST_CENSUS_BLAKE3: &str =
+    "d895cc88602ef2af2f180ac3849d9896f577dbaf37c9f65b34140c008ab7864b";
+const XYCE_BUG354_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG354_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG354_HISTORICAL_TIMEOUT_MS: u128 = 30_000;
+const XYCE_BUG354_HISTORICAL_RECORD_COUNT: usize = 11;
+const XYCE_BUG354_HISTORICAL_RECORD_BYTES: usize = 2_699;
+const XYCE_BUG354_HISTORICAL_RECORDS_SHA256: &str =
+    "bf8a3aea6966f912948443da0361ff159bc989ed11ef93b7343a2f45c6156a06";
+const XYCE_BUG354_HISTORICAL_RECORDS_BLAKE3: &str =
+    "2f4903a613cb20f1e27285fa2634adbd43e75d74d15cb01b8d19f71bfa5b2bd8";
+const XYCE_BUG354_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 11] = [
+    (
+        "Netlists/Certification_Tests/BUG_354_SON/CMakeLists.txt",
+        4_699,
+        "e73d08da637d40031570ef7b24a428ffa65ae6be87766f48349d0c5ffdbb8952",
+        "6e6f23bd0f47b8dc30e463184c6615b895acef67f6a1a02c73d4f415aa915760",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_354_SON/Manifest.txt",
+        132,
+        "413ab42380dd5161d9009914b0412504f57638874ac6d4687eb3e2f7fef5a6c5",
+        "aee7bfe7537430cc438b7ae34bca14ff3c963dcc12eb2c9fa8f2ba4a0b558faa",
+    ),
+    (
+        XYCE_BUG354_FUNCTION_PATH,
+        117,
+        "de0a3b29d62c8aa5ca2204bcc1a1a78c02a58bb8150774d050482619860310fb",
+        "eb4dcb54436aeb0d2479cd3d8adae364a0f2d31e277b637b3d972a886c188c4f",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_354_SON/bad_function.cir.sh",
+        1_369,
+        "f81a348237f09a695df74391f6f41a6108d2c26e1e0c742730115c559f8c9eae",
+        "d050e20cc6bc981d8dae880c74c3b022cb894ea42fff2f92210105a769a18392",
+    ),
+    (
+        XYCE_BUG354_LEAD_CURRENT_PATH,
+        119,
+        "34c89b53637f25b02797aeef5fbbd6701dc64f505297113e84a3dd7b8f68d5a0",
+        "ee6893cba54dd03be7f2576ea25b2a15de9466db930e40cbfa01632162ba3b89",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_354_SON/bad_leadcurrent.cir.sh",
+        1_369,
+        "f81a348237f09a695df74391f6f41a6108d2c26e1e0c742730115c559f8c9eae",
+        "d050e20cc6bc981d8dae880c74c3b022cb894ea42fff2f92210105a769a18392",
+    ),
+    (
+        XYCE_BUG354_PARAMETER_PATH,
+        113,
+        "61059a561c3622d046a7b39966976997f0c18b8f90bbd0494d91d94787f44901",
+        "5adf7955644a95ea09536f0d8ba4865a6fcb1a55b9d18a7ef5c2b3314e9ba5cc",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_354_SON/bad_parameter.cir.sh",
+        1_369,
+        "f81a348237f09a695df74391f6f41a6108d2c26e1e0c742730115c559f8c9eae",
+        "d050e20cc6bc981d8dae880c74c3b022cb894ea42fff2f92210105a769a18392",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_354_SON/options",
+        13,
+        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
+        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_354_SON/tags",
+        37,
+        "5aa3c799dbcc4d28aa47a0c6afe4708f86e4a59e36691e8312c7bca63bfc262b",
+        "979508f32619a518a60b1e89576d249d9f292fdfbd580936d7a07785f532bca0",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG354_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 4] = [
+    (
+        "bad_function.cir",
+        117,
+        "de0a3b29d62c8aa5ca2204bcc1a1a78c02a58bb8150774d050482619860310fb",
+        "eb4dcb54436aeb0d2479cd3d8adae364a0f2d31e277b637b3d972a886c188c4f",
+    ),
+    (
+        "bad_leadcurrent.cir",
+        119,
+        "34c89b53637f25b02797aeef5fbbd6701dc64f505297113e84a3dd7b8f68d5a0",
+        "ee6893cba54dd03be7f2576ea25b2a15de9466db930e40cbfa01632162ba3b89",
+    ),
+    (
+        "bad_parameter.cir",
+        113,
+        "61059a561c3622d046a7b39966976997f0c18b8f90bbd0494d91d94787f44901",
+        "5adf7955644a95ea09536f0d8ba4865a6fcb1a55b9d18a7ef5c2b3314e9ba5cc",
+    ),
+    (
+        "options",
+        13,
+        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
+        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
+    ),
+];
+
+// BUG_48_SON proves that the historical MOS LEVEL=54 alias selects BSIM4.
+// Release 7.10 required only a successful simulator exit; its comparator was
+// commented out and no numerical gold was authoritative. RSpice strengthens
+// that success predicate with a typed native-device and finite-DC contract.
+const XYCE_BUG48_CONTRACT: &str = "bug48_level54_native_bsim4_success_wrapper";
+const XYCE_BUG48_PATH: &str = "Netlists/Certification_Tests/BUG_48_SON/test.cir";
+const XYCE_BUG48_RECORD: &str = "netlists/certification_tests/bug_48_son/test.cir";
+const XYCE_BUG48_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG48_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG48_HISTORICAL_RECORD_COUNT: usize = 7;
+const XYCE_BUG48_HISTORICAL_RECORD_BYTES: usize = 1_668;
+const XYCE_BUG48_HISTORICAL_RECORDS_SHA256: &str =
+    "f876dec2f93e404e5c6654d062f16697804e61893dc38b030ab0a78415f85235";
+const XYCE_BUG48_HISTORICAL_RECORDS_BLAKE3: &str =
+    "90d55291b11798a47c9cb097a57bc50a9de9636effcd4a680fa0fa1b093cf418";
+const XYCE_BUG48_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
+    (
+        "Netlists/Certification_Tests/BUG_48_SON/CMakeLists.txt",
+        1_657,
+        "87e1411241e7fd69350ed26f9459808dbda68310fb5d59347f73644654f72e10",
+        "8ff147aab4c92da1443d80b4a89d489d4f376301e81a085fe82e74ab9ebe2d17",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_48_SON/Manifest.txt",
+        33,
+        "65900e27f04a97ab6c441dde45ba3a30dc5095f2479d90578f384fda71f6e467",
+        "54b3b72677a577f8d7f7e22513a89a6ddf286b281d9c884d5d3569e31a0fe929",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_48_SON/README",
+        109,
+        "3d6c753db8e5ed4fab8a8be91b462203b8cc248ab23e2abd029c69f41aee0bde",
+        "10303ccc21e8d89817bc3044a71bb48c33e2d4c11934fa188b659b25e1b1f752",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_48_SON/tags",
+        46,
+        "a725c65e1fba0d3241656fedb9caf217f464e8a2b9e14b21bf823f43f83c1047",
+        "4933a5eed19ded7b1fe188959c216a5d1d7ab77b700e72aeb6fc8ae583e27923",
+    ),
+    (
+        XYCE_BUG48_PATH,
+        168,
+        "7c3361111e5e1687568aa8925623c90ac67093bc24c9942fceadf7a284f96f9e",
+        "2884f341df19d6adb50604ca6186f337f1a1c52f5ae1682245c005e7d48bcbdc",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_48_SON/test.cir.sh",
+        1_172,
+        "32e11b81f2e9d456ee862afcab7d6be1582ad1b260b4f14d2761d62794766683",
+        "d741a973bd78501657a6ffecf54ce0c3c5660612e2704cf96bd860421f667312",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG48_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
+    (
+        "README",
+        109,
+        "3d6c753db8e5ed4fab8a8be91b462203b8cc248ab23e2abd029c69f41aee0bde",
+        "10303ccc21e8d89817bc3044a71bb48c33e2d4c11934fa188b659b25e1b1f752",
+    ),
+    (
+        "test.cir",
+        168,
+        "7c3361111e5e1687568aa8925623c90ac67093bc24c9942fceadf7a284f96f9e",
+        "2884f341df19d6adb50604ca6186f337f1a1c52f5ae1682245c005e7d48bcbdc",
+    ),
+];
+
+// BUG_159 is a removed-shell relational oracle. The empty owner deck selects
+// a wrapper that runs the two real worker decks in order and byte-diffs their
+// nonempty default PRN output. The only intended semantic difference is an
+// explicit BJT model TNOM=27 C versus the same omitted default.
+const XYCE_BUG159_CONTRACT: &str = "bug159_bjt_tnom_default_equivalence_wrapper";
+const XYCE_BUG159_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_159/bug_159.cir";
+const XYCE_BUG159_EXPLICIT_PATH: &str = "Netlists/Certification_Tests/BUG_159/bug_159_1.cir";
+const XYCE_BUG159_IMPLICIT_PATH: &str = "Netlists/Certification_Tests/BUG_159/bug_159_2.cir";
+const XYCE_BUG159_OWNER_RECORD: &str = "netlists/certification_tests/bug_159/bug_159.cir";
+const XYCE_BUG159_EXPLICIT_RECORD: &str = "netlists/certification_tests/bug_159/bug_159_1.cir";
+const XYCE_BUG159_IMPLICIT_RECORD: &str = "netlists/certification_tests/bug_159/bug_159_2.cir";
+const XYCE_BUG159_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_159/exclude";
+const XYCE_BUG159_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG159_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG159_HISTORICAL_RECORD_COUNT: usize = 12;
+const XYCE_BUG159_HISTORICAL_RECORD_BYTES: usize = 2_864;
+const XYCE_BUG159_HISTORICAL_RECORDS_SHA256: &str =
+    "793a771a9dfc706533d109d3292e45142ab3213b7d4480d1313a7ba06819378a";
+const XYCE_BUG159_HISTORICAL_RECORDS_BLAKE3: &str =
+    "569cdcdb0a3bd2f236246e0b6184cc01e54dd54ae78b13bf99534c2664b00eca";
+const XYCE_BUG159_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 12] = [
+    (
+        "Netlists/Certification_Tests/BUG_159/CMakeLists.txt",
+        1_551,
+        "0536246875f0f282a02d7ba1a71489c848c84ac7c4875c1f894e97af0c3eebda",
+        "d1b944849c0b2af29ca578ab3b3d234d6af0fe652e579f01ec2f9e337e878602",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_159/Manifest.txt",
+        75,
+        "5dd8bbb4fd2eeded4c316fe5001cf385e2190b89dad2be4ed8b2782c9e8662bf",
+        "0d583ff0b7679e7e95f29413acdf6c386ce5925ba95a34ed3ac9c61729c5b940",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_159/README",
+        979,
+        "5d6116dd296862775d9e4d300ef9d7c566d0e789c1abfcbf560f7f99da228043",
+        "c9cfa060797b9c6bc0b8e959b4c05e4dc6b93727a1c6a0b2ee09f374467e70e3",
+    ),
+    (
+        XYCE_BUG159_OWNER_PATH,
+        0,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_159/bug_159.cir.sh",
+        1_372,
+        "0be49b3e814edf2792bbe74af877d25e67648053ecff987826b806ba16f0fc8d",
+        "e3dcd59e70656e4613938f1f7d5d8543120de04a09c71bd39a68e3c48a4bd8fd",
+    ),
+    (
+        XYCE_BUG159_EXPLICIT_PATH,
+        676,
+        "838fd5c7594c56a5f57453bb9525a034b5bb34063200b562dce410d1b8c4fabe",
+        "b831d59a60fef20cddbd91393bdf422eafd9d9f775b009bef2c0e01517ea39e4",
+    ),
+    (
+        XYCE_BUG159_IMPLICIT_PATH,
+        667,
+        "c81fe2dfd5ad56947dc9605afa0911e90e6dd2e3b85ac9d6bb65fd426883beea",
+        "0c136fb6399d922fb88efea349b5989db7b1ea7739d988ee7e0c8563d1653988",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_159/exclude",
+        28,
+        "d1312e057f924f59537f82da2b137352b9493e643890379797c92a483d78e309",
+        "a87fc1e2a9df29c7fc653c0cbbf6d70eebde6e687401fcfca135bfe2be962293",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_159/tags",
+        16,
+        "fb8b1ab6aa8b694212335a76b1b87c077f22be7543f15c12de32a2da40b4f345",
+        "a5f2cee6f41471429bc22c4c40d36881f4c11d2387b20adbdc14efe2509f6589",
+    ),
+    (
+        "OutputData/Certification_Tests/BUG_159/bug_159_1.cir.prn",
+        213,
+        "ab4c34ff74ac0e474cf7d953e6533e51763f2776b345d64e8985fe871d9389d9",
+        "0e3ef59d22062c90b8ea6a0786fb4f58f6cda0c35f6ff0b1c3642ec1ca966a69",
+    ),
+    (
+        "OutputData/Certification_Tests/BUG_159/bug_159_2.cir.prn",
+        213,
+        "ab4c34ff74ac0e474cf7d953e6533e51763f2776b345d64e8985fe871d9389d9",
+        "0e3ef59d22062c90b8ea6a0786fb4f58f6cda0c35f6ff0b1c3642ec1ca966a69",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG159_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 4] = [
+    (
+        "README",
+        979,
+        "5d6116dd296862775d9e4d300ef9d7c566d0e789c1abfcbf560f7f99da228043",
+        "c9cfa060797b9c6bc0b8e959b4c05e4dc6b93727a1c6a0b2ee09f374467e70e3",
+    ),
+    (
+        "bug_159.cir",
+        0,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+    ),
+    (
+        "bug_159_1.cir",
+        676,
+        "838fd5c7594c56a5f57453bb9525a034b5bb34063200b562dce410d1b8c4fabe",
+        "b831d59a60fef20cddbd91393bdf422eafd9d9f775b009bef2c0e01517ea39e4",
+    ),
+    (
+        "bug_159_2.cir",
+        667,
+        "c81fe2dfd5ad56947dc9605afa0911e90e6dd2e3b85ac9d6bb65fd426883beea",
+        "0c136fb6399d922fb88efea349b5989db7b1ea7739d988ee7e0c8563d1653988",
+    ),
+];
+const XYCE_BUG159_RETAINED_OUTPUTS: [(&str, usize, &str, &str); 2] = [
+    (
+        "bug_159_1.cir.prn",
+        213,
+        "ab4c34ff74ac0e474cf7d953e6533e51763f2776b345d64e8985fe871d9389d9",
+        "0e3ef59d22062c90b8ea6a0786fb4f58f6cda0c35f6ff0b1c3642ec1ca966a69",
+    ),
+    (
+        "bug_159_2.cir.prn",
+        213,
+        "ab4c34ff74ac0e474cf7d953e6533e51763f2776b345d64e8985fe871d9389d9",
+        "0e3ef59d22062c90b8ea6a0786fb4f58f6cda0c35f6ff0b1c3642ec1ca966a69",
+    ),
+];
+
+// BUG_267 is an include-backed global-parameter success regression. The
+// removed shell wrapper only treats a nonzero simulator exit as failure (its
+// final missing-PRN branch accidentally returns success), and supplies no
+// numerical gold. RSpice preserves that success contract while strengthening
+// it with the exact typed include/parameter graph and analytic six-point DC
+// response.
+const XYCE_BUG267_CONTRACT: &str = "bug267_global_parameter_include_success_wrapper";
+const XYCE_BUG267_PATH: &str = "Netlists/Certification_Tests/BUG_267/bug267.cir";
+const XYCE_BUG267_RECORD: &str = "netlists/certification_tests/bug_267/bug267.cir";
+const XYCE_BUG267_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG267_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG267_HISTORICAL_RECORD_COUNT: usize = 7;
+const XYCE_BUG267_HISTORICAL_RECORD_BYTES: usize = 1_661;
+const XYCE_BUG267_HISTORICAL_RECORDS_SHA256: &str =
+    "6f44b1e7c6895c933c71040e2c281131c5af5b1b05650597dda78d7df3ef1d07";
+const XYCE_BUG267_HISTORICAL_RECORDS_BLAKE3: &str =
+    "e2f556e28faf17e5382dfc5f4c43c6441083f20c99ddcfe6eb1b319fbd6148c9";
+const XYCE_BUG267_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
+    (
+        "Netlists/Certification_Tests/BUG_267/CMakeLists.txt",
+        1_647,
+        "825daed5de9c62722dedfa65f0fbeecc2712a9ee2d5f85cdc71c6f079b204940",
+        "0aecc8b1f3a4e84b69928eb45b018f13485955dbe7abdb002d0db99c90e9180d",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_267/Manifest.txt",
+        44,
+        "9586977dd9baebc7e88f810409e469706cb55e32078eaca9da142f1382bfd67b",
+        "bf2e982998532ae10e5389b0f0240cdc54646fda89cfdae37d62231d8b7fd0b7",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_267/analysis.cmds",
+        42,
+        "3b6f9f91c14b60d6ad5fdbd757711695dd0b3e77a63f1fccbd08e5ed15a55d9c",
+        "0f7d1b0ff3e6b9240cd05addc2397140a3887cd6a39ee671c35ca32490b8dbf6",
+    ),
+    (
+        XYCE_BUG267_PATH,
+        1_401,
+        "3748075f2831433673802f5d46aa76b2d9a8764b6b295ca2161cbff06c72ef86",
+        "696265490951770a677336288998054fadc57ca8c76f559037cca7251a96a494",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_267/bug267.cir.sh",
+        1_057,
+        "37118e725cb539b00f1a6a21464e8af0b966d8ff9cf2a4e3b617a1af481cc3fd",
+        "dede22cb8c7c633b47730afa2088dd5ec1c9fe5fde7f561eec5dc2be26d2bb2c",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_267/tags",
+        28,
+        "43901b249a3892a461ba23bc3dc95c74bdece2bfaee8f7b6e35d9f22359893ac",
+        "2deb82428ebb81c18d9fb719f046d5b461735881ab0d03644891ca3389f06420",
+    ),
+    // The direct shell wrapper does not source Perl, but the release
+    // regression framework still owns its process/result envelope. Keep the
+    // same framework-provenance binding as adjacent reconstructed wrappers.
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG267_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
+    (
+        "analysis.cmds",
+        42,
+        "3b6f9f91c14b60d6ad5fdbd757711695dd0b3e77a63f1fccbd08e5ed15a55d9c",
+        "0f7d1b0ff3e6b9240cd05addc2397140a3887cd6a39ee671c35ca32490b8dbf6",
+    ),
+    (
+        "bug267.cir",
+        1_401,
+        "3748075f2831433673802f5d46aa76b2d9a8764b6b295ca2161cbff06c72ef86",
+        "696265490951770a677336288998054fadc57ca8c76f559037cca7251a96a494",
+    ),
+];
+
+// BUG_352 proves that a diode model parameter authored as an expression is
+// resolved before device construction. The removed wrapper runs the
+// expression deck followed by its literal control and raw-diffs their default
+// PRN files; no numerical gold participates in the executable oracle.
+const XYCE_BUG352_OWNER_CONTRACT: &str = "bug352_diode_model_expression_equivalence_wrapper_owner";
+const XYCE_BUG352_CONTROL_CONTRACT: &str =
+    "bug352_diode_model_expression_equivalence_literal_control";
+const XYCE_BUG352_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_352/BUG_352a.cir";
+const XYCE_BUG352_CONTROL_PATH: &str = "Netlists/Certification_Tests/BUG_352/BUG_352b.cir";
+const XYCE_BUG352_OWNER_RECORD: &str = "netlists/certification_tests/bug_352/bug_352a.cir";
+const XYCE_BUG352_CONTROL_RECORD: &str = "netlists/certification_tests/bug_352/bug_352b.cir";
+const XYCE_BUG352_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_352/exclude";
+const XYCE_BUG352_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG352_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG352_HISTORICAL_RECORD_COUNT: usize = 9;
+const XYCE_BUG352_HISTORICAL_RECORD_BYTES: usize = 2_132;
+const XYCE_BUG352_HISTORICAL_RECORDS_SHA256: &str =
+    "877197b218aecdd03eb4eec89cfffebd4dcc4de480425f210d613fd8f233e6df";
+const XYCE_BUG352_HISTORICAL_RECORDS_BLAKE3: &str =
+    "2841b048fb8a0b1ae78571ecc8a0f341013fcc9491e3b2c97f4639792072b502";
+const XYCE_BUG352_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 9] = [
+    (
+        "Netlists/Certification_Tests/BUG_352/CMakeLists.txt",
+        1_947,
+        "bcc6b130ed1ee65220b92581af3ff6d771ef5f4f90db300cc2404d0f014d4665",
+        "04424eacdcdef62b81f291869c5dd8f0f9777811b2f8ef33036a653d3b15bf08",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_352/Manifest.txt",
+        62,
+        "2577f06f92166598a4199ff6328bd69d13100207a7631823a13ad83d36dcbd7b",
+        "835ad44ed1a5672564a40367742f753a7593b2fd7fedae92e29a58e98936209a",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_352/README",
+        831,
+        "adea694684c225d8cc84527b21205708c8891709f98e71838599920e1537884c",
+        "51b8ed0ed86354d73459f4220498fdc8a6c6f8eb25d0f06ba6f6a932bb187f1b",
+    ),
+    (
+        XYCE_BUG352_OWNER_PATH,
+        161,
+        "26b8ffcee2b2e3c8f667a58d7c19c3aed5e8afcdc973a5ca905b52eab8fa12b1",
+        "f3a709f923870e76226ce430323725128d241c6e11b4259a6c364d6b50fafe06",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_352/BUG_352a.cir.sh",
+        1_412,
+        "33f0dba1f3201c9899c59116118c153c74ec7c892b8dc5cace6fb9aa1fdd9774",
+        "070d5e90b85909d4c3aa71ee4b4824cf9804eaaed3a64aaa323673d89cec7a73",
+    ),
+    (
+        XYCE_BUG352_CONTROL_PATH,
+        130,
+        "7693247e71be35c0eae15bce8dbc1187663db39d3981c554454f93a8a250b215",
+        "9d3f638aa4df5e86c4b29243219b8f1a6af89019419ebc2c61728b8653a12beb",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_352/exclude",
+        41,
+        "f4cb80e294a2e917da749acd1e3cf26c44b7d3b420f6907c4700574346d9f065",
+        "d171440460d8afd9c65f336b91d6f3475c015a9d6a3dbb85ec63e13e395e9e3f",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_352/tags",
+        28,
+        "43901b249a3892a461ba23bc3dc95c74bdece2bfaee8f7b6e35d9f22359893ac",
+        "2deb82428ebb81c18d9fb719f046d5b461735881ab0d03644891ca3389f06420",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG352_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
+    (
+        "BUG_352a.cir",
+        161,
+        "26b8ffcee2b2e3c8f667a58d7c19c3aed5e8afcdc973a5ca905b52eab8fa12b1",
+        "f3a709f923870e76226ce430323725128d241c6e11b4259a6c364d6b50fafe06",
+    ),
+    (
+        "BUG_352b.cir",
+        130,
+        "7693247e71be35c0eae15bce8dbc1187663db39d3981c554454f93a8a250b215",
+        "9d3f638aa4df5e86c4b29243219b8f1a6af89019419ebc2c61728b8653a12beb",
+    ),
+    (
+        "README",
+        831,
+        "adea694684c225d8cc84527b21205708c8891709f98e71838599920e1537884c",
+        "51b8ed0ed86354d73459f4220498fdc8a6c6f8eb25d0f06ba6f6a932bb187f1b",
+    ),
+];
+
+// BUG_307's serial shell wrapper proves that an unused sibling subcircuit's
+// same-named local resistor model cannot escape its lexical scope. It runs the
+// collision owner followed by the active-only control and raw-diffs their
+// default PRN files; no numerical gold or xyce_verify result participates.
+const XYCE_BUG307_OWNER_CONTRACT: &str = "bug307_subcircuit_model_scope_wrapper_owner";
+const XYCE_BUG307_CONTROL_CONTRACT: &str = "bug307_subcircuit_model_scope_control";
+const XYCE_BUG307_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_307/bug_307_a.cir";
+const XYCE_BUG307_CONTROL_PATH: &str = "Netlists/Certification_Tests/BUG_307/bug_307_b.cir";
+const XYCE_BUG307_OWNER_RECORD: &str = "netlists/certification_tests/bug_307/bug_307_a.cir";
+const XYCE_BUG307_CONTROL_RECORD: &str = "netlists/certification_tests/bug_307/bug_307_b.cir";
+const XYCE_BUG307_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_307/exclude";
+const XYCE_BUG307_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG307_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG307_HISTORICAL_RECORD_COUNT: usize = 8;
+const XYCE_BUG307_HISTORICAL_RECORD_BYTES: usize = 1_910;
+const XYCE_BUG307_HISTORICAL_RECORDS_SHA256: &str =
+    "d12d9999702cb03a5d8a7c035cd7b117e0de4a2179939ce0682ffec1919f02a9";
+const XYCE_BUG307_HISTORICAL_RECORDS_BLAKE3: &str =
+    "88ccdc0f9679d72ca35300fd520095689940c4c51b33b41cefd70adcc1bbbeb9";
+const XYCE_BUG307_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 8] = [
+    (
+        "Netlists/Certification_Tests/BUG_307/CMakeLists.txt",
+        3_726,
+        "c29d61b2ee4044b6f4f23675f615d2239c5da183efef50fc4e0471d0786f185d",
+        "a8b77563dfd31851dee65a2ec285c8cc397dca56d9fdbf99dcdda94d4c324a80",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_307/Manifest.txt",
+        215,
+        "8efafd0b6ed4df706276aaf78bddaa63bbc662727ef49002e577b2ff0e559e07",
+        "c3e85eacadb2e4ec61b3f9f016b41744923e7d9928cdc9571f4d4ff726b1cadf",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_307/README",
+        2_221,
+        "21a3c2eac2ec269b7aca08ed370b36597d19f27ab39e18893652cdcd52134017",
+        "03de16d903037f8682982f23d5f10aa83c87a48cd4326071091286359c89d7e5",
+    ),
+    (
+        XYCE_BUG307_OWNER_PATH,
+        347,
+        "a1679ad22a5e7acbf4bed85efd47f92f3d59326f3f611889a822840b37de3c22",
+        "99c850d3ca6c4021d74d697b860fe4dc2b8541f41de98474f18175c08cfa1ef0",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_307/bug_307_a.cir.sh",
+        1_179,
+        "736ee04d110134b4133412591f4c94715bdfbf3d8910015905b0e00811fc11e3",
+        "9ab7ef6f1b0debea3c708f87ab3c270f53b0b8ea8db6a1a27e3a79fcd9a0d8cd",
+    ),
+    (
+        XYCE_BUG307_CONTROL_PATH,
+        263,
+        "0dddf35b3f467b1554a795dd94ff5494e9ec5b25369ce797b1d03641f307ba0b",
+        "1e56b30e9c542f761b112af245d49e005ddd91713e1a43bf94388b04f8e624c2",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_307/exclude",
+        258,
+        "52c58cc2998c3b34b62a17fcea871a7affc41d77058c78b7dfb5d4aab93e965f",
+        "ea052f70048b548f3877ffd8904c585b66a8fa986926c24483d29e7f02ad6382",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_307/tags",
+        16,
+        "fb8b1ab6aa8b694212335a76b1b87c077f22be7543f15c12de32a2da40b4f345",
+        "a5f2cee6f41471429bc22c4c40d36881f4c11d2387b20adbdc14efe2509f6589",
+    ),
+];
+const XYCE_BUG307_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 11] = [
+    (
+        "README",
+        2_221,
+        "21a3c2eac2ec269b7aca08ed370b36597d19f27ab39e18893652cdcd52134017",
+        "03de16d903037f8682982f23d5f10aa83c87a48cd4326071091286359c89d7e5",
+    ),
+    (
+        "bug_307_a.cir",
+        347,
+        "a1679ad22a5e7acbf4bed85efd47f92f3d59326f3f611889a822840b37de3c22",
+        "99c850d3ca6c4021d74d697b860fe4dc2b8541f41de98474f18175c08cfa1ef0",
+    ),
+    (
+        "bug_307_b.cir",
+        263,
+        "0dddf35b3f467b1554a795dd94ff5494e9ec5b25369ce797b1d03641f307ba0b",
+        "1e56b30e9c542f761b112af245d49e005ddd91713e1a43bf94388b04f8e624c2",
+    ),
+    (
+        "bug_307_d.cir",
+        944,
+        "b9d7e9ff10c06d2f35dc227f609d723cb6777c6446d3067564da3f94de012d26",
+        "b532796ea4f65c12e5f5712260fc54289ac5237d16bf5acd6813f78a8ea22217",
+    ),
+    (
+        "bug_307_e.cir",
+        946,
+        "a4694f025a973b5e10172ad60344d24595f3363ce24ae1c196d5cbb8be55a864",
+        "79afd80a2d97de4ef7a747c2b3d9f6d842aecb94653e916e850d7a65a5c4be37",
+    ),
+    (
+        "bug_307_f.cir",
+        1_052,
+        "fa455d1e81bc1990479771e38b46ef217435c540ac54377e993caa63b75ea348",
+        "8945c4563decbc1b26a6bf5bfe2ac89f567aaed7e0d0bfba12d5637e6467d5c2",
+    ),
+    (
+        "bug_307_g.cir",
+        1_106,
+        "76d8a3ce9d13a58756a5b4b2426f1d20abc44e8e8d73dee96e9d27918b07cd4a",
+        "bd81fea0f08c9ca161bee4c98771cbcb5a8b0a25c6d3c1dcfb20e23c9f5a8f07",
+    ),
+    (
+        "bug_307_h.cir",
+        1_172,
+        "1b2f289deba22de22f492701a6730ef1a9b2be688099b66ee2c93ad9cf717fac",
+        "2b9e43851db5fa15a9f6424b47424a23222c4c0692d3c2f906e5769b3103b4bf",
+    ),
+    (
+        "bug_307_i.cir",
+        480,
+        "4d74799d1c37789f8740735ed7c24988e34e73818fe3b93ff45f60b8c1d60bc9",
+        "0c6bc5bc4a13a511f66163745bb7a80c9cb12a41198ad5b5104f68e929216237",
+    ),
+    (
+        "bug_307_i.lib1",
+        228,
+        "aac03ef8a09ddb99aa3b3b6f6aa6152ed7531b4cf4918b522d9b9f2a8007de47",
+        "2e084709750590888d9f0015e7b35f29f714c969dd12931a7e4af3ca6e58d391",
+    ),
+    (
+        "bug_307_i.lib2",
+        280,
+        "2fa7440e06ce352b530e640997e36c8200e5feee86e6e5e79987aaf2b38332e0",
+        "8c2ee4a4a5d0ddd0de2c89bf14380bd79ef0395dae481bd4e6e471b640a3980a",
+    ),
+];
+const XYCE_BUG307_RETAINED_OUTPUTS: [(&str, usize, &str, &str); 6] = [
+    (
+        "bug_307_d.cir.prn",
+        306_701,
+        "d757e3ffad74d451c22847d4f6179f63ea1c263c074a47f2f6b7f668f23f8070",
+        "ebe6ec704c22124d446aa5fbcabde53e88f060a97cac8927705541c51879611b",
+    ),
+    (
+        "bug_307_e.cir.prn",
+        306_701,
+        "d757e3ffad74d451c22847d4f6179f63ea1c263c074a47f2f6b7f668f23f8070",
+        "ebe6ec704c22124d446aa5fbcabde53e88f060a97cac8927705541c51879611b",
+    ),
+    (
+        "bug_307_f.cir.prn",
+        306_701,
+        "d55abf3b13631a17aabfe6d83cd629dbe39b972816bde0344e3525c5c54a9199",
+        "f98be1f2910ed36ef4dfe9acfc0a48add52b9dcb3d78433b6b74b8809ffd9903",
+    ),
+    (
+        "bug_307_g.cir.prn",
+        306_701,
+        "d55abf3b13631a17aabfe6d83cd629dbe39b972816bde0344e3525c5c54a9199",
+        "f98be1f2910ed36ef4dfe9acfc0a48add52b9dcb3d78433b6b74b8809ffd9903",
+    ),
+    (
+        "bug_307_h.cir.prn",
+        306_701,
+        "d55abf3b13631a17aabfe6d83cd629dbe39b972816bde0344e3525c5c54a9199",
+        "f98be1f2910ed36ef4dfe9acfc0a48add52b9dcb3d78433b6b74b8809ffd9903",
+    ),
+    (
+        "bug_307_i.cir.prn",
+        306_701,
+        "d757e3ffad74d451c22847d4f6179f63ea1c263c074a47f2f6b7f668f23f8070",
+        "ebe6ec704c22124d446aa5fbcabde53e88f060a97cac8927705541c51879611b",
+    ),
+];
+
+// BUG_864_SON is a bounded expected-error contract. Release 7.10 executes
+// the deck, requires a nonzero exit, and accepts the run only when either
+// complete output stream contains the unresolved-definition diagnostic. The
+// retained `options` sidecar supplies the historical 30-second outer limit.
+const XYCE_BUG864_CONTRACT: &str = "expected_failure_bug864_unresolved_subcircuit_parameter_build";
+const XYCE_BUG864_PATH: &str = "Netlists/Certification_Tests/BUG_864_SON/bug_864_son.cir";
+const XYCE_BUG864_RECORD: &str = "netlists/certification_tests/bug_864_son/bug_864_son.cir";
+const XYCE_BUG864_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG864_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG864_UPSTREAM_DIAGNOSTIC: &str =
+    "Unable to resolve parameter FOO found in .PARAM statement";
+const XYCE_BUG864_HISTORICAL_TIMEOUT_MS: u128 = 30_000;
+const XYCE_BUG864_HISTORICAL_RECORD_COUNT: usize = 7;
+const XYCE_BUG864_HISTORICAL_RECORD_BYTES: usize = 1_687;
+const XYCE_BUG864_HISTORICAL_RECORDS_SHA256: &str =
+    "e9f815b0c4e0f002b505ef103e1bcb507640faf2989717b5cc154623bcccb583";
+const XYCE_BUG864_HISTORICAL_RECORDS_BLAKE3: &str =
+    "62db0b949913135bfe8d7911a8fa1e272edd1f930905458fbe2c1dd379dd5e3b";
+const XYCE_BUG864_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
+    (
+        "Netlists/Certification_Tests/BUG_864_SON/CMakeLists.txt",
+        1_816,
+        "e1bfb80a50adf93e40c20cf88a23a940481b2ce744fbc322d9eebcd8ae355563",
+        "1f3ec5c8d304b12d7f3ff6f11d8e37de64e8cb63540e55ce8f1556ec09d605b6",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_864_SON/Manifest.txt",
+        48,
+        "9bc1a4cf78fcbdab9013fc1b233e1a1b6c24a8b4dd087f8d888068d57c836dc6",
+        "fc99f03d3c3a5eed06aa8a239483d36a303aea541fca394b99edf0b8176771ef",
+    ),
+    (
+        XYCE_BUG864_PATH,
+        447,
+        "71ba444757fc0add31c380fcff3f2dea34842236fce45de9c293311980695bac",
+        "3463724af68f93fc11effd6f04344ffb7532a4173c10cfc7181f24ee7edd0dd0",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_864_SON/bug_864_son.cir.sh",
+        780,
+        "6fac638aa87b177b8e6f37f39522336a34540bcf72c4f04c4099041d9b261ece",
+        "b486481e992b4e9728e254e3115f6f6d891f9a77dbba20f396768d8bdc511875",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_864_SON/options",
+        13,
+        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
+        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_864_SON/tags",
+        36,
+        "38081d2c7c83cc0bf7ff6b2430777e4cfabfca9019dc9638fc59395b9ffb1095",
+        "851f6add160cd333cac9c53cb5ffd9d6f14f7f7bbd97185dfe930f14e30aede0",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG864_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
+    (
+        "bug_864_son.cir",
+        447,
+        "71ba444757fc0add31c380fcff3f2dea34842236fce45de9c293311980695bac",
+        "3463724af68f93fc11effd6f04344ffb7532a4173c10cfc7181f24ee7edd0dd0",
+    ),
+    (
+        "options",
+        13,
+        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
+        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
     ),
 ];
 
@@ -1952,11 +2838,12 @@ impl XyceStartupOracleKind {
     }
 
     fn conflict_error_policy(self) -> Option<XyceUpstreamExpectedErrorPolicy> {
-        (self == Self::IcNodeSetConflict).then_some(XyceUpstreamExpectedErrorPolicy {
-            requires_nonzero_exit: true,
-            search_streams: XyceUpstreamErrorSearchStreams::EitherCompleteStdoutOrStderr,
-            ordered_patterns: &["Cannot set both .IC and .NODESET simultaneously"],
-        })
+        (self == Self::IcNodeSetConflict).then_some(
+            XyceUpstreamExpectedErrorPolicy::NonzeroExitWithOrderedPatterns {
+                search_streams: XyceUpstreamErrorSearchStreams::EitherCompleteStdoutOrStderr,
+                ordered_patterns: &["Cannot set both .IC and .NODESET simultaneously"],
+            },
+        )
     }
 
     fn is_message_input(self) -> bool {
@@ -2002,6 +2889,9 @@ enum XyceExpectedFailureKind {
     Issue455DuplicateDcSourceFunction,
     Bug204InvalidDcSweepArity,
     Bug281InvalidDcSweepArity,
+    Bug354BadFunction,
+    Bug354BadLeadCurrent,
+    Bug354BadParameter,
     Bug401BadDeviceLine,
     Bug401ExtraSpace,
     Bug401WorseDeviceLine,
@@ -2231,6 +3121,9 @@ impl XyceExpectedFailureKind {
             XYCE_ISSUE455_EXPECTED_FAILURE_RECORD => Some(Self::Issue455DuplicateDcSourceFunction),
             XYCE_BUG204_EXPECTED_FAILURE_RECORD => Some(Self::Bug204InvalidDcSweepArity),
             XYCE_BUG281_EXPECTED_FAILURE_RECORD => Some(Self::Bug281InvalidDcSweepArity),
+            XYCE_BUG354_FUNCTION_RECORD => Some(Self::Bug354BadFunction),
+            XYCE_BUG354_LEAD_CURRENT_RECORD => Some(Self::Bug354BadLeadCurrent),
+            XYCE_BUG354_PARAMETER_RECORD => Some(Self::Bug354BadParameter),
             XYCE_BUG401_BAD_DEVICE_EXPECTED_FAILURE_RECORD => Some(Self::Bug401BadDeviceLine),
             XYCE_BUG401_EXTRA_SPACE_EXPECTED_FAILURE_RECORD => Some(Self::Bug401ExtraSpace),
             XYCE_BUG401_WORSE_DEVICE_EXPECTED_FAILURE_RECORD => Some(Self::Bug401WorseDeviceLine),
@@ -2327,6 +3220,9 @@ impl XyceExpectedFailureKind {
             Self::Issue455DuplicateDcSourceFunction => XYCE_ISSUE455_EXPECTED_FAILURE_RECORD,
             Self::Bug204InvalidDcSweepArity => XYCE_BUG204_EXPECTED_FAILURE_RECORD,
             Self::Bug281InvalidDcSweepArity => XYCE_BUG281_EXPECTED_FAILURE_RECORD,
+            Self::Bug354BadFunction => XYCE_BUG354_FUNCTION_RECORD,
+            Self::Bug354BadLeadCurrent => XYCE_BUG354_LEAD_CURRENT_RECORD,
+            Self::Bug354BadParameter => XYCE_BUG354_PARAMETER_RECORD,
             Self::Bug401BadDeviceLine => XYCE_BUG401_BAD_DEVICE_EXPECTED_FAILURE_RECORD,
             Self::Bug401ExtraSpace => XYCE_BUG401_EXTRA_SPACE_EXPECTED_FAILURE_RECORD,
             Self::Bug401WorseDeviceLine => XYCE_BUG401_WORSE_DEVICE_EXPECTED_FAILURE_RECORD,
@@ -2394,6 +3290,9 @@ impl XyceExpectedFailureKind {
             Self::Issue455DuplicateDcSourceFunction => XYCE_ISSUE455_SOURCE_BLAKE3,
             Self::Bug204InvalidDcSweepArity => XYCE_BUG204_SOURCE_BLAKE3,
             Self::Bug281InvalidDcSweepArity => XYCE_BUG281_SOURCE_BLAKE3,
+            Self::Bug354BadFunction => XYCE_BUG354_FUNCTION_SOURCE_BLAKE3,
+            Self::Bug354BadLeadCurrent => XYCE_BUG354_LEAD_CURRENT_SOURCE_BLAKE3,
+            Self::Bug354BadParameter => XYCE_BUG354_PARAMETER_SOURCE_BLAKE3,
             Self::Bug401BadDeviceLine => XYCE_BUG401_BAD_DEVICE_SOURCE_BLAKE3,
             Self::Bug401ExtraSpace => XYCE_BUG401_EXTRA_SPACE_SOURCE_BLAKE3,
             Self::Bug401WorseDeviceLine => XYCE_BUG401_WORSE_DEVICE_SOURCE_BLAKE3,
@@ -2491,6 +3390,15 @@ impl XyceExpectedFailureKind {
             Self::Bug281InvalidDcSweepArity => {
                 "expected_failure_bug281_invalid_dc_sweep_arity_parse"
             }
+            Self::Bug354BadFunction => {
+                "expected_failure_bug354_unknown_print_function_output_validation"
+            }
+            Self::Bug354BadLeadCurrent => {
+                "expected_failure_bug354_unknown_iv_print_function_output_validation"
+            }
+            Self::Bug354BadParameter => {
+                "expected_failure_bug354_unresolved_print_identifier_output_validation"
+            }
             Self::Bug401BadDeviceLine => "expected_failure_bug401_bad_device_line_build",
             Self::Bug401ExtraSpace => "expected_failure_bug401_extra_space_build",
             Self::Bug401WorseDeviceLine => "expected_failure_bug401_worse_device_line_parse",
@@ -2519,6 +3427,9 @@ impl XyceExpectedFailureKind {
     }
 
     fn upstream_error_policy(self) -> XyceUpstreamExpectedErrorPolicy {
+        if self.is_bug354_family() {
+            return XyceUpstreamExpectedErrorPolicy::NonzeroExitOnly;
+        }
         let ordered_patterns = match self {
             Self::Bug67BehavioralExpression => {
                 &[r"Syntax error in number of nodes in expression: \{POLY I[(]V6[)] 300u 1\}"][..]
@@ -2630,6 +3541,9 @@ impl XyceExpectedFailureKind {
                 "in file bug_281.cir at or near line 7",
                 ".DC line not formatted correctly, found unexpected number of fields",
             ][..],
+            Self::Bug354BadFunction | Self::Bug354BadLeadCurrent | Self::Bug354BadParameter => {
+                unreachable!("BUG354 uses the nonzero-only wrapper")
+            }
             Self::Bug401BadDeviceLine => &[
                 "in file bad-device-line.cir at or near line 5",
                 "Invalid device type for device AN",
@@ -2668,11 +3582,17 @@ impl XyceExpectedFailureKind {
                 "Invalid notation encountered",
             ][..],
         };
-        XyceUpstreamExpectedErrorPolicy {
-            requires_nonzero_exit: true,
+        XyceUpstreamExpectedErrorPolicy::NonzeroExitWithOrderedPatterns {
             search_streams: XyceUpstreamErrorSearchStreams::EitherCompleteStdoutOrStderr,
             ordered_patterns,
         }
+    }
+
+    fn is_bug354_family(self) -> bool {
+        matches!(
+            self,
+            Self::Bug354BadFunction | Self::Bug354BadLeadCurrent | Self::Bug354BadParameter
+        )
     }
 
     fn expected_output_symbols(self) -> Option<&'static [XyceExpectedOutputSymbol]> {
@@ -3230,6 +4150,25 @@ impl XyceExpectedFailureKind {
                 category: XyceExpectedFailureCategory::InvalidDcSweepArity,
                 identifiers: vec!["VIN".to_string(), "STEP".to_string(), "line 7".to_string()],
             },
+            Self::Bug354BadFunction => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::OutputValidation,
+                category: XyceExpectedFailureCategory::UnknownOutputFunction,
+                identifiers: vec!["FABS".to_string(), "bad_function.cir:9".to_string()],
+            },
+            Self::Bug354BadLeadCurrent => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::OutputValidation,
+                category: XyceExpectedFailureCategory::UnknownOutputFunction,
+                identifiers: vec![
+                    "IV".to_string(),
+                    "RB".to_string(),
+                    "bad_leadcurrent.cir:9".to_string(),
+                ],
+            },
+            Self::Bug354BadParameter => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::OutputValidation,
+                category: XyceExpectedFailureCategory::UnresolvedOutputIdentifier,
+                identifiers: vec!["BAR".to_string(), "bad_parameter.cir:10".to_string()],
+            },
             Self::Bug401BadDeviceLine => XyceExpectedFailureObservation {
                 stage: XyceExpectedFailureStage::CircuitBuild,
                 category: XyceExpectedFailureCategory::UnknownXspiceModel,
@@ -3382,6 +4321,15 @@ impl XyceExpectedFailureKind {
                     physical_names_blake3: XYCE_BUG401_PHYSICAL_CENSUS_BLAKE3,
                     manifest_owner_count: 3,
                     manifest_records_blake3: XYCE_BUG401_MANIFEST_CENSUS_BLAKE3,
+                    require_manifest_bijection: true,
+                })
+            }
+            Self::Bug354BadFunction | Self::Bug354BadLeadCurrent | Self::Bug354BadParameter => {
+                Some(XyceExpectedFailureFamilyCensus {
+                    physical_cir_count: 3,
+                    physical_names_blake3: XYCE_BUG354_PHYSICAL_CENSUS_BLAKE3,
+                    manifest_owner_count: 3,
+                    manifest_records_blake3: XYCE_BUG354_MANIFEST_CENSUS_BLAKE3,
                     require_manifest_bijection: true,
                 })
             }
@@ -3547,6 +4495,7 @@ enum XyceExpectedFailureStage {
     NetlistParse,
     CircuitBuild,
     ExternalDataLoad,
+    OutputValidation,
     DcOperatingPoint,
 }
 
@@ -3581,6 +4530,8 @@ enum XyceExpectedFailureCategory {
     InvalidNumericNotation,
     UndefinedMutualInductorReference,
     ConflictingStartupDirectives,
+    UnknownOutputFunction,
+    UnresolvedOutputIdentifier,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3596,10 +4547,12 @@ enum XyceUpstreamErrorSearchStreams {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct XyceUpstreamExpectedErrorPolicy {
-    requires_nonzero_exit: bool,
-    search_streams: XyceUpstreamErrorSearchStreams,
-    ordered_patterns: &'static [&'static str],
+enum XyceUpstreamExpectedErrorPolicy {
+    NonzeroExitOnly,
+    NonzeroExitWithOrderedPatterns {
+        search_streams: XyceUpstreamErrorSearchStreams,
+        ordered_patterns: &'static [&'static str],
+    },
 }
 
 /// Configuration for the Xyce corpus runner.
@@ -6257,6 +7210,79 @@ struct XyceBug39GaussianContract {
     role: XyceBug39GaussianRole,
 }
 
+#[derive(Debug, Clone)]
+struct XyceBug39DeterministicContract {
+    deck_path: PathBuf,
+    reference_path: PathBuf,
+    role: XyceBug39DeterministicRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBug39DeterministicRole {
+    Int,
+    LimitNominal,
+    Pow,
+    Sign,
+}
+
+impl XyceBug39DeterministicRole {
+    const ALL: [Self; 4] = [Self::Int, Self::LimitNominal, Self::Pow, Self::Sign];
+
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::Int => XYCE_BUG39_INT_CONTRACT,
+            Self::LimitNominal => XYCE_BUG39_LIMIT_CONTRACT,
+            Self::Pow => XYCE_BUG39_POW_CONTRACT,
+            Self::Sign => XYCE_BUG39_SIGN_CONTRACT,
+        }
+    }
+
+    fn path(self) -> &'static str {
+        match self {
+            Self::Int => XYCE_BUG39_INT_PATH,
+            Self::LimitNominal => XYCE_BUG39_LIMIT_PATH,
+            Self::Pow => XYCE_BUG39_POW_PATH,
+            Self::Sign => XYCE_BUG39_SIGN_PATH,
+        }
+    }
+
+    fn record(self) -> &'static str {
+        match self {
+            Self::Int => XYCE_BUG39_INT_RECORD,
+            Self::LimitNominal => XYCE_BUG39_LIMIT_RECORD,
+            Self::Pow => XYCE_BUG39_POW_RECORD,
+            Self::Sign => XYCE_BUG39_SIGN_RECORD,
+        }
+    }
+
+    fn reference_file_name(self) -> &'static str {
+        match self {
+            Self::Int => "bug39_int.cir.prn.gs",
+            Self::LimitNominal => "bug39_limit.cir.prn.gs",
+            Self::Pow => "bug39_pow.cir.prn.gs",
+            Self::Sign => "bug39_sign.cir.prn.gs",
+        }
+    }
+
+    fn expected_resistance(self) -> Value {
+        match self {
+            Self::Int => 3.0,
+            Self::LimitNominal | Self::Sign => 1.0,
+            Self::Pow => 8.0,
+        }
+    }
+
+    fn for_record(relative_path: &str) -> Option<Self> {
+        match XyceTestRunner::normalize_manifest_key(relative_path).as_str() {
+            XYCE_BUG39_INT_RECORD => Some(Self::Int),
+            XYCE_BUG39_LIMIT_RECORD => Some(Self::LimitNominal),
+            XYCE_BUG39_POW_RECORD => Some(Self::Pow),
+            XYCE_BUG39_SIGN_RECORD => Some(Self::Sign),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceBug39GaussianRole {
     AgaussAbsolute,
@@ -8595,9 +9621,16 @@ impl AbortSignal for DeadlineAbort {
 mod analysis_support;
 mod comparison;
 mod contracts;
+mod contracts_bug159;
+mod contracts_bug267;
+mod contracts_bug307;
+mod contracts_bug352;
+mod contracts_bug354;
 mod contracts_bug38;
 mod contracts_bug39;
 mod contracts_bug402;
+mod contracts_bug48;
+mod contracts_bug864;
 mod contracts_dc;
 mod contracts_frequency;
 mod contracts_sources;

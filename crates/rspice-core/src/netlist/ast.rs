@@ -2906,6 +2906,16 @@ pub struct SimulationOptions {
     /// `.OPTIONS DAMPING`: how a Newton update is shortened before it is
     /// applied.
     pub damping_strategy: Option<DampingStrategy>,
+    /// `.OPTIONS BYPASS`: reuse a latent device's previous linearization
+    /// instead of re-evaluating its compact model. ngspice reads the bare key
+    /// as "on" and defaults it off; so does RSpice.
+    pub bypass: Option<bool>,
+    /// `.OPTIONS BYPASSRELTOL`: relative branch-voltage bound the bypass
+    /// predicate uses in place of the run's `RELTOL`.
+    pub bypass_reltol: Option<Value>,
+    /// `.OPTIONS BYPASSABSTOL`: absolute branch-voltage floor the bypass
+    /// predicate uses in place of the run's `VNTOL`.
+    pub bypass_abstol: Option<Value>,
     /// Relative tolerance for convergence (default: 1e-3)
     pub reltol: Option<Value>,
     /// Absolute current tolerance (default: 1e-12 A)

@@ -8,8 +8,10 @@ use crate::Value;
 use crate::config::ExpressionDialect;
 use crate::expr::{
     BinaryOp, CompiledExpr, Context, Expr, Function, UnaryOp, Vm, compile,
-    lookup_table_interpolate_with_derivative, normalize_expression_boundary,
-    parse_expression_strict, real_pow_with_derivative, resolve_file_lookup_functions_with_limits,
+    lookup_table_interpolate_with_derivative, normalize_expression_boundary, ordered_limit,
+    ordered_sign, parse_expression_strict, real_function_pow_with_derivative,
+    real_function_pwr_with_derivative, real_function_pwrs_with_derivative,
+    real_pow_with_derivative, resolve_file_lookup_functions_with_limits,
 };
 use crate::solver::StaticMatrix;
 use std::path::Path;
@@ -606,6 +608,7 @@ fn expression_excludes_voltage_output_from_transient_lte(expr: &Expr) -> bool {
                     | Function::Ceil
                     | Function::Round
                     | Function::Sign
+                    | Function::HspiceSign
                     | Function::Stp
                     | Function::Ustep
                     | Function::Eq0
@@ -966,6 +969,170 @@ pub(crate) fn compiled_expression_branch_partial(
     )
 }
 
+/// Evaluate the exact directional derivative of a real Xyce expression from
+/// caller-supplied scalar leaves.
+///
+/// Every entry in `derivative_targets` must be an alias for the same physical
+/// scalar and therefore have the same numeric value in `parameters`. This is
+/// the semantic primitive used by output-domain `DDX`: Xyce differentiates
+/// the expression AST directly, so numerical differencing is neither precise
+/// enough nor correct at branch points.
+pub fn evaluate_parameter_directional_derivative(
+    expression: &str,
+    parameters: &crate::netlist::expr::ParamContext,
+    derivative_targets: &[String],
+) -> Result<Value, String> {
+    let derivative_targets = derivative_targets
+        .iter()
+        .map(|target| target.to_ascii_uppercase())
+        .collect::<std::collections::BTreeSet<_>>();
+    fn convert(
+        expression: &crate::netlist::expr::Expr,
+        parameters: &crate::netlist::expr::ParamContext,
+        targets: &std::collections::BTreeSet<String>,
+    ) -> Result<Expr, String> {
+        use crate::netlist::expr::{BinOpKind, Expr as NetExpr, UnaryOpKind};
+        Ok(match expression {
+            NetExpr::Number(value) => Expr::Const(*value),
+            NetExpr::ComplexNumber(value) if value.is_real() => Expr::Const(value.re),
+            NetExpr::ComplexNumber(_) => {
+                return Err("DDX requires a real-valued expression".to_string());
+            }
+            NetExpr::StringLiteral(_) => {
+                return Err("DDX cannot differentiate a string literal".to_string());
+            }
+            NetExpr::Param(name)
+                if targets.contains(&name.to_ascii_uppercase()) =>
+            {
+                Expr::NodeVoltage("__RSPICE_DDX_TARGET".to_string())
+            }
+            NetExpr::Param(name) => Expr::Const(
+                parameters
+                    .get(name)
+                    .ok_or_else(|| format!("DDX scalar leaf '{name}' has no numeric value"))?,
+            ),
+            NetExpr::UnaryOp { op, operand } => match op {
+                UnaryOpKind::Neg => Expr::Unary {
+                    op: UnaryOp::Neg,
+                    operand: Box::new(convert(operand, parameters, targets)?),
+                },
+                UnaryOpKind::Pos => convert(operand, parameters, targets)?,
+                UnaryOpKind::Not => Expr::Unary {
+                    op: UnaryOp::Not,
+                    operand: Box::new(convert(operand, parameters, targets)?),
+                },
+            },
+            NetExpr::BinOp { op, left, right } => Expr::Binary {
+                op: match op {
+                    BinOpKind::Add => BinaryOp::Add,
+                    BinOpKind::Sub => BinaryOp::Sub,
+                    BinOpKind::Mul => BinaryOp::Mul,
+                    BinOpKind::Div => BinaryOp::Div,
+                    BinOpKind::Mod => BinaryOp::Mod,
+                    BinOpKind::Pow => BinaryOp::Pow,
+                    BinOpKind::Gt => BinaryOp::Gt,
+                    BinOpKind::Lt => BinaryOp::Lt,
+                    BinOpKind::Ge => BinaryOp::Ge,
+                    BinOpKind::Le => BinaryOp::Le,
+                    BinOpKind::Eq => BinaryOp::Eq,
+                    BinOpKind::Ne => BinaryOp::Ne,
+                    BinOpKind::And => BinaryOp::And,
+                    BinOpKind::Or => BinaryOp::Or,
+                },
+                left: Box::new(convert(left, parameters, targets)?),
+                right: Box::new(convert(right, parameters, targets)?),
+            },
+            NetExpr::FnCall { name, args } => Expr::Function {
+                func: Function::from_name(name)
+                    .filter(|function| {
+                        !matches!(
+                            function,
+                            Function::TableFile
+                                | Function::FastTable
+                                | Function::FastTableFile
+                                | Function::Cubic
+                                | Function::CubicFile
+                                | Function::Akima
+                                | Function::AkimaFile
+                                | Function::Wodicka
+                                | Function::WodickaFile
+                                | Function::Barycentric
+                                | Function::BarycentricFile
+                                | Function::Sdt
+                        )
+                    })
+                    .ok_or_else(|| {
+                        format!(
+                            "DDX cannot analytically differentiate unresolved or stateful function '{name}'"
+                        )
+                    })?,
+                args: args
+                    .iter()
+                    .map(|argument| convert(argument, parameters, targets))
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+        })
+    }
+
+    let parsed =
+        crate::netlist::expr::parse_expression(expression).map_err(|error| error.to_string())?;
+    if derivative_targets.is_empty() {
+        return Err("DDX has no derivative target".to_string());
+    }
+    let ast = convert(&parsed, parameters, &derivative_targets)?;
+    let program = compile(&ast);
+    let representative = derivative_targets
+        .iter()
+        .next()
+        .expect("non-empty target set");
+    let target_value = parameters.get(representative).ok_or_else(|| {
+        format!(
+            "DDX derivative target '{}' has no numeric value",
+            representative
+        )
+    })?;
+    for alias in derivative_targets.iter().skip(1) {
+        let alias_value = parameters
+            .get(alias)
+            .ok_or_else(|| format!("DDX derivative target '{alias}' has no numeric value"))?;
+        if alias_value.to_bits() != target_value.to_bits() {
+            return Err(format!(
+                "DDX derivative aliases '{representative}' and '{alias}' have different values"
+            ));
+        }
+    }
+    let node_values = vec![target_value; program.node_map.len()];
+    let target = program
+        .node_map
+        .iter()
+        .find_map(|(name, &index)| (name == "__RSPICE_DDX_TARGET").then_some(index))
+        .ok_or_else(|| {
+            format!(
+                "directional output derivative target '{}' is absent from the expression",
+                derivative_targets
+                    .iter()
+                    .next()
+                    .expect("non-empty target set")
+            )
+        })?;
+    let context = BehavioralDerivativeContext {
+        program: &program,
+        node_values: &node_values,
+        branch_values: &[],
+        time: parameters.get("TIME").unwrap_or(0.0),
+        frequency: parameters.get("FREQ").unwrap_or(0.0),
+        temperature: parameters.get("TEMP").unwrap_or(27.0),
+        gmin: parameters.get("GMIN").unwrap_or(crate::constants::GMIN),
+        expression_dialect: parameters.expression_dialect(),
+        target: DerivativeTarget::Node(target),
+    };
+    eval_behavioral_expr_with_derivative_at_boundary(&ast, &context)
+        .map(|(_, derivative)| derivative)
+        .ok_or_else(|| {
+            "directional output derivative could not be evaluated analytically".to_string()
+        })
+}
+
 fn eval_behavioral_expr_with_derivative_at_boundary(
     expr: &Expr,
     context: &BehavioralDerivativeContext<'_>,
@@ -1239,44 +1406,24 @@ fn eval_function_with_derivative(
         Function::Pwr => {
             let (base, d_base) = eval_arg(0)?;
             let (exponent, d_exponent) = eval_arg(1)?;
-            let abs_base = base.abs();
-            if d_exponent == 0.0 {
-                let value = abs_base.powf(exponent);
-                Some((
-                    value,
-                    exponent * abs_base.powf(exponent - 1.0) * base.signum() * d_base,
-                ))
-            } else if abs_base > 0.0 {
-                let value = abs_base.powf(exponent);
-                Some((
-                    value,
-                    value
-                        * (d_exponent * abs_base.ln()
-                            + exponent * base.signum() * d_base / abs_base),
-                ))
-            } else {
-                None
-            }
+            real_function_pwr_with_derivative(
+                base,
+                d_base,
+                exponent,
+                d_exponent,
+                context.expression_dialect,
+            )
         }
         Function::Pwrs => {
             let (base, d_base) = eval_arg(0)?;
             let (exponent, d_exponent) = eval_arg(1)?;
-            let abs_base = base.abs();
-            let sign = base.signum();
-            if d_exponent == 0.0 {
-                let value = sign * abs_base.powf(exponent);
-                Some((value, exponent * abs_base.powf(exponent - 1.0) * d_base))
-            } else if abs_base > 0.0 {
-                let magnitude = abs_base.powf(exponent);
-                Some((
-                    sign * magnitude,
-                    sign * magnitude
-                        * (d_exponent * abs_base.ln()
-                            + exponent * base.signum() * d_base / abs_base),
-                ))
-            } else {
-                None
-            }
+            real_function_pwrs_with_derivative(
+                base,
+                d_base,
+                exponent,
+                d_exponent,
+                context.expression_dialect,
+            )
         }
         Function::Limit => match args.len() {
             2 => {
@@ -1287,10 +1434,9 @@ fn eval_function_with_derivative(
                 let (x, dx) = eval_arg(0)?;
                 let (min, _) = eval_arg(1)?;
                 let (max, _) = eval_arg(2)?;
-                Some((
-                    x.clamp(min, max),
-                    if x >= min && x <= max { dx } else { 0.0 },
-                ))
+                let (value, retains_input_derivative) =
+                    ordered_limit(x, min, max, context.expression_dialect);
+                Some((value, if retains_input_derivative { dx } else { 0.0 }))
             }
             _ => None,
         },
@@ -1314,7 +1460,18 @@ fn eval_function_with_derivative(
         }
         Function::Sign => {
             let (x, _) = eval_arg(0)?;
-            Some((x.signum(), 0.0))
+            Some((ordered_sign(x), 0.0))
+        }
+        Function::HspiceSign => {
+            let (magnitude, d_magnitude) = eval_arg(0)?;
+            let (polarity, _) = eval_arg(1)?;
+            let sign = ordered_sign(polarity);
+            let magnitude_derivative = if magnitude >= 0.0 {
+                d_magnitude
+            } else {
+                -d_magnitude
+            };
+            Some((magnitude.abs() * sign, magnitude_derivative * sign))
         }
         Function::Uramp => {
             let (x, dx) = eval_arg(0)?;
@@ -1368,7 +1525,13 @@ fn eval_function_with_derivative(
         Function::Pow => {
             let (left, d_left) = eval_arg(0)?;
             let (right, d_right) = eval_arg(1)?;
-            real_pow_with_derivative(left, d_left, right, d_right, context.expression_dialect)
+            real_function_pow_with_derivative(
+                left,
+                d_left,
+                right,
+                d_right,
+                context.expression_dialect,
+            )
         }
         Function::Mod => {
             let (left, d_left) = eval_arg(0)?;
@@ -2601,5 +2764,53 @@ mod tests {
             &program,
             &Context::dc(&[node_value], &[]).with_expression_dialect(dialect),
         )
+    }
+
+    #[test]
+    fn xyce_sign_and_limit_match_between_vm_and_analytic_derivatives() {
+        for (expression, expected_value, expected_derivative) in [
+            ("sign(V(n),2)", 3.0, -1.0),
+            ("sign(V(n),-2)", -3.0, 1.0),
+            ("sign(V(n),0)", 0.0, 0.0),
+            ("limit(V(n),0.5)", -3.0, 1.0),
+            ("limit(V(n),0,2)", 0.0, 0.0),
+        ] {
+            assert_eq!(
+                eval_node_vm(expression, -3.0, ExpressionDialect::Xyce),
+                expected_value,
+                "VM value for {expression}"
+            );
+            assert_eq!(
+                eval_node_derivative(expression, -3.0),
+                (expected_value, expected_derivative),
+                "analytic value/derivative for {expression}"
+            );
+        }
+
+        assert_eq!(
+            eval_node_derivative("sign(V(n),2)", 0.0),
+            (0.0, 1.0),
+            "Xyce SIGN uses the nonnegative derivative branch at zero"
+        );
+        assert_eq!(
+            eval_node_derivative("limit(V(n),2,0)", 1.0),
+            (2.0, 0.0),
+            "reversed LIMIT bounds preserve Xyce's ordered first branch"
+        );
+    }
+
+    #[test]
+    fn signed_magnitude_zero_branch_matches_between_vm_and_analytic_evaluation() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            assert_eq!(eval_node_vm("pwrs(0*V(n),0)", 3.0, dialect), 1.0);
+            assert_eq!(
+                eval_node_derivative_with_dialect("pwrs(0*V(n),0)", 3.0, dialect),
+                (1.0, 0.0)
+            );
+        }
+        assert_eq!(
+            eval_node_derivative_with_dialect("pwr(0*V(n),0)", 3.0, ExpressionDialect::Ngspice,),
+            (1.0, 0.0)
+        );
     }
 }

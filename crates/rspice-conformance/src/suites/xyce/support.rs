@@ -2344,6 +2344,9 @@ impl XyceTestRunner {
             matrix_solver,
             timeint_min_timestep,
             max_timestep,
+            bypass,
+            bypass_reltol,
+            bypass_abstol,
             scale: _,
         } = options;
         reltol.is_none()
@@ -2405,6 +2408,9 @@ impl XyceTestRunner {
             && matrix_solver.is_none()
             && timeint_min_timestep.is_none()
             && max_timestep.is_none()
+            && bypass.is_none()
+            && bypass_reltol.is_none()
+            && bypass_abstol.is_none()
             && hb_num_frequencies.is_empty()
     }
 
@@ -4475,35 +4481,27 @@ impl XyceTestRunner {
         Ok(values[lower] + alpha * (values[upper] - values[lower]))
     }
 
-    pub(super) fn central_difference_derivative<F>(
-        center: Value,
-        mut eval_at: F,
-    ) -> Result<Value, String>
-    where
-        F: FnMut(Value) -> Result<Value, String>,
-    {
-        let scale = center.abs().max(1.0);
-        let mut last_finite = None;
-        for relative_step in [1.0e-4, 3.0e-5, 1.0e-5, 3.0e-6, 1.0e-6] {
-            let step = scale * relative_step;
-            let hi = eval_at(center + step)?;
-            let lo = eval_at(center - step)?;
-            let derivative = (hi - lo) / (2.0 * step);
-            if derivative.is_finite() {
-                last_finite = Some(derivative);
-            }
-        }
-        last_finite.ok_or_else(|| "DDX derivative evaluated to a non-finite value".to_string())
-    }
-
     pub(super) fn split_top_level_args(input: &str) -> Result<Vec<String>, String> {
         let mut args = Vec::new();
         let mut start = 0usize;
         let mut paren_depth = 0usize;
         let mut brace_depth = 0usize;
+        let mut in_string = false;
+        let mut escaped = false;
 
         for (index, ch) in input.char_indices() {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
             match ch {
+                '"' => in_string = true,
                 '(' => paren_depth += 1,
                 ')' => {
                     paren_depth = paren_depth.checked_sub(1).ok_or_else(|| {
@@ -4524,7 +4522,7 @@ impl XyceTestRunner {
             }
         }
 
-        if paren_depth != 0 || brace_depth != 0 {
+        if paren_depth != 0 || brace_depth != 0 || in_string {
             return Err(format!(
                 "unbalanced delimiters while parsing function arguments '{input}'"
             ));
@@ -4619,9 +4617,22 @@ impl XyceTestRunner {
         }
 
         let mut depth = 0usize;
+        let mut in_string = false;
+        let mut escaped = false;
         for (relative_index, ch) in expression[open_index..].char_indices() {
             let absolute_index = open_index + relative_index;
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
             match ch {
+                '"' => in_string = true,
                 '(' => depth += 1,
                 ')' => {
                     depth = depth.saturating_sub(1);

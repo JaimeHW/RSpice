@@ -449,6 +449,35 @@ pub enum NoiseSourceType {
 /// interpolation flag.
 pub type NoiseTable = std::sync::Arc<(Vec<(Value, Value)>, bool)>;
 
+/// The longest mechanism name a persisted noise summary may carry.
+///
+/// A mechanism names one noise source inside one device model, so it is short
+/// by nature: the longest the compiled Verilog-A catalog produces is 50 bytes.
+/// The limit is set well above that because its job is to stop a corrupt or
+/// hostile project file from carrying unbounded text into a table cell, not to
+/// police how a model author names a source.
+pub const NOISE_MECHANISM_MAX_BYTES: usize = 128;
+
+/// Whether `text` is shaped like a mechanism a noise summary may be written
+/// with.
+///
+/// The ranked contributor table a frontend persists names each row's mechanism
+/// with this text, so a reader has to agree with the emitter about what it may
+/// contain. Enumerating it is not open to us: half the mechanisms are composed
+/// by the Verilog-A code generator out of a model's own node and label names,
+/// and the compiled catalog exposes them only through a live instance, so no
+/// build can list them. The agreement is therefore a shape rather than a set —
+/// ASCII, bounded, and drawn from the characters the generator and the fixed
+/// mechanisms actually use — which every emitter satisfies by construction and
+/// which stays the same in every build.
+pub fn is_persistable_noise_mechanism(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= NOISE_MECHANISM_MAX_BYTES
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'#'))
+}
+
 /// Stable identity of one elementary device-noise mechanism.
 ///
 /// Several elementary sources may intentionally share an identity.  Xyce's
@@ -1374,6 +1403,90 @@ impl IntegratedNoise {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod mechanism_tests {
+    use super::*;
+
+    /// A contribution with no mechanism identity is named after its broad
+    /// source type instead, so those labels are persisted on the same terms.
+    #[test]
+    fn every_source_type_label_is_persistable() {
+        for noise_type in [
+            NoiseSourceType::Thermal,
+            NoiseSourceType::Shot,
+            NoiseSourceType::Flicker,
+            NoiseSourceType::Burst,
+            NoiseSourceType::White,
+            NoiseSourceType::Table,
+            NoiseSourceType::Bsim4Flicker,
+            NoiseSourceType::Bsim3Flicker,
+            NoiseSourceType::Bsim4CorrelatedThermal,
+        ] {
+            // Listing the variants is only sound while the list is complete,
+            // and this match is what makes adding one a compile error here.
+            match noise_type {
+                NoiseSourceType::Thermal
+                | NoiseSourceType::Shot
+                | NoiseSourceType::Flicker
+                | NoiseSourceType::Burst
+                | NoiseSourceType::White
+                | NoiseSourceType::Table
+                | NoiseSourceType::Bsim4Flicker
+                | NoiseSourceType::Bsim3Flicker
+                | NoiseSourceType::Bsim4CorrelatedThermal => {}
+            }
+            let label = noise_type.label();
+            assert!(
+                is_persistable_noise_mechanism(label),
+                "{noise_type:?} is summarized as '{label}', which no result can be written with"
+            );
+        }
+    }
+
+    #[test]
+    fn the_shape_admits_what_the_emitters_produce() {
+        for mechanism in [
+            "ID",
+            "FN",
+            "RD",
+            "RS",
+            "IC",
+            "IB",
+            "RC",
+            "RB",
+            "RE",
+            // Composed by the Verilog-A code generator from a model's own
+            // node and label names.
+            "WHITE_A_AIK_SHOT",
+            "FLICKER_A_AIK_FLICKER",
+            "WHITE_BX_SI_PARASITIC_TRANSPORT_CURRENT_SHOT_NOISE",
+            "WHITE_N1_I1_END_1_RESISTANCE_THERMAL_NOISE",
+            // Sanitized internal-node names keep `#`.
+            "WHITE_D#INT_S_THERMAL",
+        ] {
+            assert!(
+                is_persistable_noise_mechanism(mechanism),
+                "{mechanism} is emitted but not persistable"
+            );
+        }
+    }
+
+    #[test]
+    fn the_shape_refuses_unbounded_and_free_text() {
+        assert!(!is_persistable_noise_mechanism(""));
+        assert!(!is_persistable_noise_mechanism("channel thermal"));
+        assert!(!is_persistable_noise_mechanism("<analog loop>"));
+        assert!(!is_persistable_noise_mechanism("id\nrd"));
+        assert!(!is_persistable_noise_mechanism("naïve"));
+        assert!(is_persistable_noise_mechanism(
+            &"A".repeat(NOISE_MECHANISM_MAX_BYTES)
+        ));
+        assert!(!is_persistable_noise_mechanism(
+            &"A".repeat(NOISE_MECHANISM_MAX_BYTES + 1)
+        ));
+    }
+}
 
 #[cfg(test)]
 mod summary_tests {

@@ -58,19 +58,43 @@ impl XyceTestRunner {
         &self,
         deck: &XyceDeck,
         kind: XyceExpectedFailureKind,
+        start: Instant,
     ) -> Result<(), String> {
         let upstream_policy = kind.upstream_error_policy();
-        if !upstream_policy.requires_nonzero_exit
-            || upstream_policy.search_streams
-                != XyceUpstreamErrorSearchStreams::EitherCompleteStdoutOrStderr
-            || upstream_policy.ordered_patterns.is_empty()
-        {
+        match upstream_policy {
+            XyceUpstreamExpectedErrorPolicy::NonzeroExitOnly if kind.is_bug354_family() => {}
+            XyceUpstreamExpectedErrorPolicy::NonzeroExitWithOrderedPatterns {
+                search_streams: XyceUpstreamErrorSearchStreams::EitherCompleteStdoutOrStderr,
+                ordered_patterns,
+            } if !ordered_patterns.is_empty()
+                && ordered_patterns.iter().all(|pattern| !pattern.is_empty())
+                && !kind.is_bug354_family() => {}
+            _ => {
+                return Err(format!(
+                    "expected-failure record '{}' has an incomplete or inapplicable removed-wrapper error policy",
+                    kind.record()
+                ));
+            }
+        }
+        self.validate_expected_failure_provenance(deck, kind)?;
+        let bug354_abort = DeadlineAbort::new(
+            start,
+            self.config
+                .max_time_per_test_ms
+                .clamp(1, XYCE_BUG354_HISTORICAL_TIMEOUT_MS),
+        );
+        let no_abort = rspice_core::abort_signal::NoAbort;
+        let abort: &dyn AbortSignal = if kind.is_bug354_family() {
+            &bug354_abort
+        } else {
+            &no_abort
+        };
+        if abort.is_aborted() {
             return Err(format!(
-                "expected-failure record '{}' has an incomplete removed-wrapper error policy",
+                "expected-failure record '{}' exceeded its bounded validation contract",
                 kind.record()
             ));
         }
-        self.validate_expected_failure_provenance(deck, kind)?;
         let source_bytes = fs::read(&deck.path).map_err(|err| {
             format!(
                 "failed to read expected-failure record {}: {err}",
@@ -175,6 +199,11 @@ impl XyceTestRunner {
             XyceExpectedFailureKind::Bug281InvalidDcSweepArity => {
                 Self::observe_bug281_invalid_dc_sweep_arity(source, &deck.path)?
             }
+            XyceExpectedFailureKind::Bug354BadFunction
+            | XyceExpectedFailureKind::Bug354BadLeadCurrent
+            | XyceExpectedFailureKind::Bug354BadParameter => {
+                Self::observe_bug354_output_validation_failure(source, &deck.path, kind, abort)?
+            }
             XyceExpectedFailureKind::Bug401BadDeviceLine => {
                 self.observe_bug401_bad_device_line_failure(source, &deck.path)?
             }
@@ -238,6 +267,15 @@ impl XyceTestRunner {
                 "expected-failure record '{}' produced the wrong typed observation: expected {expected:?}, got {observation:?}",
                 kind.record()
             ));
+        }
+        if kind.is_bug354_family() {
+            self.validate_expected_failure_provenance(deck, kind)?;
+            if abort.is_aborted() {
+                return Err(format!(
+                    "expected-failure record '{}' exceeded its bounded post-validation contract",
+                    kind.record()
+                ));
+            }
         }
         Ok(())
     }
@@ -364,6 +402,9 @@ impl XyceTestRunner {
         }
         if kind.is_bug702_family() {
             self.validate_bug702_complete_family_provenance(family_dir)?;
+        }
+        if kind.is_bug354_family() {
+            self.validate_bug354_complete_family_provenance(family_dir)?;
         }
         if kind.is_bug75() {
             self.validate_bug75_complete_family_provenance(family_dir)?;

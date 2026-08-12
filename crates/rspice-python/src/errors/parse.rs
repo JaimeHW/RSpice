@@ -86,6 +86,15 @@ struct ParseErrorAttributes {
     instance_name: Option<String>,
     canonical_instance_name: Option<String>,
     qualified_instance_name: Option<String>,
+    parameter_name: Option<String>,
+    canonical_parameter_name: Option<String>,
+    expression: Option<String>,
+    output_directive: Option<String>,
+    operator_name: Option<String>,
+    function_name: Option<String>,
+    identifier_name: Option<String>,
+    missing_dependency: Option<String>,
+    reason: Option<String>,
     formal_port: Option<String>,
     first_position: Option<usize>,
     conflicting_position: Option<usize>,
@@ -179,6 +188,28 @@ fn global_subcircuit_binding_attributes(
     attributes
 }
 
+fn unresolved_subcircuit_parameter_attributes(
+    error: &rspice_core::netlist::UnresolvedSubcircuitParameterError,
+) -> ParseErrorAttributes {
+    let mut attributes = ParseErrorAttributes::new("unresolved_subcircuit_parameter");
+    attributes.category = Some("subcircuit_parameter_resolution");
+    attributes.detail = Some(error.reason.clone());
+    attributes.authored_name = Some(error.parameter_name.clone());
+    attributes.canonical_name = Some(error.canonical_parameter_name.clone());
+    attributes.qualified_name = Some(error.qualified_instance_name.clone());
+    attributes.subcircuit_name = Some(error.subcircuit_name.clone());
+    attributes.canonical_subcircuit_name = Some(error.canonical_subcircuit_name.clone());
+    attributes.instance_name = Some(error.instance_name.clone());
+    attributes.canonical_instance_name = Some(error.canonical_instance_name.clone());
+    attributes.qualified_instance_name = Some(error.qualified_instance_name.clone());
+    attributes.parameter_name = Some(error.parameter_name.clone());
+    attributes.canonical_parameter_name = Some(error.canonical_parameter_name.clone());
+    attributes.expression = Some(error.expression.clone());
+    attributes.missing_dependency = error.missing_dependency.clone();
+    attributes.reason = Some(error.reason.clone());
+    attributes
+}
+
 fn undefined_mutual_inductor_reference_attributes(
     error: &rspice_core::netlist::UndefinedMutualInductorReferenceError,
 ) -> ParseErrorAttributes {
@@ -213,6 +244,44 @@ fn output_symbol_validation_attributes(
     attributes.unresolved_output_symbols = Some(error.unresolved.iter().map(Into::into).collect());
     if let Some(first) = error.unresolved.first() {
         attributes.set_primary(&first.origin);
+    }
+    attributes
+}
+
+fn output_expression_validation_attributes(
+    error: &rspice_core::netlist::OutputExpressionValidationError,
+) -> ParseErrorAttributes {
+    use rspice_core::netlist::OutputExpressionIssue;
+
+    let mut attributes = ParseErrorAttributes::new("invalid_output_expression");
+    attributes.category = Some("output_expression_validation");
+    attributes.set_primary(&error.origin);
+    attributes.expression = Some(error.expression.clone());
+    attributes.output_directive = Some(error.directive.to_string());
+    attributes.reason = Some(error.issue.reason());
+    match &error.issue {
+        OutputExpressionIssue::UnknownFunction { function } => {
+            attributes.kind = "unknown_output_function";
+            attributes.function_name = Some(function.clone());
+        }
+        OutputExpressionIssue::UnresolvedIdentifier { identifier } => {
+            attributes.kind = "unresolved_output_identifier";
+            attributes.identifier_name = Some(identifier.clone());
+        }
+        OutputExpressionIssue::InvalidAccessor { operator, detail } => {
+            attributes.kind = "invalid_output_accessor";
+            attributes.operator_name = Some(operator.clone());
+            attributes.detail = Some(detail.clone());
+        }
+        OutputExpressionIssue::UnresolvedDeviceParameter { device, parameter } => {
+            attributes.kind = "unresolved_output_device_parameter";
+            attributes.device = Some(device.clone());
+            attributes.parameter_name = Some(parameter.clone());
+        }
+        OutputExpressionIssue::Syntax { detail } => {
+            attributes.kind = "invalid_output_expression_syntax";
+            attributes.detail = Some(detail.clone());
+        }
     }
     attributes
 }
@@ -311,10 +380,16 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
         CoreParseError::GlobalSubcircuitPortBinding(error) => {
             global_subcircuit_binding_attributes(error)
         }
+        CoreParseError::UnresolvedSubcircuitParameter(error) => {
+            unresolved_subcircuit_parameter_attributes(error)
+        }
         CoreParseError::UndefinedMutualInductorReference(error) => {
             undefined_mutual_inductor_reference_attributes(error)
         }
         CoreParseError::OutputSymbolValidation(error) => output_symbol_validation_attributes(error),
+        CoreParseError::OutputExpressionValidation(error) => {
+            output_expression_validation_attributes(error)
+        }
         CoreParseError::StartupDirectiveConflict(error) => {
             startup_directive_conflict_attributes(error)
         }
@@ -454,6 +529,18 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
             "qualified_instance_name",
             attributes.qualified_instance_name,
         )?;
+        value.setattr("parameter_name", attributes.parameter_name)?;
+        value.setattr(
+            "canonical_parameter_name",
+            attributes.canonical_parameter_name,
+        )?;
+        value.setattr("expression", attributes.expression)?;
+        value.setattr("output_directive", attributes.output_directive)?;
+        value.setattr("operator_name", attributes.operator_name)?;
+        value.setattr("function_name", attributes.function_name)?;
+        value.setattr("identifier_name", attributes.identifier_name)?;
+        value.setattr("missing_dependency", attributes.missing_dependency)?;
+        value.setattr("reason", attributes.reason)?;
         value.setattr("formal_port", attributes.formal_port)?;
         value.setattr("first_position", attributes.first_position)?;
         value.setattr("conflicting_position", attributes.conflicting_position)?;
@@ -513,9 +600,10 @@ mod tests {
     use super::*;
     use rspice_core::netlist::{
         DuplicateSubcircuitPortBindingError, GlobalSubcircuitPortBindingError,
-        NetlistSourceLocation, OutputDirectiveKind, OutputSymbolKind, OutputSymbolValidationError,
+        NetlistSourceLocation, OutputDirectiveKind, OutputExpressionIssue,
+        OutputExpressionValidationError, OutputSymbolKind, OutputSymbolValidationError,
         StartupDirectiveConflictError, StartupDirectiveKind, UndefinedMutualInductorReferenceError,
-        UnresolvedOutputSymbol,
+        UnresolvedOutputSymbol, UnresolvedSubcircuitParameterError,
     };
 
     #[test]
@@ -547,6 +635,33 @@ mod tests {
     }
 
     #[test]
+    fn output_expression_validation_exposes_structured_python_attributes() {
+        let error = OutputExpressionValidationError {
+            directive: OutputDirectiveKind::Print,
+            origin: NetlistSourceLocation {
+                path: Some(std::path::PathBuf::from("bad_function.cir")),
+                line: 9,
+            },
+            expression: "fabs(v(1))".into(),
+            issue: OutputExpressionIssue::UnknownFunction {
+                function: "FABS".into(),
+            },
+        };
+        let attributes = output_expression_validation_attributes(&error);
+        assert_eq!(attributes.kind, "unknown_output_function");
+        assert_eq!(attributes.category, Some("output_expression_validation"));
+        assert_eq!(attributes.line, Some(9));
+        assert_eq!(attributes.expression.as_deref(), Some("fabs(v(1))"));
+        assert_eq!(attributes.output_directive.as_deref(), Some(".PRINT"));
+        assert_eq!(attributes.function_name.as_deref(), Some("FABS"));
+        assert_eq!(attributes.identifier_name, None);
+        assert_eq!(
+            attributes.reason.as_deref(),
+            Some("unknown function 'FABS'")
+        );
+    }
+
+    #[test]
     fn global_subcircuit_binding_exposes_structured_python_attributes() {
         let error = GlobalSubcircuitPortBindingError {
             subcircuit_name: "cell".into(),
@@ -568,6 +683,80 @@ mod tests {
         );
         assert_eq!(attributes.formal_port.as_deref(), Some("$G_SHARED"));
         assert_eq!(attributes.actual_node.as_deref(), Some("LOCAL"));
+    }
+
+    #[test]
+    fn unresolved_subcircuit_parameter_exposes_structured_python_attributes() {
+        let attributes =
+            unresolved_subcircuit_parameter_attributes(&UnresolvedSubcircuitParameterError {
+                subcircuit_name: "cell".into(),
+                canonical_subcircuit_name: "CELL".into(),
+                instance_name: "x1".into(),
+                canonical_instance_name: "X1".into(),
+                qualified_instance_name: "TOP.X1".into(),
+                parameter_name: "foo".into(),
+                canonical_parameter_name: "FOO".into(),
+                expression: "TIME + meh".into(),
+                missing_dependency: Some("MEH".into()),
+                reason: "Undefined parameter: MEH".into(),
+            });
+
+        assert_eq!(attributes.kind, "unresolved_subcircuit_parameter");
+        assert_eq!(attributes.category, Some("subcircuit_parameter_resolution"));
+        assert_eq!(attributes.subcircuit_name.as_deref(), Some("cell"));
+        assert_eq!(
+            attributes.qualified_instance_name.as_deref(),
+            Some("TOP.X1")
+        );
+        assert_eq!(attributes.parameter_name.as_deref(), Some("foo"));
+        assert_eq!(attributes.canonical_parameter_name.as_deref(), Some("FOO"));
+        assert_eq!(attributes.expression.as_deref(), Some("TIME + meh"));
+        assert_eq!(attributes.missing_dependency.as_deref(), Some("MEH"));
+        assert_eq!(
+            attributes.reason.as_deref(),
+            Some("Undefined parameter: MEH")
+        );
+    }
+
+    #[test]
+    fn unresolved_subcircuit_parameter_is_declared_by_the_public_type_stub() {
+        let stub = include_str!("../../rspice.pyi");
+        for declaration in [
+            "\"unresolved_subcircuit_parameter\"",
+            "\"subcircuit_parameter_resolution\"",
+            "parameter_name: str | None",
+            "canonical_parameter_name: str | None",
+            "expression: str | None",
+            "missing_dependency: str | None",
+            "reason: str | None",
+        ] {
+            assert!(
+                stub.contains(declaration),
+                "public Python type stub is missing {declaration:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn output_expression_error_is_declared_by_the_public_type_stub() {
+        let stub = include_str!("../../rspice.pyi");
+        for declaration in [
+            "\"unknown_output_function\"",
+            "\"unresolved_output_identifier\"",
+            "\"invalid_output_accessor\"",
+            "\"unresolved_output_device_parameter\"",
+            "\"invalid_output_expression_syntax\"",
+            "\"output_expression_validation\"",
+            "output_directive: str | None",
+            "operator_name: str | None",
+            "function_name: str | None",
+            "identifier_name: str | None",
+        ] {
+            assert!(
+                stub.contains(declaration),
+                "Python type stub omitted {declaration}"
+            );
+        }
     }
 
     #[test]
