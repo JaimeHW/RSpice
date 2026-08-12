@@ -40,12 +40,10 @@ pub use add_resistors::*;
 pub use ast::*;
 pub use data_table::{FrequencyDataPoint, FrequencyDataTableError};
 pub use expr::{ParamContext, ParameterRedefinitionPolicy, RandomState, StatisticalParamMode};
+pub(crate) use flattener::flatten_netlist_with_models_config_with_abort;
 pub use flattener::{
     FlattenedNetlist, Flattener, FlattenerConfig, InstanceMetadata, XspiceAutoBridgeNodeHint,
-    flatten_netlist, flatten_netlist_with_models,
-};
-pub(crate) use flattener::{
-    flatten_netlist_with_models_config_with_abort, flatten_netlist_with_models_with_abort,
+    flatten_netlist, flatten_netlist_with_models, flatten_netlist_with_models_with_abort,
 };
 pub use hierarchy_path::{HierarchyPath, HierarchyPathConfig};
 pub use include::source_path_literal_to_host_path;
@@ -199,6 +197,29 @@ pub struct GlobalSubcircuitPortBindingError {
     pub actual_node: String,
 }
 
+/// A retained subcircuit-local `.PARAM` definition could not be resolved.
+///
+/// The canonical definition name and the missing dependency are distinct
+/// identities. Keeping both typed prevents hierarchy diagnostics from
+/// collapsing a failure such as `FOO=(MEH != 1)` into the less useful bare
+/// `Undefined parameter: MEH` message.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error(
+    "Unable to resolve parameter {canonical_parameter_name} found in .PARAM statement '{parameter_name}={expression}' in subcircuit {canonical_subcircuit_name} instance {qualified_instance_name}: {reason}"
+)]
+pub struct UnresolvedSubcircuitParameterError {
+    pub subcircuit_name: String,
+    pub canonical_subcircuit_name: String,
+    pub instance_name: String,
+    pub canonical_instance_name: String,
+    pub qualified_instance_name: String,
+    pub parameter_name: String,
+    pub canonical_parameter_name: String,
+    pub expression: String,
+    pub missing_dependency: Option<String>,
+    pub reason: String,
+}
+
 /// A mutual-inductor card references an inductor that is not defined in the
 /// same netlist scope.
 ///
@@ -342,6 +363,9 @@ pub enum ParseError {
 
     #[error(transparent)]
     GlobalSubcircuitPortBinding(Box<GlobalSubcircuitPortBindingError>),
+
+    #[error(transparent)]
+    UnresolvedSubcircuitParameter(Box<UnresolvedSubcircuitParameterError>),
 
     #[error(transparent)]
     UndefinedMutualInductorReference(Box<UndefinedMutualInductorReferenceError>),

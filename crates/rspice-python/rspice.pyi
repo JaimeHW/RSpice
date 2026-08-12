@@ -89,6 +89,7 @@ class ParseError(RSpiceError):
         "missing_subcircuit_ends",
         "duplicate_subcircuit_port_binding",
         "global_subcircuit_port_binding",
+        "unresolved_subcircuit_parameter",
         "undefined_mutual_inductor_reference",
         "undefined_output_symbols",
         "conflicting_startup_directives",
@@ -110,6 +111,7 @@ class ParseError(RSpiceError):
     category: Literal[
         "device_initial_condition",
         "subcircuit_binding",
+        "subcircuit_parameter_resolution",
         "mutual_inductor_reference",
         "output_symbol_validation",
         "resource_limit",
@@ -133,6 +135,11 @@ class ParseError(RSpiceError):
     instance_name: str | None
     canonical_instance_name: str | None
     qualified_instance_name: str | None
+    parameter_name: str | None
+    canonical_parameter_name: str | None
+    expression: str | None
+    missing_dependency: str | None
+    reason: str | None
     formal_port: str | None
     first_position: int | None
     conflicting_position: int | None

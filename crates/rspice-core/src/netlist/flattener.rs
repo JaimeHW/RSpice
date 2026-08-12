@@ -18,6 +18,7 @@
 use super::expr::{
     behavioral_expression_references_runtime_quantity, prepare_behavioral_expression,
     prepare_behavioral_expression_preserving_spelling,
+    validate_prepared_behavioral_runtime_expression,
 };
 use super::hierarchy_path::HierarchyPath;
 use super::param_scope::ParamResolver;
@@ -941,9 +942,12 @@ impl<'a> Flattener<'a> {
         };
         let param_scope = build_subcircuit_param_scope(
             subckt,
+            &instance.name,
+            &new_prefix,
             caller_scope,
             &scoped_instance_params,
             &self.random,
+            abort,
         )?;
 
         // Expand each element in the subcircuit
@@ -2903,12 +2907,16 @@ fn resolve_string_parametric_value(
 
 fn build_subcircuit_param_scope(
     subckt: &SubcircuitDef,
+    instance_name: &str,
+    qualified_instance_name: &str,
     caller_scope: &ParamContext,
     instance_params: &[(String, ParametricValue)],
     random: &RandomState,
-) -> Result<ParamContext, ParseError> {
+    abort: &dyn AbortSignal,
+) -> Result<ParamContext, ParseWithAbortError> {
+    ensure_parse_not_aborted(abort)?;
     let (instance_numeric, instance_strings, instance_expressions) =
-        resolve_subcircuit_instance_params(subckt, caller_scope, instance_params, random)?;
+        resolve_subcircuit_instance_params(subckt, caller_scope, instance_params, random, abort)?;
     let instance_names = instance_params
         .iter()
         .map(|(name, _)| name.to_ascii_uppercase())
@@ -2981,10 +2989,36 @@ fn build_subcircuit_param_scope(
         .filter(|(name, _)| body_is_authoritative(name))
         .cloned()
         .collect::<Vec<_>>();
-    resolve_deferred_param_expressions(&formal_expr_params, &mut scope, random, &instance_names)?;
-    resolve_deferred_param_expressions(&body_expr_params, &mut scope, random, &instance_names)?;
+    let resolution_context = SubcircuitParameterResolutionContext {
+        subcircuit_name: &subckt.name,
+        instance_name,
+        qualified_instance_name,
+    };
+    resolve_deferred_param_expressions(
+        &formal_expr_params,
+        &mut scope,
+        random,
+        &instance_names,
+        resolution_context,
+        abort,
+    )?;
+    resolve_deferred_param_expressions(
+        &body_expr_params,
+        &mut scope,
+        random,
+        &instance_names,
+        resolution_context,
+        abort,
+    )?;
 
     Ok(scope)
+}
+
+#[derive(Clone, Copy)]
+struct SubcircuitParameterResolutionContext<'a> {
+    subcircuit_name: &'a str,
+    instance_name: &'a str,
+    qualified_instance_name: &'a str,
 }
 
 fn resolve_deferred_param_expressions(
@@ -2992,7 +3026,10 @@ fn resolve_deferred_param_expressions(
     scope: &mut ParamContext,
     random: &RandomState,
     skip_names: &[String],
-) -> Result<(), ParseError> {
+    context: SubcircuitParameterResolutionContext<'_>,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    ensure_parse_not_aborted(abort)?;
     let mut pending = expr_params
         .iter()
         .filter(|(name, _)| {
@@ -3004,21 +3041,45 @@ fn resolve_deferred_param_expressions(
         .collect::<Vec<_>>();
 
     while !pending.is_empty() {
+        ensure_parse_not_aborted(abort)?;
         let mut progress = false;
         let mut unresolved = Vec::new();
         let mut first_error = None;
 
-        for (name, expr) in pending {
+        for (definition_index, (name, expr)) in pending.into_iter().enumerate() {
+            poll_parse_abort(abort, definition_index)?;
             if scope.expression_dialect() == ExpressionDialect::Xyce {
                 match prepare_behavioral_expression(&expr, scope) {
-                    Ok(prepared)
-                        if behavioral_expression_references_runtime_quantity(&prepared) =>
-                    {
-                        scope.define_parameter_expression(&name, expr, None);
-                        progress = true;
-                        continue;
+                    Ok(prepared) => {
+                        match validate_prepared_behavioral_runtime_expression(&prepared) {
+                            Ok(Some(identifier)) => {
+                                first_error
+                                    .get_or_insert(ParseError::UndefinedParameter(identifier));
+                                unresolved.push((name, expr));
+                                continue;
+                            }
+                            Err(error) => {
+                                first_error.get_or_insert_with(|| {
+                                    ParseError::InvalidValue(format!(
+                                        "parameter expression '{}' is invalid: {}",
+                                        name, error
+                                    ))
+                                });
+                                unresolved.push((name, expr));
+                                continue;
+                            }
+                            Ok(None) => {}
+                        }
+                        if !behavioral_expression_references_runtime_quantity(&prepared) {
+                            // Static expressions continue through the numeric
+                            // resolver below so forward references can make
+                            // progress over subsequent fixed-point passes.
+                        } else {
+                            scope.define_parameter_expression(&name, expr, None);
+                            progress = true;
+                            continue;
+                        }
                     }
-                    Ok(_) => {}
                     Err(error) => {
                         first_error.get_or_insert_with(|| {
                             ParseError::InvalidValue(format!(
@@ -3048,11 +3109,39 @@ fn resolve_deferred_param_expressions(
         }
 
         if !progress {
-            return Err(first_error.unwrap_or_else(|| {
+            let (parameter_name, expression) = unresolved
+                .first()
+                .cloned()
+                .ok_or_else(|| {
+                    ParseError::InvalidValue(
+                        "subcircuit deferred parameter resolver made no progress without retaining an unresolved definition"
+                            .to_string(),
+                    )
+                })?;
+            let cause = first_error.unwrap_or_else(|| {
                 ParseError::InvalidValue(
                     "subcircuit deferred parameters could not be resolved".to_string(),
                 )
-            }));
+            });
+            let missing_dependency = match &cause {
+                ParseError::UndefinedParameter(name) => Some(name.to_ascii_uppercase()),
+                _ => None,
+            };
+            return Err(ParseError::UnresolvedSubcircuitParameter(Box::new(
+                super::UnresolvedSubcircuitParameterError {
+                    subcircuit_name: context.subcircuit_name.to_string(),
+                    canonical_subcircuit_name: context.subcircuit_name.to_ascii_uppercase(),
+                    instance_name: context.instance_name.to_string(),
+                    canonical_instance_name: context.instance_name.to_ascii_uppercase(),
+                    qualified_instance_name: context.qualified_instance_name.to_string(),
+                    canonical_parameter_name: parameter_name.to_ascii_uppercase(),
+                    parameter_name,
+                    expression,
+                    missing_dependency,
+                    reason: cause.to_string(),
+                },
+            ))
+            .into());
         }
         pending = unresolved;
     }
@@ -3065,14 +3154,16 @@ fn resolve_subcircuit_instance_params(
     caller_scope: &ParamContext,
     instance_params: &[(String, ParametricValue)],
     random: &RandomState,
+    abort: &dyn AbortSignal,
 ) -> Result<
     (
         Vec<(String, Value)>,
         Vec<(String, String)>,
         Vec<(String, String)>,
     ),
-    ParseError,
+    ParseWithAbortError,
 > {
+    ensure_parse_not_aborted(abort)?;
     let mut instance_scope = caller_scope.clone();
     instance_scope.adopt_random(random);
     let mut pending = instance_params.to_vec();
@@ -3081,11 +3172,13 @@ fn resolve_subcircuit_instance_params(
     let mut expressions = Vec::<(String, String)>::new();
 
     while !pending.is_empty() {
+        ensure_parse_not_aborted(abort)?;
         let mut progress = false;
         let mut unresolved = Vec::new();
         let mut first_error = None;
 
-        for (name, value) in pending {
+        for (definition_index, (name, value)) in pending.into_iter().enumerate() {
+            poll_parse_abort(abort, definition_index)?;
             if subcircuit_instance_param_is_string(subckt, &name, &value) {
                 match resolve_string_parametric_value(&value, &instance_scope) {
                     Ok(resolved) => {
@@ -3103,19 +3196,37 @@ fn resolve_subcircuit_instance_params(
                     && let ParametricValue::Expression(expression) = &value
                 {
                     match prepare_behavioral_expression(expression, &instance_scope) {
-                        Ok(prepared)
-                            if behavioral_expression_references_runtime_quantity(&prepared) =>
-                        {
-                            instance_scope.define_parameter_expression(
-                                &name,
-                                prepared.clone(),
-                                None,
-                            );
-                            upsert_expression_param_value(&mut expressions, name, prepared);
-                            progress = true;
-                            continue;
+                        Ok(prepared) => {
+                            match validate_prepared_behavioral_runtime_expression(&prepared) {
+                                Ok(Some(identifier)) => {
+                                    first_error
+                                        .get_or_insert(ParseError::UndefinedParameter(identifier));
+                                    unresolved.push((name, value));
+                                    continue;
+                                }
+                                Err(error) => {
+                                    first_error.get_or_insert_with(|| {
+                                        ParseError::InvalidValue(format!(
+                                            "subcircuit instance parameter '{}' is invalid: {}",
+                                            name, error
+                                        ))
+                                    });
+                                    unresolved.push((name, value));
+                                    continue;
+                                }
+                                Ok(None) => {}
+                            }
+                            if behavioral_expression_references_runtime_quantity(&prepared) {
+                                instance_scope.define_parameter_expression(
+                                    &name,
+                                    prepared.clone(),
+                                    None,
+                                );
+                                upsert_expression_param_value(&mut expressions, name, prepared);
+                                progress = true;
+                                continue;
+                            }
                         }
-                        Ok(_) => {}
                         Err(error) => {
                             first_error.get_or_insert_with(|| {
                                 ParseError::InvalidValue(format!(
@@ -3143,11 +3254,13 @@ fn resolve_subcircuit_instance_params(
         }
 
         if !progress {
-            return Err(first_error.unwrap_or_else(|| {
-                ParseError::InvalidValue(
-                    "subcircuit instance parameters could not be resolved".to_string(),
-                )
-            }));
+            return Err(first_error
+                .unwrap_or_else(|| {
+                    ParseError::InvalidValue(
+                        "subcircuit instance parameters could not be resolved".to_string(),
+                    )
+                })
+                .into());
         }
         pending = unresolved;
     }
@@ -3561,7 +3674,9 @@ pub fn flatten_netlist_with_models(netlist: &Netlist) -> Result<FlattenedNetlist
     finish_non_aborting_parse(flatten_netlist_with_models_with_abort(netlist, &NoAbort))
 }
 
-pub(crate) fn flatten_netlist_with_models_with_abort(
+/// Flatten a netlist while cooperatively observing `abort` throughout
+/// hierarchy expansion and deferred parameter resolution.
+pub fn flatten_netlist_with_models_with_abort(
     netlist: &Netlist,
     abort: &dyn AbortSignal,
 ) -> Result<FlattenedNetlist, ParseWithAbortError> {
@@ -4101,6 +4216,225 @@ mod tests {
             Err(ParseError::UndefinedParameter(name))
                 if name.eq_ignore_ascii_case("missing_value")
         ));
+    }
+
+    #[test]
+    fn unresolved_subcircuit_param_preserves_definition_and_dependency_identity() {
+        let netlist = Netlist::parse_with_options(
+            "typed unresolved local parameter\n\
+             X1 d g 0 0 MYMOS w=0.4u l=3.57u\n\
+             V1 d 0 1.8\n\
+             V2 g 0 0\n\
+             .subckt MYMOS 1 2 3 4 w=0 l=0\n\
+             .param foo = '(meh != 1)'\n\
+             R1 1 3 1k\n\
+             .ends MYMOS\n\
+             .end\n",
+            super::super::parser::NetlistParseOptions {
+                expression_dialect: ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("top-level parsing retains the unresolved local expression");
+        assert_eq!(
+            netlist.subcircuits[0].body_expr_params,
+            [("FOO".to_string(), "(meh != 1)".to_string())]
+        );
+
+        let error = flatten_netlist_with_models(&netlist)
+            .expect_err("every retained local parameter must resolve before expansion");
+        let ParseError::UnresolvedSubcircuitParameter(error) = error else {
+            panic!("expected typed unresolved subcircuit-parameter error, got {error:?}");
+        };
+        assert_eq!(error.subcircuit_name, "MYMOS");
+        assert_eq!(error.canonical_subcircuit_name, "MYMOS");
+        assert_eq!(error.instance_name, "X1");
+        assert_eq!(error.canonical_instance_name, "X1");
+        assert_eq!(error.qualified_instance_name, "X1");
+        assert_eq!(error.parameter_name, "FOO");
+        assert_eq!(error.canonical_parameter_name, "FOO");
+        assert_eq!(error.expression, "(meh != 1)");
+        assert_eq!(error.missing_dependency.as_deref(), Some("MEH"));
+        assert!(error.reason.contains("Undefined parameter: MEH"));
+        assert!(
+            error
+                .to_string()
+                .contains("Unable to resolve parameter FOO found in .PARAM statement")
+        );
+    }
+
+    #[test]
+    fn runtime_subcircuit_param_does_not_mask_an_undefined_dependency() {
+        let parse = |definition: &str| {
+            Netlist::parse_with_options(
+                &format!(
+                    "runtime local parameter\n\
+                     X1 in out CELL\n\
+                     V1 in 0 1\n\
+                     .subckt CELL in out\n\
+                     .param foo = '{definition}'\n\
+                     R1 in out 1k\n\
+                     .ends CELL\n\
+                     .end\n"
+                ),
+                super::super::parser::NetlistParseOptions {
+                    expression_dialect: ExpressionDialect::Xyce,
+                    ..Default::default()
+                },
+            )
+            .expect("runtime local parameter parses")
+        };
+
+        let error = flatten_netlist_with_models(&parse("TIME + MEH"))
+            .expect_err("runtime quantity must not mask an undefined parameter");
+        let ParseError::UnresolvedSubcircuitParameter(error) = error else {
+            panic!("expected typed unresolved subcircuit-parameter error, got {error:?}");
+        };
+        assert_eq!(error.canonical_parameter_name, "FOO");
+        assert_eq!(error.missing_dependency.as_deref(), Some("MEH"));
+
+        flatten_netlist_with_models(&parse("TIME + 1"))
+            .expect("a fully bound runtime parameter remains deferred");
+
+        let error = flatten_netlist_with_models(&parse("BOGUS(TIME)"))
+            .expect_err("an unknown function must not be retained as a runtime expression");
+        let ParseError::UnresolvedSubcircuitParameter(error) = error else {
+            panic!("expected typed unresolved subcircuit-parameter error, got {error:?}");
+        };
+        assert_eq!(error.canonical_parameter_name, "FOO");
+        assert!(error.missing_dependency.is_none());
+        assert!(error.reason.contains("Unknown function"));
+    }
+
+    #[test]
+    fn runtime_instance_param_does_not_mask_invalid_dependencies_or_functions() {
+        let parse = |expression: &str| {
+            Netlist::parse_with_options(
+                &format!(
+                    "runtime instance parameter\n\
+                     X1 in out CELL p='{expression}'\n\
+                     V1 in 0 1\n\
+                     .subckt CELL in out p=0\n\
+                     R1 in out 1k\n\
+                     .ends CELL\n\
+                     .end\n"
+                ),
+                super::super::parser::NetlistParseOptions {
+                    expression_dialect: ExpressionDialect::Xyce,
+                    ..Default::default()
+                },
+            )
+            .expect("runtime instance parameter parses")
+        };
+
+        let missing = flatten_netlist_with_models(&parse("TIME + MEH"))
+            .expect_err("runtime quantity must not mask an undefined instance dependency");
+        assert!(matches!(missing, ParseError::UndefinedParameter(ref name) if name == "MEH"));
+
+        flatten_netlist_with_models(&parse("TIME + 1"))
+            .expect("a fully bound runtime instance parameter remains deferred");
+
+        let unknown = flatten_netlist_with_models(&parse("BOGUS(TIME)"))
+            .expect_err("an unknown instance function must not be retained at runtime");
+        assert!(
+            matches!(unknown, ParseError::InvalidValue(ref reason) if reason.contains("Unknown function"))
+        );
+    }
+
+    #[test]
+    fn deferred_subcircuit_parameter_resolution_is_cooperatively_abortable() {
+        let netlist = Netlist::parse_with_options(
+            "abort deferred local parameter\n\
+             X1 in out CELL\n\
+             V1 in 0 1\n\
+             .subckt CELL in out\n\
+             .param foo='TIME + 1'\n\
+             R1 in out 1k\n\
+             .ends CELL\n\
+             .end\n",
+            super::super::parser::NetlistParseOptions {
+                expression_dialect: ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("abortable runtime parameter deck parses");
+        let abort = CountingAbort::new(4);
+        let error = build_subcircuit_param_scope(
+            &netlist.subcircuits[0],
+            "X1",
+            "X1",
+            &netlist.params,
+            &[],
+            &RandomState::default(),
+            &abort,
+        )
+        .expect_err("deferred local-parameter resolution must poll cancellation");
+        assert!(matches!(error, ParseWithAbortError::Aborted));
+        assert!(abort.count() >= 5);
+    }
+
+    #[test]
+    fn public_abort_api_polls_inside_body_and_instance_parameter_worklists() {
+        fn completed_abort_checks(netlist: &Netlist) -> usize {
+            let counter = CountingAbort::new(usize::MAX);
+            flatten_netlist_with_models_with_abort(netlist, &counter)
+                .expect("non-cancelling count run flattens");
+            counter.count()
+        }
+
+        fn parse(source: &str) -> Netlist {
+            Netlist::parse_with_options(
+                source,
+                super::super::parser::NetlistParseOptions {
+                    expression_dialect: ExpressionDialect::Xyce,
+                    ..Default::default()
+                },
+            )
+            .expect("abort worklist fixture parses")
+        }
+
+        let baseline = parse(
+            "abort worklist baseline\n\
+             X1 in out CELL\n\
+             V1 in 0 1\n\
+             .subckt CELL in out\n\
+             R1 in out 1k\n\
+             .ends CELL\n\
+             .end\n",
+        );
+        let baseline_checks = completed_abort_checks(&baseline);
+
+        let mut body_source =
+            String::from("abort body worklist\nX1 in out CELL\nV1 in 0 1\n.subckt CELL in out\n");
+        for index in 0..256 {
+            body_source.push_str(&format!(".param p{index}='TIME+{index}'\n"));
+        }
+        body_source.push_str("R1 in out 1k\n.ends CELL\n.end\n");
+        let body = parse(&body_source);
+        let error =
+            flatten_netlist_with_models_with_abort(&body, &CountingAbort::new(baseline_checks))
+                .expect_err("body-expression worklist must add observable abort polls");
+        assert!(matches!(error, ParseWithAbortError::Aborted));
+
+        let formals = (0..256)
+            .map(|index| format!(" p{index}=0"))
+            .collect::<String>();
+        let overrides = (0..256)
+            .map(|index| format!(" p{index}='TIME+{index}'"))
+            .collect::<String>();
+        let instance_baseline = parse(&format!(
+            "abort instance baseline\nX1 in out CELL\nV1 in 0 1\n.subckt CELL in out{formals}\nR1 in out 1k\n.ends CELL\n.end\n"
+        ));
+        let instance_baseline_checks = completed_abort_checks(&instance_baseline);
+        let instance = parse(&format!(
+            "abort instance worklist\nX1 in out CELL{overrides}\nV1 in 0 1\n.subckt CELL in out{formals}\nR1 in out 1k\n.ends CELL\n.end\n"
+        ));
+        let error = flatten_netlist_with_models_with_abort(
+            &instance,
+            &CountingAbort::new(instance_baseline_checks),
+        )
+        .expect_err("instance-expression worklist must add observable abort polls");
+        assert!(matches!(error, ParseWithAbortError::Aborted));
     }
 
     #[test]

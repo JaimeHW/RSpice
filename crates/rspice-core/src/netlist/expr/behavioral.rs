@@ -350,6 +350,24 @@ pub fn behavioral_expression_references_runtime_quantity(expression: &str) -> bo
     }
 }
 
+/// Validate a prepared behavioral expression and return its first ordinary
+/// identifier that remains unresolved after parameter expansion.
+///
+/// Runtime quantities and circuit-probe operands are not parameter
+/// dependencies. Callers use this after [`prepare_behavioral_expression`] to
+/// ensure that the presence of `TIME`, `FREQ`, or a probe cannot mask an
+/// unrelated undefined parameter in the same retained runtime expression.
+pub(crate) fn validate_prepared_behavioral_runtime_expression(
+    expression: &str,
+) -> Result<Option<String>, String> {
+    let parsed = parse_net_expr(expression).map_err(|error| error.to_string())?;
+    if let Some(identifier) = first_unresolved_behavioral_identifier(&parsed) {
+        return Ok(Some(identifier.to_ascii_uppercase()));
+    }
+    crate::expr::parse_expression_strict(expression).map_err(|error| error.to_string())?;
+    Ok(None)
+}
+
 /// Return whether an expression depends specifically on the active AC
 /// frequency. Unlike textual scans, this ignores quoted text, function formal
 /// names, and parameter-definition left-hand sides.
@@ -701,6 +719,21 @@ fn first_unresolved_global_identifier(expression: &NetExpr) -> Option<&str> {
         NetExpr::BinOp { left, right, .. } => first_unresolved_global_identifier(left)
             .or_else(|| first_unresolved_global_identifier(right)),
         NetExpr::FnCall { args, .. } => args.iter().find_map(first_unresolved_global_identifier),
+        NetExpr::Number(_) | NetExpr::ComplexNumber(_) | NetExpr::StringLiteral(_) => None,
+    }
+}
+
+fn first_unresolved_behavioral_identifier(expression: &NetExpr) -> Option<&str> {
+    match expression {
+        NetExpr::Param(name) if is_behavioral_runtime_symbol(name) => None,
+        NetExpr::Param(name) => Some(name.as_str()),
+        NetExpr::UnaryOp { operand, .. } => first_unresolved_behavioral_identifier(operand),
+        NetExpr::BinOp { left, right, .. } => first_unresolved_behavioral_identifier(left)
+            .or_else(|| first_unresolved_behavioral_identifier(right)),
+        NetExpr::FnCall { name, .. } if is_circuit_probe(name) => None,
+        NetExpr::FnCall { args, .. } => {
+            args.iter().find_map(first_unresolved_behavioral_identifier)
+        }
         NetExpr::Number(_) | NetExpr::ComplexNumber(_) | NetExpr::StringLiteral(_) => None,
     }
 }

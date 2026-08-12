@@ -86,6 +86,11 @@ struct ParseErrorAttributes {
     instance_name: Option<String>,
     canonical_instance_name: Option<String>,
     qualified_instance_name: Option<String>,
+    parameter_name: Option<String>,
+    canonical_parameter_name: Option<String>,
+    expression: Option<String>,
+    missing_dependency: Option<String>,
+    reason: Option<String>,
     formal_port: Option<String>,
     first_position: Option<usize>,
     conflicting_position: Option<usize>,
@@ -176,6 +181,28 @@ fn global_subcircuit_binding_attributes(
     attributes.formal_port = Some(error.formal_port.clone());
     attributes.position = Some(error.position);
     attributes.actual_node = Some(error.actual_node.clone());
+    attributes
+}
+
+fn unresolved_subcircuit_parameter_attributes(
+    error: &rspice_core::netlist::UnresolvedSubcircuitParameterError,
+) -> ParseErrorAttributes {
+    let mut attributes = ParseErrorAttributes::new("unresolved_subcircuit_parameter");
+    attributes.category = Some("subcircuit_parameter_resolution");
+    attributes.detail = Some(error.reason.clone());
+    attributes.authored_name = Some(error.parameter_name.clone());
+    attributes.canonical_name = Some(error.canonical_parameter_name.clone());
+    attributes.qualified_name = Some(error.qualified_instance_name.clone());
+    attributes.subcircuit_name = Some(error.subcircuit_name.clone());
+    attributes.canonical_subcircuit_name = Some(error.canonical_subcircuit_name.clone());
+    attributes.instance_name = Some(error.instance_name.clone());
+    attributes.canonical_instance_name = Some(error.canonical_instance_name.clone());
+    attributes.qualified_instance_name = Some(error.qualified_instance_name.clone());
+    attributes.parameter_name = Some(error.parameter_name.clone());
+    attributes.canonical_parameter_name = Some(error.canonical_parameter_name.clone());
+    attributes.expression = Some(error.expression.clone());
+    attributes.missing_dependency = error.missing_dependency.clone();
+    attributes.reason = Some(error.reason.clone());
     attributes
 }
 
@@ -310,6 +337,9 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
         }
         CoreParseError::GlobalSubcircuitPortBinding(error) => {
             global_subcircuit_binding_attributes(error)
+        }
+        CoreParseError::UnresolvedSubcircuitParameter(error) => {
+            unresolved_subcircuit_parameter_attributes(error)
         }
         CoreParseError::UndefinedMutualInductorReference(error) => {
             undefined_mutual_inductor_reference_attributes(error)
@@ -454,6 +484,14 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
             "qualified_instance_name",
             attributes.qualified_instance_name,
         )?;
+        value.setattr("parameter_name", attributes.parameter_name)?;
+        value.setattr(
+            "canonical_parameter_name",
+            attributes.canonical_parameter_name,
+        )?;
+        value.setattr("expression", attributes.expression)?;
+        value.setattr("missing_dependency", attributes.missing_dependency)?;
+        value.setattr("reason", attributes.reason)?;
         value.setattr("formal_port", attributes.formal_port)?;
         value.setattr("first_position", attributes.first_position)?;
         value.setattr("conflicting_position", attributes.conflicting_position)?;
@@ -515,7 +553,7 @@ mod tests {
         DuplicateSubcircuitPortBindingError, GlobalSubcircuitPortBindingError,
         NetlistSourceLocation, OutputDirectiveKind, OutputSymbolKind, OutputSymbolValidationError,
         StartupDirectiveConflictError, StartupDirectiveKind, UndefinedMutualInductorReferenceError,
-        UnresolvedOutputSymbol,
+        UnresolvedOutputSymbol, UnresolvedSubcircuitParameterError,
     };
 
     #[test]
@@ -568,6 +606,58 @@ mod tests {
         );
         assert_eq!(attributes.formal_port.as_deref(), Some("$G_SHARED"));
         assert_eq!(attributes.actual_node.as_deref(), Some("LOCAL"));
+    }
+
+    #[test]
+    fn unresolved_subcircuit_parameter_exposes_structured_python_attributes() {
+        let attributes =
+            unresolved_subcircuit_parameter_attributes(&UnresolvedSubcircuitParameterError {
+                subcircuit_name: "cell".into(),
+                canonical_subcircuit_name: "CELL".into(),
+                instance_name: "x1".into(),
+                canonical_instance_name: "X1".into(),
+                qualified_instance_name: "TOP.X1".into(),
+                parameter_name: "foo".into(),
+                canonical_parameter_name: "FOO".into(),
+                expression: "TIME + meh".into(),
+                missing_dependency: Some("MEH".into()),
+                reason: "Undefined parameter: MEH".into(),
+            });
+
+        assert_eq!(attributes.kind, "unresolved_subcircuit_parameter");
+        assert_eq!(attributes.category, Some("subcircuit_parameter_resolution"));
+        assert_eq!(attributes.subcircuit_name.as_deref(), Some("cell"));
+        assert_eq!(
+            attributes.qualified_instance_name.as_deref(),
+            Some("TOP.X1")
+        );
+        assert_eq!(attributes.parameter_name.as_deref(), Some("foo"));
+        assert_eq!(attributes.canonical_parameter_name.as_deref(), Some("FOO"));
+        assert_eq!(attributes.expression.as_deref(), Some("TIME + meh"));
+        assert_eq!(attributes.missing_dependency.as_deref(), Some("MEH"));
+        assert_eq!(
+            attributes.reason.as_deref(),
+            Some("Undefined parameter: MEH")
+        );
+    }
+
+    #[test]
+    fn unresolved_subcircuit_parameter_is_declared_by_the_public_type_stub() {
+        let stub = include_str!("../../rspice.pyi");
+        for declaration in [
+            "\"unresolved_subcircuit_parameter\"",
+            "\"subcircuit_parameter_resolution\"",
+            "parameter_name: str | None",
+            "canonical_parameter_name: str | None",
+            "expression: str | None",
+            "missing_dependency: str | None",
+            "reason: str | None",
+        ] {
+            assert!(
+                stub.contains(declaration),
+                "public Python type stub is missing {declaration:?}"
+            );
+        }
     }
 
     #[test]
