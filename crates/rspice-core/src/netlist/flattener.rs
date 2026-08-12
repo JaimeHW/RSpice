@@ -637,9 +637,7 @@ impl<'a> Flattener<'a> {
         for (index, element) in elements.iter().enumerate() {
             poll_parse_abort(abort, index)?;
             match &element.provenance {
-                super::ElementProvenance::GeneratedDynamicInternalNode {
-                    owner, node, ..
-                } => {
+                super::ElementProvenance::GeneratedDynamicInternalNode { owner, node, .. } => {
                     if !element
                         .nodes
                         .iter()

@@ -1306,7 +1306,9 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
             WorkerAnalysisSpec::Pstb => Self::Pstb,
             WorkerAnalysisSpec::Parametric => Self::Parametric,
             WorkerAnalysisSpec::Corner => Self::Corner,
-            WorkerAnalysisSpec::MonteCarlo { variation_source } => Self::MonteCarlo { variation_source },
+            WorkerAnalysisSpec::MonteCarlo { variation_source } => {
+                Self::MonteCarlo { variation_source }
+            }
             WorkerAnalysisSpec::Reliability {
                 target_years,
                 enable_hci,

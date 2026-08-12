@@ -134,12 +134,12 @@ impl<'de> Deserialize<'de> for TempDialogState {
     {
         let persisted = PersistedTempDialogState::deserialize(deserializer)?;
         let specific_temps = persisted.specific_temps.unwrap_or_default();
-        let specific_temps = if specific_temps.trim().is_empty() && persisted.corner_temps == Some(true)
-        {
-            RETIRED_CORNER_TEMPERATURES.to_owned()
-        } else {
-            specific_temps
-        };
+        let specific_temps =
+            if specific_temps.trim().is_empty() && persisted.corner_temps == Some(true) {
+                RETIRED_CORNER_TEMPERATURES.to_owned()
+            } else {
+                specific_temps
+            };
         Ok(Self {
             temp_start: persisted.temp_start,
             temp_stop: persisted.temp_stop,

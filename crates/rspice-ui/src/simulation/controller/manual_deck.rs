@@ -1037,7 +1037,9 @@ fn command_to_queue_item(
         }
         AnalysisCommand::MonteCarlo(_) => Ok(QueuedAnalysis {
             numeric_override: None,
-            spec: AnalysisSpec::MonteCarlo { variation_source: Default::default() },
+            spec: AnalysisSpec::MonteCarlo {
+                variation_source: Default::default(),
+            },
             config: None,
             spec_options,
             analysis_line: ".mc".to_string(),

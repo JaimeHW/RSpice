@@ -365,9 +365,7 @@ fn manifest_spec_execution_blocker(spec: &AnalysisSpec) -> &'static str {
 ///
 /// Only the kinds that can be blocked need an answer here; every other
 /// specification reaches the engine and never asks.
-const fn manifest_spec_kind(
-    spec: &AnalysisSpec,
-) -> Option<crate::simulation::plan::AnalysisKind> {
+const fn manifest_spec_kind(spec: &AnalysisSpec) -> Option<crate::simulation::plan::AnalysisKind> {
     use crate::simulation::plan::AnalysisKind;
     Some(match spec {
         AnalysisSpec::Qpss { .. } => AnalysisKind::Qpss,

@@ -1208,7 +1208,10 @@ fn output_specifications_never_mix_measurements_across_retained_datasets() {
             retained_measurements: 1,
         })
     );
-    assert_eq!(measurement_in_output_dataset(run, &spec("gain", Some(0.0), None)), None);
+    assert_eq!(
+        measurement_in_output_dataset(run, &spec("gain", Some(0.0), None)),
+        None
+    );
 }
 
 #[test]
@@ -1330,7 +1333,8 @@ fn a_lone_measurement_is_reported_as_complete_coverage() {
             .with_measurements(vec![rspice_core::MeasureResult::success("gain", 12.0)]),
     ));
 
-    let evidence = measurement_in_output_dataset(&run, &spec("gain", Some(0.0), None)).expect("evidence resolves");
+    let evidence = measurement_in_output_dataset(&run, &spec("gain", Some(0.0), None))
+        .expect("evidence resolves");
 
     assert!(evidence.is_complete_coverage());
 }
@@ -1362,7 +1366,8 @@ fn coverage_counts_only_attributed_finite_measurements() {
         ]),
     ));
 
-    let evidence = measurement_in_output_dataset(&run, &spec("gain", Some(0.0), None)).expect("evidence resolves");
+    let evidence = measurement_in_output_dataset(&run, &spec("gain", Some(0.0), None))
+        .expect("evidence resolves");
 
     assert_eq!(evidence.retained_measurements, 1);
     assert!(evidence.is_complete_coverage());
@@ -1393,7 +1398,10 @@ fn output_specifications_reject_unattributed_failed_and_non_finite_measurements(
         ]),
     ));
 
-    assert_eq!(measurement_in_output_dataset(&run, &spec("gain", Some(0.0), None)), None);
+    assert_eq!(
+        measurement_in_output_dataset(&run, &spec("gain", Some(0.0), None)),
+        None
+    );
 }
 
 #[test]
@@ -1925,14 +1933,13 @@ fn corner_evidence_run() -> SimulationRun {
          .tran 1n 100n\n\
          .meas tran vout FIND V(out) AT=100n\n\
          .end\n";
-    let binding = |process: CornerProcess, label: &str, saturation_current: &str| {
-        CornerModelBinding {
+    let binding =
+        |process: CornerProcess, label: &str, saturation_current: &str| CornerModelBinding {
             process,
             source_label: label.to_owned(),
             section: Some(process.as_keyword().to_owned()),
             materialized_model_cards: format!(".model DPROCESS D (IS={saturation_current})"),
-        }
-    };
+        };
     let contract = CornerRunConfig {
         process_corners: vec![CornerProcess::TT, CornerProcess::SS],
         voltages: vec![1.8, 1.62],

@@ -541,7 +541,12 @@ R2 out 0 1k\n\
     #[test]
     fn specialized_spec_families_observe_the_supplied_counter_signal() {
         let cases = [
-            ("sweep", AnalysisSpec::MonteCarlo { variation_source: Default::default() }),
+            (
+                "sweep",
+                AnalysisSpec::MonteCarlo {
+                    variation_source: Default::default(),
+                },
+            ),
             (
                 "device",
                 AnalysisSpec::Reliability {

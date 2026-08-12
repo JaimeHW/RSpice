@@ -428,10 +428,7 @@ fn judge_under_sibling_modes(
             // Lists are included because a whole axis can be the gate: a
             // corner run set whose process dimension is empty is what makes
             // the rest of its configuration reachable at all.
-            if !matches!(
-                current,
-                Value::Bool(_) | Value::String(_) | Value::Array(_)
-            ) {
+            if !matches!(current, Value::Bool(_) | Value::String(_) | Value::Array(_)) {
                 continue;
             }
             for candidate in perturbations(kind, sibling, current) {

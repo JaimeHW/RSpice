@@ -259,7 +259,9 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     // page exists to prevent.
     let mut status = format!("{passing} pass · {failing} fail · {unmapped} without evidence");
     if partial > 0 {
-        status.push_str(&format!(" · {partial} judged on the worst of several points"));
+        status.push_str(&format!(
+            " · {partial} judged on the worst of several points"
+        ));
     }
     if unreachable_scope > 0 {
         status.push_str(&format!(
