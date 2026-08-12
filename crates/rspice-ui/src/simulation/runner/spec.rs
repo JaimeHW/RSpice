@@ -330,6 +330,42 @@ R1 out 0 {rload}\n\
         );
     }
 
+    /// A temperature step is solved one declared point at a time, so nothing
+    /// solves the declaration. Refusing it here is what keeps the sweep from
+    /// costing 2N: an executor that accepted it would quietly solve the whole
+    /// space a second time and the duplicate would look like a slow run rather
+    /// than a routing fault.
+    #[test]
+    fn a_temperature_step_is_refused_by_the_executor_rather_than_solved_whole() {
+        let netlist = "temperature step routing\n\
+V1 in 0 1\n\
+R1 in out 1k\n\
+R2 out 0 1k\n\
+.end\n";
+
+        let result = run_spec_request(
+            &EngineBridge::new(),
+            AnalysisSpec::Parametric,
+            SpecExecutionOptions {
+                temp: Some(crate::services::simulation_runner::TempRunConfig {
+                    temperatures_c: vec![-40.0, 27.0],
+                    base_mode: crate::services::simulation_runner::CornerBaseMode::Op,
+                }),
+                ..SpecExecutionOptions::default()
+            },
+            netlist,
+            None,
+            &ResolvedExecutionDependencies::default(),
+            &rspice_core::abort_signal::NoAbort,
+        );
+
+        let error = result.expect_err("a declaration must never reach an executor");
+        assert!(
+            error.to_string().contains("one declared point at a time"),
+            "{error}"
+        );
+    }
+
     #[test]
     fn exact_noise_spec_executes_without_live_setup_fallback() {
         let netlist = "noise spec fallback\n\

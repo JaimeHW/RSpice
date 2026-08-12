@@ -1,4 +1,5 @@
-//! Driving a corner run's per-point expansion for tests that judge its results.
+//! Driving a PVT declaration's per-point expansion for tests that judge its
+//! results.
 //!
 //! The prepared snapshot and the spec runner are both private to
 //! `crate::simulation`, and a specification's verdict is only worth asserting
@@ -25,35 +26,70 @@ use crate::state::{
 
 use super::SimulationError;
 
+const TEST_NAMESPACE: uuid::Uuid = uuid::Uuid::from_u128(0x0f22_9f3a_51b8_4cd7_9e21_7c60_5d18_a4b3);
+
 /// Prepare, authorize and run a corner declaration, retaining every result the
 /// expansion produced.
-///
-/// A point that fails to solve is retained as a failed result rather than
-/// dropped, because a corner that did not converge is the answer to a
-/// specification asked about that corner.
-///
-/// The run is sealed with the dispatch's own receipt, the way the controller
-/// seals one. Without it a test could not tell whether the results it is
-/// judging are an authentic ordered prefix of the authorized task graph — which
-/// is the property a project save and reload depends on.
 pub(crate) fn run_corner_declaration(
     deck: &str,
     contract: crate::services::simulation_runner::CornerRunConfig,
     reference_temperature_celsius: f64,
 ) -> Result<SimulationRun, String> {
-    const TEST_NAMESPACE: uuid::Uuid =
-        uuid::Uuid::from_u128(0x0f22_9f3a_51b8_4cd7_9e21_7c60_5d18_a4b3);
-
-    let corner = QueuedAnalysis {
-        numeric_override: None,
-        spec: AnalysisSpec::Corner,
-        config: None,
-        spec_options: super::SpecExecutionOptions {
-            corner: Some(contract),
-            ..super::SpecExecutionOptions::default()
+    run_declaration(
+        deck,
+        "Corner",
+        QueuedAnalysis {
+            numeric_override: None,
+            spec: AnalysisSpec::Corner,
+            config: None,
+            spec_options: super::SpecExecutionOptions {
+                corner: Some(contract),
+                ..super::SpecExecutionOptions::default()
+            },
+            analysis_line: ".corner".to_owned(),
         },
-        analysis_line: ".corner".to_owned(),
-    };
+        reference_temperature_celsius,
+    )
+}
+
+/// Prepare, authorize and run a temperature step, retaining every result the
+/// expansion produced.
+pub(crate) fn run_temperature_declaration(
+    deck: &str,
+    contract: crate::services::simulation_runner::TempRunConfig,
+    reference_temperature_celsius: f64,
+) -> Result<SimulationRun, String> {
+    run_declaration(
+        deck,
+        "Temperature",
+        QueuedAnalysis {
+            numeric_override: None,
+            spec: AnalysisSpec::Parametric,
+            config: None,
+            spec_options: super::SpecExecutionOptions {
+                temp: Some(contract),
+                ..super::SpecExecutionOptions::default()
+            },
+            analysis_line: ".step temp".to_owned(),
+        },
+        reference_temperature_celsius,
+    )
+}
+
+/// A point that fails to solve is retained as a failed result rather than
+/// dropped, because a point that did not converge is the answer to a
+/// specification asked about that point.
+///
+/// The run is sealed with the dispatch's own receipt, the way the controller
+/// seals one. Without it a test could not tell whether the results it is
+/// judging are an authentic ordered prefix of the authorized task graph — which
+/// is the property a project save and reload depends on.
+fn run_declaration(
+    deck: &str,
+    label: &str,
+    declaration: QueuedAnalysis,
+    reference_temperature_celsius: f64,
+) -> Result<SimulationRun, String> {
     let parts = SnapshotParts {
         intent: SimulationRunIntent::SimulateRunSet,
         simulation_plan_id: Some(SimulationPlanId::from_namespace(
@@ -68,11 +104,11 @@ pub(crate) fn run_corner_declaration(
         reference_process: ProcessCorner::TT,
         reference_temperature_celsius,
         tasks: vec![PreparedTask::new(
-            crate::product::AnalysisInstanceId::from_namespace(TEST_NAMESPACE, b"corner"),
+            crate::product::AnalysisInstanceId::from_namespace(TEST_NAMESPACE, label.as_bytes()),
             ObjectRevision::INITIAL,
             Vec::new(),
-            "Corner",
-            corner,
+            label,
+            declaration,
         )],
         executable_netlist: deck.to_owned(),
         save_policy: SavePolicy::RetainEngineProducedResults,
@@ -103,11 +139,11 @@ pub(crate) fn run_corner_declaration(
     let bridge = crate::simulation::EngineBridge::new();
     // Points are retained through the controller's own conversion. A hand-built
     // result would decide for itself what evidence a point keeps, and the
-    // corner family is assembled from exactly that evidence.
+    // family is assembled from exactly that evidence.
     let retainer = crate::simulation::SimulationController::new();
-    let mut corner_families = crate::simulation::corner_family::CornerFamilyRegistry::default();
+    let mut families = crate::simulation::point_family::PointFamilyRegistry::default();
     for task in dispatch.tasks() {
-        corner_families.register(task);
+        families.register(task);
     }
     let receipt = dispatch
         .prepared_run_receipt(AnalysisResultSourceDomain::SimulationPlan)
@@ -132,14 +168,14 @@ pub(crate) fn run_corner_declaration(
         // The declaration's own turn assembles the family from the points that
         // already ran, exactly as the controller does. It costs no engine call,
         // which is the whole point of it still being a task.
-        if matches!(task.spec(), AnalysisSpec::Corner) {
-            let analysis = match corner_families.family_for(task.instance_id(), &run) {
+        if families.declares(task.instance_id()) {
+            let analysis = match families.family_for(task.instance_id(), &run) {
                 Ok(result) => retainer.convert_to_analysis_result_with_metadata_owned(
                     result,
-                    AnalysisType::Corner,
+                    analysis_type,
                     &label,
                 ),
-                Err(error) => AnalysisResult::failed(id, AnalysisType::Corner, label, error),
+                Err(error) => AnalysisResult::failed(id, analysis_type, label, error),
             };
             run.add_analysis(analysis.with_provenance(provenance));
             continue;
@@ -172,7 +208,7 @@ pub(crate) fn run_corner_declaration(
                 &label,
             ),
             Err(SimulationError::Aborted) => {
-                return Err("corner evidence run was aborted".to_owned());
+                return Err("the PVT evidence run was aborted".to_owned());
             }
             Err(error) => AnalysisResult::failed(id, analysis_type, label, error.to_string()),
         };
@@ -195,6 +231,7 @@ fn analysis_type_for(spec: &AnalysisSpec) -> AnalysisType {
         AnalysisRunType::Transient => AnalysisType::Transient,
         AnalysisRunType::Ac => AnalysisType::Ac,
         AnalysisRunType::Corner => AnalysisType::Corner,
+        AnalysisRunType::Parametric => AnalysisType::Parametric,
         _ => AnalysisType::DcOp,
     }
 }

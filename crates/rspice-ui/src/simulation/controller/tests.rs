@@ -1780,7 +1780,7 @@ fn a_corner_declarations_turn_assembles_its_family_without_reaching_the_runner()
 
     let mut controller = SimulationController::new();
     for task in dispatch.tasks() {
-        controller.corner_families.register(task);
+        controller.point_families.register(task);
     }
     let mut tasks = dispatch.into_tasks();
     assert_eq!(tasks.len(), 3, "two declared points and the assembly");

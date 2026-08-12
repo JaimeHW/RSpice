@@ -7,7 +7,6 @@ pub(crate) mod accuracy;
 pub(crate) mod automation;
 pub(crate) mod config;
 pub(crate) mod controller;
-pub(crate) mod corner_family;
 pub(crate) mod dependency_contract;
 pub(crate) mod dialog;
 pub(crate) mod engine_bridge;
@@ -20,6 +19,7 @@ pub use output_contract::{
     SavedOutputPreflightReport, SavedOutputSemanticStatus, SavedOutputStorageEstimate,
 };
 pub(crate) mod plan;
+pub(crate) mod point_family;
 pub(crate) mod reliability_engine;
 pub(crate) mod results;
 pub(crate) mod run_set;
