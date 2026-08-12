@@ -259,6 +259,59 @@ mod tests {
     }
 
     #[test]
+    fn the_bypass_controls_reach_the_resolved_bypass_config() {
+        let options = SimulationOptions {
+            bypass_enabled: true,
+            bypass_reltol: 5.0e-4,
+            bypass_abstol: 2.0e-7,
+            ..SimulationOptions::default()
+        };
+
+        let resolved = resolve_through_the_deck(&options);
+
+        assert!(resolved.bypass_config.enabled);
+        assert_eq!(resolved.bypass_config.reltol, 5.0e-4);
+        assert_eq!(resolved.bypass_config.abstol, 2.0e-7);
+    }
+
+    #[test]
+    fn bypass_stays_off_and_states_no_bounds_when_the_page_leaves_it_alone() {
+        let resolved = resolve_through_the_deck(&SimulationOptions::default());
+        assert!(!resolved.bypass_config.enabled);
+        assert!(
+            !SimulationOptions::default()
+                .to_spice_options()
+                .contains("BYPASS")
+        );
+    }
+
+    #[test]
+    fn the_bypass_bounds_do_not_leak_into_the_timeint_package() {
+        // BYPASS rides the global card, and the LTE bounds ride TIMEINT. If the
+        // bypass keys ever moved behind a package selector, one of these two
+        // groups would swallow the other.
+        let options = SimulationOptions {
+            bypass_enabled: true,
+            bypass_reltol: 5.0e-4,
+            transient_lte_reltol: Some(2.5e-7),
+            transient_lte_abstol: Some(3.5e-11),
+            ..SimulationOptions::default()
+        };
+
+        let resolved = resolve_through_the_deck(&options);
+
+        assert_eq!(resolved.bypass_config.reltol, 5.0e-4);
+        assert_eq!(resolved.transient_lte_reltol, Some(2.5e-7));
+        assert_eq!(resolved.transient_lte_abstol, Some(3.5e-11));
+        assert_eq!(
+            resolved.convergence_config.voltage_reltol,
+            rspice_core::engine::SimulationConfig::default()
+                .convergence_config
+                .voltage_reltol
+        );
+    }
+
+    #[test]
     fn every_offered_solver_reaches_the_backend_it_names() {
         for solver in MatrixSolver::all() {
             let options = SimulationOptions {
@@ -908,6 +961,21 @@ impl SimulationOptions {
         }
         if self.arc_length != default.arc_length {
             lines.push(format!("+ ARCLENGTH={}", u8::from(self.arc_length)));
+        }
+        // Unscoped, so the bounds ride the global card and re-scope nothing
+        // after them. They are stated only alongside an enabled bypass: with
+        // the feature off they select nothing, and emitting them would put a
+        // key in the deck that changes no result.
+        if self.bypass_enabled != default.bypass_enabled {
+            lines.push(format!("+ BYPASS={}", u8::from(self.bypass_enabled)));
+        }
+        if self.bypass_enabled {
+            if (self.bypass_reltol - default.bypass_reltol).abs() > 1e-15 {
+                lines.push(format!("+ BYPASSRELTOL={:.2e}", self.bypass_reltol));
+            }
+            if (self.bypass_abstol - default.bypass_abstol).abs() > 1e-12 {
+                lines.push(format!("+ BYPASSABSTOL={:.2e}", self.bypass_abstol));
+            }
         }
         if self.damping != default.damping {
             lines.push(format!("+ DAMPING={}", self.damping.spice_name()));

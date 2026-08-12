@@ -174,6 +174,12 @@ pub struct ConvergenceQuality {
     pub timestep_reductions: usize,
     /// Number of LTE rejections (transient only)
     pub lte_rejections: usize,
+    /// Compact-model evaluations skipped because `.OPTIONS BYPASS` found the
+    /// device stationary. Zero whenever bypass is off, which is the default,
+    /// and zero on a deck carrying no model family that implements it — so a
+    /// run comparison showing no speedup can be told apart from one where the
+    /// option never engaged.
+    pub bypassed_device_evaluations: u64,
 }
 
 impl ConvergenceQuality {

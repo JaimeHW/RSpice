@@ -16,8 +16,9 @@
 //! the emitter and the netlist parser name it.
 //!
 //! Two things this page still states more confidently than it can. Device
-//! bypass has no engine consumer at all. And each step bound is emitted only
-//! when it differs from the default shown here, which is not the engine's
+//! bypass reaches the engine, but only the native BSIMSOI models consume it;
+//! on a deck without one the control is inert. And each step bound is emitted
+//! only when it differs from the default shown here, which is not the engine's
 //! default — so an untouched project runs under the engine's bound, not this
 //! one.
 //!
@@ -743,8 +744,9 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
             });
             card_note(
                 ui,
-                "Bypass reuses a device's last linearization while its terminal voltages move less \
-                 than the bound above. It is a speed/accuracy trade, not a tolerance: a run that \
+                "Bypass reuses a BSIMSOI device's last linearization across a transient timestep \
+                 while its terminal voltages move less than the bound above; no other model \
+                 family reads it yet. It is a speed/accuracy trade, not a tolerance: a run that \
                  must be compared against another should keep it off.",
             );
         },

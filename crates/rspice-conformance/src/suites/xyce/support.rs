@@ -2344,6 +2344,9 @@ impl XyceTestRunner {
             matrix_solver,
             timeint_min_timestep,
             max_timestep,
+            bypass,
+            bypass_reltol,
+            bypass_abstol,
             scale: _,
         } = options;
         reltol.is_none()
@@ -2405,6 +2408,9 @@ impl XyceTestRunner {
             && matrix_solver.is_none()
             && timeint_min_timestep.is_none()
             && max_timestep.is_none()
+            && bypass.is_none()
+            && bypass_reltol.is_none()
+            && bypass_abstol.is_none()
             && hb_num_frequencies.is_empty()
     }
 

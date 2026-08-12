@@ -8320,6 +8320,21 @@ impl Engine {
             dev.set_eval_gmin(b3soi_gmin);
         }
 
+        // `.OPTIONS BYPASS`. The bypass predicate wants ngspice's
+        // `(CKTreltol, CKTabstol, CKTvoltTol)`, of which `BypassConfig` states
+        // only the two the user may retune per-feature: its `reltol` is the
+        // relative bound and its `abstol` is the *voltage* floor (it defaults
+        // to `VNTOL`, and its own field documentation calls it a voltage
+        // tolerance). The current floor has no per-feature spelling, so it
+        // comes from the run's convergence tolerance, which is the same
+        // `CKTabstol` ngspice compares `cdhat`/`cbhat` against.
+        let bypass = &self.config.bypass_config;
+        circuit.set_b3soi_bypass_tolerances(bypass.enabled.then_some((
+            bypass.reltol,
+            self.config.convergence_config.current_abstol,
+            bypass.abstol,
+        )));
+
         if self.config.spice_dialect == SpiceDialect::Xyce {
             circuit
                 .finalize_xyce_load_plan()

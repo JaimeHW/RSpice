@@ -1447,6 +1447,29 @@ pub(super) fn parse_options_command(
                     diagnostics,
                 );
             }
+            // Spelled unscoped, as ngspice spells `bypass`. A `BYPASS` package
+            // would have to enumerate every key it accepts before an
+            // unenumerated one leaked back out to the global namespace, and
+            // three keys do not need a namespace to stay apart.
+            (_, "BYPASS") => {
+                options.bypass = Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
+            (_, "BYPASSRELTOL" | "BYPASS_RELTOL") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.bypass_reltol = Some(parse_non_negative_real_option(
+                    "BYPASSRELTOL",
+                    value,
+                    line_num,
+                )?);
+            }
+            (_, "BYPASSABSTOL" | "BYPASS_ABSTOL") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.bypass_abstol = Some(parse_non_negative_real_option(
+                    "BYPASSABSTOL",
+                    value,
+                    line_num,
+                )?);
+            }
             (_, "RELTOL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.reltol = Some(parse_positive_real_option("RELTOL", value, line_num)?);

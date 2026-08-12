@@ -21,7 +21,6 @@ pub mod ffi;
 pub mod gan_hemt;
 pub mod memristor_pem;
 pub mod memristor_team;
-pub mod model_bypass;
 pub mod opamp;
 pub mod pwl_file;
 mod sources;
