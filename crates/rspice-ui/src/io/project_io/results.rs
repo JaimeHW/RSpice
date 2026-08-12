@@ -2341,7 +2341,7 @@ impl ProjectNoiseContributorRow {
     }
 
     fn validate(&self, prefix: &str) -> Result<(), String> {
-        require_static_label(&self.mechanism, &format!("{prefix}.mechanism"))?;
+        require_noise_mechanism(&self.mechanism, &format!("{prefix}.mechanism"))?;
         require_finite(self.power, &format!("{prefix}.power"))?;
         require_finite(self.share_pct, &format!("{prefix}.share_pct"))
     }

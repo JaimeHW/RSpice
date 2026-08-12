@@ -1357,6 +1357,25 @@ fn require_static_label(value: &str, field: &str) -> Result<(), String> {
     }
 }
 
+/// A noise mechanism is checked for shape rather than membership.
+///
+/// It is not a static label: the summary keeps it as owned text on both sides
+/// of the file, so nothing is interned and no vocabulary has to cover it. Nor
+/// could one — half the mechanisms are composed by the Verilog-A code
+/// generator out of a model's own node and label names, and no build can list
+/// what a future catalog will contain. The engine owns the shape those names
+/// keep, so it is asked.
+fn require_noise_mechanism(value: &str, field: &str) -> Result<(), String> {
+    if rspice_core::analysis::is_persistable_noise_mechanism(value) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{field} is not a noise mechanism: '{}'",
+            value.chars().take(64).collect::<String>()
+        ))
+    }
+}
+
 /// Intern a persisted label for restoration.
 ///
 /// Restoration is only ever reached through a document that already validated,
@@ -1370,25 +1389,11 @@ fn intern_static_label(value: String) -> &'static str {
 /// Labels a persisted result may carry, interned back to the `&'static str`
 /// the running build uses.
 ///
-/// The operating-point half of the vocabulary belongs to the engine, which is
-/// the only thing that knows what its device families report; asking it keeps
-/// the reader in step with the emitter instead of restating its list here.
+/// The vocabulary belongs to the engine, which is the only thing that knows
+/// what its device families report; asking it keeps the reader in step with
+/// the emitter instead of restating its list here.
 fn known_static_label(value: &str) -> Option<&'static str> {
-    rspice_core::circuit::resolve_op_label(value).or_else(|| known_noise_mechanism_label(value))
-}
-
-/// Noise mechanisms named by the ranked contributor table this crate builds.
-fn known_noise_mechanism_label(value: &str) -> Option<&'static str> {
-    match value {
-        "thermal" => "thermal",
-        "flicker" => "flicker",
-        "shot" => "shot",
-        "burst" => "burst",
-        "white" => "white",
-        "table" => "table",
-        _ => return None,
-    }
-    .into()
+    rspice_core::circuit::resolve_op_label(value)
 }
 
 #[derive(Debug, Clone)]

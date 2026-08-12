@@ -1454,26 +1454,12 @@ pub(super) fn intern_static_label(value: String) -> &'static str {
 /// Labels a worker response may carry, interned back to the `&'static str`
 /// the host build uses.
 ///
-/// The engine owns the operating-point half of the vocabulary, so it is asked
-/// rather than restated. `unknown` is accepted because [`intern_static_label`]
-/// produces it, and a report that already crossed the boundary once has to
-/// survive crossing it again unchanged.
+/// The engine owns the vocabulary, so it is asked rather than restated.
+/// `unknown` is accepted because [`intern_static_label`] produces it, and a
+/// report that already crossed the boundary once has to survive crossing it
+/// again unchanged. A noise mechanism does not come through here: the summary
+/// carries it as owned text the whole way, so nothing interns it.
 pub(super) fn known_static_label(value: &str) -> Option<&'static str> {
     rspice_core::circuit::resolve_op_label(value)
-        .or_else(|| known_worker_response_label(value))
         .or_else(|| (value == "unknown").then_some("unknown"))
-}
-
-/// Labels the host itself writes into a worker response.
-fn known_worker_response_label(value: &str) -> Option<&'static str> {
-    match value {
-        "thermal" => "thermal",
-        "flicker" => "flicker",
-        "shot" => "shot",
-        "burst" => "burst",
-        "white" => "white",
-        "table" => "table",
-        _ => return None,
-    }
-    .into()
 }

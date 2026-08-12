@@ -846,3 +846,69 @@ fn push_analog_children(op: &HirAnalogOperator, stack: &mut Vec<ExprId>) {
         }
     }
 }
+
+#[cfg(test)]
+mod mechanism_tests {
+    use super::*;
+
+    fn endpoint(name: &str, ground: bool) -> CanonicalNoiseEndpoint {
+        CanonicalNoiseEndpoint {
+            node: (!ground).then(|| NodeId::new(0)),
+            name: name.into(),
+            is_internal: false,
+        }
+    }
+
+    /// A composed mechanism reaches a saved result as the name of a ranked
+    /// contributor row, and the engine's reader accepts a mechanism by shape:
+    /// non-empty ASCII drawn from alphanumerics, `_`, `-` and `#`. Node and
+    /// label names come out of arbitrary Verilog-A source, so it is this
+    /// sanitizer, not the model author, that has to keep that true.
+    #[test]
+    fn a_composed_mechanism_stays_inside_the_persistable_character_class() {
+        let sources = [
+            ("d", "s", Some("channel thermal")),
+            ("net 1", "net.2", Some("shot/noise")),
+            ("\\weird$name", "gnd!", Some("émigré")),
+            ("d#int", "s", None),
+            ("+++", "***", Some("---")),
+            ("", "", Some("")),
+        ];
+
+        for (positive, negative, label) in sources {
+            for kind in [
+                CanonicalNoiseSourceKind::White,
+                CanonicalNoiseSourceKind::Flicker,
+                CanonicalNoiseSourceKind::Table,
+            ] {
+                let mechanism = canonical_mechanism(
+                    kind,
+                    &endpoint(positive, false),
+                    &endpoint(negative, false),
+                    label,
+                );
+                assert!(
+                    !mechanism.is_empty()
+                        && mechanism.bytes().all(|byte| byte.is_ascii_alphanumeric()
+                            || matches!(byte, b'_' | b'-' | b'#')),
+                    "'{positive}'/'{negative}'/{label:?} composes '{mechanism}', \
+                     which no result can be written with"
+                );
+            }
+        }
+    }
+
+    /// Grounded endpoints are named rather than left blank, so the kind prefix
+    /// is never the whole mechanism and two sources on different rails stay
+    /// distinguishable.
+    #[test]
+    fn a_grounded_endpoint_is_named() {
+        let mechanism = canonical_mechanism(
+            CanonicalNoiseSourceKind::White,
+            &endpoint("p", false),
+            &endpoint("0", true),
+            Some("thermal"),
+        );
+        assert_eq!(mechanism, "WHITE_P_GND_THERMAL");
+    }
+}

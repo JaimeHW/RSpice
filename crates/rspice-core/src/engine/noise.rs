@@ -1293,6 +1293,24 @@ impl Engine {
             }
         }
 
+        // A ranked contributor row is named after the mechanism its source
+        // carries, and a frontend persists that name verbatim, so a source
+        // whose mechanism falls outside the persistable shape writes a result
+        // its own reader refuses. Nothing here can produce one — the fixed
+        // mechanisms are literals and the generated ones are composed by the
+        // Verilog-A code generator out of sanitized identifiers — and this is
+        // what holds that true as emitters are added.
+        debug_assert!(
+            noise_sources.iter().all(|source| {
+                source
+                    .identity
+                    .mechanism
+                    .as_deref()
+                    .is_none_or(crate::analysis::is_persistable_noise_mechanism)
+            }),
+            "a noise source names a mechanism no result can be written with"
+        );
+
         Ok((noise_sources, correlated_noise_sources))
     }
 
