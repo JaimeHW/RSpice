@@ -169,6 +169,87 @@ pub(super) fn card_head_row(
     );
 }
 
+/// The controls that narrow the ledger below, on the table's own full width.
+///
+/// Deliberately not in the card head. The head already carries the registry's
+/// status, which is a sentence rather than a chip, and it is painted right to
+/// left from whatever the controls leave: below roughly 900 px a filter and a
+/// class picker there push the status over the card's own title and off its
+/// left edge. The table's own width has room for both at every width the pages
+/// support.
+pub(super) fn filter_row(ui: &mut Ui, controls: impl FnOnce(&mut Ui)) {
+    let t = Tokens::get(ui.ctx());
+    let height = t.metrics.ctl_h + 14.0;
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    let mut row = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(Rect::from_min_max(
+                egui::pos2(rect.left() + CARD_PAD_X, rect.top()),
+                egui::pos2(rect.right() - CARD_PAD_X, rect.bottom()),
+            ))
+            .layout(Layout::left_to_right(Align::Center)),
+    );
+    row.spacing_mut().item_spacing.x = 6.0;
+    controls(&mut row);
+}
+
+/// A filter field, sized to a search box rather than to the row it sits in.
+///
+/// The field is view state only. A table that offers one must still say what
+/// it is hiding — narrowed to nothing it has to read as a filter that matched
+/// nothing, never as an empty registry.
+pub(super) fn filter_field(
+    ui: &mut Ui,
+    id_salt: &'static str,
+    placeholder: &str,
+    query: &mut String,
+) {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width().clamp(110.0, 250.0);
+    let response = ui.add_sized(
+        [width, t.metrics.ctl_h],
+        egui::TextEdit::singleline(query)
+            .id_salt(id_salt)
+            .hint_text(placeholder)
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .margin(egui::Margin {
+                left: 25,
+                right: 8,
+                top: 3,
+                bottom: 3,
+            }),
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label(placeholder.to_owned());
+    });
+    super::super::super::design_system::WorkbenchIcon::Search.paint(
+        ui.painter(),
+        Rect::from_center_size(
+            egui::pos2(response.rect.left() + 14.0, response.rect.center().y),
+            vec2(13.0, 13.0),
+        ),
+        t.color.text_faint,
+    );
+}
+
+/// Whether a registry row survives the filter above it.
+///
+/// Matched against the cells the row paints and nothing else, so a row that
+/// stays is always one the reader can see the reason for. Matching a field the
+/// table does not render would leave rows that appear to match nothing.
+pub(super) fn row_matches(query: &str, cells: &[&str]) -> bool {
+    let query = query.trim().to_ascii_lowercase();
+    query.is_empty()
+        || cells
+            .iter()
+            .any(|cell| cell.to_ascii_lowercase().contains(&query))
+}
+
 /// Two cards side by side, each sized to its own content.
 ///
 /// Below [`TWO_COLUMN_BREAKPOINT`] they stack, because two half-width cards

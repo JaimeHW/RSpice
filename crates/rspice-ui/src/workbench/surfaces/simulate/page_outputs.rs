@@ -7,7 +7,6 @@
 
 use egui::Ui;
 
-use crate::product::SimulationPlanId;
 use crate::simulation::SavedOutputSemanticStatus;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
@@ -16,10 +15,11 @@ use crate::state::{
 };
 use crate::ui::widgets::{Button, mono_input, select};
 use crate::workbench::RSpiceApp;
+use crate::workbench::commands::vocabulary::Command;
 
 use super::page_kit::{
     Tone, card, card_body, card_head_row, card_note, card_row, card_with_head, field_pair,
-    ledger_head, ledger_row, rule_row,
+    filter_field, filter_row, ledger_head, ledger_row, row_matches, rule_row,
 };
 use super::workflows::{commit_plan_change, unique_copy_name};
 
@@ -60,11 +60,38 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
             )
         })
         .count();
-    let status = if invalid == 0 {
+    let query = app.state.workbench.saved_output_filter.clone();
+    let rows: Vec<(String, Tone, bool)> = outputs
+        .iter()
+        .enumerate()
+        .map(|(index, output)| {
+            let (text, tone) = status_cell(reports.get(index));
+            let shown = row_matches(
+                &query,
+                &[
+                    output.name.as_str(),
+                    output.kind.label(),
+                    output.source_expression.as_str(),
+                    output.save_policy.label(),
+                    text.as_str(),
+                ],
+            );
+            (text, tone, shown)
+        })
+        .collect();
+    let shown = rows.iter().filter(|(_, _, shown)| *shown).count();
+    let mut status = if invalid == 0 {
         format!("{} saved · all resolve", outputs.len())
     } else {
         format!("{invalid} of {} do not resolve", outputs.len())
     };
+    // The count of what the filter left standing belongs beside the registry's
+    // own count, not instead of it: the plan still holds every output, and a
+    // head that reported only the visible ones would understate what a run
+    // will capture.
+    if shown != outputs.len() {
+        status.push_str(&format!(" · showing {shown} of {}", outputs.len()));
+    }
     let tone = if invalid == 0 { Tone::Ok } else { Tone::Error };
     let selected = app.state.workbench.selected_saved_output.clone();
     let selected_output = selected
@@ -89,11 +116,28 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
             });
         },
         |ui| {
+            // Withheld over an empty registry: a search box with nothing to
+            // match is a control that reaches nothing.
+            if !outputs.is_empty() {
+                filter_row(ui, |ui| {
+                    filter_field(
+                        ui,
+                        "simulation-plan.output-registry.filter",
+                        "Filter name, expression or status…",
+                        &mut app.state.workbench.saved_output_filter,
+                    );
+                });
+            }
             ledger_head(
                 ui,
                 &REGISTRY_COLUMNS,
                 &["Name", "Kind", "Expression", "Save policy", "Status"],
             );
+            // An empty registry and a filter that matched nothing are
+            // different facts with different fixes, so they cannot share a
+            // row: one says the run will store nothing, the other says the
+            // reader is looking through a narrowed view of outputs that are
+            // still there.
             if outputs.is_empty() {
                 ledger_row(
                     ui,
@@ -107,9 +151,25 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                     ],
                     false,
                 );
+            } else if shown == 0 {
+                let held = format!("{} saved · clear the filter to see them", outputs.len());
+                ledger_row(
+                    ui,
+                    &REGISTRY_COLUMNS,
+                    &[
+                        ("No output matches the filter", Tone::Warn),
+                        ("—", Tone::Neutral),
+                        (held.as_str(), Tone::Neutral),
+                        ("—", Tone::Neutral),
+                        ("—", Tone::Neutral),
+                    ],
+                    false,
+                );
             }
-            for (index, output) in outputs.iter().enumerate() {
-                let (status_text, status_tone) = status_cell(reports.get(index));
+            for (output, (status_text, status_tone, visible)) in outputs.iter().zip(&rows) {
+                if !visible {
+                    continue;
+                }
                 if ledger_row(
                     ui,
                     &REGISTRY_COLUMNS,
@@ -118,7 +178,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                         (output.kind.label(), Tone::Neutral),
                         (output.source_expression.as_str(), Tone::Neutral),
                         (output.save_policy.label(), Tone::Neutral),
-                        (status_text.as_str(), status_tone),
+                        (status_text.as_str(), *status_tone),
                     ],
                     selected.as_deref() == Some(output.name.as_str()),
                 )
@@ -131,7 +191,8 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                 ui,
                 "Status is resolved against the elaborated design, not against the text: an expression \
              that parses but names a node the design does not have is reported as unresolved here \
-             rather than failing after dispatch.",
+             rather than failing after dispatch. The filter is a view of this registry and nothing \
+             more: it hides rows, never outputs, and a run captures every one the plan holds.",
             );
         },
     );
@@ -268,6 +329,8 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     // controls at once, and two closures cannot borrow the same slot mutably.
     let edit: std::cell::Cell<Option<OutputEdit>> = std::cell::Cell::new(None);
     let released = std::cell::Cell::new(false);
+    let handoff: std::cell::Cell<Option<EditorHandoff>> = std::cell::Cell::new(None);
+    let dataset = app.state.simulation.has_results();
     card(
         ui,
         &title,
@@ -347,21 +410,33 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                         }
                     })),
                 );
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                    for action in EditorHandoff::ALL {
+                        let enabled = dataset || !action.needs_dataset();
+                        let response = Button::new(action.label()).enabled(enabled).show(ui);
+                        if !enabled {
+                            response.on_hover_text(EditorHandoff::DATASET_RULE);
+                        } else if response.on_hover_text(action.hint()).clicked() {
+                            handoff.set(Some(action));
+                        }
+                    }
+                });
             });
             card_note(
                 ui,
                 "Changing a capture policy is a plan-configuration change: it moves the plan \
                  revision, so a preflight taken against the previous policy no longer authorizes \
-                 a dispatch.",
+                 a dispatch. The calculator composes an expression against this plan; measurement \
+                 authoring and unit diagnostics read a retained dataset, so they stay disabled \
+                 until a run has been kept.",
             );
         },
     );
     if let Some(edit) = edit.take() {
         let detail = edit.detail(&output.name, &scopes);
         replace_output(app, output.id, &detail, |target| edit.apply(target));
-        return;
-    }
-    if released.get() {
+    } else if released.get() {
         let renamed = name.trim() != output.name;
         let rewritten = expression.trim() != output.source_expression;
         if renamed || rewritten {
@@ -386,13 +461,107 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         }
         app.state.workbench.saved_output_name_draft = None;
         app.state.workbench.saved_output_expression_draft = None;
-        return;
+    } else {
+        if name != output.name {
+            app.state.workbench.saved_output_name_draft = Some(name);
+        }
+        if expression != output.source_expression {
+            app.state.workbench.saved_output_expression_draft = Some(expression);
+        }
     }
-    if name != output.name {
-        app.state.workbench.saved_output_name_draft = Some(name);
+    // Dispatched after the record's own edits so that clicking a hand-off,
+    // which takes focus off the field being typed into, commits that edit
+    // rather than discarding it.
+    if let Some(action) = handoff.take() {
+        action.dispatch(app);
     }
-    if expression != output.source_expression {
-        app.state.workbench.saved_output_expression_draft = Some(expression);
+}
+
+/// The surfaces the expression editor hands off to.
+///
+/// Each is an existing workbench command. The card dispatches rather than
+/// growing its own copy, so the calculator, the scalar-measurement author and
+/// the diagnostics window keep one owner apiece.
+#[derive(Clone, Copy)]
+pub(super) enum EditorHandoff {
+    Calculator,
+    ScalarMeasurement,
+    UnitDiagnostics,
+}
+
+impl EditorHandoff {
+    pub(super) const ALL: [Self; 3] = [
+        Self::Calculator,
+        Self::ScalarMeasurement,
+        Self::UnitDiagnostics,
+    ];
+
+    /// Why the two dataset-backed hand-offs are disabled.
+    ///
+    /// Stated on the control and again in the card's closing note, because a
+    /// reason only a hover reveals is a reason the reader has to guess exists.
+    pub(super) const DATASET_RULE: &'static str =
+        "No run has been retained, so there is nothing to measure or diagnose against.";
+
+    pub(super) const fn label(self) -> &'static str {
+        match self {
+            Self::Calculator => "Open calculator…",
+            // Named for what the command opens. It is an author for one
+            // finite scalar measurement over the active analysis, not a
+            // catalog of templates, so "insert from library" would name a
+            // surface that does not exist.
+            Self::ScalarMeasurement => "New scalar measurement…",
+            Self::UnitDiagnostics => "Unit diagnostics…",
+        }
+    }
+
+    const fn hint(self) -> &'static str {
+        match self {
+            Self::Calculator => "Compose and evaluate an expression without saving it to the plan.",
+            Self::ScalarMeasurement => {
+                "Author a retained scalar measurement over the active analysis. It opens in \
+                 Visualization Studio, which owns measurement authoring."
+            }
+            Self::UnitDiagnostics => {
+                "Report the inferred unit and dimensional check for the expressions the active \
+                 dataset holds."
+            }
+        }
+    }
+
+    /// Whether the hand-off resolves against a retained dataset.
+    ///
+    /// This restates the dataset clause of the two commands' availability
+    /// rules rather than calling `Command::is_enabled`, and deliberately.
+    /// Their rules also require the reader to already be on a result surface,
+    /// which from here is never true and which the dispatch below answers by
+    /// navigating there instead. Asking the command directly would disable
+    /// both hand-offs permanently and name the route as the reason.
+    pub(super) const fn needs_dataset(self) -> bool {
+        matches!(self, Self::ScalarMeasurement | Self::UnitDiagnostics)
+    }
+
+    const fn command(self) -> Command {
+        match self {
+            Self::Calculator => Command::WaveformCalculator,
+            Self::ScalarMeasurement => Command::MeasurementLibrary,
+            Self::UnitDiagnostics => Command::ExpressionDiagnostics,
+        }
+    }
+
+    pub(super) fn dispatch(self, app: &mut RSpiceApp) {
+        // The measurement author lives in Visualization Studio, and the
+        // command only navigates there from a result surface. Activating
+        // Results first is what makes the hand-off land somewhere the reader
+        // can see, rather than arming a dock behind this page. The calculator
+        // and the diagnostics window are modeless tools the frame paints over
+        // whatever workspace is open, so they need no route change.
+        if matches!(self, Self::ScalarMeasurement) {
+            app.state
+                .workbench
+                .activate(crate::workbench::state::Workspace::Results);
+        }
+        self.command().execute(app);
     }
 }
 

@@ -173,8 +173,11 @@ fn registry(
             card_note(
                 ui,
                 "A variable is plan-scoped: every analysis in this plan resolves the same value \
-                 unless it declares an explicit override. Bounds are enforced at preflight, not \
-                 clamped at run time.",
+                 unless it declares an explicit override. A bound is hard and is never clamped: \
+                 the same check refuses the record at construction, refuses to emit the \
+                 deck's parameter lines, refuses to validate the stored simulation configuration, \
+                 and refuses to export the plan's parameters to the PDK callback. An out-of-range \
+                 value therefore cannot reach a run by any route.",
             );
         },
     );
@@ -388,10 +391,27 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                         .set(released.get() | mono_input(ui, &mut bounds.1, width).lost_focus());
                 })),
             );
+            // Unit handling and out-of-bounds handling are stated, not
+            // offered. Each has exactly one implementation and no second one
+            // worth building: there is no unit algebra that could compute a
+            // conversion factor — the check is a required suffix on a typed
+            // quantity — and silently moving a value its author bounded is not
+            // a policy a signed-off result could be built on.
+            rule_row(
+                ui,
+                "Unit policy",
+                "strict · a value whose unit does not match its quantity is rejected, never \
+                 converted",
+            );
+            rule_row(
+                ui,
+                "Out of bounds",
+                "the edit is refused · a resolved value outside the range is never clamped into it",
+            );
             if variable.allowed_range.is_none() {
                 card_note(
                     ui,
-                    "This variable is unbounded, so preflight cannot reject an out-of-range \
+                    "This variable is unbounded, so nothing can reject an out-of-range \
                      value. Give it both a minimum and a maximum to have the bound enforced.",
                 );
             }

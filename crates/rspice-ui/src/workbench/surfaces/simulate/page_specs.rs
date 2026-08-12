@@ -10,12 +10,13 @@ use egui::Ui;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{SpecEntry, SpecPointScope};
 use crate::workbench::RSpiceApp;
+use crate::workbench::state::SpecificationEvidenceFilter;
 
 use crate::ui::widgets::{Button, select};
 
 use super::page_kit::{
     Tone, card, card_body, card_head_row, card_note, card_row, card_with_head, field_pair,
-    ledger_head, ledger_row, rule_row,
+    filter_field, filter_row, ledger_head, ledger_row, row_matches, rule_row,
 };
 use super::workflows::commit_plan_change;
 
@@ -117,6 +118,22 @@ impl Evidence {
         }
     }
 
+    /// Whether this outcome belongs to the class the registry is showing.
+    ///
+    /// This is the page's single classification of evidence: the head's
+    /// counts are taken from it as well, so the row a filter keeps and the
+    /// number the head reports can never disagree.
+    fn in_class(&self, class: SpecificationEvidenceFilter) -> bool {
+        match class {
+            SpecificationEvidenceFilter::All => true,
+            SpecificationEvidenceFilter::Failing => {
+                matches!(self, Self::Fail { .. } | Self::MeasurementFailed)
+            }
+            SpecificationEvidenceFilter::WithoutEvidence => matches!(self, Self::None),
+            SpecificationEvidenceFilter::Partial => self.is_partial(),
+        }
+    }
+
     fn cell(&self, spec: &SpecEntry) -> (String, Tone) {
         match self {
             Self::Pass { value, points } if *points > 1 => (
@@ -157,31 +174,48 @@ fn evidence_for(app: &RSpiceApp, spec: &SpecEntry) -> Evidence {
     }
 }
 
+/// One registry row, resolved before the card so the table can be filtered
+/// and the head can report how much of it survived.
+struct RegistryRow {
+    definition: String,
+    limit: String,
+    result: String,
+    tone: Tone,
+    margin: String,
+    shown: bool,
+}
+
 fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     let specs = &payload.specs;
     let declared = declared_process_corners(app);
+    let query = app.state.workbench.specification_filter.clone();
+    let class = app.state.workbench.specification_evidence_filter;
     let mut passing = 0usize;
     let mut failing = 0usize;
     let mut unmapped = 0usize;
     let mut partial = 0usize;
     let mut unreachable_scope = 0usize;
-    let rows: Vec<(String, Tone)> = specs
+    let rows: Vec<RegistryRow> = specs
         .iter()
         .map(|spec| {
             let evidence = evidence_for(app, spec);
-            match evidence {
-                Evidence::Pass { .. } => passing += 1,
-                Evidence::Fail { .. } | Evidence::MeasurementFailed => failing += 1,
-                Evidence::None => unmapped += 1,
+            if matches!(evidence, Evidence::Pass { .. }) {
+                passing += 1;
             }
-            if evidence.is_partial() {
+            if evidence.in_class(SpecificationEvidenceFilter::Failing) {
+                failing += 1;
+            }
+            if evidence.in_class(SpecificationEvidenceFilter::WithoutEvidence) {
+                unmapped += 1;
+            }
+            if evidence.in_class(SpecificationEvidenceFilter::Partial) {
                 partial += 1;
             }
             // A scope the run set cannot reach outranks "no evidence" in the
             // cell, because the two have different fixes: one needs a run, the
             // other needs the scope or the run set changed.
             let missing = undeclared_corners(spec, &declared);
-            if missing.is_empty() {
+            let (result, tone) = if missing.is_empty() {
                 evidence.cell(spec)
             } else {
                 unreachable_scope += 1;
@@ -189,9 +223,36 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                     format!("scoped to {} · not in the run set", missing.join(" · ")),
                     Tone::Warn,
                 )
+            };
+            let definition = if spec.expression.trim().is_empty() {
+                "not retained · imported before source was kept".to_owned()
+            } else {
+                spec.expression.clone()
+            };
+            let limit = super::output_evidence::specification_limit(spec);
+            let margin = margin_label(spec, &evidence);
+            let shown = evidence.in_class(class)
+                && row_matches(
+                    &query,
+                    &[
+                        spec.measurement.as_str(),
+                        definition.as_str(),
+                        limit.as_str(),
+                        result.as_str(),
+                        margin.as_str(),
+                    ],
+                );
+            RegistryRow {
+                definition,
+                limit,
+                result,
+                tone,
+                margin,
+                shown,
             }
         })
         .collect();
+    let shown = rows.iter().filter(|row| row.shown).count();
     // A partially-covered pass is reported separately rather than folded into
     // the pass count. Reading "4 pass" when three of those were decided by one
     // point of a forty-five point sweep is exactly the false sign-off this
@@ -205,6 +266,12 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
             " · {unreachable_scope} scoped to corners the run set does not declare"
         ));
     }
+    // The verdict counts stay over the whole registry: they are what the plan
+    // is judged by, and a head that counted only the visible rows would report
+    // a sign-off the filter had produced.
+    if shown != specs.len() {
+        status.push_str(&format!(" · showing {shown} of {}", specs.len()));
+    }
     let tone = if failing > 0 {
         Tone::Error
     } else if unmapped > 0 || partial > 0 || unreachable_scope > 0 {
@@ -213,8 +280,13 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
         Tone::Ok
     };
     let selected = app.state.workbench.selected_specification.clone();
+    let classes: Vec<String> = SpecificationEvidenceFilter::ALL
+        .iter()
+        .map(|class| (*class).label().to_owned())
+        .collect();
     let mut pick = None;
     let mut author = false;
+    let mut picked_class = None;
     card_with_head(
         ui,
         |ui| {
@@ -228,6 +300,27 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
             );
         },
         |ui| {
+            // Withheld over an empty registry: neither a search box nor an
+            // evidence class has anything to narrow when nothing judges the
+            // plan yet.
+            if !specs.is_empty() {
+                filter_row(ui, |ui| {
+                    filter_field(
+                        ui,
+                        "simulation-plan.spec-registry.filter",
+                        "Filter measurement, definition or limit…",
+                        &mut app.state.workbench.specification_filter,
+                    );
+                    picked_class = select(
+                        ui,
+                        "simulation-plan.spec-registry.scope",
+                        "Evidence class",
+                        class.label(),
+                        &classes,
+                        175.0,
+                    );
+                });
+            }
             ledger_head(
                 ui,
                 &REGISTRY_COLUMNS,
@@ -238,6 +331,10 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                 // the runners did not measure at every point.
                 &["Measurement", "Definition", "Limit", "Result", "Margin"],
             );
+            // A plan with no requirements and a view narrowed to none are
+            // opposite facts: the first says nothing judges this plan, the
+            // second says the limits are there and the reader is looking at a
+            // slice of them. One row cannot stand for both.
             if specs.is_empty() {
                 ledger_row(
                     ui,
@@ -251,26 +348,34 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                     ],
                     false,
                 );
+            } else if shown == 0 {
+                let held = format!("{} in this plan · widen the filter", specs.len());
+                ledger_row(
+                    ui,
+                    &REGISTRY_COLUMNS,
+                    &[
+                        ("No specification matches the filter", Tone::Warn),
+                        (held.as_str(), Tone::Neutral),
+                        ("—", Tone::Neutral),
+                        ("—", Tone::Neutral),
+                        ("—", Tone::Neutral),
+                    ],
+                    false,
+                );
             }
-            for (spec, (result, result_tone)) in specs.iter().zip(&rows) {
-                let definition = if spec.expression.trim().is_empty() {
-                    "not retained · imported before source was kept".to_owned()
-                } else {
-                    spec.expression.clone()
-                };
-                let margin = margin_label(app, spec);
+            for (spec, row) in specs.iter().zip(&rows) {
+                if !row.shown {
+                    continue;
+                }
                 if ledger_row(
                     ui,
                     &REGISTRY_COLUMNS,
                     &[
                         (spec.measurement.as_str(), Tone::Accent),
-                        (definition.as_str(), Tone::Neutral),
-                        (
-                            super::output_evidence::specification_limit(spec).as_str(),
-                            Tone::Neutral,
-                        ),
-                        (result.as_str(), *result_tone),
-                        (margin.as_str(), *result_tone),
+                        (row.definition.as_str(), Tone::Neutral),
+                        (row.limit.as_str(), Tone::Neutral),
+                        (row.result.as_str(), row.tone),
+                        (row.margin.as_str(), row.tone),
                     ],
                     selected.as_deref() == Some(spec.measurement.as_str()),
                 )
@@ -289,13 +394,18 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                  was chosen from. That verdict is sound for every point the dataset retained; it \
                  does not speak for points the run never measured. A limit narrowed to nominal or \
                  to named corners is answered only by measurements the executor attributed to a \
-                 point, so an unattributed result never satisfies one. Authoring lives in the \
+                 point, so an unattributed result never satisfies one. The filter and the evidence \
+                 class narrow this table only; the counts above are the whole plan's, because a \
+                 sign-off cannot be produced by hiding the rows that fail. Authoring lives in the \
                  specification editor, which owns the limits this page reads.",
             );
         },
     );
     if author {
         open_specification_editor(app);
+    }
+    if let Some(index) = picked_class {
+        app.state.workbench.specification_evidence_filter = SpecificationEvidenceFilter::ALL[index];
     }
     if let Some(measurement) = pick {
         app.state.workbench.selected_specification = Some(measurement);
@@ -320,8 +430,8 @@ fn open_specification_editor(app: &mut RSpiceApp) {
 /// Reported only where a scalar result and a scalar bound both exist; a
 /// waveform specification has no margin, and inventing one would be a claim
 /// the plan cannot support.
-fn margin_label(app: &RSpiceApp, spec: &SpecEntry) -> String {
-    let Some(value) = evidence_for(app, spec).value() else {
+fn margin_label(spec: &SpecEntry, evidence: &Evidence) -> String {
+    let Some(value) = evidence.value() else {
         return "—".to_owned();
     };
     let margin = match (spec.min, spec.max) {
@@ -455,7 +565,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                 },
             );
             rule_row(ui, "Display unit", &spec.unit);
-            rule_row(ui, "Margin", &margin_label(app, spec));
+            rule_row(ui, "Margin", &margin_label(spec, &evidence));
             if !missing.is_empty() {
                 card_note(
                     ui,

@@ -10,8 +10,8 @@ use egui::{Rect, vec2};
 use super::page_kit::column_rects;
 use super::pages;
 use crate::simulation::dialog::{OptionsDialogState, SimulationOptions};
-use crate::workbench::RSpiceApp;
 use crate::workbench::state::SimulationPage;
+use crate::workbench::{AppState, RSpiceApp};
 
 /// Render one page and collect the text it painted.
 fn render(page: SimulationPage, width: f32) -> String {
@@ -1446,4 +1446,465 @@ fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
     let outcome = &app.state.workbench.analysis_lifecycle_status;
     assert!(!outcome.is_refusal(), "{}", outcome.message());
     assert!(app.state.sim_setup.options_errors.is_empty());
+}
+
+/// The active plan's identity, for seeds that hold only the session state.
+fn seeded_plan_id(state: &AppState) -> crate::product::SimulationPlanId {
+    state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the test instance has a stable plan")
+        .id()
+}
+
+/// Three saved outputs whose names, expressions and kinds differ, so a filter
+/// has something to discriminate on.
+fn seed_three_outputs(state: &mut AppState) {
+    use crate::state::{
+        SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
+        SavedOutputPrecision, SavedOutputStreaming,
+    };
+
+    let id = seeded_plan_id(state);
+    for (kind, name, expression) in [
+        (SavedOutputKind::RawVoltageOrCurrent, "vout", "V(out)"),
+        (SavedOutputKind::RawVoltageOrCurrent, "vsupply", "V(vdd)"),
+        (
+            SavedOutputKind::DerivedExpression,
+            "gain_ac",
+            "db20(V(out))",
+        ),
+    ] {
+        let output = SavedOutput::new(
+            kind,
+            name,
+            expression,
+            SavedOutputCompatibility::AllCompatibleAnalyses,
+            SavedOutputPolicy::EveryAcceptedPoint,
+            SavedOutputPrecision::FullSourcePrecision,
+            SavedOutputStreaming::StoreOnly,
+        )
+        .expect("valid saved output");
+        state
+            .workspace
+            .add_saved_output(id, output)
+            .expect("the plan accepts it");
+    }
+}
+
+/// A filter is only worth drawing if it changes what the table shows. This
+/// asserts the narrowing itself — the rows the query excludes stop being
+/// painted — and that the plan behind them is untouched, because a filter that
+/// removed outputs would change what a run captures.
+#[test]
+fn the_output_filter_narrows_the_rendered_rows_and_not_the_plan() {
+    let unfiltered = render_with(SimulationPage::Outputs, 1200.0, |app| {
+        seed_three_outputs(&mut app.state);
+    });
+    for name in ["vout", "vsupply", "gain_ac"] {
+        assert!(
+            unfiltered.contains(name),
+            "the unfiltered registry paints every saved output:\n{unfiltered}"
+        );
+    }
+
+    let filtered = render_with(SimulationPage::Outputs, 1200.0, |app| {
+        seed_three_outputs(&mut app.state);
+        app.state.workbench.saved_output_filter = "db20".to_owned();
+    });
+    // Scoped to the registry card, which ends at its closing note: the storage
+    // forecast below it is a total over every output the plan holds and is
+    // deliberately not filtered.
+    let table = filtered
+        .split_once("Status is resolved against")
+        .map_or(filtered.as_str(), |(registry, _)| registry);
+    assert!(
+        table.contains("gain_ac"),
+        "the row whose expression matches has to survive:\n{filtered}"
+    );
+    for hidden in ["vout", "vsupply"] {
+        assert!(
+            !table.contains(hidden),
+            "{hidden} does not match `db20` and must not be painted:\n{filtered}"
+        );
+    }
+    assert!(
+        filtered.contains("showing 1 of 3"),
+        "the head has to say how much of the registry survived:\n{filtered}"
+    );
+
+    let mut app = RSpiceApp::test_instance();
+    seed_three_outputs(&mut app.state);
+    let id = plan_id(&app);
+    let before = app.state.workspace.active_plan_data(id).cloned();
+    app.state.workbench.saved_output_filter = "db20".to_owned();
+    assert_eq!(
+        app.state.workspace.active_plan_data(id).cloned(),
+        before,
+        "a filter is a view: it must not move one byte of plan-owned data"
+    );
+}
+
+/// "You have no outputs" and "your filter matched none of them" are different
+/// facts with different fixes. A registry that reported the second as the
+/// first would tell an engineer their run stores nothing while it stores
+/// everything.
+#[test]
+fn an_output_filter_matching_nothing_is_distinguishable_from_an_empty_registry() {
+    let empty = render_with(SimulationPage::Outputs, 1200.0, |_| {});
+    assert!(
+        empty.contains("No saved outputs") && empty.contains("the run stores nothing"),
+        "a plan with no outputs still says the run stores nothing:\n{empty}"
+    );
+    assert!(
+        !empty.contains("No output matches the filter"),
+        "an unfiltered empty registry is not a failed match:\n{empty}"
+    );
+
+    let narrowed = render_with(SimulationPage::Outputs, 1200.0, |app| {
+        seed_three_outputs(&mut app.state);
+        app.state.workbench.saved_output_filter = "no such signal".to_owned();
+    });
+    assert!(
+        narrowed.contains("No output matches the filter"),
+        "a filter that matched nothing has to say so:\n{narrowed}"
+    );
+    assert!(
+        narrowed.contains("3 saved · clear the filter to see them"),
+        "and has to say the outputs are still there:\n{narrowed}"
+    );
+    assert!(
+        !narrowed.contains("the run stores nothing"),
+        "the outputs are all still captured, so this must not read as an empty plan:\n{narrowed}"
+    );
+}
+
+/// Two specifications: one the dataset measured and failed, one it never
+/// measured at all, so both the text filter and the evidence class have
+/// something to discriminate on.
+fn seed_two_specifications(state: &mut AppState) {
+    use crate::state::{
+        AnalysisResult, AnalysisResultProvenance, AnalysisType, SimulationRun, SpecEntry,
+        SpecPointScope,
+    };
+
+    let id = seeded_plan_id(state);
+    state.workspace.replace_active_specs(
+        id,
+        vec![
+            SpecEntry {
+                measurement: "gain_dc".to_owned(),
+                expression: "db20(V(out))".to_owned(),
+                min: Some(40.0),
+                max: None,
+                unit: "dB".to_owned(),
+                scope: SpecPointScope::AllPoints,
+            },
+            SpecEntry {
+                measurement: "bandwidth_3db".to_owned(),
+                expression: "bw(V(out))".to_owned(),
+                min: Some(1.0),
+                max: None,
+                unit: "Hz".to_owned(),
+                scope: SpecPointScope::AllPoints,
+            },
+        ],
+    );
+
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Ac, "ac")
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain_dc", 31.0)])
+            .with_provenance(
+                AnalysisResultProvenance::new(
+                    crate::product::AnalysisInstanceId::new(),
+                    crate::product::ObjectRevision::INITIAL,
+                    crate::product::ContentDigest::from_bytes([0x5a; 32]),
+                    Vec::new(),
+                )
+                .expect("valid test provenance"),
+            ),
+    );
+    state.simulation.runs = vec![run];
+    state.simulation.active_run_idx = Some(0);
+}
+
+/// The text filter matches over the cells the table paints, so a surviving row
+/// is always one whose reason for surviving is on screen.
+#[test]
+fn the_specification_filter_narrows_the_table_over_the_cells_it_paints() {
+    let filtered = render_with(SimulationPage::Specifications, 1200.0, |app| {
+        seed_two_specifications(&mut app.state);
+        app.state.workbench.specification_filter = "bw(".to_owned();
+    });
+    assert!(
+        filtered.contains("bandwidth_3db"),
+        "the row whose definition matches has to survive:\n{filtered}"
+    );
+    assert!(
+        !filtered.contains("gain_dc"),
+        "the row that matches nothing must not be painted:\n{filtered}"
+    );
+    assert!(
+        filtered.contains("showing 1 of 2"),
+        "the head reports how much of the registry survived:\n{filtered}"
+    );
+}
+
+/// The class the head counts and the class the filter keeps are one
+/// classification. A row counted as failing and then hidden by "Failing only"
+/// would mean the page held two disagreeing opinions about the same evidence.
+#[test]
+fn the_evidence_class_keeps_exactly_the_rows_the_head_counted() {
+    use crate::workbench::state::SpecificationEvidenceFilter;
+
+    let unfiltered = render_with(SimulationPage::Specifications, 1200.0, |app| {
+        seed_two_specifications(&mut app.state);
+    });
+    assert!(
+        unfiltered.contains(SpecificationEvidenceFilter::All.label()),
+        "the class control paints the class the registry is currently showing:\n{unfiltered}"
+    );
+
+    let failing = render_with(SimulationPage::Specifications, 1200.0, |app| {
+        seed_two_specifications(&mut app.state);
+        app.state.workbench.specification_evidence_filter = SpecificationEvidenceFilter::Failing;
+    });
+    assert!(
+        failing.contains(SpecificationEvidenceFilter::Failing.label()),
+        "and it paints the narrowed class once one is picked:\n{failing}"
+    );
+    assert!(
+        failing.contains("1 fail · 1 without evidence"),
+        "the head counts one of each over the whole registry:\n{failing}"
+    );
+    assert!(
+        failing.contains("gain_dc"),
+        "the measured-and-failed row is the one `Failing only` keeps:\n{failing}"
+    );
+    assert!(
+        !failing.contains("bandwidth_3db"),
+        "a limit no measurement answers is not a failure:\n{failing}"
+    );
+
+    let unmapped = render_with(SimulationPage::Specifications, 1200.0, |app| {
+        seed_two_specifications(&mut app.state);
+        app.state.workbench.specification_evidence_filter =
+            SpecificationEvidenceFilter::WithoutEvidence;
+    });
+    assert!(
+        unmapped.contains("bandwidth_3db") && !unmapped.contains("gain_dc"),
+        "`Without evidence` keeps exactly the limit the dataset never answered:\n{unmapped}"
+    );
+
+    let partial = render_with(SimulationPage::Specifications, 1200.0, |app| {
+        seed_two_specifications(&mut app.state);
+        app.state.workbench.specification_evidence_filter = SpecificationEvidenceFilter::Partial;
+    });
+    assert!(
+        partial.contains("No specification matches the filter"),
+        "no limit here was judged on several points, and the table has to say so rather than \
+         read as a plan with no requirements:\n{partial}"
+    );
+    assert!(
+        !partial.contains("nothing judges this plan's results"),
+        "the requirements are still there:\n{partial}"
+    );
+}
+
+/// Each hand-off has to land on the surface its label names. A button that
+/// armed a dock behind the page the reader is still looking at is the dead
+/// control this program exists to remove.
+#[test]
+fn every_expression_editor_handoff_opens_the_surface_it_names() {
+    use super::page_outputs::EditorHandoff;
+
+    let mut app = RSpiceApp::test_instance();
+    EditorHandoff::Calculator.dispatch(&mut app);
+    assert!(
+        app.state.dialogs.waveform_calculator_dialog,
+        "the calculator hand-off opens the calculator"
+    );
+
+    let mut app = RSpiceApp::test_instance();
+    seed_two_specifications(&mut app.state);
+    EditorHandoff::UnitDiagnostics.dispatch(&mut app);
+    assert!(
+        app.state.dialogs.expression_diagnostics_dialog,
+        "the diagnostics hand-off opens the diagnostics window"
+    );
+
+    let mut app = RSpiceApp::test_instance();
+    seed_two_specifications(&mut app.state);
+    EditorHandoff::ScalarMeasurement.dispatch(&mut app);
+    assert_eq!(
+        app.state.workbench.current_route().surface_id(),
+        crate::workbench::SurfaceId::VisualizationStudio,
+        "the measurement author lives in Visualization Studio, so the hand-off has to arrive \
+         there rather than leave the reader on this page"
+    );
+}
+
+/// A hand-off the plan cannot run has to say why on the page, not only in a
+/// tooltip the reader has to guess is there.
+#[test]
+fn a_dataset_backed_handoff_states_its_condition_before_a_run_exists() {
+    use super::page_outputs::EditorHandoff;
+
+    let rendered = render_with(SimulationPage::Outputs, 1200.0, |app| {
+        seed_three_outputs(&mut app.state);
+        app.state.workbench.selected_saved_output = Some("vout".to_owned());
+        assert!(!app.state.simulation.has_results());
+    });
+
+    for action in EditorHandoff::ALL {
+        assert!(
+            rendered.contains(action.label()),
+            "the {} hand-off must reach the screen:\n{rendered}",
+            action.label()
+        );
+    }
+    assert!(
+        rendered.contains("read a retained dataset"),
+        "the card has to state why the dataset-backed hand-offs are disabled:\n{rendered}"
+    );
+    assert_eq!(
+        EditorHandoff::ALL
+            .iter()
+            .filter(|action| action.needs_dataset())
+            .count(),
+        2,
+        "exactly the measurement author and the diagnostics window read a dataset"
+    );
+    assert!(
+        !EditorHandoff::Calculator.needs_dataset(),
+        "the calculator composes against the plan, so it is never gated on a run"
+    );
+}
+
+/// The variables page states its unit and out-of-bounds rules rather than
+/// offering a choice the engine does not implement.
+#[test]
+fn the_variables_page_states_the_rules_it_enforces_instead_of_offering_them() {
+    use crate::state::{
+        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange,
+        DesignVariableScope, DesignVariableSweepEligibility,
+    };
+
+    let rendered = render_with(SimulationPage::Variables, 1200.0, |app| {
+        let id = plan_id(app);
+        let variable = DesignVariable::new(
+            "rload",
+            "1kohm",
+            DesignVariableQuantity::Resistance,
+            DesignVariableScope::Testbench,
+            "load resistance",
+            Some(DesignVariableRange {
+                minimum: "100ohm".to_owned(),
+                maximum: "10kohm".to_owned(),
+            }),
+            DesignVariableSweepEligibility::FixedParameter,
+            DesignVariableOverridePolicy::InheritOwnerOnly,
+        )
+        .expect("valid design variable");
+        app.state
+            .workspace
+            .add_design_variable(id, variable)
+            .expect("the plan accepts it");
+        app.state.workbench.selected_design_variable = Some("rload".to_owned());
+    });
+
+    for stated in ["Unit policy", "Out of bounds"] {
+        assert!(
+            rendered.contains(stated),
+            "the page has to state its {stated} rule:\n{rendered}"
+        );
+    }
+    assert!(
+        rendered.contains("never converted"),
+        "strict unit checking is the rule, and coercion is not offered:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("never clamped into it"),
+        "a bounded variable is never moved into range:\n{rendered}"
+    );
+    assert!(
+        !rendered.contains("enforced at preflight"),
+        "the bound is refused on more paths than preflight, and the note now says so:\n{rendered}"
+    );
+}
+
+/// The registry note claims a bound is refused wherever a variable is built or
+/// read for a run. Three of those paths are reachable from a test, so they are
+/// checked rather than trusted; the fourth, the PDK project callback, needs a
+/// signed technology pin and was verified by inspection only.
+#[test]
+fn a_bounded_variable_is_refused_on_every_path_a_test_can_reach() {
+    use crate::simulation::netlist_gen::{
+        DesignVariableNetlistContext, design_variable_parameter_lines,
+    };
+    use crate::state::{
+        CellViewRef, DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
+        DesignVariableRange, DesignVariableScope, DesignVariableSweepEligibility,
+    };
+
+    let build = |expression: &str| {
+        DesignVariable::new(
+            "rload",
+            expression,
+            DesignVariableQuantity::Resistance,
+            DesignVariableScope::Project,
+            "load resistance",
+            Some(DesignVariableRange {
+                minimum: "100ohm".to_owned(),
+                maximum: "10kohm".to_owned(),
+            }),
+            DesignVariableSweepEligibility::FixedParameter,
+            DesignVariableOverridePolicy::InheritOwnerOnly,
+        )
+    };
+
+    assert!(
+        build("50kohm").is_err(),
+        "construction refuses a value outside its own bound"
+    );
+    let mut variable = build("1kohm").expect("an in-range variable is accepted");
+
+    // Forced past the constructor, exactly as a hand-edited project file would
+    // arrive, so the remaining gates are the ones under test.
+    variable.expression = "50kohm".to_owned();
+
+    let cell = CellViewRef::default_top();
+    assert!(
+        design_variable_parameter_lines(
+            std::slice::from_ref(&variable),
+            DesignVariableNetlistContext {
+                active_cell: &cell,
+                analysis_instances: &[],
+            },
+        )
+        .is_err(),
+        "netlist generation refuses to emit a parameter line for it"
+    );
+
+    let mut app = RSpiceApp::test_instance();
+    let id = plan_id(&app);
+    assert!(
+        app.state
+            .workspace
+            .validate_simulation_configuration()
+            .is_ok(),
+        "the seeded workspace is valid before the tampered record is planted"
+    );
+    app.state
+        .workspace
+        .ensure_active_plan_data(id)
+        .design_variables = vec![variable];
+    assert!(
+        app.state
+            .workspace
+            .validate_simulation_configuration()
+            .is_err(),
+        "workspace validation refuses the stored configuration"
+    );
 }
