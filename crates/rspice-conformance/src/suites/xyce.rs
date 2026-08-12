@@ -38,8 +38,9 @@ use rspice_core::netlist::{
     Netlist, NetlistParseOptions, OutputDirectiveKind, OutputSymbolKind,
     ParameterRedefinitionPolicy, ParametricValue, ParseError, StartupDiagnosticCode,
     StartupDiagnosticStage, StartupDirectiveKind, StartupDirectiveScope, StatisticalParamMode,
-    StepCommand, StepSweep, StepTarget, SubcircuitDef, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
-    flatten_netlist, flatten_netlist_with_models, validate_output_symbols,
+    StepCommand, StepSweep, StepTarget, SubcircuitDef, UnresolvedSubcircuitParameterError,
+    XYCE_DEFAULT_ZERO_RESISTANCE_TOL, flatten_netlist, flatten_netlist_with_models,
+    flatten_netlist_with_models_with_abort, validate_output_symbols,
 };
 use rspice_core::numerics::integration::TransientLteReference;
 use rspice_core::{Complex64, Engine, Value};
@@ -966,6 +967,83 @@ const XYCE_BUG402_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 4] = [
         385,
         "869fcd0742641e619af164c016a9dee520b581c9cd272ace32cc2a2457bc835a",
         "de6005465a28610ffa126624506fe999e0f28b59083eaea37ac4688845b07156",
+    ),
+];
+
+// BUG_864_SON is a bounded expected-error contract. Release 7.10 executes
+// the deck, requires a nonzero exit, and accepts the run only when either
+// complete output stream contains the unresolved-definition diagnostic. The
+// retained `options` sidecar supplies the historical 30-second outer limit.
+const XYCE_BUG864_CONTRACT: &str = "expected_failure_bug864_unresolved_subcircuit_parameter_build";
+const XYCE_BUG864_PATH: &str = "Netlists/Certification_Tests/BUG_864_SON/bug_864_son.cir";
+const XYCE_BUG864_RECORD: &str = "netlists/certification_tests/bug_864_son/bug_864_son.cir";
+const XYCE_BUG864_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG864_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG864_UPSTREAM_DIAGNOSTIC: &str =
+    "Unable to resolve parameter FOO found in .PARAM statement";
+const XYCE_BUG864_HISTORICAL_TIMEOUT_MS: u128 = 30_000;
+const XYCE_BUG864_HISTORICAL_RECORD_COUNT: usize = 7;
+const XYCE_BUG864_HISTORICAL_RECORD_BYTES: usize = 1_687;
+const XYCE_BUG864_HISTORICAL_RECORDS_SHA256: &str =
+    "e9f815b0c4e0f002b505ef103e1bcb507640faf2989717b5cc154623bcccb583";
+const XYCE_BUG864_HISTORICAL_RECORDS_BLAKE3: &str =
+    "62db0b949913135bfe8d7911a8fa1e272edd1f930905458fbe2c1dd379dd5e3b";
+const XYCE_BUG864_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
+    (
+        "Netlists/Certification_Tests/BUG_864_SON/CMakeLists.txt",
+        1_816,
+        "e1bfb80a50adf93e40c20cf88a23a940481b2ce744fbc322d9eebcd8ae355563",
+        "1f3ec5c8d304b12d7f3ff6f11d8e37de64e8cb63540e55ce8f1556ec09d605b6",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_864_SON/Manifest.txt",
+        48,
+        "9bc1a4cf78fcbdab9013fc1b233e1a1b6c24a8b4dd087f8d888068d57c836dc6",
+        "fc99f03d3c3a5eed06aa8a239483d36a303aea541fca394b99edf0b8176771ef",
+    ),
+    (
+        XYCE_BUG864_PATH,
+        447,
+        "71ba444757fc0add31c380fcff3f2dea34842236fce45de9c293311980695bac",
+        "3463724af68f93fc11effd6f04344ffb7532a4173c10cfc7181f24ee7edd0dd0",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_864_SON/bug_864_son.cir.sh",
+        780,
+        "6fac638aa87b177b8e6f37f39522336a34540bcf72c4f04c4099041d9b261ece",
+        "b486481e992b4e9728e254e3115f6f6d891f9a77dbba20f396768d8bdc511875",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_864_SON/options",
+        13,
+        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
+        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_864_SON/tags",
+        36,
+        "38081d2c7c83cc0bf7ff6b2430777e4cfabfca9019dc9638fc59395b9ffb1095",
+        "851f6add160cd333cac9c53cb5ffd9d6f14f7f7bbd97185dfe930f14e30aede0",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG864_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
+    (
+        "bug_864_son.cir",
+        447,
+        "71ba444757fc0add31c380fcff3f2dea34842236fce45de9c293311980695bac",
+        "3463724af68f93fc11effd6f04344ffb7532a4173c10cfc7181f24ee7edd0dd0",
+    ),
+    (
+        "options",
+        13,
+        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
+        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
     ),
 ];
 
@@ -8792,6 +8870,7 @@ mod contracts;
 mod contracts_bug38;
 mod contracts_bug39;
 mod contracts_bug402;
+mod contracts_bug864;
 mod contracts_dc;
 mod contracts_frequency;
 mod contracts_sources;

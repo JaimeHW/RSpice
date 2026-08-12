@@ -9453,6 +9453,30 @@ fn test_xyce_bug39_deterministic_expression_gold_oracles() {
 }
 
 #[test]
+fn test_xyce_bug864_unresolved_subcircuit_parameter_error_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_864_SON/bug_864_son.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "BUG864 must remain owned by its removed historical wrapper"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported && !result.upstream_excluded,
+        "BUG864 should reproduce its typed bounded unresolved-parameter failure, got {result:?}"
+    );
+    assert_eq!(
+        result.contract,
+        "expected_failure_bug864_unresolved_subcircuit_parameter_build"
+    );
+    assert_eq!(result.upstream_exclusion_source, None);
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_bug402_temperature_option_scope_relational_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
