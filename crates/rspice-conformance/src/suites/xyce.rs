@@ -58,15 +58,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 208;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 210;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "18f773adfbd8325c9ad1afaf312c34dc7d5853d0edd7f3a7cb0465e844452c1a";
+    "3f2f3e015a2b0f638487e05473e5a7bca700e4653014cc869a83b0651139f961";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "dc93435915cd1df203c6df7e91646505600a8ca8804d8a8084c52ef2cb412979";
+    "41e53acb1ba26af4c8b508e967fa344d1fcd930ab13a5f42484719d91b3b095b";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "c8358450a279842ed44bc5dfc52cbed4968e6d3e6a28f4e45e9efa3ddd1acce8";
+    "949ddefd4ac9a349081a5031cc23df37d1c01ec0ee9a1669c49d46e711117586";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -540,6 +540,163 @@ const XYCE_BUG38_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
         68_108,
         "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
         "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+
+// Release 7.10's two BUG_39_SON random-function placeholders are independent
+// wrapper owners. Each removed Perl wrapper generates a 10,000-resistor,
+// one-point DC deck and accepts only the historical population mean/sigma
+// predicate. Bind both empty retained anchors and the exact historical
+// generated-oracle artifacts before reproducing either contract in memory.
+const XYCE_BUG39_AGAUSS_CONTRACT: &str = "bug39_agauss_generated_mean_sigma_wrapper";
+const XYCE_BUG39_GAUSS_CONTRACT: &str = "bug39_gauss_generated_mean_sigma_wrapper";
+const XYCE_BUG39_PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
+const XYCE_BUG39_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG39_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG39_AGAUSS_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/agauss.cir";
+const XYCE_BUG39_GAUSS_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/gauss.cir";
+const XYCE_BUG39_AGAUSS_RECORD: &str = "netlists/certification_tests/bug_39_son/agauss.cir";
+const XYCE_BUG39_GAUSS_RECORD: &str = "netlists/certification_tests/bug_39_son/gauss.cir";
+const XYCE_BUG39_HISTORICAL_EXCLUDE_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/exclude";
+const XYCE_BUG39_EMPTY_CONTENT_BLAKE3: &str =
+    "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262";
+const XYCE_BUG39_CANDIDATE_COUNT: usize = 2;
+const XYCE_BUG39_CANDIDATE_BLAKE3: &str =
+    "bdfd3ca2dfe1884ee426617f009dfc23e60a306ce21ce78bd7024506e4848f8f";
+const XYCE_BUG39_CANDIDATE_CONTENT_BLAKE3: &str =
+    "ac62ef2c80d39221b0869b597488050562de2326329280399c16cb3b89932bc4";
+const XYCE_BUG39_OWNER_MANIFEST_BLAKE3: &str =
+    "106b025524124c209ed099f9d13e8c0523494320c91811e091b3e0657356fe68";
+const XYCE_BUG39_HISTORICAL_EXCLUSION_BLAKE3: &str =
+    "c39fe61b2e9e34fa277f15016d40925329a3965a53083237959ecc9cac7daadd";
+const XYCE_BUG39_REQUIRED_ORACLE_RECORD_COUNT: usize = 6;
+const XYCE_BUG39_REQUIRED_ORACLE_BYTES: usize = 1_445;
+const XYCE_BUG39_REQUIRED_ORACLE_SHA256: &str =
+    "ccc2a87ce1c24f82aec8a4547463c283fa3446a48fa764f20bc0afc53fae3075";
+const XYCE_BUG39_REQUIRED_ORACLE_BLAKE3: &str =
+    "27b787d2427d338b17e0b60e85f071224159b580390789d42361e7b89e8f5a09";
+const XYCE_BUG39_HISTORICAL_ORACLE_RECORD_COUNT: usize = 7;
+const XYCE_BUG39_HISTORICAL_ORACLE_BLAKE3: &str =
+    "00a93cf40bfee578f78fe7d680fb928b2610dd2893d6f958afc255ad3285c324";
+const XYCE_BUG39_RETAINED_RECORD_COUNT: usize = 11;
+const XYCE_BUG39_RETAINED_RECORDS_BLAKE3: &str =
+    "6ea5836525a3b58413107c49bf1819d150a1e1f5b7dffa8985e30b78bc92a832";
+const XYCE_BUG39_SAMPLE_COUNT: usize = 10_000;
+const XYCE_BUG39_MEAN: Value = 100.0;
+const XYCE_BUG39_EXPECTED_SIGMA: Value = 1.0;
+const XYCE_BUG39_MOMENT_TOLERANCE: Value = 5.0e-2;
+
+const XYCE_BUG39_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/README",
+        879,
+        "148d072b44042d70d47ad191f462cd356b1868f4a3dddf49f9d25c271e0b13a0",
+        "37bf9fd8b2e8b91e8f7baa45e985fe19450b18208753eb8533ac473ab6709a70",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/Manifest.txt",
+        285,
+        "57d8660cdfea15e033bf4138f493e92c19beb68a676911232f4d15eef27d7b7d",
+        "ccbf49ce2050f94549bb6d2fbab51d40c4332bd7615585826fd49d10fcdd40cc",
+    ),
+    (
+        XYCE_BUG39_AGAUSS_PATH,
+        0,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        XYCE_BUG39_EMPTY_CONTENT_BLAKE3,
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/agauss.cir.sh",
+        5_235,
+        "2173930707b4a5a349fb03d1f324860f0b2f71180d02ffb88a9510615e0d5055",
+        "c779be31922b96ba6cfe8acfa07ce002852d9cffac791ceddce88480a22ad0df",
+    ),
+    (
+        XYCE_BUG39_GAUSS_PATH,
+        0,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        XYCE_BUG39_EMPTY_CONTENT_BLAKE3,
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/gauss.cir.sh",
+        5_345,
+        "3c6f0797dfb473cedb1b874b54fa53897b0d154c6233ecaf36b079f0f85b9966",
+        "b35c1382598a5a766c72608d166b89f112a727ed5a401007725aa813b2812874",
+    ),
+    (
+        XYCE_BUG39_HISTORICAL_EXCLUDE_PATH,
+        21,
+        "20533602deb07138a58ed4a233abb4f381c2a1ee77d2d5d2bf4a599fe24446db",
+        "193cec42858538b08aea1096c2a0fd7ddffd4666761078b36ace1a7ffee5ec87",
+    ),
+];
+
+const XYCE_BUG39_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 11] = [
+    (
+        "agauss.cir",
+        0,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        XYCE_BUG39_EMPTY_CONTENT_BLAKE3,
+    ),
+    (
+        "bug39_int.cir",
+        168,
+        "ed26197d4f299a496f0c714a08c328cda560c1194c25ae0b415f73ff8bb1898c",
+        "62367769e743519c676f1283ee41d33a7310f9556b330f9a5da1178eaac5ec3b",
+    ),
+    (
+        "bug39_int.cir.prn.gs",
+        105,
+        "340ab7510b526e583cac2b6ac15388df3217514dc96fe4620514ac47defa015c",
+        "2b05b73a06220bce643b7961dcfe068fe7c14a9bf806100d23e6ee2f66b05629",
+    ),
+    (
+        "bug39_limit.cir",
+        482,
+        "9b1f3329062d0d7dc1f49b8a94fd88262a796e8dd92ae1c6a2d4fc579f12910f",
+        "32e9d468ab49ec892c36f7672d1d2962f54557c9df8c89f1103185863cc1c007",
+    ),
+    (
+        "bug39_limit.cir.prn.gs",
+        111,
+        "8eba99b9cfba84e66b518177060d38dc0a8fde786fd0bfc86d9818a35bee212f",
+        "190fe153a2f5887f562ed8d1fdd2546acbab3b2d733bbc9fb2e0bb9f47e703aa",
+    ),
+    (
+        "bug39_pow.cir",
+        149,
+        "76625ca95d8a4f51f6161ba610e9d569c0c161bd228cff987f6c049cc21c0f78",
+        "175baf98941dd1e24a7942aef300a9ecc4edfa7a6e8c5cf06094e4ed55606916",
+    ),
+    (
+        "bug39_pow.cir.prn.gs",
+        105,
+        "ec7adbfa8d794ff0a8c10f0f119c74b57b3f7effb843472c6148fee4cfc2c0d6",
+        "356a59eaec3ff2e5a3dee35f0510dce0b73b512ed5f21e96bef03fc10ff149af",
+    ),
+    (
+        "bug39_sign.cir",
+        152,
+        "ea2e5d157bf39d575b2c33c3ef179dfbf9f879f21383ba001eed4bfc300e142d",
+        "cb8c1dfdb32f8e36242b05d475735df124d818337bf9798246ee5e6bcd75ab51",
+    ),
+    (
+        "bug39_sign.cir.prn.gs",
+        105,
+        "9d1a472e7b465d0c2caa45a16d99328334ea0a894c3fa7da844faa465b393236",
+        "cc173d820146330a519e07328559bf51061a815906837487f06be67c0b7cf545",
+    ),
+    (
+        "gauss.cir",
+        0,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        XYCE_BUG39_EMPTY_CONTENT_BLAKE3,
+    ),
+    (
+        "README",
+        879,
+        "148d072b44042d70d47ad191f462cd356b1868f4a3dddf49f9d25c271e0b13a0",
+        "37bf9fd8b2e8b91e8f7baa45e985fe19450b18208753eb8533ac473ab6709a70",
     ),
 ];
 
@@ -5946,6 +6103,91 @@ struct XyceBug38FamilyContract {
     role: XyceBug38Role,
 }
 
+#[derive(Debug, Clone)]
+struct XyceBug39GaussianContract {
+    anchor_path: PathBuf,
+    role: XyceBug39GaussianRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBug39GaussianRole {
+    AgaussAbsolute,
+    GaussRelative,
+}
+
+impl XyceBug39GaussianRole {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::AgaussAbsolute => XYCE_BUG39_AGAUSS_CONTRACT,
+            Self::GaussRelative => XYCE_BUG39_GAUSS_CONTRACT,
+        }
+    }
+
+    fn path(self) -> &'static str {
+        match self {
+            Self::AgaussAbsolute => XYCE_BUG39_AGAUSS_PATH,
+            Self::GaussRelative => XYCE_BUG39_GAUSS_PATH,
+        }
+    }
+
+    fn record(self) -> &'static str {
+        match self {
+            Self::AgaussAbsolute => XYCE_BUG39_AGAUSS_RECORD,
+            Self::GaussRelative => XYCE_BUG39_GAUSS_RECORD,
+        }
+    }
+
+    fn generated_file_name(self) -> &'static str {
+        match self {
+            Self::AgaussAbsolute => "testagauss.cir",
+            Self::GaussRelative => "testgauss.cir",
+        }
+    }
+
+    fn generated_source_blake3(self) -> &'static str {
+        match self {
+            Self::AgaussAbsolute => {
+                "1c1bc1b8d196596b7243940066cdc0ed78466f7828a11428e0abdbd84b822aa4"
+            }
+            Self::GaussRelative => {
+                "43c397a68a44734ca24c199e7ee40cfb3104eafd675644767f91f7db4c01ef2d"
+            }
+        }
+    }
+
+    fn generated_source_sha256(self) -> &'static str {
+        match self {
+            Self::AgaussAbsolute => {
+                "ae8438d949eb59deeb7d7b37542a1d1399a0c1c536c87adb51c158a7fcb8acf0"
+            }
+            Self::GaussRelative => {
+                "607d721eae7f6f9a7082150d9a476c59163bb11276f1c99f6e3fefa027a13ab5"
+            }
+        }
+    }
+
+    fn generated_source_bytes(self) -> usize {
+        match self {
+            Self::AgaussAbsolute => 377_897,
+            Self::GaussRelative => 377_926,
+        }
+    }
+
+    fn for_record(relative_path: &str) -> Option<Self> {
+        match XyceTestRunner::normalize_manifest_key(relative_path).as_str() {
+            XYCE_BUG39_AGAUSS_RECORD => Some(Self::AgaussAbsolute),
+            XYCE_BUG39_GAUSS_RECORD => Some(Self::GaussRelative),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct XyceBug39GaussianMoments {
+    mean: Value,
+    population_standard_deviation: Value,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceBug38Role {
     WrapperOwner,
@@ -8131,6 +8373,7 @@ mod analysis_support;
 mod comparison;
 mod contracts;
 mod contracts_bug38;
+mod contracts_bug39;
 mod contracts_dc;
 mod contracts_frequency;
 mod contracts_sources;

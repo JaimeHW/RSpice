@@ -26,13 +26,14 @@ use super::{
     MissingSubcircuitEndsError, ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType,
     Netlist, NetlistSourceLocation, NodeSet, OutputAnalysisKind, OutputDirectiveKind,
     OutputRequest, ParamContext, ParameterRedefinitionPolicy, ParametricValue, ParseDiagnostic,
-    ParseError, ParseWithAbortError, PoleZeroAnalysisType, PoleZeroTransferType, PspiceUTiming,
-    PspiceUTimingMode, RemoveUnusedDeviceType, RemoveUnusedPolicy, SaveSet, SaveSignal,
-    SensitivityAcSweep, SimulationOptions, SourceMultiplicity, SourceRfPort, SourceSpec,
-    StartupDiagnosticCode, StartupDirectiveDisposition, StartupDirectiveEntry,
-    StartupDirectiveKind, StartupDirectiveRecord, StartupDirectiveScope, StatisticalParamMode,
-    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
-    XyceAddResistorMode, XyceAddResistorSpec, XyceAddResistorsPolicy, ensure_parse_not_aborted,
+    ParseError, ParseWithAbortError, PoleZeroAnalysisType, PoleZeroTransferType,
+    PspiceChebyshevKind, PspiceUTiming, PspiceUTimingMode, RemoveUnusedDeviceType,
+    RemoveUnusedPolicy, SaveSet, SaveSignal, SensitivityAcSweep, SimulationOptions,
+    SourceMultiplicity, SourceRfPort, SourceSpec, StartupDiagnosticCode,
+    StartupDirectiveDisposition, StartupDirectiveEntry, StartupDirectiveKind,
+    StartupDirectiveRecord, StartupDirectiveScope, StatisticalParamMode, StepCommand, StepSweep,
+    StepTarget, SubcircuitDef, SwitchState, VerilogAInclude, XyceAddResistorMode,
+    XyceAddResistorSpec, XyceAddResistorsPolicy, ensure_parse_not_aborted,
     finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
     validate_startup_directives_with_abort,
 };
@@ -40,11 +41,11 @@ use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use std::collections::{HashMap, HashSet};
 
+mod chebyshev_synthesis;
 mod command_parsers;
 mod commands;
 
 pub use commands::parse_save_probe;
-mod chebyshev_synthesis;
 mod conditionals;
 mod elements;
 mod laplace_synthesis;
@@ -55,7 +56,7 @@ mod state;
 mod tlines;
 mod values;
 
-use chebyshev_synthesis::*;
+pub(in crate::netlist) use chebyshev_synthesis::{ChebyshevSpec, synthesize_chebyshev};
 use command_parsers::*;
 use commands::*;
 use conditionals::*;
@@ -710,6 +711,12 @@ fn parse_netlist_impl(
     }
     normalize_pspice_u_timing_aliases_with_abort(&mut state, abort)?;
     resolve_top_level_deferred_source_specs_with_abort(&mut state.elements, &state.params, abort)?;
+    resolve_top_level_deferred_chebyshev_with_abort(
+        &mut state.elements,
+        &state.params,
+        &mut state.element_names,
+        abort,
+    )?;
     resolve_static_model_expression_params_with_abort(&mut state, abort)?;
     validate_resistor_model_references_with_abort(&state, abort)?;
     validate_coupling_model_references_with_abort(&state, abort)?;
@@ -2550,6 +2557,123 @@ fn resolve_top_level_deferred_source_specs_with_abort(
         }
     }
 
+    ensure_parse_not_aborted(abort)
+}
+
+fn resolve_top_level_deferred_chebyshev_with_abort(
+    elements: &mut Vec<Element>,
+    params: &ParamContext,
+    names: &mut ElementNameRegistry,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    let source = std::mem::take(elements);
+    let mut resolved = Vec::with_capacity(source.len());
+    for (index, element) in source.into_iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        let ElementKind::PspiceChebyshev {
+            source_line,
+            input_expression,
+            filter_kind,
+            frequencies_hz,
+            ripple_db,
+            stop_db,
+            voltage_output,
+            multiplicity,
+        } = &element.kind
+        else {
+            resolved.push(element);
+            continue;
+        };
+
+        let resolve_value = |value: &ParametricValue| -> Result<Value, ParseError> {
+            match value {
+                ParametricValue::Resolved(value) => Ok(*value),
+                ParametricValue::Expression(expression) => eval_expression(expression, params)
+                    .map_err(|error| ParseError::Syntax {
+                        line: *source_line,
+                        message: format!(
+                            "CHEBYSHEV parameter expression '{expression}' is invalid: {error}"
+                        ),
+                    }),
+                ParametricValue::String(value) | ParametricValue::StringExpression(value) => {
+                    Err(ParseError::Syntax {
+                        line: *source_line,
+                        message: format!("CHEBYSHEV parameter '{value}' must be numeric"),
+                    })
+                }
+            }
+        };
+        let spec = ChebyshevSpec {
+            kind: *filter_kind,
+            frequencies_hz: frequencies_hz
+                .iter()
+                .map(resolve_value)
+                .collect::<Result<Vec<_>, _>>()?,
+            ripple_db: resolve_value(ripple_db)?,
+            stop_db: resolve_value(stop_db)?,
+        };
+        let [node_pos, node_neg] = element.nodes.as_slice() else {
+            return Err(ParseError::Syntax {
+                line: *source_line,
+                message: format!(
+                    "CHEBYSHEV source '{}' requires exactly two output nodes",
+                    element.name
+                ),
+            }
+            .into());
+        };
+        let mut multiplicity = multiplicity.clone();
+        if let Some(expression) = multiplicity.value_expr.take() {
+            multiplicity.value =
+                eval_expression(&expression, params).map_err(|error| ParseError::Syntax {
+                    line: *source_line,
+                    message: format!(
+                        "CHEBYSHEV source '{}' M expression '{expression}' is invalid: {error}",
+                        element.name
+                    ),
+                })?;
+        }
+        if !multiplicity.value.is_finite()
+            || params.expression_dialect() == ExpressionDialect::Xyce && multiplicity.value <= 0.0
+        {
+            return Err(ParseError::Syntax {
+                line: *source_line,
+                message: format!(
+                    "CHEBYSHEV source '{}' has invalid multiplicity M={}",
+                    element.name, multiplicity.value
+                ),
+            }
+            .into());
+        }
+
+        let mut synthesized = synthesize_chebyshev(
+            &element.name,
+            node_pos,
+            node_neg,
+            input_expression,
+            &spec,
+            *voltage_output,
+            *source_line,
+        )?;
+        for generated in &mut synthesized {
+            if generated.name.eq_ignore_ascii_case(&element.name) {
+                match &mut generated.kind {
+                    ElementKind::BehavioralVoltage {
+                        multiplicity: target,
+                        ..
+                    }
+                    | ElementKind::BehavioralCurrent {
+                        multiplicity: target,
+                        ..
+                    } => *target = multiplicity.clone(),
+                    _ => {}
+                }
+            }
+        }
+        names.register_generated_helpers(&element.name, &synthesized, "TOP_LEVEL", *source_line)?;
+        resolved.extend(synthesized);
+    }
+    *elements = resolved;
     ensure_parse_not_aborted(abort)
 }
 

@@ -52,6 +52,8 @@ pub(crate) fn filter_elements_with_abort(
             // A realization's states are meaningless without the source they
             // integrate for, so they leave with it.
             ElementProvenance::GeneratedPassiveHelper { owner, .. }
+            | ElementProvenance::GeneratedDynamicStateDerivative { owner, .. }
+            | ElementProvenance::GeneratedDynamicInternalNode { owner, .. }
             | ElementProvenance::SynthesizedTransferState { owner, .. } => {
                 rejected_owners.contains(&owner.to_ascii_uppercase())
             }

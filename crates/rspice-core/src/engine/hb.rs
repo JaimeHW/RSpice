@@ -247,11 +247,12 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        self.hb_validate_config(&config)?;
+        let engine = self.resolved_for_netlist(netlist);
+        engine.hb_validate_config(&config)?;
 
         // Build circuit using SoA architecture
-        let circuit = self.build_circuit_with_abort(netlist, abort)?;
-        self.run_hb_with_prebuilt_circuit_abort(netlist, circuit, config, abort)
+        let circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        engine.run_hb_with_prebuilt_circuit_abort(netlist, circuit, config, abort)
     }
 
     fn hb_validate_config(&self, config: &HbConfig) -> Result<(), SimulationError> {

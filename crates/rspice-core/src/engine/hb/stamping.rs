@@ -199,6 +199,19 @@ impl Engine {
             // Stamp conductance matrix
             self.hb_stamp_admittance(solver, np, nn, g, true);
         }
+        if circuit.global_shunt_conductance != 0.0 {
+            for node in 1..=circuit.num_nodes() {
+                if !circuit.is_non_electrical_state_matrix_index(node - 1) {
+                    self.hb_stamp_admittance(
+                        solver,
+                        node,
+                        0,
+                        circuit.global_shunt_conductance,
+                        true,
+                    );
+                }
+            }
+        }
     }
 
     /// Stamp capacitors into HB solver C matrix

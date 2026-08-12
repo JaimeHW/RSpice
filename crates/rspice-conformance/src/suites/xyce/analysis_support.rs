@@ -161,7 +161,13 @@ impl XyceTestRunner {
             self.create_xyce_static_tran_engine(None, Self::xyce_initial_timestep_for_tran(tran));
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let transient = engine
-            .run_tran_with_abort(&netlist, tran.stop, max_step, &abort)
+            .run_tran_with_startup_mode_and_abort(
+                &netlist,
+                tran.stop,
+                max_step,
+                rspice_core::engine::TransientStartupMode::from_uic(tran.uic),
+                &abort,
+            )
             .map_err(|error| format!("MEASURE_CONT STEP transient execution failed: {error}"))?;
         Self::validate_transient_result_time_grid(&transient)?;
         let scalar = rspice_core::analysis::evaluate_tran_measurements(&netlist, &transient);

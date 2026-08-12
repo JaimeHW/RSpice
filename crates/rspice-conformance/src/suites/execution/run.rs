@@ -200,12 +200,19 @@ impl ExecutionRunner {
                 step,
                 stop,
                 max_step,
+                uic,
                 ..
             } => {
                 let ceiling = max_step.unwrap_or_else(|| default_max_step(*step, *stop));
                 classify(
                     engine
-                        .run_tran_with_abort(netlist, *stop, ceiling, abort)
+                        .run_tran_with_startup_mode_and_abort(
+                            netlist,
+                            *stop,
+                            ceiling,
+                            rspice_core::engine::TransientStartupMode::from_uic(*uic),
+                            abort,
+                        )
                         .map(|result| {
                             finite(result.time.iter())
                                 && result

@@ -632,6 +632,10 @@ fn parse_spice_suffix(chars: &[char]) -> (Value, usize) {
             "GHZ" => return (1e9, 3),     // gigahertz
             "MHZ" => return (1e6, 3),     // megahertz
             "KHZ" => return (1e3, 3),     // kilohertz
+            "UHZ" => return (1e-6, 3),    // microhertz
+            "NHZ" => return (1e-9, 3),    // nanohertz
+            "PHZ" => return (1e-12, 3),   // picohertz
+            "FHZ" => return (1e-15, 3),   // femtohertz
             "THZ" => return (1e12, 3),    // terahertz
             _ => {}
         }
@@ -1120,6 +1124,41 @@ mod tests {
         assert_eq!(parse_spice_value("1X").expect("1X parses"), 1.0e6);
         assert_eq!(parse_spice_value("1x").expect("1x parses"), 1.0e6);
         assert_eq!(parse_spice_value("2.5X").expect("2.5X parses"), 2.5e6);
+    }
+
+    #[test]
+    fn sub_hertz_frequency_suffixes_are_case_insensitive_and_fully_consumed() {
+        for (literal, expected) in [
+            ("1uHz", 1.0e-6),
+            ("1.5UHZ", 1.5e-6),
+            ("1nHz", 1.0e-9),
+            ("1.5NHZ", 1.5e-9),
+            ("1pHz", 1.0e-12),
+            ("1.5PHZ", 1.5e-12),
+            ("1fHz", 1.0e-15),
+            ("1.5FHZ", 1.5e-15),
+        ] {
+            let parsed = parse_spice_value_complete(literal)
+                .unwrap_or_else(|error| panic!("{literal} must parse completely: {error}"));
+            assert!(
+                (parsed - expected).abs() <= expected * 1.0e-15,
+                "{literal} parsed as {parsed:e}, expected {expected:e}"
+            );
+
+            let tokens = tokenize(literal)
+                .unwrap_or_else(|error| panic!("{literal} must tokenize completely: {error}"));
+            assert_eq!(tokens.len(), 2, "{literal} left a stray token: {tokens:?}");
+            assert_eq!(tokens[0].lexeme, literal);
+            if literal.contains('.') {
+                assert!(matches!(tokens[0].kind, TokenKind::Number(_)));
+            } else {
+                assert_eq!(
+                    tokens[0].kind,
+                    TokenKind::Ident(literal.to_ascii_uppercase())
+                );
+            }
+            assert!(matches!(tokens[1].kind, TokenKind::Eof));
+        }
     }
 
     #[test]

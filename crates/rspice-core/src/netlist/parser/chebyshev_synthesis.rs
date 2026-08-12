@@ -11,21 +11,12 @@
 
 use num_complex::Complex64;
 
-use super::{Element, ParseError, synthesize_rational_transfer};
+use super::{Element, ParseError, PspiceChebyshevKind, synthesize_rational_transfer};
 use crate::Value;
 
 const MAX_REALIZED_ORDER: usize = 32;
 
-/// PSpice CHEBYSHEV filter family.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ChebyshevKind {
-    LowPass,
-    HighPass,
-    BandPass,
-    BandReject,
-}
-
-impl ChebyshevKind {
+impl PspiceChebyshevKind {
     pub(super) const fn label(self) -> &'static str {
         match self {
             Self::LowPass => "LP",
@@ -45,11 +36,11 @@ impl ChebyshevKind {
 
 /// Fully evaluated PSpice CHEBYSHEV source specification.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct ChebyshevSpec {
-    pub(super) kind: ChebyshevKind,
-    pub(super) frequencies_hz: Vec<Value>,
-    pub(super) ripple_db: Value,
-    pub(super) stop_db: Value,
+pub(in crate::netlist) struct ChebyshevSpec {
+    pub(in crate::netlist) kind: PspiceChebyshevKind,
+    pub(in crate::netlist) frequencies_hz: Vec<Value>,
+    pub(in crate::netlist) ripple_db: Value,
+    pub(in crate::netlist) stop_db: Value,
 }
 
 type Poly = Vec<Value>;
@@ -165,14 +156,14 @@ fn finite_positive_frequencies(frequencies: &[Value]) -> Result<(), String> {
 }
 
 fn low_or_high_pass_sections(
-    kind: ChebyshevKind,
+    kind: PspiceChebyshevKind,
     frequencies_hz: &[Value],
     ripple_db: Value,
     stop_db: Value,
 ) -> Result<Vec<(Poly, Poly)>, String> {
     finite_positive_frequencies(frequencies_hz)?;
     let (pass_hz, normalized_stop) = match kind {
-        ChebyshevKind::LowPass => {
+        PspiceChebyshevKind::LowPass => {
             let [pass_hz, stop_hz] = frequencies_hz else {
                 return Err("LP requires exactly two cutoff frequencies".to_string());
             };
@@ -181,7 +172,7 @@ fn low_or_high_pass_sections(
             }
             (*pass_hz, stop_hz / pass_hz)
         }
-        ChebyshevKind::HighPass => {
+        PspiceChebyshevKind::HighPass => {
             let [pass_hz, stop_hz] = frequencies_hz else {
                 return Err("HP requires exactly two cutoff frequencies".to_string());
             };
@@ -207,7 +198,7 @@ fn low_or_high_pass_sections(
     for factor in prototype_factors {
         let section_order = factor.len() - 1;
         let (numerator, denominator) = match kind {
-            ChebyshevKind::LowPass => {
+            PspiceChebyshevKind::LowPass => {
                 let denominator = factor
                     .iter()
                     .enumerate()
@@ -217,7 +208,7 @@ fn low_or_high_pass_sections(
                     .collect::<Vec<_>>();
                 (vec![denominator[0]], denominator)
             }
-            ChebyshevKind::HighPass => {
+            PspiceChebyshevKind::HighPass => {
                 let mut denominator = vec![0.0; section_order + 1];
                 for (power, coefficient) in factor.iter().enumerate() {
                     denominator[section_order - power] =
@@ -236,7 +227,7 @@ fn low_or_high_pass_sections(
 }
 
 fn band_filter_sections(
-    kind: ChebyshevKind,
+    kind: PspiceChebyshevKind,
     frequencies_hz: &[Value],
     ripple_db: Value,
     stop_db: Value,
@@ -250,13 +241,13 @@ fn band_filter_sections(
     };
 
     let (pass_low_hz, pass_high_hz, stop_low_hz, stop_high_hz) = match kind {
-        ChebyshevKind::BandPass => {
+        PspiceChebyshevKind::BandPass => {
             if !(first < second && second < third && third < fourth) {
                 return Err("BP requires stop-low < pass-low < pass-high < stop-high".to_string());
             }
             (*second, *third, *first, *fourth)
         }
-        ChebyshevKind::BandReject => {
+        PspiceChebyshevKind::BandReject => {
             if !(first < second && second < fourth && fourth < third) {
                 return Err(
                     "BR requires pass-low < stop-low < stop-high < pass-high; its source order is pass-low, stop-low, pass-high, stop-high"
@@ -276,13 +267,13 @@ fn band_filter_sections(
     let bandwidth = pass_high - pass_low;
 
     let normalized_stop = match kind {
-        ChebyshevKind::BandPass => [stop_low, stop_high]
+        PspiceChebyshevKind::BandPass => [stop_low, stop_high]
             .into_iter()
             .map(|frequency| {
                 ((frequency * frequency - center_squared) / (bandwidth * frequency)).abs()
             })
             .fold(Value::INFINITY, Value::min),
-        ChebyshevKind::BandReject => [stop_low, stop_high]
+        PspiceChebyshevKind::BandReject => [stop_low, stop_high]
             .into_iter()
             .map(|frequency| {
                 ((bandwidth * frequency) / (center_squared - frequency * frequency)).abs()
@@ -311,11 +302,11 @@ fn band_filter_sections(
         let mut denominator = vec![0.0];
         for (power, coefficient) in factor.iter().enumerate() {
             let term = match kind {
-                ChebyshevKind::BandPass => poly_mul(
+                PspiceChebyshevKind::BandPass => poly_mul(
                     &poly_pow(&quadratic, power),
                     &poly_pow(&linear, section_order - power),
                 ),
-                ChebyshevKind::BandReject => poly_mul(
+                PspiceChebyshevKind::BandReject => poly_mul(
                     &poly_pow(&linear, power),
                     &poly_pow(&quadratic, section_order - power),
                 ),
@@ -324,8 +315,8 @@ fn band_filter_sections(
             poly_add_scaled(&mut denominator, &term, *coefficient);
         }
         let numerator_base = match kind {
-            ChebyshevKind::BandPass => poly_pow(&linear, section_order),
-            ChebyshevKind::BandReject => poly_pow(&quadratic, section_order),
+            PspiceChebyshevKind::BandPass => poly_pow(&linear, section_order),
+            PspiceChebyshevKind::BandReject => poly_pow(&quadratic, section_order),
             _ => unreachable!("band_filter only receives BP or BR"),
         };
         let numerator: Poly = numerator_base
@@ -349,13 +340,13 @@ fn design_sections(spec: &ChebyshevSpec) -> Result<Vec<(Poly, Poly)>, String> {
         ));
     }
     match spec.kind {
-        ChebyshevKind::LowPass | ChebyshevKind::HighPass => low_or_high_pass_sections(
+        PspiceChebyshevKind::LowPass | PspiceChebyshevKind::HighPass => low_or_high_pass_sections(
             spec.kind,
             &spec.frequencies_hz,
             spec.ripple_db,
             spec.stop_db,
         ),
-        ChebyshevKind::BandPass | ChebyshevKind::BandReject => band_filter_sections(
+        PspiceChebyshevKind::BandPass | PspiceChebyshevKind::BandReject => band_filter_sections(
             spec.kind,
             &spec.frequencies_hz,
             spec.ripple_db,
@@ -377,136 +368,8 @@ fn design_transfer(spec: &ChebyshevSpec) -> Result<(Poly, Poly), String> {
     ))
 }
 
-/// Scale factors this parser accepts in front of `Hz`, matching the set the
-/// lexer already resolves so a frequency means the same thing wherever it is
-/// written. `M` is mega here, as it is in `MHz` everywhere in SPICE practice.
-const FREQUENCY_SCALES: [(&str, Value); 5] = [
-    ("T", 1.0e12),
-    ("G", 1.0e9),
-    ("MEG", 1.0e6),
-    ("M", 1.0e6),
-    ("K", 1.0e3),
-];
-
-/// Read one filter requirement, which is either a bare number, a number
-/// carrying `unit` with an optional scale factor, or the name of a parameter.
-///
-/// The units are checked rather than skipped. SPICE's own suffix rules would
-/// read `800frogs` as 800 femto-somethings and `.1watts` as 0.1, quietly
-/// designing a filter to requirements nobody wrote; a contract this specific
-/// should refuse what it does not understand.
-fn requirement(
-    word: &str,
-    unit: &str,
-    what: &str,
-    resolve_param: &mut dyn FnMut(&str) -> Option<Value>,
-) -> Result<Value, String> {
-    if let Ok(value) = word.parse::<Value>() {
-        return Ok(value);
-    }
-
-    // Longest leading run that is still a number, so `1.2e3kHz` keeps its
-    // exponent instead of breaking at the `e`.
-    let split = (1..=word.len())
-        .filter(|end| word.is_char_boundary(*end))
-        .filter(|end| word[..*end].parse::<Value>().is_ok())
-        .next_back();
-    let Some(split) = split else {
-        return resolve_param(word)
-            .ok_or_else(|| format!("{what} '{word}' is neither a number nor a known parameter"));
-    };
-
-    let (number, suffix) = word.split_at(split);
-    let number: Value = number
-        .parse()
-        .map_err(|_| format!("{what} '{word}' is not a number"))?;
-    let suffix = suffix.to_ascii_uppercase();
-    let unit_upper = unit.to_ascii_uppercase();
-
-    let Some(scale) = suffix.strip_suffix(&unit_upper).and_then(|scale| {
-        if scale.is_empty() {
-            return Some(1.0);
-        }
-        FREQUENCY_SCALES
-            .iter()
-            .find(|(name, _)| *name == scale && unit_upper == "HZ")
-            .map(|(_, factor)| *factor)
-    }) else {
-        return Err(format!("{what} '{word}' must be given in {unit}"));
-    };
-    Ok(number * scale)
-}
-
-/// Parse a PSpice CHEBYSHEV filter contract: `LP (800Hz 1.2kHz) .1dB 50dB`.
-///
-/// `words` arrives as raw source text rather than lexer values because the
-/// lexer resolves `1.2kHz` to a number but hands back `800Hz` and `50dB` whole,
-/// so only the original spelling says what the author actually asked for.
-pub(super) fn parse_chebyshev_spec(
-    words: &[String],
-    resolve_param: &mut dyn FnMut(&str) -> Option<Value>,
-) -> Result<ChebyshevSpec, String> {
-    let mut words = words.iter().map(String::as_str);
-    let kind = match words.next().map(str::to_ascii_uppercase).as_deref() {
-        Some("LP") => ChebyshevKind::LowPass,
-        Some("HP") => ChebyshevKind::HighPass,
-        Some("BP") => ChebyshevKind::BandPass,
-        Some("BR") => ChebyshevKind::BandReject,
-        Some(other) => {
-            return Err(format!(
-                "unknown filter family '{other}'; expected LP, HP, BP, or BR"
-            ));
-        }
-        None => return Err("expected a filter family: LP, HP, BP, or BR".to_string()),
-    };
-
-    if words.next() != Some("(") {
-        return Err(format!(
-            "{} requires its cutoff frequencies in parentheses",
-            kind.label()
-        ));
-    }
-    let mut frequencies_hz = Vec::with_capacity(kind.frequency_count());
-    for index in 0..kind.frequency_count() {
-        let Some(word) = words.next().filter(|word| *word != ")") else {
-            return Err(format!(
-                "{} requires {} cutoff frequencies, found {index}",
-                kind.label(),
-                kind.frequency_count()
-            ));
-        };
-        frequencies_hz.push(requirement(word, "Hz", "cutoff frequency", resolve_param)?);
-    }
-    if words.next() != Some(")") {
-        return Err(format!(
-            "{} takes exactly {} cutoff frequencies",
-            kind.label(),
-            kind.frequency_count()
-        ));
-    }
-
-    let mut next_requirement = |what: &str| -> Result<Value, String> {
-        let word = words
-            .next()
-            .ok_or_else(|| format!("filter contract is missing its {what}"))?;
-        requirement(word, "dB", what, resolve_param)
-    };
-    let ripple_db = next_requirement("pass-band ripple")?;
-    let stop_db = next_requirement("stop-band attenuation")?;
-    if let Some(extra) = words.next() {
-        return Err(format!("unexpected '{extra}' after the filter contract"));
-    }
-
-    Ok(ChebyshevSpec {
-        kind,
-        frequencies_hz,
-        ripple_db,
-        stop_db,
-    })
-}
-
 /// Compile one PSpice CHEBYSHEV E/G source into exact dynamic helper elements.
-pub(super) fn synthesize_chebyshev(
+pub(in crate::netlist) fn synthesize_chebyshev(
     name: &str,
     node_pos: &str,
     node_neg: &str,
@@ -519,7 +382,7 @@ pub(super) fn synthesize_chebyshev(
     // engine's behavioral-source Newton path is better conditioned when that
     // proper transfer is lowered as one controller form; the other families
     // use the low-order cascade to avoid high-order band polynomial scaling.
-    let sections = (if spec.kind == ChebyshevKind::HighPass {
+    let sections = (if spec.kind == PspiceChebyshevKind::HighPass {
         design_transfer(spec).map(|transfer| vec![transfer])
     } else {
         design_sections(spec)
@@ -532,6 +395,27 @@ pub(super) fn synthesize_chebyshev(
     let mut elements = Vec::new();
     let mut section_input = input_expr.to_string();
     for (index, (numerator, denominator)) in sections.into_iter().enumerate() {
+        let representable = !numerator.is_empty()
+            && !denominator.is_empty()
+            && numerator.iter().any(|coefficient| *coefficient != 0.0)
+            && denominator
+                .first()
+                .is_some_and(|coefficient| *coefficient != 0.0)
+            && denominator
+                .last()
+                .is_some_and(|coefficient| *coefficient != 0.0)
+            && numerator
+                .iter()
+                .chain(&denominator)
+                .all(|coefficient| coefficient.is_finite());
+        if !representable {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "CHEBYSHEV source '{name}': cutoff range cannot be represented without degenerate or non-finite transfer coefficients"
+                ),
+            });
+        }
         let last = index + 1 == section_count;
         let section_name = if last {
             name.to_string()
@@ -541,7 +425,7 @@ pub(super) fn synthesize_chebyshev(
         let intermediate_node = format!("{name}.__Y{}", index + 1);
         let section_node_pos = if last { node_pos } else { &intermediate_node };
         let section_node_neg = if last { node_neg } else { "0" };
-        elements.extend(synthesize_rational_transfer(
+        let mut section_elements = synthesize_rational_transfer(
             &section_name,
             section_node_pos,
             section_node_neg,
@@ -551,10 +435,28 @@ pub(super) fn synthesize_chebyshev(
             if last { voltage_output } else { true },
             crate::netlist::SynthesizedTransferForm::Chebyshev,
             line_num,
-        )?);
+        )?;
         if !last {
+            let Some(section_output) = section_elements
+                .iter_mut()
+                .find(|element| element.name.eq_ignore_ascii_case(&section_name))
+            else {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "CHEBYSHEV source '{name}': dynamic section did not produce its required output element"
+                    ),
+                });
+            };
+            section_output.provenance =
+                crate::netlist::ElementProvenance::GeneratedDynamicInternalNode {
+                    owner: section_name.clone(),
+                    form: crate::netlist::SynthesizedTransferForm::Chebyshev,
+                    node: intermediate_node.clone(),
+                };
             section_input = format!("V({intermediate_node})");
         }
+        elements.extend(section_elements);
     }
     Ok(elements)
 }
@@ -576,7 +478,7 @@ mod tests {
         (evaluate(numerator) / evaluate(denominator)).norm()
     }
 
-    fn spec(kind: ChebyshevKind, frequencies_hz: &[Value]) -> ChebyshevSpec {
+    fn spec(kind: PspiceChebyshevKind, frequencies_hz: &[Value]) -> ChebyshevSpec {
         ChebyshevSpec {
             kind,
             frequencies_hz: frequencies_hz.to_vec(),
@@ -608,12 +510,12 @@ mod tests {
     #[test]
     fn official_low_and_high_pass_examples_meet_both_edges() {
         assert_edges(
-            &spec(ChebyshevKind::LowPass, &[800.0, 1_200.0]),
+            &spec(PspiceChebyshevKind::LowPass, &[800.0, 1_200.0]),
             &[800.0],
             &[1_200.0],
         );
         assert_edges(
-            &spec(ChebyshevKind::HighPass, &[1_200.0, 800.0]),
+            &spec(PspiceChebyshevKind::HighPass, &[1_200.0, 800.0]),
             &[1_200.0],
             &[800.0],
         );
@@ -622,13 +524,16 @@ mod tests {
     #[test]
     fn official_band_pass_and_reject_examples_meet_all_edges() {
         assert_edges(
-            &spec(ChebyshevKind::BandPass, &[800.0, 1_200.0, 2_000.0, 3_000.0]),
+            &spec(
+                PspiceChebyshevKind::BandPass,
+                &[800.0, 1_200.0, 2_000.0, 3_000.0],
+            ),
             &[1_200.0, 2_000.0],
             &[800.0, 3_000.0],
         );
         assert_edges(
             &spec(
-                ChebyshevKind::BandReject,
+                PspiceChebyshevKind::BandReject,
                 &[800.0, 1_200.0, 3_000.0, 2_000.0],
             ),
             &[800.0, 3_000.0],
@@ -638,7 +543,7 @@ mod tests {
 
     #[test]
     fn invalid_edges_and_unbounded_orders_fail_closed() {
-        let invalid = spec(ChebyshevKind::LowPass, &[1_200.0, 800.0]);
+        let invalid = spec(PspiceChebyshevKind::LowPass, &[1_200.0, 800.0]);
         assert!(
             design_transfer(&invalid)
                 .unwrap_err()
@@ -646,7 +551,7 @@ mod tests {
         );
 
         let excessive = ChebyshevSpec {
-            kind: ChebyshevKind::LowPass,
+            kind: PspiceChebyshevKind::LowPass,
             frequencies_hz: vec![1_000.0, 1_000.001],
             ripple_db: 0.001,
             stop_db: 200.0,

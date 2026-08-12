@@ -35,6 +35,7 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     vdmoses: Vdmoses,
     jfets: Vec<crate::device::Jfet>,
     xyce_memristors: Vec<XyceMemristorBinding>,
+    xyce_memristor_operating_point_mode: bool,
     vswitches: Vec<crate::device::VoltageSwitch>,
     iswitches: Vec<crate::device::CurrentSwitch>,
     generic_switches: Vec<crate::device::GenericSwitch>,
@@ -123,6 +124,18 @@ mod tests {
         circuit.restore_nonlinear_state(snapshot);
 
         assert_eq!(circuit.inductors.inductances, vec![2.0e-3]);
+    }
+
+    #[test]
+    fn nonlinear_snapshot_restores_xyce_memristor_equation_mode() {
+        let mut circuit = CircuitData::new();
+        circuit.set_xyce_memristor_operating_point_mode(false);
+        let snapshot = circuit.nonlinear_state_snapshot();
+
+        circuit.set_xyce_memristor_operating_point_mode(true);
+        circuit.restore_nonlinear_state(snapshot);
+
+        assert!(!circuit.xyce_memristor_operating_point_mode);
     }
 
     #[test]
@@ -772,6 +785,7 @@ impl CircuitData {
             vdmoses: self.vdmoses.clone(),
             jfets: self.jfets.clone(),
             xyce_memristors: self.xyce_memristors.clone(),
+            xyce_memristor_operating_point_mode: self.xyce_memristor_operating_point_mode,
             vswitches: self.vswitches.clone(),
             iswitches: self.iswitches.clone(),
             generic_switches: self.generic_switches.clone(),
@@ -854,6 +868,7 @@ impl CircuitData {
         snapshot.vdmoses.clone_from(&self.vdmoses);
         snapshot.jfets.clone_from(&self.jfets);
         snapshot.xyce_memristors.clone_from(&self.xyce_memristors);
+        snapshot.xyce_memristor_operating_point_mode = self.xyce_memristor_operating_point_mode;
         snapshot.vswitches.clone_from(&self.vswitches);
         snapshot.iswitches.clone_from(&self.iswitches);
         snapshot.generic_switches.clone_from(&self.generic_switches);
@@ -988,6 +1003,7 @@ impl CircuitData {
         self.vdmoses = snapshot.vdmoses;
         self.jfets = snapshot.jfets;
         self.xyce_memristors = snapshot.xyce_memristors;
+        self.xyce_memristor_operating_point_mode = snapshot.xyce_memristor_operating_point_mode;
         self.vswitches = snapshot.vswitches;
         self.iswitches = snapshot.iswitches;
         self.generic_switches = snapshot.generic_switches;

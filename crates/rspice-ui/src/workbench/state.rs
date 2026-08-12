@@ -884,6 +884,89 @@ impl SimulationPage {
     }
 }
 
+/// Whether a Simulation Studio plan command changed the plan or was refused.
+///
+/// A receipt and a refusal are told apart here rather than by reading the
+/// message, because the two are shown differently and only one of them has to
+/// follow the reader off the Analyses page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AnalysisLifecycleSeverity {
+    /// Everything the command asked for was committed, and the message is the
+    /// transaction's receipt.
+    #[default]
+    Receipt,
+    /// Something the command asked for was refused, and the message names what
+    /// and why. A command that commits one step and is refused the next is a
+    /// refusal: the reader has to be told about the part that did not happen.
+    Refusal,
+}
+
+/// The last outcome any Simulation Studio plan command announced.
+///
+/// Only the Analyses route draws this; the other seven routes drain refusals
+/// out of it into the toast system. That drain is keyed on `sequence`, which is
+/// why the sequence advances on a *change* of outcome and not on every
+/// restatement: three of the writers sit on the render path rather than in a
+/// click handler, and a per-frame bump would toast the same refusal forever.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalysisLifecycleOutcome {
+    severity: AnalysisLifecycleSeverity,
+    message: String,
+    sequence: u64,
+}
+
+impl Default for AnalysisLifecycleOutcome {
+    /// The field is `#[serde(skip)]`, so a restored session gets this and never
+    /// the struct literal's value. It has to read as a real status line.
+    fn default() -> Self {
+        Self {
+            severity: AnalysisLifecycleSeverity::Receipt,
+            message: "No lifecycle command has been committed this session.".to_owned(),
+            sequence: 0,
+        }
+    }
+}
+
+impl AnalysisLifecycleOutcome {
+    pub const fn severity(&self) -> AnalysisLifecycleSeverity {
+        self.severity
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// Advances only when the announced outcome differs from the one already
+    /// held. Readers compare it against the last value they acted on.
+    pub const fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    pub const fn is_refusal(&self) -> bool {
+        matches!(self.severity, AnalysisLifecycleSeverity::Refusal)
+    }
+
+    /// Announce a committed change.
+    pub fn record_receipt(&mut self, message: impl Into<String>) {
+        self.record(AnalysisLifecycleSeverity::Receipt, message);
+    }
+
+    /// Announce a command that changed nothing, and why.
+    pub fn record_refusal(&mut self, message: impl Into<String>) {
+        self.record(AnalysisLifecycleSeverity::Refusal, message);
+    }
+
+    fn record(&mut self, severity: AnalysisLifecycleSeverity, message: impl Into<String>) {
+        let message = message.into();
+        if self.severity == severity && self.message == message {
+            return;
+        }
+        self.severity = severity;
+        self.message = message;
+        self.sequence += 1;
+    }
+}
+
 /// Documents another live-session participant currently holds the write
 /// lease on, projected each frame by the live-session engine. Runtime-only:
 /// empty whenever no live session is attached. The netlist entry doubles as
@@ -1114,7 +1197,13 @@ pub struct WorkbenchState {
     pub simulation_surface_editor_anchor_y: Option<f32>,
     /// Last analysis lifecycle outcome announced by the transaction owner.
     #[serde(skip)]
-    pub analysis_lifecycle_status: String,
+    pub analysis_lifecycle_status: AnalysisLifecycleOutcome,
+    /// Sequence of the outcome the Simulation Studio has already surfaced away
+    /// from the Analyses page. Runtime-only, and deliberately not part of the
+    /// outcome itself: the writers announce, and this records what a reader did
+    /// about it.
+    #[serde(skip)]
+    pub analysis_lifecycle_toasted_sequence: u64,
     /// Active Simulation Studio transaction. Drafts are runtime-only and are
     /// committed atomically by the dialog's primary action.
     #[serde(skip)]
@@ -1333,8 +1422,8 @@ impl Default for WorkbenchState {
             simulation_surface_scroll_y: 0.0,
             simulation_surface_pending_scroll_delta_y: 0.0,
             simulation_surface_editor_anchor_y: None,
-            analysis_lifecycle_status: "No lifecycle command has been committed this session."
-                .to_owned(),
+            analysis_lifecycle_status: AnalysisLifecycleOutcome::default(),
+            analysis_lifecycle_toasted_sequence: 0,
             simulation_workflow: None,
             selected_specification: None,
             selected_design_variable: None,

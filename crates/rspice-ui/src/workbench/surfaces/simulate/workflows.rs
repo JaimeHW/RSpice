@@ -386,12 +386,15 @@ pub(super) fn commit_clone_plan(
     app.state.workspace = workspace;
     app.state.workbench.active_analysis_instance = first_instance;
     app.invalidate_simulation_preflight();
-    app.state.workbench.analysis_lifecycle_status = format!(
-        "Cloned plan {} from {} at revision {}; result manifests were not duplicated.",
-        outcome.cloned_plan_id,
-        outcome.source_plan_id,
-        outcome.source_revision.get()
-    );
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_receipt(format!(
+            "Cloned plan {} from {} at revision {}; result manifests were not duplicated.",
+            outcome.cloned_plan_id,
+            outcome.source_plan_id,
+            outcome.source_revision.get()
+        ));
     Ok(format!(
         "Created and activated '{}' with independent plan identity {}.",
         app.state.sim_setup.active_plan_name(),
@@ -511,7 +514,10 @@ pub(super) fn commit_design_variable(
     app.state.sim_setup = setup;
     app.state.workspace = workspace;
     app.invalidate_simulation_preflight();
-    app.state.workbench.analysis_lifecycle_status = receipt.status_line();
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_receipt(receipt.status_line());
     Ok(format!(
         "Created design variable {variable_name} in plan {}.",
         app.state.sim_setup.active_plan_name()
@@ -609,7 +615,10 @@ pub(super) fn commit_saved_output(
     app.state.sim_setup = setup;
     app.state.workspace = workspace;
     app.invalidate_simulation_preflight();
-    app.state.workbench.analysis_lifecycle_status = receipt.status_line();
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_receipt(receipt.status_line());
     Ok(format!(
         "Added saved output {output_name} to plan {}.",
         app.state.sim_setup.active_plan_name()
@@ -652,11 +661,17 @@ pub(super) fn commit_plan_change(
             app.state.workspace = workspace;
             app.state.sim_setup = setup;
             app.invalidate_simulation_preflight();
-            app.state.workbench.analysis_lifecycle_status = receipt.status_line();
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .record_receipt(receipt.status_line());
             true
         }
         Err(error) => {
-            app.state.workbench.analysis_lifecycle_status = error;
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .record_refusal(error);
             false
         }
     }

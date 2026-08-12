@@ -1258,32 +1258,49 @@ pub(super) fn native_bsim4_model_params_upper_map(
     Ok(resolved)
 }
 
-/// Report topology diagnostics and return the nodes with no DC path to ground.
+/// Report topology diagnostics and return their typed DC severity.
 ///
 /// Two independent questions are asked here. Xyce's lead-group analysis
 /// supplies the "connected to only 1 device Terminal" notice, which is a
 /// wiring-mistake heuristic. [`analyze_dc_ground_paths`] answers the separate
-/// question of whether anything determines a node's DC voltage; only that
-/// second list is returned, because the operating point refuses to report a
-/// bias for those nodes.
+/// question of whether anything determines a node's DC voltage. Every such
+/// node is warned. The typed result separately identifies current-driven
+/// floating components that the operating point must refuse.
 ///
 /// [`analyze_dc_ground_paths`]: crate::netlist::analyze_dc_ground_paths
-pub(super) fn collect_floating_nodes(flat_elements: &[crate::netlist::Element]) -> Vec<String> {
+pub(super) fn collect_floating_nodes(
+    flat_elements: &[crate::netlist::Element],
+    has_global_rshunt: bool,
+    capacitor_ic_mode: crate::netlist::CapacitorIcDcMode,
+) -> crate::netlist::DcGroundPathDiagnostics {
     if let Ok(diagnostics) = crate::netlist::analyze_xyce_connectivity(flat_elements) {
         for node in diagnostics.one_device_terminal_nodes {
             log::warn!("Voltage Node ({node}) connected to only 1 device Terminal");
         }
     }
 
+    if has_global_rshunt {
+        // RSHUNT is an authored conducting path from every electrical node to
+        // ground. Lead-count diagnostics remain useful, but a no-DC-path
+        // warning or fatal subset would contradict the installed circuit.
+        return crate::netlist::DcGroundPathDiagnostics {
+            analysis_complete: true,
+            ..Default::default()
+        };
+    }
+
     // An unanalyzable topology yields no nodes rather than a guess, leaving
     // every analysis free to run exactly as it did before.
-    let Ok(diagnostics) = crate::netlist::analyze_dc_ground_paths(flat_elements) else {
-        return Vec::new();
+    let Ok(diagnostics) = crate::netlist::analyze_dc_ground_paths_with_capacitor_ic_mode(
+        flat_elements,
+        capacitor_ic_mode,
+    ) else {
+        return crate::netlist::DcGroundPathDiagnostics::default();
     };
     for node in &diagnostics.no_dc_path_nodes {
         log::warn!("Voltage Node ({node}) does not have a DC path to ground");
     }
-    diagnostics.no_dc_path_nodes
+    diagnostics
 }
 
 /// Diagnostic descriptor for well-known MOS model levels.

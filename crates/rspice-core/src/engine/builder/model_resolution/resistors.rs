@@ -357,6 +357,16 @@ fn resistor_uses_xyce_default_value(instance_params: &[(String, f64)]) -> bool {
     .is_some()
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ResolvedResistorBaseValue {
+    /// Resistance after the model multiplier, before temperature and instance
+    /// scaling. This is the value from which the electrical branch is built.
+    electrical_resistance: f64,
+    /// Xyce's stored instance `R`: the explicit, sampled, geometry-derived,
+    /// or default base value before the model multiplier and other scaling.
+    reported_resistance: f64,
+}
+
 fn resolve_level2_resistor_electrical_subset(
     element_name: &str,
     model_name: &str,
@@ -365,7 +375,7 @@ fn resolve_level2_resistor_electrical_subset(
     model_def: &crate::netlist::ModelDef,
     instance_params: &[(String, f64)],
     eval_ctx: &crate::netlist::ParamContext,
-) -> Result<f64, SimulationError> {
+) -> Result<ResolvedResistorBaseValue, SimulationError> {
     let uses_xyce_default = resistor_uses_xyce_default_value(instance_params);
     let mut resistance = instance_param(instance_params, &["R", "VALUE"]);
     if resistance.is_none() && !uses_xyce_default && value.is_finite() && value > 0.0 {
@@ -388,7 +398,10 @@ fn resolve_level2_resistor_electrical_subset(
         let Some(rsh) = resolve_model_param(model_def, &["RSH", "SHEETRES", "SHEETR"], eval_ctx)?
         else {
             if uses_xyce_default {
-                return Ok(1000.0);
+                return Ok(ResolvedResistorBaseValue {
+                    electrical_resistance: 1000.0,
+                    reported_resistance: 1000.0,
+                });
             }
             return Err(SimulationError::Circuit(format!(
                 "Resistor '{}' model '{}' requires instance R or RSH with L/W geometry for native Xyce LEVEL=2",
@@ -408,7 +421,10 @@ fn resolve_level2_resistor_electrical_subset(
                 .flatten()
         });
         if uses_xyce_default && l.is_none() {
-            return Ok(1000.0);
+            return Ok(ResolvedResistorBaseValue {
+                electrical_resistance: 1000.0,
+                reported_resistance: 1000.0,
+            });
         }
         let l = l.ok_or_else(|| {
             SimulationError::Circuit(format!(
@@ -428,7 +444,10 @@ fn resolve_level2_resistor_electrical_subset(
         let w_eff = w - narrow;
         if !l_eff.is_finite() || !w_eff.is_finite() || l_eff <= 0.0 || w_eff < 0.0 {
             if uses_xyce_default {
-                return Ok(1000.0);
+                return Ok(ResolvedResistorBaseValue {
+                    electrical_resistance: 1000.0,
+                    reported_resistance: 1000.0,
+                });
             }
             return Err(SimulationError::Circuit(format!(
                 "Resistor '{}' has invalid Xyce LEVEL=2 effective geometry (L={}, W={}, NARROW={})",
@@ -450,12 +469,16 @@ fn resolve_level2_resistor_electrical_subset(
         )));
     }
 
-    Ok(resistance.ok_or_else(|| {
+    let reported_resistance = resistance.ok_or_else(|| {
         SimulationError::Circuit(format!(
             "Resistor '{}' model '{}' LEVEL=2 value could not be resolved",
             element_name, model_name
         ))
-    })? * multiplier)
+    })?;
+    Ok(ResolvedResistorBaseValue {
+        electrical_resistance: reported_resistance * multiplier,
+        reported_resistance,
+    })
 }
 
 fn apply_resistor_instance_scaling(
@@ -580,10 +603,11 @@ fn resolve_level1_model_geometry_resistance(
 /// Resistor parameters after `.PARAM`, model-card, and `.STEP` resolution.
 pub struct ResolvedResistorParameters {
     pub resistance: f64,
-    /// Value reported by Xyce's `R:<name>` parameter probe.  Ordinary
-    /// resistors report the effective branch resistance; LEVEL=2 thermal
-    /// resistors retain their nominal material value while `M` scales the
-    /// branch conductance.
+    /// Value stored in the instance `R` parameter and reported by Xyce's
+    /// `R:<name>` probe. Ordinary resistors retain their explicit, sampled,
+    /// geometry-derived, or default base value before model multiplication,
+    /// temperature correction, `SCALE`, and `M`. LEVEL=2 thermal resistors
+    /// retain their nominal material value while `M` scales conductance.
     pub reported_resistance: f64,
     pub width: f64,
     pub tc1: f64,
@@ -638,53 +662,59 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
         None
     };
 
-    let mut resistance = if let (Some(2), Some(model_def), Some(model_name)) =
-        (resistor_level, model_def, model_name)
-    {
-        if level2_requests_self_consistent_thermal_resistor(model_def, instance_params) {
-            Some(resolve_level2_thermal_resistor_static_value(
-                element_name,
-                model_name,
-                model_def,
-                instance_params,
-                &eval_ctx,
-            )?)
+    let (mut resistance, mut reported_resistance) =
+        if let (Some(2), Some(model_def), Some(model_name)) =
+            (resistor_level, model_def, model_name)
+        {
+            if level2_requests_self_consistent_thermal_resistor(model_def, instance_params) {
+                let resistance = resolve_level2_thermal_resistor_static_value(
+                    element_name,
+                    model_name,
+                    model_def,
+                    instance_params,
+                    &eval_ctx,
+                )?;
+                (Some(resistance), Some(resistance))
+            } else {
+                let resolved = resolve_level2_resistor_electrical_subset(
+                    element_name,
+                    model_name,
+                    value,
+                    value_expr,
+                    model_def,
+                    instance_params,
+                    &eval_ctx,
+                )?;
+                (
+                    Some(resolved.electrical_resistance),
+                    Some(resolved.reported_resistance),
+                )
+            }
         } else {
-            Some(resolve_level2_resistor_electrical_subset(
-                element_name,
-                model_name,
-                value,
-                value_expr,
-                model_def,
-                instance_params,
-                &eval_ctx,
-            )?)
-        }
-    } else {
-        let mut resistance = instance_param(instance_params, &["R", "VALUE"]);
-        if resistance.is_none() && uses_xyce_default && model_def.is_none() {
-            resistance = Some(1000.0);
-        }
-        if resistance.is_none()
-            && !uses_xyce_default
-            && (value.is_finite() || (value.is_infinite() && value.is_sign_positive()))
-        {
-            resistance = Some(value);
-        }
-        if resistance.is_none()
-            && let Some(expr) = value_expr
-        {
-            resistance = Some(
-                crate::netlist::expr::eval_expression(expr, &eval_ctx).map_err(|e| {
-                    SimulationError::Circuit(format!(
-                        "Resistor '{}' value expression could not be resolved: {}",
-                        element_name, e
-                    ))
-                })?,
-            );
-        }
-        resistance
-    };
+            let mut resistance = instance_param(instance_params, &["R", "VALUE"]);
+            if resistance.is_none() && uses_xyce_default && model_def.is_none() {
+                resistance = Some(1000.0);
+            }
+            if resistance.is_none()
+                && !uses_xyce_default
+                && (value.is_finite() || (value.is_infinite() && value.is_sign_positive()))
+            {
+                resistance = Some(value);
+            }
+            if resistance.is_none()
+                && let Some(expr) = value_expr
+            {
+                resistance = Some(
+                    crate::netlist::expr::eval_expression(expr, &eval_ctx).map_err(|e| {
+                        SimulationError::Circuit(format!(
+                            "Resistor '{}' value expression could not be resolved: {}",
+                            element_name, e
+                        ))
+                    })?,
+                );
+            }
+            (resistance, None)
+        };
 
     if let Some(model_def) = model_def {
         let model_resistance = resolve_model_param(
@@ -715,6 +745,7 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
                     if resistance.is_none() {
                         resistance = geometry_resistance.or(model_resistance).or(Some(1.0e-3));
                     }
+                    reported_resistance = resistance;
                 }
                 SpiceDialect::BestAvailable | SpiceDialect::Xyce => {
                     // Preserve RSpice's established default and Xyce behavior:
@@ -723,6 +754,10 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
                     if resistance.is_none() {
                         resistance = Some(geometry_resistance.unwrap_or(1000.0));
                     }
+                    // Xyce's instance `R` member is fixed here. Its model `R`
+                    // is a separate electrical multiplier and must not alter
+                    // the value returned by an `R:<name>` parameter probe.
+                    reported_resistance = resistance;
                     let resistance_multiplier = model_resistance.unwrap_or(1.0);
                     resistance = resistance.map(|value| value * resistance_multiplier);
                 }
@@ -730,6 +765,10 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
         }
     } else if resistance.is_none() && uses_xyce_default {
         resistance = Some(1000.0);
+    }
+
+    if reported_resistance.is_none() {
+        reported_resistance = resistance;
     }
 
     let mut resolved = resistance.ok_or_else(|| {
@@ -744,6 +783,12 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
                 element_name
             ))
         }
+    })?;
+    let reported_resistance = reported_resistance.ok_or_else(|| {
+        SimulationError::Circuit(format!(
+            "Resistor '{}' has no reportable base resistance value",
+            element_name
+        ))
     })?;
 
     let reported_temp_c = instance_param(instance_params, &["TEMP"])
@@ -811,21 +856,8 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
         }
     }
 
-    let thermal_static_resistor = resistor_level == Some(2)
-        && model_def.is_some_and(|model| {
-            level2_requests_self_consistent_thermal_resistor(model, instance_params)
-        });
     let resistance =
         apply_resistor_instance_scaling(element_name, "resistance", resolved, instance_params)?;
-    let reported_resistance = if thermal_static_resistor {
-        // Xyce keeps the nominal material value in the R parameter report;
-        // multiplicity only scales the electrical branch conductance.
-        resolved
-    } else {
-        // Ordinary resistors report the effective branch resistance after
-        // model, temperature, and multiplicity scaling.
-        resistance
-    };
     Ok(ResolvedResistorParameters {
         resistance,
         reported_resistance,
@@ -1140,6 +1172,24 @@ R1 a 0 1k TC1=0.1 DTEMP=5
         );
         assert_eq!(dtemp.temperature_celsius, 35.0);
         assert_eq!(dtemp.resistance, 2_300.0);
+    }
+
+    #[test]
+    fn ordinary_reported_resistance_retains_base_instance_value() {
+        let resolved = resolve_effective_parameters_from_source(
+            r#"raw instance resistance remains the reported parameter
+.options temp=37
+R1 a 0 8 RMOD M=2
+.model RMOD R (R=3 TC1=0.1 TNOM=27)
+.end
+"#,
+            "R1",
+        );
+
+        // The electrical load is 8 * model-R(3) * temperature(2) / M(2).
+        assert_eq!(resolved.resistance.to_bits(), 24.0_f64.to_bits());
+        // Xyce's parameter map still points at the instance R member.
+        assert_eq!(resolved.reported_resistance.to_bits(), 8.0_f64.to_bits());
     }
 
     #[test]

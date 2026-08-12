@@ -10,7 +10,7 @@ use rspice_core::abort_signal::AbortSignal;
 
 use crate::services::simulation_runner as svc_runner;
 
-use super::super::engine_bridge::EngineBridge;
+use super::super::engine_bridge::{EngineBridge, SupplyCornerScale};
 use super::super::execution::ResolvedExecutionDependencies;
 use super::super::multi_run::AnalysisSpec;
 use super::super::results::SimulationResult;
@@ -41,7 +41,13 @@ pub(super) fn run_spec_request(
         .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
 
     if let Some(config) = config::analysis_config_from_spec(&spec) {
-        return bridge.run_with_abort_and_source_path(&config, netlist, source_path, abort_flag);
+        return bridge.run_with_abort_and_source_path(
+            &config,
+            netlist,
+            source_path,
+            point_scoped_supply_corner(&spec, &options),
+            abort_flag,
+        );
     }
 
     match spec {
@@ -102,6 +108,31 @@ pub(super) fn run_spec_request(
         | AnalysisSpec::PoleZero { .. }
         | AnalysisSpec::Sensitivity { .. } => Err(config_backed_spec_fallback_error(&spec)),
     }
+}
+
+/// The supply corner a request scoped to one PVT point must apply.
+///
+/// A corner contract narrowed to exactly one point is how a corner run's base
+/// analysis says which point it is; anything wider is a declared space, not a
+/// point, and scaling the deck's supplies by one of its values would be a
+/// fabrication. The operating point is excluded because its own run-point
+/// contract already carries the supply and applying it here as well would
+/// square the scale.
+fn point_scoped_supply_corner(
+    spec: &AnalysisSpec,
+    options: &SpecExecutionOptions,
+) -> Option<SupplyCornerScale> {
+    if matches!(spec, AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. }) {
+        return None;
+    }
+    let contract = options.corner.as_ref()?;
+    let [point] = contract.points.as_slice() else {
+        return None;
+    };
+    Some(SupplyCornerScale {
+        corner_voltage: point.voltage,
+        nominal_voltage: contract.nominal_voltage?,
+    })
 }
 
 #[inline]
