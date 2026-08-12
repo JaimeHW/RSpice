@@ -98,6 +98,16 @@ relative include, the `FOOBAR -> BAR` ordinary/global parameter chain, the
 six-point DC grid, and the analytic voltage, source-current, and scalar-output
 values. No OutputData artifact or exclusion promotion is introduced.
 
+The Certification BUG 302 delimiter wrapper is reconstructed as one typed
+eight-member relation while its DC and transient workers retain their existing
+independently-qualified numerical contracts. RSpice preserves the executable
+wrapper's default-to-comma and default-to-tab line transformations and its
+exact invalid-delimiter warning predicate. The retained OutputData additionally
+proves the README's stronger claim that invalid delimiters fall back to the
+default bytes, although those references were not read by the historical
+wrapper. The empty owner has no invented numerical gold and no exclusion row is
+changed.
+
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
 and verifier identities. The PARAMS1, PARSER nakedAlgebra, and Certification

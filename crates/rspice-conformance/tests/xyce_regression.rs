@@ -9598,6 +9598,27 @@ fn test_xyce_bug267_global_parameter_include_success_oracle() {
 }
 
 #[test]
+fn test_xyce_bug302_print_delimiter_relational_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_302/bug_302.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "BUG302 must remain owned by its removed historical wrapper"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported && !result.upstream_excluded,
+        "BUG302 should execute its typed eight-member delimiter relation, got {result:?}"
+    );
+    assert_eq!(result.contract, "bug302_print_delimiter_relational_wrapper");
+    assert_eq!(result.upstream_exclusion_source, None);
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_bug352_diode_model_expression_equivalence_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

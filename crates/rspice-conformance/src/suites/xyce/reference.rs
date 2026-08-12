@@ -1767,6 +1767,51 @@ impl XyceTestRunner {
         Self::xyce_prn_scientific_text(value, XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION)
     }
 
+    /// Serialize a real-valued standard Xyce PRN table with the delimiter
+    /// selected by its typed `.PRINT` request. The footer intentionally stays
+    /// human-readable, matching Release 7.10's outputters and BUG_302 wrapper.
+    pub(super) fn xyce_prn_text_with_delimiter(
+        table: &XycePrnTable,
+        delimiter: &PrintDelimiter,
+    ) -> Result<String, String> {
+        if matches!(delimiter, PrintDelimiter::Custom(value) if value.is_empty()) {
+            return Err("Xyce custom PRN delimiter must be nonempty".to_string());
+        }
+        if table.columns.is_empty() {
+            return Err("standard PRN output requires at least one column".to_string());
+        }
+        let separator = delimiter.separator();
+        let mut output = String::new();
+        output.push_str(&table.columns.join(separator));
+        output.push('\n');
+        for (row_index, row) in table.rows.iter().enumerate() {
+            if row.len() != table.columns.len() {
+                return Err(format!(
+                    "standard PRN row {row_index} has {} fields for {} columns",
+                    row.len(),
+                    table.columns.len()
+                ));
+            }
+            let mut fields = Vec::with_capacity(row.len());
+            for (column_index, value) in row.iter().enumerate() {
+                if column_index == 0 && table.columns[0].eq_ignore_ascii_case("Index") {
+                    if !value.is_finite() || *value < 0.0 || value.fract() != 0.0 {
+                        return Err(format!(
+                            "standard PRN row {row_index} has invalid Index value {value}"
+                        ));
+                    }
+                    fields.push(format!("{value:.0}"));
+                } else {
+                    fields.push(Self::xyce_default_prn_text(*value)?);
+                }
+            }
+            output.push_str(&fields.join(separator));
+            output.push('\n');
+        }
+        output.push_str("End of Xyce(TM) Simulation\n");
+        Ok(output)
+    }
+
     pub(super) fn xyce_prn_scientific_text(
         value: Value,
         scientific_precision: usize,

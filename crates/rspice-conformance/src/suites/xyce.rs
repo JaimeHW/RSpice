@@ -36,12 +36,13 @@ use rspice_core::netlist::{
     DeviceInitialConditionSource, DuplicateSubcircuitPortBindingError, ElementKind,
     ElementProvenance, FreqVariation, MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError,
     Netlist, NetlistParseOptions, OutputDirectiveKind, OutputExpressionIssue, OutputSymbolKind,
-    ParameterRedefinitionPolicy, ParametricValue, ParseError, StartupDiagnosticCode,
-    StartupDiagnosticStage, StartupDirectiveKind, StartupDirectiveScope, StatisticalParamMode,
-    StepCommand, StepSweep, StepTarget, SubcircuitDef, UnresolvedSubcircuitParameterError,
-    XYCE_DEFAULT_ZERO_RESISTANCE_TOL, flatten_netlist, flatten_netlist_with_models,
-    flatten_netlist_with_models_with_abort, validate_output_expressions_with_abort,
-    validate_output_symbols, validate_output_symbols_with_abort,
+    ParameterRedefinitionPolicy, ParametricValue, ParseError, PrintDelimiter,
+    StartupDiagnosticCode, StartupDiagnosticStage, StartupDirectiveKind, StartupDirectiveScope,
+    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef,
+    UnresolvedSubcircuitParameterError, XYCE_DEFAULT_ZERO_RESISTANCE_TOL, flatten_netlist,
+    flatten_netlist_with_models, flatten_netlist_with_models_with_abort,
+    validate_output_expressions_with_abort, validate_output_symbols,
+    validate_output_symbols_with_abort,
 };
 use rspice_core::numerics::integration::TransientLteReference;
 use rspice_core::{Complex64, Engine, Value};
@@ -1381,6 +1382,283 @@ const XYCE_BUG267_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
         1_401,
         "3748075f2831433673802f5d46aa76b2d9a8764b6b295ca2161cbff06c72ef86",
         "696265490951770a677336288998054fadc57ca8c76f559037cca7251a96a494",
+    ),
+];
+
+// BUG_302 is an output-formatting wrapper. Its zero-byte owner runs two
+// four-member DC/TRAN cohorts and proves that COMMA and TAB are exact textual
+// transformations of default PRN output. Invalid delimiters retain the
+// default layout and emit Xyce's historical warning. The eight workers remain
+// independently qualified by their existing numerical contracts; only the
+// removed wrapper owner is reconstructed here.
+const XYCE_BUG302_CONTRACT: &str = "bug302_print_delimiter_relational_wrapper";
+const XYCE_BUG302_PATH: &str = "Netlists/Certification_Tests/BUG_302/bug_302.cir";
+const XYCE_BUG302_RECORD: &str = "netlists/certification_tests/bug_302/bug_302.cir";
+const XYCE_BUG302_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_302/exclude";
+const XYCE_BUG302_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG302_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG302_HISTORICAL_RECORD_COUNT: usize = 24;
+const XYCE_BUG302_HISTORICAL_RECORD_BYTES: usize = 5_903;
+const XYCE_BUG302_HISTORICAL_RECORDS_SHA256: &str =
+    "f44cf8622021c04f16698e1bde928e0eba720f3203f877f1c3378dd3dbabb2ec";
+const XYCE_BUG302_HISTORICAL_RECORDS_BLAKE3: &str =
+    "cb83a9ff9d437c3a1d90fb713ce282bb09b3f5505344504c9e422c67babc90c6";
+const XYCE_BUG302_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 24] = [
+    (
+        "Netlists/Certification_Tests/BUG_302/CMakeLists.txt",
+        2_409,
+        "b7e76dc46d95b8770f1dd38c48bc06cc6069e2d8a64acbb5789b4e9abf08bb06",
+        "c56d738bf5a1e694025f4be75b1ed8c7fab804aaa143413b45a11958ff1ad025",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_302/DC_comma.cir",
+        1_361,
+        "576fd732409aef8363f1decfadddf636fa1b525922a3f6dd1820d9e2dc040f3d",
+        "1b5910ba8cbaa523ce8aeb7f114a5fe993433c9779320ae3e8f2201b3f096f3e",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_302/DC_defaults.cir",
+        1_297,
+        "00a7314ed5201c2ac0786ee396d86277de0ef3fe52f402e21dec5351a9816e60",
+        "4c031996066b6e45e06a77a4655d37e94752c7008617c68b602fd25222c80308",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_302/DC_delimiter_invalid.cir",
+        1_389,
+        "579411aaab9b91e298a878bd95ba94d457807f574249722f048548083b100aaf",
+        "f93d00eac0f6a4b6385d0f55c82c8cc56e62edc20d2dc3992750b8fea069a4a2",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_302/DC_tab.cir",
+        1_357,
+        "a6f7eafbf54aea6ad9a773c304daf288ffb5ad0e7e044bb09526209f4f05c59c",
+        "ed8dfc2890c36d76561137a22f340dd259b1947fe306d94353e38215b82f8d8e",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_302/Manifest.txt",
+        205,
+        "35bf395fa34c0d71654c1c7fac274c257b017e33421fb03115c33c0add284cfe",
+        "6265882d882622cdaa3dbdd2190f10dddeb54f788d59db06d2fba57c86986aaf",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_302/README",
+        2_545,
+        "8728ead6436c00599afe301c5f4deae92f336d4808f8b3c166a11c2a864ee3e0",
+        "cb4aa630012d2814cd24856a67a8e7e478f309b6f2c9b47a0390849f4e350700",
+    ),
+    (
+        XYCE_BUG302_PATH,
+        0,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_302/bug_302.cir.sh",
+        5_529,
+        "1048df29a91bae4bb6d2241d2ad095f246072316573c141d933e307c313a6fdd",
+        "969733bc7a34e752df9eab7f8ed78d36e6f5978f9b7c35e5265b53a4b75c6c1a",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_302/exclude",
+        199,
+        "e93976af27802fe2548ba96016c341d35febaf64d476001a0bb4f8a3bfbbc702",
+        "e570ab7eed43a3a5e838bcda614ee90d0d3a8848a30e62e897c8956a4fe2b457",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_302/tags",
+        46,
+        "d4dfec2dad975e8cf478d3f74ed8d5cf54efc2787671fbbab41f4e3ad7e73e06",
+        "22d1263551ed12233d6e6dd7fe27e20768b742f997f04b45cd9e2eb7294bfbf9",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_302/transient_comma.cir",
+        362,
+        "333bf43c003628e28b474fca7ce0faff32439b4030acb05efb2208b1f665f52c",
+        "9d4033979f95656d878feca50f34686ca471b7d60a84a9cd79766991c989417a",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_302/transient_defaults.cir",
+        271,
+        "c0b62f4babac639a79a7168451adb974dd8d33dc2bf34701e01a8062d346a21e",
+        "1724f72e22aba6c57fcfb598c26741b818abf4708d84b8a13bbedaa29a1b7616",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_302/transient_delimiter_invalid.cir",
+        362,
+        "a35072f2fcfab6bc8a7fddf39313d3ae7ef55a7b3604687ecfb467e893618d9d",
+        "5c4325f6ba74c7517cd31b6668798c3537dd48788f5907ab440d4c7840c249f0",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_302/transient_tab.cir",
+        360,
+        "9904be03558e7abf27fe03da8eefc51abc66fb9b11cff7aad41c330ea868e7b3",
+        "cbe63f1ac2be529a771bdf396834e56fe2aa94fb88a3a688c16f2db41791ea35",
+    ),
+    (
+        "OutputData/Certification_Tests/BUG_302/DC_comma.cir.prn",
+        28_334,
+        "b8765663f204ccb112c1242be41a29371bf00b65346e6eb0f4313a2d8cff1531",
+        "5afe7b575153389589a8e34d7ce60b17dd03654ad9b07fabb6fe398a146f11ba",
+    ),
+    (
+        "OutputData/Certification_Tests/BUG_302/DC_defaults.cir.prn",
+        34_163,
+        "02f63a35008a7d4decdf8cb19a52ec85ec006bd9bb3fac16b89d88b10adb5a6b",
+        "ef47fbc7a31d8b6d6de2f5ae1195f933a6f7a701cbbf8a051e4bfb029afbf8bf",
+    ),
+    (
+        "OutputData/Certification_Tests/BUG_302/DC_delimiter_invalid.cir.prn",
+        34_163,
+        "02f63a35008a7d4decdf8cb19a52ec85ec006bd9bb3fac16b89d88b10adb5a6b",
+        "ef47fbc7a31d8b6d6de2f5ae1195f933a6f7a701cbbf8a051e4bfb029afbf8bf",
+    ),
+    (
+        "OutputData/Certification_Tests/BUG_302/DC_tab.cir.prn",
+        28_334,
+        "865acf8210101456644a958268946dfc88c4c1c45785ada9ec2d9c674cbe2e8b",
+        "e91b4f886bb217b0609d1a8a910b4de641fcf61d9ab1f6a9090b76b4240b83bc",
+    ),
+    (
+        "OutputData/Certification_Tests/BUG_302/transient_comma.cir.prn",
+        2_277,
+        "663590ebb3db66ae99e4df223558acef7a808ee29b6afccbca6db236b2bc791a",
+        "55629f198cb511bbcfef12d61d7c999b713e7cc979903a91ef27e301f13ebe06",
+    ),
+    (
+        "OutputData/Certification_Tests/BUG_302/transient_defaults.cir.prn",
+        2_982,
+        "ae915e93d317ba29fb3db575621939138536b572d8361d2847d147f56c903732",
+        "d4736c97adc60bc5cf79c6bc7157a0168cad22e10a7da1696bcaa36f521707ce",
+    ),
+    (
+        "OutputData/Certification_Tests/BUG_302/transient_delimiter_invalid.cir.prn",
+        2_982,
+        "ae915e93d317ba29fb3db575621939138536b572d8361d2847d147f56c903732",
+        "d4736c97adc60bc5cf79c6bc7157a0168cad22e10a7da1696bcaa36f521707ce",
+    ),
+    (
+        "OutputData/Certification_Tests/BUG_302/transient_tab.cir.prn",
+        2_277,
+        "1cbbd899838c8fccdc351431e85f3e8508a547a5c0aeae11cfffa586e98e0b5e",
+        "15ae9ab1fe2680cef41d9aabe64f421256e7653247cb3c64b3857626a47f7319",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG302_RETAINED_SOURCES: [(&str, usize, &str, &str); 10] = [
+    (
+        "DC_comma.cir",
+        1_361,
+        "576fd732409aef8363f1decfadddf636fa1b525922a3f6dd1820d9e2dc040f3d",
+        "1b5910ba8cbaa523ce8aeb7f114a5fe993433c9779320ae3e8f2201b3f096f3e",
+    ),
+    (
+        "DC_defaults.cir",
+        1_297,
+        "00a7314ed5201c2ac0786ee396d86277de0ef3fe52f402e21dec5351a9816e60",
+        "4c031996066b6e45e06a77a4655d37e94752c7008617c68b602fd25222c80308",
+    ),
+    (
+        "DC_delimiter_invalid.cir",
+        1_389,
+        "579411aaab9b91e298a878bd95ba94d457807f574249722f048548083b100aaf",
+        "f93d00eac0f6a4b6385d0f55c82c8cc56e62edc20d2dc3992750b8fea069a4a2",
+    ),
+    (
+        "DC_tab.cir",
+        1_357,
+        "a6f7eafbf54aea6ad9a773c304daf288ffb5ad0e7e044bb09526209f4f05c59c",
+        "ed8dfc2890c36d76561137a22f340dd259b1947fe306d94353e38215b82f8d8e",
+    ),
+    (
+        "README",
+        2_545,
+        "8728ead6436c00599afe301c5f4deae92f336d4808f8b3c166a11c2a864ee3e0",
+        "cb4aa630012d2814cd24856a67a8e7e478f309b6f2c9b47a0390849f4e350700",
+    ),
+    (
+        "bug_302.cir",
+        0,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+    ),
+    (
+        "transient_comma.cir",
+        362,
+        "333bf43c003628e28b474fca7ce0faff32439b4030acb05efb2208b1f665f52c",
+        "9d4033979f95656d878feca50f34686ca471b7d60a84a9cd79766991c989417a",
+    ),
+    (
+        "transient_defaults.cir",
+        271,
+        "c0b62f4babac639a79a7168451adb974dd8d33dc2bf34701e01a8062d346a21e",
+        "1724f72e22aba6c57fcfb598c26741b818abf4708d84b8a13bbedaa29a1b7616",
+    ),
+    (
+        "transient_delimiter_invalid.cir",
+        362,
+        "a35072f2fcfab6bc8a7fddf39313d3ae7ef55a7b3604687ecfb467e893618d9d",
+        "5c4325f6ba74c7517cd31b6668798c3537dd48788f5907ab440d4c7840c249f0",
+    ),
+    (
+        "transient_tab.cir",
+        360,
+        "9904be03558e7abf27fe03da8eefc51abc66fb9b11cff7aad41c330ea868e7b3",
+        "cbe63f1ac2be529a771bdf396834e56fe2aa94fb88a3a688c16f2db41791ea35",
+    ),
+];
+const XYCE_BUG302_RETAINED_OUTPUTS: [(&str, usize, &str, &str); 8] = [
+    (
+        "DC_comma.cir.prn",
+        28_334,
+        "b8765663f204ccb112c1242be41a29371bf00b65346e6eb0f4313a2d8cff1531",
+        "5afe7b575153389589a8e34d7ce60b17dd03654ad9b07fabb6fe398a146f11ba",
+    ),
+    (
+        "DC_defaults.cir.prn",
+        34_163,
+        "02f63a35008a7d4decdf8cb19a52ec85ec006bd9bb3fac16b89d88b10adb5a6b",
+        "ef47fbc7a31d8b6d6de2f5ae1195f933a6f7a701cbbf8a051e4bfb029afbf8bf",
+    ),
+    (
+        "DC_delimiter_invalid.cir.prn",
+        34_163,
+        "02f63a35008a7d4decdf8cb19a52ec85ec006bd9bb3fac16b89d88b10adb5a6b",
+        "ef47fbc7a31d8b6d6de2f5ae1195f933a6f7a701cbbf8a051e4bfb029afbf8bf",
+    ),
+    (
+        "DC_tab.cir.prn",
+        28_334,
+        "865acf8210101456644a958268946dfc88c4c1c45785ada9ec2d9c674cbe2e8b",
+        "e91b4f886bb217b0609d1a8a910b4de641fcf61d9ab1f6a9090b76b4240b83bc",
+    ),
+    (
+        "transient_comma.cir.prn",
+        2_277,
+        "663590ebb3db66ae99e4df223558acef7a808ee29b6afccbca6db236b2bc791a",
+        "55629f198cb511bbcfef12d61d7c999b713e7cc979903a91ef27e301f13ebe06",
+    ),
+    (
+        "transient_defaults.cir.prn",
+        2_982,
+        "ae915e93d317ba29fb3db575621939138536b572d8361d2847d147f56c903732",
+        "d4736c97adc60bc5cf79c6bc7157a0168cad22e10a7da1696bcaa36f521707ce",
+    ),
+    (
+        "transient_delimiter_invalid.cir.prn",
+        2_982,
+        "ae915e93d317ba29fb3db575621939138536b572d8361d2847d147f56c903732",
+        "d4736c97adc60bc5cf79c6bc7157a0168cad22e10a7da1696bcaa36f521707ce",
+    ),
+    (
+        "transient_tab.cir.prn",
+        2_277,
+        "1cbbd899838c8fccdc351431e85f3e8508a547a5c0aeae11cfffa586e98e0b5e",
+        "15ae9ab1fe2680cef41d9aabe64f421256e7653247cb3c64b3857626a47f7319",
     ),
 ];
 
@@ -9623,6 +9901,7 @@ mod comparison;
 mod contracts;
 mod contracts_bug159;
 mod contracts_bug267;
+mod contracts_bug302;
 mod contracts_bug307;
 mod contracts_bug352;
 mod contracts_bug354;
