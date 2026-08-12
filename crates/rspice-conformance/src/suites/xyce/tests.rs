@@ -28736,11 +28736,16 @@ fn bug39_fixture() -> (tempfile::TempDir, Vec<String>, Vec<String>) {
     }
 
     let wrapper_rows = [
-        XyceBug39GaussianRole::AgaussAbsolute,
-        XyceBug39GaussianRole::GaussRelative,
+        XyceBug39GaussianRole::AgaussAbsolute.path(),
+        XyceBug39GaussianRole::GaussRelative.path(),
     ]
     .into_iter()
-    .map(|role| format!("{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}", role.path()))
+    .chain(
+        XyceBug39DeterministicRole::ALL
+            .into_iter()
+            .map(XyceBug39DeterministicRole::path),
+    )
+    .map(|path| format!("{path}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"))
     .collect::<Vec<_>>();
     fs::write(
         root.path().join(HARNESS_MANIFEST_FILE),
@@ -28867,6 +28872,101 @@ fn bug39_release_710_oracle_generated_sources_and_sampled_plans_are_exact() {
 }
 
 #[test]
+fn bug39_deterministic_plans_and_gold_semantics_are_exact() {
+    let (root, _, _) = bug39_fixture();
+    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    for role in XyceBug39DeterministicRole::ALL {
+        let deck = XyceDeck {
+            path: root.path().join(role.path()),
+            section: XyceDeckSection::Netlists,
+            relative_path: role.path().to_string(),
+        };
+        let contract = runner
+            .bug39_deterministic_contract(&deck)
+            .expect("deterministic BUG39 role is selected")
+            .expect("exact deterministic BUG39 provenance qualifies");
+        assert_eq!(contract.role, role);
+        assert_eq!(
+            contract
+                .reference_path
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some(role.reference_file_name())
+        );
+        let (plan, netlist, reference) = runner
+            .bug39_deterministic_plan(&contract)
+            .expect("build deterministic BUG39 plan and parse exact gold");
+        XyceTestRunner::validate_bug39_deterministic_semantics(role, &plan, &netlist, &reference)
+            .expect("typed deterministic BUG39 plan and gold semantics remain exact");
+        assert_eq!(plan.print.probes, ["I(I1)", "V(1)"]);
+        assert_eq!(reference.rows, [[0.0, -1.0, role.expected_resistance()]]);
+    }
+}
+
+#[test]
+fn release_710_one_point_dc_verifier_checks_axis_and_every_dependent_signal() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let results = [DcSweepPointResult {
+        sweep_value: -1.0,
+        result: rspice_core::SimulationResult::new(0, 0),
+        device_op_report: rspice_core::circuit::DeviceOpReport::default(),
+    }];
+    let good = XycePrnTable {
+        columns: ["Index", "I(I1)", "V(1)", "V(2)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: vec![vec![0.0, -1.0, 1.0, 2.0]],
+    };
+    assert!(
+        runner
+            .compare_release_7_10_xyce_verify_dc_tables(
+                "one-point unit",
+                &good,
+                &good,
+                &results,
+                &results,
+            )
+            .expect("exact one-point tables compare")
+            .is_empty()
+    );
+
+    let mut wrong_axis = good.clone();
+    wrong_axis.rows[0][1] = -0.9;
+    assert!(
+        runner
+            .compare_release_7_10_xyce_verify_dc_tables(
+                "one-point unit",
+                &good,
+                &wrong_axis,
+                &results,
+                &results,
+            )
+            .is_err(),
+        "the strengthened contract must reject the historically dormant test-axis mismatch"
+    );
+
+    for column in [2, 3] {
+        let mut wrong_signal = good.clone();
+        wrong_signal.rows[0][column] *= 1.02;
+        assert_eq!(
+            runner
+                .compare_release_7_10_xyce_verify_dc_tables(
+                    "one-point unit",
+                    &good,
+                    &wrong_signal,
+                    &results,
+                    &results,
+                )
+                .expect("one-point dependent mismatch is a comparison result")
+                .len(),
+            1,
+            "dependent column {column} must independently satisfy the historical tolerance"
+        );
+    }
+}
+
+#[test]
 fn bug39_population_mean_and_sigma_predicate_is_strict_and_independent() {
     let samples = (0..XYCE_BUG39_SAMPLE_COUNT)
         .map(|index| if index % 2 == 0 { 99.0 } else { 101.0 })
@@ -28966,6 +29066,75 @@ fn bug39_two_anchor_provenance_fails_closed_on_census_and_ownership_drift() {
     )
     .expect("mutate BUG39 independent qualification");
     assert!(runner.validate_bug39_provenance(&contract).is_err());
+}
+
+#[test]
+fn bug39_deterministic_provenance_fails_closed_on_source_gold_and_manifest_drift() {
+    let (root, wrapper_rows, exclusion_rows) = bug39_fixture();
+    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    runner
+        .validate_bug39_deterministic_provenance()
+        .expect("exact deterministic BUG39 family qualifies");
+
+    let gold = root
+        .path()
+        .join(XYCE_BUG39_INT_PATH)
+        .with_file_name(XyceBug39DeterministicRole::Int.reference_file_name());
+    fs::remove_file(&gold).expect("remove BUG39 deterministic gold");
+    assert!(runner.validate_bug39_deterministic_provenance().is_err());
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    fs::copy(
+        source_root
+            .join("Netlists/Certification_Tests/BUG_39_SON")
+            .join(XyceBug39DeterministicRole::Int.reference_file_name()),
+        &gold,
+    )
+    .expect("restore deterministic gold");
+
+    let source = root.path().join(XYCE_BUG39_LIMIT_PATH);
+    let canonical_source = fs::read(&source).expect("read deterministic source");
+    fs::write(
+        &source,
+        [canonical_source.as_slice(), b"* drift\n"].concat(),
+    )
+    .expect("mutate deterministic source");
+    assert!(runner.validate_bug39_deterministic_provenance().is_err());
+    fs::write(&source, canonical_source).expect("restore deterministic source");
+
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!(
+            "{}\n",
+            wrapper_rows
+                .iter()
+                .filter(|row| !row.starts_with(XYCE_BUG39_POW_PATH))
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n")
+        ),
+    )
+    .expect("remove POW wrapper ownership");
+    assert!(runner.validate_bug39_deterministic_provenance().is_err());
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{}\n", wrapper_rows.join("\n")),
+    )
+    .expect("restore deterministic wrapper ownership");
+
+    let fabricated = format!(
+        "{}\t{XYCE_BUG39_HISTORICAL_EXCLUDE_PATH}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{}",
+        XyceBug39DeterministicRole::Sign.path(),
+        XyceBug39DeterministicRole::Sign.result_contract()
+    );
+    let mut rows = exclusion_rows;
+    rows.push(fabricated);
+    let refs = rows.iter().map(String::as_str).collect::<Vec<_>>();
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&refs),
+    )
+    .expect("fabricate deterministic exclusion");
+    assert!(runner.validate_bug39_deterministic_provenance().is_err());
 }
 
 #[test]

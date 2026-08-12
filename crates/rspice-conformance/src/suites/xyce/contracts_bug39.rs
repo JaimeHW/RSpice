@@ -91,98 +91,10 @@ impl XyceTestRunner {
         contract: &XyceBug39GaussianContract,
     ) -> Result<(), String> {
         const LABEL: &str = "BUG_39_SON generated Gaussian mean/sigma family";
-        Self::validate_bug39_historical_oracle_provenance()?;
         if !Self::same_path(&contract.anchor_path, &self.root.join(contract.role.path())) {
             return Err(format!("{LABEL} contract target changed"));
         }
-
-        let family_dir = contract
-            .anchor_path
-            .parent()
-            .ok_or_else(|| format!("{LABEL} anchor has no family directory"))?;
-        let family_metadata = fs::symlink_metadata(family_dir)
-            .map_err(|error| format!("failed to inspect {LABEL} directory: {error}"))?;
-        if family_metadata.file_type().is_symlink() || !family_metadata.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} requires a physical, non-symlinked family directory"
-            ));
-        }
-
-        let expected_artifacts = XYCE_BUG39_RETAINED_ARTIFACTS
-            .into_iter()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        let mut retained_records = Vec::new();
-        let mut physical_names = Vec::new();
-        for entry in fs::read_dir(family_dir)
-            .map_err(|error| format!("failed to enumerate {LABEL}: {error}"))?
-        {
-            let entry = entry.map_err(|error| format!("failed to read {LABEL} entry: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path).map_err(|error| {
-                format!(
-                    "failed to inspect {LABEL} family entry '{}': {error}",
-                    path.display()
-                )
-            })?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{LABEL} family entry '{}' must be a regular non-symlink file",
-                    path.display()
-                ));
-            }
-            let file_name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or_else(|| format!("{LABEL} family entry name is not UTF-8"))?;
-            let key = file_name.to_ascii_lowercase();
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected_artifacts.get(&key).copied()
-            else {
-                return Err(format!(
-                    "{LABEL} complete physical family census has unexpected file '{file_name}'"
-                ));
-            };
-            if file_name != expected_name {
-                return Err(format!(
-                    "{LABEL} retained artifact spelling changed: expected '{expected_name}', got '{file_name}'"
-                ));
-            }
-            let bytes = fs::read(&path).map_err(|error| {
-                format!("failed to read {LABEL} artifact '{file_name}': {error}")
-            })?;
-            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
-            let sha256 = format!("{:x}", Sha256::digest(&canonical));
-            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-            if canonical.len() != expected_bytes
-                || sha256 != expected_sha256
-                || content_blake3 != expected_blake3
-            {
-                return Err(format!(
-                    "{LABEL} retained artifact '{file_name}' identity changed: bytes={}/{expected_bytes}, sha256={sha256}, blake3={content_blake3}",
-                    canonical.len()
-                ));
-            }
-            physical_names.push(key);
-            retained_records.push(format!(
-                "{expected_name}\t{expected_bytes}\t{expected_sha256}\t{expected_blake3}"
-            ));
-        }
-        physical_names.sort();
-        retained_records.sort_by_key(|record| record.to_ascii_lowercase());
-        let expected_names = expected_artifacts.keys().cloned().collect::<Vec<_>>();
-        let retained_hash = blake3::hash(retained_records.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        if physical_names != expected_names
-            || retained_records.len() != XYCE_BUG39_RETAINED_RECORD_COUNT
-            || retained_hash != XYCE_BUG39_RETAINED_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "{LABEL} retained physical/content census changed: records={}/{retained_hash}, files={physical_names:?}",
-                retained_records.len()
-            ));
-        }
+        let family_dir = self.validate_bug39_retained_family_provenance()?;
 
         let exclusions = Self::load_upstream_exclusions(&self.root)
             .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
@@ -279,6 +191,437 @@ impl XyceTestRunner {
             ));
         }
         Ok(())
+    }
+
+    fn validate_bug39_retained_family_provenance(&self) -> Result<PathBuf, String> {
+        const LABEL: &str = "BUG_39_SON retained family";
+        Self::validate_bug39_historical_oracle_provenance()?;
+        let family_dir = self.root.join("Netlists/Certification_Tests/BUG_39_SON");
+        let family_metadata = fs::symlink_metadata(&family_dir)
+            .map_err(|error| format!("failed to inspect {LABEL} directory: {error}"))?;
+        if family_metadata.file_type().is_symlink() || !family_metadata.file_type().is_dir() {
+            return Err(format!(
+                "{LABEL} requires a physical, non-symlinked family directory"
+            ));
+        }
+
+        let expected_artifacts = XYCE_BUG39_RETAINED_ARTIFACTS
+            .into_iter()
+            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
+            .collect::<BTreeMap<_, _>>();
+        let mut retained_records = Vec::new();
+        let mut physical_names = Vec::new();
+        for entry in fs::read_dir(&family_dir)
+            .map_err(|error| format!("failed to enumerate {LABEL}: {error}"))?
+        {
+            let entry = entry.map_err(|error| format!("failed to read {LABEL} entry: {error}"))?;
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path).map_err(|error| {
+                format!(
+                    "failed to inspect {LABEL} family entry '{}': {error}",
+                    path.display()
+                )
+            })?;
+            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+                return Err(format!(
+                    "{LABEL} family entry '{}' must be a regular non-symlink file",
+                    path.display()
+                ));
+            }
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| format!("{LABEL} family entry name is not UTF-8"))?;
+            let key = file_name.to_ascii_lowercase();
+            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
+                expected_artifacts.get(&key).copied()
+            else {
+                return Err(format!(
+                    "{LABEL} complete physical family census has unexpected file '{file_name}'"
+                ));
+            };
+            if file_name != expected_name {
+                return Err(format!(
+                    "{LABEL} retained artifact spelling changed: expected '{expected_name}', got '{file_name}'"
+                ));
+            }
+            let bytes = fs::read(&path).map_err(|error| {
+                format!("failed to read {LABEL} artifact '{file_name}': {error}")
+            })?;
+            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
+            let sha256 = format!("{:x}", Sha256::digest(&canonical));
+            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
+            if canonical.len() != expected_bytes
+                || sha256 != expected_sha256
+                || content_blake3 != expected_blake3
+            {
+                return Err(format!(
+                    "{LABEL} retained artifact '{file_name}' identity changed: bytes={}/{expected_bytes}, sha256={sha256}, blake3={content_blake3}",
+                    canonical.len()
+                ));
+            }
+            physical_names.push(key);
+            retained_records.push(format!(
+                "{expected_name}\t{expected_bytes}\t{expected_sha256}\t{expected_blake3}"
+            ));
+        }
+        physical_names.sort();
+        retained_records.sort_by_key(|record| record.to_ascii_lowercase());
+        let expected_names = expected_artifacts.keys().cloned().collect::<Vec<_>>();
+        let retained_hash = blake3::hash(retained_records.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if physical_names != expected_names
+            || retained_records.len() != XYCE_BUG39_RETAINED_RECORD_COUNT
+            || retained_hash != XYCE_BUG39_RETAINED_RECORDS_BLAKE3
+        {
+            return Err(format!(
+                "{LABEL} retained physical/content census changed: records={}/{retained_hash}, files={physical_names:?}",
+                retained_records.len()
+            ));
+        }
+
+        Ok(family_dir)
+    }
+
+    pub(super) fn bug39_deterministic_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceBug39DeterministicContract, String>> {
+        let role = XyceBug39DeterministicRole::for_record(&deck.relative_path)?;
+        Some((|| {
+            const LABEL: &str = "BUG_39_SON deterministic expression family";
+            let deck_path = self.root.join(role.path());
+            if deck.section != XyceDeckSection::Netlists
+                || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != role.record()
+                || !Self::same_path(&deck.path, &deck_path)
+            {
+                return Err(format!(
+                    "recognized {LABEL} role {role:?} is not backed by its exact canonical Netlists path"
+                ));
+            }
+            let family_dir = self.validate_bug39_deterministic_provenance()?;
+            let reference_path = family_dir.join(role.reference_file_name());
+            let contract = XyceBug39DeterministicContract {
+                deck_path,
+                reference_path,
+                role,
+            };
+            let (plan, netlist, reference) = self.bug39_deterministic_plan(&contract)?;
+            Self::validate_bug39_deterministic_semantics(role, &plan, &netlist, &reference)?;
+            Ok(contract)
+        })())
+    }
+
+    pub(super) fn validate_bug39_deterministic_provenance(&self) -> Result<PathBuf, String> {
+        const LABEL: &str = "BUG_39_SON deterministic expression family";
+        let family_dir = self.validate_bug39_retained_family_provenance()?;
+        let wrappers = Self::load_upstream_wrapper_decks(&self.root);
+        let exclusions = Self::load_upstream_exclusions(&self.root)
+            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
+        let mut candidates = Vec::with_capacity(XYCE_BUG39_DETERMINISTIC_CANDIDATE_COUNT);
+        let mut content_records = Vec::with_capacity(XYCE_BUG39_DETERMINISTIC_CANDIDATE_COUNT);
+        let mut owner_rows = Vec::with_capacity(XYCE_BUG39_DETERMINISTIC_CANDIDATE_COUNT);
+        for role in XyceBug39DeterministicRole::ALL {
+            let path = self.root.join(role.path());
+            let relative = self.relative_key(&path);
+            let key = Self::normalize_manifest_key(&relative);
+            if key != role.record() || !Self::same_path(&path, &self.root.join(role.path())) {
+                return Err(format!(
+                    "{LABEL} canonical path '{}' is unavailable",
+                    role.path()
+                ));
+            }
+            if !self.requires_upstream_wrapper(&relative) || !wrappers.contains(&key) {
+                return Err(format!(
+                    "{LABEL} deck '{relative}' lost removed-wrapper ownership"
+                ));
+            }
+            if exclusions.contains_key(&key) {
+                return Err(format!(
+                    "{LABEL} deck '{relative}' must not acquire upstream-exclusion provenance"
+                ));
+            }
+            let bytes = fs::read(&path)
+                .map_err(|error| format!("failed to read {LABEL} deck '{relative}': {error}"))?;
+            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
+            let content_hash = blake3::hash(&canonical).to_hex().to_string();
+            candidates.push(relative.clone());
+            content_records.push(format!("{relative}\t{content_hash}"));
+            owner_rows.push(format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"));
+        }
+        candidates.sort();
+        content_records.sort();
+        owner_rows.sort();
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(content_records.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let owner_hash = blake3::hash(owner_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if candidates.len() != XYCE_BUG39_DETERMINISTIC_CANDIDATE_COUNT
+            || candidate_hash != XYCE_BUG39_DETERMINISTIC_CANDIDATE_BLAKE3
+            || content_hash != XYCE_BUG39_DETERMINISTIC_CONTENT_BLAKE3
+            || owner_hash != XYCE_BUG39_DETERMINISTIC_OWNER_BLAKE3
+        {
+            return Err(format!(
+                "{LABEL} ownership/content provenance changed: records={}/{candidate_hash}/{content_hash}/{owner_hash}",
+                candidates.len()
+            ));
+        }
+        Ok(family_dir)
+    }
+
+    pub(super) fn bug39_deterministic_plan(
+        &self,
+        contract: &XyceBug39DeterministicContract,
+    ) -> Result<(XyceStaticDcPlan, Netlist, XycePrnTable), String> {
+        let plan = self.static_dc_plan_for_path(&contract.deck_path, ExpressionDialect::Xyce)?;
+        let netlist = Self::parse_xyce_netlist(&plan.source, &contract.deck_path)
+            .map_err(|error| format!("BUG_39_SON deterministic deck parse failed: {error}"))?;
+        let reference = Self::parse_dc_reference_file(
+            XyceStaticDcContract::WrapperDefault,
+            &contract.reference_path,
+        )
+        .map_err(|error| format!("BUG_39_SON deterministic gold parse failed: {error}"))?;
+        Ok((plan, netlist, reference))
+    }
+
+    pub(super) fn validate_bug39_deterministic_semantics(
+        role: XyceBug39DeterministicRole,
+        plan: &XyceStaticDcPlan,
+        netlist: &Netlist,
+        reference: &XycePrnTable,
+    ) -> Result<(), String> {
+        const LABEL: &str = "BUG_39_SON deterministic expression family";
+        let expected = role.expected_resistance();
+        let resolved_parameter = netlist.params.get("RES").ok_or_else(|| {
+            format!("{LABEL} {role:?} did not resolve the authored RES parameter")
+        })?;
+        let serialized_parameter = Self::xyce_default_prn_roundtrip(resolved_parameter)?;
+        if plan.expression_dialect != ExpressionDialect::Xyce
+            || plan.parameter_redefinition_policy != ParameterRedefinitionPolicy::UseLast
+            || plan.execution_dir.is_some()
+            || plan.dc_data.is_some()
+            || !plan.steps.is_empty()
+            || plan.print_format.is_some()
+            || !plan.diagnostics.is_empty()
+            || plan.dc.sweep2.is_some()
+            || !matches!(plan.dc.mode, DcSweepMode::Linear)
+            || !plan.dc.source.eq_ignore_ascii_case("I1")
+            || plan.dc.start.to_bits() != (-1.0f64).to_bits()
+            || plan.dc.stop.to_bits() != (-1.0f64).to_bits()
+            || plan.dc.step.to_bits() != (-0.1f64).to_bits()
+            || plan.print.probes != ["I(I1)", "V(1)"]
+        {
+            return Err(format!(
+                "{LABEL} requires the exact one-point I1 sweep and ordered I(I1), V(1) default PRN plan"
+            ));
+        }
+        if netlist.params.statistical_mode() != StatisticalParamMode::Nominal
+            || netlist.params.expression_dialect() != ExpressionDialect::Xyce
+            || !resolved_parameter.is_finite()
+            || serialized_parameter.to_bits() != expected.to_bits()
+            || !netlist.diagnostics.is_empty()
+            || !netlist.models.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || netlist.elements.len() != 2
+            || netlist.analyses.len() != 1
+            || netlist.output_requests.len() != 1
+        {
+            return Err(format!(
+                "{LABEL} typed parameter/topology/directive census changed for {role:?}"
+            ));
+        }
+        let current = &netlist.elements[0];
+        if !current.name.eq_ignore_ascii_case("I1")
+            || current.nodes != ["1", "0"]
+            || !matches!(
+                &current.kind,
+                ElementKind::CurrentSource(rspice_core::netlist::SourceSpec::Dc(value))
+                    if value.to_bits() == (-1.0f64).to_bits()
+            )
+        {
+            return Err(format!("{LABEL} current-source topology changed"));
+        }
+        let resistor = &netlist.elements[1];
+        let ElementKind::Resistor {
+            value,
+            value_expr,
+            model,
+            instance_params,
+            deferred_params,
+        } = &resistor.kind
+        else {
+            return Err(format!("{LABEL} R1 is no longer a resistor"));
+        };
+        if !resistor.name.eq_ignore_ascii_case("R1")
+            || resistor.nodes != ["1", "0"]
+            || value.to_bits() != resolved_parameter.to_bits()
+            || Self::xyce_default_prn_roundtrip(*value)?.to_bits() != expected.to_bits()
+            || value_expr.is_some()
+            || model.is_some()
+            || !instance_params.is_empty()
+            || !deferred_params.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} resolved R1 semantics changed for {role:?}: value={value}, expression={value_expr:?}"
+            ));
+        }
+        if reference.columns.len() != 3
+            || !reference
+                .columns
+                .iter()
+                .zip(["Index", "I(I1)", "V(1)"])
+                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
+            || reference.rows.as_slice() != [[0.0, -1.0, expected]]
+        {
+            return Err(format!(
+                "{LABEL} {role:?} gold must remain the exact one-row [0,-1,{expected}] PRN"
+            ));
+        }
+        validate_output_symbols(netlist)
+            .map_err(|error| format!("{LABEL} output dependency changed: {error}"))?;
+        Ok(())
+    }
+
+    pub(super) fn run_bug39_deterministic_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceBug39DeterministicContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.role.result_contract();
+        let (plan, qualified_netlist, reference) = match self.bug39_deterministic_plan(&contract) {
+            Ok(qualified) => qualified,
+            Err(error) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG_39_SON deterministic plan qualification failed: {error}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if let Err(error) = Self::validate_bug39_deterministic_semantics(
+            contract.role,
+            &plan,
+            &qualified_netlist,
+            &reference,
+        ) {
+            return self.failure_result(deck, start, result_contract, error, Vec::new());
+        }
+        let (netlist, results) = match self.run_static_dc_results(&plan, start) {
+            Ok(run) => run,
+            Err(error) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG_39_SON deterministic DC execution failed: {error}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if results.len() != 1 {
+            return self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!(
+                    "BUG_39_SON deterministic DC produced {} rows instead of one",
+                    results.len()
+                ),
+                Vec::new(),
+            );
+        }
+        let actual = match self.dc_results_to_prn_table(&plan, &netlist, &results) {
+            Ok(table) => table,
+            Err(error) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG_39_SON deterministic PRN conversion failed: {error}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let expected = contract.role.expected_resistance();
+        let strengthened_physics = (|| {
+            let [row] = actual.rows.as_slice() else {
+                return Err("actual PRN must contain exactly one row".to_string());
+            };
+            if actual.columns != ["Index", "I(I1)", "V(1)"]
+                || row.len() != 3
+                || row.iter().any(|value| !value.is_finite())
+                || Self::xyce_default_prn_roundtrip(row[0])?.to_bits() != 0.0f64.to_bits()
+                || Self::xyce_default_prn_roundtrip(row[1])?.to_bits() != (-1.0f64).to_bits()
+                || Self::xyce_default_prn_roundtrip(row[2])?.to_bits() != expected.to_bits()
+            {
+                return Err(format!(
+                    "actual one-point PRN does not preserve exact [0,-1,{expected}] circuit physics: {:?}/{row:?}",
+                    actual.columns
+                ));
+            }
+            Ok(())
+        })();
+        if let Err(error) = strengthened_physics {
+            return self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("BUG_39_SON strengthened physical contract failed: {error}"),
+                Vec::new(),
+            );
+        }
+        if let Err(error) = self.validate_bug39_deterministic_provenance() {
+            return self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("BUG_39_SON provenance changed during execution: {error}"),
+                Vec::new(),
+            );
+        }
+        let mismatches = match self.compare_release_7_10_xyce_verify_dc_tables(
+            "BUG_39_SON deterministic expression",
+            &reference,
+            &actual,
+            &results,
+            &results,
+        ) {
+            Ok(mismatches) => mismatches,
+            Err(error) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG_39_SON xyce_verify adapter failed: {error}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, result_contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("{} BUG_39_SON mismatch(es)", mismatches.len()),
+                mismatches,
+            )
+        }
     }
 
     pub(super) fn bug39_generated_source(role: XyceBug39GaussianRole) -> Result<String, String> {

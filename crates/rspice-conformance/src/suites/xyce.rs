@@ -550,6 +550,10 @@ const XYCE_BUG38_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
 // generated-oracle artifacts before reproducing either contract in memory.
 const XYCE_BUG39_AGAUSS_CONTRACT: &str = "bug39_agauss_generated_mean_sigma_wrapper";
 const XYCE_BUG39_GAUSS_CONTRACT: &str = "bug39_gauss_generated_mean_sigma_wrapper";
+const XYCE_BUG39_INT_CONTRACT: &str = "bug39_int_single_point_xyce_verify_dc_wrapper";
+const XYCE_BUG39_LIMIT_CONTRACT: &str = "bug39_limit_nominal_single_point_xyce_verify_dc_wrapper";
+const XYCE_BUG39_POW_CONTRACT: &str = "bug39_pow_single_point_xyce_verify_dc_wrapper";
+const XYCE_BUG39_SIGN_CONTRACT: &str = "bug39_sign_single_point_xyce_verify_dc_wrapper";
 const XYCE_BUG39_PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const XYCE_BUG39_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
 const XYCE_BUG39_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
@@ -557,6 +561,14 @@ const XYCE_BUG39_AGAUSS_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/ag
 const XYCE_BUG39_GAUSS_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/gauss.cir";
 const XYCE_BUG39_AGAUSS_RECORD: &str = "netlists/certification_tests/bug_39_son/agauss.cir";
 const XYCE_BUG39_GAUSS_RECORD: &str = "netlists/certification_tests/bug_39_son/gauss.cir";
+const XYCE_BUG39_INT_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/bug39_int.cir";
+const XYCE_BUG39_LIMIT_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/bug39_limit.cir";
+const XYCE_BUG39_POW_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/bug39_pow.cir";
+const XYCE_BUG39_SIGN_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/bug39_sign.cir";
+const XYCE_BUG39_INT_RECORD: &str = "netlists/certification_tests/bug_39_son/bug39_int.cir";
+const XYCE_BUG39_LIMIT_RECORD: &str = "netlists/certification_tests/bug_39_son/bug39_limit.cir";
+const XYCE_BUG39_POW_RECORD: &str = "netlists/certification_tests/bug_39_son/bug39_pow.cir";
+const XYCE_BUG39_SIGN_RECORD: &str = "netlists/certification_tests/bug_39_son/bug39_sign.cir";
 const XYCE_BUG39_HISTORICAL_EXCLUDE_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/exclude";
 const XYCE_BUG39_EMPTY_CONTENT_BLAKE3: &str =
     "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262";
@@ -569,15 +581,22 @@ const XYCE_BUG39_OWNER_MANIFEST_BLAKE3: &str =
     "106b025524124c209ed099f9d13e8c0523494320c91811e091b3e0657356fe68";
 const XYCE_BUG39_HISTORICAL_EXCLUSION_BLAKE3: &str =
     "c39fe61b2e9e34fa277f15016d40925329a3965a53083237959ecc9cac7daadd";
-const XYCE_BUG39_REQUIRED_ORACLE_RECORD_COUNT: usize = 6;
-const XYCE_BUG39_REQUIRED_ORACLE_BYTES: usize = 1_445;
+const XYCE_BUG39_DETERMINISTIC_CANDIDATE_COUNT: usize = 4;
+const XYCE_BUG39_DETERMINISTIC_CANDIDATE_BLAKE3: &str =
+    "60eaf1c149554b9a114a4348101c4f6e31f9531ffd66547d03d13488f126d267";
+const XYCE_BUG39_DETERMINISTIC_CONTENT_BLAKE3: &str =
+    "15c9f12196f084ffaf6cf329aab3fdc86c78786836b70774de20f890cd973540";
+const XYCE_BUG39_DETERMINISTIC_OWNER_BLAKE3: &str =
+    "f01c785308ef7ff2d9477720cd4fefead2531f9699a3580d46fa40472bcf77b6";
+const XYCE_BUG39_REQUIRED_ORACLE_RECORD_COUNT: usize = 23;
+const XYCE_BUG39_REQUIRED_ORACLE_BYTES: usize = 5_559;
 const XYCE_BUG39_REQUIRED_ORACLE_SHA256: &str =
-    "ccc2a87ce1c24f82aec8a4547463c283fa3446a48fa764f20bc0afc53fae3075";
+    "9942679e83b82ebcb3ad5d749fc61ba58af88ff3e23d08e550f83d80fc876f7f";
 const XYCE_BUG39_REQUIRED_ORACLE_BLAKE3: &str =
-    "27b787d2427d338b17e0b60e85f071224159b580390789d42361e7b89e8f5a09";
-const XYCE_BUG39_HISTORICAL_ORACLE_RECORD_COUNT: usize = 7;
+    "e43bcfb707f28a3fdf35004dc01157e67940fdf1a7c6e74727cff3756ff438f0";
+const XYCE_BUG39_HISTORICAL_ORACLE_RECORD_COUNT: usize = 24;
 const XYCE_BUG39_HISTORICAL_ORACLE_BLAKE3: &str =
-    "00a93cf40bfee578f78fe7d680fb928b2610dd2893d6f958afc255ad3285c324";
+    "f4a60b0bbb5d306718efd7371cfd84181650c71617c8b3ad908859a5e33f5b21";
 const XYCE_BUG39_RETAINED_RECORD_COUNT: usize = 11;
 const XYCE_BUG39_RETAINED_RECORDS_BLAKE3: &str =
     "6ea5836525a3b58413107c49bf1819d150a1e1f5b7dffa8985e30b78bc92a832";
@@ -586,7 +605,7 @@ const XYCE_BUG39_MEAN: Value = 100.0;
 const XYCE_BUG39_EXPECTED_SIGMA: Value = 1.0;
 const XYCE_BUG39_MOMENT_TOLERANCE: Value = 5.0e-2;
 
-const XYCE_BUG39_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
+const XYCE_BUG39_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 24] = [
     (
         "Netlists/Certification_Tests/BUG_39_SON/README",
         879,
@@ -612,6 +631,78 @@ const XYCE_BUG39_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
         "c779be31922b96ba6cfe8acfa07ce002852d9cffac791ceddce88480a22ad0df",
     ),
     (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_int.cir",
+        168,
+        "ed26197d4f299a496f0c714a08c328cda560c1194c25ae0b415f73ff8bb1898c",
+        "62367769e743519c676f1283ee41d33a7310f9556b330f9a5da1178eaac5ec3b",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_int.cir.prn.gs",
+        105,
+        "340ab7510b526e583cac2b6ac15388df3217514dc96fe4620514ac47defa015c",
+        "2b05b73a06220bce643b7961dcfe068fe7c14a9bf806100d23e6ee2f66b05629",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_int.cir.sh",
+        1_097,
+        "7c38fcf5e57bbbc015ff4d7c099205c6f0801d4eaee0ac87ea5c1b22baeba9f0",
+        "cf22359501be453ee5822bb84a002554a1fd844c504bb1c90cfabc08146f0380",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_limit.cir",
+        482,
+        "9b1f3329062d0d7dc1f49b8a94fd88262a796e8dd92ae1c6a2d4fc579f12910f",
+        "32e9d468ab49ec892c36f7672d1d2962f54557c9df8c89f1103185863cc1c007",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_limit.cir.prn.gs",
+        111,
+        "8eba99b9cfba84e66b518177060d38dc0a8fde786fd0bfc86d9818a35bee212f",
+        "190fe153a2f5887f562ed8d1fdd2546acbab3b2d733bbc9fb2e0bb9f47e703aa",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_limit.cir.sh",
+        1_099,
+        "2bba1611c424ea3332f38cd930a4227599848b98ef84c566874f0c718f22dbc2",
+        "ab0acfba22a5fbc0c43d10295f607ec93068f3dfaf25cb02b383a1c52342dd2e",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_pow.cir",
+        149,
+        "76625ca95d8a4f51f6161ba610e9d569c0c161bd228cff987f6c049cc21c0f78",
+        "175baf98941dd1e24a7942aef300a9ecc4edfa7a6e8c5cf06094e4ed55606916",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_pow.cir.prn.gs",
+        105,
+        "ec7adbfa8d794ff0a8c10f0f119c74b57b3f7effb843472c6148fee4cfc2c0d6",
+        "356a59eaec3ff2e5a3dee35f0510dce0b73b512ed5f21e96bef03fc10ff149af",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_pow.cir.sh",
+        1_097,
+        "9f12693fd5d0690197861e8a51612a44c84a59b7a3d7ee94bdc4bbec6fccc11c",
+        "57de1dc11d431315e6a3f8155c6c1510785afa0e2ab35e0095c043fd7fd5e4ce",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_sign.cir",
+        152,
+        "ea2e5d157bf39d575b2c33c3ef179dfbf9f879f21383ba001eed4bfc300e142d",
+        "cb8c1dfdb32f8e36242b05d475735df124d818337bf9798246ee5e6bcd75ab51",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_sign.cir.prn.gs",
+        105,
+        "9d1a472e7b465d0c2caa45a16d99328334ea0a894c3fa7da844faa465b393236",
+        "cc173d820146330a519e07328559bf51061a815906837487f06be67c0b7cf545",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_39_SON/bug39_sign.cir.sh",
+        1_098,
+        "308f59a5d46011dd8cd80a4be0b175c49cb58904b82b5f96241b32697a670f15",
+        "d6a1c069603d12b1bc7e9089de080381ff20bf0e20b3b4e0db96f180bb1f14fd",
+    ),
+    (
         XYCE_BUG39_GAUSS_PATH,
         0,
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -624,10 +715,40 @@ const XYCE_BUG39_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
         "b35c1382598a5a766c72608d166b89f112a727ed5a401007725aa813b2812874",
     ),
     (
+        "Netlists/Certification_Tests/BUG_39_SON/tags",
+        46,
+        "99021efbf1ed8e6a6563e2cf21f130d010a308452e1b7a2895660e3ac8d904d5",
+        "2b5db3920215b065bab2f4ca1f443963363fcab5e31c9788788e6ca7cf664e34",
+    ),
+    (
         XYCE_BUG39_HISTORICAL_EXCLUDE_PATH,
         21,
         "20533602deb07138a58ed4a233abb4f381c2a1ee77d2d5d2bf4a599fe24446db",
         "193cec42858538b08aea1096c2a0fd7ddffd4666761078b36ace1a7ffee5ec87",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+    (
+        "TestScripts/XyceVerify/DCSources.pm",
+        2_739,
+        "b2ddcab5ad5a89c428b9b4430190fa27ef7106da7e7afeb31452c81890a9a006",
+        "0905f9dc79d7c5bdbe17e3c2360cd063d6fcbf41823a410f98b236783d109ad7",
+    ),
+    (
+        "TestScripts/XyceVerify/DCSweep.pm",
+        9_301,
+        "2246da2374e6cce3ea516a50e472fb07f7481e8b0effb20d4a650e6b6cb1eda0",
+        "b9cc7d905d001ebe2ace44936b9631e4bdcbf42bca4d4b34c5866262cd11d9a3",
+    ),
+    (
+        XYCE_RELEASE_710_XYCE_VERIFY_PATH,
+        XYCE_RELEASE_710_XYCE_VERIFY_BYTES,
+        XYCE_RELEASE_710_XYCE_VERIFY_SHA256,
+        XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3,
     ),
 ];
 
@@ -6255,6 +6376,79 @@ struct XyceBug38FamilyContract {
 struct XyceBug39GaussianContract {
     anchor_path: PathBuf,
     role: XyceBug39GaussianRole,
+}
+
+#[derive(Debug, Clone)]
+struct XyceBug39DeterministicContract {
+    deck_path: PathBuf,
+    reference_path: PathBuf,
+    role: XyceBug39DeterministicRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBug39DeterministicRole {
+    Int,
+    LimitNominal,
+    Pow,
+    Sign,
+}
+
+impl XyceBug39DeterministicRole {
+    const ALL: [Self; 4] = [Self::Int, Self::LimitNominal, Self::Pow, Self::Sign];
+
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::Int => XYCE_BUG39_INT_CONTRACT,
+            Self::LimitNominal => XYCE_BUG39_LIMIT_CONTRACT,
+            Self::Pow => XYCE_BUG39_POW_CONTRACT,
+            Self::Sign => XYCE_BUG39_SIGN_CONTRACT,
+        }
+    }
+
+    fn path(self) -> &'static str {
+        match self {
+            Self::Int => XYCE_BUG39_INT_PATH,
+            Self::LimitNominal => XYCE_BUG39_LIMIT_PATH,
+            Self::Pow => XYCE_BUG39_POW_PATH,
+            Self::Sign => XYCE_BUG39_SIGN_PATH,
+        }
+    }
+
+    fn record(self) -> &'static str {
+        match self {
+            Self::Int => XYCE_BUG39_INT_RECORD,
+            Self::LimitNominal => XYCE_BUG39_LIMIT_RECORD,
+            Self::Pow => XYCE_BUG39_POW_RECORD,
+            Self::Sign => XYCE_BUG39_SIGN_RECORD,
+        }
+    }
+
+    fn reference_file_name(self) -> &'static str {
+        match self {
+            Self::Int => "bug39_int.cir.prn.gs",
+            Self::LimitNominal => "bug39_limit.cir.prn.gs",
+            Self::Pow => "bug39_pow.cir.prn.gs",
+            Self::Sign => "bug39_sign.cir.prn.gs",
+        }
+    }
+
+    fn expected_resistance(self) -> Value {
+        match self {
+            Self::Int => 3.0,
+            Self::LimitNominal | Self::Sign => 1.0,
+            Self::Pow => 8.0,
+        }
+    }
+
+    fn for_record(relative_path: &str) -> Option<Self> {
+        match XyceTestRunner::normalize_manifest_key(relative_path).as_str() {
+            XYCE_BUG39_INT_RECORD => Some(Self::Int),
+            XYCE_BUG39_LIMIT_RECORD => Some(Self::LimitNominal),
+            XYCE_BUG39_POW_RECORD => Some(Self::Pow),
+            XYCE_BUG39_SIGN_RECORD => Some(Self::Sign),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

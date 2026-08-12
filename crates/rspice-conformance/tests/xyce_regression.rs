@@ -9414,6 +9414,45 @@ fn test_xyce_bug39_generated_gaussian_mean_sigma_oracles() {
 }
 
 #[test]
+fn test_xyce_bug39_deterministic_expression_gold_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        (
+            "Netlists/Certification_Tests/BUG_39_SON/bug39_int.cir",
+            "bug39_int_single_point_xyce_verify_dc_wrapper",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_39_SON/bug39_limit.cir",
+            "bug39_limit_nominal_single_point_xyce_verify_dc_wrapper",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_39_SON/bug39_pow.cir",
+            "bug39_pow_single_point_xyce_verify_dc_wrapper",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_39_SON/bug39_sign.cir",
+            "bug39_sign_single_point_xyce_verify_dc_wrapper",
+        ),
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} must remain owned by its removed historical wrapper"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should execute its exact deterministic one-point DC/gold contract, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(result.upstream_exclusion_source, None);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_bug402_temperature_option_scope_relational_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
