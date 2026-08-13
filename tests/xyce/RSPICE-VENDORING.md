@@ -130,6 +130,15 @@ print expression, and requires a finite nontrivial native observation under a
 shared deadline. The historical wrapper did not invoke a comparator, so no
 numerical gold is invented.
 
+Certification BUG 1661 preserves an active Release-7.10 self-relational
+transient wrapper for implicit top-level `$G*` nodes. RSpice pins the sole
+retained deck and complete five-file upstream family, validates the exact PWL
+source, behavioral `V($g_1)` reference, resistive topology, transient card,
+and print order, then requires `V($g_1)` and `V(1)` to compare numerically
+equal after default eight-digit PRN serialization on every finite output row.
+The historical wrapper ignored its nominal verifier and gold arguments, so no
+OutputData artifact or numerical waveform oracle is invented.
+
 Certification BUG 206 preserves an active Release-7.10 hierarchy error
 wrapper. RSpice parses the exact malformed X instance, validates the otherwise
 complete DC/subcircuit envelope, and requires a typed undefined-subcircuit

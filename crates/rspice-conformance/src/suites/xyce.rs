@@ -2108,6 +2108,60 @@ const XYCE_BUG271_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 1] = [(
     "2d718077d38a66e04d8b234e91c1c4ec480cbeb4500b45f498b76249635d5f0f",
 )];
 
+// BUG_1661's active Release-7.10 Perl wrapper runs this one transient deck,
+// requires the generated PRN, and compares the serialized V($G_1) and V(1)
+// columns for exact numeric equality. It does not use a checked-in gold file.
+const XYCE_BUG1661_CONTRACT: &str = "bug1661_globalnode_behavioral_expression_equality_wrapper";
+const XYCE_BUG1661_PATH: &str = "Netlists/Certification_Tests/BUG_1661/globalnode_expr_toplev.cir";
+const XYCE_BUG1661_RECORD: &str =
+    "netlists/certification_tests/bug_1661/globalnode_expr_toplev.cir";
+const XYCE_BUG1661_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG1661_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG1661_HISTORICAL_RECORD_COUNT: usize = 5;
+const XYCE_BUG1661_HISTORICAL_RECORD_BYTES: usize = 1_229;
+const XYCE_BUG1661_HISTORICAL_RECORDS_SHA256: &str =
+    "c16712fc1bd34da589181dd2109ac813a6524aaa40bf796425b276fee38da47b";
+const XYCE_BUG1661_HISTORICAL_RECORDS_BLAKE3: &str =
+    "dec807a0c52ca3b3b02d0a128583b99308b01371df1fe7bcfa9023d55d1db436";
+const XYCE_BUG1661_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 5] = [
+    (
+        "Netlists/Certification_Tests/BUG_1661/CMakeLists.txt",
+        1_320,
+        "a487b4650fbc9357fbe0a53ffb7ee5939fd8954ed4cda83d71bcfdadae786479",
+        "96460f20062b75eae10f434d25e6b7d60d8d5b98bf86d7f66973c6fbf33f4471",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1661/Manifest.txt",
+        62,
+        "be96035a82a5baefdfcaab1e1a91f89744875bd8a270121a8ed8f6a6c6aa7eea",
+        "90983379352516dd523e8212cd5c416e0a87ade91ab34de2485da8c77b3e16af",
+    ),
+    (
+        XYCE_BUG1661_PATH,
+        166,
+        "a3d847fd48a4c78171b422fd69a449ef4e5c02bcdcc0e0bd0c29fe9349b9d84f",
+        "d59abb99dde37a857ce59902ca9ce93068ee27b46b173bcae5fabbd6d8604e1e",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1661/globalnode_expr_toplev.cir.sh",
+        1_438,
+        "3368c0053a3348adea087f6ad398bbbfcfc576294a7ab03574d6aa9174a54837",
+        "8d284c65c445a1fa5d2283c8918437d55754a6c252c120c42cad14a7ae66161e",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1661/tags",
+        49,
+        "328d453b60a790e98d14cc0ed0c5e838577156852aa4982cafa9b0a892899787",
+        "e33b0893cf7c5e9f2cee4fadd792972124b34d7e4a9e7de38801285962f6304e",
+    ),
+];
+const XYCE_BUG1661_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 1] = [(
+    "globalnode_expr_toplev.cir",
+    166,
+    "a3d847fd48a4c78171b422fd69a449ef4e5c02bcdcc0e0bd0c29fe9349b9d84f",
+    "d59abb99dde37a857ce59902ca9ce93068ee27b46b173bcae5fabbd6d8604e1e",
+)];
+
 // BUG_1040_SON's Release-7.10 wrapper proves that the NOOP spelling of
 // transient startup produces the same diode-capacitor discharge waveform as
 // ordinary operating-point startup. The zero-byte .cir file is only the
@@ -11114,6 +11168,7 @@ mod contracts_bug1116;
 mod contracts_bug1162;
 mod contracts_bug1398;
 mod contracts_bug159;
+mod contracts_bug1661;
 mod contracts_bug206;
 mod contracts_bug267;
 mod contracts_bug271;
