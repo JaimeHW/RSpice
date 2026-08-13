@@ -2108,6 +2108,97 @@ const XYCE_BUG271_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 1] = [(
     "2d718077d38a66e04d8b234e91c1c4ec480cbeb4500b45f498b76249635d5f0f",
 )];
 
+// BUG_1040_SON's Release-7.10 wrapper proves that the NOOP spelling of
+// transient startup produces the same diode-capacitor discharge waveform as
+// ordinary operating-point startup. The zero-byte .cir file is only the
+// wrapper owner; the two retained .net files are the executable workers.
+const XYCE_BUG1040_CONTRACT: &str = "bug1040_noop_operating_point_transient_wrapper";
+const XYCE_BUG1040_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_1040_SON/bug_1040_son.cir";
+const XYCE_BUG1040_OP_PATH: &str =
+    "Netlists/Certification_Tests/BUG_1040_SON/rc_discharge_diode_op.net";
+const XYCE_BUG1040_NOOP_PATH: &str =
+    "Netlists/Certification_Tests/BUG_1040_SON/rc_discharge_diode_noop.net";
+const XYCE_BUG1040_OWNER_RECORD: &str =
+    "netlists/certification_tests/bug_1040_son/bug_1040_son.cir";
+const XYCE_BUG1040_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG1040_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG1040_HISTORICAL_RECORD_COUNT: usize = 8;
+const XYCE_BUG1040_HISTORICAL_RECORD_BYTES: usize = 1_964;
+const XYCE_BUG1040_HISTORICAL_RECORDS_SHA256: &str =
+    "81949e4b41df1756864d7b2b7d2cc89dd9e75cd9c3a39eaf0c158cd056ef1f06";
+const XYCE_BUG1040_HISTORICAL_RECORDS_BLAKE3: &str =
+    "3ba26b8f9fa83653b89a0e657d60629ef6fa1f55d7d742801885f75b7971da11";
+const XYCE_BUG1040_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 8] = [
+    (
+        "Netlists/Certification_Tests/BUG_1040_SON/CMakeLists.txt",
+        1_931,
+        "2b19f4aaf9dd481b49687f514873d7149d7410b096abf39a5399b0834f22a382",
+        "56d5a786a1609c7bc684699235bdef42c4c3b1bde4a1ebc7a1833b7061c3dda8",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1040_SON/Manifest.txt",
+        91,
+        "c91d7e33be9e696e7cbb9f2603378f81ee8664b567e4b67dc04485104602d2f7",
+        "f88d548325ced3d592705b3636f7c39050ec1ab32fd71fbd15d114d3dae1fee1",
+    ),
+    (
+        XYCE_BUG1040_OWNER_PATH,
+        0,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1040_SON/bug_1040_son.cir.sh",
+        1_964,
+        "fde5dcfe158d3966594646c25436fee61fc0e056e071a751a0f60f9fe08030b8",
+        "75dad870908939721c86a4d0d42bd94407a3a67c975305b20a6211061603da7b",
+    ),
+    (
+        XYCE_BUG1040_NOOP_PATH,
+        265,
+        "7084016db0779c82ce55b1c072774e330b8d4d25100b18e773429b8d27502c5d",
+        "0d73841755795bf8ba769e0f3ca0c77b4509b2674fa7f05b49779a09a0cf7027",
+    ),
+    (
+        XYCE_BUG1040_OP_PATH,
+        260,
+        "cdaea1743b0ca4046b94b11ee56eb957996631cfbbd3466ba0f296c6cd5ed7ca",
+        "81ba29e78edda22d3c14cea1bb4b2a0d7531241d460b62cbbf04f8d9919f4368",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1040_SON/tags",
+        42,
+        "8c7976b6bc7659c5ec9fb9e62e6b4fb8faef36c23efedc8034edd44194c87029",
+        "13282063d079de074ec7423f0eb80670541a3a335e4388af7df4796e5873ceba",
+    ),
+    (
+        XYCE_RELEASE_710_XYCE_VERIFY_PATH,
+        XYCE_RELEASE_710_XYCE_VERIFY_BYTES,
+        XYCE_RELEASE_710_XYCE_VERIFY_SHA256,
+        XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3,
+    ),
+];
+const XYCE_BUG1040_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
+    (
+        "bug_1040_son.cir",
+        0,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+    ),
+    (
+        "rc_discharge_diode_noop.net",
+        265,
+        "7084016db0779c82ce55b1c072774e330b8d4d25100b18e773429b8d27502c5d",
+        "0d73841755795bf8ba769e0f3ca0c77b4509b2674fa7f05b49779a09a0cf7027",
+    ),
+    (
+        "rc_discharge_diode_op.net",
+        260,
+        "cdaea1743b0ca4046b94b11ee56eb957996631cfbbd3466ba0f296c6cd5ed7ca",
+        "81ba29e78edda22d3c14cea1bb4b2a0d7531241d460b62cbbf04f8d9919f4368",
+    ),
+];
+
 // BUG_307's serial shell wrapper proves that an unused sibling subcircuit's
 // same-named local resistor model cannot escape its lexical scope. It runs the
 // collision owner followed by the active-only control and raw-diffs their
@@ -10515,6 +10606,7 @@ mod analysis_support;
 mod comparison;
 mod contracts;
 mod contracts_bug1025;
+mod contracts_bug1040;
 mod contracts_bug1398;
 mod contracts_bug159;
 mod contracts_bug267;

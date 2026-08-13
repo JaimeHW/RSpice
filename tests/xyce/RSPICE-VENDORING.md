@@ -91,6 +91,14 @@ proves the model `L` multipliers plus `TC1`/`TC2` at DEVICE TEMP=37 resolve to
 the control's exact inductances before comparing their transient tables. No
 numerical gold is invented.
 
+Certification BUG 1040 SON keeps a zero-byte wrapper owner whose executable
+workers differ only by ordinary operating-point startup versus the Xyce
+`NOOP` spelling. RSpice pins the exact three-file retained family and removed
+Release-7.10 wrapper/verifier provenance, validates the shared diode-capacitor
+discharge circuit and its sole startup delta, then preserves the historical
+GOOD=operating-point, TEST=NOOP `xyce_verify` direction. No numerical gold or
+exclusion row is introduced.
+
 Certification BUG 271 preserves an active Release-7.10 success-only wrapper
 whose deck proves that tab-prefixed prose and `*` lines remain comments around
 an otherwise ordinary RLC/PULSE transient. RSpice pins the exact retained
