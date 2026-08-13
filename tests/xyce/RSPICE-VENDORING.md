@@ -268,6 +268,15 @@ last-definition control with the historical verifier semantics. The two
 historical control exclusions are independently qualified; no output gold is
 invented.
 
+Certification ISSUE 451 reconstructs the Release-7.10 hierarchical-node
+operating-point wrapper. RSpice independently solves the authored top-level
+`X1:testNode` references and the explicit in-subcircuit control, requires the
+historical byte-exact default-PRN relation, and additionally checks the five
+printed voltages against the circuit's closed-form resistor solution. The
+historical control exclusion is independently qualified; the wrapper fallback
+verifier and its loaded modules are provenance-bound, but no numerical gold is
+invented.
+
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
 and verifier identities. The PARAMS1, PARSER nakedAlgebra, and Certification

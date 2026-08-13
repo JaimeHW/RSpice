@@ -61,15 +61,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 228;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 229;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "42c3f3ef78aa71509b6c7b7604a9f10d185a7368ded96a8c41bf5f919e1ba466";
+    "1414989e46b533351e824cb32856d618d18443c6c09f11873be50e1a3f7388d5";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "6f399e61691bb1bcf3cdd83437c5ef9593218857eec9feb55b521c3efd837d2f";
+    "2ff0e56762c1dc40466a4fbf44b9a057ffe6cae24e79a240fde6a2f44437a1a5";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "0b0e92e7619fcbe1b5bd8dc31f52d6aa85061e69c714699e007979a6735f7d0f";
+    "ec603d786670998a01f362511ad6e9c12752fd53163aa468bb1a91d65cb991ef";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -2109,6 +2109,117 @@ const XYCE_ISSUE202_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
         88,
         "65e351a4ac5983ebb5545ace148a1d5f866023e55c57299aba626fcc9c84e16e",
         "2e7a4013cb2cb17c701b01fe620fe45e81d0b7af58b09b9401f9b54e7d57f546",
+    ),
+];
+
+// ISSUE_451's Release-7.10 wrapper compares a hierarchical-node circuit to
+// an explicit in-subcircuit reference. It first requires a byte-exact PRN
+// diff and only then falls back to xyce_verify, so bind the complete family
+// activation plus the verifier and all of its eagerly loaded repository
+// modules before reproducing the relation natively.
+const XYCE_ISSUE451_OWNER_CONTRACT: &str = "issue451_hierarchical_node_wrapper_owner";
+const XYCE_ISSUE451_REFERENCE_CONTRACT: &str = "issue451_hierarchical_node_explicit_reference";
+const XYCE_ISSUE451_OWNER_PATH: &str = "Netlists/Certification_Tests/ISSUE_451/issue451.cir";
+const XYCE_ISSUE451_REFERENCE_PATH: &str =
+    "Netlists/Certification_Tests/ISSUE_451/issue451_ref.cir";
+const XYCE_ISSUE451_OWNER_RECORD: &str = "netlists/certification_tests/issue_451/issue451.cir";
+const XYCE_ISSUE451_REFERENCE_RECORD: &str =
+    "netlists/certification_tests/issue_451/issue451_ref.cir";
+const XYCE_ISSUE451_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/ISSUE_451/exclude";
+const XYCE_ISSUE451_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_ISSUE451_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_ISSUE451_HISTORICAL_RECORD_COUNT: usize = 11;
+const XYCE_ISSUE451_HISTORICAL_RECORD_BYTES: usize = 2_586;
+const XYCE_ISSUE451_HISTORICAL_RECORDS_SHA256: &str =
+    "a8be3ab4f5e030330dbc8af5c1921c811fa9f536486e8b044e0da8d524184d61";
+const XYCE_ISSUE451_HISTORICAL_RECORDS_BLAKE3: &str =
+    "40c60a4625bf10ebab7b4146f65a0db8a8f40046aece740a76e3709ab1f92ca4";
+const XYCE_ISSUE451_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 11] = [
+    (
+        "Netlists/Certification_Tests/ISSUE_451/CMakeLists.txt",
+        1_360,
+        "c3a36d9176e2a9f63ff4a7d223db48f30bd4310f21e9c1b9238f56249bdb5a46",
+        "e15f8db50bb488130cc9503eed4f92d5a42a3ea4816d4882bbb35f96136f3362",
+    ),
+    (
+        "Netlists/Certification_Tests/ISSUE_451/Manifest.txt",
+        59,
+        "7cb305c1a5dd98cb3e96ca9a505c8c80fdc1e94c2a02d566f001c6d55d193eb9",
+        "e7e09a2f49b41c4b6d27208f35e6c69c9ba4c60a2dacd98aefba165b4d9e9a96",
+    ),
+    (
+        XYCE_ISSUE451_EXCLUSION_SOURCE,
+        17,
+        "147230167b51c3cd822442628873f82cd46094b924d4f0a78bfc255ee6e863c3",
+        "5e1ac817048a6ed43937757ee5976a19f6f3843ac8f48c7ad50abffe0c453ae2",
+    ),
+    (
+        XYCE_ISSUE451_OWNER_PATH,
+        371,
+        "6df6de48c1cb9b3a07c7b00c79974c498b0bc372e4f0c5cface9bae06623d49a",
+        "dd15a6e050f1b1bfb9e256c0e36fdac756469a593c5cc097f5fac982ab0933db",
+    ),
+    (
+        "Netlists/Certification_Tests/ISSUE_451/issue451.cir.sh",
+        1_504,
+        "12f11e5b7471d8aee5a32553d52e8858dba0f7028386bd0678a4ab3dfbfdbdc6",
+        "ee142d134dac30f68a0f2303cdd5eb396b1a6240eb96e6a83487035ce5e66b5e",
+    ),
+    (
+        XYCE_ISSUE451_REFERENCE_PATH,
+        421,
+        "b4b817871d79dc3f61fe0837159ec9b07eb689564d3b652cfb0f157074404b24",
+        "45fd5785ec0a81ebebd5996aa2fc85d93157119da277cada6e5640f1d46a781c",
+    ),
+    (
+        "Netlists/Certification_Tests/ISSUE_451/tags",
+        26,
+        "fe1c0752e6b37e25c9ffdf07f2f27528606cd2e32317665547187d451f3a9047",
+        "f2fe6fa8055dde2c654c4f81c41dfd23b3c3b111f8ec3879cd3cbd2a29b141f1",
+    ),
+    (
+        "TestScripts/XyceVerify/DCSources.pm",
+        2_739,
+        "b2ddcab5ad5a89c428b9b4430190fa27ef7106da7e7afeb31452c81890a9a006",
+        "0905f9dc79d7c5bdbe17e3c2360cd063d6fcbf41823a410f98b236783d109ad7",
+    ),
+    (
+        "TestScripts/XyceVerify/DCSweep.pm",
+        9_301,
+        "2246da2374e6cce3ea516a50e472fb07f7481e8b0effb20d4a650e6b6cb1eda0",
+        "b9cc7d905d001ebe2ace44936b9631e4bdcbf42bca4d4b34c5866262cd11d9a3",
+    ),
+    (
+        "TestScripts/XyceVerify/StepSweep.pm",
+        8_731,
+        "84b2d485c1848f2e456463de8a5015205d87c3db8a6d070547d6f9464618fed6",
+        "db1b142ab3ae9163bbe02bd68b5b3a6311436adbf27c06d71a5c05df9b6973e7",
+    ),
+    (
+        XYCE_RELEASE_710_XYCE_VERIFY_PATH,
+        XYCE_RELEASE_710_XYCE_VERIFY_BYTES,
+        XYCE_RELEASE_710_XYCE_VERIFY_SHA256,
+        XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3,
+    ),
+];
+const XYCE_ISSUE451_RETAINED_RECORD_COUNT: usize = 2;
+const XYCE_ISSUE451_RETAINED_RECORD_BYTES: usize = 297;
+const XYCE_ISSUE451_RETAINED_RECORDS_SHA256: &str =
+    "776cc2670147a620df05c61f55afd6c3553feab6015e5c07a680d2793564134b";
+const XYCE_ISSUE451_RETAINED_RECORDS_BLAKE3: &str =
+    "f52d2458b599ca6076ab6455092ca348e6eea8833512fe774fe570135718d3c1";
+const XYCE_ISSUE451_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
+    (
+        "issue451.cir",
+        371,
+        "6df6de48c1cb9b3a07c7b00c79974c498b0bc372e4f0c5cface9bae06623d49a",
+        "dd15a6e050f1b1bfb9e256c0e36fdac756469a593c5cc097f5fac982ab0933db",
+    ),
+    (
+        "issue451_ref.cir",
+        421,
+        "b4b817871d79dc3f61fe0837159ec9b07eb689564d3b652cfb0f157074404b24",
+        "45fd5785ec0a81ebebd5996aa2fc85d93157119da277cada6e5640f1d46a781c",
     ),
 ];
 
@@ -11845,6 +11956,7 @@ mod contracts_dc;
 mod contracts_diode_analytic;
 mod contracts_frequency;
 mod contracts_issue202;
+mod contracts_issue451;
 mod contracts_issue61;
 mod contracts_legacy_device_analytic;
 mod contracts_sources;

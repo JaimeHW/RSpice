@@ -10165,6 +10165,38 @@ fn test_xyce_issue202_redefined_parameter_mode_matrix() {
 }
 
 #[test]
+fn test_xyce_issue451_hierarchical_node_operating_point_relation() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, contract, wrapper, exclusion) in [
+        (
+            "Netlists/Certification_Tests/ISSUE_451/issue451.cir",
+            "issue451_hierarchical_node_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/ISSUE_451/issue451_ref.cir",
+            "issue451_hierarchical_node_explicit_reference",
+            false,
+            Some("Netlists/Certification_Tests/ISSUE_451/exclude"),
+        ),
+    ] {
+        assert_eq!(runner.requires_upstream_wrapper(relative), wrapper);
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should reproduce the exact hierarchical-node operating-point relation, got {result:?}"
+        );
+        assert_eq!(result.contract, contract);
+        assert_eq!(result.upstream_exclusion_source.as_deref(), exclusion);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_bug352_diode_model_expression_equivalence_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
