@@ -8,6 +8,24 @@
 
 use super::*;
 
+#[test]
+fn behavioral_reference_error_round_trips_through_worker_contract() {
+    let expected = SimulationError::BehavioralReference {
+        owner_name: "b2".to_string(),
+        canonical_owner_name: "B2".to_string(),
+        dependency_name: "b1".to_string(),
+        canonical_dependency_name: "B1".to_string(),
+        reason: "lead_current_not_solution_variable".to_string(),
+    };
+
+    let worker = WorkerSimulationError::from(expected.clone());
+    let encoded = serde_json::to_string(&worker).expect("worker error serializes");
+    let decoded: WorkerSimulationError =
+        serde_json::from_str(&encoded).expect("worker error deserializes");
+
+    assert_eq!(SimulationError::from(decoded), expected);
+}
+
 pub(super) fn retained_pss_operating_point() -> rspice_core::engine::PssOperatingPoint {
     let config = rspice_core::analysis::PssConfig::new(1.0)
         .with_harmonics(4)

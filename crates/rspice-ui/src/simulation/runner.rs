@@ -908,6 +908,15 @@ pub enum SimulationError {
     /// Netlist parsing error
     ParseError(String),
 
+    /// A node or device referenced by a behavioral expression could not be bound.
+    BehavioralReference {
+        owner_name: String,
+        canonical_owner_name: String,
+        dependency_name: String,
+        canonical_dependency_name: String,
+        reason: String,
+    },
+
     /// Circuit building error
     CircuitError(String),
 
@@ -941,6 +950,16 @@ impl std::fmt::Display for SimulationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SimulationError::ParseError(msg) => write!(f, "Parse error: {}", msg),
+            SimulationError::BehavioralReference {
+                canonical_owner_name,
+                canonical_dependency_name,
+                reason,
+                ..
+            } => write!(
+                f,
+                "Device instance {canonical_owner_name}: Problem with value for \
+                 {canonical_dependency_name} in {canonical_owner_name} ({reason})"
+            ),
             SimulationError::CircuitError(msg) => write!(f, "Circuit error: {}", msg),
             SimulationError::SolverError(msg) => write!(f, "Solver error: {}", msg),
             SimulationError::ConvergenceFailed {

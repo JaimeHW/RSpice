@@ -643,6 +643,13 @@ fn format_payload_bytes(bytes: usize) -> String {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum WorkerSimulationError {
     ParseError(String),
+    BehavioralReference {
+        owner_name: String,
+        canonical_owner_name: String,
+        dependency_name: String,
+        canonical_dependency_name: String,
+        reason: String,
+    },
     CircuitError(String),
     SolverError(String),
     ConvergenceFailed {
@@ -664,6 +671,19 @@ impl From<SimulationError> for WorkerSimulationError {
     fn from(value: SimulationError) -> Self {
         match value {
             SimulationError::ParseError(message) => Self::ParseError(message),
+            SimulationError::BehavioralReference {
+                owner_name,
+                canonical_owner_name,
+                dependency_name,
+                canonical_dependency_name,
+                reason,
+            } => Self::BehavioralReference {
+                owner_name,
+                canonical_owner_name,
+                dependency_name,
+                canonical_dependency_name,
+                reason,
+            },
             SimulationError::CircuitError(message) => Self::CircuitError(message),
             SimulationError::SolverError(message) => Self::SolverError(message),
             SimulationError::ConvergenceFailed {
@@ -694,6 +714,19 @@ impl From<WorkerSimulationError> for SimulationError {
     fn from(value: WorkerSimulationError) -> Self {
         match value {
             WorkerSimulationError::ParseError(message) => Self::ParseError(message),
+            WorkerSimulationError::BehavioralReference {
+                owner_name,
+                canonical_owner_name,
+                dependency_name,
+                canonical_dependency_name,
+                reason,
+            } => Self::BehavioralReference {
+                owner_name,
+                canonical_owner_name,
+                dependency_name,
+                canonical_dependency_name,
+                reason,
+            },
             WorkerSimulationError::CircuitError(message) => Self::CircuitError(message),
             WorkerSimulationError::SolverError(message) => Self::SolverError(message),
             WorkerSimulationError::ConvergenceFailed {
