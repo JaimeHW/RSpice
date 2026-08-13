@@ -60,7 +60,7 @@ reported separately from `expected_unsupported`.
 
 Some upstream exclusions are helper, baseline, or control decks tested by an
 upstream wrapper owner. RSpice has independently reconstructed and qualified
-exact native contracts for 214 such decks. Those rows use
+exact native contracts for 216 such decks. Those rows use
 `rspice_independently_qualified` and name the exact expected native contract.
 The adapter executes them, preserves their upstream provenance on the result,
 and fails closed if execution becomes unsupported, fails, or selects a
@@ -89,6 +89,14 @@ the active-only control, proves that both select the qualified
 `myRMOD::RMOD` card and its 0.031-ohm geometry, and compares their default PRN
 serialization byte-for-byte. The separate D-I transient family keeps its
 existing verifier-backed contracts and retained numerical references.
+
+Certification BUG 28 SON's son3 wrapper is reconstructed as one three-way
+mutual-inductor relation. RSpice runs the subcircuit-local parameter owner,
+its literal-inductance control, and its global-parameter control under one
+deadline; it first compares default PRN serialization exactly and then uses
+the historical Release-7.10 `xyce_verify` direction as the wrapper did. The
+contract separately proves that all three flatten to the same coupled
+inductances, so waveform equality cannot conceal a shared resolution error.
 
 Certification BUG 267 has no numerical gold or comparator: its Release-7.10
 shell wrapper only fails when the simulator process fails (the final missing-

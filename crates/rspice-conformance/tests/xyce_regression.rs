@@ -9561,6 +9561,39 @@ fn test_xyce_diode_analytic_generated_gold_wrappers() {
 }
 
 #[test]
+fn test_xyce_bug28_subcircuit_parameter_equivalence_wrapper() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for (relative, expected_contract, exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_28_SON/bug_28_son3.cir",
+            "bug28son_subcircuit_parameter_wrapper_owner",
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_28_SON/bug_28_son3_noparams.cir",
+            "bug28son_subcircuit_parameter_literal_control",
+            Some("Netlists/Certification_Tests/BUG_28_SON/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_28_SON/bug_28_son3_globalp.cir",
+            "bug28son_subcircuit_parameter_global_control",
+            Some("Netlists/Certification_Tests/BUG_28_SON/exclude"),
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should execute the exact three-way BUG28 relation, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(result.upstream_exclusion_source.as_deref(), exclusion);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_bug48_level54_native_bsim4_success_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
