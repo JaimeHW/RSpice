@@ -1392,7 +1392,14 @@ fn linear_sweep_points_controlled(
         return Ok(Vec::new());
     }
     if (stop > start && step < 0.0) || (stop < start && step > 0.0) {
-        return Ok(Vec::new());
+        return if max_points == 0 && reject_limit {
+            Err(SweepPointGenerationError::LimitExceeded {
+                requested: 1,
+                limit: 0,
+            })
+        } else {
+            Ok(vec![start])
+        };
     }
 
     let mut points = Vec::new();
@@ -2397,6 +2404,31 @@ mod controlled_step_sweep_tests {
                 limit: 3
             })
         ));
+    }
+
+    #[test]
+    fn inconsistent_sweep_direction_runs_only_the_authored_start_point() {
+        for sweep in [
+            DcSweepSpec::linear(100.0, 1.0, 1.0),
+            DcSweepSpec::linear(1.0, 100.0, -1.0),
+            DcSweepSpec::decade(100.0, 1.0, 4),
+            DcSweepSpec::octave(100.0, 1.0, 4),
+        ] {
+            assert_eq!(sweep.points(), vec![sweep.start]);
+            assert_eq!(
+                sweep
+                    .points_bounded_with_abort(1, &NoAbort)
+                    .expect("one authored start point fits the resource bound"),
+                vec![sweep.start]
+            );
+            assert!(matches!(
+                sweep.points_bounded_with_abort(0, &NoAbort),
+                Err(SweepPointGenerationError::LimitExceeded {
+                    requested: 1,
+                    limit: 0
+                })
+            ));
+        }
     }
 
     #[test]

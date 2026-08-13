@@ -47,10 +47,19 @@ pub(super) fn parse_command(
         ".DC" => {
             let (source, spec) = parse_dc_sweep_spec(stream, line_num, params)?;
 
+            push_xyce_inconsistent_dc_sweep_warning(params, diagnostics, origin, &source, &spec);
+
             // Optional second (outer) source: .DC V1 a b s V2 a2 b2 s2
             skip_commas(stream);
             let sweep2 = if matches!(stream.peek().kind, TokenKind::Ident(_)) {
                 let (source2, spec2) = parse_dc_sweep_spec(stream, line_num, params)?;
+                push_xyce_inconsistent_dc_sweep_warning(
+                    params,
+                    diagnostics,
+                    origin,
+                    &source2,
+                    &spec2,
+                );
                 Some(crate::netlist::DcSecondSweep {
                     source: source2,
                     start: spec2.start,
@@ -473,6 +482,37 @@ pub(super) fn parse_command(
     }
 
     Ok(())
+}
+
+fn push_xyce_inconsistent_dc_sweep_warning(
+    params: &ParamContext,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+    origin: &NetlistSourceLocation,
+    source: &str,
+    spec: &crate::netlist::DcSweepSpec,
+) {
+    if params.expression_dialect() != crate::config::ExpressionDialect::Xyce {
+        return;
+    }
+    let label = match spec.mode {
+        crate::netlist::DcSweepMode::Linear
+            if (spec.stop > spec.start && spec.step < 0.0)
+                || (spec.stop < spec.start && spec.step > 0.0) =>
+        {
+            "Linear"
+        }
+        crate::netlist::DcSweepMode::Decade { .. } if spec.start > spec.stop => "Decade",
+        crate::netlist::DcSweepMode::Octave { .. } if spec.start > spec.stop => "Octave",
+        _ => return,
+    };
+    let message = format!(
+        "{label} DC or STEP parameters for sweep over {source} are inconsistent; only the first requested point will be evaluated"
+    );
+    diagnostics.push(ParseDiagnostic::warning_at(
+        origin.clone(),
+        "xyce-inconsistent-dc-sweep-direction",
+        message,
+    ));
 }
 
 fn parse_lin_command(
@@ -5221,6 +5261,60 @@ mod tests {
             ]
         );
         assert!(netlist.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn xyce_inconsistent_dc_sweeps_warn_and_preserve_one_start_point() {
+        let options = crate::netlist::NetlistParseOptions {
+            expression_dialect: crate::config::ExpressionDialect::Xyce,
+            ..Default::default()
+        };
+        for (statement, label) in [
+            (".DC V1 100 1 1", "Linear"),
+            (".DC DEC V1 100 1 4", "Decade"),
+            (".DC OCT V1 100 1 4", "Octave"),
+        ] {
+            let deck = format!(
+                "inconsistent Xyce sweep\nV1 1 0 1\nR1 1 0 1k\n{statement}\n.PRINT DC V(1)\n.END\n"
+            );
+            let netlist = Netlist::parse_with_options(&deck, options)
+                .unwrap_or_else(|error| panic!("{statement} failed to parse: {error}"));
+            let [
+                AnalysisCommand::Dc {
+                    source,
+                    start,
+                    stop,
+                    step,
+                    mode,
+                    sweep2: None,
+                },
+            ] = netlist.analyses.as_slice()
+            else {
+                panic!("{statement} lost its sole DC analysis")
+            };
+            assert_eq!(source, "V1");
+            let spec = crate::netlist::DcSweepSpec {
+                start: *start,
+                stop: *stop,
+                step: *step,
+                mode: mode.clone(),
+            };
+            assert_eq!(spec.points(), vec![100.0]);
+            let [diagnostic] = netlist.diagnostics.as_slice() else {
+                panic!("{statement} must emit one Xyce warning")
+            };
+            assert_eq!(diagnostic.code, "xyce-inconsistent-dc-sweep-direction");
+            assert_eq!(diagnostic.line, 4);
+            assert!(
+                diagnostic
+                    .message
+                    .starts_with(&format!("{label} DC or STEP parameters for sweep over V1"))
+            );
+        }
+
+        let generic = Netlist::parse("generic sweep\nV1 1 0 1\nR1 1 0 1k\n.DC V1 100 1 1\n.END\n")
+            .expect("generic SPICE also retains the authored start point");
+        assert!(generic.diagnostics.is_empty());
     }
 
     #[test]

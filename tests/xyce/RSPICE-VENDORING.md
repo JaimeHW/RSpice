@@ -60,7 +60,7 @@ reported separately from `expected_unsupported`.
 
 Some upstream exclusions are helper, baseline, or control decks tested by an
 upstream wrapper owner. RSpice has independently reconstructed and qualified
-exact native contracts for 217 such decks. Those rows use
+exact native contracts for 221 such decks. Those rows use
 `rspice_independently_qualified` and name the exact expected native contract.
 The adapter executes them, preserves their upstream provenance on the result,
 and fails closed if execution becomes unsupported, fails, or selects a
@@ -98,6 +98,14 @@ Release-7.10 wrapper/verifier provenance, validates the shared diode-capacitor
 discharge circuit and its sole startup delta, then preserves the historical
 GOOD=operating-point, TEST=NOOP `xyce_verify` direction. No numerical gold or
 exclusion row is introduced.
+
+Certification BUG 1162 SON preserves the Release-7.10 one-point behavior for
+inconsistent linear, decade, and octave DC sweep directions. RSpice emits one
+typed Xyce warning for each defective control, evaluates only the authored
+100-volt start point, and compares every resulting default PRN table against
+the wrapper's ordinary one-point baseline with the historical verifier. The
+empty wrapper owner and all four controls are bound as one provenance-locked
+family; no numerical gold is invented.
 
 Certification BUG 271 preserves an active Release-7.10 success-only wrapper
 whose deck proves that tab-prefixed prose and `*` lines remain comments around

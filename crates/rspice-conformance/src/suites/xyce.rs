@@ -61,15 +61,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 217;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 221;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "e54b8e00bed443cde2ab97220a8971b80333028391553b325cdcb935ee774462";
+    "d268cff78cd00f89984531804d67cfb0bc08f8480b978aeb5e840cdece80b716";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "f05fbd3c5828038f51deb1f662790aa1fe83dc12aeedaa11debd5c2c506fe09c";
+    "35186fa7367ee28b84b1dc2e8969f8e3664281f9dbe346e79fc6a1fadbbfbd9c";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "d31e79ef94ab10cd39fa5e70819f0b385466b4d380866b3ce26b5d405fd793a6";
+    "6914a57e1f40116d72617ca1e40255f04a59425ffb08449d12871f1864aafa8c";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -2196,6 +2196,147 @@ const XYCE_BUG1040_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
         260,
         "cdaea1743b0ca4046b94b11ee56eb957996631cfbbd3466ba0f296c6cd5ed7ca",
         "81ba29e78edda22d3c14cea1bb4b2a0d7531241d460b62cbbf04f8d9919f4368",
+    ),
+];
+
+// BUG_1162_SON's wrapper proves that inconsistent LIN/DEC/OCT DC sweep
+// directions warn and execute exactly the authored start point. The empty
+// owner runs one ordinary baseline followed by the three defective controls.
+const XYCE_BUG1162_OWNER_CONTRACT: &str = "bug1162_inconsistent_dc_sweep_wrapper_owner";
+const XYCE_BUG1162_BASELINE_CONTRACT: &str = "bug1162_inconsistent_dc_sweep_baseline_control";
+const XYCE_BUG1162_LINEAR_CONTRACT: &str = "bug1162_inconsistent_dc_sweep_linear_control";
+const XYCE_BUG1162_DECADE_CONTRACT: &str = "bug1162_inconsistent_dc_sweep_decade_control";
+const XYCE_BUG1162_OCTAVE_CONTRACT: &str = "bug1162_inconsistent_dc_sweep_octave_control";
+const XYCE_BUG1162_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_1162_SON/bug_1162_son.cir";
+const XYCE_BUG1162_BASELINE_PATH: &str = "Netlists/Certification_Tests/BUG_1162_SON/baseline.cir";
+const XYCE_BUG1162_LINEAR_PATH: &str =
+    "Netlists/Certification_Tests/BUG_1162_SON/defective_lin.cir";
+const XYCE_BUG1162_DECADE_PATH: &str =
+    "Netlists/Certification_Tests/BUG_1162_SON/defective_dec.cir";
+const XYCE_BUG1162_OCTAVE_PATH: &str =
+    "Netlists/Certification_Tests/BUG_1162_SON/defective_oct.cir";
+const XYCE_BUG1162_OWNER_RECORD: &str =
+    "netlists/certification_tests/bug_1162_son/bug_1162_son.cir";
+const XYCE_BUG1162_BASELINE_RECORD: &str = "netlists/certification_tests/bug_1162_son/baseline.cir";
+const XYCE_BUG1162_LINEAR_RECORD: &str =
+    "netlists/certification_tests/bug_1162_son/defective_lin.cir";
+const XYCE_BUG1162_DECADE_RECORD: &str =
+    "netlists/certification_tests/bug_1162_son/defective_dec.cir";
+const XYCE_BUG1162_OCTAVE_RECORD: &str =
+    "netlists/certification_tests/bug_1162_son/defective_oct.cir";
+const XYCE_BUG1162_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_1162_SON/exclude";
+const XYCE_BUG1162_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG1162_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG1162_HISTORICAL_RECORD_COUNT: usize = 12;
+const XYCE_BUG1162_HISTORICAL_RECORD_BYTES: usize = 2_909;
+const XYCE_BUG1162_HISTORICAL_RECORDS_SHA256: &str =
+    "7a8a9bd2199d36feb330f351a9aa8fde6811caeb3dd177c5ec47c878e7db0f58";
+const XYCE_BUG1162_HISTORICAL_RECORDS_BLAKE3: &str =
+    "d4ad630a2a9ec582ed30236fd0b0e7dfbe6481612a94993ee39e63687a675362";
+const XYCE_BUG1162_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 12] = [
+    (
+        "Netlists/Certification_Tests/BUG_1162_SON/CMakeLists.txt",
+        1_695,
+        "536193553d5f181d3b51d7727414c42d4c4a434c20a8fa03dde87c31fbc261ec",
+        "a4b62d4cb26464135d4ab874499a72139f4400495641d79bc8e7f394bebd10aa",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1162_SON/Manifest.txt",
+        109,
+        "590a6d26a4c83827a7625976d2974f4977cff44814810cb475f29e09fb2955aa",
+        "00fd10d5ee333284ea33bfc6874fc7315f7b8940b2ba0bab28db64db5a789ba5",
+    ),
+    (
+        XYCE_BUG1162_BASELINE_PATH,
+        359,
+        "ed0bafa51ab5fae912e0e90b5a50aad3aa7d7565d45f69eb7b4ff88d42df0f23",
+        "bf776c9aa9b37b834c0f433135d79a93ca87b1c8afdc79e9f380ca82385f238f",
+    ),
+    (
+        XYCE_BUG1162_OWNER_PATH,
+        0,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1162_SON/bug_1162_son.cir.sh",
+        2_943,
+        "1bb150c5bfc1516a9916a734e53a813c6c3d0109a3bac76a9728180a4eda2afd",
+        "e38d31859a60d7e83685f1cd3f14ddacfd7b998a8f10f129a28bc74162b00a6b",
+    ),
+    (
+        XYCE_BUG1162_DECADE_PATH,
+        460,
+        "d31696bedd99454740b3a16ff5b9cc6390be3b80f0d1a7f983981b29257e4926",
+        "e58dc957a0e9ae07c04a48b2124868b68fca8acbe49efc95e74547e3212efac7",
+    ),
+    (
+        XYCE_BUG1162_LINEAR_PATH,
+        447,
+        "3ca53e5d9dd23f29ab057cd3af06604c3b295112d9921ef1675511349db8c3a4",
+        "e87bda21a9bc62990e092b5e970b524d4cd87a4e7976f13239cd2d449ac8edf5",
+    ),
+    (
+        XYCE_BUG1162_OCTAVE_PATH,
+        459,
+        "be51f5602cb79590aec74148ca85ec5740e838dd04bd944dbb66ed2ed76b1940",
+        "99babd65cae23941cfbb7ec773dfe554bd5594ee3cf5bb27be257e049a8536af",
+    ),
+    (
+        XYCE_BUG1162_EXCLUSION_SOURCE,
+        67,
+        "128deb269045ae15c340d47031bdcde02252d0c9dab82353a5e35a8caf3751f7",
+        "3d5881a935121bf4eb82ac2728e44eee8cdabc8a3eeef4286f6e919f0d40637f",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1162_SON/tags",
+        16,
+        "fb8b1ab6aa8b694212335a76b1b87c077f22be7543f15c12de32a2da40b4f345",
+        "a5f2cee6f41471429bc22c4c40d36881f4c11d2387b20adbdc14efe2509f6589",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+    (
+        XYCE_RELEASE_710_XYCE_VERIFY_PATH,
+        XYCE_RELEASE_710_XYCE_VERIFY_BYTES,
+        XYCE_RELEASE_710_XYCE_VERIFY_SHA256,
+        XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3,
+    ),
+];
+const XYCE_BUG1162_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 5] = [
+    (
+        "baseline.cir",
+        359,
+        "ed0bafa51ab5fae912e0e90b5a50aad3aa7d7565d45f69eb7b4ff88d42df0f23",
+        "bf776c9aa9b37b834c0f433135d79a93ca87b1c8afdc79e9f380ca82385f238f",
+    ),
+    (
+        "bug_1162_son.cir",
+        0,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+    ),
+    (
+        "defective_dec.cir",
+        460,
+        "d31696bedd99454740b3a16ff5b9cc6390be3b80f0d1a7f983981b29257e4926",
+        "e58dc957a0e9ae07c04a48b2124868b68fca8acbe49efc95e74547e3212efac7",
+    ),
+    (
+        "defective_lin.cir",
+        447,
+        "3ca53e5d9dd23f29ab057cd3af06604c3b295112d9921ef1675511349db8c3a4",
+        "e87bda21a9bc62990e092b5e970b524d4cd87a4e7976f13239cd2d449ac8edf5",
+    ),
+    (
+        "defective_oct.cir",
+        459,
+        "be51f5602cb79590aec74148ca85ec5740e838dd04bd944dbb66ed2ed76b1940",
+        "99babd65cae23941cfbb7ec773dfe554bd5594ee3cf5bb27be257e049a8536af",
     ),
 ];
 
@@ -10607,6 +10748,7 @@ mod comparison;
 mod contracts;
 mod contracts_bug1025;
 mod contracts_bug1040;
+mod contracts_bug1162;
 mod contracts_bug1398;
 mod contracts_bug159;
 mod contracts_bug267;

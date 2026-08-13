@@ -9645,6 +9645,55 @@ fn test_xyce_bug1040_noop_operating_point_transient_wrapper() {
 }
 
 #[test]
+fn test_xyce_bug1162_inconsistent_dc_sweep_wrapper() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for (relative, expected_contract, expected_wrapper, exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_1162_SON/bug_1162_son.cir",
+            "bug1162_inconsistent_dc_sweep_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1162_SON/baseline.cir",
+            "bug1162_inconsistent_dc_sweep_baseline_control",
+            false,
+            Some("Netlists/Certification_Tests/BUG_1162_SON/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1162_SON/defective_lin.cir",
+            "bug1162_inconsistent_dc_sweep_linear_control",
+            false,
+            Some("Netlists/Certification_Tests/BUG_1162_SON/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1162_SON/defective_dec.cir",
+            "bug1162_inconsistent_dc_sweep_decade_control",
+            false,
+            Some("Netlists/Certification_Tests/BUG_1162_SON/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1162_SON/defective_oct.cir",
+            "bug1162_inconsistent_dc_sweep_octave_control",
+            false,
+            Some("Netlists/Certification_Tests/BUG_1162_SON/exclude"),
+        ),
+    ] {
+        assert_eq!(runner.requires_upstream_wrapper(relative), expected_wrapper);
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should execute the exact BUG1162 one-point relation, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(result.upstream_exclusion_source.as_deref(), exclusion);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_bug271_tab_comment_rlc_success_wrapper() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
