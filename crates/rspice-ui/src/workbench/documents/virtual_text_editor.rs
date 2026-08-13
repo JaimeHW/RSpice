@@ -104,6 +104,10 @@ pub(crate) struct VirtualEditorOutput {
     pub changed: bool,
     pub cursor_line: usize,
     pub cursor_char_index: usize,
+    /// Character under the pointer in the code well. Gutter, folded-away,
+    /// and off-document positions report `None` so language hovers never
+    /// guess at a token.
+    pub hover_char_index: Option<usize>,
     pub selected_char_range: Option<(usize, usize)>,
     pub breakpoint_toggled: Option<usize>,
     /// Screen position just below the primary caret, for a popover that has to
@@ -196,6 +200,7 @@ pub(crate) fn show_virtual_text_editor(
     consume_accesskit_text_selection(ui, editor_id, &mut session.model, style);
     let mut breakpoint_toggled = None;
     let mut caret_anchor = None;
+    let mut hover_char_index = None;
     let mut requested_scroll = requested_line;
     let available = Vec2::new(ui.available_width(), ui.available_height().max(120.0));
     let scroll_output = ui.allocate_ui(available, |ui| {
@@ -354,6 +359,13 @@ pub(crate) fn show_virtual_text_editor(
                 );
 
                 let pointer_hover = ui.input(|input| input.pointer.hover_pos());
+                if let Some(pointer) = pointer_hover.filter(|pointer| {
+                    ui.clip_rect().contains(*pointer) && pointer.x > sticky_separator
+                }) {
+                    let (line, column) =
+                        hit_test(&session.model, pointer, origin, viewport, style, char_width);
+                    hover_char_index = Some(session.model.char_at_line_column(line, column));
+                }
                 for line in viewport_lines {
                     let row_top =
                         origin.y + style.top_padding + line.visible_row as f32 * style.line_height;
@@ -550,6 +562,7 @@ pub(crate) fn show_virtual_text_editor(
         changed,
         cursor_line,
         cursor_char_index,
+        hover_char_index,
         selected_char_range,
         breakpoint_toggled,
         caret_anchor,

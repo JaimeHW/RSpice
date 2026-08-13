@@ -71,6 +71,46 @@ struct NetlistSearchResults {
     error: Option<crate::state::FindError>,
 }
 
+fn plan_all_owned_replacements(
+    documents: &[NetlistSearchDocument<'_>],
+    query: &str,
+    replacement: &str,
+    options: crate::state::FindOptions,
+) -> Result<
+    Vec<crate::workbench::documents::netlist_document::OwnedNetlistReplacement>,
+    crate::state::FindError,
+> {
+    use crate::state::{ReplaceScope, replace_in_source};
+    use crate::workbench::documents::netlist_document::OwnedNetlistReplacement;
+
+    let mut edits = Vec::new();
+    for document in documents.iter().filter(|document| document.editable) {
+        let outcome = replace_in_source(
+            document.source,
+            query,
+            replacement,
+            options,
+            ReplaceScope::All,
+        )?;
+        let replacement_count = outcome.replacement_count();
+        let replaced_source = outcome.into_source();
+        if replacement_count == 0 || replaced_source == document.source {
+            continue;
+        }
+        edits.push(if let Some(identity) = document.dependency_identity {
+            OwnedNetlistReplacement::dependency(
+                identity,
+                document.source,
+                replaced_source,
+                replacement_count,
+            )
+        } else {
+            OwnedNetlistReplacement::root(document.source, replaced_source, replacement_count)
+        });
+    }
+    Ok(edits)
+}
+
 fn netlist_search_documents(
     state: &AppState,
     scope: crate::workbench::documents::netlist_document::NetlistFindScope,
@@ -503,6 +543,21 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         DialogChoice::None | DialogChoice::Secondary => {}
     }
 
+    let all_owned_replacements = if matches!(action, Some(FindWindowAction::ReplaceAll))
+        && find.scope == NetlistFindScope::AllOwnedSources
+    {
+        match plan_all_owned_replacements(&documents, &find.find, &find.replacement, options) {
+            Ok(replacements) => Some(replacements),
+            Err(error) => {
+                find.error = Some(error.to_string());
+                action = None;
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // The action is resolved against the borrowed scan before anything is
     // written, because opening a document replaces the very buffers these
     // matches were found in.
@@ -538,6 +593,33 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     drop(matches);
     drop(documents);
     app.state.ui.netlist.find = find;
+
+    if let Some(replacements) = all_owned_replacements {
+        match crate::workbench::documents::netlist_document::replace_owned_sources_atomically(
+            &mut app.state,
+            replacements,
+        ) {
+            Ok(count) if count > 0 => {
+                app.state.ui.netlist.find.selected_match = 0;
+                let count_text = count.to_string();
+                app.state
+                    .push_user_message(ConsoleMessage::info(messages.format(
+                        if count == 1 {
+                            MessageId::NetlistFindReplacedSingular
+                        } else {
+                            MessageId::NetlistFindReplaced
+                        },
+                        &[("count", &count_text)],
+                    )));
+            }
+            Ok(_) => {}
+            Err(error) => {
+                app.state.ui.netlist.find.error = Some(error.clone());
+                app.state.push_user_message(ConsoleMessage::error(error));
+            }
+        }
+        return;
+    }
 
     let Some(target) = target else {
         return;
@@ -603,18 +685,36 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                 Ok(outcome) => {
                     let count = outcome.replacement_count();
                     let replacement = outcome.into_source();
-                    let replaced = if target.dependency_identity.is_some() {
-                        crate::workbench::documents::netlist_document::replace_owned_dependency_source(
-                            &mut app.state,
+                    let edit = if let Some(identity) = target.dependency_identity.as_deref() {
+                        crate::workbench::documents::netlist_document::OwnedNetlistReplacement::dependency(
+                            identity,
+                            source,
                             replacement,
+                            count,
                         )
                     } else {
-                        crate::workbench::documents::netlist_document::replace_owned_source(
-                            &mut app.state,
+                        crate::workbench::documents::netlist_document::OwnedNetlistReplacement::root(
+                            source,
                             replacement,
+                            count,
                         )
                     };
-                    if count > 0 && replaced {
+                    let replaced = if count == 0 {
+                        false
+                    } else {
+                        match crate::workbench::documents::netlist_document::replace_owned_sources_atomically(
+                            &mut app.state,
+                            vec![edit],
+                        ) {
+                            Ok(_) => true,
+                            Err(error) => {
+                                app.state.ui.netlist.find.error = Some(error.clone());
+                                app.state.push_user_message(ConsoleMessage::error(error));
+                                false
+                            }
+                        }
+                    };
+                    if replaced {
                         app.state.ui.netlist.find.selected_match = 0;
                         let count_text = count.to_string();
                         app.state
@@ -675,4 +775,49 @@ fn find_scope_combo(
                 messages.text(MessageId::NetlistFindProjectReferences),
             );
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_owned_replace_plans_root_and_every_editable_include() {
+        let root = ".include \"models.lib\"\n.param gain=10\n.end\n";
+        let include = ".param gain=20\n";
+        let generated = ".param gain=30\n";
+        let documents = vec![
+            NetlistSearchDocument {
+                active_document: ActiveNetlistDocument::OwnedSource,
+                dependency_identity: None,
+                editable: true,
+                label: "top.cir".to_owned(),
+                source: root,
+            },
+            NetlistSearchDocument {
+                active_document: ActiveNetlistDocument::OwnedSource,
+                dependency_identity: Some("models.lib"),
+                editable: true,
+                label: "models.lib".to_owned(),
+                source: include,
+            },
+            NetlistSearchDocument {
+                active_document: ActiveNetlistDocument::Generated,
+                dependency_identity: None,
+                editable: false,
+                label: "generated.sp".to_owned(),
+                source: generated,
+            },
+        ];
+
+        let edits = plan_all_owned_replacements(
+            &documents,
+            "gain",
+            "av",
+            crate::state::FindOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(edits.len(), 2, "generated source remains find-only");
+    }
 }

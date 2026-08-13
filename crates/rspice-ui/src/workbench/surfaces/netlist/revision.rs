@@ -268,7 +268,8 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
             && message.chars().count() <= 240
             && !message.chars().any(char::is_control)
     };
-    let needs_save = app.state.ui.netlist.externally_saved_content_digest != Some(current_digest);
+    let needs_save = dialog.save_as
+        || app.state.ui.netlist.externally_saved_content_digest != Some(current_digest);
     let primary_enabled = validated && message_valid && needs_save;
     let footer_hint = if validated {
         messages.text(MessageId::NetlistExactSnapshotValidated)
@@ -277,8 +278,16 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
     };
     let choice = Dialog::new(
         messages.text(MessageId::NetlistSaveEyebrow),
-        messages.text(MessageId::NetlistSaveTitle),
-        messages.text(MessageId::NetlistSave),
+        if dialog.save_as {
+            "Save owned source as".to_owned()
+        } else {
+            messages.text(MessageId::NetlistSaveTitle)
+        },
+        if dialog.save_as {
+            "Save source as".to_owned()
+        } else {
+            messages.text(MessageId::NetlistSave)
+        },
     )
     .description(messages.text(MessageId::NetlistSaveDescription))
     .size(DialogSize::Transaction)
@@ -296,6 +305,20 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
         ui.label(
             egui::RichText::new(artifact_name).font(theme::mono(tokens::FS_1, FontWeight::Medium)),
         );
+        ui.horizontal(|ui| {
+            ui.label("Encoding");
+            if dialog.save_as {
+                egui::ComboBox::from_id_salt("rspice.netlist.save-as-encoding")
+                    .selected_text(dialog.encoding.label())
+                    .show_ui(ui, |ui| {
+                        for encoding in crate::state::NetlistTextEncoding::ALL {
+                            ui.selectable_value(&mut dialog.encoding, encoding, encoding.label());
+                        }
+                    });
+            } else {
+                ui.monospace(dialog.encoding.label());
+            }
+        });
         egui::Frame::new()
             .fill(t.color.bg_inset)
             .stroke(egui::Stroke::new(1.0, t.color.border))
@@ -350,11 +373,13 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
                 &mut app.state,
                 &app.simulation_controller,
                 app.export_workflow_io.as_ref(),
-                false,
+                dialog.save_as,
+                dialog.encoding,
                 &dialog.message,
             ) {
                 crate::workbench::workflows::netlist_workflow::validate_visible_netlist_source(app);
                 dialog.open = false;
+                dialog.save_as = false;
                 dialog.error = None;
                 dialog.message = "Update owned SPICE source".to_owned();
             } else {

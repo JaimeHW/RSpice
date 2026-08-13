@@ -5,6 +5,7 @@
 //! document's ownership, and the advisory chip yields its space before the
 //! language label or a blocking status can clip.
 
+use egui::containers::menu::MenuButton;
 use egui::{Align, Layout, Ui, vec2};
 
 use crate::diagnostics::ConsoleMessage;
@@ -241,7 +242,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             ui.add_enabled_ui(active_available, |ui| {
                 crate::workbench::documents::text_editor_commands::editor_command_menu(
                     ui,
-                    crate::workbench::documents::netlist_document::editor_id(),
+                    crate::workbench::documents::netlist_document::editor_id(&app.state),
                     crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
                         &app.state,
                     ),
@@ -265,6 +266,13 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             .on_disabled_hover_text(messages.text(MessageId::NetlistSearchUnavailable));
             if find_clicked {
                 action = Some(NetlistToolbarAction::Find);
+            }
+            if let Some(language_action) = language_tools_menu(
+                ui,
+                messages,
+                active_available && active != ActiveNetlistDocument::GeneratedDiff,
+            ) {
+                action = Some(language_action);
             }
             if dependency_visible {
                 let (label, candidate) = if dependency_owned {
@@ -380,7 +388,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             ui.add_enabled_ui(active_available, |ui| {
                 crate::workbench::documents::text_editor_commands::editor_command_menu(
                     ui,
-                    crate::workbench::documents::netlist_document::editor_id(),
+                    crate::workbench::documents::netlist_document::editor_id(&app.state),
                     crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
                         &app.state,
                     ),
@@ -404,6 +412,13 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             .on_disabled_hover_text(messages.text(MessageId::NetlistSearchUnavailable));
             if find_clicked {
                 action = Some(NetlistToolbarAction::Find);
+            }
+            if let Some(language_action) = language_tools_menu(
+                ui,
+                messages,
+                active_available && active != ActiveNetlistDocument::GeneratedDiff,
+            ) {
+                action = Some(language_action);
             }
 
             if dependency_visible {
@@ -556,8 +571,97 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
         Some(NetlistToolbarAction::Find) => {
             crate::workbench::commands::vocabulary::Command::FindCodeDocument.execute(app);
         }
+        Some(NetlistToolbarAction::GoToDefinition) => {
+            match crate::workbench::documents::netlist_document::language::go_to_definition_at_cursor(
+                &mut app.state,
+            ) {
+                Ok(message) => app.state.push_user_message(ConsoleMessage::info(message)),
+                Err(error) => app.state.push_user_message(ConsoleMessage::warning(error)),
+            }
+        }
+        Some(NetlistToolbarAction::FindReferences) => {
+            match crate::workbench::documents::netlist_document::language::find_references_at_cursor(
+                &mut app.state,
+            ) {
+                Ok(message) => app.state.push_user_message(ConsoleMessage::info(message)),
+                Err(error) => app.state.push_user_message(ConsoleMessage::warning(error)),
+            }
+        }
+        Some(NetlistToolbarAction::RenameSymbol) => {
+            if let Err(error) = crate::workbench::documents::netlist_document::language::begin_rename_at_cursor(
+                &mut app.state,
+            ) {
+                app.state.push_user_message(ConsoleMessage::warning(error));
+            }
+        }
         None => {}
     }
+}
+
+fn language_tools_menu(
+    ui: &mut Ui,
+    messages: crate::workbench::MessageCatalog,
+    enabled: bool,
+) -> Option<NetlistToolbarAction> {
+    let mut action = None;
+    let (response, _) = ui
+        .add_enabled_ui(enabled, |ui| {
+            ui.spacing_mut().button_padding = vec2(0.0, 0.0);
+            MenuButton::from_button(
+                egui::Button::new(egui::WidgetText::default())
+                    .frame(false)
+                    .min_size(vec2(28.0, 28.0)),
+            )
+            .ui(ui, |ui| {
+                ui.set_min_width(180.0);
+                if ui
+                    .button(messages.text(MessageId::NetlistGoToDefinition))
+                    .clicked()
+                {
+                    action = Some(NetlistToolbarAction::GoToDefinition);
+                    ui.close();
+                }
+                if ui
+                    .button(messages.text(MessageId::NetlistFindReferences))
+                    .clicked()
+                {
+                    action = Some(NetlistToolbarAction::FindReferences);
+                    ui.close();
+                }
+                if ui
+                    .button(messages.text(MessageId::NetlistRenameSymbol))
+                    .clicked()
+                {
+                    action = Some(NetlistToolbarAction::RenameSymbol);
+                    ui.close();
+                }
+            })
+        })
+        .inner;
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            messages.text(MessageId::NetlistLanguageTools),
+        )
+    });
+    ui.painter().rect_filled(
+        response.rect,
+        2.0,
+        if response.hovered() {
+            Tokens::get(ui.ctx()).color.bg_hover
+        } else {
+            egui::Color32::TRANSPARENT
+        },
+    );
+    WorkbenchIcon::Target.paint(
+        ui.painter(),
+        egui::Rect::from_center_size(response.rect.center(), vec2(16.0, 16.0)),
+        Tokens::get(ui.ctx()).color.text_dim,
+    );
+    theme::paint_focus_ring(ui, &response, response.rect);
+    response.on_hover_text(messages.text(MessageId::NetlistLanguageTools));
+    action
 }
 
 pub(super) const fn code_toolbar_compact(width: f32) -> bool {
@@ -628,4 +732,7 @@ enum NetlistToolbarAction {
     Validate,
     Save,
     Find,
+    GoToDefinition,
+    FindReferences,
+    RenameSymbol,
 }

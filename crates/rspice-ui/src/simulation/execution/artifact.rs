@@ -153,7 +153,11 @@ pub(in crate::simulation) fn validate_prepared_dependency_contract_with_options(
     }
     if matches!(
         consumer,
-        AnalysisSpec::Pac | AnalysisSpec::Pxf | AnalysisSpec::Pnoise | AnalysisSpec::Pstb
+        AnalysisSpec::PssSpectrum { .. }
+            | AnalysisSpec::Pac
+            | AnalysisSpec::Pxf
+            | AnalysisSpec::Pnoise
+            | AnalysisSpec::Pstb
     ) {
         let require_autonomous = matches!(consumer, AnalysisSpec::Pnoise)
             && consumer_options.pnoise.as_ref().is_some_and(|config| {
@@ -1123,9 +1127,11 @@ impl ResolvedExecutionDependencies {
                 method: PssMethod::Shooting,
                 ..
             } => Some(ExecutionArtifactKind::DcOperatingPointSeed),
-            AnalysisSpec::Pac | AnalysisSpec::Pxf | AnalysisSpec::Pnoise | AnalysisSpec::Pstb => {
-                Some(ExecutionArtifactKind::PeriodicState)
-            }
+            AnalysisSpec::PssSpectrum { .. }
+            | AnalysisSpec::Pac
+            | AnalysisSpec::Pxf
+            | AnalysisSpec::Pnoise
+            | AnalysisSpec::Pstb => Some(ExecutionArtifactKind::PeriodicState),
             _ => None,
         };
         let expected_count = usize::from(expected_kind.is_some());

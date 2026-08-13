@@ -20,6 +20,7 @@ pub(crate) fn save_owned_netlist_source(
     simulation_controller: &crate::simulation::SimulationController,
     io: &(impl ExportWorkflowIo + ?Sized),
     save_as: bool,
+    save_as_encoding: crate::state::NetlistTextEncoding,
     commit_message: &str,
 ) -> bool {
     if state.ui.netlist.active_dependency_identity.is_some() {
@@ -94,13 +95,18 @@ pub(crate) fn save_owned_netlist_source(
         .netlist_descriptor
         .as_ref()
         .and_then(|descriptor| descriptor.external_file_sha256);
-    let encoding = state
+    let source_encoding = state
         .workspace
         .netlist_descriptor
         .as_ref()
         .map_or(crate::state::NetlistTextEncoding::Utf8, |descriptor| {
             descriptor.source_encoding
         });
+    let encoding = if save_as {
+        save_as_encoding
+    } else {
+        source_encoding
+    };
     let encoded_source = match encoding.encode(&source) {
         Ok(bytes) => bytes,
         Err(error) => {
@@ -192,6 +198,7 @@ pub(crate) fn save_owned_netlist_source(
     ) {
         (Some(descriptor), Some(document)) => {
             let mut descriptor = descriptor.clone();
+            descriptor.source_encoding = encoding;
             descriptor.source_line_ending = crate::state::NetlistLineEnding::detect(&source);
             descriptor.external_file_sha256 = io
                 .saved_paths_are_reopenable()

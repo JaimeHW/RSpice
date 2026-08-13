@@ -12,6 +12,33 @@ use super::*;
 const GENERATED_BASE: &str = "* generated\n.option reltol=1e-3\n.param gain=10\n.include \"models/a.lib\"\n.lib \"models/b.lib\" TT\n+ section=fast\nV1 out 0 1\nR1 out 0 1k\n.op\n.measure op vout FIND V(out)\n.save V(out)\n.end\n";
 
 #[test]
+fn launcher_drop_stages_a_new_netlist_project_review() {
+    let mut state = AppState::default();
+    let source = b"dropped deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
+
+    assert!(stage_dropped_netlist_project(
+        &mut state,
+        source.to_vec(),
+        None,
+        "dropped.cir".to_owned(),
+    ));
+
+    let review = state
+        .ui
+        .netlist
+        .import_review
+        .as_ref()
+        .expect("launcher drop owns a staged review");
+    assert_eq!(
+        review.operation,
+        crate::workbench::documents::netlist_document::NetlistImportOperation::OpenProject
+    );
+    assert_eq!(review.display_name, "dropped.cir");
+    assert_eq!(review.source.as_bytes(), source);
+    assert_eq!(review.blocking_issue_count(), 0);
+}
+
+#[test]
 fn started_netlist_import_routes_every_calling_page_to_its_completion_owner() {
     let mut state = AppState::default();
     state.workbench.workspace = crate::workbench::state::Workspace::Models;
@@ -63,6 +90,101 @@ fn import_decoder_and_encoder_preserve_supported_file_boundaries() {
     assert_eq!(decoded, source);
     assert_eq!(encoding.encode(&decoded).unwrap(), latin1);
     assert!(encoding.encode("\u{20ac}").is_err());
+}
+
+#[test]
+fn save_as_can_convert_an_imported_legacy_deck_to_utf8() {
+    use std::cell::RefCell;
+    use std::path::{Path, PathBuf};
+    use std::rc::Rc;
+
+    #[derive(Debug)]
+    struct CaptureIo {
+        bytes: Rc<RefCell<Vec<u8>>>,
+    }
+
+    impl crate::workbench::workflows::export_workflow::ExportWorkflowIo for CaptureIo {
+        fn show_save_dialog(
+            &self,
+            _config: crate::workbench::workflows::export_workflow::SaveDialogConfig<'_>,
+        ) -> Result<Option<PathBuf>, String> {
+            Ok(Some(PathBuf::from("converted.cir")))
+        }
+
+        fn write_text_file(&self, _path: &Path, contents: &str) -> Result<(), String> {
+            self.bytes.replace(contents.as_bytes().to_vec());
+            Ok(())
+        }
+
+        fn write_bytes_file_observed(
+            &self,
+            _destination: &crate::workbench::workflows::export_workflow::ObservedExportDestination,
+            contents: &[u8],
+            _mime_type: &str,
+        ) -> Result<(), String> {
+            self.bytes.replace(contents.to_vec());
+            Ok(())
+        }
+
+        fn write_waveform_csv(
+            &self,
+            _dataset: &crate::io::WaveformDataset,
+            _path: &Path,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn saved_paths_are_reopenable(&self) -> bool {
+            false
+        }
+    }
+
+    let mut app = crate::workbench::RSpiceApp::test_instance();
+    let latin1_source = "* caf\u{00e9}\nV1 out 0 1\n.op\n.end\n";
+    assert!(apply_imported_netlist(
+        &mut app.state,
+        latin1_source.to_owned(),
+        None,
+        "legacy.cir",
+    ));
+    app.state
+        .workspace
+        .netlist_descriptor
+        .as_mut()
+        .unwrap()
+        .source_encoding = crate::state::NetlistTextEncoding::Latin1;
+    let utf8_source = "* caf\u{00e9} and \u{03a9}\nV1 out 0 1\n.op\n.end\n";
+    assert!(
+        crate::workbench::documents::netlist_document::replace_owned_source(
+            &mut app.state,
+            utf8_source.to_owned(),
+        )
+    );
+    assert!(validate_visible_netlist_source(&mut app));
+    let bytes = Rc::new(RefCell::new(Vec::new()));
+    let io = CaptureIo {
+        bytes: Rc::clone(&bytes),
+    };
+
+    assert!(save_owned_netlist_source(
+        &mut app.state,
+        &app.simulation_controller,
+        &io,
+        true,
+        crate::state::NetlistTextEncoding::Utf8,
+        "Convert legacy deck to UTF-8",
+    ));
+
+    assert_eq!(bytes.borrow().as_slice(), utf8_source.as_bytes());
+    assert_eq!(
+        app.state
+            .workspace
+            .netlist_descriptor
+            .as_ref()
+            .unwrap()
+            .source_encoding,
+        crate::state::NetlistTextEncoding::Utf8,
+    );
 }
 
 fn generated_bundle_fixture() -> Vec<u8> {
@@ -1323,6 +1445,7 @@ fn ordinary_source_save_refuses_to_overwrite_external_changes() {
         &app.simulation_controller,
         &crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
         false,
+        crate::state::NetlistTextEncoding::Utf8,
         "Attempt conflicting save",
     ));
     assert_eq!(std::fs::read_to_string(&path).unwrap(), external);

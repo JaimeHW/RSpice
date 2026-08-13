@@ -1238,9 +1238,7 @@ mod tests {
         }
 
         assert_eq!(
-            controller_source
-                .match_indices("self.runner.start_prepared(")
-                .count(),
+            controller_source.match_indices(".start_prepared(").count(),
             1,
             "the controller must have one opaque task dispatch point"
         );

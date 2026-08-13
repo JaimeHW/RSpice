@@ -15,6 +15,8 @@ use crate::services::simulation_runner::{
     CornerBaseMode, CornerFrequencySweep, TempRunConfig, expand_step_sweep_values,
 };
 
+mod periodic;
+
 pub(super) fn build_manual_deck_queue(
     state: &AppState,
     source: &str,
@@ -22,7 +24,8 @@ pub(super) fn build_manual_deck_queue(
     let source = compose_manual_deck_source(source);
     let parsed =
         Netlist::parse(&source).map_err(|err| vec![format!("Netlist parse error: {err}")])?;
-    if parsed.analyses.is_empty() {
+    let periodic_tasks = periodic::parse_periodic_tasks(&parsed, &source)?;
+    if parsed.analyses.is_empty() && periodic_tasks.is_empty() {
         return Err(vec![
             "No analysis command in netlist. Add .op, .ac, .tran, or another supported analysis."
                 .to_string(),
@@ -100,6 +103,36 @@ pub(super) fn build_manual_deck_queue(
             Err(err) => errors.push(err),
         }
     }
+
+    let periodic_pss_count = periodic_tasks
+        .iter()
+        .filter(|task| matches!(task.spec, AnalysisSpec::Pss { .. }))
+        .count();
+    if periodic_pss_count > 0 {
+        let op_count = queue
+            .iter()
+            .filter(|task| {
+                matches!(
+                    task.spec,
+                    AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. }
+                )
+            })
+            .count();
+        if op_count > 1 {
+            errors.push(format!(
+                "Manual-deck PSS requires one unambiguous operating-point seed; found {op_count} .OP analyses."
+            ));
+        } else if op_count == 0 {
+            match command_to_queue_item(state, &parsed, &AnalysisCommand::Op) {
+                Ok(mut item) => {
+                    item.analysis_line = ".op (implicit PSS seed)".to_owned();
+                    queue.push(item);
+                }
+                Err(error) => errors.push(format!("Implicit PSS operating point: {error}")),
+            }
+        }
+    }
+    queue.extend(periodic_tasks);
 
     if errors.is_empty() && queue.is_empty() {
         Err(vec![
@@ -1235,6 +1268,27 @@ mod tests {
                 && (stop_time - 1e-6).abs() < 1e-18
                 && start_time == 0.0
         ));
+    }
+
+    #[test]
+    fn manual_periodic_deck_owns_implicit_seed_and_typed_analysis_options() {
+        let state = AppState::default();
+        let queue = build_manual_deck_queue(
+            &state,
+            "periodic\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n.pss 1Meg tones=V1 points_per_period=128 save_harmonics=8\n.pac dec 20 1k 100Meg input=V1 output=out maxsideband=4\n.pnoise dec 10 1 1Meg output=out noiseref=phase\n.end\n",
+        )
+        .expect("manual periodic queue");
+
+        assert_eq!(queue.len(), 5);
+        assert!(matches!(queue[0].spec, AnalysisSpec::DcOp { .. }));
+        assert_eq!(queue[0].analysis_line, ".op (implicit PSS seed)");
+        assert!(matches!(queue[1].spec, AnalysisSpec::Pss { .. }));
+        assert!(matches!(
+            queue[2].spec,
+            AnalysisSpec::PssSpectrum { num_harmonics: 8 }
+        ));
+        assert!(queue[3].spec_options.pac.is_some());
+        assert!(queue[4].spec_options.pnoise.is_some());
     }
 
     #[test]

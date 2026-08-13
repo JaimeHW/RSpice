@@ -1081,7 +1081,8 @@ impl PreparedRunSnapshot {
                     method: crate::simulation::multi_run::PssMethod::Shooting,
                     ..
                 } => Some(ExecutionArtifactKind::DcOperatingPointSeed),
-                AnalysisSpec::Pac
+                AnalysisSpec::PssSpectrum { .. }
+                | AnalysisSpec::Pac
                 | AnalysisSpec::Pxf
                 | AnalysisSpec::Pnoise
                 | AnalysisSpec::Pstb => Some(ExecutionArtifactKind::PeriodicState),

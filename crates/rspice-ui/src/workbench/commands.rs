@@ -398,7 +398,10 @@ impl Command {
             Self::Undo => {
                 if state.workbench.safe_mode.project_read_only() {
                     false
-                } else if state.can_undo_project_design() {
+                } else if (netlist_page_is_visible(state)
+                    && crate::workbench::documents::netlist_document::can_undo_netlist_edit(state))
+                    || state.can_undo_project_design()
+                {
                     true
                 } else if active_symbol_editor(app) {
                     state.can_undo_active_symbol_document()
@@ -411,7 +414,10 @@ impl Command {
             Self::Redo => {
                 if state.workbench.safe_mode.project_read_only() {
                     false
-                } else if state.can_redo_project_design() {
+                } else if (netlist_page_is_visible(state)
+                    && crate::workbench::documents::netlist_document::can_redo_netlist_edit(state))
+                    || state.can_redo_project_design()
+                {
                     true
                 } else if active_symbol_editor(app) {
                     state.can_redo_active_symbol_document()
@@ -945,13 +951,27 @@ impl Command {
                     && app.state.ui.netlist.active_document
                         == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
                 {
-                    app.state.ui.netlist.save_dialog.open = true;
-                    app.state.ui.netlist.save_dialog.error = None;
+                    crate::workbench::documents::netlist_document::open_netlist_save_dialog(
+                        &mut app.state,
+                        false,
+                    );
                 } else {
                     file_action(app, FileMenuAction::Save);
                 }
             }
-            Self::SaveAs => file_action(app, FileMenuAction::SaveProjectAs),
+            Self::SaveAs => {
+                if netlist_page_is_visible(&app.state)
+                    && app.state.ui.netlist.active_document
+                        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
+                {
+                    crate::workbench::documents::netlist_document::open_netlist_save_dialog(
+                        &mut app.state,
+                        true,
+                    );
+                } else {
+                    file_action(app, FileMenuAction::SaveProjectAs);
+                }
+            }
             Self::SaveAll => file_action(app, FileMenuAction::SaveAll),
             Self::RevertActiveDocument => file_action(app, FileMenuAction::RevertActiveDocument),
             Self::CloseActiveDocument => file_action(app, FileMenuAction::CloseActiveDocument),

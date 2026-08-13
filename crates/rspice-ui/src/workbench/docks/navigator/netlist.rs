@@ -44,10 +44,76 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         &retained_include_states(&app.state),
         messages,
     );
+    let project_index =
+        crate::workbench::documents::netlist_document::language::project_index(&mut app.state);
+    let symbol_query = app
+        .state
+        .workbench
+        .navigator_query
+        .trim()
+        .to_ascii_lowercase();
+    let matching_symbol_indices = project_index.as_ref().map(|index| {
+        if symbol_query.is_empty() {
+            Vec::new()
+        } else {
+            index
+                .symbols()
+                .iter()
+                .enumerate()
+                .filter_map(|(position, symbol)| {
+                    (symbol.name.to_ascii_lowercase().contains(&symbol_query)
+                        || symbol.detail.to_ascii_lowercase().contains(&symbol_query)
+                        || symbol
+                            .definition
+                            .display_name
+                            .to_ascii_lowercase()
+                            .contains(&symbol_query))
+                    .then_some(position)
+                })
+                .collect::<Vec<_>>()
+        }
+    });
+    let matching_reference_indices = project_index.as_ref().map(|index| {
+        if symbol_query.is_empty() {
+            Vec::new()
+        } else {
+            index
+                .references()
+                .iter()
+                .enumerate()
+                .filter_map(|(position, reference)| {
+                    reference
+                        .name
+                        .to_ascii_lowercase()
+                        .contains(&symbol_query)
+                        .then_some(position)
+                })
+                .collect::<Vec<_>>()
+        }
+    });
+    let matching_hierarchy_indices = project_index.as_ref().map(|index| {
+        index
+            .hierarchy()
+            .iter()
+            .enumerate()
+            .filter_map(|(position, instance)| {
+                (symbol_query.is_empty()
+                    || instance.path.to_ascii_lowercase().contains(&symbol_query)
+                    || instance.target.to_ascii_lowercase().contains(&symbol_query)
+                    || instance
+                        .location
+                        .display_name
+                        .to_ascii_lowercase()
+                        .contains(&symbol_query))
+                .then_some(position)
+            })
+            .collect::<Vec<_>>()
+    });
     let active_line = app.state.ui.netlist.cursor_line.saturating_add(1);
     let height = outline_row_height(ui, &app.state);
 
     let mut goto = None;
+    let mut goto_project_location = None;
     let mut toggled = None;
 
     ScrollArea::vertical()
@@ -150,6 +216,176 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
             }
 
+            if let Some(project_index) = project_index.as_ref() {
+                let hierarchy_count = matching_hierarchy_indices.as_ref().map_or(0, Vec::len);
+                if hierarchy_count > 0 {
+                    let count_text = messages.format(
+                        if hierarchy_count == 1 {
+                            MessageId::NetlistNavigatorHierarchyInstanceSingular
+                        } else {
+                            MessageId::NetlistNavigatorHierarchyInstances
+                        },
+                        &[("count", &hierarchy_count.to_string())],
+                    );
+                    let hierarchy_meta = if project_index.hierarchy_truncated() {
+                        format!(
+                            "{} · {}",
+                            count_text,
+                            messages.text(MessageId::NetlistNavigatorHierarchyBounded)
+                        )
+                    } else {
+                        count_text
+                    };
+                    section_header(
+                        ui,
+                        &messages.text(MessageId::NetlistNavigatorHierarchy),
+                        Some(&hierarchy_meta),
+                    );
+                    uniform_rows(ui, height, hierarchy_count, |ui, position| {
+                        let Some(instance) = matching_hierarchy_indices
+                            .as_ref()
+                            .and_then(|matching| matching.get(position))
+                            .and_then(|index| project_index.hierarchy().get(*index))
+                        else {
+                            return;
+                        };
+                        let label = format!("{} → {}", instance.path, instance.target);
+                        let mut meta = format!(
+                            "{}:{}",
+                            instance.location.display_name, instance.location.line
+                        );
+                        if instance.recursive {
+                            meta.push_str(" · ");
+                            meta.push_str(
+                                &messages.text(MessageId::NetlistNavigatorHierarchyRecursive),
+                            );
+                        }
+                        if netlist_outline_row(
+                            ui,
+                            OutlineRowVisual {
+                                label: &label,
+                                meta: Some(&meta),
+                                icon: None,
+                                shape: NetlistOutlineRowShape::Index,
+                                selected: false,
+                                enabled: true,
+                                height,
+                            },
+                        )
+                        .clicked()
+                        {
+                            goto_project_location = Some(instance.location.clone());
+                        }
+                    });
+                }
+                let symbol_count = matching_symbol_indices.as_ref().map_or(0, |matching| {
+                    if symbol_query.is_empty() {
+                        project_index.symbols().len()
+                    } else {
+                        matching.len()
+                    }
+                });
+                if symbol_count > 0 {
+                    section_header(
+                        ui,
+                        &messages.text(MessageId::NetlistNavigatorProjectSymbols),
+                        Some(&messages.format(
+                            if symbol_count == 1 {
+                                MessageId::NetlistNavigatorSymbolSingular
+                            } else {
+                                MessageId::NetlistNavigatorSymbols
+                            },
+                            &[
+                                ("count", &symbol_count.to_string()),
+                                ("sources", &project_index.source_count().to_string()),
+                            ],
+                        )),
+                    );
+                    uniform_rows(ui, height, symbol_count, |ui, position| {
+                        let symbol_index = if symbol_query.is_empty() {
+                            position
+                        } else {
+                            matching_symbol_indices
+                                .as_ref()
+                                .and_then(|matching| matching.get(position))
+                                .copied()
+                                .unwrap_or(position)
+                        };
+                        let Some(symbol) = project_index.symbols().get(symbol_index) else {
+                            return;
+                        };
+                        let meta = format!(
+                            "{} · {}:{}",
+                            symbol.kind.label(),
+                            symbol.definition.display_name,
+                            symbol.definition.line
+                        );
+                        if netlist_outline_row(
+                            ui,
+                            OutlineRowVisual {
+                                label: &symbol.name,
+                                meta: Some(&meta),
+                                icon: None,
+                                shape: NetlistOutlineRowShape::Index,
+                                selected: false,
+                                enabled: true,
+                                height,
+                            },
+                        )
+                        .clicked()
+                        {
+                            goto_project_location = Some(symbol.definition.clone());
+                        }
+                    });
+                }
+                let reference_count = matching_reference_indices.as_ref().map_or(0, Vec::len);
+                if reference_count > 0 {
+                    section_header(
+                        ui,
+                        &messages.text(MessageId::NetlistNavigatorProjectReferences),
+                        Some(&messages.format(
+                            if reference_count == 1 {
+                                MessageId::NetlistNavigatorReferenceSingular
+                            } else {
+                                MessageId::NetlistNavigatorReferences
+                            },
+                            &[("count", &reference_count.to_string())],
+                        )),
+                    );
+                    uniform_rows(ui, height, reference_count, |ui, position| {
+                        let Some(reference) = matching_reference_indices
+                            .as_ref()
+                            .and_then(|matching| matching.get(position))
+                            .and_then(|index| project_index.references().get(*index))
+                        else {
+                            return;
+                        };
+                        let meta = format!(
+                            "{} · {}:{}",
+                            reference.kind.label(),
+                            reference.location.display_name,
+                            reference.location.line
+                        );
+                        if netlist_outline_row(
+                            ui,
+                            OutlineRowVisual {
+                                label: &reference.name,
+                                meta: Some(&meta),
+                                icon: None,
+                                shape: NetlistOutlineRowShape::Index,
+                                selected: false,
+                                enabled: true,
+                                height,
+                            },
+                        )
+                        .clicked()
+                        {
+                            goto_project_location = Some(reference.location.clone());
+                        }
+                    });
+                }
+            }
+
             if !projection.semantic_rows.is_empty() {
                 section_header(
                     ui,
@@ -211,6 +447,16 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         // document frame.
         app.state.ui.netlist.cursor_line = line.saturating_sub(1);
         app.state.ui.netlist.requested_line = Some(line);
+    }
+    if let Some(location) = goto_project_location
+        && let Err(error) =
+            crate::workbench::documents::netlist_document::language::open_project_location(
+                &mut app.state,
+                &location,
+            )
+    {
+        app.state
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
     }
 }
 

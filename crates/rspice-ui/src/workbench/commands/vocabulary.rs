@@ -312,14 +312,14 @@ impl Command {
                 spec("models", "Open models workspace", "Navigate")
             }
             Self::OpenWorkspace(Workspace::Netlist) => {
-                spec("netlist", "Open automation workspace", "Navigate")
+                spec("netlist", "Open netlist workspace", "Navigate")
             }
             Self::ProjectLauncher => spec("project-launcher", "Project launcher…", "File"),
             Self::RecentProjects => spec("recent-projects", "Recent projects…", "File"),
             Self::NewProject => spec("new-project", "New project…", "File"),
             Self::OpenProject => spec("open-project", "Open project…", "File"),
             Self::Save => spec("save-project", "Save", "File"),
-            Self::SaveAs => spec("save-project-as", "Save as project copy…", "File"),
+            Self::SaveAs => spec("save-project-as", "Save as…", "File"),
             Self::SaveAll => spec("save-all", "Save all", "File"),
             Self::RevertActiveDocument => {
                 spec("revert-document", "Revert active document…", "File")

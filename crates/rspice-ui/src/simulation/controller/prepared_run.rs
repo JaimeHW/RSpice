@@ -795,13 +795,6 @@ impl SimulationController {
             })
             .collect::<Vec<_>>();
 
-        let fourier_count = prepared
-            .iter()
-            .filter(|task| matches!(&task.queued_analysis().spec, AnalysisSpec::Fourier { .. }))
-            .count();
-        if fourier_count == 0 {
-            return Ok(prepared);
-        }
         let transient_producers = prepared
             .iter()
             .filter(|task| matches!(&task.queued_analysis().spec, AnalysisSpec::Transient { .. }))
@@ -813,28 +806,90 @@ impl SimulationController {
                 )
             })
             .collect::<Vec<_>>();
-        let [(producer_id, producer_revision, producer_config_digest)] =
-            transient_producers.as_slice()
-        else {
-            return Err(PreparationError::new(
-                PreparationStage::AnalysisPlan,
-                format!(
-                    "Manual-deck Fourier tasks require exactly one prepared Transient producer; found {}",
-                    transient_producers.len()
-                ),
-            ));
-        };
+        let periodic_producers = prepared
+            .iter()
+            .filter(|task| matches!(&task.queued_analysis().spec, AnalysisSpec::Pss { .. }))
+            .map(|task| {
+                (
+                    task.instance_id(),
+                    task.source_revision(),
+                    task.config_digest(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let operating_point_producers = prepared
+            .iter()
+            .filter(|task| {
+                matches!(
+                    &task.queued_analysis().spec,
+                    AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. }
+                )
+            })
+            .map(|task| {
+                (
+                    task.instance_id(),
+                    task.source_revision(),
+                    task.config_digest(),
+                )
+            })
+            .collect::<Vec<_>>();
         for task in &mut prepared {
-            if matches!(&task.queued_analysis().spec, AnalysisSpec::Fourier { .. }) {
-                task.set_dependencies(vec![*producer_id]);
-                task.set_dependency_bindings(vec![
-                    PreparedDependencyBinding::transient_trajectory(
-                        *producer_id,
-                        *producer_revision,
-                        *producer_config_digest,
+            type ProducerIdentity = (
+                crate::product::AnalysisInstanceId,
+                crate::product::ObjectRevision,
+                crate::product::ContentDigest,
+            );
+            type BindingConstructor = fn(
+                crate::product::AnalysisInstanceId,
+                crate::product::ObjectRevision,
+                crate::product::ContentDigest,
+            ) -> PreparedDependencyBinding;
+            let (producers, artifact_label, binding): (
+                &[ProducerIdentity],
+                &str,
+                BindingConstructor,
+            ) = match &task.queued_analysis().spec {
+                AnalysisSpec::Fourier { .. } => (
+                    &transient_producers,
+                    "Transient trajectory",
+                    PreparedDependencyBinding::transient_trajectory,
+                ),
+                AnalysisSpec::Pss {
+                    method: PssMethod::Shooting,
+                    ..
+                } => (
+                    &operating_point_producers,
+                    "operating-point seed",
+                    PreparedDependencyBinding::dc_operating_point_seed,
+                ),
+                AnalysisSpec::PssSpectrum { .. }
+                | AnalysisSpec::Pac
+                | AnalysisSpec::Pnoise
+                | AnalysisSpec::Pxf
+                | AnalysisSpec::Pstb
+                | AnalysisSpec::Psp { .. } => (
+                    &periodic_producers,
+                    "shooting-PSS state",
+                    PreparedDependencyBinding::periodic_state,
+                ),
+                _ => continue,
+            };
+            let [(producer_id, producer_revision, producer_config_digest)] = producers else {
+                return Err(PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    format!(
+                        "Manual-deck {} requires exactly one prepared {artifact_label} producer; found {}",
+                        task.queued_analysis().spec.run_type().display_name(),
+                        producers.len()
                     ),
-                ]);
-            }
+                ));
+            };
+            task.set_dependencies(vec![*producer_id]);
+            task.set_dependency_bindings(vec![binding(
+                *producer_id,
+                *producer_revision,
+                *producer_config_digest,
+            )]);
         }
 
         // Analysis directives are declarative, so source order cannot make a

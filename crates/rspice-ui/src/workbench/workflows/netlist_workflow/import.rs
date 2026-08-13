@@ -96,6 +96,7 @@ pub(super) fn apply_imported_netlist_transaction(
     // reviewable after this project-owned document changes.
     state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
     state.ui.netlist = Default::default();
+    state.workbench.netlist_open_documents.clear();
     let source_digest =
         crate::workbench::documents::netlist_document::source_content_digest(&source);
     state.workspace.netlist_source = Some(source.clone());

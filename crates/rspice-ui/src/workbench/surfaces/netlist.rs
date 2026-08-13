@@ -9,6 +9,7 @@
 //! every other part reads. Each submodule owns one transaction of its own.
 
 mod generation;
+mod language;
 mod ownership;
 mod revision;
 mod search;
@@ -34,7 +35,7 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
     execution_profile_review_banner(ui, app);
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
         ui,
-        crate::workbench::documents::netlist_document::editor_id(),
+        crate::workbench::documents::netlist_document::editor_id(&app.state),
     ) {
         format_owned_netlist(ui.ctx(), app);
     }
@@ -62,6 +63,7 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     });
     search::find_replace_window(ui.ctx(), app);
+    language::rename_dialog_window(ui.ctx(), app);
     ownership::ownership_dialog_window(ui.ctx(), app);
     revision::comparison_dialog_window(ui.ctx(), app);
     revision::save_source_dialog_window(ui.ctx(), app);

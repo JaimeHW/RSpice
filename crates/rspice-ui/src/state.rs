@@ -76,6 +76,8 @@ pub use physical_layout::{
 };
 #[cfg(test)]
 pub use physical_layout::{LayoutInstance, LayoutOrientation, LayoutTransform};
+#[cfg(not(target_arch = "wasm32"))]
+pub use project_sources::MAX_PROJECT_SOURCE_DEPENDENCIES;
 pub(crate) use project_sources::{
     CanonicalCellViewOwnerKey, canonical_cell_view_owner_key, project_source_path_key,
     project_source_paths_equal,

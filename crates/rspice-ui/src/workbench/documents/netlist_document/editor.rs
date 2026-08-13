@@ -55,9 +55,39 @@ const fn platform_include_access() -> IncludeAccess {
     }
 }
 
-/// Stable id so the completion accept can reposition the caret.
-pub(crate) fn editor_id() -> egui::Id {
-    egui::Id::new("rspice.netlist.editor.text")
+/// Stable per-document id so cursor, selection, undo, and scroll state do not
+/// leak between an owned root, generated root, include, or comparison tab.
+pub(crate) fn editor_id(state: &AppState) -> egui::Id {
+    let base = egui::Id::new("rspice.netlist.editor.text");
+    let netlist = &state.ui.netlist;
+    if netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff {
+        return base.with("comparison");
+    }
+    let root = netlist
+        .active_dependency_root
+        .unwrap_or(netlist.active_document);
+    let document_id = match root {
+        super::ActiveNetlistDocument::Generated => netlist
+            .generated_document
+            .as_ref()
+            .map(|document| document.id()),
+        super::ActiveNetlistDocument::OwnedSource => netlist
+            .owned_document
+            .as_ref()
+            .or(state.workspace.netlist_document.as_ref())
+            .map(|document| document.id()),
+        super::ActiveNetlistDocument::GeneratedDiff => None,
+    };
+    match (document_id, netlist.active_dependency_identity.as_deref()) {
+        (Some(document_id), Some(identity)) => base.with((document_id, identity)),
+        (Some(document_id), None) => base.with(document_id),
+        (None, Some(identity)) => base.with(("dependency", identity)),
+        (None, None) => base.with(match root {
+            super::ActiveNetlistDocument::Generated => "generated",
+            super::ActiveNetlistDocument::OwnedSource => "owned",
+            super::ActiveNetlistDocument::GeneratedDiff => "comparison",
+        }),
+    }
 }
 
 /// Render the editor and diagnostics strip.
@@ -65,6 +95,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let editable = super::active_netlist_source_is_editable(state);
+    let editor_id = editor_id(state);
 
     refresh_diagnostics(ui, state);
 
@@ -100,7 +131,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .netlist
         .requested_line
         .take()
-        .or_else(|| show_go_to_line(ui, editor_id(), &buffer));
+        .or_else(|| show_go_to_line(ui, editor_id, &buffer));
 
     let diff_document =
         state.ui.netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff;
@@ -108,6 +139,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let mut completion_changed = false;
     let changed;
     let cursor_line;
+    let cursor_char_index;
+    let hover_char_index;
+    let editor_response;
     let anchor;
 
     {
@@ -156,7 +190,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         let revision = state.ui.netlist.revision;
         let output = crate::workbench::documents::virtual_text_editor::show_virtual_text_editor(
             ui,
-            editor_id(),
+            editor_id,
             &mut buffer,
             revision,
             editable,
@@ -196,6 +230,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         );
         changed = output.changed;
         cursor_line = output.cursor_line;
+        cursor_char_index = output.cursor_char_index;
+        hover_char_index = output.hover_char_index;
+        editor_response = output.response.clone();
         anchor = completion::CompletionAnchor {
             focused: output.response.has_focus(),
             caret_char_index: output.cursor_char_index,
@@ -205,6 +242,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     let now = ui.input(|input| input.time);
     state.ui.netlist.cursor_line = cursor_line;
+    state.ui.netlist.cursor_char_index = cursor_char_index;
 
     // Completion is an edit and therefore exists only for project-owned source.
     if editable
@@ -213,8 +251,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     {
         completion_changed = true;
         buffer.replace_range(start..end, &text);
-        completion::place_caret(ui, editor_id(), caret);
+        completion::place_caret(ui, editor_id, caret);
     }
+    let hover_symbol =
+        hover_char_index.and_then(|index| super::language::symbol_name_at(&buffer, index));
 
     // All editor writes pass through the ownership guard. Even if a future UI
     // path reports a change for read-only content, it cannot implicitly create
@@ -228,6 +268,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }
     if source_changed && state.ui.netlist.active_dependency_identity.is_none() {
         super::refresh_diff_pips_from_baseline(state);
+    }
+    if let Some(symbol) = hover_symbol
+        && let Some(hover) = super::language::symbol_hover(state, &symbol)
+    {
+        editor_response.on_hover_ui_at_pointer(|ui| {
+            ui.set_max_width(360.0);
+            ui.label(egui::RichText::new(hover.title).strong());
+            ui.label(hover.detail);
+        });
     }
 }
 
@@ -449,6 +498,9 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
     for diagnostic in &mut diagnostics {
         diagnostic.bind_validation(revision, &validation_id);
     }
+    let project_symbols = super::language::project_index(state)
+        .map(|index| index.completion_symbols())
+        .unwrap_or_default();
     let netlist = &mut state.ui.netlist;
     netlist.diagnostics = Arc::new(bounded_netlist_diagnostics(
         diagnostics,
@@ -456,7 +508,16 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
         revision,
         &validation_id,
     ));
-    if let Some(symbols) = symbols {
+    if let Some(mut symbols) = symbols {
+        let mut seen = symbols
+            .iter()
+            .map(|symbol| (symbol.kind, symbol.name.to_ascii_lowercase()))
+            .collect::<std::collections::HashSet<_>>();
+        symbols.extend(
+            project_symbols
+                .into_iter()
+                .filter(|symbol| seen.insert((symbol.kind, symbol.name.to_ascii_lowercase()))),
+        );
         netlist.symbols = symbols;
     }
     netlist.diag_revision = Some(revision);
@@ -871,11 +932,12 @@ mod tests {
         for frame in 0..3 {
             let _ = context.clone().run_ui(input.clone(), |ui| {
                 if frame == 0 {
+                    let editor_id = editor_id(&state);
                     ui.ctx()
-                        .memory_mut(|memory| memory.request_focus(editor_id()));
+                        .memory_mut(|memory| memory.request_focus(editor_id));
                     crate::workbench::documents::text_editor_commands::queue_caret_char_index(
                         ui.ctx(),
-                        editor_id(),
+                        editor_id,
                         source.chars().count(),
                     );
                 }

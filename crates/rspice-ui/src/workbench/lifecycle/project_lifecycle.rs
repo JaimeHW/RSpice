@@ -1637,6 +1637,7 @@ fn revert_document_in_place(
             state.workspace.netlist_source_dirty = false;
             state.workspace.project_sources_dirty = false;
             state.ui.netlist = Default::default();
+            state.workbench.netlist_open_documents.clear();
             state.simulation.netlist_content =
                 state.workspace.netlist_source.clone().unwrap_or_default();
             state.simulation.trigger_simulation = false;

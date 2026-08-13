@@ -144,6 +144,83 @@ const LAUNCHER_GROUP_HEIGHT: f32 = 27.0;
 const LAUNCHER_SEGMENT_MIN_WIDTH: f32 = 54.0;
 const LAUNCHER_HEADER_COPY_GAP: f32 = 2.0;
 const SAFE_MODE_OPTION_HEIGHT: f32 = 54.0;
+
+fn handle_launcher_netlist_drop(ctx: &Context, app: &mut RSpiceApp) -> bool {
+    let dropped = ctx.input(|input| input.raw.dropped_files.clone());
+    if dropped.is_empty() {
+        return false;
+    }
+    if dropped.len() != 1 {
+        app.state.push_user_message(ConsoleMessage::warning(
+            "Drop one SPICE deck at a time so RSpice can review one exact netlist project.",
+        ));
+        return false;
+    }
+
+    let file = &dropped[0];
+    let source_path = file.path.clone();
+    let display_name = (!file.name.trim().is_empty())
+        .then(|| file.name.clone())
+        .or_else(|| {
+            source_path
+                .as_deref()
+                .and_then(Path::file_name)
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "dropped-netlist.spice".to_owned());
+    let supported = Path::new(&display_name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "cir" | "sp" | "spice" | "net" | "ckt"
+            )
+        });
+    if !supported {
+        app.state.push_user_message(ConsoleMessage::warning(
+            "The project launcher accepts .cir, .sp, .spice, .net, and .ckt SPICE decks.",
+        ));
+        return false;
+    }
+
+    let bytes = if let Some(bytes) = file.bytes.as_ref() {
+        Ok(bytes.to_vec())
+    } else {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            source_path
+                .as_deref()
+                .ok_or_else(|| "Dropped file has neither bytes nor a native path.".to_owned())
+                .and_then(|path| std::fs::read(path).map_err(|error| error.to_string()))
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            Err("Browser drop did not provide immutable file bytes.".to_owned())
+        }
+    };
+    match bytes {
+        Ok(bytes) => {
+            if crate::workbench::workflows::netlist_workflow::stage_dropped_netlist_project(
+                &mut app.state,
+                bytes,
+                source_path,
+                display_name,
+            ) {
+                dismiss_launcher(app);
+                true
+            } else {
+                false
+            }
+        }
+        Err(error) => {
+            app.state.push_user_message(ConsoleMessage::error(format!(
+                "Dropped SPICE source could not be read: {error}"
+            )));
+            false
+        }
+    }
+}
 const SAFE_MODE_OPTION_HORIZONTAL_INSET: f32 = 16.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -240,6 +317,10 @@ impl LauncherLayout {
 pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
     if !app.state.workbench.project_launcher_open {
         show_discard_confirmation(ctx, app);
+        return;
+    }
+
+    if handle_launcher_netlist_drop(ctx, app) {
         return;
     }
 

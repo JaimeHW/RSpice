@@ -454,6 +454,44 @@ fn manual_fourier_is_topologically_bound_to_its_exact_transient_task() {
 }
 
 #[test]
+fn manual_periodic_analyses_are_topologically_bound_to_seed_and_pss() {
+    let mut state = AppState::default();
+    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.workspace.netlist_source = Some(
+        "Periodic deck\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\nLPROBE out sensed 1n\nR2 sensed 0 1k\n.pss 1Meg tones=V1 points_per_period=128 save_harmonics=8\n.pac dec 20 1k 100Meg input=V1 output=out\n.pnoise dec 10 1 1Meg output=out noiseref=output\n.pxf dec 10 1k 10Meg input=V1 output=out outsideband=1\n.pstb probe=LPROBE maxharm=8 nmults=6\n.end\n"
+            .to_owned(),
+    );
+
+    let mut controller = SimulationController::new();
+    let snapshot = controller
+        .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+        .expect("prepare manual periodic dependency graph");
+    controller
+        .authorize_snapshot(snapshot)
+        .expect("authorize manual periodic dependency graph");
+    let dispatch = controller
+        .consume_snapshot_for_dispatch(&mut state)
+        .expect("dispatch manual periodic dependency graph");
+    let tasks = dispatch.tasks().collect::<Vec<_>>();
+
+    assert_eq!(tasks.len(), 7);
+    assert!(matches!(tasks[0].spec(), AnalysisSpec::DcOp { .. }));
+    assert!(matches!(tasks[1].spec(), AnalysisSpec::Pss { .. }));
+    assert_eq!(tasks[1].dependencies(), &[tasks[0].instance_id()]);
+    for consumer in &tasks[2..] {
+        assert!(matches!(
+            consumer.spec(),
+            AnalysisSpec::PssSpectrum { .. }
+                | AnalysisSpec::Pac
+                | AnalysisSpec::Pnoise
+                | AnalysisSpec::Pxf
+                | AnalysisSpec::Pstb
+        ));
+        assert_eq!(consumer.dependencies(), &[tasks[1].instance_id()]);
+    }
+}
+
+#[test]
 fn dispatch_rejects_mutation_after_explicit_preflight() {
     let mut state = runnable_state();
     let mut controller = SimulationController::new();

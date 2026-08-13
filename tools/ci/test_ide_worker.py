@@ -401,7 +401,7 @@ class IdeWorkerRoutingTests(unittest.TestCase):
         self.assertRegex(
             app,
             re.compile(
-                r"if\s+self\.state\.simulation\.is_running\s*\{\s*"
+                r"if\s+self\.state\.simulation\.has_active_execution\(\)\s*\{\s*"
                 r"ctx\.request_repaint_after\(std::time::Duration::from_millis\(\d+\)\)",
                 re.S,
             ),

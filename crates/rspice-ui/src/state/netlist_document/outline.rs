@@ -82,11 +82,6 @@ pub struct OutlineEntry {
 
 impl OutlineEntry {
     #[must_use]
-    pub const fn id(&self) -> u64 {
-        self.id
-    }
-
-    #[must_use]
     pub const fn kind(&self) -> OutlineEntryKind {
         self.kind
     }
@@ -226,22 +221,21 @@ impl NetlistOutline {
         &self.sections
     }
 
-    #[must_use]
-    pub fn entry(&self, id: u64) -> Option<&OutlineEntry> {
+    #[cfg(test)]
+    fn entry(&self, id: u64) -> Option<&OutlineEntry> {
         id.checked_sub(1)
             .and_then(|index| usize::try_from(index).ok())
             .and_then(|index| self.entries.get(index))
             .filter(|entry| entry.id == id)
     }
 
-    /// Entry containing `line`, or the closest declaration preceding it.
-    #[must_use]
-    pub fn entry_at_or_before_line(&self, line: usize) -> Option<&OutlineEntry> {
+    #[cfg(test)]
+    fn entry_at_or_before_line(&self, line: usize) -> Option<&OutlineEntry> {
         self.entries.iter().rev().find(|entry| entry.line <= line)
     }
 
-    #[must_use]
-    pub fn filtered_entries(&self, query: &str) -> Vec<&OutlineEntry> {
+    #[cfg(test)]
+    fn filtered_entries(&self, query: &str) -> Vec<&OutlineEntry> {
         let query = query.trim().to_lowercase();
         if query.is_empty() {
             return self.entries.iter().collect();
@@ -426,6 +420,18 @@ pub(crate) fn card_tokens(card: &str) -> Vec<String> {
     tokenize_card(card.trim_start())
         .into_iter()
         .map(|token| token.text)
+        .collect()
+}
+
+/// Token text and one-based Unicode column for source-intelligence actions
+/// that must identify the exact declaration/reference token without
+/// retokenizing SPICE differently from the outline.
+pub(crate) fn card_tokens_with_columns(card: &str) -> Vec<(String, usize)> {
+    let trimmed = card.trim_start();
+    let leading_columns = card.chars().take_while(|ch| ch.is_whitespace()).count();
+    tokenize_card(trimmed)
+        .into_iter()
+        .map(|token| (token.text, token.column + leading_columns))
         .collect()
 }
 

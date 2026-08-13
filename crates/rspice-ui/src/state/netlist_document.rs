@@ -21,7 +21,7 @@ pub use document::{
 pub use outline::{
     NetlistSourceIndex, OutlineEntry, OutlineEntryKind, OutlineSection, OutlineSectionKind,
 };
-pub(crate) use outline::{card_tokens, parse_include_directives};
+pub(crate) use outline::{card_tokens, card_tokens_with_columns, parse_include_directives};
 pub(crate) use sealed::expand_retained_netlist_dependencies;
 pub use search::{
     BoundedFindMatches, FindDirection, FindError, FindMatch, FindOptions, ReplaceScope,

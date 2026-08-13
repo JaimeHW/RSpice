@@ -165,7 +165,7 @@ impl Workspace {
             Self::Results => "Result document",
             Self::Verify => "Verification evidence",
             Self::Models => "Model binding",
-            Self::Netlist => "Automation pipeline",
+            Self::Netlist => "Netlist & Code",
         }
     }
 
@@ -246,6 +246,16 @@ pub enum WorkspaceDocumentId {
     VisualizationDocument(crate::product::ResultDocumentId),
     Verification,
     Models,
+    NetlistGenerated(crate::state::NetlistDocumentId),
+    NetlistOwned(crate::state::NetlistDocumentId),
+    NetlistDependency {
+        root: crate::state::NetlistDocumentId,
+        logical_identity: String,
+    },
+    NetlistComparison,
+    /// Legacy single-document session identity retained so older device-local
+    /// workbench snapshots continue to deserialize. New netlist sessions use
+    /// the stable document-specific variants above.
     NetlistSource,
 }
 
@@ -258,7 +268,11 @@ impl WorkspaceDocumentId {
             Self::ResultDataset(_) | Self::VisualizationDocument(_) => Workspace::Results,
             Self::Verification => Workspace::Verify,
             Self::Models => Workspace::Models,
-            Self::NetlistSource => Workspace::Netlist,
+            Self::NetlistGenerated(_)
+            | Self::NetlistOwned(_)
+            | Self::NetlistDependency { .. }
+            | Self::NetlistComparison
+            | Self::NetlistSource => Workspace::Netlist,
         }
     }
 }
@@ -1152,6 +1166,11 @@ pub struct WorkbenchState {
     /// not silently retarget a restored tab.
     #[serde(default)]
     pub documents: WorkspaceDocumentRegistry,
+    /// Netlist secondary documents explicitly opened by the user. Resolved
+    /// include closures can contain thousands of files, so availability alone
+    /// must never materialize every include as a tab.
+    #[serde(default)]
+    pub netlist_open_documents: HashSet<WorkspaceDocumentId>,
     #[serde(default)]
     pub project_page: ProjectPage,
     /// Device-local filters and row selections for the Project workspace.
@@ -1427,6 +1446,7 @@ impl Default for WorkbenchState {
             console_page: ConsolePage::Console,
             design_panel: DesignPanel::Navigator,
             documents: WorkspaceDocumentRegistry::default(),
+            netlist_open_documents: HashSet::new(),
             project_page: ProjectPage::Overview,
             project_library_filter: String::new(),
             project_dependency_filter: String::new(),

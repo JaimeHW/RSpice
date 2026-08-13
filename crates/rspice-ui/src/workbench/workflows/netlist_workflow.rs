@@ -29,7 +29,7 @@ pub(crate) use platform::{poll_browser_dependency_relink, poll_browser_netlist_i
 pub(crate) use save::save_owned_netlist_source;
 pub(crate) use staging::{
     begin_owned_netlist_profile_review, cancel_staged_netlist_import, commit_staged_netlist_import,
-    stage_dropped_netlist_import,
+    stage_dropped_netlist_import, stage_dropped_netlist_project,
 };
 
 pub const NETLIST_FILTER: (&str, &[&str]) = ("SPICE Deck", &["cir", "sp", "spice", "net", "ckt"]);

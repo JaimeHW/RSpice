@@ -989,6 +989,14 @@ pub enum NetlistTextEncoding {
 }
 
 impl NetlistTextEncoding {
+    pub const ALL: [Self; 5] = [
+        Self::Utf8,
+        Self::Utf8Bom,
+        Self::Utf16LeBom,
+        Self::Utf16BeBom,
+        Self::Latin1,
+    ];
+
     pub const fn label(self) -> &'static str {
         match self {
             Self::Utf8 => "UTF-8",
@@ -1578,14 +1586,14 @@ fn is_hspice_presentation_directive(line: &str) -> bool {
 }
 
 fn is_pspice_probe_marker(line: &str) -> bool {
-    line.trim().split_whitespace().next().is_some_and(|head| {
+    line.split_whitespace().next().is_some_and(|head| {
         let lower = head.to_ascii_lowercase();
         lower == ".probe" || lower.starts_with(".probe/")
     })
 }
 
 fn is_pspice_v2_probe_marker(line: &str) -> bool {
-    line.trim().split_whitespace().next().is_some_and(|head| {
+    line.split_whitespace().next().is_some_and(|head| {
         let lower = head.to_ascii_lowercase();
         matches!(lower.as_str(), ".probe" | ".probe64" | ".probe/csdf")
     })

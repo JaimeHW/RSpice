@@ -154,17 +154,31 @@ impl RSpiceApp {
                     && self.state.ui.netlist.active_document
                         == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
                 {
-                    self.state.ui.netlist.save_dialog.open = true;
-                    self.state.ui.netlist.save_dialog.error = None;
+                    crate::workbench::documents::netlist_document::open_netlist_save_dialog(
+                        &mut self.state,
+                        false,
+                    );
                 } else {
                     self.execute_project_file_shortcut(
                         crate::workbench::menu_bar::FileMenuAction::Save,
                     )
                 }
             }
-            ShortcutCommand::SaveAs => self.execute_project_file_shortcut(
-                crate::workbench::menu_bar::FileMenuAction::SaveProjectAs,
-            ),
+            ShortcutCommand::SaveAs => {
+                if self.state.workbench.workspace == crate::workbench::state::Workspace::Netlist
+                    && self.state.ui.netlist.active_document
+                        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
+                {
+                    crate::workbench::documents::netlist_document::open_netlist_save_dialog(
+                        &mut self.state,
+                        true,
+                    );
+                } else {
+                    self.execute_project_file_shortcut(
+                        crate::workbench::menu_bar::FileMenuAction::SaveProjectAs,
+                    );
+                }
+            }
             ShortcutCommand::SaveAll => self
                 .execute_project_file_shortcut(crate::workbench::menu_bar::FileMenuAction::SaveAll),
             ShortcutCommand::CloseActiveDocument => self.execute_project_file_shortcut(
@@ -1017,6 +1031,24 @@ impl RSpiceApp {
     }
 
     pub(crate) fn action_edit_undo(&mut self) {
+        if self.state.workbench.workspace == crate::workbench::state::Workspace::Netlist
+            && self.state.ui.code_workspace.page
+                == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
+        {
+            match crate::workbench::documents::netlist_document::undo_netlist_edit(&mut self.state)
+            {
+                Ok(Some(description)) => {
+                    self.state
+                        .push_user_message(ConsoleMessage::info(format!("Undo: {description}")));
+                    return;
+                }
+                Err(error) => {
+                    self.state.push_user_message(ConsoleMessage::warning(error));
+                    return;
+                }
+                Ok(None) => {}
+            }
+        }
         let project_first = self.state.project_undo_owns_active_document();
         if (project_first && self.try_project_design_undo())
             || self.try_active_document_undo()
@@ -1029,6 +1061,24 @@ impl RSpiceApp {
     }
 
     pub(crate) fn action_edit_redo(&mut self) {
+        if self.state.workbench.workspace == crate::workbench::state::Workspace::Netlist
+            && self.state.ui.code_workspace.page
+                == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
+        {
+            match crate::workbench::documents::netlist_document::redo_netlist_edit(&mut self.state)
+            {
+                Ok(Some(description)) => {
+                    self.state
+                        .push_user_message(ConsoleMessage::info(format!("Redo: {description}")));
+                    return;
+                }
+                Err(error) => {
+                    self.state.push_user_message(ConsoleMessage::warning(error));
+                    return;
+                }
+                Ok(None) => {}
+            }
+        }
         let project_first = self.state.project_redo_owns_active_document();
         if (project_first && self.try_project_design_redo())
             || self.try_active_document_redo()

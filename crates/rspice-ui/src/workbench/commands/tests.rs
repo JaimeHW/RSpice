@@ -1603,7 +1603,7 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
     );
     assert_eq!(
         Command::OpenWorkspace(Workspace::Netlist).spec().label,
-        "Open automation workspace"
+        "Open netlist workspace"
     );
     assert_eq!(
         Command::ModelsPage(ModelsPage::Models).spec().label,
