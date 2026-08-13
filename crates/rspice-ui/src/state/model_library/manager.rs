@@ -162,6 +162,41 @@ fn model_library_source_digest(library: &ModelLibrary) -> ContentDigest {
     ContentDigest::from_bytes(Sha256::digest(bytes).into())
 }
 
+/// One ordered model-library binding owned by a simulation plan.
+///
+/// The name is the project-catalog identity, the digest prevents a refreshed
+/// or replaced source from being accepted under an old plan, and the optional
+/// corner is the plan's nominal section override. Vector order is executable
+/// precedence; it is never reconstructed from the manager's hash map.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SimulationPlanModelBinding {
+    pub library_name: String,
+    pub source_digest: ContentDigest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_corner: Option<String>,
+}
+
+impl SimulationPlanModelBinding {
+    fn validate(&self) -> Result<(), String> {
+        for (field, value) in [("library name", self.library_name.as_str())]
+            .into_iter()
+            .chain(
+                self.selected_corner
+                    .as_deref()
+                    .map(|value| ("corner section", value)),
+            )
+        {
+            if value.is_empty() || value != value.trim() || value.chars().any(char::is_control) {
+                return Err(format!(
+                    "Simulation-plan model {field} must be nonempty, trimmed, and control-free"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelValidationFindingSeverity {
@@ -747,7 +782,7 @@ fn resolve_materialized_definition_namespace(
                 )?;
         }
     }
-    applied.sort_by(|left, right| left.key().cmp(&right.key()));
+    applied.sort_by_key(|left| left.key());
     applied.dedup_by(|left, right| left.key() == right.key());
     let bindings = bindings
         .into_iter()
@@ -799,7 +834,7 @@ fn mask_materialized_definition(
                 let line = std::str::from_utf8(&bytes[cursor..next]).map_err(|error| {
                     format!("materialized subcircuit source is not UTF-8: {error}")
                 })?;
-                let head = line.trim_start().split_whitespace().next().unwrap_or("");
+                let head = line.split_whitespace().next().unwrap_or("");
                 if head.eq_ignore_ascii_case(".subckt") {
                     depth += 1;
                 } else if head.eq_ignore_ascii_case(".ends") {
@@ -1732,7 +1767,6 @@ impl ModelLibraryManager {
             .get(&resolution_record_key(scope, &normalized))
     }
 
-    #[must_use]
     pub(crate) fn restore_model_resolution_records(
         &mut self,
         records: Vec<ModelResolutionRecord>,

@@ -3,9 +3,10 @@
 //! Steps one design parameter and returns a result set per point.
 
 use super::super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted};
-use super::mapping::{describe_step_target, map_dc_sweep_results_with_abort};
+use super::mapping::describe_step_target;
 use super::sweep_points::expand_step_sweep_values_with_abort;
 use super::types::ParametricData;
+use super::types::{CornerBaseMode, CornerFrequencySweep};
 use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
 use rspice_core::abort_signal::NoAbort;
@@ -45,6 +46,24 @@ pub fn run_parametric_analysis_with_source_path_and_abort(
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<ParametricData> {
+    run_parametric_analysis_with_base_and_source_path_and_abort(
+        netlist_text,
+        source_path,
+        &CornerBaseMode::Op,
+        abort,
+    )
+}
+
+/// Execute a design-parameter `.STEP` using the authored paired base
+/// analysis. Each stepped netlist is solved independently and contributes the
+/// terminal value of that analysis to the parametric family.
+pub fn run_parametric_analysis_with_base_and_source_path_and_abort(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+    base_mode: &CornerBaseMode,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<ParametricData> {
+    super::types::validate_base_mode("Parametric", base_mode).map_err(ServiceRunError::Failure)?;
     let netlist = super::super::parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
     ensure_not_aborted(abort)?;
 
@@ -80,9 +99,16 @@ pub fn run_parametric_analysis_with_source_path_and_abort(
     }
 
     let engine = Engine::new(engine_config);
-    let results = engine
-        .run_step_command_with_abort(&netlist, step_cmd, &values, abort)
+    let stepped = engine
+        .step_netlists_for_command_with_abort(&netlist, step_cmd, &values, abort)
         .map_err(|error| ServiceRunError::from_core("Parametric analysis error", error))?;
+    let mut results = Vec::with_capacity(stepped.len());
+    for (value, stepped_netlist) in stepped {
+        ensure_not_aborted(abort)?;
+        let (names, values) = run_base_analysis(&engine, &stepped_netlist, base_mode, abort)
+            .map_err(|error| ServiceRunError::from_core("Parametric base analysis error", error))?;
+        results.push((value, names, values));
+    }
 
     if results.is_empty() {
         return Err(ServiceRunError::Failure(
@@ -95,7 +121,27 @@ pub fn run_parametric_analysis_with_source_path_and_abort(
     } else {
         values.len().saturating_sub(results.len())
     };
-    let (sweep_values, voltages) = map_dc_sweep_results_with_abort(&results, abort)?;
+    let sweep_values = results
+        .iter()
+        .map(|(value, _, _)| *value)
+        .collect::<Vec<_>>();
+    let names = results[0].1.clone();
+    let mut voltages = Vec::with_capacity(names.len());
+    for name in names {
+        let mut values = Vec::with_capacity(results.len());
+        for (_, point_names, point_values) in &results {
+            let index = point_names
+                .iter()
+                .position(|candidate| candidate.eq_ignore_ascii_case(&name))
+                .ok_or_else(|| {
+                    ServiceRunError::Failure(format!(
+                        "Parametric base analysis did not retain node {name:?} at every point"
+                    ))
+                })?;
+            values.push(point_values[index]);
+        }
+        voltages.push((base_mode.metric_label().format_trace_name(&name), values));
+    }
 
     Ok(ParametricData {
         target: describe_step_target(step_cmd),
@@ -103,6 +149,150 @@ pub fn run_parametric_analysis_with_source_path_and_abort(
         voltages,
         num_failures,
     })
+}
+
+fn run_base_analysis(
+    engine: &Engine,
+    netlist: &rspice_core::Netlist,
+    mode: &CornerBaseMode,
+    abort: &dyn AbortSignal,
+) -> Result<(Vec<String>, Vec<f64>), rspice_core::SimulationError> {
+    match mode {
+        CornerBaseMode::Op => {
+            let result = engine.run_dc_op_with_abort(netlist, abort)?;
+            Ok((
+                result.node_names.into_iter().skip(1).collect(),
+                result.node_voltages.into_iter().skip(1).collect(),
+            ))
+        }
+        CornerBaseMode::DcSweep {
+            source_name,
+            start,
+            stop,
+            step,
+        } => {
+            let result = engine
+                .run_dc_sweep_with_abort(netlist, source_name, *start, *stop, *step, abort)?
+                .into_iter()
+                .last()
+                .ok_or_else(|| {
+                    rspice_core::SimulationError::Circuit(
+                        "DC base sweep produced no points".to_owned(),
+                    )
+                })?
+                .1;
+            Ok((
+                result.node_names.into_iter().skip(1).collect(),
+                result.node_voltages.into_iter().skip(1).collect(),
+            ))
+        }
+        CornerBaseMode::DcSweepNested {
+            source_name,
+            start,
+            stop,
+            step,
+            source2,
+            start2,
+            stop2,
+            step2,
+        } => {
+            let second = rspice_core::netlist::DcSecondSweep::linear(
+                source2.clone(),
+                *start2,
+                *stop2,
+                *step2,
+            );
+            let result = engine
+                .run_dc_sweep2_with_abort(
+                    netlist,
+                    source_name,
+                    *start,
+                    *stop,
+                    *step,
+                    Some(&second),
+                    abort,
+                )?
+                .into_iter()
+                .last()
+                .ok_or_else(|| {
+                    rspice_core::SimulationError::Circuit(
+                        "Nested DC base sweep produced no points".to_owned(),
+                    )
+                })?
+                .1;
+            Ok((
+                result.node_names.into_iter().skip(1).collect(),
+                result.node_voltages.into_iter().skip(1).collect(),
+            ))
+        }
+        CornerBaseMode::Transient {
+            stop_time,
+            step_time,
+        } => terminal_transient(engine, netlist, *stop_time, *step_time, abort),
+        CornerBaseMode::TransientWindow {
+            stop_time,
+            step_time,
+            max_timestep,
+            ..
+        } => terminal_transient(
+            engine,
+            netlist,
+            *stop_time,
+            max_timestep.unwrap_or(*step_time),
+            abort,
+        ),
+        CornerBaseMode::Ac {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+        } => {
+            let variation = match sweep {
+                CornerFrequencySweep::Decade => rspice_core::netlist::FreqVariation::Dec,
+                CornerFrequencySweep::Octave => rspice_core::netlist::FreqVariation::Oct,
+                CornerFrequencySweep::Linear => rspice_core::netlist::FreqVariation::Lin,
+            };
+            let frequencies = rspice_core::analysis::ac::ac_sweep_frequencies(
+                variation,
+                *points_per_unit,
+                *start_freq,
+                *stop_freq,
+            );
+            let result = engine
+                .run_ac_with_abort(netlist, &frequencies, abort)?
+                .into_iter()
+                .last()
+                .ok_or_else(|| {
+                    rspice_core::SimulationError::Circuit(
+                        "AC base sweep produced no points".to_owned(),
+                    )
+                })?;
+            Ok((
+                result.node_names,
+                result
+                    .voltages
+                    .into_iter()
+                    .map(|value| value.norm())
+                    .collect(),
+            ))
+        }
+    }
+}
+
+fn terminal_transient(
+    engine: &Engine,
+    netlist: &rspice_core::Netlist,
+    stop_time: f64,
+    max_timestep: f64,
+    abort: &dyn AbortSignal,
+) -> Result<(Vec<String>, Vec<f64>), rspice_core::SimulationError> {
+    let result = engine.run_tran_with_abort(netlist, stop_time, max_timestep, abort)?;
+    let values = result
+        .voltages
+        .iter()
+        .map(|waveform| waveform.last().copied().unwrap_or_default())
+        .collect();
+    Ok((result.node_names, values))
 }
 
 #[cfg(test)]
@@ -212,5 +402,35 @@ R2 out 0 1k
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
         assert!(abort.polls.load(Ordering::Relaxed) >= 8);
+    }
+
+    #[test]
+    fn parametric_transient_base_solves_every_stepped_netlist() {
+        let data = run_parametric_analysis_with_base_and_source_path_and_abort(
+            "transient step\n\
+             .param rload=1k\n\
+             V1 in 0 pulse(0 1 0 1n 1n 20n 40n)\n\
+             R1 in out {rload}\n\
+             C1 out 0 1p\n\
+             .tran 0.5n 10n\n\
+             .step param rload list 1k 2k\n\
+             .end\n",
+            None,
+            &CornerBaseMode::Transient {
+                stop_time: 10e-9,
+                step_time: 0.5e-9,
+            },
+            &NoAbort,
+        )
+        .expect("transient parameter base");
+
+        assert_eq!(data.sweep_values, vec![1000.0, 2000.0]);
+        let (_, output) = data
+            .voltages
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
+            .expect("terminal output trace");
+        assert_eq!(output.len(), 2);
+        assert!(output.iter().all(|value| value.is_finite()));
     }
 }

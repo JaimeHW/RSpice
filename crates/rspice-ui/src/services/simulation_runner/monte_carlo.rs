@@ -71,6 +71,7 @@ pub fn run_monte_carlo_analysis_with_source_path_and_abort(
         None,
         None,
         None,
+        &[],
         abort,
     )
 }
@@ -82,6 +83,7 @@ pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abor
     temperature_celsius: Option<Value>,
     supply_voltage: Option<Value>,
     nominal_supply_voltage: Option<Value>,
+    supply_source_names: &[String],
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<MonteCarloData> {
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
@@ -133,6 +135,7 @@ pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abor
                 temperature_celsius,
                 supply_voltage,
                 nominal_supply_voltage,
+                supply_source_names: supply_source_names.to_vec(),
             },
         );
     let result = engine
@@ -199,6 +202,7 @@ pub fn run_statistical_monte_carlo_with_source_path_and_abort(
         None,
         None,
         None,
+        &[],
         abort,
     )
 }
@@ -212,6 +216,7 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
     temperature_celsius: Option<Value>,
     supply_voltage: Option<Value>,
     nominal_supply_voltage: Option<Value>,
+    supply_source_names: &[String],
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<MonteCarloData> {
     let mut netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
@@ -221,6 +226,7 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
             temperature_celsius,
             supply_voltage,
             nominal_supply_voltage,
+            supply_source_names,
             abort,
         )?;
     } else if supply_voltage.is_some() || nominal_supply_voltage.is_some() {
@@ -261,6 +267,7 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
                 temperature_celsius,
                 supply_voltage,
                 nominal_supply_voltage,
+                supply_source_names,
                 abort,
             )?;
         }
@@ -501,6 +508,7 @@ R2 out 0 1k
             Some(25.0),
             None,
             None,
+            &[],
             &NoAbort,
         )
         .expect("reference Monte Carlo executes");
@@ -510,6 +518,7 @@ R2 out 0 1k
             Some(125.0),
             Some(2.0),
             Some(1.0),
+            &["V1".to_owned()],
             &NoAbort,
         )
         .expect("PVT Monte Carlo executes");
@@ -525,6 +534,7 @@ R2 out 0 1k
             Some(25.0),
             None,
             None,
+            &[],
             &NoAbort,
         )
         .expect("reference statistical Monte Carlo executes");
@@ -534,6 +544,7 @@ R2 out 0 1k
             Some(125.0),
             Some(2.0),
             Some(1.0),
+            &["V1".to_owned()],
             &NoAbort,
         )
         .expect("PVT statistical Monte Carlo executes");

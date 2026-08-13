@@ -159,7 +159,26 @@ pub struct StoredSimulationPlan {
     lineage: SimulationPlanLineage,
     analysis_plan: SimulationPlan,
     reference_pvt: ReferencePvtPoint,
+    /// Complete run-space declaration owned by this plan. Older inactive-plan
+    /// records did not persist one; migration restores a review-required
+    /// reference-only declaration rather than copying the active plan's axes.
+    #[serde(default = "legacy_inactive_run_set")]
+    run_set: crate::simulation::run_set::RunSetState,
+    /// Ordered model closure and per-library nominal section owned by this
+    /// inactive plan.
+    #[serde(default)]
+    model_bindings: Vec<crate::state::model_library::SimulationPlanModelBinding>,
+    #[serde(default)]
+    save_policy: crate::workbench::app_state::SimulationSavePolicy,
+    /// Recoverable retirement state. Archived plans retain their complete
+    /// configuration and all result references.
+    #[serde(default)]
+    archived: bool,
     options: SimulationOptions,
+}
+
+fn legacy_inactive_run_set() -> crate::simulation::run_set::RunSetState {
+    crate::simulation::run_set::RunSetState::reference_only()
 }
 
 impl StoredSimulationPlan {
@@ -186,6 +205,21 @@ impl StoredSimulationPlan {
     #[must_use]
     pub const fn analysis_plan(&self) -> &SimulationPlan {
         &self.analysis_plan
+    }
+
+    #[must_use]
+    pub const fn run_set(&self) -> &crate::simulation::run_set::RunSetState {
+        &self.run_set
+    }
+
+    #[must_use]
+    pub fn model_bindings(&self) -> &[crate::state::model_library::SimulationPlanModelBinding] {
+        &self.model_bindings
+    }
+
+    #[must_use]
+    pub const fn archived(&self) -> bool {
+        self.archived
     }
 }
 
@@ -230,6 +264,24 @@ pub struct SimulationPlanCloneOutcome {
     pub analysis_identity_map: Vec<(AnalysisInstanceId, AnalysisInstanceId)>,
 }
 
+/// Portable, payload-independent simulation-plan document. The workspace
+/// payload travels beside this record so import can remap every analysis
+/// reference to the fresh destination identities.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SimulationPlanImportDocument {
+    pub source_plan_id: SimulationPlanId,
+    pub source_revision: ObjectRevision,
+    pub name: SimulationPlanName,
+    pub analysis_plan: SimulationPlan,
+    pub reference_pvt: ReferencePvtPoint,
+    pub run_set: crate::simulation::run_set::RunSetState,
+    pub model_bindings: Vec<crate::state::model_library::SimulationPlanModelBinding>,
+    #[serde(default)]
+    pub save_policy: crate::workbench::app_state::SimulationSavePolicy,
+    pub options: SimulationOptions,
+}
+
 /// Atomic named-plan catalog operation failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SimulationPlanCatalogError {
@@ -238,8 +290,14 @@ pub enum SimulationPlanCatalogError {
     ActivePlanUnavailable,
     PlanNotFound(SimulationPlanId),
     PlanExecuting(SimulationPlanId),
+    ActivePlanCannotBeArchived(SimulationPlanId),
+    PlanArchived(SimulationPlanId),
+    PlanAlreadyArchived(SimulationPlanId),
+    PlanNotArchived(SimulationPlanId),
     InvalidLineage(SimulationPlanId),
     DuplicatePlanIdentity(SimulationPlanId),
+    InvalidModelBindings(String),
+    InvalidSavePolicy(String),
     InvalidPlan(AnalysisPlanError),
 }
 
@@ -260,6 +318,20 @@ impl fmt::Display for SimulationPlanCatalogError {
                 formatter,
                 "Simulation plan {id} owns queued or executing work and cannot be replaced."
             ),
+            Self::ActivePlanCannotBeArchived(id) => write!(
+                formatter,
+                "Active simulation plan {id} cannot be archived; activate another plan first."
+            ),
+            Self::PlanArchived(id) => write!(
+                formatter,
+                "Simulation plan {id} is archived and must be restored before activation."
+            ),
+            Self::PlanAlreadyArchived(id) => {
+                write!(formatter, "Simulation plan {id} is already archived.")
+            }
+            Self::PlanNotArchived(id) => {
+                write!(formatter, "Simulation plan {id} is not archived.")
+            }
             Self::InvalidLineage(id) => write!(
                 formatter,
                 "Simulation plan {id} has incomplete clone-lineage metadata."
@@ -268,6 +340,8 @@ impl fmt::Display for SimulationPlanCatalogError {
                 formatter,
                 "Simulation plan identity {id} appears more than once in the project."
             ),
+            Self::InvalidModelBindings(error) => formatter.write_str(error),
+            Self::InvalidSavePolicy(error) => formatter.write_str(error),
             Self::InvalidPlan(error) => error.fmt(formatter),
         }
     }
@@ -307,6 +381,236 @@ impl SimSetupState {
     #[must_use]
     pub fn plan_count(&self) -> usize {
         usize::from(self.analysis_plan.is_some()) + self.inactive_plans.len()
+    }
+
+    /// Snapshot one catalog entry as a portable plan document without
+    /// changing the active editor.
+    pub fn export_plan(
+        &self,
+        id: SimulationPlanId,
+    ) -> Result<SimulationPlanImportDocument, SimulationPlanCatalogError> {
+        self.validate_plan_catalog()?;
+        if let Some(plan) = self.analysis_plan.as_ref().filter(|plan| plan.id() == id) {
+            return Ok(SimulationPlanImportDocument {
+                source_plan_id: plan.id(),
+                source_revision: plan.revision(),
+                name: self.active_plan_name.clone(),
+                analysis_plan: plan.clone(),
+                reference_pvt: self.reference_pvt,
+                run_set: self.run_set.clone(),
+                model_bindings: self.model_bindings.clone(),
+                save_policy: self.save_policy,
+                options: self.options.clone(),
+            });
+        }
+        let stored = self
+            .inactive_plans
+            .iter()
+            .find(|plan| plan.id() == id)
+            .ok_or(SimulationPlanCatalogError::PlanNotFound(id))?;
+        Ok(SimulationPlanImportDocument {
+            source_plan_id: stored.id(),
+            source_revision: stored.revision(),
+            name: stored.name.clone(),
+            analysis_plan: stored.analysis_plan.clone(),
+            reference_pvt: stored.reference_pvt,
+            run_set: stored.run_set.clone(),
+            model_bindings: stored.model_bindings.clone(),
+            save_policy: stored.save_policy,
+            options: stored.options.clone(),
+        })
+    }
+
+    /// Create and activate a fresh root plan while retaining the current plan
+    /// unchanged in the catalog.
+    pub fn create_plan(
+        &mut self,
+        name: impl Into<String>,
+    ) -> Result<SimulationPlanId, SimulationPlanCatalogError> {
+        let name = SimulationPlanName::new(name)?;
+        self.ensure_plan_name_available(&name, None)?;
+        self.validate_plan_catalog()?;
+        let active = self
+            .analysis_plan
+            .as_ref()
+            .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?;
+        if active.has_executing_instances() {
+            return Err(SimulationPlanCatalogError::PlanExecuting(active.id()));
+        }
+
+        let mut candidate = self.clone();
+        candidate.inactive_plans.push(StoredSimulationPlan {
+            name: candidate.active_plan_name.clone(),
+            lineage: candidate.active_plan_lineage,
+            analysis_plan: candidate
+                .analysis_plan
+                .take()
+                .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?,
+            reference_pvt: candidate.reference_pvt,
+            run_set: candidate.run_set.clone(),
+            model_bindings: candidate.model_bindings.clone(),
+            save_policy: candidate.save_policy,
+            archived: false,
+            options: candidate.options.clone(),
+        });
+        let plan = SimulationPlan::new();
+        let id = plan.id();
+        candidate.active_plan_name = name;
+        candidate.active_plan_lineage = SimulationPlanLineage::default();
+        candidate.analysis_plan = Some(plan);
+        candidate.reference_pvt = ReferencePvtPoint::default();
+        candidate.run_set = crate::simulation::run_set::RunSetState::reference_only();
+        candidate.model_bindings.clear();
+        candidate.save_policy = crate::workbench::app_state::SimulationSavePolicy::default();
+        candidate.options = SimulationOptions::default();
+        candidate.options.temp = candidate.reference_pvt.temperature_celsius;
+        candidate.reset_plan_editor_transients();
+        candidate.refresh_legacy_analysis_projections();
+        candidate.validate_plan_catalog()?;
+        *self = candidate;
+        Ok(id)
+    }
+
+    /// Rename one plan without changing its stable identity or revision.
+    pub fn rename_plan(
+        &mut self,
+        id: SimulationPlanId,
+        name: impl Into<String>,
+    ) -> Result<(), SimulationPlanCatalogError> {
+        self.validate_plan_catalog()?;
+        let name = SimulationPlanName::new(name)?;
+        self.ensure_plan_name_available(&name, Some(id))?;
+        let active = self
+            .analysis_plan
+            .as_ref()
+            .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?;
+        if active.id() == id {
+            if active.has_executing_instances() {
+                return Err(SimulationPlanCatalogError::PlanExecuting(id));
+            }
+            self.active_plan_name = name;
+            return Ok(());
+        }
+        let plan = self
+            .inactive_plans
+            .iter_mut()
+            .find(|plan| plan.id() == id)
+            .ok_or(SimulationPlanCatalogError::PlanNotFound(id))?;
+        if plan.analysis_plan.has_executing_instances() {
+            return Err(SimulationPlanCatalogError::PlanExecuting(id));
+        }
+        plan.name = name;
+        Ok(())
+    }
+
+    /// Recoverably archive one inactive plan.
+    pub fn archive_plan(&mut self, id: SimulationPlanId) -> Result<(), SimulationPlanCatalogError> {
+        self.validate_plan_catalog()?;
+        if self
+            .analysis_plan
+            .as_ref()
+            .is_some_and(|plan| plan.id() == id)
+        {
+            return Err(SimulationPlanCatalogError::ActivePlanCannotBeArchived(id));
+        }
+        let plan = self
+            .inactive_plans
+            .iter_mut()
+            .find(|plan| plan.id() == id)
+            .ok_or(SimulationPlanCatalogError::PlanNotFound(id))?;
+        if plan.archived {
+            return Err(SimulationPlanCatalogError::PlanAlreadyArchived(id));
+        }
+        if plan.analysis_plan.has_executing_instances() {
+            return Err(SimulationPlanCatalogError::PlanExecuting(id));
+        }
+        plan.archived = true;
+        Ok(())
+    }
+
+    /// Restore an archived plan to the selectable catalog.
+    pub fn restore_plan(&mut self, id: SimulationPlanId) -> Result<(), SimulationPlanCatalogError> {
+        self.validate_plan_catalog()?;
+        let plan = self
+            .inactive_plans
+            .iter_mut()
+            .find(|plan| plan.id() == id)
+            .ok_or(SimulationPlanCatalogError::PlanNotFound(id))?;
+        if !plan.archived {
+            return Err(SimulationPlanCatalogError::PlanNotArchived(id));
+        }
+        plan.archived = false;
+        Ok(())
+    }
+
+    /// Import a portable plan as a fresh local identity and activate it.
+    /// Source lineage is retained, while analysis identities are remapped so
+    /// imported references cannot collide with this project.
+    pub fn import_plan(
+        &mut self,
+        mut document: SimulationPlanImportDocument,
+    ) -> Result<SimulationPlanCloneOutcome, SimulationPlanCatalogError> {
+        self.validate_plan_catalog()?;
+        self.ensure_plan_name_available(&document.name, None)?;
+        document.analysis_plan.prepare_after_restore();
+        document.analysis_plan.validate_structure()?;
+        validate_model_binding_list(&document.model_bindings)
+            .map_err(SimulationPlanCatalogError::InvalidModelBindings)?;
+        let current = self
+            .analysis_plan
+            .as_ref()
+            .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?;
+        if current.has_executing_instances() {
+            return Err(SimulationPlanCatalogError::PlanExecuting(current.id()));
+        }
+        let imported = document.analysis_plan.clone_as_new()?;
+        let analysis_identity_map = document
+            .analysis_plan
+            .instances()
+            .iter()
+            .zip(imported.instances())
+            .map(|(source, destination)| (source.id(), destination.id()))
+            .collect::<Vec<_>>();
+        let imported_id = imported.id();
+
+        let mut candidate = self.clone();
+        candidate.inactive_plans.push(StoredSimulationPlan {
+            name: candidate.active_plan_name.clone(),
+            lineage: candidate.active_plan_lineage,
+            analysis_plan: candidate
+                .analysis_plan
+                .take()
+                .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?,
+            reference_pvt: candidate.reference_pvt,
+            run_set: candidate.run_set.clone(),
+            model_bindings: candidate.model_bindings.clone(),
+            save_policy: candidate.save_policy,
+            archived: false,
+            options: candidate.options.clone(),
+        });
+        candidate.active_plan_name = document.name;
+        candidate.active_plan_lineage = SimulationPlanLineage::cloned_from_with_contents(
+            document.source_plan_id,
+            document.source_revision,
+            SimulationPlanCloneOptions::ALL_PLAN_CONTENTS,
+        );
+        candidate.analysis_plan = Some(imported);
+        candidate.reference_pvt = document.reference_pvt;
+        candidate.run_set = document.run_set;
+        candidate.model_bindings = document.model_bindings;
+        candidate.save_policy = document.save_policy;
+        candidate.options = document.options;
+        candidate.reset_plan_editor_transients();
+        candidate.refresh_legacy_analysis_projections();
+        candidate.validate_plan_catalog()?;
+        *self = candidate;
+        Ok(SimulationPlanCloneOutcome {
+            source_plan_id: document.source_plan_id,
+            source_revision: document.source_revision,
+            cloned_plan_id: imported_id,
+            contents: SimulationPlanCloneOptions::ALL_PLAN_CONTENTS,
+            analysis_identity_map,
+        })
     }
 
     /// Clone the active plan and activate the clone in one atomic operation.
@@ -358,6 +662,21 @@ impl SimSetupState {
         } else {
             ReferencePvtPoint::default()
         };
+        let cloned_run_set = if contents.copy_pvt_and_model_bindings {
+            self.run_set.clone()
+        } else {
+            crate::simulation::run_set::RunSetState::reference_only()
+        };
+        let cloned_model_bindings = if contents.copy_pvt_and_model_bindings {
+            self.model_bindings.clone()
+        } else {
+            Vec::new()
+        };
+        let cloned_save_policy = if contents.copy_advanced_options {
+            self.save_policy
+        } else {
+            crate::workbench::app_state::SimulationSavePolicy::default()
+        };
         let mut cloned_options = if contents.copy_advanced_options {
             self.options.clone()
         } else {
@@ -378,12 +697,19 @@ impl SimSetupState {
             lineage: candidate.active_plan_lineage,
             analysis_plan: source_plan,
             reference_pvt: candidate.reference_pvt,
+            run_set: candidate.run_set.clone(),
+            model_bindings: candidate.model_bindings.clone(),
+            save_policy: candidate.save_policy,
+            archived: false,
             options: candidate.options.clone(),
         });
         candidate.active_plan_name = new_name;
         candidate.active_plan_lineage = cloned_lineage;
         candidate.analysis_plan = Some(cloned_plan);
         candidate.reference_pvt = cloned_reference_pvt;
+        candidate.run_set = cloned_run_set;
+        candidate.model_bindings = cloned_model_bindings;
+        candidate.save_policy = cloned_save_policy;
         candidate.options = cloned_options;
         candidate.reset_plan_editor_transients();
         candidate.refresh_legacy_analysis_projections();
@@ -427,6 +753,9 @@ impl SimSetupState {
         {
             return Err(SimulationPlanCatalogError::PlanExecuting(id));
         }
+        if self.inactive_plans[index].archived {
+            return Err(SimulationPlanCatalogError::PlanArchived(id));
+        }
 
         let mut candidate = self.clone();
         let target = candidate.inactive_plans.remove(index);
@@ -438,6 +767,10 @@ impl SimSetupState {
                 .take()
                 .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?,
             reference_pvt: candidate.reference_pvt,
+            run_set: candidate.run_set.clone(),
+            model_bindings: candidate.model_bindings.clone(),
+            save_policy: candidate.save_policy,
+            archived: false,
             options: candidate.options.clone(),
         };
         candidate.inactive_plans.insert(index, current);
@@ -445,6 +778,9 @@ impl SimSetupState {
         candidate.active_plan_lineage = target.lineage;
         candidate.analysis_plan = Some(target.analysis_plan);
         candidate.reference_pvt = target.reference_pvt;
+        candidate.run_set = target.run_set;
+        candidate.model_bindings = target.model_bindings;
+        candidate.save_policy = target.save_policy;
         candidate.options = target.options;
         candidate.reset_plan_editor_transients();
         candidate.refresh_legacy_analysis_projections();
@@ -490,6 +826,11 @@ impl SimSetupState {
         if !self.active_plan_lineage.is_valid() {
             return Err(SimulationPlanCatalogError::InvalidLineage(active.id()));
         }
+        validate_model_binding_list(&self.model_bindings)
+            .map_err(SimulationPlanCatalogError::InvalidModelBindings)?;
+        self.save_policy
+            .validate()
+            .map_err(SimulationPlanCatalogError::InvalidSavePolicy)?;
 
         for stored in &self.inactive_plans {
             if !names.insert(stored.name.uniqueness_key()) {
@@ -505,6 +846,12 @@ impl SimSetupState {
             if !stored.lineage.is_valid() {
                 return Err(SimulationPlanCatalogError::InvalidLineage(stored.id()));
             }
+            validate_model_binding_list(&stored.model_bindings)
+                .map_err(SimulationPlanCatalogError::InvalidModelBindings)?;
+            stored
+                .save_policy
+                .validate()
+                .map_err(SimulationPlanCatalogError::InvalidSavePolicy)?;
             stored.analysis_plan.validate_structure()?;
         }
         Ok(())
@@ -513,6 +860,19 @@ impl SimSetupState {
     pub(crate) fn prepare_plan_catalog_after_restore(&mut self) {
         for plan in &mut self.inactive_plans {
             plan.analysis_plan.prepare_after_restore();
+        }
+    }
+
+    /// Migrate the former project-global model selection into every plan.
+    /// Called only by the execution-context schema migration that predates
+    /// per-plan bindings; a current explicit empty closure remains empty.
+    pub(crate) fn migrate_legacy_model_bindings(
+        &mut self,
+        bindings: &[crate::state::model_library::SimulationPlanModelBinding],
+    ) {
+        self.model_bindings = bindings.to_vec();
+        for plan in &mut self.inactive_plans {
+            plan.model_bindings = bindings.to_vec();
         }
     }
 
@@ -558,6 +918,34 @@ impl SimSetupState {
     }
 }
 
+fn validate_model_binding_list(
+    bindings: &[crate::state::model_library::SimulationPlanModelBinding],
+) -> Result<(), String> {
+    let mut names = HashSet::with_capacity(bindings.len());
+    for binding in bindings {
+        let name = binding.library_name.as_str();
+        if name.is_empty() || name != name.trim() || name.chars().any(char::is_control) {
+            return Err(
+                "model binding library names must be nonempty, trimmed, and control-free"
+                    .to_owned(),
+            );
+        }
+        if !names.insert(name.to_ascii_lowercase()) {
+            return Err(format!("model library '{name}' is bound more than once"));
+        }
+        if let Some(section) = binding.selected_corner.as_deref()
+            && (section.is_empty()
+                || section != section.trim()
+                || section.chars().any(char::is_control))
+        {
+            return Err(format!(
+                "model binding '{name}' has an invalid corner section"
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -589,6 +977,23 @@ mod tests {
         let source_id = setup.analysis_plan.as_ref().unwrap().id();
         let source_instance_id = setup.analysis_plan.as_ref().unwrap().instances()[0].id();
         setup.options.reltol = 2.5e-5;
+        setup.save_policy.retained_dataset_limit = 7;
+        setup
+            .run_set
+            .dimensions
+            .iter_mut()
+            .find(|dimension| {
+                dimension.kind == crate::simulation::run_set::RunSetDimensionKind::Supply
+            })
+            .unwrap()
+            .source = "netlist-source:VDD".to_owned();
+        setup
+            .model_bindings
+            .push(crate::state::model_library::SimulationPlanModelBinding {
+                library_name: "foundry-models".to_owned(),
+                source_digest: crate::product::ContentDigest::from_bytes([7; 32]),
+                selected_corner: Some("TT".to_owned()),
+            });
         setup
             .analysis_plan
             .as_mut()
@@ -617,6 +1022,7 @@ mod tests {
         assert_eq!(setup.analysis_plan.as_ref().unwrap().id(), clone_id);
         assert_ne!(clone_id, source_id);
         assert_eq!(setup.options.reltol, 2.5e-5);
+        assert_eq!(setup.save_policy.retained_dataset_limit, 7);
         assert_eq!(clone.source_plan_id, source_id);
         assert_eq!(clone.contents, SimulationPlanCloneOptions::default());
         assert_eq!(
@@ -640,6 +1046,35 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(setup.inactive_plans()[0].id(), source_id);
+        assert_eq!(
+            setup.inactive_plans()[0]
+                .run_set()
+                .dimensions
+                .iter()
+                .find(|dimension| {
+                    dimension.kind == crate::simulation::run_set::RunSetDimensionKind::Supply
+                })
+                .unwrap()
+                .source,
+            "netlist-source:VDD"
+        );
+        assert_eq!(
+            setup.inactive_plans()[0].model_bindings()[0]
+                .selected_corner
+                .as_deref(),
+            Some("TT")
+        );
+        setup
+            .run_set
+            .dimensions
+            .iter_mut()
+            .find(|dimension| {
+                dimension.kind == crate::simulation::run_set::RunSetDimensionKind::Supply
+            })
+            .unwrap()
+            .source = "netlist-source:VCORE".to_owned();
+        setup.model_bindings[0].selected_corner = Some("FF".to_owned());
+        setup.save_policy.retained_dataset_limit = 3;
 
         setup
             .activate_plan(source_id)
@@ -651,6 +1086,49 @@ mod tests {
             source_instance_id
         );
         assert_eq!(setup.inactive_plans()[0].id(), clone_id);
+        assert_eq!(
+            setup
+                .run_set
+                .dimensions
+                .iter()
+                .find(|dimension| {
+                    dimension.kind == crate::simulation::run_set::RunSetDimensionKind::Supply
+                })
+                .unwrap()
+                .source,
+            "netlist-source:VDD",
+            "switching restores the source plan's independent run-set document"
+        );
+        assert_eq!(
+            setup.model_bindings[0].selected_corner.as_deref(),
+            Some("TT"),
+            "switching restores the source plan's model section"
+        );
+        assert_eq!(setup.save_policy.retained_dataset_limit, 7);
+        assert_eq!(
+            setup.inactive_plans()[0]
+                .run_set()
+                .dimensions
+                .iter()
+                .find(|dimension| {
+                    dimension.kind == crate::simulation::run_set::RunSetDimensionKind::Supply
+                })
+                .unwrap()
+                .source,
+            "netlist-source:VCORE",
+            "the clone retains its independently edited run set"
+        );
+        assert_eq!(
+            setup.inactive_plans()[0].model_bindings()[0]
+                .selected_corner
+                .as_deref(),
+            Some("FF"),
+            "the clone retains its independently edited model section"
+        );
+        assert_eq!(
+            setup.inactive_plans()[0].save_policy.retained_dataset_limit,
+            3
+        );
     }
 
     #[test]
@@ -682,6 +1160,45 @@ mod tests {
         assert!(outcome.analysis_identity_map.is_empty());
         assert_eq!(setup.active_plan_lineage().clone_contents(), Some(contents));
         assert_eq!(setup.enabled_analysis_instance_count(), 0);
+    }
+
+    #[test]
+    fn create_rename_archive_restore_and_activate_preserve_identity() {
+        let mut setup = SimSetupState::new();
+        let original_id = setup.analysis_plan.as_ref().unwrap().id();
+        let created_id = setup
+            .create_plan("Fresh characterization")
+            .expect("fresh plan commits");
+        assert_ne!(created_id, original_id);
+        assert_eq!(setup.active_plan_name().as_str(), "Fresh characterization");
+        assert_eq!(setup.active_plan_lineage(), SimulationPlanLineage::root());
+        assert!(setup.model_bindings.is_empty());
+
+        setup
+            .rename_plan(original_id, "Archived source")
+            .expect("inactive rename preserves identity");
+        assert_eq!(setup.inactive_plans()[0].name().as_str(), "Archived source");
+        assert_eq!(setup.inactive_plans()[0].id(), original_id);
+        setup
+            .archive_plan(original_id)
+            .expect("inactive plan archives");
+        assert!(setup.inactive_plans()[0].archived());
+        assert!(matches!(
+            setup.activate_plan(original_id),
+            Err(SimulationPlanCatalogError::PlanArchived(id)) if id == original_id
+        ));
+        setup
+            .restore_plan(original_id)
+            .expect("archive is recoverable");
+        setup
+            .activate_plan(original_id)
+            .expect("restored plan activates");
+        assert_eq!(setup.analysis_plan.as_ref().unwrap().id(), original_id);
+        assert_eq!(setup.active_plan_name().as_str(), "Archived source");
+        assert!(matches!(
+            setup.archive_plan(original_id),
+            Err(SimulationPlanCatalogError::ActivePlanCannotBeArchived(id)) if id == original_id
+        ));
     }
 
     fn clone_instance_id(setup: &SimSetupState) -> AnalysisInstanceId {

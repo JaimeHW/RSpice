@@ -100,6 +100,9 @@ pub struct CornerConfig {
     pub process_corners: Vec<ProcessCorner>,
     /// Voltage values to sweep (V)
     pub voltages: Vec<f64>,
+    /// Exact independent voltage-source instances that form the swept supply
+    /// domain. Empty is valid only while no supply axis is enabled.
+    pub supply_source_names: Vec<String>,
     /// Temperature values to sweep (°C)
     ///
     /// Always Celsius. The run configuration, the engine's `TEMP` option and
@@ -126,6 +129,7 @@ impl Default for CornerConfig {
         Self {
             process_corners: vec![ProcessCorner::TT],
             voltages: vec![1.0],
+            supply_source_names: Vec::new(),
             temperatures: vec![25.0],
             full_matrix: true,
             points: Vec::new(),
@@ -226,6 +230,34 @@ impl CornerConfig {
         for v in &self.voltages {
             if *v <= 0.0 {
                 return Err("Voltage values must be positive".to_string());
+            }
+        }
+
+        let mut distinct_supply_values: Vec<u64> = if self.points.is_empty() {
+            self.voltages.iter().map(|value| value.to_bits()).collect()
+        } else {
+            self.points
+                .iter()
+                .map(|point| point.voltage.to_bits())
+                .collect()
+        };
+        distinct_supply_values.sort_unstable();
+        distinct_supply_values.dedup();
+        if distinct_supply_values.len() > 1 && self.supply_source_names.is_empty() {
+            return Err(
+                "Voltage sweeping requires an explicit netlist supply-source binding".to_owned(),
+            );
+        }
+        let mut seen_supply_sources = std::collections::BTreeSet::new();
+        for source in &self.supply_source_names {
+            if source.trim().is_empty()
+                || source != source.trim()
+                || source.chars().any(char::is_control)
+                || !seen_supply_sources.insert(source.to_ascii_lowercase())
+            {
+                return Err(format!(
+                    "Supply source binding {source:?} is empty, malformed, or duplicated"
+                ));
             }
         }
 

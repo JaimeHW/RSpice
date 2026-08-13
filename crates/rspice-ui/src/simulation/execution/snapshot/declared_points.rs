@@ -71,7 +71,10 @@ pub(super) fn expand_corner_run_point_tasks(
         let pvt = PreparedPvtPoint {
             process: process_from_corner_runner(process),
             voltage: Some(voltage),
+            supply_source_names: contract.supply_source_names.clone(),
             temperature_celsius,
+            parameter_overrides: Vec::new(),
+            source_overrides: Vec::new(),
             corner_contract: Some(contract.clone()),
         };
         let (deck, nominal_supply_voltage) = prepare_pvt_point_source(executable_netlist, &pvt)?;
@@ -154,7 +157,10 @@ pub(super) fn expand_temperature_run_point_tasks(
         let pvt = PreparedPvtPoint {
             process: reference_process,
             voltage: None,
+            supply_source_names: Vec::new(),
             temperature_celsius,
+            parameter_overrides: Vec::new(),
+            source_overrides: Vec::new(),
             corner_contract: None,
         };
         let (deck, nominal_supply_voltage) = prepare_pvt_point_source(executable_netlist, &pvt)?;
@@ -368,6 +374,7 @@ fn point_base_analysis_request(
                     process: point.process,
                     supply_voltage: point.voltage,
                     nominal_supply_voltage,
+                    supply_source_names: point.supply_source_names.clone(),
                 },
                 ..OpConfig::default()
             };
@@ -397,6 +404,29 @@ fn point_base_analysis_request(
             None,
             format!(".dc {source_name} {start} {stop} {step}"),
         ),
+        CornerBaseMode::DcSweepNested {
+            source_name,
+            start,
+            stop,
+            step,
+            source2,
+            start2,
+            stop2,
+            step2,
+        } => (
+            AnalysisSpec::DcSweep {
+                source_name: source_name.clone(),
+                start: *start,
+                stop: *stop,
+                step: *step,
+                source2: Some(source2.clone()),
+                start2: Some(*start2),
+                stop2: Some(*stop2),
+                step2: Some(*step2),
+            },
+            None,
+            format!(".dc {source_name} {start} {stop} {step} {source2} {start2} {stop2} {step2}"),
+        ),
         CornerBaseMode::Transient {
             stop_time,
             step_time,
@@ -410,6 +440,23 @@ fn point_base_analysis_request(
             },
             None,
             format!(".tran {step_time} {stop_time}"),
+        ),
+        CornerBaseMode::TransientWindow {
+            stop_time,
+            step_time,
+            start_time,
+            max_timestep,
+            uic,
+        } => (
+            AnalysisSpec::Transient {
+                stop_time: *stop_time,
+                step_time: *step_time,
+                start_time: *start_time,
+                max_timestep: *max_timestep,
+                uic: *uic,
+            },
+            None,
+            format!(".tran {step_time} {stop_time} {start_time}"),
         ),
         CornerBaseMode::Ac {
             start_freq,

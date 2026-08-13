@@ -1318,6 +1318,10 @@ pub struct ProjectSimulationRun {
     pub provenance_mode: PersistedField<ProjectRunProvenanceMode>,
     #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
     pub prepared_receipt: PersistedField<ProjectPreparedRunReceipt>,
+    /// Optional immutable grouping identity for a multi-plan campaign. The
+    /// member run remains independently authenticated by `prepared_receipt`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub campaign_membership: Option<crate::state::SimulationCampaignMembership>,
     /// Retention classification. Absent is `Pruneable`, which is what every
     /// project written before baselines existed was already under; it is a
     /// user policy over the run rather than sealed result content, so it is
@@ -1332,6 +1336,7 @@ pub struct ProjectSimulationRun {
 
 impl ProjectSimulationRun {
     pub(super) fn into_run(self) -> Result<SimulationRun, String> {
+        let campaign_membership = self.campaign_membership.clone();
         let run_id = self
             .run_id
             .ok_or_else(|| format!("simulation run sequence {} has no stable id", self.id))?;
@@ -1442,11 +1447,17 @@ impl ProjectSimulationRun {
         } else {
             self.success
         };
+        run.restore_campaign_membership(campaign_membership)?;
         run.restore_provenance(provenance)?;
         Ok(run)
     }
 
     fn validate(&self, run_idx: usize) -> Result<(), String> {
+        if let Some(membership) = &self.campaign_membership {
+            membership
+                .validate()
+                .map_err(|error| format!("runs[{run_idx}].campaign_membership: {error}"))?;
+        }
         require_finite(self.timestamp, &format!("runs[{run_idx}].timestamp"))?;
         require_finite(self.elapsed_time, &format!("runs[{run_idx}].elapsed_time"))?;
         let lifecycle = self.lifecycle.ok_or_else(|| {
@@ -1723,6 +1734,7 @@ impl From<&SimulationRun> for ProjectSimulationRun {
             dataset_content_digest: PersistedField::Value(run.dataset_content_digest()),
             provenance_mode,
             prepared_receipt,
+            campaign_membership: run.campaign_membership().cloned(),
             retention: run.retention(),
             elapsed_time: run.elapsed_time,
             success,

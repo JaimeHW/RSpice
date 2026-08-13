@@ -758,10 +758,31 @@ impl PreflightDialogState {
 /// Local presentation state for the canonical Jobs manager. Selection uses
 /// stable run identity so history insertion, pruning, and reload cannot
 /// silently retarget the inspector or exported manifest.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum JobsPlanScope {
+    ActivePlan,
+    #[default]
+    AllPlans,
+    ManualDeck,
+}
+
+impl JobsPlanScope {
+    pub const ALL: [Self; 3] = [Self::ActivePlan, Self::AllPlans, Self::ManualDeck];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ActivePlan => "Active plan",
+            Self::AllPlans => "All plans",
+            Self::ManualDeck => "Manual decks",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct JobsManagerState {
     pub selected_run_id: Option<crate::product::RunId>,
     pub scroll_offset: f32,
+    pub plan_scope: JobsPlanScope,
 }
 
 /// Report-composer selection and transactional editor presentation. The

@@ -61,8 +61,8 @@ pub(super) fn build_manual_deck_queue(
         Ok(plan) => plan,
         Err(err) => return Err(vec![err]),
     };
-    let parameter_step_skips = match parameter_step_context_skips(&parsed.analyses) {
-        Ok(skips) => skips,
+    let parameter_step_plan = match build_parameter_step_plan(&parsed.analyses) {
+        Ok(plan) => plan,
         Err(err) => return Err(vec![err]),
     };
 
@@ -74,10 +74,17 @@ pub(super) fn build_manual_deck_queue(
         {
             queue.push(plan.item.clone());
         }
+        if let Some(plan) = &parameter_step_plan
+            && idx == plan.insert_index
+        {
+            queue.push(plan.item.clone());
+        }
         if temperature_plan
             .as_ref()
             .is_some_and(|plan| plan.skip_indices.contains(&idx))
-            || parameter_step_skips.contains(&idx)
+            || parameter_step_plan
+                .as_ref()
+                .is_some_and(|plan| plan.skip_indices.contains(&idx))
         {
             continue;
         }
@@ -267,14 +274,10 @@ fn build_temperature_plan(
         return Ok(None);
     }
 
-    let (base_index, base_mode) = match supported_bases.first() {
-        Some((idx, command)) => (*idx, temperature_base_mode(command)?),
-        None => (
-            step_temp
-                .map(|(idx, _)| idx)
-                .expect(".step temp should have an index"),
-            CornerBaseMode::Op,
-        ),
+    let (base_index, base_mode) = match (supported_bases.first(), step_temp) {
+        (Some((idx, command)), _) => (*idx, temperature_base_mode(command)?),
+        (None, Some((idx, _))) => (idx, CornerBaseMode::Op),
+        (None, None) => return Ok(None),
     };
 
     let mut skip_indices = temp_indices;
@@ -314,22 +317,27 @@ fn build_temperature_plan(
     }))
 }
 
-fn parameter_step_context_skips(analyses: &[AnalysisCommand]) -> Result<Vec<usize>, String> {
-    let Some((_, step)) = analyses.iter().enumerate().find_map(|(idx, command)| {
+fn build_parameter_step_plan(
+    analyses: &[AnalysisCommand],
+) -> Result<Option<PlannedQueueItem>, String> {
+    let Some((step_index, step)) = analyses.iter().enumerate().find_map(|(idx, command)| {
         if let AnalysisCommand::Step(step) = command {
             (step.target != StepTarget::Temp).then_some((idx, step))
         } else {
             None
         }
     }) else {
-        return Ok(Vec::new());
+        return Ok(None);
     };
 
-    let mut op_indices = Vec::new();
+    let mut supported_bases = Vec::new();
     let mut unsupported = Vec::new();
     for (idx, command) in analyses.iter().enumerate() {
         match command {
-            AnalysisCommand::Op => op_indices.push(idx),
+            AnalysisCommand::Op
+            | AnalysisCommand::Dc { .. }
+            | AnalysisCommand::Tran { .. }
+            | AnalysisCommand::Ac { .. } => supported_bases.push((idx, command)),
             AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } => {}
             AnalysisCommand::MonteCarlo(_) => {}
             other if is_analysis_command(other) => unsupported.push(command_name(other)),
@@ -341,13 +349,48 @@ fn parameter_step_context_skips(analyses: &[AnalysisCommand]) -> Result<Vec<usiz
         unsupported.sort_unstable();
         unsupported.dedup();
         return Err(format!(
-            "Manual parameter .step runs currently execute DC operating-point sweeps only; found unsupported paired analysis {} for target {}",
+            "Manual parameter .step supports .op, .dc, .tran, or .ac as its paired base analysis; found unsupported analysis {} for target {}",
             unsupported.join(", "),
             step_target_name(step)
         ));
     }
+    if supported_bases.len() > 1 {
+        return Err(format!(
+            "Manual parameter .step requires one unambiguous base analysis; found {}",
+            supported_bases
+                .iter()
+                .map(|(_, command)| command_name(command))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
 
-    Ok(op_indices)
+    let (base_index, base_mode) = if let Some((index, command)) = supported_bases.first() {
+        (*index, temperature_base_mode(command)?)
+    } else {
+        (step_index, CornerBaseMode::Op)
+    };
+    let mut skip_indices = vec![step_index];
+    if base_index != step_index {
+        skip_indices.push(base_index);
+    }
+    skip_indices.sort_unstable();
+    skip_indices.dedup();
+
+    Ok(Some(PlannedQueueItem {
+        insert_index: skip_indices[0],
+        skip_indices,
+        item: QueuedAnalysis {
+            numeric_override: None,
+            spec: AnalysisSpec::Parametric,
+            config: None,
+            spec_options: SpecExecutionOptions {
+                parametric_base: Some(base_mode),
+                ..SpecExecutionOptions::default()
+            },
+            analysis_line: format!(".step {}", step_target_name(step)),
+        },
+    }))
 }
 
 fn unique_temp_directive_values(analyses: &[AnalysisCommand]) -> Vec<f64> {
@@ -395,11 +438,17 @@ fn temperature_base_mode(command: &AnalysisCommand) -> Result<CornerBaseMode, St
             sweep2,
             mode: _,
         } => {
-            if sweep2.is_some() {
-                return Err(
-                    "Manual temperature sweeps do not yet support nested .dc base sweeps"
-                        .to_string(),
-                );
+            if let Some(second) = sweep2 {
+                return Ok(CornerBaseMode::DcSweepNested {
+                    source_name: source.clone(),
+                    start: *start,
+                    stop: *stop,
+                    step: *step,
+                    source2: second.source.clone(),
+                    start2: second.start,
+                    stop2: second.stop,
+                    step2: second.step,
+                });
             }
             Ok(CornerBaseMode::DcSweep {
                 source_name: source.clone(),
@@ -416,10 +465,13 @@ fn temperature_base_mode(command: &AnalysisCommand) -> Result<CornerBaseMode, St
             uic,
         } => {
             if start.is_some() || max_step.is_some() || *uic {
-                return Err(
-                    "Manual temperature transient sweeps currently support tstep/tstop only"
-                        .to_string(),
-                );
+                return Ok(CornerBaseMode::TransientWindow {
+                    stop_time: *stop,
+                    step_time: *step,
+                    start_time: start.unwrap_or(0.0),
+                    max_timestep: *max_step,
+                    uic: *uic,
+                });
             }
             Ok(CornerBaseMode::Transient {
                 stop_time: *stop,
@@ -1228,6 +1280,22 @@ fn parse_fourier_output(output: &str) -> Result<(String, String), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manual_deck_planning_has_no_panic_shortcuts() {
+        for source in [
+            include_str!("manual_deck.rs"),
+            include_str!("manual_deck/periodic.rs"),
+        ] {
+            let production = crate::source_guard::production_source(source);
+            for forbidden in [".expect(", ".unwrap(", "panic!(", "unreachable!("] {
+                assert!(
+                    !production.contains(forbidden),
+                    "manual-deck production code contains panic shortcut {forbidden}"
+                );
+            }
+        }
+    }
     use crate::services::simulation_runner::CornerBaseMode;
     use crate::simulation::multi_run::FrequencySweep;
 
@@ -1758,19 +1826,54 @@ Rload out 0 {rload}\n\
     }
 
     #[test]
-    fn manual_deck_rejects_parameter_step_with_transient_base_analysis() {
+    fn manual_deck_parameter_step_retains_transient_base_analysis() {
         let state = AppState::default();
-        let err = build_manual_deck_queue(
+        let queue = build_manual_deck_queue(
             &state,
             "deck\n.param rload=1k\nV1 out 0 pulse(0 1 0 1n 1n 5n 10n)\nR1 out 0 {rload}\n.tran 1n 10n\n.step param rload 1k 2k 1k\n.end\n",
         )
-        .expect_err("parameter step with transient should be diagnosed");
+        .expect("parameter step with transient should be planned");
 
-        assert!(
-            err.iter()
-                .any(|message| message.contains("parameter .step")),
-            "expected unsupported parameter .step diagnostic, got {err:?}"
-        );
+        assert_eq!(queue.len(), 1);
+        assert!(matches!(queue[0].spec, AnalysisSpec::Parametric));
+        assert!(matches!(
+            queue[0].spec_options.parametric_base,
+            Some(CornerBaseMode::Transient { .. })
+        ));
+    }
+
+    #[test]
+    fn manual_temperature_sweep_retains_nested_dc_and_full_transient_forms() {
+        let state = AppState::default();
+        let nested = build_manual_deck_queue(
+            &state,
+            "deck\nV1 in 0 0\nV2 bias 0 0\nR1 in bias 1k\n.dc V1 0 1 0.5 V2 0 2 1\n.step temp list 25 125\n.end\n",
+        )
+        .expect("nested DC temperature sweep");
+        assert!(matches!(
+            nested[0].spec_options.temp.as_ref().map(|config| &config.base_mode),
+            Some(CornerBaseMode::DcSweepNested { source2, .. }) if source2 == "V2"
+        ));
+
+        let transient = build_manual_deck_queue(
+            &state,
+            "deck\nV1 out 0 pulse(0 1 0 1n 1n 5n 10n)\nR1 out 0 1k\n.tran 1n 20n 2n 0.5n uic\n.step temp list 25 125\n.end\n",
+        )
+        .expect("full transient temperature sweep");
+        assert!(matches!(
+            transient[0]
+                .spec_options
+                .temp
+                .as_ref()
+                .map(|config| &config.base_mode),
+            Some(CornerBaseMode::TransientWindow {
+                start_time,
+                max_timestep: Some(max_timestep),
+                uic: true,
+                ..
+            }) if (*start_time - 2e-9).abs() < 1e-21
+                && (*max_timestep - 0.5e-9).abs() < 1e-21
+        ));
     }
 
     #[test]

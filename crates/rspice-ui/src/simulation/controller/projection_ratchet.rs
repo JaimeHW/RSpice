@@ -118,6 +118,12 @@ const ENUM_CANDIDATES: &[&str] = &[
     "Cartesian",
     "Zipped",
     "Filtered",
+    "conditional",
+    "adaptive",
+    "nested",
+    "Conditional",
+    "Adaptive",
+    "Nested",
 ];
 
 /// One valid element for a list-valued field that defaults to empty.
@@ -140,6 +146,24 @@ const ARRAY_SEEDS: &[(AnalysisKind, &str, &str)] = &[
         AnalysisKind::Corner,
         "run_set.composition.excluded_points",
         r#""dimension-process-value-001+dimension-supply-value-001+dimension-temperature-value-001""#,
+    ),
+    (
+        AnalysisKind::Corner,
+        "run_set.composition.upstream_dimension_ids",
+        r#""dimension-temperature""#,
+    ),
+];
+
+const OBJECT_SEEDS: &[(AnalysisKind, &str, &str)] = &[
+    (
+        AnalysisKind::Corner,
+        "run_set.composition.adaptive_policy",
+        r#"{"id":"space-filling-v1","objective":"minimize:error","seed":7,"bounds":"{\"dimension-temperature\":[-40,125]}","stop_rule":"maximum-proposals","maximum_proposals":4}"#,
+    ),
+    (
+        AnalysisKind::Corner,
+        "run_set.composition.adaptive_policy",
+        r#"{"id":"space-filling-v2","objective":"minimize:error","seed":11,"bounds":"{\"dimension-temperature\":[-20,85]}","stop_rule":"maximum-proposals","maximum_proposals":6}"#,
     ),
 ];
 
@@ -268,7 +292,11 @@ fn perturbations(kind: AnalysisKind, path: &str, current: &Value) -> Vec<Value> 
             }
             arrays
         }
-        Value::Null | Value::Object(_) => Vec::new(),
+        Value::Null | Value::Object(_) => OBJECT_SEEDS
+            .iter()
+            .filter(|(seed_kind, seed_path, _)| *seed_kind == kind && *seed_path == path)
+            .filter_map(|(_, _, literal)| serde_json::from_str(literal).ok())
+            .collect(),
     };
     candidates.retain(|candidate| candidate != current);
     candidates
@@ -357,6 +385,60 @@ fn with_all_booleans(body: &Map<String, Value>, setting: bool) -> Map<String, Va
             (key.clone(), value)
         })
         .collect()
+}
+
+/// Give the corner ratchet a reachable supply contract. Production defaults
+/// deliberately do not guess a supply source, but this test must start from a
+/// valid point so edits such as point exclusions can reach the executor.
+fn with_bound_corner_supply(mut body: Map<String, Value>) -> Map<String, Value> {
+    let Some(Value::Object(run_set)) = body.get_mut("run_set") else {
+        return body;
+    };
+    let Some(Value::Array(dimensions)) = run_set.get_mut("dimensions") else {
+        return body;
+    };
+    for dimension in dimensions {
+        let Some(dimension) = dimension.as_object_mut() else {
+            continue;
+        };
+        if dimension.get("kind").and_then(Value::as_str) == Some("supply") {
+            dimension.insert(
+                "source".to_owned(),
+                Value::String("netlist-source:VDD".to_owned()),
+            );
+        }
+    }
+    body
+}
+
+fn with_corner_composition_fixture(mut body: Map<String, Value>, mode: &str) -> Map<String, Value> {
+    let Some(Value::Object(run_set)) = body.get_mut("run_set") else {
+        return body;
+    };
+    let Some(Value::Object(composition)) = run_set.get_mut("composition") else {
+        return body;
+    };
+    composition.insert("mode".to_owned(), Value::String(mode.to_owned()));
+    match mode {
+        "conditional" => {
+            composition.insert(
+                "predicate".to_owned(),
+                Value::String("dimension-temperature == 25".to_owned()),
+            );
+            composition.insert(
+                "upstream_dimension_ids".to_owned(),
+                Value::Array(vec![Value::String("dimension-temperature".to_owned())]),
+            );
+        }
+        "adaptive" => {
+            composition.insert(
+                "adaptive_policy".to_owned(),
+                serde_json::from_str(OBJECT_SEEDS[0].2).expect("adaptive fixture is valid JSON"),
+            );
+        }
+        _ => {}
+    }
+    body
 }
 
 /// One outcome for a field, against one starting body.
@@ -452,17 +534,25 @@ fn every_draft_field_moves_the_engine_facing_projection() {
 
     for kind in AnalysisKind::ALL {
         let draft = AnalysisDraft::for_kind(kind);
-        let Some(body) = draft_body(&draft) else {
+        let Some(mut body) = draft_body(&draft) else {
             continue;
         };
+        if kind == AnalysisKind::Corner {
+            body = with_bound_corner_supply(body);
+        }
 
         // Three starting points, so a field gated behind a checkbox is judged
         // in the state where it can actually matter.
-        let bodies = [
+        let mut bodies = vec![
             body.clone(),
             with_all_booleans(&body, true),
             with_all_booleans(&body, false),
         ];
+        if kind == AnalysisKind::Corner {
+            bodies.push(with_corner_composition_fixture(body.clone(), "conditional"));
+            bodies.push(with_corner_composition_fixture(body.clone(), "adaptive"));
+            bodies.push(with_corner_composition_fixture(body.clone(), "nested"));
+        }
 
         let mut paths = Vec::new();
         leaf_paths(&body, "", &mut paths);

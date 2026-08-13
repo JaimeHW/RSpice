@@ -566,6 +566,8 @@ pub(in crate::simulation) struct DcOperatingPointSeedArtifact {
     temperature_celsius: f64,
     supply_voltage: Option<f64>,
     nominal_supply_voltage: Option<f64>,
+    #[serde(default)]
+    supply_source_names: Vec<String>,
     node_names: Vec<String>,
     branch_names: Vec<String>,
     #[serde(with = "f64_bits_vec")]
@@ -587,6 +589,10 @@ impl DcOperatingPointSeedArtifact {
 
     pub(in crate::simulation) const fn nominal_supply_voltage(&self) -> Option<f64> {
         self.nominal_supply_voltage
+    }
+
+    pub(in crate::simulation) fn supply_source_names(&self) -> &[String] {
+        &self.supply_source_names
     }
 
     pub(in crate::simulation) fn core_seed(
@@ -618,6 +624,12 @@ impl DcOperatingPointSeedArtifact {
                 ));
             }
         }
+        if self.supply_voltage.is_some() && self.supply_source_names.is_empty() {
+            return Err(ExecutionArtifactError::InvalidPayload(
+                "DC operating-point seed supply requires explicitly bound source instances"
+                    .to_owned(),
+            ));
+        }
         self.core_seed().map(|_| ())
     }
 
@@ -631,6 +643,10 @@ impl DcOperatingPointSeedArtifact {
         writer.option(self.nominal_supply_voltage.as_ref(), |writer, value| {
             writer.f64(*value);
         });
+        writer.sequence(self.supply_source_names.len());
+        for source in &self.supply_source_names {
+            writer.string(source);
+        }
         writer.sequence(self.node_names.len());
         for name in &self.node_names {
             writer.string(name);
@@ -1187,12 +1203,13 @@ impl ExecutionArtifactEnvelope {
                     .to_owned(),
             ));
         }
-        let run_point = prepared_config.run_point;
+        let run_point = prepared_config.run_point.clone();
         let seed = DcOperatingPointSeedArtifact {
             effective_source_content_digest,
             temperature_celsius: prepared_config.temperature_celsius,
             supply_voltage: run_point.supply_voltage,
             nominal_supply_voltage: run_point.nominal_supply_voltage,
+            supply_source_names: run_point.supply_source_names,
             node_names: result.mna_node_names.clone(),
             branch_names: result.mna_branch_names.clone(),
             solution: result.mna_solution.clone(),
@@ -1544,6 +1561,7 @@ impl ResolvedExecutionDependencies {
                                 temperature_celsius: seed.temperature_celsius,
                                 supply_voltage: seed.supply_voltage,
                                 nominal_supply_voltage: seed.nominal_supply_voltage,
+                                supply_source_names: seed.supply_source_names.clone(),
                                 node_names: seed.node_names.clone(),
                                 branch_names: seed.branch_names.clone(),
                                 solution,
@@ -1747,6 +1765,7 @@ impl ResolvedExecutionDependencies {
                             temperature_celsius: metadata.temperature_celsius,
                             supply_voltage: metadata.supply_voltage,
                             nominal_supply_voltage: metadata.nominal_supply_voltage,
+                            supply_source_names: metadata.supply_source_names,
                             node_names: metadata.node_names,
                             branch_names: metadata.branch_names,
                             solution: take_transfer_buffer(&mut buffers, metadata.solution)?,
@@ -2054,6 +2073,8 @@ struct DcOperatingPointSeedTransferMetadata {
     temperature_celsius: f64,
     supply_voltage: Option<f64>,
     nominal_supply_voltage: Option<f64>,
+    #[serde(default)]
+    supply_source_names: Vec<String>,
     node_names: Vec<String>,
     branch_names: Vec<String>,
     solution: TransferBufferRef,
@@ -2458,6 +2479,7 @@ mod tests {
         configuration.temperature_celsius = 125.0;
         configuration.run_point.supply_voltage = Some(1.2);
         configuration.run_point.nominal_supply_voltage = Some(1.0);
+        configuration.run_point.supply_source_names = vec!["V1".to_owned()];
         SimulationResult::DcOp(Box::new(crate::simulation::results::DcOpResult {
             configuration,
             mna_node_names: vec!["in".to_owned(), "out".to_owned()],

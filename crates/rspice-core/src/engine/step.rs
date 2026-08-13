@@ -889,7 +889,7 @@ impl Engine {
         self.step_netlists_for_command_with_abort(netlist, step_cmd, values, &NoAbort)
     }
 
-    fn step_netlists_for_command_with_abort(
+    pub fn step_netlists_for_command_with_abort(
         &self,
         netlist: &Netlist,
         step_cmd: &StepCommand,

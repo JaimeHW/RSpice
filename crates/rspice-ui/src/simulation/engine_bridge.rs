@@ -52,10 +52,11 @@ pub struct EngineBridge {
 /// dispatch — the one seam every configuration-backed analysis passes through
 /// — so a corner point reaches transient, AC and DC exactly as it reaches the
 /// operating point.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(in crate::simulation) struct SupplyCornerScale {
     pub(in crate::simulation) corner_voltage: f64,
     pub(in crate::simulation) nominal_voltage: f64,
+    pub(in crate::simulation) supply_source_names: Vec<String>,
 }
 
 struct SimulationInput<'a> {
@@ -224,6 +225,7 @@ impl EngineBridge {
                         &mut netlist,
                         supply,
                         nominal,
+                        &environment.supply_source_names,
                         abort_flag,
                     )
                     .map_err(|error| {
@@ -248,6 +250,7 @@ impl EngineBridge {
                 &mut netlist,
                 corner.corner_voltage,
                 corner.nominal_voltage,
+                &corner.supply_source_names,
                 abort_flag,
             )
             .map_err(|error| {

@@ -21,6 +21,47 @@ use std::collections::HashSet;
 /// resolves to, so it is one type rather than two that have to agree.
 pub type ReferencePvtPoint = crate::simulation::run_set::ReferencePoint;
 
+/// Plan-owned result delivery and retention policy. These controls are part of
+/// the executable plan rather than project-global UI preferences: switching a
+/// plan switches the policy, and a prepared snapshot authenticates it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SimulationSavePolicy {
+    /// Maximum retained datasets produced by this plan. Golden baselines are
+    /// exempt and may make the limit temporarily unenforceable.
+    pub retained_dataset_limit: usize,
+    /// Hard preflight ceiling for the bounded saved-output forecast.
+    pub maximum_storage_bytes: u64,
+    /// Whether contracts requesting live delivery may open a live stream.
+    pub live_streaming_enabled: bool,
+    /// Whether accepted transient samples are retained as failure diagnostics
+    /// if the final solve fails or is interrupted.
+    pub retain_failure_diagnostics: bool,
+}
+
+impl Default for SimulationSavePolicy {
+    fn default() -> Self {
+        Self {
+            retained_dataset_limit: 20,
+            maximum_storage_bytes: 10 * 1024 * 1024 * 1024,
+            live_streaming_enabled: true,
+            retain_failure_diagnostics: true,
+        }
+    }
+}
+
+impl SimulationSavePolicy {
+    pub fn validate(self) -> Result<(), String> {
+        if self.retained_dataset_limit == 0 || self.retained_dataset_limit > 10_000 {
+            return Err("Plan retention must be from 1 through 10,000 datasets.".to_owned());
+        }
+        if self.maximum_storage_bytes == 0 {
+            return Err("Plan saved-output storage budget must be greater than zero.".to_owned());
+        }
+        Ok(())
+    }
+}
+
 /// `.tran` draft. SI suffixes allowed; "auto" max step defers to the
 /// engine's LTE control.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -157,6 +198,14 @@ pub struct SimSetupState {
     /// Corner analysis remains an analysis instance with its own base mode.
     #[serde(default = "default_global_run_set")]
     pub run_set: crate::simulation::run_set::RunSetState,
+    /// Ordered, content-pinned model libraries consumed by this plan.
+    /// Absence is an explicit empty closure; execution never falls back to
+    /// every library currently loaded in the project manager.
+    #[serde(default)]
+    pub model_bindings: Vec<crate::state::model_library::SimulationPlanModelBinding>,
+    /// Result storage, live delivery, and per-plan history policy.
+    #[serde(default)]
+    pub save_policy: SimulationSavePolicy,
     /// Validated project-unique name of the active simulation plan.
     #[serde(default)]
     pub active_plan_name: crate::workbench::app_state::SimulationPlanName,

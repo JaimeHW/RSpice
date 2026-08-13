@@ -5,7 +5,77 @@
 //! run, and a failed run are all different things to the UI.
 
 use super::*;
-use crate::product::{AnalysisInstanceId, DatasetId, JobId, RunId};
+use crate::product::{AnalysisInstanceId, DatasetId, JobId, RunId, SimulationCampaignId};
+
+/// Immutable membership of one run in a reviewed multi-plan campaign.
+///
+/// A campaign groups independently authenticated plan runs. It never replaces
+/// their run, job, dataset, or prepared-snapshot identity.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SimulationCampaignMembership {
+    campaign_id: SimulationCampaignId,
+    name: String,
+    member_index: u32,
+    member_count: u32,
+}
+
+impl SimulationCampaignMembership {
+    pub(crate) fn new(
+        campaign_id: SimulationCampaignId,
+        name: impl Into<String>,
+        member_index: u32,
+        member_count: u32,
+    ) -> Result<Self, String> {
+        let membership = Self {
+            campaign_id,
+            name: name.into().trim().to_owned(),
+            member_index,
+            member_count,
+        };
+        membership.validate()?;
+        Ok(membership)
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        if self.name.is_empty() {
+            return Err("simulation campaign name must not be empty".to_owned());
+        }
+        if self.name.chars().count() > 160 {
+            return Err("simulation campaign name must not exceed 160 characters".to_owned());
+        }
+        if self.member_count < 2 {
+            return Err("simulation campaign must contain at least two plan members".to_owned());
+        }
+        if self.member_index == 0 || self.member_index > self.member_count {
+            return Err(format!(
+                "simulation campaign member index {} is outside 1..={}",
+                self.member_index, self.member_count
+            ));
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub const fn campaign_id(&self) -> SimulationCampaignId {
+        self.campaign_id
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub const fn member_index(&self) -> u32 {
+        self.member_index
+    }
+
+    #[must_use]
+    pub const fn member_count(&self) -> u32 {
+        self.member_count
+    }
+}
 
 /// Qualified execution runtime that owns a simulation job.
 ///
@@ -173,6 +243,8 @@ pub struct SimulationRun {
     pub elapsed_time: f64,
     /// Whether all analyses in this run succeeded
     pub success: bool,
+    /// Optional immutable grouping identity for a multi-plan campaign.
+    campaign_membership: Option<SimulationCampaignMembership>,
 }
 
 impl SimulationRun {
@@ -194,7 +266,39 @@ impl SimulationRun {
             retention: RunRetention::Pruneable,
             elapsed_time: 0.0,
             success: true,
+            campaign_membership: None,
         }
+    }
+
+    #[must_use]
+    pub fn campaign_membership(&self) -> Option<&SimulationCampaignMembership> {
+        self.campaign_membership.as_ref()
+    }
+
+    pub(crate) fn set_campaign_membership(
+        &mut self,
+        membership: SimulationCampaignMembership,
+    ) -> Result<(), String> {
+        if self.campaign_membership.is_some() {
+            return Err(format!(
+                "simulation run {} already belongs to a campaign",
+                self.id
+            ));
+        }
+        membership.validate()?;
+        self.campaign_membership = Some(membership);
+        Ok(())
+    }
+
+    pub(crate) fn restore_campaign_membership(
+        &mut self,
+        membership: Option<SimulationCampaignMembership>,
+    ) -> Result<(), String> {
+        if let Some(membership) = &membership {
+            membership.validate()?;
+        }
+        self.campaign_membership = membership;
+        Ok(())
     }
 
     /// What retention may do with this run.
@@ -331,6 +435,9 @@ impl SimulationRun {
     /// authoritative receipt. Aborted and partial runs may omit the remaining
     /// suffix; they may not rewrite or reorder completed task identity.
     pub fn validate_provenance(&self) -> Result<(), String> {
+        if let Some(membership) = &self.campaign_membership {
+            membership.validate()?;
+        }
         let provenance = self.provenance.as_ref().ok_or_else(|| {
             format!(
                 "simulation run {} is unsealed and has no authoritative provenance",

@@ -269,7 +269,7 @@ impl OpPreviousState {
 
 /// Position of this OP inside its bound run-point sequence. A standalone OP
 /// has one point at index zero, which is also its final point.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpRunPointContext {
     pub index: usize,
@@ -284,6 +284,9 @@ pub struct OpRunPointContext {
     pub supply_voltage: Option<f64>,
     #[serde(default)]
     pub nominal_supply_voltage: Option<f64>,
+    /// Exact independent voltage-source instances forming the supply domain.
+    #[serde(default)]
+    pub supply_source_names: Vec<String>,
 }
 
 impl Default for OpRunPointContext {
@@ -294,13 +297,14 @@ impl Default for OpRunPointContext {
             process: ProcessCorner::TT,
             supply_voltage: None,
             nominal_supply_voltage: None,
+            supply_source_names: Vec::new(),
         }
     }
 }
 
 impl OpRunPointContext {
     #[must_use]
-    pub const fn is_final(self) -> bool {
+    pub const fn is_final(&self) -> bool {
         self.count > 0 && self.index + 1 == self.count
     }
 }

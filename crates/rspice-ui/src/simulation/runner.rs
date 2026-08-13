@@ -37,6 +37,9 @@ pub(crate) mod worker_contract;
 #[derive(Debug, Clone, Default)]
 pub struct SpecExecutionOptions {
     pub temp: Option<crate::services::simulation_runner::TempRunConfig>,
+    /// Base analysis paired with a design-parameter `.STEP`. `None` retains
+    /// the classic operating-point behavior for older prepared requests.
+    pub parametric_base: Option<crate::services::simulation_runner::CornerBaseMode>,
     pub corner: Option<crate::services::simulation_runner::CornerRunConfig>,
     pub pac: Option<crate::services::simulation_runner::PacRunConfig>,
     pub pxf: Option<crate::services::simulation_runner::PxfRunConfig>,
@@ -48,12 +51,14 @@ pub struct SpecExecutionOptions {
 /// Process-model selection is already materialized into the prepared source;
 /// these values cover the two inputs that must be applied to the parsed deck
 /// immediately before any analysis is dispatched.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AnalysisExecutionEnvironment {
     pub temperature_celsius: f64,
     pub supply_voltage: Option<f64>,
     pub nominal_supply_voltage: Option<f64>,
+    #[serde(default)]
+    pub supply_source_names: Vec<String>,
 }
 
 /// One fully accepted transient point published by the engine while the

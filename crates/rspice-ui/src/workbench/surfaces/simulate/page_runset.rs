@@ -11,8 +11,9 @@ use egui::{Sense, Ui, vec2};
 
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::simulation::run_set::{
-    self, InvalidValuePolicy, RunSetAction, RunSetBudgets, RunSetCompositionMode, RunSetDimension,
-    RunSetDimensionKind, RunSetReceiptStatus, RunSetState, RunSetValidation,
+    self, InvalidValuePolicy, RunSetAction, RunSetAdaptivePolicy, RunSetBudgets,
+    RunSetCompositionMode, RunSetDimension, RunSetDimensionKind, RunSetReceiptStatus, RunSetState,
+    RunSetValidation,
 };
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
@@ -97,7 +98,13 @@ fn toolbar(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
                         );
                     }
                     for kind in addable {
-                        if ui.button(kind.default_name()).clicked() {
+                        if let Some(reason) = kind.execution_blocker() {
+                            ui.add_enabled(
+                                false,
+                                egui::Button::new(format!("{} · unavailable", kind.default_name())),
+                            )
+                            .on_disabled_hover_text(reason);
+                        } else if ui.button(kind.default_name()).clicked() {
                             action = Some(RunSetAction::AddDimension(kind));
                             ui.close();
                         }
@@ -383,14 +390,19 @@ fn axis_card(
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let mut enabled = dimension.enabled;
-                            if ui
-                                .add(egui::Checkbox::without_text(&mut enabled))
+                            let can_toggle =
+                                dimension.enabled || dimension.kind.execution_blocker().is_none();
+                            let response = ui
+                                .add_enabled(can_toggle, egui::Checkbox::without_text(&mut enabled))
                                 .on_hover_text(format!(
                                     "Include {} in the run space",
                                     dimension.name
-                                ))
-                                .changed()
-                            {
+                                ));
+                            let response = match dimension.kind.execution_blocker() {
+                                Some(reason) => response.on_disabled_hover_text(reason),
+                                None => response,
+                            };
+                            if response.changed() {
                                 event = Some(AxisEvent::SetEnabled(enabled));
                             }
                         });
@@ -528,12 +540,19 @@ fn forecast_tile(ui: &mut Ui, validation: &RunSetValidation) {
                     ui.spacing_mut().item_spacing.y = 4.0;
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new(forecast.point_count.to_string())
-                                .font(theme::mono(tokens::FS_4, FontWeight::SemiBold))
-                                .color(t.color.text),
+                            egui::RichText::new(if forecast.exact {
+                                forecast.point_count.to_string()
+                            } else {
+                                format!(
+                                    "{}–{}",
+                                    forecast.point_count_minimum, forecast.point_count_maximum
+                                )
+                            })
+                            .font(theme::mono(tokens::FS_4, FontWeight::SemiBold))
+                            .color(t.color.text),
                         );
                         ui.label(
-                            egui::RichText::new(if forecast.point_count == 1 {
+                            egui::RichText::new(if forecast.exact && forecast.point_count == 1 {
                                 "point"
                             } else {
                                 "points"
@@ -690,7 +709,9 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
         .unwrap_or_default();
     let last = app.state.sim_setup.run_set.dimensions.len() - 1;
     let title = format!("Selected dimension · {}", dimension.name);
-    let status = if dimension.enabled {
+    let status = if dimension.kind.execution_blocker().is_some() {
+        ("unavailable", Tone::Error)
+    } else if dimension.enabled {
         ("enabled", Tone::Ok)
     } else {
         ("disabled", Tone::Neutral)
@@ -765,6 +786,10 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
                     ui,
                     "Binds to",
                     match dimension.kind {
+                        RunSetDimensionKind::Parameter => {
+                            "an exact design variable through a point-specific .param override"
+                        }
+                        RunSetDimensionKind::Source => "an explicitly named independent source",
                         RunSetDimensionKind::ProcessSection => {
                             "the library section every model resolves through"
                         }
@@ -772,8 +797,33 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
                         RunSetDimensionKind::Temperature => {
                             "the solve temperature and every model's TNOM reference"
                         }
+                        RunSetDimensionKind::Model => {
+                            "a section of one ordered plan-owned model binding"
+                        }
+                        RunSetDimensionKind::Frequency => {
+                            "a compatible analysis instance's frequency control"
+                        }
+                        RunSetDimensionKind::Time => {
+                            "a compatible analysis instance's time control"
+                        }
+                        RunSetDimensionKind::Seed => {
+                            "the reproducible seed of a statistical analysis"
+                        }
+                        RunSetDimensionKind::Sample => "the sample count of a statistical analysis",
+                        RunSetDimensionKind::AnalysisSelection => {
+                            "the plan analysis instances executed at each point"
+                        }
+                        RunSetDimensionKind::DigitalConfiguration => {
+                            "a frozen mixed-signal digital configuration"
+                        }
+                        RunSetDimensionKind::ExternalDataset => {
+                            "a sealed external dataset identity"
+                        }
                     },
                 );
+                if let Some(reason) = dimension.kind.execution_blocker() {
+                    rule_row(ui, "Execution", reason);
+                }
 
                 // The value list is a draft until focus leaves: committing per
                 // keystroke would move the plan revision on every character and
@@ -885,7 +935,11 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
         Some((mode.as_str(), Tone::Neutral)),
         |ui| {
             card_body(ui, |ui| {
-                let options: Vec<String> = RunSetCompositionMode::ALL
+                let available_modes = RunSetCompositionMode::ALL
+                    .into_iter()
+                    .filter(|mode| mode.execution_blocker().is_none())
+                    .collect::<Vec<_>>();
+                let options: Vec<String> = available_modes
                     .iter()
                     .map(|mode| mode.label().to_owned())
                     .collect();
@@ -906,11 +960,126 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
                     None,
                 );
                 if let Some(index) = picked
-                    && let Some(mode) = RunSetCompositionMode::ALL.get(index).copied()
+                    && let Some(mode) = available_modes.get(index).copied()
                 {
                     action = Some(RunSetAction::SetComposition(
                         current_composition.with_mode(mode),
                     ));
+                }
+                rule_row(
+                    ui,
+                    "Adaptive",
+                    RunSetCompositionMode::Adaptive
+                        .execution_blocker()
+                        .expect("adaptive composition is deliberately unavailable"),
+                );
+                if mode == RunSetCompositionMode::Conditional {
+                    let mut edited = current_composition.clone();
+                    let mut predicate = edited.predicate.clone();
+                    let released =
+                        mono_input(ui, &mut predicate, ui.available_width()).lost_focus();
+                    ui.label("Predicate grammar: dimension-id == value; join clauses with &&");
+                    if released && predicate != edited.predicate {
+                        edited.predicate = predicate;
+                        action = Some(RunSetAction::SetComposition(edited.clone()));
+                    }
+                    ui.label("Authorized upstream dimensions");
+                    for dimension in app.state.sim_setup.run_set.enabled_dimensions() {
+                        let mut selected = edited
+                            .upstream_dimension_ids
+                            .iter()
+                            .any(|id| id == &dimension.id);
+                        if ui.checkbox(&mut selected, &dimension.name).changed() {
+                            if selected {
+                                edited.upstream_dimension_ids.push(dimension.id.clone());
+                            } else {
+                                edited
+                                    .upstream_dimension_ids
+                                    .retain(|id| id != &dimension.id);
+                            }
+                            action = Some(RunSetAction::SetComposition(edited.clone()));
+                        }
+                    }
+                }
+                if mode == RunSetCompositionMode::Nested {
+                    let mut edited = current_composition.clone();
+                    let mut depth = edited.maximum_depth.to_string();
+                    if mono_input(ui, &mut depth, 120.0).lost_focus()
+                        && let Ok(parsed) = depth.trim().parse::<u8>()
+                        && parsed != edited.maximum_depth
+                    {
+                        edited.maximum_depth = parsed;
+                        action = Some(RunSetAction::SetComposition(edited));
+                    }
+                }
+                if mode == RunSetCompositionMode::Adaptive {
+                    let mut edited = current_composition.clone();
+                    let mut policy =
+                        edited
+                            .adaptive_policy
+                            .clone()
+                            .unwrap_or(RunSetAdaptivePolicy {
+                                id: String::new(),
+                                objective: String::new(),
+                                seed: 1,
+                                bounds: "{}".to_owned(),
+                                stop_rule: String::new(),
+                                maximum_proposals: 1,
+                            });
+                    let mut seed = policy.seed.to_string();
+                    let mut maximum = policy.maximum_proposals.to_string();
+                    let released = std::cell::Cell::new(false);
+                    field_pair(
+                        ui,
+                        ("Policy ID", &mut |ui: &mut Ui, width: f32| {
+                            released.set(
+                                released.get() | mono_input(ui, &mut policy.id, width).lost_focus(),
+                            );
+                        }),
+                        Some(("Objective", &mut |ui: &mut Ui, width: f32| {
+                            released.set(
+                                released.get()
+                                    | mono_input(ui, &mut policy.objective, width).lost_focus(),
+                            );
+                        })),
+                    );
+                    field_pair(
+                        ui,
+                        ("Seed", &mut |ui: &mut Ui, width: f32| {
+                            released.set(
+                                released.get() | mono_input(ui, &mut seed, width).lost_focus(),
+                            );
+                        }),
+                        Some(("Maximum proposals", &mut |ui: &mut Ui, width: f32| {
+                            released.set(
+                                released.get() | mono_input(ui, &mut maximum, width).lost_focus(),
+                            );
+                        })),
+                    );
+                    field_pair(
+                        ui,
+                        ("Bounds · JSON", &mut |ui: &mut Ui, width: f32| {
+                            released.set(
+                                released.get()
+                                    | mono_input(ui, &mut policy.bounds, width).lost_focus(),
+                            );
+                        }),
+                        Some(("Stop rule", &mut |ui: &mut Ui, width: f32| {
+                            released.set(
+                                released.get()
+                                    | mono_input(ui, &mut policy.stop_rule, width).lost_focus(),
+                            );
+                        })),
+                    );
+                    if released.get()
+                        && let (Ok(seed), Ok(maximum_proposals)) =
+                            (seed.trim().parse::<u64>(), maximum.trim().parse::<usize>())
+                    {
+                        policy.seed = seed;
+                        policy.maximum_proposals = maximum_proposals;
+                        edited.adaptive_policy = Some(policy);
+                        action = Some(RunSetAction::SetComposition(edited));
+                    }
                 }
                 rule_row(ui, "Contract", mode.contract());
                 rule_row(
@@ -944,11 +1113,7 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
             });
             card_note(
                 ui,
-                "Conditional, adaptive and nested compositions are not offered: the executor \
-                 expands a declared matrix, and a mode it could not expand would be a choice that \
-                 changed nothing about what runs. A filtered composition is still that matrix — it \
-                 removes points the design cannot reach by naming each one, not by evaluating a \
-                 predicate.",
+                "Conditional predicates and nested traversal resolve deterministically into exact point identities. Adaptive declarations remain fail-closed until the campaign scheduler can authorize proposals from completed evidence; a direct run never pretends the maximum proposal budget is an executed matrix.",
             );
         },
     );

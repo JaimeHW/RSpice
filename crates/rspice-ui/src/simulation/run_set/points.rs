@@ -115,7 +115,110 @@ pub fn resolve(state: &RunSetState) -> Option<Vec<RunSetPoint<'_>>> {
                 .contains(&point.point_key())
         });
     }
+    if state.composition.mode == RunSetCompositionMode::Conditional {
+        points.retain(|point| conditional_predicate_matches(state, point).unwrap_or(false));
+    }
+    // An adaptive declaration requires feedback from completed proposals and
+    // therefore cannot be flattened into an authorized queue up front.
+    if state.composition.mode == RunSetCompositionMode::Adaptive {
+        return None;
+    }
     Some(points)
+}
+
+/// Evaluate the deliberately small, deterministic conditional grammar.
+/// Clauses are `<dimension-id-or-name> == <authored-value>` (or `!=`) joined by
+/// `&&`. Values may be quoted. There is no implicit numeric coercion: the
+/// predicate addresses exactly the declaration displayed in the point table.
+fn conditional_predicate_matches(state: &RunSetState, point: &RunSetPoint<'_>) -> Result<bool, ()> {
+    let predicate = state.composition.predicate.trim();
+    if predicate.is_empty() {
+        return Err(());
+    }
+    for clause in predicate.split("&&") {
+        let clause = clause.trim();
+        let (left, right, equal) = if let Some((left, right)) = clause.split_once("==") {
+            (left, right, true)
+        } else if let Some((left, right)) = clause.split_once("!=") {
+            (left, right, false)
+        } else {
+            return Err(());
+        };
+        let dimension_key = left.trim();
+        let expected = right
+            .trim()
+            .trim_matches(|character| character == '\'' || character == '"');
+        let Some((_, actual)) = point.coordinates.iter().find(|(dimension, _)| {
+            dimension.id == dimension_key || dimension.name == dimension_key
+        }) else {
+            return Err(());
+        };
+        let matches = actual.lexical.trim() == expected;
+        if matches != equal {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+pub(super) fn validate_conditional_predicate(state: &RunSetState) -> Result<(), String> {
+    let predicate = state.composition.predicate.trim();
+    if predicate.is_empty() {
+        return Err("Conditional composition requires a predicate.".to_owned());
+    }
+    if state.composition.upstream_dimension_ids.is_empty() {
+        return Err(
+            "Conditional composition requires at least one upstream dimension identity.".to_owned(),
+        );
+    }
+    for id in &state.composition.upstream_dimension_ids {
+        if !state
+            .enabled_dimensions()
+            .any(|dimension| dimension.id == *id)
+        {
+            return Err(format!(
+                "Conditional upstream dimension {id:?} is not enabled in this run set."
+            ));
+        }
+    }
+    for clause in predicate.split("&&") {
+        let clause = clause.trim();
+        let (left, right) = clause
+            .split_once("==")
+            .or_else(|| clause.split_once("!="))
+            .ok_or_else(|| {
+                format!(
+                    "Conditional clause {clause:?} must use == or !=; clauses may be joined by &&."
+                )
+            })?;
+        let dimension_key = left.trim();
+        let dimension = state
+            .enabled_dimensions()
+            .find(|dimension| dimension.id == dimension_key || dimension.name == dimension_key)
+            .ok_or_else(|| {
+                format!("Conditional clause references unknown dimension {dimension_key:?}.")
+            })?;
+        if !state
+            .composition
+            .upstream_dimension_ids
+            .contains(&dimension.id)
+        {
+            return Err(format!(
+                "Conditional clause reads {}, which is not listed as an upstream dimension.",
+                dimension.id
+            ));
+        }
+        let expected = right
+            .trim()
+            .trim_matches(|character| character == '\'' || character == '"');
+        if expected.is_empty() {
+            return Err(format!(
+                "Conditional clause for {} requires a value.",
+                dimension.id
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The composed space before any exclusion is applied.
@@ -143,7 +246,11 @@ pub fn compose(state: &RunSetState) -> Option<Vec<RunSetPoint<'_>>> {
     match state.composition.mode {
         // A filtered space is the cross product; `resolve` is what subtracts
         // from it, so the expansion itself is the Cartesian one.
-        RunSetCompositionMode::Cartesian | RunSetCompositionMode::Filtered => {
+        RunSetCompositionMode::Cartesian
+        | RunSetCompositionMode::Filtered
+        | RunSetCompositionMode::Conditional
+        | RunSetCompositionMode::Adaptive
+        | RunSetCompositionMode::Nested => {
             let mut points = vec![RunSetPoint {
                 coordinates: Vec::new(),
             }];

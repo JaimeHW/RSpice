@@ -49,8 +49,15 @@ pub struct RunSetWarning {
 /// What the composed space costs, exactly.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct RunSetForecast {
-    /// Points the space resolves to.
+    /// Maximum points the space resolves to. Equal to the minimum for every
+    /// deterministic composition.
     pub point_count: usize,
+    #[serde(default)]
+    pub point_count_minimum: usize,
+    #[serde(default)]
+    pub point_count_maximum: usize,
+    #[serde(default = "default_forecast_exact")]
+    pub exact: bool,
     /// Enabled analysis instances, each contributing one task per point.
     pub enabled_analysis_count: usize,
     /// `point_count × enabled_analysis_count`.
@@ -59,6 +66,10 @@ pub struct RunSetForecast {
     pub cost_ms: u64,
     /// Modelled stored bytes.
     pub storage_bytes: u64,
+}
+
+const fn default_forecast_exact() -> bool {
+    true
 }
 
 /// Whether the run set may be previewed.
@@ -228,6 +239,45 @@ pub fn validate_with_task_count(
         }
         seen_kinds.push(dimension.kind);
 
+        if dimension.kind == RunSetDimensionKind::Supply
+            && let Err(message) = super::model::parse_supply_source_authority(&dimension.source)
+        {
+            errors.push(RunSetError::about(
+                "RUNSET-SUPPLY-BINDING",
+                &dimension.id,
+                message,
+            ));
+        }
+        if dimension.kind == RunSetDimensionKind::Parameter
+            && let Err(message) = super::model::parse_parameter_source_authority(&dimension.source)
+        {
+            errors.push(RunSetError::about(
+                "RUNSET-PARAMETER-BINDING",
+                &dimension.id,
+                message,
+            ));
+        }
+        if dimension.kind == RunSetDimensionKind::Source
+            && let Err(message) = super::model::parse_source_value_authority(&dimension.source)
+        {
+            errors.push(RunSetError::about(
+                "RUNSET-SOURCE-BINDING",
+                &dimension.id,
+                message,
+            ));
+        }
+        if let Some(reason) = dimension.kind.execution_blocker() {
+            errors.push(RunSetError::about(
+                "RUNSET-BINDING-UNAVAILABLE",
+                &dimension.id,
+                format!(
+                    "The {} dimension is retained for project compatibility but cannot execute: {reason}. Keep it disabled; source authority {:?} was preserved unchanged.",
+                    dimension.kind.as_str(),
+                    dimension.source
+                ),
+            ));
+        }
+
         if dimension.values.is_empty() {
             errors.push(RunSetError::about(
                 "RUNSET-EMPTY-DIMENSION",
@@ -255,6 +305,24 @@ pub fn validate_with_task_count(
                 }
                 RunSetDimensionKind::Temperature => {
                     format!("{detail} is not a temperature above absolute zero.")
+                }
+                RunSetDimensionKind::Parameter | RunSetDimensionKind::Source => {
+                    format!("{detail} is not a finite SPICE quantity.")
+                }
+                RunSetDimensionKind::Frequency | RunSetDimensionKind::Time => {
+                    format!("{detail} is not a positive finite quantity.")
+                }
+                RunSetDimensionKind::Seed => {
+                    format!("{detail} is not an exactly representable unsigned seed.")
+                }
+                RunSetDimensionKind::Sample => {
+                    format!("{detail} is not a positive, exactly representable sample count.")
+                }
+                RunSetDimensionKind::Model
+                | RunSetDimensionKind::AnalysisSelection
+                | RunSetDimensionKind::DigitalConfiguration
+                | RunSetDimensionKind::ExternalDataset => {
+                    format!("{detail} is not a non-empty reference.")
                 }
             };
             match dimension.invalid_value_policy {
@@ -299,6 +367,50 @@ pub fn validate_with_task_count(
         }
     }
 
+    if state.composition.mode == RunSetCompositionMode::Conditional
+        && let Err(message) = super::points::validate_conditional_predicate(state)
+    {
+        errors.push(RunSetError::global("RUNSET-PREDICATE", message));
+    }
+    if state.composition.mode == RunSetCompositionMode::Nested
+        && !(1..=8).contains(&state.composition.maximum_depth)
+    {
+        errors.push(RunSetError::global(
+            "RUNSET-NESTED-DEPTH",
+            "Nested composition depth must be from 1 through 8.",
+        ));
+    }
+    if state.composition.mode == RunSetCompositionMode::Adaptive {
+        let policy_valid = state
+            .composition
+            .adaptive_policy
+            .as_ref()
+            .is_some_and(|policy| {
+                !policy.id.trim().is_empty()
+                    && !policy.objective.trim().is_empty()
+                    && !policy.bounds.trim().is_empty()
+                    && serde_json::from_str::<serde_json::Value>(&policy.bounds).is_ok()
+                    && !policy.stop_rule.trim().is_empty()
+                    && policy.maximum_proposals > 0
+            });
+        if !policy_valid {
+            errors.push(RunSetError::global(
+                "RUNSET-ADAPTIVE-POLICY",
+                "Adaptive composition requires a frozen policy identity, objective, seed, JSON bounds, stop rule, and positive maximum proposal count.",
+            ));
+        }
+        // Adaptive scheduling is stateful: authorizing every possible task up
+        // front would misrepresent a feedback-driven campaign as a matrix.
+        errors.push(RunSetError::global(
+            "RUNSET-ADAPTIVE-EXECUTOR",
+            state
+                .composition
+                .mode
+                .execution_blocker()
+                .unwrap_or("Adaptive composition cannot execute in this engine build."),
+        ));
+    }
+
     let composed_count = if lengths.is_empty() {
         1
     } else if state.composition.mode == RunSetCompositionMode::Zipped {
@@ -329,8 +441,26 @@ pub fn validate_with_task_count(
         });
     }
 
-    let point_count = composed_count.saturating_sub(excluded.applied);
-    if point_count == 0 {
+    let deterministic_point_count = if state.composition.mode == RunSetCompositionMode::Conditional
+        && super::points::validate_conditional_predicate(state).is_ok()
+    {
+        super::points::resolve(state).map_or(0, |points| points.len())
+    } else {
+        composed_count.saturating_sub(excluded.applied)
+    };
+    let adaptive_proposals = if state.composition.mode == RunSetCompositionMode::Adaptive {
+        state
+            .composition
+            .adaptive_policy
+            .as_ref()
+            .map_or(0, |policy| policy.maximum_proposals)
+    } else {
+        0
+    };
+    let point_count_minimum = deterministic_point_count;
+    let point_count_maximum = deterministic_point_count.saturating_add(adaptive_proposals);
+    let point_count = point_count_maximum;
+    if deterministic_point_count == 0 {
         errors.push(RunSetError::global(
             "RUNSET-ALL-POINTS-EXCLUDED",
             format!(
@@ -341,7 +471,10 @@ pub fn validate_with_task_count(
     }
 
     let analyses = enabled_analysis_count;
-    let task_count = exact_task_count.or_else(|| point_count.checked_mul(analyses));
+    let task_count = (state.composition.mode != RunSetCompositionMode::Adaptive)
+        .then_some(exact_task_count)
+        .flatten()
+        .or_else(|| point_count.checked_mul(analyses));
     if task_count.is_none() {
         errors.push(RunSetError::global(
             "RUNSET-CARDINALITY-OVERFLOW",
@@ -416,6 +549,9 @@ pub fn validate_with_task_count(
         warnings,
         forecast: RunSetForecast {
             point_count,
+            point_count_minimum,
+            point_count_maximum,
+            exact: state.composition.mode != RunSetCompositionMode::Adaptive,
             enabled_analysis_count: analyses,
             task_count,
             cost_ms: (task_count as u64).saturating_mul(state.budgets.cost_per_point_ms),

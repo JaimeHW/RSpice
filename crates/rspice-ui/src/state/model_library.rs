@@ -64,7 +64,7 @@ pub(crate) use library::{
 pub use manager::{
     ModelConsumerScope, ModelExecutionPlan, ModelLibraryManager, ModelResolutionRecord,
     ModelValidationFinding, ModelValidationFindingSeverity, ModelValidationReceipt, PackModelHit,
-    ProjectModelCommit, SealedModelExecutionSources,
+    ProjectModelCommit, SealedModelExecutionSources, SimulationPlanModelBinding,
 };
 pub use model::DeviceModel;
 pub use project_revision::ProjectModelRevisionDefinition;

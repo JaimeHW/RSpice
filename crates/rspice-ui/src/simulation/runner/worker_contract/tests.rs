@@ -126,6 +126,7 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
             process: crate::simulation::dialog::corner::ProcessCorner::SS,
             supply_voltage: Some(0.9),
             nominal_supply_voltage: Some(1.0),
+            supply_source_names: vec!["VDD".to_owned()],
         },
     }
 }
@@ -1836,6 +1837,7 @@ fn worker_spec_request_preserves_corner_execution_options() {
             crate::services::simulation_runner::CornerProcess::FF,
         ],
         voltages: vec![0.9, 1.0, 1.1],
+        supply_source_names: vec!["VDD".to_owned()],
         temperatures_c: vec![-40.0, 25.0, 125.0],
         full_matrix: false,
         nominal_voltage: Some(1.0),

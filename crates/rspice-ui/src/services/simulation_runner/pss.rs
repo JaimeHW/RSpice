@@ -144,6 +144,7 @@ pub fn run_pss_analysis_with_dc_seed_and_source_path_and_abort(
     temperature_celsius: Value,
     supply_voltage: Option<Value>,
     nominal_supply_voltage: Option<Value>,
+    supply_source_names: &[String],
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PssData> {
     run_pss_analysis_internal(
@@ -155,6 +156,7 @@ pub fn run_pss_analysis_with_dc_seed_and_source_path_and_abort(
             temperature_celsius,
             supply_voltage,
             nominal_supply_voltage,
+            supply_source_names,
         }),
         abort,
     )
@@ -165,6 +167,7 @@ struct PssSeedEnvironment<'a> {
     temperature_celsius: Value,
     supply_voltage: Option<Value>,
     nominal_supply_voltage: Option<Value>,
+    supply_source_names: &'a [String],
 }
 
 fn run_pss_analysis_internal(
@@ -189,6 +192,7 @@ fn run_pss_analysis_internal(
                 environment.temperature_celsius,
                 environment.supply_voltage,
                 environment.nominal_supply_voltage,
+                environment.supply_source_names,
                 abort,
             )
         })
@@ -296,6 +300,7 @@ fn apply_seed_environment(
     temperature_celsius: Value,
     supply_voltage: Option<Value>,
     nominal_supply_voltage: Option<Value>,
+    supply_source_names: &[String],
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Value> {
     if !temperature_celsius.is_finite() || temperature_celsius <= -273.15 {
@@ -306,7 +311,7 @@ fn apply_seed_environment(
     match (supply_voltage, nominal_supply_voltage) {
         (None, None) => {}
         (Some(supply), Some(nominal)) => {
-            super::apply_voltage_corner(netlist, supply, nominal, abort)?;
+            super::apply_voltage_corner(netlist, supply, nominal, supply_source_names, abort)?;
         }
         _ => {
             return Err(ServiceRunError::Failure(
@@ -491,8 +496,15 @@ mod tests {
         let mut netlist =
             rspice_core::Netlist::parse("seed environment\nVDD vdd 0 DC 1\nR1 vdd 0 1k\n.end\n")
                 .unwrap();
-        let temperature_kelvin =
-            apply_seed_environment(&mut netlist, 125.0, Some(1.2), Some(1.0), &NoAbort).unwrap();
+        let temperature_kelvin = apply_seed_environment(
+            &mut netlist,
+            125.0,
+            Some(1.2),
+            Some(1.0),
+            &["VDD".to_owned()],
+            &NoAbort,
+        )
+        .unwrap();
         assert_eq!(temperature_kelvin.to_bits(), 398.15_f64.to_bits());
         let supply = netlist
             .elements
@@ -545,7 +557,15 @@ mod tests {
             oscillator_node: None,
         };
         let result = run_pss_analysis_with_dc_seed_and_source_path_and_abort(
-            source, &config, None, &seed, 125.0, None, None, &NoAbort,
+            source,
+            &config,
+            None,
+            &seed,
+            125.0,
+            None,
+            None,
+            &[],
+            &NoAbort,
         )
         .expect("seeded PSS solves with the OP environment");
         assert_eq!(

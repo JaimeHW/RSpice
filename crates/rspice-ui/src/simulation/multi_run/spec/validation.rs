@@ -42,7 +42,7 @@ impl AnalysisSpec {
                 previous_state: previous_state.clone(),
                 violation_devices: violation_devices.clone(),
                 violation_source_content_digest: *violation_source_content_digest,
-                run_point: *run_point,
+                run_point: run_point.clone(),
             }
             .validate(),
             AnalysisSpec::DcSweep {

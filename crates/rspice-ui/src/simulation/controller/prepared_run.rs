@@ -40,6 +40,87 @@ fn bind_data_root<'a>(
     }
 }
 
+fn activate_campaign_plan(
+    state: &mut AppState,
+    plan_id: crate::product::SimulationPlanId,
+) -> Result<String, String> {
+    let current_id = state.sim_setup.stable_analysis_plan()?.id();
+    let plan_name = if current_id == plan_id {
+        state.sim_setup.active_plan_name().to_string()
+    } else {
+        let stored = state
+            .sim_setup
+            .inactive_plans()
+            .iter()
+            .find(|plan| plan.id() == plan_id)
+            .ok_or_else(|| format!("Simulation plan {plan_id} does not exist"))?;
+        if stored.archived() {
+            return Err(format!(
+                "Archived simulation plan '{}' cannot be queued in a campaign",
+                stored.name()
+            ));
+        }
+        stored.name().to_string()
+    };
+    if current_id != plan_id {
+        state.workspace.migrate_active_plan_data(current_id);
+        state.workspace.migrate_inactive_plan_data(plan_id);
+        state
+            .sim_setup
+            .activate_plan(plan_id)
+            .map_err(|error| error.to_string())?;
+        state.workspace.sync_legacy_specs_projection(plan_id);
+        state
+            .workspace
+            .validate_simulation_configuration()
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(plan_name)
+}
+
+fn validate_plan_saved_output_budget(
+    outputs: &[crate::state::SavedOutput],
+    tasks: &[PreparedTask],
+    run_set_point_count: usize,
+    maximum_storage_bytes: u64,
+) -> Result<(), PreparationError> {
+    let mut bounded_bytes = 0_u64;
+    for output in outputs {
+        let report = crate::simulation::output_contract::preflight_saved_output(
+            output,
+            tasks
+                .iter()
+                .map(|task| (task.instance_id(), &task.queued_analysis().spec)),
+        );
+        match report.storage_estimate() {
+            crate::simulation::SavedOutputStorageEstimate::ExactBytes(bytes) => {
+                bounded_bytes = bounded_bytes.saturating_add(*bytes);
+            }
+            crate::simulation::SavedOutputStorageEstimate::Indeterminate { reason } => {
+                return Err(PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    format!(
+                        "Saved-output storage budget cannot be proven for '{}': {reason}",
+                        output.name
+                    ),
+                ));
+            }
+        }
+    }
+    let forecast = bounded_bytes.saturating_mul(run_set_point_count as u64);
+    if forecast > maximum_storage_bytes {
+        return Err(PreparationError::new(
+            PreparationStage::AnalysisPlan,
+            format!(
+                "Saved-output forecast {} exceeds this plan's {} storage budget",
+                crate::simulation::run_set::format_bytes(forecast),
+                crate::simulation::run_set::format_bytes(maximum_storage_bytes)
+            ),
+        ));
+    }
+    Ok(())
+}
+
 impl SimulationController {
     /// Build the analysis-independent executable design deck used by
     /// inspection surfaces.
@@ -118,7 +199,9 @@ impl SimulationController {
         let sealed_models = if has_project_technology {
             state.seal_project_execution_model_sources()
         } else {
-            state.model_library_manager.seal_execution_sources()
+            state
+                .model_library_manager
+                .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
         }
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         let model_cards = if has_project_technology {
@@ -180,6 +263,206 @@ impl SimulationController {
         let metadata = snapshot.metadata();
         self.authorize_snapshot(snapshot)?;
         Ok(metadata)
+    }
+
+    /// Freeze and start a declared-order campaign of independent simulation
+    /// plans. Every member is prepared in a cloned project view before any
+    /// engine work begins, so a later member never observes edits made while
+    /// an earlier member is executing.
+    pub(crate) fn prepare_and_start_campaign(
+        &mut self,
+        state: &mut AppState,
+        name: &str,
+        member_ids: &[crate::product::SimulationPlanId],
+    ) -> Result<super::SimulationCampaignDispatchReceipt, String> {
+        const MAX_CAMPAIGN_MEMBERS: usize = 64;
+
+        if self.has_active_batch() || self.active_campaign.is_some() {
+            return Err(
+                "A simulation run or campaign is already active; stop it before queuing another campaign"
+                    .to_owned(),
+            );
+        }
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("Campaign name must not be empty".to_owned());
+        }
+        if name.chars().count() > 160 {
+            return Err("Campaign name must not exceed 160 characters".to_owned());
+        }
+        let mut seen = HashSet::with_capacity(member_ids.len());
+        let member_ids = member_ids
+            .iter()
+            .copied()
+            .filter(|id| seen.insert(*id))
+            .collect::<Vec<_>>();
+        if member_ids.len() < 2 {
+            return Err("A simulation campaign requires at least two distinct plans".to_owned());
+        }
+        if member_ids.len() > MAX_CAMPAIGN_MEMBERS {
+            return Err(format!(
+                "A simulation campaign may contain at most {MAX_CAMPAIGN_MEMBERS} plans"
+            ));
+        }
+
+        let mut frozen_state = state.clone();
+        let mut members = VecDeque::with_capacity(member_ids.len());
+        let mut task_count = 0_usize;
+        for plan_id in member_ids {
+            let plan_name = activate_campaign_plan(&mut frozen_state, plan_id)?;
+            let snapshot = self
+                .build_prepared_snapshot(&frozen_state, SimulationRunIntent::SimulateRunSet)
+                .map_err(|error| {
+                    format!("Campaign member '{plan_name}' is not runnable: {error}")
+                })?;
+            if snapshot.simulation_plan_id() != Some(plan_id) {
+                return Err(format!(
+                    "Campaign member '{plan_name}' prepared under the wrong simulation-plan identity"
+                ));
+            }
+            task_count = task_count.saturating_add(snapshot.metadata().task_count);
+            members.push_back(super::PreparedCampaignMember {
+                plan_name,
+                snapshot,
+            });
+        }
+
+        let campaign_id = crate::product::SimulationCampaignId::new();
+        let member_count = members.len();
+        self.clear_prepared_run();
+        state.workbench.preflight.invalidate();
+        self.design_execution_epoch = state.design_execution_epoch;
+        self.active_campaign = Some(super::ActiveSimulationCampaign {
+            id: campaign_id,
+            name: name.to_owned(),
+            member_count: member_count as u32,
+            dispatched_count: 0,
+            completed_count: 0,
+            failed_count: 0,
+            cancelled: false,
+            pending: members,
+        });
+        state.push_sim_message(ConsoleMessage::info(format!(
+            "Queued campaign '{name}' ({member_count} plans, {task_count} authenticated tasks)"
+        )));
+        self.dispatch_next_campaign_member(state)?;
+        Ok(super::SimulationCampaignDispatchReceipt {
+            campaign_id,
+            member_count,
+            task_count,
+        })
+    }
+
+    pub(super) fn dispatch_next_campaign_member(
+        &mut self,
+        state: &mut AppState,
+    ) -> Result<(), String> {
+        loop {
+            let Some(mut campaign) = self.active_campaign.take() else {
+                return Ok(());
+            };
+            let Some(member) = campaign.pending.pop_front() else {
+                let outcome = if campaign.cancelled {
+                    "cancelled"
+                } else if campaign.failed_count == 0 {
+                    "completed"
+                } else {
+                    "completed with errors"
+                };
+                state.push_sim_message(ConsoleMessage::info(format!(
+                    "Campaign '{}' {outcome}: {} completed, {} failed",
+                    campaign.name, campaign.completed_count, campaign.failed_count
+                )));
+                state.simulation.status = format!("Campaign {outcome}");
+                return Ok(());
+            };
+            campaign.dispatched_count = campaign.dispatched_count.saturating_add(1);
+            let membership = match crate::state::SimulationCampaignMembership::new(
+                campaign.id,
+                campaign.name.clone(),
+                campaign.dispatched_count,
+                campaign.member_count,
+            ) {
+                Ok(membership) => membership,
+                Err(error) => {
+                    campaign.completed_count = campaign.completed_count.saturating_add(1);
+                    campaign.failed_count = campaign.failed_count.saturating_add(1);
+                    self.active_campaign = Some(campaign);
+                    state.push_sim_message(ConsoleMessage::error(format!(
+                        "Campaign member '{}' has invalid membership metadata: {error}",
+                        member.plan_name
+                    )));
+                    continue;
+                }
+            };
+            let member_name = member.plan_name;
+            let digest = member.snapshot.digest();
+            let dispatch = (|| {
+                let permit = self
+                    .execution_permits
+                    .issue(digest)
+                    .map_err(|error| format!("could not authorize member: {error}"))?;
+                let proof = permit
+                    .consume(digest, digest)
+                    .map_err(|error| format!("could not consume member authorization: {error}"))?;
+                member
+                    .snapshot
+                    .authorize_dispatch(proof)
+                    .map_err(|error| error.to_string())
+            })();
+            self.active_campaign = Some(campaign);
+            let dispatch = match dispatch {
+                Ok(dispatch) => dispatch,
+                Err(error) => {
+                    let campaign = self
+                        .active_campaign
+                        .as_mut()
+                        .expect("campaign is reinstalled before authorization is handled");
+                    campaign.completed_count = campaign.completed_count.saturating_add(1);
+                    campaign.failed_count = campaign.failed_count.saturating_add(1);
+                    state.push_sim_message(ConsoleMessage::error(format!(
+                        "Campaign member '{member_name}' could not be authorized: {error}"
+                    )));
+                    continue;
+                }
+            };
+            state.push_sim_message(ConsoleMessage::info(format!(
+                "Dispatching campaign member {} of {}: '{member_name}'",
+                membership.member_index(),
+                membership.member_count()
+            )));
+            match self.start_authorized_dispatch(state, dispatch, Some(membership)) {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    let campaign = self
+                        .active_campaign
+                        .as_mut()
+                        .expect("campaign remains installed during member dispatch");
+                    campaign.completed_count = campaign.completed_count.saturating_add(1);
+                    campaign.failed_count = campaign.failed_count.saturating_add(1);
+                    state.push_sim_message(ConsoleMessage::error(format!(
+                        "Campaign member '{member_name}' could not start: {error}"
+                    )));
+                }
+            }
+        }
+    }
+
+    pub(super) fn complete_campaign_member(&mut self, state: &mut AppState, succeeded: bool) {
+        let Some(campaign) = self.active_campaign.as_mut() else {
+            return;
+        };
+        campaign.completed_count = campaign.completed_count.saturating_add(1);
+        if !succeeded {
+            campaign.failed_count = campaign.failed_count.saturating_add(1);
+        }
+        if let Err(error) = self.dispatch_next_campaign_member(state) {
+            state.push_sim_message(ConsoleMessage::error(format!(
+                "Campaign scheduling stopped safely: {error}"
+            )));
+            self.active_campaign = None;
+            state.simulation.status = "Campaign stopped".to_owned();
+        }
     }
 
     /// Rebuild the complete live run-set contract and require it to match the
@@ -423,7 +706,9 @@ impl SimulationController {
         let sealed_models = if has_project_technology {
             state.seal_project_execution_model_sources()
         } else {
-            state.model_library_manager.seal_execution_sources()
+            state
+                .model_library_manager
+                .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
         }
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         let tasks = self
@@ -431,6 +716,12 @@ impl SimulationController {
             .map_err(|errors| {
                 PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; "))
             })?;
+        validate_plan_saved_output_budget(
+            &plan_payload.saved_outputs,
+            &tasks,
+            state.sim_setup.run_set.point_count(),
+            state.sim_setup.save_policy.maximum_storage_bytes,
+        )?;
         let tasks = attach_saved_output_contracts(tasks, &plan_payload.saved_outputs)?;
         if tasks.is_empty() {
             return Err(PreparationError::new(
@@ -578,7 +869,12 @@ impl SimulationController {
             run_set: Some(prepared_run_set),
             tasks,
             executable_netlist: netlist,
-            save_policy: SavePolicy::RetainEngineProducedResults,
+            save_policy: SavePolicy::PlanOwned {
+                retained_dataset_limit: state.sim_setup.save_policy.retained_dataset_limit,
+                maximum_storage_bytes: state.sim_setup.save_policy.maximum_storage_bytes,
+                live_streaming_enabled: state.sim_setup.save_policy.live_streaming_enabled,
+                retain_failure_diagnostics: state.sim_setup.save_policy.retain_failure_diagnostics,
+            },
             model_identities,
             project_model_sources,
             project_veriloga_runtimes,
@@ -644,7 +940,9 @@ impl SimulationController {
         let sealed_models = if has_project_technology {
             state.seal_project_execution_model_sources()
         } else {
-            state.model_library_manager.seal_execution_sources()
+            state
+                .model_library_manager
+                .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
         }
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         let model_execution_plan = if has_project_technology {

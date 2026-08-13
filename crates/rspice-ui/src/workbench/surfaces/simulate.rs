@@ -24,7 +24,7 @@ use std::collections::HashSet;
 
 use egui::{Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, Vec2, vec2};
 
-use crate::product::{AnalysisInstanceId, ContentDigest};
+use crate::product::{AnalysisInstanceId, ContentDigest, SimulationPlanId};
 use crate::simulation::dialog::{NoiseReferenceType, PssDialogState};
 use crate::simulation::plan::{
     AnalysisDependency, AnalysisDependencyRepairContext, AnalysisDraft, AnalysisKind,
@@ -39,7 +39,8 @@ use crate::ui::widgets::{
 };
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::{
-    ClonePlanDraft, DesignVariableDraft, SavedOutputDraft, SimulationWorkflowDialog,
+    ClonePlanDraft, DesignVariableDraft, SavedOutputDraft, SimulationPlanManagerDraft,
+    SimulationPlanManagerMode, SimulationWorkflowDialog,
 };
 
 use super::super::commands::vocabulary::Command;
@@ -800,17 +801,22 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
         ),
     };
 
+    let mut manage_plans = false;
     let mut clone_plan = false;
     let mut validate = false;
     if surface_width > TITLE_ACTION_STACK_BREAKPOINT {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
-            let heading_width = (ui.available_width() - 222.0).max(220.0);
+            let heading_width = (ui.available_width() - 310.0).max(220.0);
             ui.allocate_ui_with_layout(
                 vec2(heading_width, 0.0),
                 Layout::top_down(Align::Min),
                 |ui| heading(ui, &eyebrow, &plan_name, &description),
             );
+            manage_plans = Button::new("Plans")
+                .enabled(plan_available)
+                .show(ui)
+                .clicked();
             clone_plan = Button::new("Clone plan")
                 .icon(Icon::Copy)
                 .enabled(plan_available)
@@ -828,7 +834,13 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
-            let action_width = ((ui.available_width() - 6.0) * 0.5).max(1.0);
+            let action_width = ((ui.available_width() - 12.0) / 3.0).max(1.0);
+            manage_plans = Button::new("Plans")
+                .min_width(action_width)
+                .max_width(action_width)
+                .enabled(plan_available)
+                .show(ui)
+                .clicked();
             clone_plan = Button::new("Clone plan")
                 .icon(Icon::Copy)
                 .min_width(action_width)
@@ -846,9 +858,17 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
                 .clicked();
         });
     }
+    if manage_plans && let Ok(plan) = app.state.sim_setup.stable_analysis_plan() {
+        app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::PlanManager(
+            SimulationPlanManagerDraft::new(plan.id(), &plan_name),
+        ));
+    }
     if clone_plan {
         app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(
-            ClonePlanDraft::for_source(&plan_name),
+            ClonePlanDraft::for_source(
+                app.state.sim_setup.stable_analysis_plan().unwrap().id(),
+                &plan_name,
+            ),
         ));
     }
     if validate {

@@ -49,6 +49,7 @@ impl EngineBridge {
                 &mut execution_netlist,
                 supply,
                 nominal,
+                &config.run_point.supply_source_names,
                 abort,
             )
             .map_err(|error| {
@@ -78,7 +79,7 @@ impl EngineBridge {
             let effective_source_digest =
                 crate::simulation::execution::operating_point_effective_source_digest(
                     source,
-                    config.run_point,
+                    config.run_point.clone(),
                 );
             if previous.source_content_digest != effective_source_digest {
                 return Err(SimulationError::InvalidConfig(

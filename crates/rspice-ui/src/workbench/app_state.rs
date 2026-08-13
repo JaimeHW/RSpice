@@ -41,9 +41,12 @@ pub(crate) use session::shortcuts::{
 };
 pub(crate) use session::state_init::default_model_library_manager;
 pub use sim_setup::plan_catalog::{
-    SimulationPlanCloneOptions, SimulationPlanLineage, SimulationPlanName, StoredSimulationPlan,
+    SimulationPlanCloneOptions, SimulationPlanImportDocument, SimulationPlanLineage,
+    SimulationPlanName, StoredSimulationPlan,
 };
-pub use sim_setup::{AcSetup, DcSetup, NoiseSetup, ReferencePvtPoint, SimSetupState, TranSetup};
+pub use sim_setup::{
+    AcSetup, DcSetup, NoiseSetup, ReferencePvtPoint, SimSetupState, SimulationSavePolicy, TranSetup,
+};
 
 /// Exact owner of one mutable specialized-viewer cache.
 ///
@@ -730,7 +733,7 @@ impl AppState {
                 format!("Signed PDK model sources cannot be sealed for project execution: {error}")
             })?;
         self.model_library_manager
-            .seal_execution_sources()?
+            .seal_execution_sources_for_plan(&self.sim_setup.model_bindings)?
             .with_pdk_model_sources(sealed_pdk)
     }
 

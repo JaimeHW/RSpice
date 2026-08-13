@@ -28,11 +28,11 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let reports = app
         .simulation_controller
         .saved_outputs_preflight(&app.state, &payload.saved_outputs);
-    capture_groups(ui, &payload, &reports);
+    capture_groups(ui, app, &payload, &reports);
     card_row(
         ui,
         app,
-        |ui, _| streaming_contract(ui, &payload),
+        |ui, app| streaming_contract(ui, app, &payload),
         retention_contract,
     );
 }
@@ -43,6 +43,13 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 /// much of the reader's work survives, and a typo in a text field is a
 /// promise nobody meant to make.
 const RETENTION_CHOICES: [usize; 5] = [5, 10, 20, 50, 200];
+const STORAGE_BUDGET_CHOICES: [u64; 5] = [
+    256 * 1024 * 1024,
+    1024 * 1024 * 1024,
+    10 * 1024 * 1024 * 1024,
+    50 * 1024 * 1024 * 1024,
+    200 * 1024 * 1024 * 1024,
+];
 
 /// How many datasets the retention list names before it summarizes the rest.
 ///
@@ -88,6 +95,7 @@ fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
 /// a signal is retained at full rate, decimated, or not stored at all.
 fn capture_groups(
     ui: &mut Ui,
+    app: &mut RSpiceApp,
     payload: &SimulationPlanPayload,
     reports: &[SavedOutputPreflightReport],
 ) {
@@ -112,8 +120,16 @@ fn capture_groups(
     }
     let total: u64 = groups.iter().map(|(_, _, bytes, _)| bytes).sum();
     let unbounded: usize = groups.iter().map(|(_, _, _, count)| count).sum();
-    let status = if unbounded == 0 {
+    let budget = app.state.sim_setup.save_policy.maximum_storage_bytes;
+    let over_budget = total > budget;
+    let status = if unbounded == 0 && !over_budget {
         format!("{} bounded", format_bytes(total))
+    } else if over_budget {
+        format!(
+            "{} exceeds {} budget",
+            format_bytes(total),
+            format_bytes(budget)
+        )
     } else {
         format!(
             "{} bounded · {unbounded} not yet bounded",
@@ -125,9 +141,37 @@ fn capture_groups(
         "Capture groups",
         Some((
             status.as_str(),
-            if unbounded == 0 { Tone::Ok } else { Tone::Warn },
+            if over_budget {
+                Tone::Error
+            } else if unbounded == 0 {
+                Tone::Ok
+            } else {
+                Tone::Warn
+            },
         )),
         |ui| {
+            let choices = STORAGE_BUDGET_CHOICES
+                .iter()
+                .map(|bytes| format_bytes(*bytes))
+                .collect::<Vec<_>>();
+            let selected = format_bytes(budget);
+            let mut picked = None;
+            card_body(ui, |ui| {
+                field_pair(
+                    ui,
+                    ("Plan storage budget", &mut |ui: &mut Ui, width: f32| {
+                        picked = select(
+                            ui,
+                            "simulation.save.storage-budget",
+                            "Plan saved-output storage budget",
+                            &selected,
+                            &choices,
+                            width,
+                        );
+                    }),
+                    None,
+                );
+            });
             ledger_head(
                 ui,
                 &GROUP_COLUMNS,
@@ -170,11 +214,18 @@ fn capture_groups(
                  is counted as not yet bounded rather than as zero. Which group an output falls \
                  in is its save policy, set on Outputs & expressions.",
             );
+            if let Some(index) = picked
+                && let Some(bytes) = STORAGE_BUDGET_CHOICES.get(index).copied()
+            {
+                let mut policy = app.state.sim_setup.save_policy;
+                policy.maximum_storage_bytes = bytes;
+                commit_save_policy(app, policy, "Save policy · storage budget");
+            }
         },
     );
 }
 
-fn streaming_contract(ui: &mut Ui, payload: &SimulationPlanPayload) {
+fn streaming_contract(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     let streamed = payload
         .saved_outputs
         .iter()
@@ -213,6 +264,20 @@ fn streaming_contract(ui: &mut Ui, payload: &SimulationPlanPayload) {
         )),
         |ui| {
             card_body(ui, |ui| {
+                let mut policy = app.state.sim_setup.save_policy;
+                let mut changed = false;
+                changed |= ui
+                    .checkbox(
+                        &mut policy.live_streaming_enabled,
+                        "Permit live delivery for outputs that request it",
+                    )
+                    .changed();
+                changed |= ui
+                    .checkbox(
+                        &mut policy.retain_failure_diagnostics,
+                        "Retain accepted transient prefixes after failure or abort",
+                    )
+                    .changed();
                 rule_row(
                     ui,
                     "Streamed while solving",
@@ -232,6 +297,9 @@ fn streaming_contract(ui: &mut Ui, payload: &SimulationPlanPayload) {
                     "Display decimation",
                     "never changes what is stored · the dataset keeps every accepted point",
                 );
+                if changed {
+                    commit_save_policy(app, policy, "Save policy · streaming and diagnostics");
+                }
             });
             card_note(
                 ui,
@@ -245,17 +313,46 @@ fn streaming_contract(ui: &mut Ui, payload: &SimulationPlanPayload) {
 
 fn retention_contract(ui: &mut Ui, app: &mut RSpiceApp) {
     let simulation = &app.state.simulation;
-    let retained = simulation.runs.len();
-    let limit = simulation.effective_retained_dataset_limit();
-    let pinned = simulation.pinned_run_count();
+    let Some(plan_id) = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .map(|plan| plan.id())
+    else {
+        card(
+            ui,
+            "Retention",
+            Some(("plan unavailable", Tone::Error)),
+            |ui| {
+                card_note(
+                    ui,
+                    "A stable active simulation plan is required to own dataset retention.",
+                );
+            },
+        );
+        return;
+    };
+    let retained = simulation.retained_plan_dataset_count(plan_id);
+    let limit = app.state.sim_setup.save_policy.retained_dataset_limit;
+    let pinned = simulation.pinned_plan_run_count(plan_id);
     // Pinning can put the limit out of reach entirely. The card states that
     // rather than a count that reads as a policy still being enforced.
-    let unenforceable = simulation.retention_limit_is_unenforceable();
+    let unenforceable = pinned >= limit;
     let at_limit = retained >= limit;
     let active_run_id = simulation.active_run().map(|run| run.run_id);
     let mut rows: Vec<RetentionRow> = Vec::new();
     let mut summarized = 0usize;
-    for (index, run) in simulation.runs.iter().enumerate() {
+    for (index, run) in simulation
+        .runs
+        .iter()
+        .filter(|run| {
+            run.prepared_receipt()
+                .and_then(crate::state::PreparedRunReceipt::simulation_plan_id)
+                == Some(plan_id)
+        })
+        .enumerate()
+    {
         let is_pinned = run.retention().is_pinned();
         if index >= DATASETS_LISTED && !is_pinned {
             summarized += 1;
@@ -377,7 +474,49 @@ fn retention_contract(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Some(index) = picked
         && let Some(depth) = RETENTION_CHOICES.get(index)
     {
-        app.state.simulation.set_retained_dataset_limit(*depth);
+        let mut policy = app.state.sim_setup.save_policy;
+        policy.retained_dataset_limit = *depth;
+        commit_save_policy(app, policy, "Save policy · dataset retention");
+        app.state.simulation.prune_plan_runs(plan_id, *depth);
+    }
+}
+
+fn commit_save_policy(
+    app: &mut RSpiceApp,
+    policy: crate::workbench::app_state::SimulationSavePolicy,
+    detail: &str,
+) {
+    if policy == app.state.sim_setup.save_policy {
+        return;
+    }
+    if let Err(error) = policy.validate() {
+        app.state
+            .workbench
+            .analysis_lifecycle_status
+            .record_refusal(error);
+        return;
+    }
+    let previous = app.state.sim_setup.save_policy;
+    app.state.sim_setup.save_policy = policy;
+    match app
+        .state
+        .sim_setup
+        .commit_active_plan_configuration_change(detail)
+    {
+        Ok(receipt) => {
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .record_receipt(receipt.status_line());
+            app.state.workbench.preflight.invalidate();
+        }
+        Err(error) => {
+            app.state.sim_setup.save_policy = previous;
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .record_refusal(error.to_string());
+        }
     }
 }
 

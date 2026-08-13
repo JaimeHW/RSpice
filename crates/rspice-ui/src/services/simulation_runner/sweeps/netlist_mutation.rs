@@ -16,12 +16,14 @@ pub(crate) fn apply_voltage_corner(
     netlist: &mut rspice_core::Netlist,
     corner_voltage: Value,
     nominal_voltage: Value,
+    supply_source_names: &[String],
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<()> {
     rspice_core::engine::apply_supply_voltage_scale_with_abort(
         netlist,
         corner_voltage,
         nominal_voltage,
+        supply_source_names,
         abort,
     )
     .map_err(|error| match error {
@@ -42,6 +44,7 @@ pub(crate) fn apply_run_environment(
     temperature_celsius: Value,
     supply_voltage: Option<Value>,
     nominal_supply_voltage: Option<Value>,
+    supply_source_names: &[String],
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<()> {
     ensure_not_aborted(abort)?;
@@ -54,7 +57,9 @@ pub(crate) fn apply_run_environment(
     }
     netlist.options.temp = Some(temperature_celsius);
     match (supply_voltage, nominal_supply_voltage) {
-        (Some(supply), Some(nominal)) => apply_voltage_corner(netlist, supply, nominal, abort)?,
+        (Some(supply), Some(nominal)) => {
+            apply_voltage_corner(netlist, supply, nominal, supply_source_names, abort)?
+        }
         (None, None) => {}
         _ => {
             return Err(ServiceRunError::Failure(
@@ -67,44 +72,57 @@ pub(crate) fn apply_run_environment(
 
 pub(crate) fn infer_nominal_supply_voltage(
     netlist: &rspice_core::Netlist,
+    supply_source_names: &[String],
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Option<Value>> {
     ensure_not_aborted(abort)?;
-    let mut ground_referenced = Vec::new();
-    let mut all_sources = Vec::new();
-
-    for (index, element) in netlist.elements.iter().enumerate() {
-        poll_periodically(abort, index)?;
-        if let ElementKind::VoltageSource(spec) = &element.kind
-            && let Some(dc) = dc_value_from_source(spec)
-        {
-            let abs_dc = dc.abs();
-            if abs_dc <= 1e-15 {
-                continue;
-            }
-            all_sources.push(abs_dc);
-            if element
-                .nodes
-                .get(1)
-                .map(|name| is_ground_node(name))
-                .unwrap_or(false)
-            {
-                ground_referenced.push(abs_dc);
-            }
-        }
+    if supply_source_names.is_empty() {
+        return Err(ServiceRunError::Failure(
+            "Nominal supply resolution requires at least one explicitly bound source".to_owned(),
+        ));
     }
-
-    if !ground_referenced.is_empty() {
-        ensure_not_aborted(abort)?;
-        return Ok(ground_referenced.into_iter().max_by(|a, b| a.total_cmp(b)));
+    let mut seen = std::collections::BTreeSet::new();
+    let mut values = Vec::with_capacity(supply_source_names.len());
+    for (index, source_name) in supply_source_names.iter().enumerate() {
+        poll_periodically(abort, index)?;
+        if source_name.trim().is_empty()
+            || source_name != source_name.trim()
+            || source_name.chars().any(char::is_control)
+            || !seen.insert(source_name.to_ascii_lowercase())
+        {
+            return Err(ServiceRunError::Failure(format!(
+                "Supply source binding {source_name:?} is malformed or duplicated"
+            )));
+        }
+        let Some(element) = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(source_name))
+        else {
+            return Err(ServiceRunError::Failure(format!(
+                "Bound supply source {source_name:?} is absent from the executable netlist"
+            )));
+        };
+        let ElementKind::VoltageSource(spec) = &element.kind else {
+            return Err(ServiceRunError::Failure(format!(
+                "Bound supply source {source_name:?} is not an independent voltage source"
+            )));
+        };
+        let Some(dc) = dc_value_from_source(spec) else {
+            return Err(ServiceRunError::Failure(format!(
+                "Bound supply source {source_name:?} has no scalable DC value"
+            )));
+        };
+        let abs_dc = dc.abs();
+        if abs_dc <= 1e-15 {
+            return Err(ServiceRunError::Failure(format!(
+                "Bound supply source {source_name:?} has a zero nominal magnitude"
+            )));
+        }
+        values.push(abs_dc);
     }
     ensure_not_aborted(abort)?;
-    Ok(all_sources.into_iter().max_by(|a, b| a.total_cmp(b)))
-}
-
-fn is_ground_node(node: &str) -> bool {
-    let n = node.trim();
-    n == "0" || n.eq_ignore_ascii_case("gnd") || n.eq_ignore_ascii_case("ground")
+    Ok(values.into_iter().max_by(|a, b| a.total_cmp(b)))
 }
 
 fn dc_value_from_source(spec: &SourceSpec) -> Option<Value> {

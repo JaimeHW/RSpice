@@ -116,6 +116,7 @@ macro_rules! define_derivable_uuid_id {
 // one is a single line whenever the object arrives.
 define_derivable_uuid_id!(ProjectId);
 define_derivable_uuid_id!(SimulationPlanId);
+define_uuid_id!(SimulationCampaignId);
 define_derivable_uuid_id!(AnalysisInstanceId);
 define_derivable_uuid_id!(DesignVariableId);
 define_derivable_uuid_id!(SavedOutputId);

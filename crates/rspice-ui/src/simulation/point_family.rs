@@ -382,9 +382,10 @@ fn point_node_values(
     let mut values = match base_mode {
         CornerBaseMode::Op => operating_point_node_values(analysis)?,
         CornerBaseMode::Ac { .. } => terminal_ac_magnitudes(analysis),
-        CornerBaseMode::DcSweep { .. } | CornerBaseMode::Transient { .. } => {
-            terminal_node_samples(analysis)
-        }
+        CornerBaseMode::DcSweep { .. }
+        | CornerBaseMode::DcSweepNested { .. }
+        | CornerBaseMode::Transient { .. }
+        | CornerBaseMode::TransientWindow { .. } => terminal_node_samples(analysis),
     };
     if values.is_empty() {
         return None;

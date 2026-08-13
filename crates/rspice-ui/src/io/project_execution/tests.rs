@@ -407,6 +407,65 @@ fn schema_four_promotes_the_single_stable_plan_into_the_named_catalog() {
     restored.validate().expect("promoted context validates");
 }
 
+#[test]
+fn schema_sixteen_migrates_global_model_selection_into_every_plan() {
+    let mut manager = ModelLibraryManager::new();
+    let library = manager
+        .load_library_bytes(
+            "foundry.lib",
+            b".lib TT\n.model nch NMOS (LEVEL=1 KP=1e-3)\n.endl TT\n.lib FF\n.model nch NMOS (LEVEL=1 KP=2e-3)\n.endl FF\n"
+                .to_vec(),
+            Some("FF"),
+        )
+        .expect("legacy global model selection loads");
+    let mut plan = SimSetupState::new();
+    plan.clone_active_plan(
+        "Legacy second plan",
+        crate::workbench::app_state::SimulationPlanCloneOptions::default(),
+    )
+    .expect("second plan exists");
+    let context = context_from_state(&plan, &manager).expect("current context validates");
+    let mut value = serde_json::to_value(context).expect("context serializes");
+    value["schema_version"] = serde_json::json!(SOURCE_QUALIFIED_MODEL_RESOLUTION_SCHEMA_VERSION);
+    let persisted_plan = value["simulation_plan"]
+        .as_object_mut()
+        .expect("simulation plan is an object");
+    persisted_plan.remove("model_bindings");
+    for stored in persisted_plan["inactive_plans"]
+        .as_array_mut()
+        .expect("inactive plans are an array")
+    {
+        stored
+            .as_object_mut()
+            .expect("stored plan is an object")
+            .remove("model_bindings");
+    }
+
+    let mut restored: ProjectExecutionContext =
+        serde_json::from_value(value).expect("schema sixteen remains readable");
+    restored
+        .migrate_to_current(project_id())
+        .expect("global selections migrate to explicit plan bindings");
+
+    assert_eq!(restored.simulation_plan.model_bindings.len(), 1);
+    assert_eq!(
+        restored.simulation_plan.model_bindings[0].library_name,
+        library
+    );
+    assert_eq!(
+        restored.simulation_plan.model_bindings[0]
+            .selected_corner
+            .as_deref(),
+        Some("FF")
+    );
+    assert_eq!(
+        restored.simulation_plan.inactive_plans()[0].model_bindings(),
+        restored.simulation_plan.model_bindings.as_slice(),
+        "the former global closure applied to every plan and must migrate without behavioral drift"
+    );
+    restored.validate().expect("migrated context validates");
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn schema_six_classifies_legacy_sources_without_inventing_edit_authority() {

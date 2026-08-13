@@ -9,7 +9,6 @@ use super::types::{CornerMetricLabel, CornerPoint, SweepPointResult};
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::netlist::{StepCommand, StepSweep, StepTarget};
-use rspice_core::solver::SimulationResult as CoreSimulationResult;
 
 pub(super) fn describe_step_target(step_cmd: &StepCommand) -> String {
     if let StepSweep::Data { table_name } = &step_cmd.sweep {
@@ -28,38 +27,6 @@ pub(super) fn describe_step_target(step_cmd: &StepCommand) -> String {
         }
         StepTarget::Temp => "TEMP".to_string(),
     }
-}
-
-pub(super) fn map_dc_sweep_results_with_abort(
-    results: &[(Value, CoreSimulationResult)],
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<(Vec<Value>, Vec<(String, Vec<Value>)>)> {
-    let mut sweep_values = Vec::with_capacity(results.len());
-    for (index, (value, _)) in results.iter().enumerate() {
-        poll_periodically(abort, index)?;
-        sweep_values.push(*value);
-    }
-    let mut voltages = Vec::new();
-
-    if let Some((_, first)) = results.first() {
-        for node_idx in 1..first.node_voltages.len() {
-            poll_periodically(abort, node_idx)?;
-            let node_name = first
-                .node_names
-                .get(node_idx)
-                .cloned()
-                .unwrap_or_else(|| node_idx.to_string());
-            let mut values = Vec::with_capacity(results.len());
-            for (point_index, (_, result)) in results.iter().enumerate() {
-                poll_periodically(abort, point_index)?;
-                values.push(result.node_voltages.get(node_idx).copied().unwrap_or(0.0));
-            }
-            voltages.push((format!("V({})", node_name), values));
-        }
-    }
-
-    ensure_not_aborted(abort)?;
-    Ok((sweep_values, voltages))
 }
 
 /// Lay solved temperature points onto the axis a parametric plot reads.

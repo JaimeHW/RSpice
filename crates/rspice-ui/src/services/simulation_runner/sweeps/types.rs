@@ -132,6 +132,9 @@ impl CornerProcess {
 pub struct CornerRunConfig {
     pub process_corners: Vec<CornerProcess>,
     pub voltages: Vec<Value>,
+    /// Exact independent voltage-source instances forming the supply domain.
+    /// Voltage corners never infer these from grounding or magnitude.
+    pub supply_source_names: Vec<String>,
     pub temperatures_c: Vec<Value>,
     pub full_matrix: bool,
     pub nominal_voltage: Option<Value>,
@@ -172,8 +175,27 @@ pub enum CornerBaseMode {
         stop: Value,
         step: Value,
     },
+    /// Run an authored two-source nested DC sweep at each point.
+    DcSweepNested {
+        source_name: String,
+        start: Value,
+        stop: Value,
+        step: Value,
+        source2: String,
+        start2: Value,
+        stop2: Value,
+        step2: Value,
+    },
     /// Run transient analysis and record the terminal sample at each corner.
     Transient { stop_time: Value, step_time: Value },
+    /// Run the complete authored transient window at each point.
+    TransientWindow {
+        stop_time: Value,
+        step_time: Value,
+        start_time: Value,
+        max_timestep: Option<Value>,
+        uic: bool,
+    },
     /// Run AC analysis and record terminal-frequency magnitude at each corner.
     Ac {
         start_freq: Value,
@@ -197,6 +219,7 @@ impl Default for CornerRunConfig {
         Self {
             process_corners: vec![CornerProcess::TT],
             voltages: vec![1.0],
+            supply_source_names: Vec::new(),
             temperatures_c: vec![25.0],
             full_matrix: true,
             nominal_voltage: Some(1.0),
@@ -219,6 +242,34 @@ impl CornerRunConfig {
             return Err(
                 "Corner analysis voltage corners must be positive finite values".to_string(),
             );
+        }
+        let mut distinct_supply_values: Vec<u64> = if self.points.is_empty() {
+            self.voltages.iter().map(|value| value.to_bits()).collect()
+        } else {
+            self.points
+                .iter()
+                .map(|point| point.voltage.to_bits())
+                .collect()
+        };
+        distinct_supply_values.sort_unstable();
+        distinct_supply_values.dedup();
+        if distinct_supply_values.len() > 1 && self.supply_source_names.is_empty() {
+            return Err(
+                "Corner voltage sweeping requires explicitly bound supply-source instances"
+                    .to_owned(),
+            );
+        }
+        let mut seen_supply_sources = std::collections::BTreeSet::new();
+        for source in &self.supply_source_names {
+            if source.trim().is_empty()
+                || source != source.trim()
+                || source.chars().any(char::is_control)
+                || !seen_supply_sources.insert(source.to_ascii_lowercase())
+            {
+                return Err(format!(
+                    "Corner supply source binding {source:?} is empty, malformed, or duplicated"
+                ));
+            }
         }
         if self.temperatures_c.is_empty() {
             return Err("Corner analysis requires at least one temperature corner".to_string());
@@ -326,7 +377,7 @@ fn require_model_section(
     ))
 }
 
-fn validate_base_mode(context: &str, base_mode: &CornerBaseMode) -> Result<(), String> {
+pub(super) fn validate_base_mode(context: &str, base_mode: &CornerBaseMode) -> Result<(), String> {
     match base_mode {
         CornerBaseMode::Op => {}
         CornerBaseMode::DcSweep {
@@ -360,6 +411,24 @@ fn validate_base_mode(context: &str, base_mode: &CornerBaseMode) -> Result<(), S
                 ));
             }
         }
+        CornerBaseMode::DcSweepNested {
+            source_name,
+            start,
+            stop,
+            step,
+            source2,
+            start2,
+            stop2,
+            step2,
+        } => {
+            validate_dc_base(context, source_name, *start, *stop, *step)?;
+            validate_dc_base(context, source2, *start2, *stop2, *step2)?;
+            if source_name.eq_ignore_ascii_case(source2) {
+                return Err(format!(
+                    "{context} nested DC base mode requires two distinct sources"
+                ));
+            }
+        }
         CornerBaseMode::Transient {
             stop_time,
             step_time,
@@ -380,6 +449,27 @@ fn validate_base_mode(context: &str, base_mode: &CornerBaseMode) -> Result<(), S
                 return Err(format!(
                     "{} transient base mode step_time must be <= stop_time",
                     context
+                ));
+            }
+        }
+        CornerBaseMode::TransientWindow {
+            stop_time,
+            step_time,
+            start_time,
+            max_timestep,
+            ..
+        } => {
+            validate_transient_base(context, *stop_time, *step_time)?;
+            if !start_time.is_finite() || *start_time < 0.0 || start_time >= stop_time {
+                return Err(format!(
+                    "{context} transient start_time must be finite, non-negative, and below stop_time"
+                ));
+            }
+            if let Some(max_timestep) = max_timestep
+                && (!max_timestep.is_finite() || *max_timestep <= 0.0)
+            {
+                return Err(format!(
+                    "{context} transient max_timestep must be a positive finite value"
                 ));
             }
         }
@@ -414,6 +504,57 @@ fn validate_base_mode(context: &str, base_mode: &CornerBaseMode) -> Result<(), S
                 ));
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_dc_base(
+    context: &str,
+    source_name: &str,
+    start: Value,
+    stop: Value,
+    step: Value,
+) -> Result<(), String> {
+    if source_name.trim().is_empty() {
+        return Err(format!(
+            "{context} DC sweep base mode requires a non-empty source name"
+        ));
+    }
+    if !start.is_finite() || !stop.is_finite() || !step.is_finite() {
+        return Err(format!(
+            "{context} DC sweep base mode requires finite start/stop/step values"
+        ));
+    }
+    if step == 0.0 {
+        return Err(format!("{context} DC sweep base mode step cannot be zero"));
+    }
+    if (stop - start).abs() > 0.0 && (stop - start).signum() != step.signum() {
+        return Err(format!(
+            "{context} DC sweep base mode step direction must match start/stop range"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_transient_base(
+    context: &str,
+    stop_time: Value,
+    step_time: Value,
+) -> Result<(), String> {
+    if !stop_time.is_finite() || stop_time <= 0.0 {
+        return Err(format!(
+            "{context} transient base mode stop_time must be a positive finite value"
+        ));
+    }
+    if !step_time.is_finite() || step_time <= 0.0 {
+        return Err(format!(
+            "{context} transient base mode step_time must be a positive finite value"
+        ));
+    }
+    if step_time > stop_time {
+        return Err(format!(
+            "{context} transient base mode step_time must be <= stop_time"
+        ));
     }
     Ok(())
 }

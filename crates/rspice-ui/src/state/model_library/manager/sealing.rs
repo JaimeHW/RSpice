@@ -53,15 +53,22 @@ impl ModelLibraryManager {
     /// published to the in-memory resolver.
     pub fn seal_execution_sources(&self) -> Result<SealedModelExecutionSources, String> {
         self.validate_model_resolution_records_against_catalog()?;
+        let mut libraries: Vec<_> = self
+            .libraries
+            .values()
+            .filter(|library| library.source_authority.has_execution_source())
+            .map(|library| (library, library.selected_corner.clone()))
+            .collect();
+        libraries.sort_by(|(left, _), (right, _)| left.name.cmp(&right.name));
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.seal_execution_sources_with_reader(|path| {
+            self.seal_selected_execution_sources_with_reader(libraries, |path| {
                 std::fs::read(path).map_err(|error| error.to_string())
             })
         }
         #[cfg(target_arch = "wasm32")]
         {
-            self.seal_execution_sources_with_reader(|path| {
+            self.seal_selected_execution_sources_with_reader(libraries, |path| {
                 Err(format!(
                     "browser execution cannot authenticate external model path '{}'",
                     path.display()
@@ -70,9 +77,139 @@ impl ModelLibraryManager {
         }
     }
 
+    /// Capture the manager's current executable catalog as an explicit plan
+    /// binding list. This is used only for schema migration and deliberate
+    /// user attachment; execution never calls it implicitly.
+    #[must_use]
+    pub fn default_simulation_plan_bindings(&self) -> Vec<SimulationPlanModelBinding> {
+        let mut libraries = self
+            .libraries
+            .values()
+            .filter(|library| library.source_authority.has_execution_source())
+            .collect::<Vec<_>>();
+        libraries.sort_by(|left, right| left.name.cmp(&right.name));
+        libraries
+            .into_iter()
+            .map(|library| SimulationPlanModelBinding {
+                library_name: library.name.clone(),
+                source_digest: model_library_source_digest(library),
+                selected_corner: library.selected_corner.clone(),
+            })
+            .collect()
+    }
+
+    /// Create one binding for a library the user explicitly attaches to a
+    /// plan. Source-less catalog entries cannot be execution bindings.
+    pub fn simulation_plan_binding(
+        &self,
+        library_name: &str,
+    ) -> Result<SimulationPlanModelBinding, String> {
+        let library = self
+            .get_library(library_name)
+            .ok_or_else(|| format!("Model library '{library_name}' is no longer loaded"))?;
+        if !library.source_authority.has_execution_source() {
+            return Err(format!(
+                "Model library '{}' has no executable source authority",
+                library.name
+            ));
+        }
+        Ok(SimulationPlanModelBinding {
+            library_name: library.name.clone(),
+            source_digest: model_library_source_digest(library),
+            selected_corner: library.selected_corner.clone(),
+        })
+    }
+
+    /// Seal exactly the libraries selected by a simulation plan, preserving
+    /// their declared order and nominal section overrides.
+    pub fn seal_execution_sources_for_plan(
+        &self,
+        bindings: &[SimulationPlanModelBinding],
+    ) -> Result<SealedModelExecutionSources, String> {
+        self.validate_model_resolution_records_against_catalog()?;
+        let libraries = self.resolve_simulation_plan_bindings(bindings)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.seal_selected_execution_sources_with_reader(libraries, |path| {
+                std::fs::read(path).map_err(|error| error.to_string())
+            })
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.seal_selected_execution_sources_with_reader(libraries, |path| {
+                Err(format!(
+                    "browser execution cannot authenticate external model path '{}'",
+                    path.display()
+                ))
+            })
+        }
+    }
+
+    /// Validate binding identities and selected sections against the current
+    /// catalog without reading external source bytes.
+    pub fn validate_simulation_plan_bindings(
+        &self,
+        bindings: &[SimulationPlanModelBinding],
+    ) -> Result<(), String> {
+        self.resolve_simulation_plan_bindings(bindings).map(|_| ())
+    }
+
+    fn resolve_simulation_plan_bindings(
+        &self,
+        bindings: &[SimulationPlanModelBinding],
+    ) -> Result<Vec<(&ModelLibrary, Option<String>)>, String> {
+        let mut names = HashSet::with_capacity(bindings.len());
+        let mut resolved = Vec::with_capacity(bindings.len());
+        for (index, binding) in bindings.iter().enumerate() {
+            binding
+                .validate()
+                .map_err(|error| format!("Model binding {} is invalid: {error}", index + 1))?;
+            let uniqueness_key = binding.library_name.to_ascii_lowercase();
+            if !names.insert(uniqueness_key) {
+                return Err(format!(
+                    "Simulation plan binds model library '{}' more than once",
+                    binding.library_name
+                ));
+            }
+            let library = self.get_library(&binding.library_name).ok_or_else(|| {
+                format!(
+                    "Simulation-plan model binding '{}' is stale because that library is no longer loaded",
+                    binding.library_name
+                )
+            })?;
+            if !library.source_authority.has_execution_source() {
+                return Err(format!(
+                    "Simulation-plan model binding '{}' is not executable because the library has no source authority",
+                    binding.library_name
+                ));
+            }
+            let actual_digest = model_library_source_digest(library);
+            if actual_digest != binding.source_digest {
+                return Err(format!(
+                    "Simulation-plan model binding '{}' is stale because its accepted source digest changed; review and reattach the library",
+                    binding.library_name
+                ));
+            }
+            if let Some(selected) = binding.selected_corner.as_deref()
+                && !library
+                    .corners
+                    .values()
+                    .any(|corner| corner.name.eq_ignore_ascii_case(selected))
+            {
+                return Err(format!(
+                    "Simulation-plan model binding '{}' selects missing corner section '{}'",
+                    binding.library_name, selected
+                ));
+            }
+            resolved.push((library, binding.selected_corner.clone()));
+        }
+        Ok(resolved)
+    }
+
+    #[cfg(test)]
     pub(super) fn seal_execution_sources_with_reader<F>(
         &self,
-        mut read_external: F,
+        read_external: F,
     ) -> Result<SealedModelExecutionSources, String>
     where
         F: FnMut(&Path) -> Result<Vec<u8>, String>,
@@ -83,7 +220,21 @@ impl ModelLibraryManager {
             .filter(|library| library.source_authority.has_execution_source())
             .collect();
         libraries.sort_by(|left, right| left.name.cmp(&right.name));
+        let libraries = libraries
+            .into_iter()
+            .map(|library| (library, library.selected_corner.clone()))
+            .collect();
+        self.seal_selected_execution_sources_with_reader(libraries, read_external)
+    }
 
+    fn seal_selected_execution_sources_with_reader<F>(
+        &self,
+        libraries: Vec<(&ModelLibrary, Option<String>)>,
+        mut read_external: F,
+    ) -> Result<SealedModelExecutionSources, String>
+    where
+        F: FnMut(&Path) -> Result<Vec<u8>, String>,
+    {
         // The final flag selects retained project bytes (`true`) or a live,
         // re-authenticated external read (`false`). A path can never mix the
         // two authorities across libraries.
@@ -92,7 +243,7 @@ impl ModelLibraryManager {
         let mut retained_sources = BTreeMap::<PathBuf, Vec<u8>>::new();
         let mut expected_edges = BTreeMap::<(PathBuf, String), PathBuf>::new();
         let mut sealed_libraries = Vec::with_capacity(libraries.len());
-        for library in libraries {
+        for (library, selected_corner) in libraries {
             let root_path = library.root_path.as_ref().ok_or_else(|| {
                 format!(
                     "Model library '{}' declares source authority but has no root identity",
@@ -323,7 +474,7 @@ impl ModelLibraryManager {
                 root_path: root_path.clone(),
                 source_digest: model_library_source_digest(library),
                 corners,
-                selected_corner: library.selected_corner.clone(),
+                selected_corner,
                 allows_selected_section_override: matches!(
                     library.source_authority,
                     ModelSourceAuthority::ProjectOwned { .. }

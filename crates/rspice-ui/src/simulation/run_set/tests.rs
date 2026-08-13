@@ -11,6 +11,17 @@ fn reference() -> ReferencePoint {
     }
 }
 
+fn bound_default() -> RunSetState {
+    let mut state = RunSetState::default();
+    state
+        .dimensions
+        .iter_mut()
+        .find(|dimension| dimension.kind == RunSetDimensionKind::Supply)
+        .expect("the default run set declares a supply axis")
+        .source = "netlist-source:VDD".to_owned();
+    state
+}
+
 fn enable(state: &mut RunSetState, kind: RunSetDimensionKind, enabled: bool) {
     let id = state
         .dimensions
@@ -43,8 +54,15 @@ fn set_values(state: &mut RunSetState, kind: RunSetDimensionKind, text: &str) {
 }
 
 #[test]
-fn the_default_run_set_is_the_commercial_pvt_space_and_validates() {
-    let state = RunSetState::default();
+fn the_default_run_set_is_the_commercial_pvt_space_and_requires_a_supply_binding() {
+    let unbound = RunSetState::default();
+    assert!(
+        validate(&unbound, 1)
+            .errors
+            .iter()
+            .any(|error| error.id == "RUNSET-SUPPLY-BINDING")
+    );
+    let state = bound_default();
     let validation = validate(&state, 1);
 
     assert!(validation.is_ready(), "{:?}", validation.errors);
@@ -75,7 +93,7 @@ fn plan_aware_validation_refuses_an_empty_plan_without_inventing_a_task() {
 
 #[test]
 fn a_cartesian_space_multiplies_every_enabled_axis() {
-    let mut state = RunSetState::default();
+    let mut state = bound_default();
     set_values(
         &mut state,
         RunSetDimensionKind::ProcessSection,
@@ -104,8 +122,95 @@ fn a_cartesian_space_multiplies_every_enabled_axis() {
 }
 
 #[test]
+fn contract_vocabulary_includes_every_mockup_dimension_and_composition_kind() {
+    assert_eq!(RunSetDimensionKind::ALL.len(), 13);
+    assert_eq!(RunSetCompositionMode::ALL.len(), 6);
+    assert!(RunSetDimensionKind::ALL.contains(&RunSetDimensionKind::Parameter));
+    assert!(RunSetDimensionKind::ALL.contains(&RunSetDimensionKind::ExternalDataset));
+    assert!(RunSetCompositionMode::ALL.contains(&RunSetCompositionMode::Adaptive));
+}
+
+#[test]
+fn every_visible_run_set_capability_is_executable_or_has_one_exact_blocker() {
+    let executable_dimensions = RunSetDimensionKind::ALL
+        .into_iter()
+        .filter(|kind| kind.execution_blocker().is_none())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        executable_dimensions,
+        [
+            RunSetDimensionKind::Parameter,
+            RunSetDimensionKind::Source,
+            RunSetDimensionKind::Temperature,
+            RunSetDimensionKind::ProcessSection,
+            RunSetDimensionKind::Supply,
+        ]
+    );
+    assert_eq!(
+        RunSetCompositionMode::ALL
+            .into_iter()
+            .filter(|mode| mode.execution_blocker().is_some())
+            .collect::<Vec<_>>(),
+        [RunSetCompositionMode::Adaptive]
+    );
+}
+
+#[test]
+fn conditional_composition_filters_exact_authored_coordinates() {
+    let mut state = bound_default();
+    enable(&mut state, RunSetDimensionKind::Supply, false);
+    enable(&mut state, RunSetDimensionKind::Temperature, false);
+    let transaction = dispatch(
+        &mut state,
+        RunSetAction::SetComposition(RunSetComposition {
+            mode: RunSetCompositionMode::Conditional,
+            predicate: "dimension-process == TT".to_owned(),
+            upstream_dimension_ids: vec!["dimension-process".to_owned()],
+            ..RunSetComposition::default()
+        }),
+        1,
+    );
+    assert!(transaction.was_adopted());
+    let validation = validate(&state, 1);
+    assert!(validation.is_ready(), "{:?}", validation.errors);
+    let points = resolve(&state).expect("conditional space resolves exactly");
+    assert_eq!(points.len(), 1);
+    assert_eq!(points[0].label(), "TT");
+}
+
+#[test]
+fn adaptive_composition_fails_closed_without_the_campaign_scheduler() {
+    let mut state = bound_default();
+    let transaction = dispatch(
+        &mut state,
+        RunSetAction::SetComposition(RunSetComposition {
+            mode: RunSetCompositionMode::Adaptive,
+            adaptive_policy: Some(RunSetAdaptivePolicy {
+                id: "policy-1".to_owned(),
+                objective: "minimize delay".to_owned(),
+                seed: 41,
+                bounds: "{\"CLOAD\":[1e-12,1e-9]}".to_owned(),
+                stop_rule: "proposals >= 8".to_owned(),
+                maximum_proposals: 8,
+            }),
+            ..RunSetComposition::default()
+        }),
+        1,
+    );
+    assert!(transaction.was_adopted());
+    let validation = validate(&state, 1);
+    assert!(
+        validation
+            .errors
+            .iter()
+            .any(|error| error.id == "RUNSET-ADAPTIVE-EXECUTOR")
+    );
+    assert!(resolve(&state).is_none());
+}
+
+#[test]
 fn a_zipped_space_refuses_unequal_non_scalar_lengths_instead_of_cycling() {
-    let mut state = RunSetState::default();
+    let mut state = bound_default();
     set_values(&mut state, RunSetDimensionKind::ProcessSection, "TT\nSS");
     let transaction = dispatch(
         &mut state,
@@ -214,7 +319,7 @@ fn the_engine_batch_limit_blocks_preview_even_when_the_authored_budget_is_larger
 
 #[test]
 fn a_preview_freezes_a_forecast_that_the_next_edit_clears() {
-    let mut state = RunSetState::default();
+    let mut state = bound_default();
     let transaction = dispatch(&mut state, RunSetAction::Preview, 1);
 
     assert!(transaction.was_adopted());
@@ -284,7 +389,9 @@ fn a_disabled_process_axis_is_still_declared_and_cannot_be_added_twice() {
             .is_none()
     );
     assert!(
-        state.addable_kinds().is_empty(),
+        !state
+            .addable_kinds()
+            .contains(&RunSetDimensionKind::ProcessSection),
         "a disabled dimension is declared; adding a second would be two owners"
     );
 }
@@ -292,7 +399,13 @@ fn a_disabled_process_axis_is_still_declared_and_cannot_be_added_twice() {
 #[test]
 fn a_kind_can_only_be_declared_once_because_the_engine_binds_one_per_point() {
     let mut state = RunSetState::default();
-    assert!(state.addable_kinds().is_empty());
+    assert!(state.addable_kinds().contains(&RunSetDimensionKind::Source));
+    assert!(
+        !state
+            .addable_kinds()
+            .contains(&RunSetDimensionKind::Parameter)
+    );
+    assert!(!state.addable_kinds().contains(&RunSetDimensionKind::Supply));
 
     let transaction = dispatch(
         &mut state,
@@ -310,7 +423,15 @@ fn a_kind_can_only_be_declared_once_because_the_engine_binds_one_per_point() {
         .id
         .clone();
     assert!(dispatch(&mut state, RunSetAction::RemoveDimension { id }, 1).was_adopted());
-    assert_eq!(state.addable_kinds(), vec![RunSetDimensionKind::Supply]);
+    assert!(state.addable_kinds().contains(&RunSetDimensionKind::Supply));
+    assert_eq!(
+        state
+            .addable_kinds()
+            .iter()
+            .filter(|kind| **kind == RunSetDimensionKind::Supply)
+            .count(),
+        1
+    );
 
     let transaction = dispatch(
         &mut state,
@@ -330,7 +451,7 @@ fn a_kind_can_only_be_declared_once_because_the_engine_binds_one_per_point() {
 
 #[test]
 fn every_declared_axis_reaches_the_corner_configuration_it_binds() {
-    let mut state = RunSetState::default();
+    let mut state = bound_default();
     set_values(&mut state, RunSetDimensionKind::ProcessSection, "TT\nSS");
     set_values(&mut state, RunSetDimensionKind::Supply, "0.9\n1.1");
     set_values(&mut state, RunSetDimensionKind::Temperature, "-40\n125");
@@ -378,7 +499,7 @@ fn an_undeclared_axis_resolves_to_the_plan_reference_rather_than_a_constant() {
 
 #[test]
 fn a_run_set_that_does_not_validate_is_never_turned_into_a_configuration() {
-    let mut state = RunSetState::default();
+    let mut state = bound_default();
     set_values(&mut state, RunSetDimensionKind::Temperature, "hot");
 
     let error = state
@@ -426,7 +547,7 @@ fn exclude(state: &mut RunSetState, key: &str) {
 
 #[test]
 fn excluding_one_point_shortens_the_space_by_exactly_that_point() {
-    let mut state = RunSetState::default();
+    let mut state = bound_default();
     let key = key_of(&state, 13);
     let label = compose(&state).expect("composes")[13].label();
 
@@ -496,7 +617,7 @@ fn a_point_identity_survives_reordering_the_dimensions_that_built_it() {
 
 #[test]
 fn an_exclusion_the_space_outgrew_is_reported_by_identity_and_never_dropped() {
-    let mut state = RunSetState::default();
+    let mut state = bound_default();
     // Point 26 is the last of the cartesian expansion, so it uses the last
     // value of every axis — including the temperature about to be removed.
     let key = key_of(&state, 26);
@@ -617,7 +738,7 @@ fn undo_restores_an_excluded_point_and_the_composition_it_changed() {
 
 #[test]
 fn a_filtered_space_reaches_the_executor_as_the_points_it_resolved() {
-    let mut state = RunSetState::default();
+    let mut state = bound_default();
     set_values(&mut state, RunSetDimensionKind::ProcessSection, "TT\nSS");
     set_values(&mut state, RunSetDimensionKind::Supply, "0.9\n1.1");
     set_values(&mut state, RunSetDimensionKind::Temperature, "-40\n125");
@@ -681,7 +802,7 @@ fn a_filtered_space_reaches_the_executor_as_the_points_it_resolved() {
 
 #[test]
 fn a_filtered_space_narrows_its_axes_to_the_values_its_points_still_use() {
-    let mut state = RunSetState::default();
+    let mut state = bound_default();
     set_values(&mut state, RunSetDimensionKind::ProcessSection, "TT\nSS");
     set_values(&mut state, RunSetDimensionKind::Supply, "1.0");
     set_values(&mut state, RunSetDimensionKind::Temperature, "25\n125");

@@ -1161,7 +1161,10 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
         .iter()
         .map(|run| (run.run_id, run.dataset_id, run.id))
         .collect::<Vec<_>>();
-    let mut draft = ClonePlanDraft::for_source(app.state.sim_setup.active_plan_name().as_str());
+    let mut draft = ClonePlanDraft::for_source(
+        app.state.sim_setup.stable_analysis_plan().unwrap().id(),
+        app.state.sim_setup.active_plan_name().as_str(),
+    );
     draft.name = "Independent characterization".to_owned();
 
     commit_clone_plan(&mut app, &draft).expect("valid clone");
@@ -1201,6 +1204,65 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
 }
 
 #[test]
+fn plan_manager_export_import_remaps_all_local_identities() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.provision_test_project_technology_contract();
+    commit_design_variable(&mut app, &DesignVariableDraft::default()).expect("source variable");
+    commit_saved_output(&mut app, &SavedOutputDraft::default()).expect("source output");
+    let source_plan = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("stable source plan");
+    let source_id = source_plan.id();
+    let source_analysis_ids = source_plan
+        .instances()
+        .iter()
+        .map(|instance| instance.id())
+        .collect::<Vec<_>>();
+    let source_payload = app
+        .state
+        .workspace
+        .active_plan_data(source_id)
+        .expect("source payload")
+        .clone();
+    let json = export_simulation_plan_package(&app, source_id).expect("portable export");
+
+    let (imported_id, _) =
+        commit_import_simulation_plan(&mut app, &json, "Imported independent characterization")
+            .expect("portable import validates and commits");
+
+    assert_ne!(imported_id, source_id);
+    assert_eq!(
+        app.state.sim_setup.active_plan_name().as_str(),
+        "Imported independent characterization"
+    );
+    let imported_plan = app.state.sim_setup.stable_analysis_plan().unwrap();
+    assert!(
+        imported_plan
+            .instances()
+            .iter()
+            .all(|instance| !source_analysis_ids.contains(&instance.id()))
+    );
+    let imported_payload = app
+        .state
+        .workspace
+        .active_plan_data(imported_id)
+        .expect("imported payload");
+    assert_eq!(imported_payload.design_variables.len(), 1);
+    assert_eq!(imported_payload.saved_outputs.len(), 1);
+    assert_ne!(
+        imported_payload.design_variables[0].id,
+        source_payload.design_variables[0].id
+    );
+    assert_ne!(
+        imported_payload.saved_outputs[0].id,
+        source_payload.saved_outputs[0].id
+    );
+    assert_eq!(imported_payload.regression_baseline_run, None);
+}
+
+#[test]
 fn cancelling_a_simulation_workflow_never_invokes_its_commit() {
     let mut app = RSpiceApp::test_instance();
     let source_id = app
@@ -1210,7 +1272,10 @@ fn cancelling_a_simulation_workflow_never_invokes_its_commit() {
         .expect("stable source plan")
         .id();
     let inactive_before = app.state.sim_setup.inactive_plans().len();
-    let mut draft = ClonePlanDraft::for_source(app.state.sim_setup.active_plan_name().as_str());
+    let mut draft = ClonePlanDraft::for_source(
+        app.state.sim_setup.stable_analysis_plan().unwrap().id(),
+        app.state.sim_setup.active_plan_name().as_str(),
+    );
     draft.name = "Cancelled clone".to_owned();
     app.state.workbench.simulation_workflow =
         Some(SimulationWorkflowDialog::ClonePlan(draft.clone()));
@@ -1998,6 +2063,7 @@ fn corner_evidence_run() -> SimulationRun {
     let contract = CornerRunConfig {
         process_corners: vec![CornerProcess::TT, CornerProcess::SS],
         voltages: vec![1.8, 1.62],
+        supply_source_names: vec!["VDD".to_owned()],
         temperatures_c: vec![27.0, 125.0],
         full_matrix: false,
         nominal_voltage: Some(1.8),
@@ -2118,6 +2184,7 @@ fn a_corner_point_that_cannot_be_solved_is_retained_as_a_failure() {
     let contract = CornerRunConfig {
         process_corners: vec![CornerProcess::TT],
         voltages: vec![1.8, 1.62],
+        supply_source_names: vec!["VDD".to_owned()],
         temperatures_c: vec![27.0],
         full_matrix: true,
         nominal_voltage: Some(1.8),

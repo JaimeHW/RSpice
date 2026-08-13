@@ -454,6 +454,124 @@ fn manual_fourier_is_topologically_bound_to_its_exact_transient_task() {
 }
 
 #[test]
+fn campaign_freezes_distinct_plan_members_without_switching_the_live_editor() {
+    let mut state = runnable_state();
+    let first_plan_id = state.sim_setup.stable_analysis_plan().unwrap().id();
+    state.workspace.migrate_active_plan_data(first_plan_id);
+    let second_plan_id = state
+        .sim_setup
+        .create_plan("Second campaign plan")
+        .expect("create campaign plan");
+    state.workspace.migrate_inactive_plan_data(second_plan_id);
+    state.workspace.sync_legacy_specs_projection(second_plan_id);
+    let live_plan_before_dispatch = state.sim_setup.stable_analysis_plan().unwrap().id();
+    let mut controller = SimulationController::new();
+
+    let receipt = controller
+        .prepare_and_start_campaign(
+            &mut state,
+            "Nightly characterization",
+            &[first_plan_id, second_plan_id],
+        )
+        .expect("freeze and dispatch campaign");
+
+    assert_eq!(receipt.member_count, 2);
+    assert_eq!(
+        state.sim_setup.stable_analysis_plan().unwrap().id(),
+        live_plan_before_dispatch
+    );
+    let run = state
+        .simulation
+        .active_run()
+        .expect("first member dispatched");
+    assert_eq!(
+        run.prepared_receipt().unwrap().simulation_plan_id(),
+        Some(first_plan_id)
+    );
+    let membership = run
+        .campaign_membership()
+        .expect("campaign identity retained");
+    assert_eq!(membership.campaign_id(), receipt.campaign_id);
+    assert_eq!(membership.member_index(), 1);
+    assert_eq!(membership.member_count(), 2);
+    assert_eq!(
+        controller
+            .active_campaign
+            .as_ref()
+            .expect("campaign remains active")
+            .pending
+            .len(),
+        1
+    );
+
+    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
+        .expect("campaign member project snapshot");
+    let json = crate::io::project_io::serialize_project_file(&project)
+        .expect("campaign member serializes");
+    let loaded =
+        crate::io::project_io::load_project_text(&json, None).expect("campaign member reloads");
+    let restored = loaded
+        .simulation_results
+        .into_simulation_state()
+        .expect("campaign result history restores");
+    let restored_membership = restored.runs[0]
+        .campaign_membership()
+        .expect("campaign identity survives project round trip");
+    assert_eq!(restored_membership.campaign_id(), receipt.campaign_id);
+    assert_eq!(restored_membership.member_index(), 1);
+
+    controller.abort();
+}
+
+#[test]
+fn prepared_snapshot_authenticates_and_enforces_plan_owned_save_policy() {
+    let mut state = runnable_state();
+    let controller = SimulationController::new();
+    let baseline = controller
+        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+        .expect("baseline save policy prepares");
+
+    state.sim_setup.save_policy.live_streaming_enabled = false;
+    state.sim_setup.save_policy.retain_failure_diagnostics = false;
+    state.sim_setup.save_policy.retained_dataset_limit = 5;
+    let changed = controller
+        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+        .expect("changed save policy prepares");
+    assert_ne!(baseline.digest(), changed.digest());
+    assert_eq!(
+        changed.metadata().save_policy,
+        "Plan-owned save and streaming policy"
+    );
+
+    let plan_id = state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("stable plan")
+        .id();
+    state
+        .workspace
+        .add_saved_output(
+            plan_id,
+            crate::state::SavedOutput::new(
+                crate::state::SavedOutputKind::RawVoltageOrCurrent,
+                "output_voltage",
+                "V(1)",
+                crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
+                crate::state::SavedOutputPolicy::SelectedAndFinalPoints,
+                crate::state::SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
+                crate::state::SavedOutputStreaming::StoreOnly,
+            )
+            .expect("valid output"),
+        )
+        .expect("plan owns output");
+    state.sim_setup.save_policy.maximum_storage_bytes = 1;
+    let error = controller
+        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+        .expect_err("one-byte plan budget must refuse retained output");
+    assert!(error.message().contains("storage budget"), "{error}");
+}
+
+#[test]
 fn manual_periodic_analyses_are_topologically_bound_to_seed_and_pss() {
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
@@ -1103,10 +1221,16 @@ fn accepted_model_file_mutation_after_prepare_fails_closed() {
     )
     .expect("write model");
     let mut state = runnable_state();
-    state
+    let library_name = state
         .model_library_manager
         .load_library_file(&model, None)
         .expect("load model library");
+    state.sim_setup.model_bindings.push(
+        state
+            .model_library_manager
+            .simulation_plan_binding(&library_name)
+            .expect("explicitly bind the loaded library to this plan"),
+    );
     let mut controller = SimulationController::new();
     controller
         .prepare_run_set_for_preflight(&state)
@@ -1243,11 +1367,18 @@ fn a_project_without_a_technology_prepares_its_run_set_against_the_plain_model_l
 #[test]
 fn an_enabled_corner_analysis_without_a_technology_blocks_preparation() {
     let mut state = technology_free_runnable_state();
+    let mut corner = crate::simulation::dialog::corner::CornerDialogState::default();
+    for dimension in &mut corner.run_set.dimensions {
+        if dimension.kind == crate::simulation::run_set::RunSetDimensionKind::Supply {
+            dimension.source = format!(
+                "{}VDD",
+                crate::simulation::run_set::NETLIST_SUPPLY_SOURCE_PREFIX
+            );
+        }
+    }
     let instance = insert_enabled_draft(
         &mut state,
-        crate::simulation::plan::AnalysisDraft::Corner(
-            crate::simulation::dialog::corner::CornerDialogState::default(),
-        ),
+        crate::simulation::plan::AnalysisDraft::Corner(corner),
     );
 
     let mut controller = SimulationController::new();

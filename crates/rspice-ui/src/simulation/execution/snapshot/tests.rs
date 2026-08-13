@@ -94,6 +94,7 @@ fn corner_task(
             corner: Some(crate::services::simulation_runner::CornerRunConfig {
                 process_corners,
                 voltages,
+                supply_source_names: vec!["VDD".to_owned()],
                 temperatures_c,
                 full_matrix,
                 nominal_voltage: Some(1.0),
@@ -183,7 +184,18 @@ fn global_temperature_run_set(temperatures: &[&str]) -> PreparedRunSet {
     let mut state = crate::simulation::run_set::RunSetState::default();
     for dimension in &mut state.dimensions {
         match dimension.kind {
-            RunSetDimensionKind::ProcessSection | RunSetDimensionKind::Supply => {
+            RunSetDimensionKind::Parameter
+            | RunSetDimensionKind::Source
+            | RunSetDimensionKind::ProcessSection
+            | RunSetDimensionKind::Supply
+            | RunSetDimensionKind::Model
+            | RunSetDimensionKind::Frequency
+            | RunSetDimensionKind::Time
+            | RunSetDimensionKind::Seed
+            | RunSetDimensionKind::Sample
+            | RunSetDimensionKind::AnalysisSelection
+            | RunSetDimensionKind::DigitalConfiguration
+            | RunSetDimensionKind::ExternalDataset => {
                 dimension.enabled = false;
             }
             RunSetDimensionKind::Temperature => {
@@ -201,6 +213,42 @@ fn global_temperature_run_set(temperatures: &[&str]) -> PreparedRunSet {
 
 fn reference_only_run_set() -> PreparedRunSet {
     let state = crate::simulation::run_set::RunSetState::reference_only();
+    PreparedRunSet::new(
+        state,
+        crate::services::simulation_runner::CornerRunConfig::default(),
+    )
+}
+
+fn global_parameter_run_set(name: &str, values: &[&str]) -> PreparedRunSet {
+    use crate::simulation::run_set::RunSetDimensionKind;
+
+    let mut state = crate::simulation::run_set::RunSetState::reference_only();
+    let dimension = state
+        .dimensions
+        .iter_mut()
+        .find(|dimension| dimension.kind == RunSetDimensionKind::Parameter)
+        .expect("the default Run Set declares its CLOAD parameter template");
+    dimension.source = format!("design-variable:{name}");
+    dimension.set_values_from_lines(&values.join("\n"), 2);
+    dimension.enabled = true;
+    PreparedRunSet::new(
+        state,
+        crate::services::simulation_runner::CornerRunConfig::default(),
+    )
+}
+
+fn global_source_run_set(name: &str, values: &[&str]) -> PreparedRunSet {
+    use crate::simulation::run_set::{RunSetDimension, RunSetDimensionKind};
+
+    let mut state = crate::simulation::run_set::RunSetState::reference_only();
+    let mut dimension = RunSetDimension::new(
+        "dimension-source-test",
+        RunSetDimensionKind::Source,
+        values,
+        2,
+    );
+    dimension.source = format!("netlist-source:{name}");
+    state.dimensions.push(dimension);
     PreparedRunSet::new(
         state,
         crate::services::simulation_runner::CornerRunConfig::default(),
@@ -238,12 +286,93 @@ fn global_run_set_expands_every_core_analysis_at_every_point() {
     assert_eq!(
         transient
             .iter()
-            .map(|task| task.execution_environment.unwrap().temperature_celsius)
+            .map(|task| {
+                task.execution_environment
+                    .as_ref()
+                    .unwrap()
+                    .temperature_celsius
+            })
             .collect::<Vec<_>>(),
         vec![-40.0, 125.0],
     );
     assert_ne!(transient[0].instance_id, transient[1].instance_id);
     assert_ne!(transient[0].config_digest, transient[1].config_digest);
+}
+
+#[test]
+fn global_parameter_axis_materializes_exact_point_decks_and_identities() {
+    let mut run = parts();
+    run.executable_netlist = "parameter axis\n\
+.param CLOAD=1p\n\
+V1 in 0 1\n\
+R1 in out 1k\n\
+C1 out 0 {CLOAD}\n\
+.op\n\
+.end\n"
+        .to_owned();
+    run.run_set = Some(global_parameter_run_set("CLOAD", &["2p", "20p"]));
+
+    let snapshot = PreparedRunSnapshot::new(run).expect("parameter Run Set prepares");
+    assert_eq!(snapshot.tasks.len(), 2);
+    assert_ne!(snapshot.tasks[0].instance_id, snapshot.tasks[1].instance_id);
+    assert_ne!(
+        snapshot.tasks[0].config_digest,
+        snapshot.tasks[1].config_digest
+    );
+
+    let decks = snapshot
+        .tasks
+        .iter()
+        .map(|task| {
+            task.executable_netlist_override
+                .as_deref()
+                .expect("each parameter point owns a deck")
+        })
+        .collect::<Vec<_>>();
+    assert!(decks[0].contains(".param CLOAD=2p"));
+    assert!(decks[1].contains(".param CLOAD=20p"));
+    for deck in decks {
+        let override_position = deck.rfind(".param CLOAD=").expect("override card");
+        let end_position = deck.find(".end").expect("terminal card");
+        assert!(override_position < end_position);
+        rspice_core::Netlist::parse(deck).expect("point-specific deck remains executable");
+    }
+}
+
+#[test]
+fn global_source_axis_replaces_only_the_bound_independent_source_dc_value() {
+    let mut run = parts();
+    run.executable_netlist = "source axis\n\
+VBIAS out 0 DC 1 AC 1\n\
+R1 out 0 1k\n\
+.op\n\
+.end\n"
+        .to_owned();
+    run.run_set = Some(global_source_run_set("VBIAS", &["0.5", "1.5"]));
+
+    let snapshot = PreparedRunSnapshot::new(run).expect("source Run Set prepares");
+    assert_eq!(snapshot.tasks.len(), 2);
+    let expected = [0.5, 1.5];
+    for (task, expected_voltage) in snapshot.tasks.iter().zip(expected) {
+        let deck = task
+            .executable_netlist_override
+            .as_deref()
+            .expect("each source point owns a deck");
+        assert!(deck.contains(&format!("VBIAS out 0 DC {expected_voltage}")));
+        let result = crate::simulation::EngineBridge::new()
+            .run(
+                task.task
+                    .config
+                    .as_ref()
+                    .expect("configured operating point"),
+                deck,
+            )
+            .expect("source point solves");
+        let crate::simulation::SimulationResult::DcOp(result) = result else {
+            panic!("operating point result")
+        };
+        assert!((result.voltage("out").expect("output node") - expected_voltage).abs() < 1e-12);
+    }
 }
 
 #[test]
@@ -287,7 +416,12 @@ R1 out 0 {rload}\n\
         snapshot
             .tasks
             .iter()
-            .map(|task| task.execution_environment.unwrap().temperature_celsius)
+            .map(|task| {
+                task.execution_environment
+                    .as_ref()
+                    .unwrap()
+                    .temperature_celsius
+            })
             .collect::<Vec<_>>(),
         vec![-40.0, 125.0],
     );
@@ -1569,6 +1703,7 @@ fn transient_corner_task() -> QueuedAnalysis {
             corner: Some(CornerRunConfig {
                 process_corners: vec![CornerProcess::TT, CornerProcess::SS],
                 voltages: vec![1.8, 1.62],
+                supply_source_names: vec!["VDD".to_owned()],
                 temperatures_c: vec![27.0, 125.0],
                 full_matrix: false,
                 nominal_voltage: Some(1.8),

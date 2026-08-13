@@ -46,7 +46,9 @@ impl SimulationController {
         let sealed_sources = if state.project_technology_in_effect() {
             state.seal_project_execution_model_sources()
         } else {
-            state.model_library_manager.seal_execution_sources()
+            state
+                .model_library_manager
+                .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
         };
         let sealed_models = match sealed_sources {
             Ok(sealed) => sealed,
@@ -404,6 +406,7 @@ impl SimulationController {
                     .map_err(|e| format!("invalid temperature sweep settings: {}", e))?;
                 Ok(SpecExecutionOptions {
                     temp: Some(Self::temp_run_config_from_dialog(state, &temp_cfg)?),
+                    parametric_base: None,
                     corner: None,
                     pac: None,
                     pxf: None,
@@ -419,6 +422,7 @@ impl SimulationController {
                     .map_err(|e| format!("invalid corner settings: {}", e))?;
                 Ok(SpecExecutionOptions {
                     temp: None,
+                    parametric_base: None,
                     corner: Some(Self::corner_run_config_from_dialog(
                         state,
                         &corner_cfg,
@@ -432,6 +436,7 @@ impl SimulationController {
             }
             AnalysisSpec::Pac => Ok(SpecExecutionOptions {
                 temp: None,
+                parametric_base: None,
                 corner: None,
                 pac: Some(Self::pac_run_config_from_dialog(state)?),
                 pxf: None,
@@ -440,6 +445,7 @@ impl SimulationController {
             }),
             AnalysisSpec::Pxf => Ok(SpecExecutionOptions {
                 temp: None,
+                parametric_base: None,
                 corner: None,
                 pac: None,
                 pxf: Some(Self::pxf_run_config_from_dialog(state)?),
@@ -449,6 +455,7 @@ impl SimulationController {
             AnalysisSpec::Tf { .. } => Ok(SpecExecutionOptions::default()),
             AnalysisSpec::Pnoise => Ok(SpecExecutionOptions {
                 temp: None,
+                parametric_base: None,
                 corner: None,
                 pac: None,
                 pxf: None,
@@ -457,6 +464,7 @@ impl SimulationController {
             }),
             AnalysisSpec::Pstb => Ok(SpecExecutionOptions {
                 temp: None,
+                parametric_base: None,
                 corner: None,
                 pac: None,
                 pxf: None,
@@ -466,6 +474,7 @@ impl SimulationController {
             AnalysisSpec::Psp { .. } => Ok(SpecExecutionOptions::default()),
             _ => Ok(SpecExecutionOptions {
                 temp: None,
+                parametric_base: None,
                 corner: None,
                 pac: None,
                 pxf: None,

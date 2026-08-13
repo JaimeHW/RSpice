@@ -164,13 +164,9 @@ pub(crate) fn technology_demand(
 /// analysis. Invalid declarations are reported by Run Set validation and do
 /// not manufacture a second technology blocker here.
 fn global_run_set_section_reason(sim_setup: &SimSetupState) -> Option<TechnologyDemandReason> {
-    if sim_setup
+    sim_setup
         .run_set
-        .enabled_dimension_of(RunSetDimensionKind::ProcessSection)
-        .is_none()
-    {
-        return None;
-    }
+        .enabled_dimension_of(RunSetDimensionKind::ProcessSection)?;
     let config = sim_setup
         .run_set
         .to_corner_config(
@@ -315,6 +311,17 @@ mod tests {
         }
     }
 
+    fn bind_supply_source(run_set: &mut crate::simulation::run_set::RunSetState) {
+        for dimension in &mut run_set.dimensions {
+            if dimension.kind == RunSetDimensionKind::Supply {
+                dimension.source = format!(
+                    "{}VDD",
+                    crate::simulation::run_set::NETLIST_SUPPLY_SOURCE_PREFIX
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_nominal_global_run_set_demands_no_technology() {
         let mut state = AppState::default();
@@ -328,6 +335,7 @@ mod tests {
     #[test]
     fn the_default_global_pvt_run_set_demands_its_non_typical_sections() {
         let mut state = AppState::default();
+        bind_supply_source(&mut state.sim_setup.run_set);
         for dimension in &mut state.sim_setup.run_set.dimensions {
             dimension.enabled = true;
         }
@@ -373,7 +381,9 @@ mod tests {
     fn an_enabled_corner_analysis_demands_its_non_typical_sections() {
         let mut state = AppState::default();
         disable_global_process_axis(&mut state);
-        let id = insert_corner(&mut state, CornerDialogState::default());
+        let mut corner = CornerDialogState::default();
+        bind_supply_source(&mut corner.run_set);
+        let id = insert_corner(&mut state, corner);
         let demand = state.technology_demand();
         let TechnologyDemandReason::CornerSections { instance, sections } = sole_reason(&demand)
         else {

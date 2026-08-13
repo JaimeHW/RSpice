@@ -162,6 +162,7 @@ fn point_scoped_supply_corner(
     Some(SupplyCornerScale {
         corner_voltage: point.voltage,
         nominal_voltage: contract.nominal_voltage?,
+        supply_source_names: contract.supply_source_names.clone(),
     })
 }
 

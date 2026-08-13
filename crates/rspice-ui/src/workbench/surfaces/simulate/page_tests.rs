@@ -220,7 +220,12 @@ fn the_solver_page_states_both_acceptance_criteria_and_the_whole_ladder() {
 fn the_run_space_page_states_every_axis_and_what_they_resolve_to() {
     let rendered = render_with(SimulationPage::RunSet, 1200.0, |app| {
         for dimension in &mut app.state.sim_setup.run_set.dimensions {
-            dimension.enabled = true;
+            dimension.enabled = matches!(
+                dimension.kind,
+                crate::simulation::run_set::RunSetDimensionKind::ProcessSection
+                    | crate::simulation::run_set::RunSetDimensionKind::Supply
+                    | crate::simulation::run_set::RunSetDimensionKind::Temperature
+            );
         }
     });
 
@@ -289,7 +294,12 @@ fn an_unresolvable_run_space_shows_its_refusal_and_keeps_the_invalid_value() {
 fn disabling_an_axis_moves_the_forecast_and_the_point_table_together() {
     let rendered = render_with(SimulationPage::RunSet, 1200.0, |app| {
         for dimension in &mut app.state.sim_setup.run_set.dimensions {
-            dimension.enabled = true;
+            dimension.enabled = matches!(
+                dimension.kind,
+                crate::simulation::run_set::RunSetDimensionKind::ProcessSection
+                    | crate::simulation::run_set::RunSetDimensionKind::Supply
+                    | crate::simulation::run_set::RunSetDimensionKind::Temperature
+            );
         }
         let id = app.state.sim_setup.run_set.dimensions[1].id.clone();
         crate::simulation::run_set::dispatch(
@@ -1288,6 +1298,7 @@ fn the_applies_to_control_is_built_from_the_declared_run_set() {
         RunSetState::from_corner_config(&CornerConfig {
             process_corners: vec![ProcessCorner::TT, ProcessCorner::SS],
             voltages: vec![1.0],
+            supply_source_names: Vec::new(),
             temperatures: vec![-40.0, 27.0, 125.0],
             full_matrix: true,
             points: Vec::new(),

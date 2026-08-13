@@ -25,7 +25,7 @@ use crate::state::model_library::{
 };
 use crate::workbench::app_state::SimSetupState;
 
-pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 16;
+pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 17;
 const LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 0;
 const UNPINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 1;
 const PATH_PINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 2;
@@ -42,6 +42,7 @@ const RETAINED_IMPORTED_SOURCE_AUTHORITY_SCHEMA_VERSION: u32 = 12;
 const EXPLICIT_MODEL_DEFINITION_RESOLUTION_SCHEMA_VERSION: u32 = 13;
 const RETAINED_SUBCIRCUIT_INTERFACE_SCHEMA_VERSION: u32 = 14;
 const AUTHENTICATED_MODEL_SECTION_SCHEMA_VERSION: u32 = 15;
+const SOURCE_QUALIFIED_MODEL_RESOLUTION_SCHEMA_VERSION: u32 = 16;
 const RETIRED_SINGLETON_ANALYSIS_FIELDS: &[&str] = &[
     "enabled",
     "analysis_order",
@@ -383,6 +384,21 @@ impl ProjectExecutionContext {
                 // empty ledger is the only safe migration: existing overlaps
                 // stay fail-closed until a user publishes an exact decision.
                 self.model_resolution_records.clear();
+                self.schema_version = SOURCE_QUALIFIED_MODEL_RESOLUTION_SCHEMA_VERSION;
+                self.migrate_to_current(project_id)
+            }
+            SOURCE_QUALIFIED_MODEL_RESOLUTION_SCHEMA_VERSION => {
+                // Schema 16 kept the nominal model section and library order
+                // in the project-global manager. Preserve that exact former
+                // behavior explicitly in every plan; future changes then
+                // diverge independently.
+                let mut manager = ModelLibraryManager::new();
+                for library in self.model_libraries.clone() {
+                    manager.add_library(library.into_model_library());
+                }
+                let bindings = manager.default_simulation_plan_bindings();
+                self.simulation_plan
+                    .migrate_legacy_model_bindings(&bindings);
                 self.schema_version = PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION;
                 Ok(())
             }
@@ -410,7 +426,8 @@ impl ProjectExecutionContext {
             manager.add_library(library.into_model_library());
         }
         manager.restore_model_resolution_records(self.model_resolution_records.clone())?;
-        manager.restore_model_validation_receipt(self.model_validation_receipt.clone())
+        manager.restore_model_validation_receipt(self.model_validation_receipt.clone())?;
+        validate_simulation_plan_model_bindings(&self.simulation_plan, &manager)
     }
 
     /// Bind project technology metadata to the exact execution library it
@@ -460,6 +477,26 @@ impl ProjectExecutionContext {
         self.simulation_plan.prepare_after_restore();
         Ok((self.simulation_plan, manager, warnings))
     }
+}
+
+fn validate_simulation_plan_model_bindings(
+    plan: &SimSetupState,
+    manager: &ModelLibraryManager,
+) -> Result<(), String> {
+    manager
+        .validate_simulation_plan_bindings(&plan.model_bindings)
+        .map_err(|error| format!("active simulation-plan model bindings are invalid: {error}"))?;
+    for stored in plan.inactive_plans() {
+        manager
+            .validate_simulation_plan_bindings(stored.model_bindings())
+            .map_err(|error| {
+                format!(
+                    "simulation-plan '{}' model bindings are invalid: {error}",
+                    stored.name()
+                )
+            })?;
+    }
+    Ok(())
 }
 
 impl From<&ModelLibrary> for ProjectModelLibrary {

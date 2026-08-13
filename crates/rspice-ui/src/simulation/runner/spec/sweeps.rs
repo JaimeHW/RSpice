@@ -43,14 +43,27 @@ fn run_monte_carlo(
 ) -> Result<SimulationResult, SimulationError> {
     use crate::simulation::dialog::McVariationSource;
 
+    let (temperature, supply, nominal_supply, supply_source_names) = environment.map_or_else(
+        || (None, None, None, Vec::new()),
+        |environment| {
+            (
+                Some(environment.temperature_celsius),
+                environment.supply_voltage,
+                environment.nominal_supply_voltage,
+                environment.supply_source_names,
+            )
+        },
+    );
+
     let data = super::run_abort_aware_service(abort, || match variation_source {
         McVariationSource::ParameterTolerance => {
             svc_runner::run_monte_carlo_analysis_with_environment_and_source_path_and_abort(
                 netlist,
                 source_path,
-                environment.map(|environment| environment.temperature_celsius),
-                environment.and_then(|environment| environment.supply_voltage),
-                environment.and_then(|environment| environment.nominal_supply_voltage),
+                temperature,
+                supply,
+                nominal_supply,
+                &supply_source_names,
                 abort,
             )
         }
@@ -58,9 +71,10 @@ fn run_monte_carlo(
             svc_runner::run_statistical_monte_carlo_with_environment_and_source_path_and_abort(
                 netlist,
                 source_path,
-                environment.map(|environment| environment.temperature_celsius),
-                environment.and_then(|environment| environment.supply_voltage),
-                environment.and_then(|environment| environment.nominal_supply_voltage),
+                temperature,
+                supply,
+                nominal_supply,
+                &supply_source_names,
                 abort,
             )
         }
@@ -109,7 +123,20 @@ fn run_parametric(
         ));
     }
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_parametric_analysis_with_source_path_and_abort(netlist, source_path, abort)
+        if let Some(base_mode) = options.parametric_base.as_ref() {
+            svc_runner::run_parametric_analysis_with_base_and_source_path_and_abort(
+                netlist,
+                source_path,
+                base_mode,
+                abort,
+            )
+        } else {
+            svc_runner::run_parametric_analysis_with_source_path_and_abort(
+                netlist,
+                source_path,
+                abort,
+            )
+        }
     })?;
     let sweep_values = data.sweep_values;
     let mut waveforms = HashMap::with_capacity(data.voltages.len());

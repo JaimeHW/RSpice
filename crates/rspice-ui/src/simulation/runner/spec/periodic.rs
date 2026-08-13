@@ -555,6 +555,7 @@ fn run_pss(
             artifact.temperature_celsius(),
             artifact.supply_voltage(),
             artifact.nominal_supply_voltage(),
+            artifact.supply_source_names(),
             abort,
         )
     })?;

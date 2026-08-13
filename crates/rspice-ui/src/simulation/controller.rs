@@ -81,6 +81,32 @@ pub(super) struct QueuedAnalysis {
     pub(super) numeric_override: Option<AnalysisNumericOverride>,
 }
 
+#[derive(Clone)]
+struct PreparedCampaignMember {
+    plan_name: String,
+    snapshot: crate::simulation::execution::PreparedRunSnapshot,
+}
+
+struct ActiveSimulationCampaign {
+    id: crate::product::SimulationCampaignId,
+    name: String,
+    member_count: u32,
+    dispatched_count: u32,
+    completed_count: u32,
+    failed_count: u32,
+    cancelled: bool,
+    pending: VecDeque<PreparedCampaignMember>,
+}
+
+/// Reviewed forecast returned after a campaign has been frozen and its first
+/// member has been submitted to the local execution queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SimulationCampaignDispatchReceipt {
+    pub campaign_id: crate::product::SimulationCampaignId,
+    pub member_count: usize,
+    pub task_count: usize,
+}
+
 #[derive(Debug, Default)]
 struct LiveTransientAccumulator {
     waveforms: Vec<LiveTransientWaveform>,
@@ -194,6 +220,8 @@ pub struct SimulationController {
     /// Immutable output contracts authenticated with the current task before
     /// its dispatch token is moved into the runner.
     current_saved_output_contracts: Vec<PreparedSavedOutput>,
+    /// Save/streaming policy authenticated by the active prepared snapshot.
+    current_save_policy: crate::simulation::execution::SavePolicy,
     /// Source domain authenticated by the active run dispatch. Manual-deck
     /// task IDs are deterministic source projections, not plan-owned IDs.
     current_source_domain: AnalysisResultSourceDomain,
@@ -235,6 +263,9 @@ pub struct SimulationController {
     touchstone_export_policy: TouchstoneExportPolicy,
     /// Generation-safe authority shared by every prepared dispatch token.
     execution_permits: crate::simulation::execution::ExecutionPermitIssuer,
+    /// Frozen, declared-order multi-plan campaign. Each member is an
+    /// independent prepared run; this record only schedules and rolls them up.
+    active_campaign: Option<ActiveSimulationCampaign>,
 }
 
 impl Default for SimulationController {
@@ -257,6 +288,8 @@ impl SimulationController {
             current_effective_source_content_digest: None,
             current_op_effective_source_content_digest: None,
             current_saved_output_contracts: Vec::new(),
+            current_save_policy:
+                crate::simulation::execution::SavePolicy::RetainEngineProducedResults,
             current_source_domain: AnalysisResultSourceDomain::SimulationPlan,
             current_run_id: None,
             live_transient: LiveTransientAccumulator::default(),
@@ -272,6 +305,7 @@ impl SimulationController {
             pending_prepared_run: None,
             touchstone_export_policy: TouchstoneExportPolicy::disabled(),
             execution_permits: crate::simulation::execution::ExecutionPermitIssuer::default(),
+            active_campaign: None,
         }
     }
 
@@ -330,6 +364,10 @@ impl SimulationController {
                     // its abort acknowledgement. That acknowledgement is the
                     // authority for the terminal lifecycle and duration.
                     self.pending_analyses.clear();
+                    if let Some(campaign) = self.active_campaign.as_mut() {
+                        campaign.pending.clear();
+                        campaign.cancelled = true;
+                    }
                     state.simulation.status = "Cancelling".to_owned();
                     state.push_sim_message(ConsoleMessage::warning(
                         "Simulation cancellation requested".to_owned(),
@@ -382,7 +420,7 @@ impl SimulationController {
             return;
         }
 
-        let mut dispatch = match self.consume_snapshot_for_dispatch(state) {
+        let dispatch = match self.consume_snapshot_for_dispatch(state) {
             Ok(dispatch) => dispatch,
             Err(error) => {
                 if state.simulation.run_intent == SimulationRunIntent::SimulateRunSet {
@@ -399,28 +437,46 @@ impl SimulationController {
             // advertise authority the controller no longer owns.
             state.workbench.preflight.invalidate();
         }
+        if let Err(error) = self.start_authorized_dispatch(state, dispatch, None) {
+            state.push_sim_message(ConsoleMessage::error(error.to_string()));
+            state.simulation.status = "Run blocked".to_owned();
+        }
+    }
+
+    fn start_authorized_dispatch(
+        &mut self,
+        state: &mut AppState,
+        mut dispatch: crate::simulation::execution::AuthorizedRunDispatch,
+        campaign_membership: Option<crate::state::SimulationCampaignMembership>,
+    ) -> Result<(), crate::simulation::execution::PreparationError> {
+        if let Some(membership) = campaign_membership.as_ref() {
+            membership.validate().map_err(|error| {
+                crate::simulation::execution::PreparationError::new(
+                    crate::simulation::execution::PreparationStage::Authorization,
+                    error,
+                )
+            })?;
+        }
         let source_domain = match dispatch.intent() {
             SimulationRunIntent::SimulateRunSet => AnalysisResultSourceDomain::SimulationPlan,
             SimulationRunIntent::ManualDeck => AnalysisResultSourceDomain::ManualDeck,
         };
-        let run_receipt = match dispatch.prepared_run_receipt(source_domain) {
-            Ok(receipt) => receipt,
-            Err(error) => {
-                state.push_sim_message(ConsoleMessage::error(error.to_string()));
-                state.simulation.status = "Run blocked".to_owned();
-                return;
-            }
-        };
+        let dispatched_plan_id = dispatch.simulation_plan_id();
+        let dispatched_save_policy = dispatch.save_policy();
+        let run_receipt = dispatch.prepared_run_receipt(source_domain)?;
 
         self.pending_analyses.clear();
         self.successful_analysis_instances.clear();
         self.execution_artifacts.clear();
         self.current_source_domain = source_domain;
+        self.current_save_policy = dispatched_save_policy;
         self.total_analyses = dispatch.task_count();
         self.current_analysis_idx = 0;
         self.cached_netlist = Some(dispatch.executable_netlist().to_owned());
 
-        if let Some(cross_probe) = dispatch.take_cross_probe() {
+        if let Some(cross_probe) = dispatch.take_cross_probe()
+            && campaign_membership.is_none()
+        {
             cross_probe.apply(state);
         }
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
@@ -444,10 +500,20 @@ impl SimulationController {
         );
 
         let run = state.simulation.start_prepared_run(run_receipt);
+        if let Some(membership) = campaign_membership {
+            run.set_campaign_membership(membership)
+                .expect("campaign membership was validated before run creation");
+        }
         let run_id = run.id;
         let execution_identity = run
             .execution_identity()
             .expect("current simulation runs always allocate job identity");
+        if let (Some(plan_id), Some(limit)) = (
+            dispatched_plan_id,
+            dispatched_save_policy.retained_dataset_limit(),
+        ) {
+            state.simulation.prune_plan_runs(plan_id, limit);
+        }
         self.current_run_id = Some(run_id);
         state.simulation.active_execution = Some(execution_identity);
         state.simulation.abort_request = None;
@@ -468,6 +534,7 @@ impl SimulationController {
         }
         self.pending_analyses = dispatch.into_tasks();
         self.start_next_analysis(state);
+        Ok(())
     }
 
     /// Treat both controller-owned batch metadata and runner-local work as
@@ -539,6 +606,8 @@ impl SimulationController {
         self.current_effective_source_content_digest = None;
         self.current_op_effective_source_content_digest = None;
         self.current_saved_output_contracts.clear();
+        self.current_save_policy =
+            crate::simulation::execution::SavePolicy::RetainEngineProducedResults;
         self.live_transient.clear();
         self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
         self.current_run_id = None;
@@ -546,6 +615,7 @@ impl SimulationController {
         self.current_analysis_idx = 0;
         self.total_analyses = 0;
         self.transient_post = transient_post::TransientPostCoordinator::default();
+        self.active_campaign = None;
     }
 
     fn start_manual_deck_simulation(&mut self, state: &mut AppState) {
@@ -730,7 +800,7 @@ impl SimulationController {
             Some(
                 crate::simulation::execution::operating_point_effective_source_digest(
                     next_analysis.executable_netlist(),
-                    config.run_point,
+                    config.run_point.clone(),
                 ),
             )
         });
@@ -797,8 +867,8 @@ impl SimulationController {
             .resolve_dependency_artifacts(&self.execution_artifacts)
             .map_err(|error| SimulationError::InvalidConfig(error.to_string()))
             .and_then(|dispatch| {
-                let stream_transient_samples =
-                    self.current_saved_output_contracts.iter().any(|contract| {
+                let stream_transient_samples = self.current_save_policy.live_streaming_enabled()
+                    && self.current_saved_output_contracts.iter().any(|contract| {
                         contract.streaming()
                             == crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
                             || contract.policy()
@@ -970,6 +1040,9 @@ impl SimulationController {
         }) {
             return;
         }
+        if !self.current_save_policy.live_streaming_enabled() {
+            return;
+        }
         let Some(provenance) = self.current_provenance.clone() else {
             log::error!("Accepted transient samples have no prepared-task provenance");
             return;
@@ -1028,7 +1101,9 @@ impl SimulationController {
         error: impl Into<String>,
         provenance: AnalysisResultProvenance,
     ) -> AnalysisResult {
-        let mut analysis = if self.live_transient.is_empty() {
+        let mut analysis = if self.live_transient.is_empty()
+            || !self.current_save_policy.retain_failure_diagnostics()
+        {
             AnalysisResult::failed(1, analysis_type, label, error.into())
         } else {
             let mut analysis = self.live_transient.source_analysis(analysis_type, label);
@@ -1086,6 +1161,8 @@ impl SimulationController {
         self.current_effective_source_content_digest = None;
         self.current_op_effective_source_content_digest = None;
         self.current_saved_output_contracts.clear();
+        self.current_save_policy =
+            crate::simulation::execution::SavePolicy::RetainEngineProducedResults;
         self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
         self.current_run_id = None;
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
@@ -1115,6 +1192,8 @@ impl SimulationController {
             ConsoleMessage::error("Simulation completed with errors".to_owned())
         };
         state.push_sim_message(summary);
+
+        self.complete_campaign_member(state, run_success);
 
         log::info!("Simulation batch completed");
     }
@@ -1741,7 +1820,9 @@ impl SimulationController {
                 }
                 Err(SimulationError::Aborted) => {
                     log::info!("Analysis aborted; retaining any accepted transient prefix");
-                    let partial = if self.live_transient.is_empty() {
+                    let partial = if self.live_transient.is_empty()
+                        || !self.current_save_policy.retain_failure_diagnostics()
+                    {
                         None
                     } else {
                         let analysis_type = self
@@ -1803,10 +1884,14 @@ impl SimulationController {
                     self.current_effective_source_content_digest = None;
                     self.current_op_effective_source_content_digest = None;
                     self.current_saved_output_contracts.clear();
+                    self.current_save_policy =
+                        crate::simulation::execution::SavePolicy::RetainEngineProducedResults;
                     self.live_transient.clear();
                     self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
                     self.current_run_id = None;
                     self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
+                    self.current_analysis_idx = 0;
+                    self.total_analyses = 0;
                     state.simulation.active_execution = None;
                     state.simulation.abort_request = None;
                     state.ui.netlist.pending_manual_run_id = None;
@@ -1815,6 +1900,7 @@ impl SimulationController {
                     state.push_sim_message(ConsoleMessage::warning(
                         "Simulation aborted by user".to_owned(),
                     ));
+                    self.complete_campaign_member(state, false);
                 }
                 Err(e) => {
                     state

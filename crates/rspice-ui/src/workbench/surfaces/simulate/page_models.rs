@@ -10,9 +10,9 @@
 use egui::Ui;
 
 use crate::state::model_library::ModelSourceAuthority;
-use crate::ui::widgets::{Button, select};
+use crate::ui::icons::Icon;
+use crate::ui::widgets::{Button, IconButton, select};
 use crate::workbench::RSpiceApp;
-use crate::workbench::app_state::design_history::publish_model_library_candidate;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::ModelsPage;
 
@@ -25,7 +25,7 @@ use super::page_kit::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
-const CLOSURE_COLUMNS: [f32; 5] = [0.24, 0.16, 0.16, 0.20, 0.24];
+const CLOSURE_COLUMNS: [f32; 6] = [0.07, 0.21, 0.12, 0.18, 0.27, 0.15];
 const GATE_COLUMNS: [f32; 3] = [0.30, 0.46, 0.24];
 
 /// How many models with findings the gate card lists before it stops.
@@ -47,64 +47,64 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
-    let libraries: Vec<(
-        String,
-        String,
-        usize,
-        usize,
-        Option<String>,
-        ModelSourceAuthority,
-    )> = app
-        .state
-        .model_library_manager
-        .libraries_sorted()
-        .into_iter()
-        .map(|library| {
-            (
-                library.name.clone(),
-                library.technology_node.clone(),
-                library.models.len(),
-                library.source_closure.len(),
-                library.selected_corner.clone(),
-                library.source_authority,
-            )
-        })
-        .collect();
-    let unpinned = libraries
+    let bindings = app.state.sim_setup.model_bindings.clone();
+    let invalid = bindings
         .iter()
-        .filter(|(_, _, _, closure, _, authority)| {
-            *closure == 0 && matches!(authority, ModelSourceAuthority::External)
+        .filter(|binding| {
+            app.state
+                .model_library_manager
+                .validate_simulation_plan_bindings(std::slice::from_ref(binding))
+                .is_err()
         })
         .count();
-    let status = if unpinned == 0 {
-        format!("{} libraries · every source pinned", libraries.len())
+    let status = if invalid == 0 {
+        format!(
+            "{} ordered binding{}",
+            bindings.len(),
+            plural_suffix(bindings.len())
+        )
     } else {
-        format!("{unpinned} external libraries are not pinned")
+        format!(
+            "{invalid} stale or invalid binding{}",
+            plural_suffix(invalid)
+        )
     };
-    let tone = if unpinned == 0 { Tone::Ok } else { Tone::Error };
-    let mut requested: Option<(String, String)> = None;
+    let tone = if invalid == 0 { Tone::Ok } else { Tone::Error };
+    let mut requested = None;
     card(ui, "Model closure", Some((status.as_str(), tone)), |ui| {
         ledger_head(
             ui,
             &CLOSURE_COLUMNS,
-            &["Library", "Node", "Models", "Source", "Corner section"],
+            &[
+                "Order",
+                "Library",
+                "Models",
+                "Source",
+                "Corner section",
+                "Actions",
+            ],
         );
-        if libraries.is_empty() {
+        if bindings.is_empty() {
             ledger_row(
                 ui,
                 &CLOSURE_COLUMNS,
                 &[
-                    ("No libraries loaded", Tone::Neutral),
                     ("—", Tone::Neutral),
+                    ("No model libraries bound", Tone::Neutral),
+                    ("0", Tone::Neutral),
+                    ("explicit empty closure", Tone::Neutral),
+                    ("attach a library below", Tone::Warn),
                     ("—", Tone::Neutral),
-                    ("—", Tone::Neutral),
-                    ("nothing to bind against", Tone::Warn),
                 ],
                 false,
             );
         }
-        for (name, node, models, closure_len, corner, authority) in &libraries {
-            let corners = corner_options(app, name);
+        for (index, binding) in bindings.iter().enumerate() {
+            let library = app
+                .state
+                .model_library_manager
+                .get_library(&binding.library_name);
+            let corners = corner_options(app, &binding.library_name);
             let (rect, cells) = ledger_row_cells(ui, &CLOSURE_COLUMNS);
             let t = Tokens::get(ui.ctx());
             ui.painter().hline(
@@ -116,37 +116,48 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
             paint_text(
                 ui,
                 cells[0].shrink2(egui::vec2(8.0, 0.0)),
-                name,
+                &(index + 1).to_string(),
                 font.clone(),
-                t.color.accent,
+                t.color.text_dim,
             );
             paint_text(
                 ui,
                 cells[1].shrink2(egui::vec2(8.0, 0.0)),
-                if node.is_empty() {
-                    "—"
-                } else {
-                    node.as_str()
-                },
+                &binding.library_name,
                 font.clone(),
-                t.color.text_dim,
+                if library.is_some() {
+                    t.color.accent
+                } else {
+                    t.color.err
+                },
             );
             paint_text(
                 ui,
                 cells[2].shrink2(egui::vec2(8.0, 0.0)),
-                &models.to_string(),
+                &library
+                    .map_or(0, |library| library.models.len())
+                    .to_string(),
                 font.clone(),
                 t.color.text_dim,
             );
-            let (source_text, source_color) = match (authority, closure_len) {
-                (ModelSourceAuthority::External, 0) => {
-                    ("external · unpinned".to_owned(), t.color.err)
-                }
-                (ModelSourceAuthority::External, len) => {
-                    (format!("external · {len} pinned"), t.color.text_dim)
-                }
-                (_, 0) => ("project-owned".to_owned(), t.color.text_dim),
-                (_, len) => (format!("project · {len} pinned"), t.color.text_dim),
+            let validation = app
+                .state
+                .model_library_manager
+                .validate_simulation_plan_bindings(std::slice::from_ref(binding));
+            let (source_text, source_color) = match (library, validation) {
+                (_, Err(_)) => ("stale · review required".to_owned(), t.color.err),
+                (Some(library), Ok(())) => (
+                    format!(
+                        "{} · {} pinned",
+                        match library.source_authority {
+                            ModelSourceAuthority::External => "external",
+                            _ => "project",
+                        },
+                        library.source_closure.len()
+                    ),
+                    t.color.text_dim,
+                ),
+                (None, Ok(())) => ("missing".to_owned(), t.color.err),
             };
             paint_text(
                 ui,
@@ -155,41 +166,126 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                 font,
                 source_color,
             );
-            if corners.is_empty() {
+            if library.is_none() || corners.is_empty() {
                 paint_text(
                     ui,
                     cells[4].shrink2(egui::vec2(8.0, 0.0)),
-                    "no corner sections declared",
+                    if library.is_some() {
+                        "reference-process fallback"
+                    } else {
+                        "library unavailable"
+                    },
                     theme::sans(tokens::FS_0, FontWeight::Regular),
                     t.color.text_faint,
                 );
             } else {
-                let selected = corner.clone().unwrap_or_else(|| corners[0].clone());
+                let mut choices = Vec::with_capacity(corners.len() + 1);
+                choices.push("Automatic (reference process)".to_owned());
+                choices.extend(corners);
+                let selected = binding
+                    .selected_corner
+                    .clone()
+                    .unwrap_or_else(|| choices[0].clone());
                 let cell_rect = cells[4].shrink2(egui::vec2(6.0, 4.0));
                 let mut cell = cell_ui(ui, cell_rect);
-                if let Some(index) = select(
+                if let Some(choice) = select(
                     &mut cell,
-                    &format!("simulation.models.corner.{name}"),
+                    &format!("simulation.models.corner.{}", binding.library_name),
                     "Corner section",
                     &selected,
-                    &corners,
+                    &choices,
                     cell_rect.width(),
                 ) {
-                    requested = Some((name.clone(), corners[index].clone()));
+                    requested = Some(ModelBindingAction::SetCorner {
+                        index,
+                        corner: (choice != 0).then(|| choices[choice].clone()),
+                    });
                 }
             }
+            let action_rect = cells[5].shrink2(egui::vec2(3.0, 4.0));
+            let mut actions = cell_ui(ui, action_rect);
+            actions.horizontal(|ui| {
+                if IconButton::new(Icon::ChevronUp)
+                    .enabled(index > 0)
+                    .tooltip("Move earlier in model precedence")
+                    .show(ui)
+                    .clicked()
+                {
+                    requested = Some(ModelBindingAction::MoveUp(index));
+                }
+                if IconButton::new(Icon::ChevronDown)
+                    .enabled(index + 1 < bindings.len())
+                    .tooltip("Move later in model precedence")
+                    .show(ui)
+                    .clicked()
+                {
+                    requested = Some(ModelBindingAction::MoveDown(index));
+                }
+                if IconButton::new(Icon::Trash)
+                    .tooltip("Remove from this simulation plan")
+                    .show(ui)
+                    .clicked()
+                {
+                    requested = Some(ModelBindingAction::Remove(index));
+                }
+            });
+        }
+
+        let bound_names = bindings
+            .iter()
+            .map(|binding| binding.library_name.to_ascii_lowercase())
+            .collect::<std::collections::HashSet<_>>();
+        let available = app
+            .state
+            .model_library_manager
+            .libraries_sorted()
+            .into_iter()
+            .filter(|library| {
+                library.source_authority.has_execution_source()
+                    && !bound_names.contains(&library.name.to_ascii_lowercase())
+            })
+            .map(|library| library.name.clone())
+            .collect::<Vec<_>>();
+        if !available.is_empty() {
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label("Available executable libraries:");
+                for name in available.iter().take(4) {
+                    if Button::new(name).show(ui).clicked() {
+                        requested = Some(ModelBindingAction::Attach(name.clone()));
+                    }
+                }
+                if available.len() > 4 {
+                    ui.label(format!("+{} more", available.len() - 4));
+                }
+            });
         }
         card_note(
             ui,
-            "A library's corner section decides which model cards a run resolves. An external \
-             library with no pinned source closure cannot be reproduced from the project alone, \
-             so preflight refuses to dispatch against it.",
+            "This ordered list is owned by the active simulation plan. Earlier libraries have \
+             higher precedence. Every entry is pinned to the source digest accepted when it was \
+             attached; replacement or refresh requires an explicit review before another run.",
         );
     });
 
-    if let Some((library, corner)) = requested {
-        set_corner(app, &library, &corner);
+    if let Some(action) = requested {
+        apply_model_binding_action(app, action);
     }
+}
+
+const fn plural_suffix(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
+}
+
+enum ModelBindingAction {
+    SetCorner {
+        index: usize,
+        corner: Option<String>,
+    },
+    MoveUp(usize),
+    MoveDown(usize),
+    Remove(usize),
+    Attach(String),
 }
 
 fn corner_options(app: &RSpiceApp, library: &str) -> Vec<String> {
@@ -206,52 +302,75 @@ fn corner_options(app: &RSpiceApp, library: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn set_corner(app: &mut RSpiceApp, library: &str, corner: &str) {
-    let mut candidate = app.state.model_library_manager.clone();
-    let Some(entry) = candidate.get_library_mut(library) else {
-        app.state
-            .workbench
-            .analysis_lifecycle_status
-            .record_refusal(format!("Library {library} is no longer loaded."));
-        return;
+fn apply_model_binding_action(app: &mut RSpiceApp, action: ModelBindingAction) {
+    let mut candidate = app.state.sim_setup.clone();
+    let detail = match action {
+        ModelBindingAction::SetCorner { index, corner } => {
+            let Some(binding) = candidate.model_bindings.get_mut(index) else {
+                return record_binding_refusal(
+                    app,
+                    "The model binding changed before the edit committed.",
+                );
+            };
+            binding.selected_corner = corner;
+            format!("Changed model section for {}.", binding.library_name)
+        }
+        ModelBindingAction::MoveUp(index)
+            if index > 0 && index < candidate.model_bindings.len() =>
+        {
+            candidate.model_bindings.swap(index - 1, index);
+            "Changed model-library precedence.".to_owned()
+        }
+        ModelBindingAction::MoveDown(index) if index + 1 < candidate.model_bindings.len() => {
+            candidate.model_bindings.swap(index, index + 1);
+            "Changed model-library precedence.".to_owned()
+        }
+        ModelBindingAction::Remove(index) if index < candidate.model_bindings.len() => {
+            let removed = candidate.model_bindings.remove(index);
+            format!(
+                "Removed model library {} from the plan.",
+                removed.library_name
+            )
+        }
+        ModelBindingAction::Attach(name) => {
+            let binding = match app
+                .state
+                .model_library_manager
+                .simulation_plan_binding(&name)
+            {
+                Ok(binding) => binding,
+                Err(error) => return record_binding_refusal(app, &error),
+            };
+            candidate.model_bindings.push(binding);
+            format!("Attached model library {name} to the plan.")
+        }
+        _ => return,
     };
-    if !entry
-        .corners
-        .values()
-        .any(|candidate| candidate.name.eq_ignore_ascii_case(corner))
+    if let Err(error) = app
+        .state
+        .model_library_manager
+        .validate_simulation_plan_bindings(&candidate.model_bindings)
     {
-        app.state
-            .workbench
-            .analysis_lifecycle_status
-            .record_refusal(format!(
-                "Corner {corner} is no longer defined by {library}."
-            ));
-        return;
+        return record_binding_refusal(app, &error);
     }
-    entry.selected_corner = Some(corner.to_owned());
-    match publish_model_library_candidate(
-        &mut app.state,
-        candidate,
-        library,
-        format!("select nominal model corner {corner}"),
-    ) {
-        Ok(revision) => {
+    match candidate.commit_active_plan_configuration_change(detail) {
+        Ok(receipt) => {
+            app.state.sim_setup = candidate;
             app.invalidate_simulation_preflight();
             app.state
                 .workbench
                 .analysis_lifecycle_status
-                .record_receipt(format!(
-                    "{library} now resolves its {corner} section at project revision {}.",
-                    revision.get()
-                ));
+                .record_receipt(receipt.status_line());
         }
-        Err(error) => {
-            app.state
-                .workbench
-                .analysis_lifecycle_status
-                .record_refusal(error);
-        }
+        Err(error) => record_binding_refusal(app, &error.to_string()),
     }
+}
+
+fn record_binding_refusal(app: &mut RSpiceApp, error: &str) {
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_refusal(error.to_owned());
 }
 
 /// One model's contribution to the release gate.
@@ -436,7 +555,17 @@ fn plural(count: usize, singular: &str) -> String {
 /// none is recomputed, so the two surfaces cannot report different gates for
 /// the same closure.
 fn qualification_gate(ui: &mut Ui, app: &mut RSpiceApp) {
-    let summaries = model_gate_facts(app);
+    let bound = app
+        .state
+        .sim_setup
+        .model_bindings
+        .iter()
+        .map(|binding| binding.library_name.to_ascii_lowercase())
+        .collect::<std::collections::HashSet<_>>();
+    let summaries = model_gate_facts(app)
+        .into_iter()
+        .filter(|fact| bound.contains(&fact.library.to_ascii_lowercase()))
+        .collect::<Vec<_>>();
     let reading = gate_reading(summaries.iter().map(ModelGate::from));
     let (status, tone) = gate_status(&reading);
     let mut open = false;
@@ -540,13 +669,18 @@ fn qualification_gate(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn binding_policy(ui: &mut Ui, app: &RSpiceApp) {
-    let libraries = app.state.model_library_manager.libraries_sorted();
-    let with_corner = libraries
+    let bindings = &app.state.sim_setup.model_bindings;
+    let with_corner = bindings
         .iter()
-        .filter(|library| library.selected_corner.is_some())
+        .filter(|binding| binding.selected_corner.is_some())
         .count();
-    let subcircuits: usize = libraries
+    let subcircuits: usize = bindings
         .iter()
+        .filter_map(|binding| {
+            app.state
+                .model_library_manager
+                .get_library(&binding.library_name)
+        })
         .map(|library| library.subcircuits.len())
         .sum();
     card(
@@ -558,7 +692,7 @@ fn binding_policy(ui: &mut Ui, app: &RSpiceApp) {
                 rule_row(
                     ui,
                     "Libraries with a corner bound",
-                    &format!("{with_corner} of {}", libraries.len()),
+                    &format!("{with_corner} of {}", bindings.len()),
                 );
                 rule_row(ui, "Addressable subcircuits", &subcircuits.to_string());
                 rule_row(
@@ -569,21 +703,31 @@ fn binding_policy(ui: &mut Ui, app: &RSpiceApp) {
                 rule_row(
                     ui,
                     "Duplicate definition",
-                    "the first library in load order wins, and the shadowed one is reported",
+                    "resolved by an explicit provider decision; otherwise preflight refuses it",
                 );
             });
             card_note(
                 ui,
-                "Resolution order is the library load order, which the model workspace owns. This \
-                 page sets which section of each library a run reads; it never reorders the \
-                 closure.",
+                "Resolution order is the active plan's binding order above. The project model \
+                 workspace owns source content; this plan owns which sources participate, their \
+                 precedence, and each nominal section.",
             );
         },
     );
 }
 
 fn reproducibility(ui: &mut Ui, app: &RSpiceApp) {
-    let libraries = app.state.model_library_manager.libraries_sorted();
+    let libraries = app
+        .state
+        .sim_setup
+        .model_bindings
+        .iter()
+        .filter_map(|binding| {
+            app.state
+                .model_library_manager
+                .get_library(&binding.library_name)
+        })
+        .collect::<Vec<_>>();
     // Only an external library needs a pinned closure: a project-owned one
     // already carries its bytes in the project file. Counting every library
     // as needing a pin made this card contradict the closure card above it,

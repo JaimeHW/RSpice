@@ -19,9 +19,12 @@ mod validate;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+pub use model::NETLIST_SUPPLY_SOURCE_PREFIX;
 pub use model::{
-    InvalidValuePolicy, RunSetBudgets, RunSetComposition, RunSetCompositionMode, RunSetDimension,
-    RunSetDimensionKind, RunSetState,
+    InvalidValuePolicy, RunSetAdaptivePolicy, RunSetBudgets, RunSetComposition,
+    RunSetCompositionMode, RunSetDimension, RunSetDimensionKind, RunSetState,
+    parse_parameter_source_authority, parse_source_value_authority, parse_supply_source_authority,
 };
 pub use points::{RunSetPoint, compose, resolve};
 #[cfg(test)]
@@ -154,10 +157,14 @@ impl RunSetState {
         // With no supply axis the ratio the executor applies is 1.0, so the
         // deck's own supply is used untouched. The value itself is arbitrary
         // and only has to match the nominal the executor divides by.
-        let voltages = match self.enabled_dimension_of(RunSetDimensionKind::Supply) {
-            Some(dimension) => dimension.canonical_values(),
-            None => vec![UNSWEPT_SUPPLY],
-        };
+        let (voltages, supply_source_names) =
+            match self.enabled_dimension_of(RunSetDimensionKind::Supply) {
+                Some(dimension) => (
+                    dimension.canonical_values(),
+                    model::parse_supply_source_authority(&dimension.source)?,
+                ),
+                None => (vec![UNSWEPT_SUPPLY], Vec::new()),
+            };
 
         let temperatures = match self.enabled_dimension_of(RunSetDimensionKind::Temperature) {
             Some(dimension) => dimension.canonical_values(),
@@ -178,6 +185,7 @@ impl RunSetState {
             CornerConfig {
                 process_corners,
                 voltages,
+                supply_source_names,
                 temperatures,
                 full_matrix: self.composition.mode != RunSetCompositionMode::Zipped,
                 points,
@@ -187,6 +195,7 @@ impl RunSetState {
             CornerConfig {
                 process_corners: retain_used(&process_corners, &points, |point| point.process),
                 voltages: retain_used(&voltages, &points, |point| point.voltage),
+                supply_source_names,
                 temperatures: retain_used(&temperatures, &points, |point| {
                     point.temperature_celsius
                 }),
@@ -231,6 +240,19 @@ impl RunSetState {
                         }
                         RunSetDimensionKind::Supply => spec.voltage = canonical,
                         RunSetDimensionKind::Temperature => spec.temperature_celsius = canonical,
+                        // Non-PVT coordinates are materialized directly into
+                        // the prepared task/deck. They do not alter the corner
+                        // projection used by legacy corner services.
+                        RunSetDimensionKind::Parameter
+                        | RunSetDimensionKind::Source
+                        | RunSetDimensionKind::Model
+                        | RunSetDimensionKind::Frequency
+                        | RunSetDimensionKind::Time
+                        | RunSetDimensionKind::Seed
+                        | RunSetDimensionKind::Sample
+                        | RunSetDimensionKind::AnalysisSelection
+                        | RunSetDimensionKind::DigitalConfiguration
+                        | RunSetDimensionKind::ExternalDataset => {}
                     }
                 }
                 Ok(spec)
@@ -267,6 +289,7 @@ impl RunSetState {
                     RunSetCompositionMode::Zipped
                 },
                 excluded_points: std::collections::BTreeSet::new(),
+                ..RunSetComposition::default()
             },
             budgets: RunSetBudgets::default(),
             preview: None,
@@ -294,6 +317,13 @@ impl RunSetState {
             &supplies.iter().map(String::as_str).collect::<Vec<_>>(),
             1,
         );
+        if !config.supply_source_names.is_empty() {
+            supply.source = format!(
+                "{}{}",
+                model::NETLIST_SUPPLY_SOURCE_PREFIX,
+                config.supply_source_names.join(",")
+            );
+        }
         // A single supply value is not a sweep: it is the deck's own value, and
         // enabling an axis for it would report a dimension the run does not
         // actually vary.

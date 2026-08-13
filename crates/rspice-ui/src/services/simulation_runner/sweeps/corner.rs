@@ -301,6 +301,7 @@ mod tests {
         let unequal = CornerRunConfig {
             process_corners: vec![CornerProcess::TT],
             voltages: vec![0.9, 1.0],
+            supply_source_names: vec!["VDD".to_owned()],
             temperatures_c: vec![-40.0, 27.0, 125.0],
             full_matrix: false,
             ..CornerRunConfig::default()

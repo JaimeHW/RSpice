@@ -9,20 +9,26 @@ use std::collections::{HashMap, HashSet};
 
 /// Exact operating environment applied to every Monte Carlo trial after any
 /// parameter-driven source reparse.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MonteCarloEnvironment {
     pub temperature_celsius: Value,
     pub supply_voltage: Option<Value>,
     pub nominal_supply_voltage: Option<Value>,
+    /// Exact independent voltage-source instance names that form the supply
+    /// domain. A voltage corner is never inferred from circuit topology: bias,
+    /// reference, and stimulus sources may also be ground referenced.
+    pub supply_source_names: Vec<String>,
 }
 
-/// Scale the independent DC supplies selected by the simulator's PVT rule.
-/// Ground-referenced voltage sources are preferred; only when none exist are
-/// all independent DC voltage sources considered.
+/// Scale only the explicitly bound independent DC supply sources.
+///
+/// Selection is resolved completely before mutation so a stale binding cannot
+/// leave a partially scaled circuit.
 pub fn apply_supply_voltage_scale_with_abort(
     netlist: &mut Netlist,
     supply: Value,
     nominal: Value,
+    source_names: &[String],
     abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
     if abort.is_aborted() {
@@ -38,37 +44,53 @@ pub fn apply_supply_voltage_scale_with_abort(
             "Corner nominal voltage must be a positive finite value".to_owned(),
         ));
     }
-    let ground_policy = netlist.ground_policy();
-    let mut candidates = Vec::new();
-    for (index, element) in netlist.elements.iter().enumerate() {
+    if source_names.is_empty() {
+        return Err(SimulationError::Circuit(
+            "Supply scaling requires at least one explicitly bound independent voltage source"
+                .to_owned(),
+        ));
+    }
+    let mut normalized = std::collections::BTreeSet::new();
+    let mut candidates = Vec::with_capacity(source_names.len());
+    for source_name in source_names {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        let Some(negative) = element.nodes.get(1) else {
-            continue;
-        };
-        if ground_policy.is_ground(negative)
-            && matches!(
-                &element.kind,
-                ElementKind::VoltageSource(spec) if scalable_dc_value(spec).is_some()
-            )
+        let trimmed = source_name.trim();
+        if trimmed.is_empty()
+            || trimmed != source_name
+            || trimmed.chars().any(char::is_control)
+            || !normalized.insert(trimmed.to_ascii_lowercase())
         {
-            candidates.push(index);
+            return Err(SimulationError::Circuit(format!(
+                "Supply source binding {source_name:?} is empty, malformed, or duplicated"
+            )));
         }
-    }
-    if candidates.is_empty() {
-        candidates.extend(
-            netlist
-                .elements
-                .iter()
-                .enumerate()
-                .filter_map(|(index, element)| match &element.kind {
-                    ElementKind::VoltageSource(spec) if scalable_dc_value(spec).is_some() => {
-                        Some(index)
-                    }
-                    _ => None,
-                }),
-        );
+        let Some((index, element)) = netlist
+            .elements
+            .iter()
+            .enumerate()
+            .find(|(_, element)| element.name.eq_ignore_ascii_case(trimmed))
+        else {
+            return Err(SimulationError::Circuit(format!(
+                "Bound supply source {trimmed:?} is not present in the executable netlist"
+            )));
+        };
+        match &element.kind {
+            ElementKind::VoltageSource(spec) if scalable_dc_value(spec).is_some() => {
+                candidates.push(index);
+            }
+            ElementKind::VoltageSource(_) => {
+                return Err(SimulationError::Circuit(format!(
+                    "Bound supply source {trimmed:?} has no scalable independent DC value"
+                )));
+            }
+            _ => {
+                return Err(SimulationError::Circuit(format!(
+                    "Bound supply source {trimmed:?} is not an independent voltage source"
+                )));
+            }
+        }
     }
     let scale = supply / nominal;
     for index in candidates {
@@ -302,7 +324,7 @@ impl Engine {
         let materialize_run =
             |run_index: usize| -> Result<std::borrow::Cow<'_, Netlist>, SimulationError> {
                 if monte_params.is_empty() {
-                    let Some(environment) = environment else {
+                    let Some(environment) = environment.as_ref() else {
                         return Ok(std::borrow::Cow::Borrowed(netlist));
                     };
                     let mut materialized = netlist.clone();
@@ -321,7 +343,7 @@ impl Engine {
                         resource_limits,
                         abort,
                     )?;
-                if let Some(environment) = environment {
+                if let Some(environment) = environment.as_ref() {
                     Self::apply_monte_carlo_environment(&mut perturbed, environment, abort)?;
                 }
                 Ok(std::borrow::Cow::Owned(perturbed))
@@ -425,7 +447,7 @@ impl Engine {
 
     fn apply_monte_carlo_environment(
         netlist: &mut Netlist,
-        environment: MonteCarloEnvironment,
+        environment: &MonteCarloEnvironment,
         abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
         if abort.is_aborted() {
@@ -445,7 +467,13 @@ impl Engine {
             environment.nominal_supply_voltage,
         ) {
             (Some(supply), Some(nominal)) => {
-                apply_supply_voltage_scale_with_abort(netlist, supply, nominal, abort)?;
+                apply_supply_voltage_scale_with_abort(
+                    netlist,
+                    supply,
+                    nominal,
+                    &environment.supply_source_names,
+                    abort,
+                )?;
             }
             (None, None) => {}
             _ => {
@@ -583,26 +611,57 @@ mod tests {
     }
 
     #[test]
-    fn supply_scaling_prefers_ground_referenced_sources() {
+    fn supply_scaling_changes_only_explicitly_bound_sources() {
         let mut netlist =
             Netlist::parse("scale\nVDD vdd 0 1\nVFLOAT a b 3\nR1 vdd 0 1k\nR2 a b 1k\n.end\n")
                 .expect("deck parses");
 
-        apply_supply_voltage_scale_with_abort(&mut netlist, 2.0, 1.0, &NoAbort)
-            .expect("scale applies");
+        apply_supply_voltage_scale_with_abort(
+            &mut netlist,
+            2.0,
+            1.0,
+            &["VDD".to_owned()],
+            &NoAbort,
+        )
+        .expect("scale applies");
 
         assert_eq!(dc_sources(&netlist), vec![2.0, 3.0]);
     }
 
     #[test]
-    fn supply_scaling_falls_back_when_no_source_is_ground_referenced() {
+    fn supply_scaling_supports_explicit_floating_supply_domains() {
         let mut netlist = Netlist::parse("scale\nV1 a b 1\nV2 c d 3\nR1 a b 1k\nR2 c d 1k\n.end\n")
             .expect("deck parses");
 
-        apply_supply_voltage_scale_with_abort(&mut netlist, 0.5, 1.0, &NoAbort)
-            .expect("fallback scale applies");
+        apply_supply_voltage_scale_with_abort(
+            &mut netlist,
+            0.5,
+            1.0,
+            &["V1".to_owned(), "V2".to_owned()],
+            &NoAbort,
+        )
+        .expect("bound scale applies");
 
         assert_eq!(dc_sources(&netlist), vec![0.5, 1.5]);
+    }
+
+    #[test]
+    fn supply_scaling_refuses_an_unbound_or_stale_domain_without_mutation() {
+        let mut netlist =
+            Netlist::parse("scale\nVDD vdd 0 1\nVBIAS bias 0 0.5\n.end\n").expect("deck parses");
+        let original = dc_sources(&netlist);
+
+        let error = apply_supply_voltage_scale_with_abort(
+            &mut netlist,
+            0.9,
+            1.0,
+            &["VMISSING".to_owned()],
+            &NoAbort,
+        )
+        .expect_err("stale binding is refused");
+
+        assert!(error.to_string().contains("VMISSING"));
+        assert_eq!(dc_sources(&netlist), original);
     }
 
     struct Aborted;
@@ -619,7 +678,13 @@ mod tests {
             Netlist::parse("scale\nV1 a 0 1\nR1 a 0 1k\n.end\n").expect("deck parses");
 
         assert!(matches!(
-            apply_supply_voltage_scale_with_abort(&mut netlist, 2.0, 1.0, &Aborted),
+            apply_supply_voltage_scale_with_abort(
+                &mut netlist,
+                2.0,
+                1.0,
+                &["VDD".to_owned()],
+                &Aborted,
+            ),
             Err(SimulationError::Aborted)
         ));
     }

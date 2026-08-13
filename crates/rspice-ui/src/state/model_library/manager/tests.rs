@@ -209,6 +209,92 @@ fn nominal_execution_plan_honors_the_published_library_corner() {
 }
 
 #[test]
+fn simulation_plan_binding_owns_nominal_section_without_mutating_library() {
+    let (directory, path) = model_fixture();
+    let mut manager = ModelLibraryManager::new();
+    let name = manager
+        .load_library_file(&path, None)
+        .expect("load sectioned model library");
+    assert_eq!(
+        manager
+            .get_library(&name)
+            .unwrap()
+            .selected_corner
+            .as_deref(),
+        Some("TT")
+    );
+    let mut binding = manager
+        .simulation_plan_binding(&name)
+        .expect("library can be explicitly attached");
+    binding.selected_corner = Some("FF".to_owned());
+
+    let plan = manager
+        .seal_execution_sources_for_plan(&[binding])
+        .expect("seal the plan-owned selection")
+        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .expect("materialize the plan-owned FF section");
+
+    assert_eq!(
+        plan.selected_library_corners(),
+        &[(name.clone(), Some("FF".to_owned()))]
+    );
+    assert!(plan.model_cards()[0].contains("KP=2e-3"));
+    assert_eq!(
+        manager
+            .get_library(&name)
+            .unwrap()
+            .selected_corner
+            .as_deref(),
+        Some("TT"),
+        "editing a simulation plan must not mutate the project model catalog"
+    );
+    fs::remove_dir_all(directory).expect("remove model fixture directory");
+}
+
+#[test]
+fn simulation_plan_binding_order_is_preserved_and_stale_digest_is_refused() {
+    let mut manager = ModelLibraryManager::new();
+    let late = manager
+        .load_library_bytes(
+            "z-late.lib",
+            b".model z_device D (IS=2e-12)\n".to_vec(),
+            None,
+        )
+        .expect("load late library");
+    let early = manager
+        .load_library_bytes(
+            "a-early.lib",
+            b".model a_device D (IS=1e-12)\n".to_vec(),
+            None,
+        )
+        .expect("load early library");
+    let bindings = vec![
+        manager.simulation_plan_binding(&late).unwrap(),
+        manager.simulation_plan_binding(&early).unwrap(),
+    ];
+    let plan = manager
+        .seal_execution_sources_for_plan(&bindings)
+        .expect("seal explicit precedence")
+        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .expect("materialize explicit precedence");
+    let names = plan
+        .selected_library_corners()
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec![late.as_str(), early.as_str()]);
+    assert!(plan.model_cards()[0].contains("z_device"));
+    assert!(plan.model_cards()[1].contains("a_device"));
+
+    let mut stale = bindings;
+    stale[0].source_digest = crate::product::ContentDigest::from_bytes([0; 32]);
+    let error = manager
+        .seal_execution_sources_for_plan(&stale)
+        .expect_err("a stale plan binding must not redirect to current content");
+    assert!(error.contains("accepted source digest changed"), "{error}");
+}
+
+#[test]
 fn contested_materialized_model_names_fail_closed() {
     let (directory, first) = model_fixture();
     let second = directory.join("alternate.lib");

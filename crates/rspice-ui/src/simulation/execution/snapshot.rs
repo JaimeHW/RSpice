@@ -81,18 +81,73 @@ pub(in crate::simulation) enum SavePolicy {
     /// Retain every dataset and signal produced by the selected engine
     /// analyses. RSpice currently exposes no narrower output-selection UI.
     RetainEngineProducedResults,
+    /// Simulation-plan-owned controls authenticated with the prepared run.
+    PlanOwned {
+        retained_dataset_limit: usize,
+        maximum_storage_bytes: u64,
+        live_streaming_enabled: bool,
+        retain_failure_diagnostics: bool,
+    },
 }
 
 impl SavePolicy {
     pub(in crate::simulation) const fn label(self) -> &'static str {
         match self {
             Self::RetainEngineProducedResults => "Retain engine-produced results",
+            Self::PlanOwned { .. } => "Plan-owned save and streaming policy",
         }
     }
 
     const fn tag(self) -> u8 {
         match self {
             Self::RetainEngineProducedResults => 0,
+            Self::PlanOwned { .. } => 1,
+        }
+    }
+
+    pub(in crate::simulation) const fn retained_dataset_limit(self) -> Option<usize> {
+        match self {
+            Self::RetainEngineProducedResults => None,
+            Self::PlanOwned {
+                retained_dataset_limit,
+                ..
+            } => Some(retained_dataset_limit),
+        }
+    }
+
+    pub(in crate::simulation) const fn live_streaming_enabled(self) -> bool {
+        match self {
+            Self::RetainEngineProducedResults => true,
+            Self::PlanOwned {
+                live_streaming_enabled,
+                ..
+            } => live_streaming_enabled,
+        }
+    }
+
+    pub(in crate::simulation) const fn retain_failure_diagnostics(self) -> bool {
+        match self {
+            Self::RetainEngineProducedResults => true,
+            Self::PlanOwned {
+                retain_failure_diagnostics,
+                ..
+            } => retain_failure_diagnostics,
+        }
+    }
+
+    fn encode(self, writer: &mut CanonicalWriter) {
+        writer.u8(self.tag());
+        if let Self::PlanOwned {
+            retained_dataset_limit,
+            maximum_storage_bytes,
+            live_streaming_enabled,
+            retain_failure_diagnostics,
+        } = self
+        {
+            writer.usize(retained_dataset_limit);
+            writer.u64(maximum_storage_bytes);
+            writer.bool(live_streaming_enabled);
+            writer.bool(retain_failure_diagnostics);
         }
     }
 }
@@ -477,7 +532,7 @@ impl PreparedTask {
             &self.task.spec_options,
             self.task.numeric_override.as_ref(),
         );
-        let Some(environment) = self.execution_environment else {
+        let Some(environment) = self.execution_environment.as_ref() else {
             return analysis_digest;
         };
         let mut writer = CanonicalWriter::new("rspice.analysis-run-set-environment/v1");
@@ -490,6 +545,10 @@ impl PreparedTask {
             environment.nominal_supply_voltage.as_ref(),
             |writer, voltage| writer.f64(*voltage),
         );
+        writer.usize(environment.supply_source_names.len());
+        for source in &environment.supply_source_names {
+            writer.string(source);
+        }
         writer.finish()
     }
 }
@@ -498,7 +557,14 @@ impl PreparedTask {
 struct PreparedPvtPoint {
     process: ProcessCorner,
     voltage: Option<f64>,
+    supply_source_names: Vec<String>,
     temperature_celsius: f64,
+    /// Exact point-specific design-variable values, in declaration order.
+    /// These are materialized as `.param` cards in the authenticated task
+    /// source before the task digest is frozen.
+    parameter_overrides: Vec<(String, String)>,
+    /// Exact independent source values materialized into the task deck.
+    source_overrides: Vec<(String, String)>,
     /// Exact corner contract that owns process-model and nominal-voltage
     /// semantics for this point. Temperature-only axes do not carry one.
     corner_contract: Option<crate::services::simulation_runner::CornerRunConfig>,
@@ -581,6 +647,7 @@ pub(in crate::simulation) struct AuthorizedRunDispatch {
     project_revision: u64,
     source_digest: ContentDigest,
     source_receipt: RunSourceReceipt,
+    save_policy: SavePolicy,
     project_model_sources: Vec<PreparedModelSourceIdentity>,
     tasks: VecDeque<AuthorizedTaskDispatch>,
     executable_netlist: Arc<str>,
@@ -626,6 +693,14 @@ impl AuthorizedRunDispatch {
 
     pub(in crate::simulation) const fn intent(&self) -> SimulationRunIntent {
         self.intent
+    }
+
+    pub(in crate::simulation) const fn simulation_plan_id(&self) -> Option<SimulationPlanId> {
+        self.simulation_plan_id
+    }
+
+    pub(in crate::simulation) const fn save_policy(&self) -> SavePolicy {
+        self.save_policy
     }
 
     pub(in crate::simulation) fn prepared_run_receipt(
@@ -902,6 +977,10 @@ impl std::fmt::Debug for PreparedRunSnapshot {
 }
 
 impl PreparedRunSnapshot {
+    pub(in crate::simulation) const fn simulation_plan_id(&self) -> Option<SimulationPlanId> {
+        self.simulation_plan_id
+    }
+
     pub(in crate::simulation) fn new(mut parts: SnapshotParts) -> Result<Self, PreparationError> {
         ObjectRevision::new(parts.project_revision).map_err(|error| {
             PreparationError::new(
@@ -1452,6 +1531,7 @@ impl PreparedRunSnapshot {
             project_revision: self.project_revision,
             source_digest: self.source_digest,
             source_receipt: self.receipt,
+            save_policy: self.save_policy,
             project_model_sources: self.project_model_sources,
             tasks,
             executable_netlist,
@@ -1629,15 +1709,27 @@ fn expand_global_run_set_tasks(
                     .as_ref()
                     .map(corner_contract_digest)
                     .map_or_else(|| "none".to_owned(), |digest| digest.to_string());
+                let mut identity_material = format!(
+                    "rspice-global-run-set/v2/{point_index}/{}/{:016x}/{:016x}/{corner_digest}",
+                    process_tag(point.process),
+                    point.voltage.map(f64::to_bits).unwrap_or_default(),
+                    point.temperature_celsius.to_bits(),
+                );
+                for (name, value) in &point.parameter_overrides {
+                    identity_material.push('/');
+                    identity_material.push_str(name);
+                    identity_material.push('=');
+                    identity_material.push_str(value);
+                }
+                for (name, value) in &point.source_overrides {
+                    identity_material.push('/');
+                    identity_material.push_str(name);
+                    identity_material.push('=');
+                    identity_material.push_str(value);
+                }
                 AnalysisInstanceId::from_namespace(
                     task.instance_id.as_uuid(),
-                    format!(
-                        "rspice-global-run-set/v1/{point_index}/{}/{:016x}/{:016x}/{corner_digest}",
-                        process_tag(point.process),
-                        point.voltage.map(f64::to_bits).unwrap_or_default(),
-                        point.temperature_celsius.to_bits(),
-                    )
-                    .as_bytes(),
+                    identity_material.as_bytes(),
                 )
             };
             identities.insert((task.instance_id, point_index), identity);
@@ -1710,6 +1802,7 @@ fn expand_global_run_set_tasks(
                     process: point.process,
                     supply_voltage: point.voltage,
                     nominal_supply_voltage: *nominal_supply_voltage,
+                    supply_source_names: point.supply_source_names.clone(),
                 };
                 point_task.task.spec = operating_point_spec(&config);
                 point_task.task.config = Some(crate::simulation::AnalysisConfig::DcOp(config));
@@ -1732,6 +1825,7 @@ fn expand_global_run_set_tasks(
                         temperature_celsius: point.temperature_celsius,
                         supply_voltage: point.voltage,
                         nominal_supply_voltage: *nominal_supply_voltage,
+                        supply_source_names: point.supply_source_names.clone(),
                     },
                 );
             }
@@ -2002,6 +2096,7 @@ fn expand_pvt_point_tasks(
                 process: point.process,
                 supply_voltage: point.voltage,
                 nominal_supply_voltage,
+                supply_source_names: point.supply_source_names.clone(),
             };
             point_task.pvt_point = Some(
                 crate::state::AnalysisResultPvtPoint::new(
@@ -2089,7 +2184,9 @@ fn prepare_pvt_point_source(
                 "PVT run point voltage is missing its authenticated corner contract",
             ));
         }
-        return Ok((None, None));
+        let source = materialize_source_overrides(executable_netlist, &point.source_overrides)?;
+        let source = materialize_parameter_overrides(&source, &point.parameter_overrides);
+        return Ok(((source != executable_netlist).then_some(source), None));
     };
 
     let source = crate::services::simulation_runner::materialize_corner_process_source(
@@ -2119,6 +2216,7 @@ fn prepare_pvt_point_source(
             Some(voltage) => voltage,
             None => crate::services::simulation_runner::infer_nominal_supply_voltage(
                 &parsed,
+                &point.supply_source_names,
                 &rspice_core::NoAbort,
             )
             .map_err(|error| {
@@ -2138,8 +2236,123 @@ fn prepare_pvt_point_source(
         None
     };
 
+    let source = materialize_source_overrides(&source, &point.source_overrides)?;
+    let source = materialize_parameter_overrides(&source, &point.parameter_overrides);
     let source_override = (source != executable_netlist).then_some(source);
     Ok((source_override, nominal_supply_voltage))
+}
+
+fn materialize_parameter_overrides(
+    executable_netlist: &str,
+    overrides: &[(String, String)],
+) -> String {
+    if overrides.is_empty() {
+        return executable_netlist.to_owned();
+    }
+    let mut block = String::new();
+    for (name, value) in overrides {
+        block.push_str(".param ");
+        block.push_str(name);
+        block.push('=');
+        block.push_str(value);
+        block.push('\n');
+    }
+    splice_before_terminal_end_card(executable_netlist, block.trim_end())
+}
+
+fn materialize_source_overrides(
+    executable_netlist: &str,
+    overrides: &[(String, String)],
+) -> Result<String, PreparationError> {
+    let mut source = executable_netlist.to_owned();
+    for (name, value) in overrides {
+        let parsed = rspice_core::Netlist::parse(&source).map_err(|error| {
+            PreparationError::new(
+                PreparationStage::Netlist,
+                format!("Cannot validate Run Set source binding {name:?}: {error}"),
+            )
+        })?;
+        let element = parsed
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(name))
+            .ok_or_else(|| {
+                PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    format!("Run Set source binding {name:?} is absent from the executable deck"),
+                )
+            })?;
+        let spec = match &element.kind {
+            rspice_core::netlist::ElementKind::VoltageSource(spec)
+            | rspice_core::netlist::ElementKind::CurrentSource(spec) => spec,
+            _ => {
+                return Err(PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    format!("Run Set source binding {name:?} is not an independent source"),
+                ));
+            }
+        };
+        if !source_spec_has_explicit_dc(spec) {
+            return Err(PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!(
+                    "Run Set source binding {name:?} has no explicit DC value that can be replaced"
+                ),
+            ));
+        }
+        source = replace_source_dc_card(&source, name, value).ok_or_else(|| {
+            PreparationError::new(
+                PreparationStage::Netlist,
+                format!("Run Set could not locate the authored card for source {name:?}"),
+            )
+        })?;
+    }
+    Ok(source)
+}
+
+fn source_spec_has_explicit_dc(spec: &rspice_core::netlist::SourceSpec) -> bool {
+    use rspice_core::netlist::SourceSpec;
+    match spec {
+        SourceSpec::Dc(_)
+        | SourceSpec::DcAc { .. }
+        | SourceSpec::DcTransient { .. }
+        | SourceSpec::DcAcTransient { .. } => true,
+        SourceSpec::Distortion { inner, .. } | SourceSpec::RfPort { inner, .. } => {
+            source_spec_has_explicit_dc(inner)
+        }
+        _ => false,
+    }
+}
+
+fn replace_source_dc_card(source: &str, source_name: &str, value: &str) -> Option<String> {
+    let mut replaced = false;
+    let mut output = String::with_capacity(source.len() + value.len());
+    for line in source.split_inclusive('\n') {
+        let newline = line.ends_with('\n');
+        let content = line.trim_end_matches(['\r', '\n']);
+        let mut tokens = content.split_whitespace().collect::<Vec<_>>();
+        if !replaced
+            && tokens
+                .first()
+                .is_some_and(|token| token.eq_ignore_ascii_case(source_name))
+            && tokens.len() >= 4
+        {
+            let value_index = tokens
+                .iter()
+                .position(|token| token.eq_ignore_ascii_case("DC"))
+                .and_then(|index| (index + 1 < tokens.len()).then_some(index + 1))
+                .unwrap_or(3);
+            tokens[value_index] = value;
+            output.push_str(&tokens.join(" "));
+            replaced = true;
+        } else {
+            output.push_str(content);
+        }
+        if newline {
+            output.push('\n');
+        }
+    }
+    replaced.then_some(output)
 }
 
 fn operating_point_config(spec: &AnalysisSpec) -> Option<crate::simulation::dialog::OpConfig> {
@@ -2176,7 +2389,7 @@ fn operating_point_config(spec: &AnalysisSpec) -> Option<crate::simulation::dial
             previous_state: previous_state.clone(),
             violation_devices: violation_devices.clone(),
             violation_source_content_digest: *violation_source_content_digest,
-            run_point: *run_point,
+            run_point: run_point.clone(),
         }),
         _ => None,
     }
@@ -2197,7 +2410,7 @@ fn operating_point_spec(config: &crate::simulation::dialog::OpConfig) -> Analysi
         previous_state: config.previous_state.clone(),
         violation_devices: config.violation_devices.clone(),
         violation_source_content_digest: config.violation_source_content_digest,
-        run_point: config.run_point,
+        run_point: config.run_point.clone(),
     }
 }
 
@@ -2213,7 +2426,7 @@ fn validate_retained_operating_point_contract(
     spec_config.validate_for_execution()?;
     let effective_source_digest = super::canonical::operating_point_effective_source_digest(
         executable_source,
-        spec_config.run_point,
+        spec_config.run_point.clone(),
     );
     if let Some(previous) = spec_config.previous_state.as_ref()
         && previous.source_content_digest != effective_source_digest
@@ -2324,7 +2537,10 @@ fn derive_pvt_points(
         for point in points {
             let mut process = reference_process;
             let mut voltage = None;
+            let mut supply_source_names = Vec::new();
             let mut temperature_celsius = reference_temperature_celsius;
+            let mut parameter_overrides = Vec::new();
+            let mut source_overrides = Vec::new();
             for (dimension, value) in point.coordinates {
                 let canonical = value.canonical.ok_or_else(|| {
                     PreparationError::new(
@@ -2351,14 +2567,69 @@ fn derive_pvt_points(
                             }
                         };
                     }
-                    RunSetDimensionKind::Supply => voltage = Some(canonical),
+                    RunSetDimensionKind::Supply => {
+                        voltage = Some(canonical);
+                        supply_source_names =
+                            crate::simulation::run_set::parse_supply_source_authority(
+                                &dimension.source,
+                            )
+                            .map_err(|error| {
+                                PreparationError::new(
+                                    PreparationStage::AnalysisPlan,
+                                    format!("Run Set supply binding is not executable: {error}"),
+                                )
+                            })?;
+                    }
                     RunSetDimensionKind::Temperature => temperature_celsius = canonical,
+                    RunSetDimensionKind::Parameter => {
+                        let name = crate::simulation::run_set::parse_parameter_source_authority(
+                            &dimension.source,
+                        )
+                        .map_err(|error| {
+                            PreparationError::new(
+                                PreparationStage::AnalysisPlan,
+                                format!("Run Set parameter binding is not executable: {error}"),
+                            )
+                        })?;
+                        parameter_overrides.push((name, value.lexical.trim().to_owned()));
+                    }
+                    RunSetDimensionKind::Source => {
+                        let name = crate::simulation::run_set::parse_source_value_authority(
+                            &dimension.source,
+                        )
+                        .map_err(|error| {
+                            PreparationError::new(
+                                PreparationStage::AnalysisPlan,
+                                format!("Run Set source binding is not executable: {error}"),
+                            )
+                        })?;
+                        source_overrides.push((name, value.lexical.trim().to_owned()));
+                    }
+                    RunSetDimensionKind::Model
+                    | RunSetDimensionKind::Frequency
+                    | RunSetDimensionKind::Time
+                    | RunSetDimensionKind::Seed
+                    | RunSetDimensionKind::Sample
+                    | RunSetDimensionKind::AnalysisSelection
+                    | RunSetDimensionKind::DigitalConfiguration
+                    | RunSetDimensionKind::ExternalDataset => {
+                        return Err(PreparationError::new(
+                            PreparationStage::AnalysisPlan,
+                            format!(
+                                "Run Set {} binding reached preparation without an executor",
+                                dimension.kind.as_str()
+                            ),
+                        ));
+                    }
                 }
             }
             prepared.push(PreparedPvtPoint {
                 process,
                 voltage,
+                supply_source_names,
                 temperature_celsius,
+                parameter_overrides,
+                source_overrides,
                 corner_contract: Some(run_set.corner_contract.clone()),
             });
         }
@@ -2406,7 +2677,10 @@ fn derive_pvt_points(
                     |(process, voltage, temperature_celsius)| PreparedPvtPoint {
                         process: process_from_corner_runner(process),
                         voltage: Some(voltage),
+                        supply_source_names: corner.supply_source_names.clone(),
                         temperature_celsius,
+                        parameter_overrides: Vec::new(),
+                        source_overrides: Vec::new(),
                         corner_contract: Some(corner.clone()),
                     },
                 ));
@@ -2434,7 +2708,10 @@ fn derive_pvt_points(
                         |temperature_celsius| PreparedPvtPoint {
                             process: reference_process,
                             voltage: None,
+                            supply_source_names: Vec::new(),
                             temperature_celsius,
+                            parameter_overrides: Vec::new(),
+                            source_overrides: Vec::new(),
                             corner_contract: None,
                         },
                     ));
@@ -2496,7 +2773,10 @@ fn reference_pvt_point(process: ProcessCorner, temperature_celsius: f64) -> Prep
     PreparedPvtPoint {
         process,
         voltage: None,
+        supply_source_names: Vec::new(),
         temperature_celsius,
+        parameter_overrides: Vec::new(),
+        source_overrides: Vec::new(),
         corner_contract: None,
     }
 }
@@ -2508,6 +2788,10 @@ fn corner_contract_digest(
     writer.option(contract.nominal_voltage.as_ref(), |writer, voltage| {
         writer.f64(*voltage);
     });
+    writer.sequence(contract.supply_source_names.len());
+    for source in &contract.supply_source_names {
+        writer.string(source);
+    }
     writer.sequence(contract.model_bindings.len());
     for binding in &contract.model_bindings {
         writer.u8(match binding.process {
@@ -2592,6 +2876,16 @@ fn snapshot_digest(
             writer.f64(*voltage);
         });
         writer.f64(point.temperature_celsius);
+        writer.sequence(point.parameter_overrides.len());
+        for (name, value) in &point.parameter_overrides {
+            writer.string(name);
+            writer.string(value);
+        }
+        writer.sequence(point.source_overrides.len());
+        for (name, value) in &point.source_overrides {
+            writer.string(name);
+            writer.string(value);
+        }
     }
 
     writer.domain("ordered-prepared-task-graph");
@@ -2640,7 +2934,7 @@ fn snapshot_digest(
     }
 
     writer.domain("save-policy");
-    writer.u8(save_policy.tag());
+    save_policy.encode(&mut writer);
     writer.domain("model-and-library-identities");
     writer.sequence(model_identities.len());
     for identity in model_identities {

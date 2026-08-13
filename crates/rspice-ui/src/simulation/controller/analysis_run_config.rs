@@ -356,6 +356,7 @@ impl SimulationController {
         Ok(CornerRunConfig {
             process_corners,
             voltages: corner_cfg.voltages.clone(),
+            supply_source_names: corner_cfg.supply_source_names.clone(),
             temperatures_c: corner_cfg.temperatures.clone(),
             full_matrix: corner_cfg.full_matrix,
             nominal_voltage,

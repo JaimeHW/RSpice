@@ -366,7 +366,7 @@ fn encode_op_config(writer: &mut CanonicalWriter, config: &OpConfig) {
         config.previous_state.as_ref(),
         &config.violation_devices,
         config.violation_source_content_digest.as_ref(),
-        config.run_point,
+        config.run_point.clone(),
     );
 }
 
@@ -480,6 +480,10 @@ fn encode_op_fields(
         run_point.nominal_supply_voltage.as_ref(),
         |writer, voltage| writer.f64(*voltage),
     );
+    writer.sequence(run_point.supply_source_names.len());
+    for source in &run_point.supply_source_names {
+        writer.string(source);
+    }
 }
 
 pub(in crate::simulation) fn manual_source_receipt_digest(
@@ -663,7 +667,7 @@ fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
             previous_state.as_ref(),
             violation_devices,
             violation_source_content_digest.as_ref(),
-            *run_point,
+            run_point.clone(),
         ),
         AnalysisSpec::Pac
         | AnalysisSpec::Pnoise
@@ -1281,6 +1285,9 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         encode_f64_slice(writer, &config.temperatures_c);
         encode_corner_base_mode(writer, &config.base_mode);
     });
+    writer.option(options.parametric_base.as_ref(), |writer, mode| {
+        encode_corner_base_mode(writer, mode);
+    });
     writer.option(options.corner.as_ref(), |writer, config| {
         writer.sequence(config.process_corners.len());
         for process in &config.process_corners {
@@ -1290,6 +1297,10 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         encode_f64_slice(writer, &config.temperatures_c);
         writer.bool(config.full_matrix);
         writer.option(config.nominal_voltage.as_ref(), |w, v| w.f64(*v));
+        writer.sequence(config.supply_source_names.len());
+        for source in &config.supply_source_names {
+            writer.string(source);
+        }
         encode_corner_base_mode(writer, &config.base_mode);
         writer.sequence(config.model_bindings.len());
         for binding in &config.model_bindings {
@@ -1399,6 +1410,26 @@ fn encode_corner_base_mode(writer: &mut CanonicalWriter, mode: &CornerBaseMode) 
             writer.f64(*stop);
             writer.f64(*step);
         }
+        CornerBaseMode::DcSweepNested {
+            source_name,
+            start,
+            stop,
+            step,
+            source2,
+            start2,
+            stop2,
+            step2,
+        } => {
+            writer.u8(4);
+            writer.string(source_name);
+            writer.f64(*start);
+            writer.f64(*stop);
+            writer.f64(*step);
+            writer.string(source2);
+            writer.f64(*start2);
+            writer.f64(*stop2);
+            writer.f64(*step2);
+        }
         CornerBaseMode::Transient {
             stop_time,
             step_time,
@@ -1406,6 +1437,20 @@ fn encode_corner_base_mode(writer: &mut CanonicalWriter, mode: &CornerBaseMode) 
             writer.u8(2);
             writer.f64(*stop_time);
             writer.f64(*step_time);
+        }
+        CornerBaseMode::TransientWindow {
+            stop_time,
+            step_time,
+            start_time,
+            max_timestep,
+            uic,
+        } => {
+            writer.u8(5);
+            writer.f64(*stop_time);
+            writer.f64(*step_time);
+            writer.f64(*start_time);
+            writer.option(max_timestep.as_ref(), |writer, value| writer.f64(*value));
+            writer.bool(*uic);
         }
         CornerBaseMode::Ac {
             start_freq,

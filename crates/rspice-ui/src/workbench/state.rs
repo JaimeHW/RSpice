@@ -47,6 +47,7 @@ pub enum Workspace {
 /// authoritative project configuration after restart.
 #[derive(Debug, Clone)]
 pub enum SimulationWorkflowDialog {
+    PlanManager(SimulationPlanManagerDraft),
     ClonePlan(ClonePlanDraft),
     DesignVariable(DesignVariableDraft),
     SavedOutput(SavedOutputDraft),
@@ -54,6 +55,7 @@ pub enum SimulationWorkflowDialog {
 
 #[derive(Debug, Clone)]
 pub struct ClonePlanDraft {
+    pub source_plan_id: crate::product::SimulationPlanId,
     pub name: String,
     pub copy_analyses_options: bool,
     pub copy_variables_outputs_specs: bool,
@@ -63,8 +65,9 @@ pub struct ClonePlanDraft {
 }
 
 impl ClonePlanDraft {
-    pub fn for_source(source_name: &str) -> Self {
+    pub fn for_source(source_plan_id: crate::product::SimulationPlanId, source_name: &str) -> Self {
         Self {
+            source_plan_id,
             name: format!("{source_name} · variant"),
             copy_analyses_options: true,
             copy_variables_outputs_specs: true,
@@ -273,6 +276,52 @@ impl WorkspaceDocumentId {
             | Self::NetlistDependency { .. }
             | Self::NetlistComparison
             | Self::NetlistSource => Workspace::Netlist,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimulationPlanManagerMode {
+    Browse,
+    Create,
+    Rename,
+    Compare,
+    Export,
+    Import,
+    Campaign,
+    ConfirmArchive,
+}
+
+/// Runtime-only state of the versioned Simulation Plan Manager.
+#[derive(Debug, Clone)]
+pub struct SimulationPlanManagerDraft {
+    pub selected_plan_id: crate::product::SimulationPlanId,
+    pub filter: String,
+    /// 0 = working and archived, 1 = working only, 2 = archived only.
+    pub scope: usize,
+    pub mode: SimulationPlanManagerMode,
+    pub name: String,
+    pub exchange_text: String,
+    pub campaign_name: String,
+    pub campaign_member_ids: Vec<crate::product::SimulationPlanId>,
+    pub validation_error: Option<String>,
+}
+
+impl SimulationPlanManagerDraft {
+    pub fn new(
+        selected_plan_id: crate::product::SimulationPlanId,
+        selected_name: impl Into<String>,
+    ) -> Self {
+        Self {
+            selected_plan_id,
+            filter: String::new(),
+            scope: 0,
+            mode: SimulationPlanManagerMode::Browse,
+            name: selected_name.into(),
+            exchange_text: String::new(),
+            campaign_name: "Simulation campaign".to_owned(),
+            campaign_member_ids: Vec::new(),
+            validation_error: None,
         }
     }
 }

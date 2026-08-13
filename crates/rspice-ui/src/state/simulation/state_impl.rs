@@ -298,6 +298,10 @@ impl SimulationState {
         &mut self,
         receipt: Option<PreparedRunReceipt>,
     ) -> &mut SimulationRun {
+        let plan_scoped = receipt
+            .as_ref()
+            .and_then(PreparedRunReceipt::simulation_plan_id)
+            .is_some();
         self.next_run_id += 1;
         let run = match receipt {
             Some(receipt) => SimulationRun::new_prepared(self.next_run_id, receipt),
@@ -312,7 +316,9 @@ impl SimulationState {
         self.active_analysis_idx = None;
 
         // Prune history if needed
-        self.prune_runs_history();
+        if !plan_scoped {
+            self.prune_runs_history();
+        }
         self.prune_overlay_dataset_ids();
 
         // Return mutable reference to the new run
@@ -583,7 +589,9 @@ impl SimulationState {
         overlay_dataset_ids: Vec<DatasetId>,
     ) {
         self.runs = runs;
-        self.prune_runs_history();
+        // Loading a project must not apply the retired project-global limit to
+        // a history now owned by multiple simulation plans. Each plan applies
+        // its own policy when it next creates or explicitly edits retention.
 
         let max_run_id = self.runs.iter().map(|run| run.id).max().unwrap_or(0);
         self.next_run_id = next_run_id.max(max_run_id);
@@ -660,11 +668,68 @@ impl SimulationState {
 
     /// How many retained datasets are pinned as golden baselines.
     #[must_use]
+    #[cfg(test)]
     pub fn pinned_run_count(&self) -> usize {
         self.runs
             .iter()
             .filter(|run| run.retention().is_pinned())
             .count()
+    }
+
+    #[must_use]
+    pub fn retained_plan_dataset_count(&self, plan_id: crate::product::SimulationPlanId) -> usize {
+        self.runs
+            .iter()
+            .filter(|run| {
+                run.prepared_receipt()
+                    .and_then(PreparedRunReceipt::simulation_plan_id)
+                    == Some(plan_id)
+            })
+            .count()
+    }
+
+    #[must_use]
+    pub fn pinned_plan_run_count(&self, plan_id: crate::product::SimulationPlanId) -> usize {
+        self.runs
+            .iter()
+            .filter(|run| {
+                run.retention().is_pinned()
+                    && run
+                        .prepared_receipt()
+                        .and_then(PreparedRunReceipt::simulation_plan_id)
+                        == Some(plan_id)
+            })
+            .count()
+    }
+
+    pub(crate) fn prune_plan_runs(
+        &mut self,
+        plan_id: crate::product::SimulationPlanId,
+        limit: usize,
+    ) {
+        let limit = limit.max(1);
+        let selected_run_id = self.active_run().map(|run| run.run_id);
+        while self.retained_plan_dataset_count(plan_id) > limit {
+            let Some(index) = self.runs.iter().rposition(|run| {
+                run.retention().is_pruneable()
+                    && run
+                        .prepared_receipt()
+                        .and_then(PreparedRunReceipt::simulation_plan_id)
+                        == Some(plan_id)
+                    && Some(run.run_id) != selected_run_id
+            }) else {
+                break;
+            };
+            self.runs.remove(index);
+        }
+        if let Some(run_id) = selected_run_id {
+            self.active_run_idx = self.runs.iter().position(|run| run.run_id == run_id);
+            if self.active_run_idx.is_none() {
+                self.active_analysis_idx = None;
+            }
+        }
+        self.prune_overlay_dataset_ids();
+        self.prune_yield_evidence_provenance();
     }
 
     /// Whether the retention limit can still be honoured at all.
@@ -673,6 +738,7 @@ impl SimulationState {
     /// history grows past it instead of holding at it. Surfaces report that
     /// rather than a count that implies the limit is being enforced.
     #[must_use]
+    #[cfg(test)]
     pub fn retention_limit_is_unenforceable(&self) -> bool {
         self.pinned_run_count() >= self.effective_retained_dataset_limit()
     }
@@ -714,6 +780,7 @@ impl SimulationState {
     ///
     /// Applying at once is deliberate: a limit that only takes effect on the
     /// next run would report a policy the project is not actually under.
+    #[cfg(test)]
     pub fn set_retained_dataset_limit(&mut self, limit: usize) {
         self.retained_dataset_limit = Some(limit.max(1));
         self.prune_runs_history();
@@ -782,6 +849,48 @@ impl SimulationState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn plan_receipt(plan_id: crate::product::SimulationPlanId, byte: u8) -> PreparedRunReceipt {
+        PreparedRunReceipt::new(
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(plan_id),
+            crate::product::ObjectRevision::INITIAL,
+            crate::product::ContentDigest::from_bytes([byte; 32]),
+            crate::product::ContentDigest::from_bytes([byte.wrapping_add(1); 32]),
+            PreparedSourceCheckReceipt::SchematicDrc(crate::product::ContentDigest::from_bytes(
+                [byte.wrapping_add(2); 32],
+            )),
+            vec![
+                PreparedRunTaskReceipt::new(
+                    crate::product::AnalysisInstanceId::new(),
+                    crate::product::ObjectRevision::INITIAL,
+                    Vec::new(),
+                    0,
+                    crate::product::ContentDigest::from_bytes([byte.wrapping_add(3); 32]),
+                )
+                .expect("task receipt"),
+            ],
+        )
+        .expect("plan receipt")
+    }
+
+    #[test]
+    fn plan_retention_prunes_only_the_owning_plans_datasets() {
+        let plan_a = crate::product::SimulationPlanId::new();
+        let plan_b = crate::product::SimulationPlanId::new();
+        let mut state = SimulationState::default();
+        state.start_prepared_run(plan_receipt(plan_a, 1));
+        state.start_prepared_run(plan_receipt(plan_b, 11));
+        state.start_prepared_run(plan_receipt(plan_a, 21));
+        state.start_prepared_run(plan_receipt(plan_b, 31));
+        state.start_prepared_run(plan_receipt(plan_a, 41));
+
+        state.prune_plan_runs(plan_a, 2);
+
+        assert_eq!(state.retained_plan_dataset_count(plan_a), 2);
+        assert_eq!(state.retained_plan_dataset_count(plan_b), 2);
+        assert_eq!(state.runs.len(), 4);
+    }
 
     #[test]
     fn deferred_saved_output_materializes_by_stable_identity_and_refreshes_selection() {

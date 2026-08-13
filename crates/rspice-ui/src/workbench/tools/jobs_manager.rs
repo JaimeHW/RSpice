@@ -22,6 +22,7 @@ use crate::ui::{
     tokens::{self, Tokens},
     widgets::{Dialog, DialogChoice, DialogSize},
 };
+use crate::workbench::state::JobsPlanScope;
 use crate::workbench::{AppState, RSpiceApp};
 
 use crate::workbench::{
@@ -81,6 +82,8 @@ struct RunRow {
     source_revision: String,
     run_set_id: String,
     tasks: Vec<TaskRow>,
+    plan_id: Option<crate::product::SimulationPlanId>,
+    campaign: Option<crate::state::SimulationCampaignMembership>,
 }
 
 impl RunRow {
@@ -115,6 +118,36 @@ impl RunRow {
             .unwrap_or_else(|| "Target not retained (legacy run)".to_owned());
         let (scope, evidence, source_revision, run_set_id, tasks) =
             run_authority_rows(run, executor_owned, current_analysis_progress);
+        let plan_id = run
+            .prepared_receipt()
+            .and_then(crate::state::PreparedRunReceipt::simulation_plan_id);
+        let mut scope = plan_id.map_or(scope, |plan_id| {
+            let name = state
+                .sim_setup
+                .stable_analysis_plan()
+                .ok()
+                .filter(|plan| plan.id() == plan_id)
+                .map(|_| state.sim_setup.active_plan_name().to_string())
+                .or_else(|| {
+                    state
+                        .sim_setup
+                        .inactive_plans()
+                        .iter()
+                        .find(|plan| plan.id() == plan_id)
+                        .map(|plan| plan.name().to_string())
+                })
+                .unwrap_or_else(|| "Deleted plan".to_owned());
+            format!("{name} · {plan_id}")
+        });
+        let campaign = run.campaign_membership().cloned();
+        if let Some(membership) = &campaign {
+            scope.push_str(&format!(
+                "\n{} · member {}/{}",
+                membership.name(),
+                membership.member_index(),
+                membership.member_count()
+            ));
+        }
         // The runner reports progress for the analysis currently executing.
         // The manager reports progress for the immutable prepared batch, so
         // completed task prefixes and the active task must be folded together.
@@ -143,13 +176,27 @@ impl RunRow {
             source_revision,
             run_set_id,
             tasks,
+            plan_id,
+            campaign,
         }
     }
 }
 
 #[derive(Debug, Clone)]
+struct CampaignRollup {
+    id: crate::product::SimulationCampaignId,
+    name: String,
+    retained_members: usize,
+    declared_members: u32,
+    completed_members: usize,
+    failed_members: usize,
+    active_members: usize,
+}
+
+#[derive(Debug, Clone)]
 struct JobsSnapshot {
     rows: Vec<RunRow>,
+    campaigns: Vec<CampaignRollup>,
     selected_run_id: Option<RunId>,
     running: bool,
     cancelling: bool,
@@ -157,23 +204,63 @@ struct JobsSnapshot {
 }
 
 impl JobsSnapshot {
-    fn capture(state: &AppState, requested: Option<RunId>) -> Self {
+    fn capture(state: &AppState, requested: Option<RunId>, scope: JobsPlanScope) -> Self {
         let active_run_id = state
             .simulation
             .active_execution
             .map(|execution| execution.run_id);
+        let active_plan_id = state
+            .sim_setup
+            .stable_analysis_plan()
+            .ok()
+            .map(|plan| plan.id());
         let rows = state
             .simulation
             .runs
             .iter()
             .map(|run| RunRow::from_run(state, run, Some(run.run_id) == active_run_id))
+            .filter(|row| match scope {
+                JobsPlanScope::AllPlans => true,
+                JobsPlanScope::ActivePlan => row.plan_id == active_plan_id,
+                JobsPlanScope::ManualDeck => row.plan_id.is_none(),
+            })
             .collect::<Vec<_>>();
         let selected_run_id = requested
             .filter(|id| rows.iter().any(|row| row.run_id == *id))
-            .or(active_run_id)
+            .or_else(|| active_run_id.filter(|id| rows.iter().any(|row| row.run_id == *id)))
             .or_else(|| rows.first().map(|row| row.run_id));
+        let mut campaigns = Vec::<CampaignRollup>::new();
+        for row in &rows {
+            let Some(membership) = &row.campaign else {
+                continue;
+            };
+            let index = campaigns
+                .iter()
+                .position(|campaign| campaign.id == membership.campaign_id())
+                .unwrap_or_else(|| {
+                    campaigns.push(CampaignRollup {
+                        id: membership.campaign_id(),
+                        name: membership.name().to_owned(),
+                        retained_members: 0,
+                        declared_members: membership.member_count(),
+                        completed_members: 0,
+                        failed_members: 0,
+                        active_members: 0,
+                    });
+                    campaigns.len() - 1
+                });
+            let campaign = &mut campaigns[index];
+            campaign.retained_members += 1;
+            match row.tone {
+                RunTone::Success => campaign.completed_members += 1,
+                RunTone::Error | RunTone::Warning => campaign.failed_members += 1,
+                RunTone::Active => campaign.active_members += 1,
+                RunTone::Neutral => {}
+            }
+        }
         Self {
             rows,
+            campaigns,
             selected_run_id,
             running: active_run_id.is_some(),
             cancelling: active_run_id.is_some_and(|run_id| {
@@ -209,10 +296,15 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
         return;
     }
 
-    let snapshot =
-        JobsSnapshot::capture(&app.state, app.state.workbench.jobs_manager.selected_run_id);
+    let scope = app.state.workbench.jobs_manager.plan_scope;
+    let snapshot = JobsSnapshot::capture(
+        &app.state,
+        app.state.workbench.jobs_manager.selected_run_id,
+        scope,
+    );
     app.state.workbench.jobs_manager.selected_run_id = snapshot.selected_run_id;
     let mut requested_selection = None;
+    let mut requested_scope = scope;
     let mut body_scroll_offset = app.state.workbench.jobs_manager.scroll_offset;
     let run_label = if snapshot.cancelling {
         "Cancelling…"
@@ -243,6 +335,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
         dialog
     };
     let choice = dialog.show(ctx, |ui| {
+        render_plan_scope(ui, scope, &mut requested_scope);
         render_status_strip(ui, &snapshot);
         let output = ScrollArea::vertical()
             .id_salt("workbench.jobs-manager.body")
@@ -255,6 +348,10 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     });
 
     app.state.workbench.jobs_manager.scroll_offset = body_scroll_offset;
+    if requested_scope != scope {
+        app.state.workbench.jobs_manager.plan_scope = requested_scope;
+        app.state.workbench.jobs_manager.selected_run_id = None;
+    }
     if let Some(run_id) = requested_selection {
         app.state.workbench.jobs_manager.selected_run_id = Some(run_id);
     }
@@ -270,6 +367,30 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
         DialogChoice::Ghost | DialogChoice::Cancelled => close_to_source(app),
         DialogChoice::Secondary | DialogChoice::None => {}
     }
+}
+
+fn render_plan_scope(ui: &mut Ui, current: JobsPlanScope, requested: &mut JobsPlanScope) {
+    let t = Tokens::get(ui.ctx());
+    Frame::NONE
+        .fill(t.color.bg_panel)
+        .inner_margin(Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new("History scope")
+                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                        .color(t.color.text_dim),
+                );
+                for scope in JobsPlanScope::ALL {
+                    if ui
+                        .selectable_label(current == scope, scope.label())
+                        .clicked()
+                    {
+                        *requested = scope;
+                    }
+                }
+            });
+        });
 }
 
 fn close_to_source(app: &mut RSpiceApp) {
@@ -499,6 +620,62 @@ fn render_queue_and_graph(
             }
         });
 
+    if !snapshot.campaigns.is_empty() {
+        section_head(
+            ui,
+            "Campaign roll-up",
+            &format!("{} retained campaign(s)", snapshot.campaigns.len()),
+            t.color.text_dim,
+        );
+        Frame::NONE
+            .fill(t.color.bg_app)
+            .inner_margin(Margin::symmetric(10, 7))
+            .show(ui, |ui| {
+                for campaign in &snapshot.campaigns {
+                    let outcome = if campaign.active_members > 0 {
+                        "running"
+                    } else if campaign.retained_members < campaign.declared_members as usize {
+                        "partial history"
+                    } else if campaign.failed_members > 0 {
+                        "completed with errors"
+                    } else {
+                        "complete"
+                    };
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(
+                            RichText::new(&campaign.name)
+                                .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                                .color(t.color.text),
+                        );
+                        ui.label(
+                            RichText::new(campaign.id.to_string())
+                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                .color(t.color.text_faint),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.label(
+                                RichText::new(format!(
+                                    "{outcome} · {}/{} retained · {} complete · {} failed",
+                                    campaign.retained_members,
+                                    campaign.declared_members,
+                                    campaign.completed_members,
+                                    campaign.failed_members
+                                ))
+                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                .color(
+                                    if campaign.failed_members > 0 {
+                                        t.color.warn
+                                    } else {
+                                        t.color.ok
+                                    },
+                                ),
+                            );
+                        });
+                    });
+                }
+            });
+    }
+
     let selected = snapshot.selected();
     section_head(
         ui,
@@ -608,6 +785,23 @@ fn render_inspector(ui: &mut Ui, snapshot: &JobsSnapshot) {
                         "Run-set ID",
                         &row.run_set_id,
                     );
+                    if let Some(campaign) = &row.campaign {
+                        crate::workbench::design_system::property_row(
+                            ui,
+                            "Campaign",
+                            campaign.name(),
+                        );
+                        crate::workbench::design_system::property_row(
+                            ui,
+                            "Campaign member",
+                            &format!(
+                                "{} / {} · {}",
+                                campaign.member_index(),
+                                campaign.member_count(),
+                                campaign.campaign_id()
+                            ),
+                        );
+                    }
                     crate::workbench::design_system::property_row(
                         ui,
                         "Tasks",
@@ -1253,6 +1447,14 @@ fn export_selected_manifest(app: &mut RSpiceApp) {
 
 fn serialize_manifest(run: &SimulationRun) -> Result<String, String> {
     run.validate_provenance()?;
+    let campaign = run.campaign_membership().map(|membership| {
+        json!({
+            "campaign_id": membership.campaign_id().to_string(),
+            "name": membership.name(),
+            "member_index": membership.member_index(),
+            "member_count": membership.member_count(),
+        })
+    });
     let success = if matches!(
         run.lifecycle,
         SimulationRunLifecycle::Preparing
@@ -1351,6 +1553,7 @@ fn serialize_manifest(run: &SimulationRun) -> Result<String, String> {
                 "id": target.runtime(),
                 "label": target.label(),
             })),
+            "campaign": campaign,
             "provenance": provenance,
             "analyses": analyses,
         }
@@ -1361,7 +1564,34 @@ fn serialize_manifest(run: &SimulationRun) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{AnalysisResult, AnalysisType, SimulationState};
+    use crate::state::{
+        AnalysisResult, AnalysisResultSourceDomain, AnalysisType, PreparedRunReceipt,
+        PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationState,
+    };
+
+    fn plan_receipt(plan_id: crate::product::SimulationPlanId, byte: u8) -> PreparedRunReceipt {
+        PreparedRunReceipt::new(
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(plan_id),
+            crate::product::ObjectRevision::INITIAL,
+            crate::product::ContentDigest::from_bytes([byte; 32]),
+            crate::product::ContentDigest::from_bytes([byte.wrapping_add(1); 32]),
+            PreparedSourceCheckReceipt::SchematicDrc(crate::product::ContentDigest::from_bytes(
+                [byte.wrapping_add(2); 32],
+            )),
+            vec![
+                PreparedRunTaskReceipt::new(
+                    crate::product::AnalysisInstanceId::new(),
+                    crate::product::ObjectRevision::INITIAL,
+                    Vec::new(),
+                    0,
+                    crate::product::ContentDigest::from_bytes([byte.wrapping_add(3); 32]),
+                )
+                .expect("task receipt"),
+            ],
+        )
+        .expect("plan receipt")
+    }
 
     #[test]
     fn stale_selection_reanchors_to_the_active_stable_run() {
@@ -1376,12 +1606,72 @@ mod tests {
             .simulation
             .run_by_stable_id(second)
             .and_then(SimulationRun::execution_identity);
-        let snapshot = JobsSnapshot::capture(&state, Some(first));
+        let snapshot = JobsSnapshot::capture(&state, Some(first), JobsPlanScope::AllPlans);
         assert_eq!(snapshot.selected_run_id, Some(first));
 
         state.simulation.runs.retain(|run| run.run_id != first);
-        let snapshot = JobsSnapshot::capture(&state, Some(first));
+        let snapshot = JobsSnapshot::capture(&state, Some(first), JobsPlanScope::AllPlans);
         assert_eq!(snapshot.selected_run_id, Some(second));
+    }
+
+    #[test]
+    fn history_scope_never_mixes_active_plan_inactive_plan_and_manual_decks() {
+        let mut state = AppState::default();
+        let inactive_plan_id = state.sim_setup.stable_analysis_plan().unwrap().id();
+        let active_plan_id = state
+            .sim_setup
+            .create_plan("Campaign member")
+            .expect("create second plan");
+
+        let campaign_id = crate::product::SimulationCampaignId::new();
+        let inactive_run = {
+            let run = state
+                .simulation
+                .start_prepared_run(plan_receipt(inactive_plan_id, 1));
+            run.set_campaign_membership(
+                crate::state::SimulationCampaignMembership::new(
+                    campaign_id,
+                    "Two-plan campaign",
+                    1,
+                    2,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            run.run_id
+        };
+        let active_run = {
+            let run = state
+                .simulation
+                .start_prepared_run(plan_receipt(active_plan_id, 11));
+            run.set_campaign_membership(
+                crate::state::SimulationCampaignMembership::new(
+                    campaign_id,
+                    "Two-plan campaign",
+                    2,
+                    2,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            run.run_id
+        };
+        let manual_run = state.simulation.start_run().run_id;
+
+        let active = JobsSnapshot::capture(&state, None, JobsPlanScope::ActivePlan);
+        assert_eq!(active.rows.len(), 1);
+        assert_eq!(active.rows[0].run_id, active_run);
+        assert_eq!(active.selected_run_id, Some(active_run));
+
+        let manual = JobsSnapshot::capture(&state, None, JobsPlanScope::ManualDeck);
+        assert_eq!(manual.rows.len(), 1);
+        assert_eq!(manual.rows[0].run_id, manual_run);
+
+        let all = JobsSnapshot::capture(&state, None, JobsPlanScope::AllPlans);
+        assert_eq!(all.rows.len(), 3);
+        assert!(all.rows.iter().any(|row| row.run_id == inactive_run));
+        assert_eq!(all.campaigns.len(), 1);
+        assert_eq!(all.campaigns[0].retained_members, 2);
     }
 
     #[test]
@@ -1393,6 +1683,17 @@ mod tests {
         run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
         run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
             .expect("legacy fixture is valid");
+        let campaign_id = crate::product::SimulationCampaignId::new();
+        run.set_campaign_membership(
+            crate::state::SimulationCampaignMembership::new(
+                campaign_id,
+                "Nightly characterization",
+                1,
+                2,
+            )
+            .unwrap(),
+        )
+        .unwrap();
         let manifest = serialize_manifest(&run).expect("manifest serializes");
         let value: serde_json::Value = serde_json::from_str(&manifest).unwrap();
         assert!(value["manifest"]["job_id"].is_null());
@@ -1400,6 +1701,10 @@ mod tests {
         assert_eq!(
             value["manifest"]["provenance"]["mode"],
             "legacy-unattributed"
+        );
+        assert_eq!(
+            value["manifest"]["campaign"]["campaign_id"],
+            campaign_id.to_string()
         );
     }
 

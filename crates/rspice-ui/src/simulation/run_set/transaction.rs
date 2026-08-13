@@ -309,15 +309,17 @@ fn dispatch_with_validation(
         },
         RunSetAction::SetComposition(composition) => next.composition = composition.clone(),
         RunSetAction::ExcludePoint { key } => {
-            if next.composition.mode == RunSetCompositionMode::Zipped {
+            if !matches!(
+                next.composition.mode,
+                RunSetCompositionMode::Cartesian | RunSetCompositionMode::Filtered
+            ) {
                 // Excluding from a zipped space would have to name a point of
                 // the cross product, which is a different space from the one
                 // being run. Switching modes silently would change what the
                 // remaining points are, not just how many there are.
                 refusal = Some(missing(
                     "RUNSET-EXCLUSION-MODE",
-                    "Points are excluded from a cross product. Change the composition away from \
-                     zipped before excluding one.",
+                    "Point exclusions belong to a Cartesian/filtered composition. Change the composition before excluding one.",
                 ));
             } else if !super::points::contains_point_key(&next, key) {
                 refusal = Some(exclusion_unknown(
@@ -478,9 +480,19 @@ fn missing(id: &'static str, message: impl Into<String>) -> RunSetError {
 /// executable rather than an immediately invalid axis.
 fn default_values(kind: RunSetDimensionKind) -> Vec<&'static str> {
     match kind {
+        RunSetDimensionKind::Parameter => vec!["1"],
+        RunSetDimensionKind::Source => vec!["0"],
         RunSetDimensionKind::ProcessSection => vec!["TT", "SS", "FF"],
         RunSetDimensionKind::Supply => vec!["0.9", "1.0", "1.1"],
         RunSetDimensionKind::Temperature => vec!["-40", "25", "125"],
+        RunSetDimensionKind::Model => vec!["TT"],
+        RunSetDimensionKind::Frequency => vec!["1k", "1Meg"],
+        RunSetDimensionKind::Time => vec!["1n", "1u"],
+        RunSetDimensionKind::Seed => vec!["1"],
+        RunSetDimensionKind::Sample => vec!["100"],
+        RunSetDimensionKind::AnalysisSelection => vec!["analysis-instance-id"],
+        RunSetDimensionKind::DigitalConfiguration => vec!["digital-config-id"],
+        RunSetDimensionKind::ExternalDataset => vec!["dataset-id"],
     }
 }
 

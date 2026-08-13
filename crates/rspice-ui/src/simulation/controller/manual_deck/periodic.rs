@@ -106,7 +106,11 @@ pub(super) fn parse_periodic_tasks(
         let task = match head.as_str() {
             ".pss" => QueuedAnalysis {
                 numeric_override: None,
-                spec: pss_spec.clone().expect("one parsed PSS spec exists"),
+                spec: pss_spec.clone().ok_or_else(|| {
+                    vec![format!(
+                        "line {line}: the parsed .PSS directive lost its authenticated analysis specification"
+                    )]
+                })?,
                 config: None,
                 spec_options: SpecExecutionOptions::default(),
                 analysis_line: card.source.clone(),
@@ -197,17 +201,21 @@ pub(super) fn parse_periodic_tasks(
                     analysis_line: card.source.clone(),
                 }
             }
-            _ => unreachable!("filtered periodic directive"),
+            _ => {
+                return Err(vec![format!(
+                    "line {line}: unsupported periodic directive {head} reached task construction"
+                )]);
+            }
+        };
+        let pss_spectrum_harmonics = match &task.spec {
+            AnalysisSpec::Pss { num_harmonics, .. } if *num_harmonics > 0 => Some(*num_harmonics),
+            _ => None,
         };
         tasks.push(task);
-        if let AnalysisSpec::Pss { num_harmonics, .. } = &tasks.last().unwrap().spec
-            && *num_harmonics > 0
-        {
+        if let Some(num_harmonics) = pss_spectrum_harmonics {
             tasks.push(QueuedAnalysis {
                 numeric_override: None,
-                spec: AnalysisSpec::PssSpectrum {
-                    num_harmonics: *num_harmonics,
-                },
+                spec: AnalysisSpec::PssSpectrum { num_harmonics },
                 config: None,
                 spec_options: SpecExecutionOptions::default(),
                 analysis_line: format!("{} (spectrum)", card.source),

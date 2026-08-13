@@ -602,33 +602,13 @@ impl ProjectFile {
                 receipt.source_domain == AnalysisResultSourceDomain::SimulationPlan
             })
         });
-        let plan = if has_plan_receipt {
-            Some(
-                simulation_plan
-                    .ok_or_else(|| {
-                        "simulation-plan result history has no persisted simulation plan".to_owned()
-                    })?
-                    .stable_analysis_plan()?,
-            )
+        let plans = if has_plan_receipt {
+            Some(simulation_plan.ok_or_else(|| {
+                "simulation-plan result history has no persisted simulation plan".to_owned()
+            })?)
         } else {
             None
         };
-        let current = plan
-            .map(|plan| {
-                plan.instances()
-                    .iter()
-                    .map(|instance| (instance.id(), instance))
-                    .collect::<HashMap<_, _>>()
-            })
-            .unwrap_or_default();
-        let retired = plan
-            .map(|plan| {
-                plan.tombstones()
-                    .iter()
-                    .map(|tombstone| (tombstone.id(), tombstone))
-                    .collect::<HashMap<_, _>>()
-            })
-            .unwrap_or_default();
 
         for (run_idx, run) in simulation_results.runs.iter().enumerate() {
             let Some(receipt) = run.prepared_receipt.as_ref() else {
@@ -643,13 +623,38 @@ impl ProjectFile {
             }
             match receipt.source_domain {
                 AnalysisResultSourceDomain::SimulationPlan => {
-                    let plan = plan.expect("plan receipt precondition established above");
-                    if receipt.simulation_plan_id != Some(plan.id()) {
-                        return Err(format!(
-                            "runs[{run_idx}].prepared_receipt.simulation_plan_id does not match persisted plan {}",
-                            plan.id()
-                        ));
-                    }
+                    let plan_id = receipt.simulation_plan_id.ok_or_else(|| {
+                        format!(
+                            "runs[{run_idx}].prepared_receipt has simulation-plan provenance without a plan identity"
+                        )
+                    })?;
+                    let plans = plans.expect("plan receipt precondition established above");
+                    let plan = plans
+                        .stable_analysis_plan()
+                        .ok()
+                        .filter(|plan| plan.id() == plan_id)
+                        .or_else(|| {
+                            plans
+                                .inactive_plans()
+                                .iter()
+                                .find(|stored| stored.id() == plan_id)
+                                .map(|stored| stored.analysis_plan())
+                        })
+                        .ok_or_else(|| {
+                            format!(
+                                "runs[{run_idx}].prepared_receipt.simulation_plan_id {plan_id} is absent from the persisted plan catalog"
+                            )
+                        })?;
+                    let current = plan
+                        .instances()
+                        .iter()
+                        .map(|instance| (instance.id(), instance))
+                        .collect::<HashMap<_, _>>();
+                    let retired = plan
+                        .tombstones()
+                        .iter()
+                        .map(|tombstone| (tombstone.id(), tombstone))
+                        .collect::<HashMap<_, _>>();
                     let produced_task_ids = run
                         .analyses
                         .iter()

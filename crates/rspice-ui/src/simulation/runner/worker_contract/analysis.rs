@@ -48,6 +48,7 @@ impl From<WorkerSimulationRequest> for SimulationRequest {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerSpecExecutionOptions {
     pub temp: Option<WorkerTempRunConfig>,
+    pub parametric_base: Option<WorkerCornerBaseMode>,
     pub corner: Option<WorkerCornerRunConfig>,
     pub pac: Option<WorkerPacRunConfig>,
     pub pxf: Option<WorkerPxfRunConfig>,
@@ -59,6 +60,10 @@ impl From<&SpecExecutionOptions> for WorkerSpecExecutionOptions {
     fn from(value: &SpecExecutionOptions) -> Self {
         Self {
             temp: value.temp.as_ref().map(WorkerTempRunConfig::from),
+            parametric_base: value
+                .parametric_base
+                .as_ref()
+                .map(WorkerCornerBaseMode::from),
             corner: value.corner.as_ref().map(WorkerCornerRunConfig::from),
             pac: value.pac.as_ref().map(WorkerPacRunConfig::from),
             pxf: value.pxf.as_ref().map(WorkerPxfRunConfig::from),
@@ -74,6 +79,9 @@ impl From<WorkerSpecExecutionOptions> for SpecExecutionOptions {
             temp: value
                 .temp
                 .map(crate::services::simulation_runner::TempRunConfig::from),
+            parametric_base: value
+                .parametric_base
+                .map(crate::services::simulation_runner::CornerBaseMode::from),
             corner: value
                 .corner
                 .map(crate::services::simulation_runner::CornerRunConfig::from),
@@ -121,6 +129,8 @@ impl From<WorkerTempRunConfig> for crate::services::simulation_runner::TempRunCo
 pub(crate) struct WorkerCornerRunConfig {
     pub process_corners: Vec<WorkerCornerProcess>,
     pub voltages: Vec<f64>,
+    #[serde(default)]
+    pub supply_source_names: Vec<String>,
     pub temperatures_c: Vec<f64>,
     pub full_matrix: bool,
     pub nominal_voltage: Option<f64>,
@@ -180,6 +190,7 @@ impl From<&crate::services::simulation_runner::CornerRunConfig> for WorkerCorner
                 .map(WorkerCornerProcess::from)
                 .collect(),
             voltages: value.voltages.clone(),
+            supply_source_names: value.supply_source_names.clone(),
             temperatures_c: value.temperatures_c.clone(),
             full_matrix: value.full_matrix,
             nominal_voltage: value.nominal_voltage,
@@ -211,6 +222,7 @@ impl From<WorkerCornerRunConfig> for crate::services::simulation_runner::CornerR
                 .map(crate::services::simulation_runner::CornerProcess::from)
                 .collect(),
             voltages: value.voltages,
+            supply_source_names: value.supply_source_names,
             temperatures_c: value.temperatures_c,
             full_matrix: value.full_matrix,
             nominal_voltage: value.nominal_voltage,
@@ -242,9 +254,26 @@ pub(crate) enum WorkerCornerBaseMode {
         stop: f64,
         step: f64,
     },
+    DcSweepNested {
+        source_name: String,
+        start: f64,
+        stop: f64,
+        step: f64,
+        source2: String,
+        start2: f64,
+        stop2: f64,
+        step2: f64,
+    },
     Transient {
         stop_time: f64,
         step_time: f64,
+    },
+    TransientWindow {
+        stop_time: f64,
+        step_time: f64,
+        start_time: f64,
+        max_timestep: Option<f64>,
+        uic: bool,
     },
     Ac {
         start_freq: f64,
@@ -269,12 +298,44 @@ impl From<&crate::services::simulation_runner::CornerBaseMode> for WorkerCornerB
                 stop: *stop,
                 step: *step,
             },
+            crate::services::simulation_runner::CornerBaseMode::DcSweepNested {
+                source_name,
+                start,
+                stop,
+                step,
+                source2,
+                start2,
+                stop2,
+                step2,
+            } => Self::DcSweepNested {
+                source_name: source_name.clone(),
+                start: *start,
+                stop: *stop,
+                step: *step,
+                source2: source2.clone(),
+                start2: *start2,
+                stop2: *stop2,
+                step2: *step2,
+            },
             crate::services::simulation_runner::CornerBaseMode::Transient {
                 stop_time,
                 step_time,
             } => Self::Transient {
                 stop_time: *stop_time,
                 step_time: *step_time,
+            },
+            crate::services::simulation_runner::CornerBaseMode::TransientWindow {
+                stop_time,
+                step_time,
+                start_time,
+                max_timestep,
+                uic,
+            } => Self::TransientWindow {
+                stop_time: *stop_time,
+                step_time: *step_time,
+                start_time: *start_time,
+                max_timestep: *max_timestep,
+                uic: *uic,
             },
             crate::services::simulation_runner::CornerBaseMode::Ac {
                 start_freq,
@@ -306,12 +367,44 @@ impl From<WorkerCornerBaseMode> for crate::services::simulation_runner::CornerBa
                 stop,
                 step,
             },
+            WorkerCornerBaseMode::DcSweepNested {
+                source_name,
+                start,
+                stop,
+                step,
+                source2,
+                start2,
+                stop2,
+                step2,
+            } => Self::DcSweepNested {
+                source_name,
+                start,
+                stop,
+                step,
+                source2,
+                start2,
+                stop2,
+                step2,
+            },
             WorkerCornerBaseMode::Transient {
                 stop_time,
                 step_time,
             } => Self::Transient {
                 stop_time,
                 step_time,
+            },
+            WorkerCornerBaseMode::TransientWindow {
+                stop_time,
+                step_time,
+                start_time,
+                max_timestep,
+                uic,
+            } => Self::TransientWindow {
+                stop_time,
+                step_time,
+                start_time,
+                max_timestep,
+                uic,
             },
             WorkerCornerBaseMode::Ac {
                 start_freq,
@@ -824,7 +917,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 previous_state: previous_state.clone(),
                 violation_devices: violation_devices.clone(),
                 violation_source_content_digest: *violation_source_content_digest,
-                run_point: *run_point,
+                run_point: run_point.clone(),
             })),
             AnalysisSpec::DcSweep {
                 source_name,

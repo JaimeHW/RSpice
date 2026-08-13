@@ -590,4 +590,64 @@ impl ProjectWorkspace {
         self.sync_legacy_specs_projection(cloned_plan_id);
         Ok(())
     }
+
+    /// Import a portable payload under a fresh local plan identity while
+    /// remapping every analysis-scoped reference. Foreign baseline run IDs are
+    /// deliberately not imported because they do not identify a local result.
+    pub fn import_plan_data(
+        &mut self,
+        cloned_plan_id: SimulationPlanId,
+        source: &SimulationPlanPayload,
+        analysis_identity_map: &[(AnalysisInstanceId, AnalysisInstanceId)],
+    ) -> Result<(), SimulationConfigurationError> {
+        if self.active_plan_data(cloned_plan_id).is_some() {
+            return Err(SimulationConfigurationError::PlanPayloadAlreadyExists {
+                plan_id: cloned_plan_id,
+            });
+        }
+        let remap = analysis_identity_map
+            .iter()
+            .copied()
+            .collect::<HashMap<_, _>>();
+        let design_variables =
+            source
+                .design_variables
+                .iter()
+                .map(|variable| variable.cloned_for_new_plan(&remap))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|analysis_id| {
+                    SimulationConfigurationError::MissingClonedAnalysisMapping { analysis_id }
+                })?;
+        let saved_outputs =
+            source
+                .saved_outputs
+                .iter()
+                .map(|output| output.cloned_for_new_plan(&remap))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|analysis_id| {
+                    SimulationConfigurationError::MissingClonedAnalysisMapping { analysis_id }
+                })?;
+        let regression_tolerances =
+            source
+                .regression_tolerances
+                .iter()
+                .map(|rule| rule.cloned_for_new_plan(&remap))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|analysis_id| {
+                    SimulationConfigurationError::MissingClonedAnalysisMapping { analysis_id }
+                })?;
+        self.simulation_plan_payloads
+            .push(SimulationPlanPayloadRecord {
+                plan_id: cloned_plan_id,
+                payload: SimulationPlanPayload {
+                    design_variables,
+                    saved_outputs,
+                    specs: source.specs.clone(),
+                    regression_baseline_run: None,
+                    regression_tolerances,
+                },
+            });
+        self.sync_legacy_specs_projection(cloned_plan_id);
+        Ok(())
+    }
 }

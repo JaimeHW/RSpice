@@ -1728,6 +1728,7 @@ fn a_corner_declarations_turn_assembles_its_family_without_reaching_the_runner()
             corner: Some(CornerRunConfig {
                 process_corners: vec![CornerProcess::TT],
                 voltages: vec![1.8, 1.62],
+                supply_source_names: vec!["VDD".to_owned()],
                 temperatures_c: vec![27.0],
                 full_matrix: true,
                 nominal_voltage: Some(1.8),

@@ -6,41 +6,83 @@
 //! stable identity and the revision it came from, so a point in a manifest can
 //! be traced back to the exact declaration that produced it.
 //!
-//! Only kinds the engine can bind are representable. A dimension the solver
-//! could not execute would be a control that validates and persists and then
-//! silently does nothing, which is the one failure this module exists to make
-//! impossible.
+//! The persisted vocabulary matches the Simulation Studio contract. Validation
+//! additionally proves that every enabled kind has a concrete binding for the
+//! current execution path, so a visible axis can never silently do nothing.
 
 use serde::{Deserialize, Serialize};
 
 /// What a dimension varies, and therefore how it reaches the engine.
 ///
-/// Each variant names an execution binding that exists. `ProcessSection`
-/// selects the model-library section every device resolves through;
-/// `Supply` scales the netlist's DC supply; `Temperature` sets the solve
-/// temperature. Together they are the three axes the corner executor runs.
+/// A kind becomes executable through its source authority. For example,
+/// `Parameter` uses `design-variable:<name>`, while `Supply` uses an explicit
+/// list of independent voltage-source instance names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RunSetDimensionKind {
+    /// A named SPICE/design variable.
+    Parameter,
+    /// An independent source value or waveform choice.
+    Source,
     /// PDK/library section: `tt`, `ss`, `ff`, `sf`, `fs`.
     ProcessSection,
     /// Supply voltage applied to the design's DC sources.
     Supply,
     /// Ambient and model-evaluation temperature, in °C.
     Temperature,
+    /// A section/reference belonging to one selected model-library binding.
+    Model,
+    /// Analysis frequency or frequency-range control.
+    Frequency,
+    /// Analysis time or time-range control.
+    Time,
+    /// Reproducible statistical seed.
+    Seed,
+    /// Statistical sample/trial count.
+    Sample,
+    /// Selects which analysis instances execute at a point.
+    AnalysisSelection,
+    /// Selects a frozen mixed-signal/digital configuration.
+    DigitalConfiguration,
+    /// Selects a sealed external dataset.
+    ExternalDataset,
 }
 
 impl RunSetDimensionKind {
     /// Every kind, in the order a fresh run set declares them.
-    pub const ALL: [Self; 3] = [Self::ProcessSection, Self::Supply, Self::Temperature];
+    pub const ALL: [Self; 13] = [
+        Self::Parameter,
+        Self::Source,
+        Self::Temperature,
+        Self::ProcessSection,
+        Self::Model,
+        Self::Supply,
+        Self::Frequency,
+        Self::Time,
+        Self::Seed,
+        Self::Sample,
+        Self::AnalysisSelection,
+        Self::DigitalConfiguration,
+        Self::ExternalDataset,
+    ];
 
     /// Stable lexical name, matching the run-set contract vocabulary.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Parameter => "parameter",
+            Self::Source => "source",
             Self::ProcessSection => "process-section",
             Self::Supply => "supply",
             Self::Temperature => "temperature",
+            Self::Model => "model",
+            Self::Frequency => "frequency",
+            Self::Time => "time",
+            Self::Seed => "seed",
+            Self::Sample => "sample",
+            Self::AnalysisSelection => "analysis-selection",
+            Self::DigitalConfiguration => "digital-configuration",
+            Self::ExternalDataset => "external-dataset",
         }
     }
 
@@ -50,8 +92,18 @@ impl RunSetDimensionKind {
     #[must_use]
     pub fn value_type(self) -> RunSetValueType {
         match self {
-            Self::ProcessSection => RunSetValueType::Reference,
-            Self::Supply | Self::Temperature => RunSetValueType::Quantity,
+            Self::ProcessSection
+            | Self::Model
+            | Self::AnalysisSelection
+            | Self::DigitalConfiguration
+            | Self::ExternalDataset => RunSetValueType::Reference,
+            Self::Seed | Self::Sample => RunSetValueType::Integer,
+            Self::Parameter
+            | Self::Source
+            | Self::Supply
+            | Self::Temperature
+            | Self::Frequency
+            | Self::Time => RunSetValueType::Quantity,
         }
     }
 
@@ -59,9 +111,19 @@ impl RunSetDimensionKind {
     #[must_use]
     pub fn unit(self) -> Option<&'static str> {
         match self {
-            Self::ProcessSection => None,
+            Self::ProcessSection
+            | Self::Parameter
+            | Self::Source
+            | Self::Model
+            | Self::Seed
+            | Self::Sample
+            | Self::AnalysisSelection
+            | Self::DigitalConfiguration
+            | Self::ExternalDataset => None,
             Self::Supply => Some("V"),
             Self::Temperature => Some("°C"),
+            Self::Frequency => Some("Hz"),
+            Self::Time => Some("s"),
         }
     }
 
@@ -69,9 +131,59 @@ impl RunSetDimensionKind {
     #[must_use]
     pub fn source(self) -> &'static str {
         match self {
+            Self::Parameter => "design-variable:",
+            Self::Source => "netlist-source:",
             Self::ProcessSection => "model-library:process-sections",
-            Self::Supply => "testbench:supply-sources",
+            Self::Supply => "unbound:supply-sources",
             Self::Temperature => "run-set:temperature-axis",
+            Self::Model => "model-binding:",
+            Self::Frequency => "analysis-frequency:all",
+            Self::Time => "analysis-time:all",
+            Self::Seed => "monte-carlo:seed",
+            Self::Sample => "monte-carlo:samples",
+            Self::AnalysisSelection => "analysis:",
+            Self::DigitalConfiguration => "digital-configuration:",
+            Self::ExternalDataset => "external-dataset:",
+        }
+    }
+
+    /// Current execution limitation for a persisted dimension vocabulary.
+    ///
+    /// Unsupported kinds remain deserializable so an older or newer project
+    /// never loses authored intent. Studio creation and execution surfaces use
+    /// this same reason to keep those declarations visible and fail closed.
+    #[must_use]
+    pub const fn execution_blocker(self) -> Option<&'static str> {
+        match self {
+            Self::Model => Some(
+                "per-point model selection is unavailable; ordered model-library bindings currently apply to the whole simulation plan",
+            ),
+            Self::Frequency => Some(
+                "per-point frequency-control binding is unavailable; configure the frequency sweep on each analysis instance",
+            ),
+            Self::Time => Some(
+                "per-point time-control binding is unavailable; configure time controls on each transient analysis instance",
+            ),
+            Self::Seed => Some(
+                "per-point statistical seed binding is unavailable; configure the reproducible seed on the Monte Carlo analysis",
+            ),
+            Self::Sample => Some(
+                "per-point statistical sample-count binding is unavailable; configure samples on the Monte Carlo analysis",
+            ),
+            Self::AnalysisSelection => Some(
+                "per-point analysis selection requires a task-subset scheduler that is unavailable in this engine build",
+            ),
+            Self::DigitalConfiguration => Some(
+                "frozen mixed-signal digital configurations are not available in this engine build",
+            ),
+            Self::ExternalDataset => {
+                Some("sealed external-dataset resolution is not available in this engine build")
+            }
+            Self::Parameter
+            | Self::Source
+            | Self::ProcessSection
+            | Self::Supply
+            | Self::Temperature => None,
         }
     }
 
@@ -81,9 +193,19 @@ impl RunSetDimensionKind {
     #[must_use]
     pub fn default_name(self) -> &'static str {
         match self {
+            Self::Parameter => "Design parameter",
+            Self::Source => "Source value",
             Self::ProcessSection => "Process section",
             Self::Supply => "Supply voltage",
             Self::Temperature => "Temperature",
+            Self::Model => "Model selection",
+            Self::Frequency => "Frequency",
+            Self::Time => "Time",
+            Self::Seed => "Random seed",
+            Self::Sample => "Sample count",
+            Self::AnalysisSelection => "Analysis selection",
+            Self::DigitalConfiguration => "Digital configuration",
+            Self::ExternalDataset => "External dataset",
         }
     }
 }
@@ -94,8 +216,18 @@ impl RunSetDimensionKind {
 pub enum RunSetValueType {
     /// A physical quantity in the dimension's canonical unit.
     Quantity,
+    /// A signed whole number represented exactly.
+    Integer,
+    /// A true/false switch.
+    Boolean,
+    /// One member of a lexical vocabulary.
+    Enum,
     /// A name resolved against an external authority.
     Reference,
+    /// A SPICE expression retained exactly for a compatible binding.
+    Expression,
+    /// A structured JSON value used by configuration bindings.
+    Object,
 }
 
 impl RunSetValueType {
@@ -103,7 +235,12 @@ impl RunSetValueType {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Quantity => "quantity",
+            Self::Integer => "integer",
+            Self::Boolean => "boolean",
+            Self::Enum => "enum",
             Self::Reference => "reference",
+            Self::Expression => "expression",
+            Self::Object => "object",
         }
     }
 }
@@ -124,10 +261,24 @@ pub enum RunSetCompositionMode {
     /// combination the design cannot reach is dropped from the run without
     /// distorting the axes that produced it.
     Filtered,
+    /// Cartesian candidates retained only when a typed predicate evaluates to
+    /// true for their upstream coordinates.
+    Conditional,
+    /// Initial declared points followed by proposals from a frozen policy.
+    Adaptive,
+    /// Ordered hierarchical traversal of the same exact Cartesian leaves.
+    Nested,
 }
 
 impl RunSetCompositionMode {
-    pub const ALL: [Self; 3] = [Self::Cartesian, Self::Zipped, Self::Filtered];
+    pub const ALL: [Self; 6] = [
+        Self::Cartesian,
+        Self::Zipped,
+        Self::Filtered,
+        Self::Conditional,
+        Self::Adaptive,
+        Self::Nested,
+    ];
 
     #[must_use]
     pub fn as_str(self) -> &'static str {
@@ -135,6 +286,9 @@ impl RunSetCompositionMode {
             Self::Cartesian => "cartesian",
             Self::Zipped => "zipped",
             Self::Filtered => "filtered",
+            Self::Conditional => "conditional",
+            Self::Adaptive => "adaptive",
+            Self::Nested => "nested",
         }
     }
 
@@ -146,8 +300,10 @@ impl RunSetCompositionMode {
     #[must_use]
     pub fn operator(self) -> &'static str {
         match self {
-            Self::Cartesian | Self::Filtered => "×",
+            Self::Cartesian | Self::Filtered | Self::Nested => "×",
             Self::Zipped => "⇅",
+            Self::Conditional => "?",
+            Self::Adaptive => "↗",
         }
     }
 
@@ -168,6 +324,15 @@ impl RunSetCompositionMode {
                  identities of the values it is made of. An exclusion the space no longer contains \
                  is reported, never silently discarded."
             }
+            Self::Conditional => {
+                "Cartesian candidates accepted only when the versioned predicate over declared upstream dimensions evaluates to true."
+            }
+            Self::Adaptive => {
+                "The declared matrix is the initial design; a frozen deterministic policy may add proposals up to its stated maximum."
+            }
+            Self::Nested => {
+                "Ordered hierarchical traversal of Cartesian leaves, bounded by the declared maximum nesting depth."
+            }
         }
     }
 
@@ -177,6 +342,22 @@ impl RunSetCompositionMode {
             Self::Cartesian => "Cartesian · every combination",
             Self::Zipped => "Zipped · index-aligned",
             Self::Filtered => "Filtered · Cartesian less excluded points",
+            Self::Conditional => "Conditional · predicate-selected points",
+            Self::Adaptive => "Adaptive · frozen proposal policy",
+            Self::Nested => "Nested · hierarchical traversal",
+        }
+    }
+
+    /// Current execution limitation for a persisted composition vocabulary.
+    #[must_use]
+    pub const fn execution_blocker(self) -> Option<&'static str> {
+        match self {
+            Self::Adaptive => Some(
+                "adaptive composition requires a result-feedback proposal scheduler that is unavailable in this engine build",
+            ),
+            Self::Cartesian | Self::Zipped | Self::Filtered | Self::Conditional | Self::Nested => {
+                None
+            }
         }
     }
 }
@@ -245,6 +426,10 @@ fn canonical_value(lexical: &str, kind: RunSetDimensionKind) -> Option<f64> {
         RunSetDimensionKind::ProcessSection => {
             process_section_index(text).map(|index| index as f64)
         }
+        RunSetDimensionKind::Parameter | RunSetDimensionKind::Source => {
+            let value = crate::simulation::dialog::options::parse_si_value(text).ok()?;
+            value.is_finite().then_some(value)
+        }
         RunSetDimensionKind::Supply => {
             let value = crate::simulation::dialog::options::parse_si_value(text).ok()?;
             (value.is_finite() && value > 0.0).then_some(value)
@@ -260,6 +445,28 @@ fn canonical_value(lexical: &str, kind: RunSetDimensionKind) -> Option<f64> {
             let value = crate::simulation::dialog::options::parse_si_value(stripped).ok()?;
             (value.is_finite() && value > -273.15).then_some(value)
         }
+        RunSetDimensionKind::Frequency | RunSetDimensionKind::Time => {
+            let value = crate::simulation::dialog::options::parse_si_value(text).ok()?;
+            (value.is_finite() && value > 0.0).then_some(value)
+        }
+        RunSetDimensionKind::Seed => text
+            .parse::<u64>()
+            .ok()
+            .filter(|value| *value <= (1_u64 << 53))
+            .map(|value| value as f64),
+        RunSetDimensionKind::Sample => text
+            .parse::<u64>()
+            .ok()
+            .filter(|value| *value > 0 && *value <= (1_u64 << 53))
+            .map(|value| value as f64),
+        // These kinds carry references. Their exact lexical identity is the
+        // canonical payload; the numeric sentinel records parse validity for
+        // the legacy point expander without hashing or otherwise weakening the
+        // reference text.
+        RunSetDimensionKind::Model
+        | RunSetDimensionKind::AnalysisSelection
+        | RunSetDimensionKind::DigitalConfiguration
+        | RunSetDimensionKind::ExternalDataset => Some(0.0),
     }
 }
 
@@ -291,6 +498,80 @@ pub struct RunSetDimension {
     pub invalid_value_policy: InvalidValuePolicy,
     /// Whether this dimension contributes to the space.
     pub enabled: bool,
+}
+
+/// Prefix used by a supply dimension's source authority. The suffix is a
+/// comma-separated list of exact independent voltage-source instance names.
+pub const NETLIST_SUPPLY_SOURCE_PREFIX: &str = "netlist-source:";
+/// Prefix used by a parameter dimension's source authority. The suffix is the
+/// exact SPICE parameter/design-variable identifier to override.
+pub const DESIGN_VARIABLE_SOURCE_PREFIX: &str = "design-variable:";
+
+/// Resolve a parameter axis to the exact identifier written into its
+/// point-specific `.param` card.
+pub fn parse_parameter_source_authority(source: &str) -> Result<String, String> {
+    parse_single_identifier_authority(source, DESIGN_VARIABLE_SOURCE_PREFIX, "parameter")
+}
+
+/// Resolve an absolute source-value axis to one exact independent source.
+pub fn parse_source_value_authority(source: &str) -> Result<String, String> {
+    parse_single_identifier_authority(source, NETLIST_SUPPLY_SOURCE_PREFIX, "source")
+}
+
+fn parse_single_identifier_authority(
+    source: &str,
+    prefix: &str,
+    noun: &str,
+) -> Result<String, String> {
+    let Some(name) = source.strip_prefix(prefix) else {
+        return Err(format!(
+            "{noun} source authority must use {prefix} followed by one exact identifier"
+        ));
+    };
+    if name.is_empty()
+        || name != name.trim()
+        || !name
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        || !name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_')
+    {
+        return Err(format!(
+            "{noun} source authority {source:?} does not end in one valid SPICE identifier"
+        ));
+    }
+    Ok(name.to_owned())
+}
+
+/// Resolve the exact independent voltage sources a supply axis is authorized
+/// to modify. Ambiguous authority labels from older projects intentionally do
+/// not infer a rail from topology.
+pub fn parse_supply_source_authority(source: &str) -> Result<Vec<String>, String> {
+    let Some(names) = source.strip_prefix(NETLIST_SUPPLY_SOURCE_PREFIX) else {
+        return Err(format!(
+            "Supply source authority must use {NETLIST_SUPPLY_SOURCE_PREFIX} followed by one or more exact source names"
+        ));
+    };
+    let mut seen = std::collections::BTreeSet::new();
+    let mut resolved = Vec::new();
+    for name in names.split(',') {
+        let name = name.trim();
+        if name.is_empty() || name.chars().any(char::is_control) {
+            return Err(
+                "Supply source authority contains an empty or malformed source name".to_owned(),
+            );
+        }
+        if !seen.insert(name.to_ascii_lowercase()) {
+            return Err(format!("Supply source authority repeats {name:?}"));
+        }
+        resolved.push(name.to_owned());
+    }
+    if resolved.is_empty() {
+        return Err("Supply source authority requires at least one source name".to_owned());
+    }
+    Ok(resolved)
 }
 
 impl RunSetDimension {
@@ -394,8 +675,22 @@ impl Default for RunSetBudgets {
     }
 }
 
+/// Deterministic adaptive proposal contract.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunSetAdaptivePolicy {
+    pub id: String,
+    pub objective: String,
+    pub seed: u64,
+    /// Typed bounds in canonical JSON. They remain text here so equality and
+    /// digests preserve the exact frozen declaration.
+    pub bounds: String,
+    pub stop_rule: String,
+    pub maximum_proposals: usize,
+}
+
 /// The composition rule and its parameters.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunSetComposition {
     pub mode: RunSetCompositionMode,
     /// Point identities removed from the cross product, read only by
@@ -408,6 +703,36 @@ pub struct RunSetComposition {
     /// retyping a value keeps the exclusion attached to it.
     #[serde(default)]
     pub excluded_points: std::collections::BTreeSet<String>,
+    /// Typed conditional predicate. The executable grammar is intentionally
+    /// compact: `<dimension-id> == <value>` clauses joined by `&&`.
+    #[serde(default)]
+    pub predicate: String,
+    /// Dimensions the conditional predicate is authorized to read.
+    #[serde(default)]
+    pub upstream_dimension_ids: Vec<String>,
+    /// Frozen proposal policy for adaptive composition.
+    #[serde(default)]
+    pub adaptive_policy: Option<RunSetAdaptivePolicy>,
+    /// Maximum hierarchy depth for nested composition.
+    #[serde(default = "default_nested_depth")]
+    pub maximum_depth: u8,
+}
+
+const fn default_nested_depth() -> u8 {
+    3
+}
+
+impl Default for RunSetComposition {
+    fn default() -> Self {
+        Self {
+            mode: RunSetCompositionMode::default(),
+            excluded_points: std::collections::BTreeSet::new(),
+            predicate: String::new(),
+            upstream_dimension_ids: Vec::new(),
+            adaptive_policy: None,
+            maximum_depth: default_nested_depth(),
+        }
+    }
 }
 
 impl RunSetComposition {
@@ -417,6 +742,10 @@ impl RunSetComposition {
         Self {
             mode,
             excluded_points: self.excluded_points.clone(),
+            predicate: self.predicate.clone(),
+            upstream_dimension_ids: self.upstream_dimension_ids.clone(),
+            adaptive_policy: self.adaptive_policy.clone(),
+            maximum_depth: self.maximum_depth,
         }
     }
 
@@ -483,7 +812,7 @@ impl Default for RunSetState {
     fn default() -> Self {
         Self {
             revision: 1,
-            sequence: 4,
+            sequence: 5,
             dimensions: vec![
                 RunSetDimension::new(
                     "dimension-process",
@@ -503,6 +832,18 @@ impl Default for RunSetState {
                     &["-40", "25", "125"],
                     1,
                 ),
+                {
+                    let mut dimension = RunSetDimension::new(
+                        "dimension-cload",
+                        RunSetDimensionKind::Parameter,
+                        &["1p", "10p", "100p"],
+                        1,
+                    );
+                    dimension.name = "Load capacitance".to_owned();
+                    dimension.source = "design-variable:CLOAD".to_owned();
+                    dimension.enabled = false;
+                    dimension
+                },
             ],
             composition: RunSetComposition::default(),
             budgets: RunSetBudgets::default(),

@@ -1719,6 +1719,15 @@ mod tests {
     fn an_enabled_corner_analysis_names_its_instance_and_sections_in_its_own_row() {
         let mut state = AppState::default();
         disable_global_process_axis(&mut state);
+        let mut corner = crate::simulation::dialog::corner::CornerDialogState::default();
+        for dimension in &mut corner.run_set.dimensions {
+            if dimension.kind == crate::simulation::run_set::RunSetDimensionKind::Supply {
+                dimension.source = format!(
+                    "{}VDD",
+                    crate::simulation::run_set::NETLIST_SUPPLY_SOURCE_PREFIX
+                );
+            }
+        }
         let plan = state
             .sim_setup
             .stable_analysis_plan_mut()
@@ -1727,9 +1736,7 @@ mod tests {
         let (instance, _) = plan
             .insert_draft_with_id(
                 crate::product::AnalysisInstanceId::new(),
-                crate::simulation::plan::AnalysisDraft::Corner(
-                    crate::simulation::dialog::corner::CornerDialogState::default(),
-                ),
+                crate::simulation::plan::AnalysisDraft::Corner(corner),
                 true,
                 position,
             )

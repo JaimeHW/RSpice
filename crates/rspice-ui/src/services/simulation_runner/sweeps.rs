@@ -40,7 +40,10 @@ pub(crate) fn expand_corner_pvt_points(
     })
 }
 
-pub use parametric::run_parametric_analysis_with_source_path_and_abort;
+pub use parametric::{
+    run_parametric_analysis_with_base_and_source_path_and_abort,
+    run_parametric_analysis_with_source_path_and_abort,
+};
 pub use types::{
     CornerBaseMode, CornerFrequencySweep, CornerModelBinding, CornerPoint, CornerProcess,
     CornerRunConfig, TempRunConfig,

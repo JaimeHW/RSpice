@@ -272,7 +272,7 @@ impl WorkerRequest {
                 .map(|path| path.to_string_lossy().into_owned()),
             project_veriloga_runtimes: input.project_veriloga_runtimes.clone(),
             dependencies: input.dependencies.clone(),
-            environment: input.environment,
+            environment: input.environment.clone(),
             stream_transient_samples: input.stream_transient_samples,
         })
     }
