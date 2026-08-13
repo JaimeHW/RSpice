@@ -183,13 +183,14 @@ h1 { grid-area: title; max-width: 30ch; margin: 0; font-size: clamp(1.65rem, 2.6
 .byline { grid-area: byline; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .2rem .75rem; align-self: center; margin: 0; padding: 0; color: var(--muted); font: 620 .59rem/1.35 ui-monospace, Consolas, monospace; }
 .byline span { display: block; overflow-wrap: anywhere; }
 
-.publication-workspace { display: grid; grid-template-columns: 142px minmax(0, 1fr); gap: 14px; align-items: start; padding-top: 4px; }
-.tabbar-wrap { position: sticky; z-index: 15; top: 12px; min-width: 0; margin: 0; padding: 0; background: transparent; }
-.tabbar { display: grid; width: 100%; gap: 3px; overflow: hidden; padding: 5px; border-radius: 6px; background: var(--surface); scrollbar-width: none; }
+.publication-workspace { min-width: 0; padding-top: 2px; }
+.tabbar-wrap { position: sticky; z-index: 15; top: 0; min-width: 0; margin: 0; padding: 5px 0 9px; background: var(--paper); }
+.tabbar { display: flex; width: fit-content; max-width: 100%; gap: 2px; overflow-x: auto; padding: 4px; border-radius: 6px; background: var(--surface); scrollbar-width: none; }
 .tabbar::-webkit-scrollbar { display: none; }
-.tabbar a { position: relative; min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: .55rem; padding: .48rem .65rem; border-radius: 3px; color: var(--muted); font: 600 .77rem/1.2 "IBM Plex Sans", "Segoe UI", sans-serif; letter-spacing: .01em; text-decoration: none; }
+.tabbar a { position: relative; flex: 0 0 auto; min-height: 34px; display: inline-flex; align-items: center; gap: .5rem; padding: .4rem .72rem; border-radius: 3px; color: var(--muted); font: 600 .75rem/1.2 "IBM Plex Sans", "Segoe UI", sans-serif; letter-spacing: .005em; text-decoration: none; }
 .tabbar a:hover { background: var(--surface-strong); color: var(--text); }
-.tabbar a[aria-current="page"] { background: var(--paper); box-shadow: inset 3px 0 0 var(--brand); color: var(--text); }
+.tabbar a[aria-current="page"] { background: var(--paper); color: var(--text); }
+.tabbar a[aria-current="page"]::before { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 1px; background: var(--brand); content: ""; }
 .tab-count { color: var(--muted); font: 600 .63rem/1 "IBM Plex Mono", ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
 .tabbar a[aria-current="page"] .tab-count { color: var(--brand); }
 
@@ -295,21 +296,14 @@ svg .t-foreground { fill: var(--foreground); } svg .t-secondary { fill: var(--se
   .side-card, .cloud-context-grid .side-card { padding-inline: 0; border-width: 1px 0 0; }
 }
 
-@media (max-width: 760px) {
-  .publication-workspace { display: block; padding-top: 2px; }
-  .tabbar-wrap { position: sticky; top: 0; margin: 0 -4px; padding: 4px; background: var(--paper); }
-  .tabbar { display: flex; width: 100%; gap: 2px; overflow-x: auto; padding: 4px; }
-  .tabbar a { flex: 0 0 auto; min-height: 34px; justify-content: center; padding-inline: .75rem; }
-  .tabbar a[aria-current="page"] { box-shadow: inset 0 -3px 0 var(--brand); }
-  .content { padding-top: 6px; }
-}
-
 @media (max-width: 600px) {
   .shell { width: 100%; margin: 0; padding-inline: 14px; border: 0; }
   .publication-nav { min-height: 44px; }
   .brand-context, .button-label { display: none; }
   .publication-header { padding-top: 20px; }
   h1 { font-size: clamp(1.85rem, 10vw, 2.7rem); }
+  .tabbar-wrap { margin-inline: -4px; padding-inline: 4px; }
+  .tabbar { width: 100%; }
   .tabbar a { min-height: 34px; padding-inline: .7rem; }
   .figure-heading { align-items: flex-start; }
   .asset-item, .cloud-artifact-list li { align-items: flex-start; }
