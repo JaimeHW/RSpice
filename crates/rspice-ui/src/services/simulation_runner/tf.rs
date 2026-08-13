@@ -155,6 +155,7 @@ pub fn run_tf_analysis_with_config(
 
 /// Run transfer-function analysis with explicit configuration and
 /// cooperative cancellation.
+#[cfg(test)]
 pub fn run_tf_analysis_with_config_and_abort(
     netlist_text: &str,
     config: &TfRunConfig,

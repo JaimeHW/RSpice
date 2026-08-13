@@ -1497,7 +1497,7 @@ pub(crate) fn prepare_revert_active_document(
 ) -> Result<RevertReviewToken, ProjectLifecycleError> {
     require_open_project(state)?;
     let id = active_document(state);
-    if state.simulation.is_running
+    if state.simulation.has_active_execution()
         && matches!(
             id,
             ProjectDocumentId::SimulationPlan
@@ -1694,7 +1694,7 @@ pub(crate) fn close_active_document(state: &mut AppState) -> Result<(), ProjectL
 pub(crate) fn begin_project_replacement(
     state: &mut AppState,
 ) -> Result<TransactionId, ProjectLifecycleError> {
-    if state.simulation.is_running {
+    if state.simulation.has_active_execution() {
         return Err(ProjectLifecycleError::ActiveRun);
     }
     if state.project_lifecycle.transaction.is_some() {
@@ -1737,7 +1737,7 @@ pub(crate) fn validate_project_replacement(
     state: &AppState,
     id: TransactionId,
 ) -> Result<(), ProjectLifecycleError> {
-    if state.simulation.is_running {
+    if state.simulation.has_active_execution() {
         return Err(ProjectLifecycleError::ActiveRun);
     }
     let transaction = state

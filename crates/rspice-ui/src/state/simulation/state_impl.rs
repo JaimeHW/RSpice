@@ -4,6 +4,50 @@ use super::*;
 use crate::product::{DatasetId, RunId};
 
 impl SimulationState {
+    /// Whether an execution still owns mutable simulation state.
+    ///
+    /// `is_running` is the runner's instantaneous worker activity and can
+    /// become false before the controller has polled and sealed its result.
+    /// Product controls must therefore treat the stable execution identity as
+    /// authoritative and retain the legacy flag only as a fail-safe fallback.
+    #[must_use]
+    pub fn has_active_execution(&self) -> bool {
+        self.active_execution.is_some() || self.is_running
+    }
+
+    /// Lifecycle of the exact execution currently owned by the controller.
+    #[must_use]
+    pub fn active_execution_lifecycle(&self) -> Option<SimulationRunLifecycle> {
+        let identity = self.active_execution?;
+        self.runs
+            .iter()
+            .find(|run| run.execution_identity() == Some(identity))
+            .map(|run| run.lifecycle)
+    }
+
+    /// Whether a new identity-bound cancellation request can be accepted.
+    #[must_use]
+    pub fn can_request_abort_active_run(&self) -> bool {
+        self.active_execution.is_some()
+            && self.abort_request.is_none()
+            && matches!(
+                self.active_execution_lifecycle(),
+                Some(SimulationRunLifecycle::Preparing | SimulationRunLifecycle::Running)
+            )
+    }
+
+    /// Whether the active execution is already waiting for cancellation
+    /// acknowledgement from the runner.
+    #[must_use]
+    pub fn cancellation_is_pending(&self) -> bool {
+        self.active_execution
+            .is_some_and(|identity| self.abort_request == Some(identity))
+            || matches!(
+                self.active_execution_lifecycle(),
+                Some(SimulationRunLifecycle::Cancelling)
+            )
+    }
+
     /// Materialize one authenticated deferred output from the immutable
     /// retained source analysis. Stable identities are used so a UI action
     /// cannot target a different row after history reorder or pruning.
@@ -85,6 +129,14 @@ impl SimulationState {
         let identity = self
             .active_execution
             .ok_or_else(|| "there is no active simulation execution to cancel".to_owned())?;
+        if let Some(requested) = self.abort_request {
+            return Err(if requested == identity {
+                "simulation cancellation is already pending".to_owned()
+            } else {
+                "a cancellation request for another simulation execution is still pending"
+                    .to_owned()
+            });
+        }
         let run = self
             .runs
             .iter()
@@ -95,11 +147,15 @@ impl SimulationState {
                     identity.job_id, identity.run_id
                 )
             })?;
+        if run.lifecycle == SimulationRunLifecycle::Cancelling {
+            return Err(format!(
+                "simulation run {} cancellation is already in progress",
+                run.id
+            ));
+        }
         if !matches!(
             run.lifecycle,
-            SimulationRunLifecycle::Preparing
-                | SimulationRunLifecycle::Running
-                | SimulationRunLifecycle::Cancelling
+            SimulationRunLifecycle::Preparing | SimulationRunLifecycle::Running
         ) {
             return Err(format!(
                 "simulation run {} is {:?} and cannot be cancelled",
@@ -499,7 +555,7 @@ impl SimulationState {
 
     /// Clear all runs history
     pub fn clear_runs(&mut self) {
-        if self.active_execution.is_some() || self.is_running {
+        if self.has_active_execution() {
             return;
         }
         self.runs.clear();
@@ -973,6 +1029,41 @@ mod tests {
             state.run_by_stable_id(identity.run_id).unwrap().lifecycle,
             SimulationRunLifecycle::Running,
             "the controller owns the authoritative transition to Cancelling"
+        );
+    }
+
+    #[test]
+    fn stable_execution_identity_outlives_instantaneous_runner_activity() {
+        let mut state = SimulationState::default();
+        let run = state.start_run();
+        run.mark_running().unwrap();
+        let identity = run.execution_identity().unwrap();
+        state.active_execution = Some(identity);
+        state.is_running = false;
+
+        assert!(state.has_active_execution());
+        assert_eq!(
+            state.active_execution_lifecycle(),
+            Some(SimulationRunLifecycle::Running)
+        );
+        assert!(state.can_request_abort_active_run());
+    }
+
+    #[test]
+    fn duplicate_cancellation_requests_are_rejected_until_acknowledged() {
+        let mut state = SimulationState::default();
+        let run = state.start_run();
+        run.mark_running().unwrap();
+        let identity = run.execution_identity().unwrap();
+        state.active_execution = Some(identity);
+
+        state.request_abort_active_run().unwrap();
+
+        assert!(state.cancellation_is_pending());
+        assert!(!state.can_request_abort_active_run());
+        assert_eq!(
+            state.request_abort_active_run().unwrap_err(),
+            "simulation cancellation is already pending"
         );
     }
 

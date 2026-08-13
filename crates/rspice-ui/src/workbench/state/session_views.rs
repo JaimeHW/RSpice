@@ -568,7 +568,10 @@ pub enum ModelsWorkbenchDialog {
     },
     DefinitionConflict {
         definition: String,
+        scope: crate::state::model_library::ModelConsumerScope,
         providers: Vec<String>,
+        selected_provider: String,
+        reason: String,
     },
     BindingTrace {
         model: String,
@@ -579,6 +582,25 @@ pub enum ModelsWorkbenchDialog {
         name: String,
         temperature_c: String,
         supply_factor: String,
+    },
+    EditCorner {
+        library: String,
+        original_name: String,
+        duplicate: bool,
+        name: String,
+        description: String,
+        nmos_corner: String,
+        pmos_corner: String,
+        temperature_c: String,
+        supply_factor: String,
+        minimum_temperature_c: String,
+        maximum_temperature_c: String,
+        required_domains: Vec<crate::state::model_library::CornerSectionDomain>,
+        make_default: bool,
+    },
+    ConfirmDeleteCorner {
+        library: String,
+        corner: String,
     },
     BindCornerSection {
         library: String,

@@ -602,7 +602,7 @@ pub(crate) fn recovery_replacement_block_reason(state: &AppState) -> Option<Stri
                 .to_owned(),
         );
     }
-    if state.simulation.is_running {
+    if state.simulation.has_active_execution() {
         return Some(
             "Recovery comparison is blocked because a simulation run is active. Stop the run, then save or close the current project before opening recovery work."
                 .to_owned(),

@@ -2358,10 +2358,44 @@ fn selection_bulk_edit_has_mockup_identity_order_and_read_only_inspection() {
 
 #[test]
 fn stop_command_follows_the_execution_target_capability() {
-    assert!(!stop_simulation_enabled(false));
+    let mut simulation = crate::state::SimulationState::default();
+    assert!(!stop_simulation_enabled(&simulation));
+    let identity = simulation
+        .start_run()
+        .execution_identity()
+        .expect("current run has execution identity");
+    simulation.active_execution = Some(identity);
+    simulation.is_running = false;
     assert_eq!(
-        stop_simulation_enabled(true),
+        stop_simulation_enabled(&simulation),
         crate::simulation::execution::execution_target_supports_cancellation()
+    );
+
+    simulation.request_abort_active_run().unwrap();
+    assert!(!stop_simulation_enabled(&simulation));
+}
+
+#[test]
+fn run_controls_follow_stable_execution_ownership_through_cancellation() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.project_open = true;
+    let identity = app
+        .state
+        .simulation
+        .start_run()
+        .execution_identity()
+        .expect("current run has execution identity");
+    app.state.simulation.active_execution = Some(identity);
+    app.state.simulation.is_running = false;
+
+    assert!(!Command::RunSimulation.is_enabled(&app));
+    assert!(Command::StopSimulation.is_enabled(&app));
+
+    app.state.simulation.request_abort_active_run().unwrap();
+    assert!(!Command::StopSimulation.is_enabled(&app));
+    assert_eq!(
+        Command::StopSimulation.availability(&app),
+        CommandAvailability::Disabled("simulation cancellation is already in progress")
     );
 }
 

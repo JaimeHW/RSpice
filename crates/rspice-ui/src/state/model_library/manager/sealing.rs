@@ -52,6 +52,7 @@ impl ModelLibraryManager {
     /// over those same bytes, and only the authenticated UTF-8 content is
     /// published to the in-memory resolver.
     pub fn seal_execution_sources(&self) -> Result<SealedModelExecutionSources, String> {
+        self.validate_model_resolution_records_against_catalog()?;
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.seal_execution_sources_with_reader(|path| {
@@ -320,8 +321,13 @@ impl ModelLibraryManager {
             sealed_libraries.push(SealedExecutionLibrary {
                 name: library.name.clone(),
                 root_path: root_path.clone(),
+                source_digest: model_library_source_digest(library),
                 corners,
                 selected_corner: library.selected_corner.clone(),
+                allows_selected_section_override: matches!(
+                    library.source_authority,
+                    ModelSourceAuthority::ProjectOwned { .. }
+                ),
             });
         }
 
@@ -406,6 +412,7 @@ impl ModelLibraryManager {
             pdk_veriloga_artifacts: Vec::new(),
             pdk_veriloga_bindings: Vec::new(),
             pdk_identity: None,
+            resolution_records: self.owned_model_resolution_records(),
         })
     }
 }

@@ -162,7 +162,7 @@ impl RSpiceApp {
                 let dirty = crate::workbench::lifecycle::project_lifecycle::dirty_document_count(
                     &self.state,
                 );
-                let running = self.state.simulation.is_running;
+                let running = self.state.simulation.has_active_execution();
                 let primary = if dirty > 0 {
                     "Save all and close"
                 } else {

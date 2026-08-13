@@ -1376,7 +1376,14 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     property_row(
         ui,
         "Engine status",
-        if app.state.simulation.is_running {
+        if app.state.simulation.cancellation_is_pending() {
+            "Stopping"
+        } else if matches!(
+            app.state.simulation.active_execution_lifecycle(),
+            Some(crate::state::SimulationRunLifecycle::Preparing)
+        ) {
+            "Preparing"
+        } else if app.state.simulation.has_active_execution() {
             "Running"
         } else {
             "Ready"

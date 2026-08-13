@@ -62,8 +62,9 @@ pub(crate) use library::{
     subcircuit_interface_key,
 };
 pub use manager::{
-    ModelExecutionPlan, ModelLibraryManager, PackModelHit, ProjectModelCommit,
-    SealedModelExecutionSources,
+    ModelConsumerScope, ModelExecutionPlan, ModelLibraryManager, ModelResolutionRecord,
+    ModelValidationFinding, ModelValidationFindingSeverity, ModelValidationReceipt, PackModelHit,
+    ProjectModelCommit, SealedModelExecutionSources,
 };
 pub use model::DeviceModel;
 pub use project_revision::ProjectModelRevisionDefinition;

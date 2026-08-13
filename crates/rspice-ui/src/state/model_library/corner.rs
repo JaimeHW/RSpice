@@ -166,7 +166,10 @@ impl ProcessCorner {
     /// instead of migrating it to an unbound draft.
     #[must_use]
     pub fn effective_section_bindings(&self) -> Vec<CornerSectionBinding> {
-        if self.section_bindings.is_empty() && self.file_path.is_some() {
+        if self.section_bindings.is_empty()
+            && self.required_domains.is_empty()
+            && self.file_path.is_some()
+        {
             vec![CornerSectionBinding::new(
                 CornerSectionDomain::Composite,
                 self.name.clone(),
@@ -189,12 +192,26 @@ impl ProcessCorner {
         }
     }
 
-    /// Validate the durable corner contract independently of source parsing.
+    /// Validate a persistable authoring draft independently of source parsing.
+    ///
+    /// Drafts may intentionally leave a required domain unbound. That state is
+    /// retained so a multi-step editor can save, reload, undo, and recover its
+    /// work; [`Self::validate_contract`] still rejects the draft at every
+    /// execution boundary until all required domains are bound.
+    pub fn validate_draft_contract(&self) -> Result<(), Vec<String>> {
+        self.validate_contract_completeness(false)
+    }
+
+    /// Validate an executable corner contract independently of source parsing.
     ///
     /// Source existence, content digests, and section presence are checked by
-    /// `ModelLibraryManager::inspect_corner_bindings`, which operates on the
-    /// same sealed source snapshot used for simulation.
+    /// the sealed model-execution plan. This method additionally requires each
+    /// declared domain to have one explicit binding.
     pub fn validate_contract(&self) -> Result<(), Vec<String>> {
+        self.validate_contract_completeness(true)
+    }
+
+    fn validate_contract_completeness(&self, require_complete: bool) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         let name = self.name.trim();
         if name.is_empty() {
@@ -211,9 +228,18 @@ impl ProcessCorner {
         }
         if !self.temperature.is_finite() {
             errors.push("nominal temperature must be finite".to_owned());
+        } else if self.temperature < -273.15 {
+            errors.push("nominal temperature cannot be below absolute zero".to_owned());
         }
         if !self.vdd_factor.is_finite() || self.vdd_factor <= 0.0 {
             errors.push("supply factor must be positive and finite".to_owned());
+        }
+        for (label, axis) in [("NMOS", &self.nmos_corner), ("PMOS", &self.pmos_corner)] {
+            if axis.trim().is_empty() {
+                errors.push(format!("{label} corner axis cannot be empty"));
+            } else if axis.chars().any(char::is_control) {
+                errors.push(format!("{label} corner axis contains a control character"));
+            }
         }
         match (self.minimum_temperature_c, self.maximum_temperature_c) {
             (None, None) => {}
@@ -221,6 +247,12 @@ impl ProcessCorner {
                 if !minimum.is_finite() || !maximum.is_finite() {
                     errors.push("qualified temperature bounds must be finite".to_owned());
                 } else {
+                    if minimum < -273.15 {
+                        errors.push(
+                            "minimum qualified temperature cannot be below absolute zero"
+                                .to_owned(),
+                        );
+                    }
                     if minimum > maximum {
                         errors.push("minimum qualified temperature exceeds the maximum".to_owned());
                     }
@@ -272,7 +304,7 @@ impl ProcessCorner {
                     required.label()
                 ));
             }
-            if !bindings.iter().any(|binding| binding.domain == required) {
+            if require_complete && !bindings.iter().any(|binding| binding.domain == required) {
                 errors.push(format!(
                     "{} section is required but not bound",
                     required.label()
@@ -394,6 +426,27 @@ mod tests {
             errors
                 .iter()
                 .any(|error| error.contains("minimum qualified temperature"))
+        );
+    }
+
+    #[test]
+    fn incomplete_required_domain_is_a_persistable_but_non_executable_draft() {
+        let mut corner =
+            ProcessCorner::from_composite_section("HOT", "/pdk/corners.lib".into(), false);
+        corner.section_bindings.clear();
+        corner.required_domains = vec![CornerSectionDomain::Mos];
+
+        assert!(corner.effective_section_bindings().is_empty());
+        corner
+            .validate_draft_contract()
+            .expect("an incomplete binding is a recoverable authoring draft");
+        let errors = corner
+            .validate_contract()
+            .expect_err("the same draft cannot become executable");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("MOS section is required but not bound"))
         );
     }
 }

@@ -990,8 +990,7 @@ impl Command {
             }
             Self::RunSimulation => "active plan is not runnable",
             Self::OpenNetlist | Self::ImportNetlist
-                if app.state.simulation.active_execution.is_some()
-                    || app.state.simulation.is_running =>
+                if app.state.simulation.has_active_execution() =>
             {
                 "an active simulation execution still owns the project"
             }
@@ -999,22 +998,22 @@ impl Command {
                 "the project is open read-only"
             }
             Self::StopSimulation
-                if app.state.simulation.is_running
+                if app.state.simulation.has_active_execution()
                     && !crate::simulation::execution::execution_target_supports_cancellation() =>
             {
                 "cancellation is unavailable for the current execution target"
             }
+            Self::StopSimulation if app.state.simulation.cancellation_is_pending() => {
+                "simulation cancellation is already in progress"
+            }
+            Self::StopSimulation if app.state.simulation.has_active_execution() => {
+                "the active simulation execution cannot accept cancellation"
+            }
             Self::StopSimulation => "no simulation is running",
-            Self::ClearResults
-                if app.state.simulation.active_execution.is_some()
-                    || app.state.simulation.is_running =>
-            {
+            Self::ClearResults if app.state.simulation.has_active_execution() => {
                 "an active simulation execution still owns result history"
             }
-            Self::ImportResultDataset
-                if app.state.simulation.active_execution.is_some()
-                    || app.state.simulation.is_running =>
-            {
+            Self::ImportResultDataset if app.state.simulation.has_active_execution() => {
                 "an active simulation execution still owns result history"
             }
             Self::ImportResultDataset if app.state.workbench.safe_mode.project_read_only() => {

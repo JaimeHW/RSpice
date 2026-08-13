@@ -555,7 +555,7 @@ impl RSpiceApp {
         );
         self.simulation_controller
             .update(&mut self.state, self.export_workflow_io.as_ref());
-        if self.state.simulation.is_running {
+        if self.state.simulation.has_active_execution() {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
         if matches!(
@@ -1629,7 +1629,13 @@ mod tests {
     #[test]
     fn netlist_manual_run_request_queues_when_engine_is_busy() {
         let mut state = AppState::default();
-        state.simulation.is_running = true;
+        let identity = state
+            .simulation
+            .start_run()
+            .execution_identity()
+            .expect("current run has execution identity");
+        state.simulation.active_execution = Some(identity);
+        state.simulation.is_running = false;
         state.request_netlist_manual_deck_run();
 
         assert_eq!(
@@ -1639,7 +1645,7 @@ mod tests {
         assert!(!state.simulation.trigger_simulation);
         assert!(state.ui.netlist.rerun_queued);
 
-        state.simulation.is_running = false;
+        state.simulation.active_execution = None;
         state.ui.netlist.rerun_queued = false;
         state.request_netlist_manual_deck_run();
 

@@ -210,7 +210,7 @@ pub(crate) fn run(app: &mut RSpiceApp) {
 /// report is reusable; the controller still rebuilds and digest-compares the
 /// live contract when it consumes the one-shot permit.
 pub(crate) fn run_and_queue(app: &mut RSpiceApp) {
-    if app.state.simulation.is_running || app.state.simulation.trigger_simulation {
+    if app.state.simulation.has_active_execution() || app.state.simulation.trigger_simulation {
         app.state.push_user_message(ConsoleMessage::warning(
             "A simulation is already running or waiting to start".to_owned(),
         ));

@@ -1747,6 +1747,7 @@ fn a_corner_declarations_turn_assembles_its_family_without_reaching_the_runner()
         source_digest: ContentDigest::from_bytes([0x81; 32]),
         reference_process: ProcessCorner::TT,
         reference_temperature_celsius: 27.0,
+        run_set: None,
         tasks: vec![PreparedTask::new(
             AnalysisInstanceId::new(),
             ObjectRevision::INITIAL,

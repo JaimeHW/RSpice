@@ -464,10 +464,15 @@ fn paint_trash(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) 
 
 fn console_context(ui: &mut Ui, app: &RSpiceApp) {
     let t = Tokens::get(ui.ctx());
-    let text = if app.state.simulation.is_running {
+    let text = if app.state.simulation.has_active_execution() {
+        let activity = if app.state.simulation.cancellation_is_pending() {
+            "cancellation in progress"
+        } else {
+            "execution in progress"
+        };
         format!(
-            "Active job · {}% · execution in progress",
-            simulation_progress_percent(app.state.simulation.progress)
+            "Active job · {}% · {activity}",
+            simulation_progress_percent(app.state.simulation.progress),
         )
     } else if let Some(index) = app.state.simulation.active_run_idx {
         app.state.simulation.runs.get(index).map_or_else(
@@ -1024,7 +1029,7 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
                     tone,
                 );
             }
-            if !app.state.simulation.is_running {
+            if !app.state.simulation.has_active_execution() {
                 issue_row(
                     ui,
                     "IDLE",

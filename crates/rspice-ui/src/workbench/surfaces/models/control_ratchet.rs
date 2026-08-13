@@ -178,6 +178,14 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
     ("Add to project", "add_part publishes a revision"),
     ("Add corner", "add_corner publishes a revision"),
     ("Open Model Editor", "Command::ModelEditor"),
+    (
+        "Clear provider decision",
+        "clear_definition_provider publishes a guarded revision",
+    ),
+    (
+        "Publish provider decision",
+        "publish_definition_provider publishes a source-qualified record",
+    ),
     ("Edit in Model Editor…", "Command::ModelEditor"),
     // Symbols & CDF
     ("Library manager", "SurfaceId::LibraryCellviewManager"),
@@ -190,6 +198,18 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
     // Corners & sections
     ("Import section map", "Command::PdkSettings"),
     ("Add corner…", "models_view.dialog = AddCorner"),
+    ("Edit corner…", "models_view.dialog = EditCorner"),
+    (
+        "Duplicate…",
+        "models_view.dialog = EditCorner duplicate mode",
+    ),
+    ("Set default", "set_default_corner publishes a revision"),
+    ("Delete corner…", "models_view.dialog = ConfirmDeleteCorner"),
+    ("Delete corner", "delete_corner publishes a revision"),
+    (
+        "Use as the library default corner",
+        "EditCorner.make_default",
+    ),
     ("Bind section…", "models_view.dialog = BindCornerSection"),
     (
         "Bind section",

@@ -1164,7 +1164,7 @@ impl NetlistDocumentState {
 
 /// Reconcile queued execution and diff state before rendering the document.
 pub fn prepare(state: &mut AppState) {
-    if state.ui.netlist.rerun_queued && !state.simulation.is_running {
+    if state.ui.netlist.rerun_queued && !state.simulation.has_active_execution() {
         state.ui.netlist.rerun_queued = false;
         if let Some(reason) = state.manual_deck_run_block_reason() {
             state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(

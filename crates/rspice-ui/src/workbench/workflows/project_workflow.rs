@@ -66,7 +66,7 @@ impl<'a> ProjectLoadOrigin<'a> {
 }
 
 pub(crate) fn create_new_project(state: &mut AppState) {
-    if state.simulation.is_running {
+    if state.simulation.has_active_execution() {
         lifecycle_error(
             state,
             ProjectLifecycleError::ActiveRun,
@@ -863,7 +863,7 @@ fn request_close_project_for(state: &mut AppState, destination: ProjectCloseDest
 }
 
 pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
-    if state.simulation.is_running {
+    if state.simulation.has_active_execution() {
         lifecycle_error(
             state,
             ProjectLifecycleError::ActiveRun,

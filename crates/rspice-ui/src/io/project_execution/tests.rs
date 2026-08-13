@@ -5,6 +5,7 @@
 //! run blocked - never dropped or silently re-resolved.
 
 use super::*;
+use crate::product::ObjectRevision;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind, AnalysisLifecycleState};
 use crate::state::model_library::{
     CornerSectionBinding, CornerSectionDomain, CorrelationDatasetClass, CorrelationDatasetRevision,
@@ -84,6 +85,75 @@ fn transient_runtime_state_is_not_serialized() {
         );
     }
     assert!(plan.get("analysis_plan").is_some());
+}
+
+#[test]
+fn source_qualified_provider_decision_round_trips_without_reauthorization() {
+    let mut manager = ModelLibraryManager::new();
+    let winner = manager
+        .load_library_bytes(
+            "approved.lib",
+            b".model shared NMOS (LEVEL=1 KP=1e-3)\n".to_vec(),
+            None,
+        )
+        .expect("approved source imports");
+    manager
+        .load_library_bytes(
+            "alternate.lib",
+            b".model shared NMOS (LEVEL=1 KP=2e-3)\n".to_vec(),
+            None,
+        )
+        .expect("alternate source imports");
+    let record = manager
+        .resolve_definition_provider(
+            crate::state::model_library::ModelConsumerScope::PrimitiveModel,
+            "shared",
+            &winner,
+            "Model-owner review selected the released characterization source.",
+        )
+        .expect("provider decision records");
+    let plan = manager
+        .seal_execution_sources()
+        .expect("retained providers seal")
+        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .expect("provider decision produces one exact plan");
+    let validation = manager
+        .issue_model_validation_receipt(
+            ObjectRevision::INITIAL,
+            plan.digest(),
+            None,
+            PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
+            vec![crate::state::model_library::ModelValidationFinding {
+                code: "SPICE_NAMESPACE_COMPILED".to_owned(),
+                severity: crate::state::model_library::ModelValidationFindingSeverity::Information,
+                message: "The frozen persisted namespace compiled.".to_owned(),
+            }],
+        )
+        .expect("validation receipt records");
+
+    let context = context_from_state(&SimSetupState::new(), &manager)
+        .expect("provider decision saves in execution context");
+    assert_eq!(context.model_resolution_records, vec![record.clone()]);
+    assert_eq!(context.model_validation_receipt, Some(validation.clone()));
+    let encoded = serde_json::to_vec(&context).expect("execution context serializes");
+    let restored: ProjectExecutionContext =
+        serde_json::from_slice(&encoded).expect("execution context deserializes");
+    let (_, restored, _) = restored
+        .into_state(project_id())
+        .expect("provider decision restores against exact retained sources");
+    assert_eq!(
+        restored
+            .model_resolution_record(
+                crate::state::model_library::ModelConsumerScope::PrimitiveModel,
+                "shared"
+            )
+            .cloned(),
+        Some(record)
+    );
+    assert_eq!(
+        restored.model_validation_receipt().cloned(),
+        Some(validation)
+    );
 }
 
 #[test]
@@ -1089,6 +1159,8 @@ fn legacy_context_migrates_to_sorted_execution_order() {
         schema_version: LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION,
         simulation_plan: plan,
         model_libraries: Vec::new(),
+        model_resolution_records: Vec::new(),
+        model_validation_receipt: None,
     };
 
     context
@@ -1432,6 +1504,8 @@ fn foreign_platform_source_binding_is_retained_without_filesystem_probe() {
             selected_corner: None,
             version: String::new(),
         }],
+        model_resolution_records: Vec::new(),
+        model_validation_receipt: None,
     };
 
     context
@@ -1508,6 +1582,8 @@ fn disconnected_source_subgraph_is_rejected_even_when_every_member_has_an_edge()
             selected_corner: None,
             version: String::new(),
         }],
+        model_resolution_records: Vec::new(),
+        model_validation_receipt: None,
     };
 
     let error = context

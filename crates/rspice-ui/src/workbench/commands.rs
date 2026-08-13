@@ -21,8 +21,9 @@ pub(crate) mod vocabulary;
 
 const COMMAND_ZOOM_FACTOR: f64 = 1.2;
 
-fn stop_simulation_enabled(is_running: bool) -> bool {
-    is_running && crate::simulation::execution::execution_target_supports_cancellation()
+fn stop_simulation_enabled(simulation: &crate::state::SimulationState) -> bool {
+    simulation.can_request_abort_active_run()
+        && crate::simulation::execution::execution_target_supports_cancellation()
 }
 
 fn model_library_rescan_diagnostic(app: &RSpiceApp) -> (String, bool) {
@@ -336,20 +337,19 @@ impl Command {
             Self::RevertActiveDocument => {
                 state.project_lifecycle.accepted().is_some()
                     && crate::workbench::lifecycle::project_lifecycle::active_document_is_dirty(state)
-                    && !state.simulation.is_running
+                    && !state.simulation.has_active_execution()
             }
             Self::CloseActiveDocument => {
                 crate::workbench::lifecycle::project_lifecycle::can_close_active_document(state)
             }
             Self::CloseProject => state.project_lifecycle.project_open,
             Self::OpenNetlist => {
-                state.simulation.active_execution.is_none() && !state.simulation.is_running
+                !state.simulation.has_active_execution()
             }
             Self::ImportNetlist => {
                 state.project_lifecycle.project_open
                     && !state.workbench.safe_mode.project_read_only()
-                    && state.simulation.active_execution.is_none()
-                    && !state.simulation.is_running
+                    && !state.simulation.has_active_execution()
             }
             Self::PublishToWeb => {
                 matches!(
@@ -692,7 +692,8 @@ impl Command {
                 if state.workbench.workspace == Workspace::Netlist {
                     app.manual_deck_run_block_reason().is_none()
                 } else {
-                    !state.simulation.is_running && !state.simulation.trigger_simulation
+                    !state.simulation.has_active_execution()
+                        && !state.simulation.trigger_simulation
                 }
             }
             // Each of these opens a window that only the netlist page draws.
@@ -733,16 +734,14 @@ impl Command {
                     && !state.ui.netlist.generated_history.is_empty()
                     && state.ui.netlist.generated_document.is_some()
             }
-            Self::StopSimulation => stop_simulation_enabled(state.simulation.is_running),
+            Self::StopSimulation => stop_simulation_enabled(&state.simulation),
             Self::ClearResults => {
                 state.simulation.has_results()
-                    && state.simulation.active_execution.is_none()
-                    && !state.simulation.is_running
+                    && !state.simulation.has_active_execution()
             }
             Self::ImportResultDataset => {
                 !state.workbench.safe_mode.project_read_only()
-                    && state.simulation.active_execution.is_none()
-                    && !state.simulation.is_running
+                    && !state.simulation.has_active_execution()
             }
             // Waves is the workspace's default sheet, and its empty state is
             // the workspace's landing, so this route stays actionable before a
@@ -1630,16 +1629,22 @@ impl Command {
                 }
             }
             Self::StopSimulation => {
-                if stop_simulation_enabled(app.state.simulation.is_running) {
+                if stop_simulation_enabled(&app.state.simulation) {
                     if let Err(error) = app.state.simulation.request_abort_active_run() {
                         app.state
                             .push_sim_message(crate::diagnostics::ConsoleMessage::warning(error));
                     }
-                } else if app.state.simulation.is_running {
+                } else if app.state.simulation.has_active_execution() {
+                    let reason = match Self::StopSimulation.availability(app) {
+                        CommandAvailability::Disabled(reason) => reason,
+                        CommandAvailability::Available | CommandAvailability::Hidden => {
+                            "the active simulation execution cannot accept cancellation"
+                        }
+                    };
                     app.state.push_sim_message(
-                        crate::diagnostics::ConsoleMessage::warning(
-                            "This execution target cannot yet guarantee cancellation; the active run was left intact",
-                        ),
+                        crate::diagnostics::ConsoleMessage::warning(format!(
+                            "Stop request ignored: {reason}; the active run was left intact"
+                        )),
                     );
                 }
             }
@@ -1698,9 +1703,7 @@ impl Command {
                     .saturating_sub(1);
             }
             Self::ClearResults => {
-                if app.state.simulation.active_execution.is_some()
-                    || app.state.simulation.is_running
-                {
+                if app.state.simulation.has_active_execution() {
                     app.state
                         .push_sim_message(crate::diagnostics::ConsoleMessage::warning(
                         "Result history cannot be cleared while a simulation execution owns a run"

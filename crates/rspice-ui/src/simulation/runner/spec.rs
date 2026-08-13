@@ -330,6 +330,92 @@ R1 out 0 {rload}\n\
         );
     }
 
+    #[test]
+    fn frequency_specs_resolve_relative_includes_from_source_path() {
+        let temp = TempDeckDir::new();
+        fs::write(temp.deck_path(), "").expect("deck path placeholder");
+        let top = "relative include frequency analysis\n\
+.include \"network.inc\"\n\
+.end\n";
+        let run = |spec| {
+            run_spec_request(
+                &EngineBridge::new(),
+                spec,
+                SpecExecutionOptions::default(),
+                top,
+                Some(&temp.deck_path()),
+                &ResolvedExecutionDependencies::default(),
+                &rspice_core::abort_signal::NoAbort,
+            )
+        };
+
+        fs::write(temp.path.join("network.inc"), "R1 IN OUT 50\nR2 OUT 0 50\n")
+            .expect("S-parameter include write");
+        let sparameter = run(AnalysisSpec::SParameter {
+            start_freq: 1.0e6,
+            stop_freq: 1.0e7,
+            points_per_unit: 1,
+            sweep: crate::simulation::multi_run::FrequencySweep::Decade,
+            z0: 50.0,
+            ports: vec![
+                crate::simulation::multi_run::SpPort {
+                    node_pos: "IN".to_owned(),
+                    node_neg: "0".to_owned(),
+                    z0: None,
+                },
+                crate::simulation::multi_run::SpPort {
+                    node_pos: "OUT".to_owned(),
+                    node_neg: "0".to_owned(),
+                    z0: None,
+                },
+            ],
+        });
+        assert!(
+            matches!(sparameter, Ok(SimulationResult::Ac { .. })),
+            "S-parameter relative include should resolve: {sparameter:?}"
+        );
+
+        fs::write(
+            temp.path.join("network.inc"),
+            "VIN IN 0 1\nR1 IN OUT 1k\nR2 OUT 0 2k\n",
+        )
+        .expect("TF include write");
+        let transfer = run(AnalysisSpec::Tf {
+            input_source: "VIN".to_owned(),
+            output_expression: "V(OUT)".to_owned(),
+            transfer_gain: true,
+            input_resistance: true,
+            output_resistance: true,
+            normalization: crate::simulation::multi_run::TfNormalization::None,
+            accuracy: crate::simulation::multi_run::TfAccuracy::Balanced,
+        });
+        assert!(
+            matches!(transfer, Ok(SimulationResult::TransferFunction { .. })),
+            "TF relative include should resolve: {transfer:?}"
+        );
+
+        fs::write(
+            temp.path.join("network.inc"),
+            "E1 EO 0 CTRL 0 -1000\n\
+VPROBE EO X 0\n\
+R1 X CTRL 1k\n\
+C1 CTRL 0 159.154943091895n\n",
+        )
+        .expect("STB include write");
+        let stability = run(AnalysisSpec::Stb {
+            probe_node: "VPROBE".to_owned(),
+            start_freq: 10.0,
+            stop_freq: 1.0e4,
+            sweep: crate::simulation::multi_run::FrequencySweep::Decade,
+            points_per_decade: 2,
+            compute_nyquist: false,
+        });
+        assert!(
+            matches!(stability, Ok(SimulationResult::Ac { .. })),
+            "STB relative include should resolve: {stability:?}"
+        );
+    }
+
     /// A temperature step is solved one declared point at a time, so nothing
     /// solves the declaration. Refusing it here is what keeps the sweep from
     /// costing 2N: an executor that accepted it would quietly solve the whole

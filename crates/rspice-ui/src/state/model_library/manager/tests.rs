@@ -159,7 +159,11 @@ fn loaded_sections_resolve_to_exact_reference_and_corner_bindings() {
     let error = manager
         .corner_model_bindings(&[CornerProcess::SS])
         .expect_err("undefined SS section must fail closed");
-    assert!(error.contains("does not define the SS process section"));
+    assert!(
+        error.contains("does not define selected corner 'SS'")
+            && error.contains("SS reference process"),
+        "{error}"
+    );
     fs::remove_dir_all(directory).expect("remove model fixture directory");
 }
 
@@ -235,6 +239,200 @@ fn contested_materialized_model_names_fail_closed() {
     assert!(error.contains("alternate.lib"), "{error}");
 
     fs::remove_dir_all(directory).expect("remove duplicate-provider fixture");
+}
+
+#[test]
+fn source_qualified_provider_decision_removes_loser_before_engine_parse() {
+    let (directory, first) = model_fixture();
+    let second = directory.join("alternate.lib");
+    fs::write(&first, ".model contested NMOS (LEVEL=1 KP=1e-3)\n")
+        .expect("write selected provider");
+    fs::write(&second, ".model contested NMOS (LEVEL=1 KP=2e-3)\n").expect("write losing provider");
+    let mut manager = ModelLibraryManager::new();
+    let winner = manager
+        .load_library_file(&first, None)
+        .expect("load selected provider");
+    manager
+        .load_library_file(&second, None)
+        .expect("load losing provider");
+
+    let record = manager
+        .resolve_definition_provider(
+            ModelConsumerScope::PrimitiveModel,
+            "CONTESTED",
+            &winner,
+            "Device-owner review selected the characterized foundry card.",
+        )
+        .expect("publish source-qualified provider decision in manager candidate");
+    let plan = manager
+        .seal_execution_sources()
+        .expect("seal exact authenticated providers")
+        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .expect("the explicit provider decision resolves the namespace");
+
+    assert_eq!(plan.applied_resolutions(), &[record]);
+    let combined = format!(
+        "resolved namespace\n{}\n.end\n",
+        plan.model_cards().join("\n")
+    );
+    let parsed = rspice_core::netlist::parse_netlist(&combined).expect("resolved cards parse");
+    let definitions = parsed
+        .models
+        .iter()
+        .filter(|definition| definition.name.eq_ignore_ascii_case("contested"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        definitions.len(),
+        1,
+        "the losing card must not reach the engine"
+    );
+    assert!(plan.model_cards().join("\n").contains("KP=1e-3"));
+    assert!(!plan.model_cards().join("\n").contains("KP=2e-3"));
+
+    fs::remove_dir_all(directory).expect("remove resolved-provider fixture");
+}
+
+#[test]
+fn refreshed_provider_digest_invalidates_persisted_decision() {
+    let (directory, first) = model_fixture();
+    let second = directory.join("alternate.lib");
+    fs::write(&first, ".model contested NMOS (LEVEL=1 KP=1e-3)\n")
+        .expect("write selected provider");
+    fs::write(&second, ".model contested NMOS (LEVEL=1 KP=2e-3)\n").expect("write losing provider");
+    let mut manager = ModelLibraryManager::new();
+    let winner = manager
+        .load_library_file(&first, None)
+        .expect("load selected provider");
+    manager
+        .load_library_file(&second, None)
+        .expect("load losing provider");
+    manager
+        .resolve_definition_provider(
+            ModelConsumerScope::PrimitiveModel,
+            "contested",
+            &winner,
+            "Initial model-owner review.",
+        )
+        .expect("record provider decision");
+
+    fs::write(&first, ".model contested NMOS (LEVEL=1 KP=3e-3)\n").expect("revise selected source");
+    manager
+        .load_library_file(&first, None)
+        .expect("explicitly refresh changed source");
+    let error = manager
+        .seal_execution_sources()
+        .expect_err("refresh must invalidate the old digest-bound decision");
+    assert!(error.contains("provider decision"), "{error}");
+    assert!(error.contains("changed digest"), "{error}");
+
+    fs::remove_dir_all(directory).expect("remove stale-provider fixture");
+}
+
+#[test]
+fn source_qualified_subcircuit_decision_removes_the_entire_losing_body() {
+    let mut manager = ModelLibraryManager::new();
+    let winner = manager
+        .load_library_bytes(
+            "approved-subcircuit.lib",
+            b".subckt AMP in out\ne1 out 0 in 0 2\n.ends AMP\n".to_vec(),
+            None,
+        )
+        .expect("approved subcircuit imports");
+    manager
+        .load_library_bytes(
+            "alternate-subcircuit.lib",
+            b".subckt amp in out\ne1 out 0 in 0 9\n.ends amp\n".to_vec(),
+            None,
+        )
+        .expect("alternate subcircuit imports");
+    let record = manager
+        .resolve_definition_provider(
+            ModelConsumerScope::Subcircuit,
+            "amp",
+            &winner,
+            "Macro-model owner selected the released source.",
+        )
+        .expect("subcircuit provider decision records");
+
+    let plan = manager
+        .seal_execution_sources()
+        .expect("subcircuit sources seal")
+        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .expect("subcircuit decision resolves the namespace");
+    let cards = plan.model_cards().join("\n");
+
+    assert_eq!(plan.applied_resolutions(), &[record]);
+    assert!(cards.contains("in 0 2"));
+    assert!(!cards.contains("in 0 9"));
+    let source_map = rspice_core::netlist::source_map_for_editor(&format!("resolved\n{cards}\n"));
+    assert_eq!(
+        source_map
+            .subckt_defs
+            .iter()
+            .filter(|definition| definition.name.eq_ignore_ascii_case("amp"))
+            .count(),
+        1,
+        "the engine-facing namespace must contain one callable AMP body"
+    );
+}
+
+#[test]
+fn durable_validation_receipt_is_bound_to_revision_plan_catalog_and_sources() {
+    let (directory, path) = model_fixture();
+    let mut manager = ModelLibraryManager::new();
+    manager
+        .load_library_file(&path, None)
+        .expect("load authenticated model fixture");
+    let plan = manager
+        .seal_execution_sources()
+        .expect("seal fixture")
+        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .expect("build validation plan");
+    let expected_source_count = manager.model_validation_source_identity().0;
+    let receipt = manager
+        .issue_model_validation_receipt(
+            ObjectRevision::INITIAL,
+            plan.digest(),
+            None,
+            16,
+            vec![ModelValidationFinding {
+                code: "SPICE_NAMESPACE_COMPILED".to_owned(),
+                severity: ModelValidationFindingSeverity::Information,
+                message: "The frozen test namespace compiled.".to_owned(),
+            }],
+        )
+        .expect("issue durable validation receipt");
+    receipt.verify().expect("receipt self-authenticates");
+    assert!(expected_source_count > 0);
+    assert_eq!(receipt.source_count, expected_source_count);
+    let encoded = serde_json::to_string(&receipt).expect("receipt serializes");
+    assert!(
+        !encoded.contains("shared.inc") && !encoded.contains("source_digests"),
+        "a durable receipt must not duplicate source paths or per-file records"
+    );
+    manager
+        .validate_model_validation_receipt(ObjectRevision::INITIAL, plan.digest(), None, 16)
+        .expect("exact inputs retain validation authority");
+    let stale = manager
+        .validate_model_validation_receipt(
+            ObjectRevision::new(2).expect("revision two"),
+            plan.digest(),
+            None,
+            16,
+        )
+        .expect_err("project revision changes invalidate the receipt");
+    assert!(stale.contains("project revision"), "{stale}");
+
+    let mut tampered = serde_json::to_value(&receipt).expect("receipt serializes");
+    tampered["validated_at_unix_ms"] = serde_json::json!(receipt.validated_at_unix_ms + 1);
+    let tampered: ModelValidationReceipt =
+        serde_json::from_value(tampered).expect("tampered shape remains parseable");
+    let error = tampered
+        .verify()
+        .expect_err("payload tampering must invalidate the receipt digest");
+    assert!(error.contains("digest"), "{error}");
+
+    fs::remove_dir_all(directory).expect("remove validation receipt fixture");
 }
 
 #[test]

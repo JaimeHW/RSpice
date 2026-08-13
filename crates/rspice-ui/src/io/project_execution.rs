@@ -16,15 +16,16 @@ use crate::product::{ContentDigest, ProjectId};
 use crate::state::model_library::is_foreign_platform_absolute_path;
 use crate::state::model_library::{
     DeviceModel, ModelCorrelationState, ModelDefinitionMetadata, ModelLibrary, ModelLibraryManager,
-    ModelQualificationState, ModelSectionQualification, ModelSourceAuthority, ModelSourceContent,
-    ModelSourceEdge, ModelSourceEvidenceBinding, ModelSourcePin, ModelSubcircuitInterface,
-    ParameterDataType, ParameterValue, ProcessCorner as LibraryProcessCorner,
-    ProjectModelDefinition, ProjectModelRevisionDefinition, first_unreachable_source,
-    is_portable_absolute_path, subcircuit_interface_key,
+    ModelQualificationState, ModelResolutionRecord, ModelSectionQualification,
+    ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourceEvidenceBinding,
+    ModelSourcePin, ModelSubcircuitInterface, ModelValidationReceipt, ParameterDataType,
+    ParameterValue, ProcessCorner as LibraryProcessCorner, ProjectModelDefinition,
+    ProjectModelRevisionDefinition, first_unreachable_source, is_portable_absolute_path,
+    subcircuit_interface_key,
 };
 use crate::workbench::app_state::SimSetupState;
 
-pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 15;
+pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 16;
 const LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 0;
 const UNPINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 1;
 const PATH_PINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 2;
@@ -40,6 +41,7 @@ const TYPED_CORNER_DOMAIN_SCHEMA_VERSION: u32 = 11;
 const RETAINED_IMPORTED_SOURCE_AUTHORITY_SCHEMA_VERSION: u32 = 12;
 const EXPLICIT_MODEL_DEFINITION_RESOLUTION_SCHEMA_VERSION: u32 = 13;
 const RETAINED_SUBCIRCUIT_INTERFACE_SCHEMA_VERSION: u32 = 14;
+const AUTHENTICATED_MODEL_SECTION_SCHEMA_VERSION: u32 = 15;
 const RETIRED_SINGLETON_ANALYSIS_FIELDS: &[&str] = &[
     "enabled",
     "analysis_order",
@@ -81,6 +83,9 @@ pub struct ProjectExecutionContext {
     pub schema_version: u32,
     pub simulation_plan: SimSetupState,
     pub model_libraries: Vec<ProjectModelLibrary>,
+    pub model_resolution_records: Vec<ModelResolutionRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_validation_receipt: Option<ModelValidationReceipt>,
 }
 
 impl<'de> Deserialize<'de> for ProjectExecutionContext {
@@ -95,6 +100,10 @@ impl<'de> Deserialize<'de> for ProjectExecutionContext {
             schema_version: u32,
             simulation_plan: serde_json::Value,
             model_libraries: Vec<ProjectModelLibrary>,
+            #[serde(default)]
+            model_resolution_records: Vec<ModelResolutionRecord>,
+            #[serde(default)]
+            model_validation_receipt: Option<ModelValidationReceipt>,
             /// Retired with the local Models workspace. The field is still
             /// accepted, and discarded, so a project written by a build that
             /// carried the ledger still loads under `deny_unknown_fields`.
@@ -134,6 +143,8 @@ impl<'de> Deserialize<'de> for ProjectExecutionContext {
             schema_version: persisted.schema_version,
             simulation_plan,
             model_libraries: persisted.model_libraries,
+            model_resolution_records: persisted.model_resolution_records,
+            model_validation_receipt: persisted.model_validation_receipt,
         })
     }
 }
@@ -199,6 +210,8 @@ impl ProjectExecutionContext {
                 .into_iter()
                 .map(ProjectModelLibrary::from)
                 .collect(),
+            model_resolution_records: model_libraries.owned_model_resolution_records(),
+            model_validation_receipt: model_libraries.model_validation_receipt().cloned(),
         };
         context.validate()?;
         Ok(context)
@@ -362,6 +375,14 @@ impl ProjectExecutionContext {
                         )
                     })?;
                 }
+                self.schema_version = AUTHENTICATED_MODEL_SECTION_SCHEMA_VERSION;
+                self.migrate_to_current(project_id)
+            }
+            AUTHENTICATED_MODEL_SECTION_SCHEMA_VERSION => {
+                // Schema 15 predated source-qualified provider decisions. An
+                // empty ledger is the only safe migration: existing overlaps
+                // stay fail-closed until a user publishes an exact decision.
+                self.model_resolution_records.clear();
                 self.schema_version = PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION;
                 Ok(())
             }
@@ -383,7 +404,13 @@ impl ProjectExecutionContext {
             ));
         }
         validate_simulation_plan(&self.simulation_plan)?;
-        validate_model_libraries(&self.model_libraries)
+        validate_model_libraries(&self.model_libraries)?;
+        let mut manager = ModelLibraryManager::new();
+        for library in self.model_libraries.clone() {
+            manager.add_library(library.into_model_library());
+        }
+        manager.restore_model_resolution_records(self.model_resolution_records.clone())?;
+        manager.restore_model_validation_receipt(self.model_validation_receipt.clone())
     }
 
     /// Bind project technology metadata to the exact execution library it
@@ -428,6 +455,8 @@ impl ProjectExecutionContext {
         for library in self.model_libraries {
             manager.add_library(library.into_model_library());
         }
+        manager.restore_model_resolution_records(self.model_resolution_records)?;
+        manager.restore_model_validation_receipt(self.model_validation_receipt)?;
         self.simulation_plan.prepare_after_restore();
         Ok((self.simulation_plan, manager, warnings))
     }
@@ -1222,21 +1251,11 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                     "{context}.corners['{corner_key}'] source path is not a member of the authenticated library closure"
                 ));
             }
-            if let Err(errors) = corner.validate_contract() {
-                // Unbound required domains are a durable draft state. They
-                // remain visible in Models > Corners and fail only when that
-                // corner is selected for execution. Every other structural
-                // defect is rejected during project restore.
-                let structural = errors
-                    .into_iter()
-                    .filter(|error| !error.contains("section is required but not bound"))
-                    .collect::<Vec<_>>();
-                if !structural.is_empty() {
-                    return Err(format!(
-                        "{context}.corners['{corner_key}'] has an invalid section contract: {}",
-                        structural.join("; ")
-                    ));
-                }
+            if let Err(errors) = corner.validate_draft_contract() {
+                return Err(format!(
+                    "{context}.corners['{corner_key}'] has an invalid authoring draft: {}",
+                    errors.join("; ")
+                ));
             }
         }
         let active_model_sections = persisted_active_model_section_names(library)?

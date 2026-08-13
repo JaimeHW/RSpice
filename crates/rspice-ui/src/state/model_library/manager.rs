@@ -43,6 +43,323 @@ pub struct ProjectModelCommit {
     pub affects_execution: bool,
 }
 
+pub const MODEL_RESOLUTION_RECORD_SCHEMA_VERSION: u16 = 1;
+pub const MODEL_VALIDATION_RECEIPT_SCHEMA_VERSION: u16 = 1;
+
+/// Consumer namespace governed by one explicit provider decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelConsumerScope {
+    PrimitiveModel,
+    Subcircuit,
+}
+
+impl ModelConsumerScope {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::PrimitiveModel => "primitive model",
+            Self::Subcircuit => "subcircuit",
+        }
+    }
+
+    const fn key(self) -> &'static str {
+        match self {
+            Self::PrimitiveModel => "model",
+            Self::Subcircuit => "subckt",
+        }
+    }
+}
+
+/// Exact project-owned decision for a contested executable definition.
+///
+/// The provider's authenticated source digest makes the decision expire when
+/// a source is refreshed, even if the library and definition names are reused.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelResolutionRecord {
+    pub schema_version: u16,
+    pub consumer_scope: ModelConsumerScope,
+    pub normalized_name: String,
+    pub provider_library: String,
+    pub provider_definition: String,
+    pub provider_source_digest: ContentDigest,
+    pub audit_reason: String,
+    pub created_at_unix_ms: u64,
+}
+
+impl ModelResolutionRecord {
+    fn key(&self) -> String {
+        resolution_record_key(self.consumer_scope, &self.normalized_name)
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.schema_version != MODEL_RESOLUTION_RECORD_SCHEMA_VERSION {
+            return Err(format!(
+                "model-resolution record for '{}' uses unsupported schema {}",
+                self.normalized_name, self.schema_version
+            ));
+        }
+        let normalized = self.normalized_name.trim().to_ascii_lowercase();
+        if normalized.is_empty() || normalized != self.normalized_name {
+            return Err("model-resolution name must be nonempty canonical lowercase".to_owned());
+        }
+        if self.provider_definition.to_ascii_lowercase() != self.normalized_name {
+            return Err(
+                "model-resolution provider definition does not match its canonical name".to_owned(),
+            );
+        }
+        for (field, value, maximum) in [
+            (
+                "provider library",
+                self.provider_library.as_str(),
+                512_usize,
+            ),
+            (
+                "provider definition",
+                self.provider_definition.as_str(),
+                512_usize,
+            ),
+            ("audit reason", self.audit_reason.as_str(), 2_048_usize),
+        ] {
+            if value.is_empty()
+                || value != value.trim()
+                || value.len() > maximum
+                || value.chars().any(char::is_control)
+            {
+                return Err(format!(
+                    "model-resolution {field} must be nonempty, trimmed, control-free, and at most {maximum} bytes"
+                ));
+            }
+        }
+        if self.created_at_unix_ms == 0 {
+            return Err("model-resolution timestamp must be nonzero".to_owned());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ModelDefinitionProvider {
+    pub library: String,
+    pub definition: String,
+    pub source_digest: ContentDigest,
+}
+
+fn resolution_record_key(scope: ModelConsumerScope, normalized_name: &str) -> String {
+    format!("{}:{normalized_name}", scope.key())
+}
+
+fn model_library_source_digest(library: &ModelLibrary) -> ContentDigest {
+    if let Some(root) = library.root_path.as_deref()
+        && let Some(pin) = library.source_closure.iter().find(|pin| pin.path == root)
+    {
+        return pin.digest;
+    }
+    let bytes = serde_json::to_value(library)
+        .and_then(|canonical| serde_json::to_vec(&canonical))
+        .unwrap_or_else(|error| format!("serialization-error:{error}").into_bytes());
+    ContentDigest::from_bytes(Sha256::digest(bytes).into())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelValidationFindingSeverity {
+    Information,
+    Warning,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelValidationFinding {
+    pub code: String,
+    pub severity: ModelValidationFindingSeverity,
+    pub message: String,
+}
+
+/// Durable evidence that one exact project revision passed the executable
+/// model pipeline on one supported platform and engine/schema build.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelValidationReceipt {
+    pub schema_version: u16,
+    pub project_revision: ObjectRevision,
+    pub model_execution_plan_digest: ContentDigest,
+    pub execution_catalog_digest: ContentDigest,
+    /// Number of authenticated ordinary-library source members represented by
+    /// `source_closure_digest`. The receipt stores one canonical digest rather
+    /// than duplicating every source path and digest into project metadata.
+    pub source_count: u64,
+    pub source_closure_digest: ContentDigest,
+    pub pdk_archive_digest: Option<ContentDigest>,
+    pub engine_version: String,
+    pub execution_schema_version: u32,
+    pub platform: String,
+    pub findings: Vec<ModelValidationFinding>,
+    pub validated_at_unix_ms: u64,
+    pub receipt_digest: ContentDigest,
+}
+
+impl ModelValidationReceipt {
+    #[allow(clippy::too_many_arguments)]
+    fn issue(
+        project_revision: ObjectRevision,
+        model_execution_plan_digest: ContentDigest,
+        execution_catalog_digest: ContentDigest,
+        source_count: u64,
+        source_closure_digest: ContentDigest,
+        pdk_archive_digest: Option<ContentDigest>,
+        execution_schema_version: u32,
+        findings: Vec<ModelValidationFinding>,
+    ) -> Result<Self, String> {
+        let engine_version = env!("CARGO_PKG_VERSION").to_owned();
+        let platform = model_validation_platform().to_owned();
+        let validated_at_unix_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| format!("system clock cannot timestamp model validation: {error}"))?
+            .as_millis()
+            .try_into()
+            .map_err(|_| "model-validation timestamp exceeds the supported range".to_owned())?;
+        let receipt_digest = model_validation_receipt_digest(
+            project_revision,
+            model_execution_plan_digest,
+            execution_catalog_digest,
+            source_count,
+            source_closure_digest,
+            pdk_archive_digest,
+            &engine_version,
+            execution_schema_version,
+            &platform,
+            &findings,
+            validated_at_unix_ms,
+        )?;
+        let receipt = Self {
+            schema_version: MODEL_VALIDATION_RECEIPT_SCHEMA_VERSION,
+            project_revision,
+            model_execution_plan_digest,
+            execution_catalog_digest,
+            source_count,
+            source_closure_digest,
+            pdk_archive_digest,
+            engine_version,
+            execution_schema_version,
+            platform,
+            findings,
+            validated_at_unix_ms,
+            receipt_digest,
+        };
+        receipt.verify()?;
+        Ok(receipt)
+    }
+
+    pub fn verify(&self) -> Result<(), String> {
+        if self.schema_version != MODEL_VALIDATION_RECEIPT_SCHEMA_VERSION {
+            return Err(format!(
+                "model-validation receipt uses unsupported schema {}",
+                self.schema_version
+            ));
+        }
+        if self.engine_version.trim().is_empty()
+            || self.engine_version != self.engine_version.trim()
+            || self.engine_version.len() > 128
+            || !matches!(
+                self.platform.as_str(),
+                "desktop-windows" | "desktop-macos" | "desktop-linux" | "browser-wasm32"
+            )
+            || self.validated_at_unix_ms == 0
+        {
+            return Err(
+                "model-validation receipt has an invalid engine, platform, or timestamp identity"
+                    .to_owned(),
+            );
+        }
+        if self.findings.is_empty() || self.findings.len() > 64 {
+            return Err(
+                "model-validation receipt must retain between 1 and 64 bounded findings".to_owned(),
+            );
+        }
+        for finding in &self.findings {
+            for (field, value, maximum) in [
+                ("finding code", finding.code.as_str(), 128_usize),
+                ("finding message", finding.message.as_str(), 2_048_usize),
+            ] {
+                if value.is_empty()
+                    || value != value.trim()
+                    || value.len() > maximum
+                    || value.chars().any(char::is_control)
+                {
+                    return Err(format!(
+                        "model-validation {field} must be nonempty, trimmed, control-free, and at most {maximum} bytes"
+                    ));
+                }
+            }
+        }
+        let expected = model_validation_receipt_digest(
+            self.project_revision,
+            self.model_execution_plan_digest,
+            self.execution_catalog_digest,
+            self.source_count,
+            self.source_closure_digest,
+            self.pdk_archive_digest,
+            &self.engine_version,
+            self.execution_schema_version,
+            &self.platform,
+            &self.findings,
+            self.validated_at_unix_ms,
+        )?;
+        if expected != self.receipt_digest {
+            return Err("model-validation receipt digest does not match its payload".to_owned());
+        }
+        Ok(())
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn model_validation_receipt_digest(
+    project_revision: ObjectRevision,
+    model_execution_plan_digest: ContentDigest,
+    execution_catalog_digest: ContentDigest,
+    source_count: u64,
+    source_closure_digest: ContentDigest,
+    pdk_archive_digest: Option<ContentDigest>,
+    engine_version: &str,
+    execution_schema_version: u32,
+    platform: &str,
+    findings: &[ModelValidationFinding],
+    validated_at_unix_ms: u64,
+) -> Result<ContentDigest, String> {
+    let bytes = serde_json::to_vec(&(
+        MODEL_VALIDATION_RECEIPT_SCHEMA_VERSION,
+        project_revision,
+        model_execution_plan_digest,
+        execution_catalog_digest,
+        source_count,
+        source_closure_digest,
+        pdk_archive_digest,
+        engine_version,
+        execution_schema_version,
+        platform,
+        findings,
+        validated_at_unix_ms,
+    ))
+    .map_err(|error| format!("Cannot serialize model-validation receipt payload: {error}"))?;
+    Ok(ContentDigest::from_bytes(Sha256::digest(bytes).into()))
+}
+
+const fn model_validation_platform() -> &'static str {
+    if cfg!(target_arch = "wasm32") {
+        "browser-wasm32"
+    } else if cfg!(target_os = "windows") {
+        "desktop-windows"
+    } else if cfg!(target_os = "macos") {
+        "desktop-macos"
+    } else if cfg!(target_os = "linux") {
+        "desktop-linux"
+    } else {
+        "desktop-unsupported"
+    }
+}
+
 /// One immutable, authenticated model-source snapshot for a simulation run.
 /// The exact bytes are intentionally transient and are never serialized into
 /// project/session state.
@@ -59,6 +376,7 @@ pub struct SealedModelExecutionSources {
         crate::state::pdk_config::PdkTechnologyBinding,
         ContentDigest,
     )>,
+    resolution_records: Vec<ModelResolutionRecord>,
 }
 
 /// Immutable, content-addressed model namespace used by one nominal run.
@@ -72,6 +390,7 @@ pub struct ModelExecutionPlan {
     reference_process: crate::simulation::dialog::corner::ProcessCorner,
     selected_library_corners: Vec<(String, Option<String>)>,
     bindings: Vec<CornerModelBinding>,
+    applied_resolutions: Vec<ModelResolutionRecord>,
     digest: ContentDigest,
 }
 
@@ -89,6 +408,11 @@ impl ModelExecutionPlan {
     #[must_use]
     pub fn bindings(&self) -> &[CornerModelBinding] {
         &self.bindings
+    }
+
+    #[must_use]
+    pub fn applied_resolutions(&self) -> &[ModelResolutionRecord] {
+        &self.applied_resolutions
     }
 
     #[must_use]
@@ -114,8 +438,10 @@ impl ModelExecutionPlan {
 struct SealedExecutionLibrary {
     name: String,
     root_path: PathBuf,
+    source_digest: ContentDigest,
     corners: Vec<ProcessCorner>,
     selected_corner: Option<String>,
+    allows_selected_section_override: bool,
 }
 
 /// One corner section materialized out of the sealed bundle, with the identity
@@ -124,6 +450,23 @@ struct MaterializedCornerSection {
     source_label: String,
     section: String,
     materialized_model_cards: String,
+}
+
+#[derive(Debug, Clone)]
+struct MaterializedPlanBinding {
+    binding: CornerModelBinding,
+    provider_library: String,
+    provider_source_digest: ContentDigest,
+    allows_selected_section_override: bool,
+}
+
+#[derive(Debug, Clone)]
+struct MaterializedDefinition {
+    scope: ModelConsumerScope,
+    normalized_name: String,
+    exact_name: String,
+    binding_index: usize,
+    name_span: std::ops::Range<usize>,
 }
 
 const fn pdk_model_process(process: CornerProcess) -> crate::state::pdk_config::PdkModelProcess {
@@ -153,86 +496,345 @@ fn hash_plan_field(hasher: &mut Sha256, value: &[u8]) {
     hasher.update(value);
 }
 
-fn validate_materialized_definition_namespace_by_process(
-    bindings: &[CornerModelBinding],
-) -> Result<(), String> {
-    for process in [
-        CornerProcess::TT,
-        CornerProcess::SS,
-        CornerProcess::FF,
-        CornerProcess::SF,
-        CornerProcess::FS,
-    ] {
-        let process_bindings = bindings
-            .iter()
-            .filter(|binding| binding.process == process)
-            .cloned()
-            .collect::<Vec<_>>();
-        if !process_bindings.is_empty() {
-            validate_materialized_definition_namespace(&process_bindings)?;
+fn materialized_definitions(binding_index: usize, cards: &str) -> Vec<MaterializedDefinition> {
+    // The editor source map deliberately treats the first line as a SPICE
+    // title. Prefix one title so the first actual model card is inspected.
+    let prefix = "RSpice materialized provider\n";
+    let wrapped = format!("{prefix}{cards}");
+    let map = rspice_core::netlist::source_map_for_editor(&wrapped);
+    map.model_defs
+        .into_iter()
+        .filter(|definition| definition.scope.is_none())
+        .map(|definition| MaterializedDefinition {
+            scope: ModelConsumerScope::PrimitiveModel,
+            normalized_name: definition.name.to_ascii_lowercase(),
+            exact_name: definition.name,
+            binding_index,
+            name_span: (definition.span.start - prefix.len())..(definition.span.end - prefix.len()),
+        })
+        .chain(
+            map.subckt_defs
+                .into_iter()
+                .filter(|definition| definition.scope.is_none())
+                .map(|definition| MaterializedDefinition {
+                    scope: ModelConsumerScope::Subcircuit,
+                    normalized_name: definition.name.to_ascii_lowercase(),
+                    exact_name: definition.name,
+                    binding_index,
+                    name_span: (definition.span.start - prefix.len())
+                        ..(definition.span.end - prefix.len()),
+                }),
+        )
+        .collect()
+}
+
+/// Canonical project-owned model revisions intentionally carry one top-level
+/// base card plus one complete card in each `.lib` section. Selecting such a
+/// section must replace the base card, while duplicates in imported or signed
+/// sources remain errors. Perform that one narrowly authorized rewrite before
+/// resolving conflicts between independent providers.
+fn apply_project_section_overrides(bindings: &mut [MaterializedPlanBinding]) -> Result<(), String> {
+    let definitions = bindings
+        .iter()
+        .enumerate()
+        .flat_map(|(index, binding)| {
+            materialized_definitions(index, &binding.binding.materialized_model_cards)
+        })
+        .collect::<Vec<_>>();
+    let mut groups = BTreeMap::<(ModelConsumerScope, String), Vec<&MaterializedDefinition>>::new();
+    for definition in &definitions {
+        groups
+            .entry((definition.scope, definition.normalized_name.clone()))
+            .or_default()
+            .push(definition);
+    }
+    let mut losers = BTreeMap::<usize, Vec<&MaterializedDefinition>>::new();
+    let mut unresolved = Vec::new();
+    for ((scope, normalized_name), providers) in groups {
+        let mut same_source = BTreeMap::<(String, String), Vec<&MaterializedDefinition>>::new();
+        for definition in providers {
+            let binding = &bindings[definition.binding_index];
+            same_source
+                .entry((
+                    binding.provider_library.clone(),
+                    binding.provider_source_digest.to_string(),
+                ))
+                .or_default()
+                .push(definition);
+        }
+        for ((library, digest), definitions) in same_source {
+            if definitions.len() < 2 {
+                continue;
+            }
+            let binding_index = definitions[0].binding_index;
+            let authorized = definitions
+                .iter()
+                .all(|definition| definition.binding_index == binding_index)
+                && bindings[binding_index].allows_selected_section_override
+                && bindings[binding_index].binding.section.is_some();
+            if !authorized {
+                unresolved.push(format!(
+                    "{} '{}' is repeated inside authenticated provider '{}' at source {}",
+                    scope.label(),
+                    normalized_name,
+                    library,
+                    digest
+                ));
+                continue;
+            }
+            let winner_span = definitions
+                .iter()
+                .max_by_key(|definition| definition.name_span.start)
+                .map(|definition| definition.name_span.clone())
+                .expect("same-source override group is nonempty");
+            for definition in definitions {
+                if definition.name_span != winner_span {
+                    losers
+                        .entry(definition.binding_index)
+                        .or_default()
+                        .push(definition);
+                }
+            }
+        }
+    }
+    if !unresolved.is_empty() {
+        unresolved.truncate(8);
+        return Err(format!(
+            "Executable model namespace is contested and fails closed: {}. Repair the duplicate source before simulation.",
+            unresolved.join("; ")
+        ));
+    }
+    for (binding_index, mut definitions) in losers {
+        definitions.sort_by_key(|definition| std::cmp::Reverse(definition.name_span.start));
+        for definition in definitions {
+            bindings[binding_index].binding.materialized_model_cards =
+                mask_materialized_definition(
+                    &bindings[binding_index].binding.materialized_model_cards,
+                    definition,
+                )?;
         }
     }
     Ok(())
 }
 
-/// Reject a materialized namespace whose result would otherwise depend on the
-/// first definition returned by the core engine.  SPICE model and subcircuit
-/// names intentionally share this conservative top-level conflict index: an
-/// explicit, persisted resolution record is required before such a contested
-/// name can ever become executable.
-fn validate_materialized_definition_namespace(
-    bindings: &[CornerModelBinding],
-) -> Result<(), String> {
-    let mut providers = BTreeMap::<String, (String, Vec<String>)>::new();
-    for binding in bindings {
-        let source = format!(
-            "{}{}",
-            binding.source_label,
-            binding
-                .section
-                .as_deref()
-                .map(|section| format!(" [{section}]"))
-                .unwrap_or_default()
-        );
-        let wrapped = format!(
-            "RSpice sealed model namespace\n{}\n.end\n",
-            binding.materialized_model_cards
-        );
-        let parsed = rspice_core::netlist::parse_netlist(&wrapped).map_err(|error| {
-            format!("Cannot validate executable model namespace from '{source}': {error}")
-        })?;
-        for (name, kind) in parsed
-            .models
-            .iter()
-            .map(|definition| (definition.name.as_str(), "model"))
-            .chain(
-                parsed
-                    .subcircuits
-                    .iter()
-                    .map(|definition| (definition.name.as_str(), "subcircuit")),
+/// Apply exact project-owned provider decisions to a frozen materialization.
+/// Losing definitions are blanked before the engine parses the cards, so the
+/// engine consumes one unambiguous namespace rather than relying on include
+/// order or first-match lookup.
+fn resolve_materialized_definition_namespace(
+    mut bindings: Vec<MaterializedPlanBinding>,
+    records: &[ModelResolutionRecord],
+) -> Result<(Vec<CornerModelBinding>, Vec<ModelResolutionRecord>), String> {
+    apply_project_section_overrides(&mut bindings)?;
+    let definitions = bindings
+        .iter()
+        .enumerate()
+        .flat_map(|(index, binding)| {
+            materialized_definitions(index, &binding.binding.materialized_model_cards)
+        })
+        .collect::<Vec<_>>();
+    let mut groups = BTreeMap::<(ModelConsumerScope, String), Vec<&MaterializedDefinition>>::new();
+    for definition in &definitions {
+        groups
+            .entry((definition.scope, definition.normalized_name.clone()))
+            .or_default()
+            .push(definition);
+    }
+    let record_index = records
+        .iter()
+        .map(|record| {
+            (
+                (record.consumer_scope, record.normalized_name.clone()),
+                record,
             )
-        {
-            let entry = providers
-                .entry(name.to_ascii_lowercase())
-                .or_insert_with(|| (name.to_owned(), Vec::new()));
-            entry.1.push(format!("{kind} in {source}"));
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut losers = BTreeMap::<usize, Vec<&MaterializedDefinition>>::new();
+    let mut applied = Vec::new();
+    let mut unresolved = Vec::new();
+
+    for ((scope, normalized_name), providers) in groups {
+        if providers.len() < 2 {
+            continue;
         }
+        let provider_descriptions = providers
+            .iter()
+            .map(|definition| {
+                let binding = &bindings[definition.binding_index];
+                format!(
+                    "{}/{} at {} (source {})",
+                    binding.provider_library,
+                    definition.exact_name,
+                    binding.binding.source_label,
+                    binding.provider_source_digest
+                )
+            })
+            .collect::<Vec<_>>();
+        if providers.iter().enumerate().any(|(index, left)| {
+            providers.iter().skip(index + 1).any(|right| {
+                let left = &bindings[left.binding_index];
+                let right = &bindings[right.binding_index];
+                left.provider_library == right.provider_library
+                    && left.provider_source_digest == right.provider_source_digest
+            })
+        }) {
+            unresolved.push(format!(
+                "{} '{}' is repeated inside one authenticated provider: {}",
+                scope.label(),
+                normalized_name,
+                provider_descriptions.join(", ")
+            ));
+            continue;
+        }
+        let Some(record) = record_index.get(&(scope, normalized_name.clone())) else {
+            unresolved.push(format!(
+                "{} '{}' from {}",
+                scope.label(),
+                normalized_name,
+                provider_descriptions.join(", ")
+            ));
+            continue;
+        };
+        let winners = providers
+            .iter()
+            .filter(|definition| {
+                let binding = &bindings[definition.binding_index];
+                binding.provider_library == record.provider_library
+                    && binding.provider_source_digest == record.provider_source_digest
+                    && definition.exact_name == record.provider_definition
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        if winners.len() != 1 {
+            unresolved.push(format!(
+                "{} '{}' has a stale provider decision for '{}/{}' at source {}; active providers are {}",
+                scope.label(),
+                normalized_name,
+                record.provider_library,
+                record.provider_definition,
+                record.provider_source_digest,
+                provider_descriptions.join(", ")
+            ));
+            continue;
+        }
+        let winner = winners[0];
+        for provider in providers {
+            if !std::ptr::eq(provider, winner) {
+                losers
+                    .entry(provider.binding_index)
+                    .or_default()
+                    .push(provider);
+            }
+        }
+        applied.push((*record).clone());
     }
 
-    let conflicts = providers
-        .into_values()
-        .filter(|(_, providers)| providers.len() > 1)
-        .take(8)
-        .map(|(name, providers)| format!("'{name}' from {}", providers.join(", ")))
-        .collect::<Vec<_>>();
-    if conflicts.is_empty() {
-        Ok(())
-    } else {
-        Err(format!(
-            "Executable model namespace is contested and fails closed: {}. Remove or rename the duplicate definition before simulation.",
-            conflicts.join("; ")
-        ))
+    if !unresolved.is_empty() {
+        unresolved.truncate(8);
+        return Err(format!(
+            "Executable model namespace is contested and fails closed: {}. Publish an exact source-qualified provider decision or repair the duplicate source before simulation.",
+            unresolved.join("; ")
+        ));
     }
+
+    for (binding_index, mut definitions) in losers {
+        definitions.sort_by_key(|definition| std::cmp::Reverse(definition.name_span.start));
+        for definition in definitions {
+            bindings[binding_index].binding.materialized_model_cards =
+                mask_materialized_definition(
+                    &bindings[binding_index].binding.materialized_model_cards,
+                    definition,
+                )?;
+        }
+    }
+    applied.sort_by(|left, right| left.key().cmp(&right.key()));
+    applied.dedup_by(|left, right| left.key() == right.key());
+    let bindings = bindings
+        .into_iter()
+        .filter(|binding| !binding.binding.materialized_model_cards.trim().is_empty())
+        .map(|binding| {
+            binding.binding.validate()?;
+            Ok(binding.binding)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok((bindings, applied))
+}
+
+fn mask_materialized_definition(
+    cards: &str,
+    definition: &MaterializedDefinition,
+) -> Result<String, String> {
+    if definition.name_span.end > cards.len() {
+        return Err(format!(
+            "cannot apply provider decision for '{}' because its source span is invalid",
+            definition.exact_name
+        ));
+    }
+    let bytes = cards.as_bytes();
+    let start = bytes[..definition.name_span.start]
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |index| index + 1);
+    let mut end = physical_line_end(bytes, start);
+    match definition.scope {
+        ModelConsumerScope::PrimitiveModel => {
+            while end < bytes.len() {
+                let next_end = physical_line_end(bytes, end);
+                let line = std::str::from_utf8(&bytes[end..next_end]).map_err(|error| {
+                    format!("materialized model source is not UTF-8 at continuation: {error}")
+                })?;
+                if line.trim_start().starts_with('+') {
+                    end = next_end;
+                } else {
+                    break;
+                }
+            }
+        }
+        ModelConsumerScope::Subcircuit => {
+            let mut cursor = start;
+            let mut depth = 0_usize;
+            let mut closed = false;
+            while cursor < bytes.len() {
+                let next = physical_line_end(bytes, cursor);
+                let line = std::str::from_utf8(&bytes[cursor..next]).map_err(|error| {
+                    format!("materialized subcircuit source is not UTF-8: {error}")
+                })?;
+                let head = line.trim_start().split_whitespace().next().unwrap_or("");
+                if head.eq_ignore_ascii_case(".subckt") {
+                    depth += 1;
+                } else if head.eq_ignore_ascii_case(".ends") {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        end = next;
+                        closed = true;
+                        break;
+                    }
+                }
+                cursor = next;
+            }
+            if !closed {
+                return Err(format!(
+                    "cannot apply provider decision because subcircuit '{}' has no matching .ENDS",
+                    definition.exact_name
+                ));
+            }
+        }
+    }
+    let mut masked = bytes.to_vec();
+    for byte in &mut masked[start..end] {
+        if *byte != b'\n' && *byte != b'\r' {
+            *byte = b' ';
+        }
+    }
+    String::from_utf8(masked)
+        .map_err(|error| format!("resolved model materialization is not UTF-8: {error}"))
+}
+
+fn physical_line_end(bytes: &[u8], start: usize) -> usize {
+    bytes[start..]
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .map_or(bytes.len(), |offset| start + offset + 1)
 }
 
 impl SealedModelExecutionSources {
@@ -497,8 +1099,9 @@ impl SealedModelExecutionSources {
         process: crate::simulation::dialog::corner::ProcessCorner,
     ) -> Result<ModelExecutionPlan, String> {
         let corner_process = simulation_corner_process(process);
-        let bindings = self.bindings_for_processes(&[corner_process], true)?;
-        validate_materialized_definition_namespace(&bindings)?;
+        let materialized = self.bindings_for_processes(&[corner_process], true)?;
+        let (bindings, applied_resolutions) =
+            resolve_materialized_definition_namespace(materialized, &self.resolution_records)?;
 
         let selected_library_corners = self
             .libraries
@@ -520,7 +1123,7 @@ impl SealedModelExecutionSources {
             .collect::<Vec<_>>();
 
         let mut hasher = Sha256::new();
-        hasher.update(b"rspice.model-execution-plan/v1\0");
+        hasher.update(b"rspice.model-execution-plan/v2\0");
         hasher.update(corner_process.as_keyword().as_bytes());
         for (library, corner) in &selected_library_corners {
             hash_plan_field(&mut hasher, library.as_bytes());
@@ -534,12 +1137,19 @@ impl SealedModelExecutionSources {
             );
             hash_plan_field(&mut hasher, binding.materialized_model_cards.as_bytes());
         }
+        for resolution in &applied_resolutions {
+            let bytes = serde_json::to_vec(resolution).map_err(|error| {
+                format!("Cannot digest applied model provider decision: {error}")
+            })?;
+            hash_plan_field(&mut hasher, &bytes);
+        }
         let digest = ContentDigest::from_bytes(hasher.finalize().into());
 
         Ok(ModelExecutionPlan {
             reference_process: process,
             selected_library_corners,
             bindings,
+            applied_resolutions,
             digest,
         })
     }
@@ -559,16 +1169,21 @@ impl SealedModelExecutionSources {
         &self,
         processes: &[CornerProcess],
     ) -> Result<Vec<CornerModelBinding>, String> {
-        let bindings = self.bindings_for_processes(processes, false)?;
-        validate_materialized_definition_namespace_by_process(&bindings)?;
-        Ok(bindings)
+        let mut resolved = Vec::new();
+        for process in processes {
+            let materialized = self.bindings_for_processes(&[*process], false)?;
+            let (bindings, _) =
+                resolve_materialized_definition_namespace(materialized, &self.resolution_records)?;
+            resolved.extend(bindings);
+        }
+        Ok(resolved)
     }
 
     fn bindings_for_processes(
         &self,
         processes: &[CornerProcess],
         honor_nominal_selection: bool,
-    ) -> Result<Vec<CornerModelBinding>, String> {
+    ) -> Result<Vec<MaterializedPlanBinding>, String> {
         if self.libraries.is_empty() && self.pdk_process_bindings.is_empty() {
             if let Some(process) = processes
                 .iter()
@@ -608,13 +1223,19 @@ impl SealedModelExecutionSources {
                 match corner.as_ref() {
                     Some(corner) => {
                         for section in self.materialize_library_corner(library, corner)? {
-                            let binding = CornerModelBinding {
-                                process: *process,
-                                source_label: section.source_label,
-                                section: Some(section.section),
-                                materialized_model_cards: section.materialized_model_cards,
+                            let binding = MaterializedPlanBinding {
+                                binding: CornerModelBinding {
+                                    process: *process,
+                                    source_label: section.source_label,
+                                    section: Some(section.section),
+                                    materialized_model_cards: section.materialized_model_cards,
+                                },
+                                provider_library: library.name.clone(),
+                                provider_source_digest: library.source_digest,
+                                allows_selected_section_override: library
+                                    .allows_selected_section_override,
                             };
-                            binding.validate()?;
+                            binding.binding.validate()?;
                             bindings.push(binding);
                         }
                     }
@@ -632,13 +1253,18 @@ impl SealedModelExecutionSources {
                                     library.root_path.display()
                                 )
                             })?;
-                        let binding = CornerModelBinding {
-                            process: *process,
-                            source_label: library.root_path.display().to_string(),
-                            section: None,
-                            materialized_model_cards,
+                        let binding = MaterializedPlanBinding {
+                            binding: CornerModelBinding {
+                                process: *process,
+                                source_label: library.root_path.display().to_string(),
+                                section: None,
+                                materialized_model_cards,
+                            },
+                            provider_library: library.name.clone(),
+                            provider_source_digest: library.source_digest,
+                            allows_selected_section_override: false,
                         };
-                        binding.validate()?;
+                        binding.binding.validate()?;
                         bindings.push(binding);
                     }
                 }
@@ -692,13 +1318,18 @@ impl SealedModelExecutionSources {
                             )
                         })
                         .unwrap_or_else(|| source.source_id.clone());
-                    let binding = CornerModelBinding {
-                        process: *process,
-                        source_label: package,
-                        section: source.section.clone(),
-                        materialized_model_cards,
+                    let binding = MaterializedPlanBinding {
+                        binding: CornerModelBinding {
+                            process: *process,
+                            source_label: package,
+                            section: source.section.clone(),
+                            materialized_model_cards,
+                        },
+                        provider_library: format!("signed-pdk:{}", source.source_id),
+                        provider_source_digest: source.artifact_digest,
+                        allows_selected_section_override: false,
                     };
-                    binding.validate()?;
+                    binding.binding.validate()?;
                     bindings.push(binding);
                 }
             }
@@ -923,6 +1554,12 @@ pub struct ModelLibraryManager {
     pub filter_text: String,
     /// Filter by model type
     pub filter_type: Option<ModelType>,
+    /// Durable project decisions for contested executable definitions. The
+    /// map key is the canonical `scope:name` identity repeated by each value.
+    #[serde(default)]
+    resolution_records: BTreeMap<String, ModelResolutionRecord>,
+    #[serde(default)]
+    validation_receipt: Option<ModelValidationReceipt>,
     /// Index over the shipped model packs, when one was found on disk.
     ///
     /// Held rather than loaded: the packs carry around 199,000 definitions, so
@@ -965,6 +1602,319 @@ pub struct PackModelHit {
 }
 
 impl ModelLibraryManager {
+    #[must_use]
+    pub fn model_validation_receipt(&self) -> Option<&ModelValidationReceipt> {
+        self.validation_receipt.as_ref()
+    }
+
+    pub(crate) fn invalidate_model_validation_receipt(&mut self) {
+        self.validation_receipt = None;
+    }
+
+    pub(crate) fn restore_model_validation_receipt(
+        &mut self,
+        receipt: Option<ModelValidationReceipt>,
+    ) -> Result<(), String> {
+        if let Some(receipt) = receipt.as_ref() {
+            receipt.verify()?;
+        }
+        self.validation_receipt = receipt;
+        Ok(())
+    }
+
+    pub(crate) fn issue_model_validation_receipt(
+        &mut self,
+        project_revision: ObjectRevision,
+        plan_digest: ContentDigest,
+        pdk_archive_digest: Option<ContentDigest>,
+        execution_schema_version: u32,
+        findings: Vec<ModelValidationFinding>,
+    ) -> Result<ModelValidationReceipt, String> {
+        let (source_count, source_closure_digest) = self.model_validation_source_identity();
+        let receipt = ModelValidationReceipt::issue(
+            project_revision,
+            plan_digest,
+            self.execution_catalog_digest(),
+            source_count,
+            source_closure_digest,
+            pdk_archive_digest,
+            execution_schema_version,
+            findings,
+        )?;
+        self.validation_receipt = Some(receipt.clone());
+        Ok(receipt)
+    }
+
+    pub(crate) fn validate_model_validation_receipt(
+        &self,
+        project_revision: ObjectRevision,
+        plan_digest: ContentDigest,
+        pdk_archive_digest: Option<ContentDigest>,
+        execution_schema_version: u32,
+    ) -> Result<&ModelValidationReceipt, String> {
+        let receipt = self.validation_receipt.as_ref().ok_or_else(|| {
+            "No durable model-validation receipt exists for this project revision.".to_owned()
+        })?;
+        receipt.verify()?;
+        if receipt.project_revision != project_revision {
+            return Err(
+                "Model-validation receipt is stale after a project revision change.".to_owned(),
+            );
+        }
+        if receipt.model_execution_plan_digest != plan_digest {
+            return Err(
+                "Model-validation receipt is stale after the execution plan changed.".to_owned(),
+            );
+        }
+        if receipt.execution_catalog_digest != self.execution_catalog_digest() {
+            return Err(
+                "Model-validation receipt is stale after the model catalog changed.".to_owned(),
+            );
+        }
+        if receipt.pdk_archive_digest != pdk_archive_digest {
+            return Err(
+                "Model-validation receipt is stale after the signed PDK changed.".to_owned(),
+            );
+        }
+        if receipt.execution_schema_version != execution_schema_version
+            || receipt.engine_version != env!("CARGO_PKG_VERSION")
+            || receipt.platform != model_validation_platform()
+        {
+            return Err(
+                "Model-validation receipt was produced by a different engine, schema, or platform."
+                    .to_owned(),
+            );
+        }
+        let (source_count, source_closure_digest) = self.model_validation_source_identity();
+        if receipt.source_count != source_count
+            || receipt.source_closure_digest != source_closure_digest
+        {
+            return Err(
+                "Model-validation receipt is stale after source digests changed.".to_owned(),
+            );
+        }
+        Ok(receipt)
+    }
+
+    fn model_validation_source_identity(&self) -> (u64, ContentDigest) {
+        let mut identities = self
+            .libraries_sorted()
+            .into_iter()
+            .flat_map(|library| {
+                library
+                    .source_closure
+                    .iter()
+                    .map(move |source| (library.name.clone(), source.digest.to_string()))
+            })
+            .collect::<Vec<_>>();
+        identities.sort();
+        let source_count = identities.len() as u64;
+        let mut hasher = Sha256::new();
+        hasher.update(b"rspice.model-validation-source-closure/v1\0");
+        for (library, digest) in identities {
+            hash_plan_field(&mut hasher, library.as_bytes());
+            hash_plan_field(&mut hasher, digest.as_bytes());
+        }
+        (
+            source_count,
+            ContentDigest::from_bytes(hasher.finalize().into()),
+        )
+    }
+
+    #[must_use]
+    pub fn model_resolution_record(
+        &self,
+        scope: ModelConsumerScope,
+        definition: &str,
+    ) -> Option<&ModelResolutionRecord> {
+        let normalized = definition.trim().to_ascii_lowercase();
+        self.resolution_records
+            .get(&resolution_record_key(scope, &normalized))
+    }
+
+    #[must_use]
+    pub(crate) fn restore_model_resolution_records(
+        &mut self,
+        records: Vec<ModelResolutionRecord>,
+    ) -> Result<(), String> {
+        let mut restored = BTreeMap::new();
+        for record in records {
+            record.validate()?;
+            let key = record.key();
+            if restored.insert(key.clone(), record).is_some() {
+                return Err(format!("model-resolution record '{key}' is repeated"));
+            }
+        }
+        self.resolution_records = restored;
+        self.validate_model_resolution_records_against_catalog()
+    }
+
+    #[must_use]
+    pub(crate) fn owned_model_resolution_records(&self) -> Vec<ModelResolutionRecord> {
+        self.resolution_records.values().cloned().collect()
+    }
+
+    pub(crate) fn definition_providers(
+        &self,
+        scope: ModelConsumerScope,
+        definition: &str,
+    ) -> Vec<ModelDefinitionProvider> {
+        let normalized = definition.trim().to_ascii_lowercase();
+        let mut providers = Vec::new();
+        for library in self.libraries_sorted() {
+            let names = match scope {
+                ModelConsumerScope::PrimitiveModel => library
+                    .models
+                    .values()
+                    .map(|model| model.name.as_str())
+                    .collect::<Vec<_>>(),
+                ModelConsumerScope::Subcircuit => library
+                    .subcircuits
+                    .values()
+                    .filter(|subcircuit| subcircuit.section.is_none())
+                    .map(|subcircuit| subcircuit.name.as_str())
+                    .collect::<Vec<_>>(),
+            };
+            for exact_name in names
+                .into_iter()
+                .filter(|name| name.to_ascii_lowercase() == normalized)
+            {
+                providers.push(ModelDefinitionProvider {
+                    library: library.name.clone(),
+                    definition: exact_name.to_owned(),
+                    source_digest: model_library_source_digest(library),
+                });
+            }
+        }
+        providers.sort_by(|left, right| {
+            left.library
+                .cmp(&right.library)
+                .then_with(|| left.definition.cmp(&right.definition))
+                .then_with(|| {
+                    left.source_digest
+                        .to_string()
+                        .cmp(&right.source_digest.to_string())
+                })
+        });
+        providers
+    }
+
+    pub fn resolve_definition_provider(
+        &mut self,
+        scope: ModelConsumerScope,
+        definition: &str,
+        provider_library: &str,
+        audit_reason: &str,
+    ) -> Result<ModelResolutionRecord, String> {
+        let normalized_name = definition.trim().to_ascii_lowercase();
+        let providers = self.definition_providers(scope, &normalized_name);
+        if providers.len() < 2 {
+            return Err(format!(
+                "{} definition '{}' is not contested by multiple authenticated providers",
+                scope.label(),
+                definition.trim()
+            ));
+        }
+        let provider = providers
+            .iter()
+            .find(|provider| provider.library == provider_library)
+            .ok_or_else(|| {
+                format!(
+                    "'{provider_library}' is not an exact provider of contested {} '{}'",
+                    scope.label(),
+                    normalized_name
+                )
+            })?;
+        if providers.iter().any(|candidate| {
+            candidate != provider
+                && candidate.library.eq_ignore_ascii_case(&provider.library)
+                && candidate.source_digest == provider.source_digest
+        }) {
+            return Err(format!(
+                "{} '{}' is defined more than once inside provider '{}'; repair the source because a provider decision cannot distinguish same-source duplicates",
+                scope.label(),
+                normalized_name,
+                provider.library
+            ));
+        }
+        let created_at_unix_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| format!("system clock cannot timestamp provider decision: {error}"))?
+            .as_millis()
+            .try_into()
+            .map_err(|_| "provider-decision timestamp exceeds the supported range".to_owned())?;
+        let record = ModelResolutionRecord {
+            schema_version: MODEL_RESOLUTION_RECORD_SCHEMA_VERSION,
+            consumer_scope: scope,
+            normalized_name,
+            provider_library: provider.library.clone(),
+            provider_definition: provider.definition.clone(),
+            provider_source_digest: provider.source_digest,
+            audit_reason: audit_reason.to_owned(),
+            created_at_unix_ms,
+        };
+        record.validate()?;
+        self.resolution_records.insert(record.key(), record.clone());
+        Ok(record)
+    }
+
+    pub fn clear_definition_provider(
+        &mut self,
+        scope: ModelConsumerScope,
+        definition: &str,
+    ) -> bool {
+        let normalized = definition.trim().to_ascii_lowercase();
+        self.resolution_records
+            .remove(&resolution_record_key(scope, &normalized))
+            .is_some()
+    }
+
+    fn validate_model_resolution_records_against_catalog(&self) -> Result<(), String> {
+        for (key, record) in &self.resolution_records {
+            record.validate()?;
+            if record.key() != *key {
+                return Err(format!(
+                    "model-resolution map key '{key}' does not match its record identity '{}'",
+                    record.key()
+                ));
+            }
+            let provider = self.get_library(&record.provider_library).ok_or_else(|| {
+                format!(
+                    "provider decision for {} '{}' is stale because library '{}' was removed",
+                    record.consumer_scope.label(),
+                    record.normalized_name,
+                    record.provider_library
+                )
+            })?;
+            if model_library_source_digest(provider) != record.provider_source_digest {
+                return Err(format!(
+                    "provider decision for {} '{}' is stale because source '{}' changed digest",
+                    record.consumer_scope.label(),
+                    record.normalized_name,
+                    record.provider_library
+                ));
+            }
+            let exact_provider_exists = self
+                .definition_providers(record.consumer_scope, &record.normalized_name)
+                .into_iter()
+                .any(|candidate| {
+                    candidate.library == record.provider_library
+                        && candidate.definition == record.provider_definition
+                        && candidate.source_digest == record.provider_source_digest
+                });
+            if !exact_provider_exists {
+                return Err(format!(
+                    "provider decision for {} '{}' is stale because exact definition '{}/{}' is no longer available",
+                    record.consumer_scope.label(),
+                    record.normalized_name,
+                    record.provider_library,
+                    record.provider_definition
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Convert a parsed card that a `.lib` section owns, recording the section
     /// as execution provenance. Cards at file scope use
     /// [`Self::convert_parsed_model`], which leaves the section unset.
@@ -1049,6 +1999,12 @@ impl ModelLibraryManager {
             // expires authorized runs at random.
             let bytes = serde_json::to_value(library)
                 .and_then(|canonical| serde_json::to_vec(&canonical))
+                .unwrap_or_else(|error| format!("serialization-error:{error}").into_bytes());
+            hasher.update((bytes.len() as u64).to_le_bytes());
+            hasher.update(bytes);
+        }
+        for record in self.resolution_records.values() {
+            let bytes = serde_json::to_vec(record)
                 .unwrap_or_else(|error| format!("serialization-error:{error}").into_bytes());
             hasher.update((bytes.len() as u64).to_le_bytes());
             hasher.update(bytes);
@@ -1487,6 +2443,7 @@ impl ModelLibraryManager {
     #[cfg(test)]
     pub fn clear(&mut self) {
         self.libraries.clear();
+        self.resolution_records.clear();
         self.selected_library = None;
     }
 

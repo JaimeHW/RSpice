@@ -37,6 +37,7 @@ pub(super) fn run_frequency_spec(
                 z0,
                 ports,
             },
+            source_path,
             abort,
         ),
         AnalysisSpec::Tf {
@@ -81,6 +82,7 @@ pub(super) fn run_frequency_spec(
             },
             normalization,
             accuracy,
+            source_path,
             abort,
         ),
         AnalysisSpec::Pac => run_pac(netlist, source_path, options, dependencies, abort),
@@ -101,6 +103,7 @@ pub(super) fn run_frequency_spec(
             sweep,
             points_per_decade,
             compute_nyquist,
+            source_path,
             abort,
         ),
         AnalysisSpec::Pstb => run_pstb(netlist, source_path, options, dependencies, abort),
@@ -120,6 +123,7 @@ struct SParameterRequest {
 fn run_sparameter(
     netlist: &str,
     request: SParameterRequest,
+    source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     let sweep = match request.sweep {
@@ -145,7 +149,12 @@ fn run_sparameter(
         ports: configured_ports,
     };
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_sparameter_analysis_with_abort(netlist, &cfg, abort)
+        svc_runner::run_sparameter_analysis_with_source_path_and_abort(
+            netlist,
+            &cfg,
+            source_path,
+            abort,
+        )
     })?;
     let mut waveforms = HashMap::new();
     for row in 0..data.num_ports {
@@ -175,10 +184,16 @@ fn run_tf(
     config: svc_runner::TfRunConfig,
     normalization: crate::simulation::multi_run::TfNormalization,
     accuracy: crate::simulation::multi_run::TfAccuracy,
+    source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_tf_analysis_with_config_and_abort(netlist, &config, abort)
+        svc_runner::run_tf_analysis_with_config_and_source_path_and_abort(
+            netlist,
+            &config,
+            source_path,
+            abort,
+        )
     })?;
     super::ensure_not_aborted(abort)?;
 
@@ -414,6 +429,7 @@ fn run_stb(
     sweep: FrequencySweep,
     points_per_decade: usize,
     compute_nyquist: bool,
+    source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     let data = super::run_abort_aware_service(abort, || {
@@ -425,7 +441,7 @@ fn run_stb(
             stb_sweep_type(sweep),
             points_per_decade,
             compute_nyquist,
-            None,
+            source_path,
             abort,
         )
     })?;

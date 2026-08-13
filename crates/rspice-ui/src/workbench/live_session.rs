@@ -509,7 +509,7 @@ impl LiveSessionEngine {
     /// Finish a policy-mandated mirror teardown that had to wait for the
     /// local run to stop.
     fn settle_mirror_discard(&mut self, state: &mut AppState) {
-        if !self.mirror_discard_pending || state.simulation.is_running {
+        if !self.mirror_discard_pending || state.simulation.has_active_execution() {
             return;
         }
         state
@@ -621,8 +621,10 @@ impl LiveSessionEngine {
             "The live session ended; its policy does not allow keeping a copy, \
              so the mirrored project is closing.",
         ));
-        if state.simulation.is_running {
-            if let Err(error) = state.simulation.request_abort_active_run() {
+        if state.simulation.has_active_execution() {
+            if state.simulation.can_request_abort_active_run()
+                && let Err(error) = state.simulation.request_abort_active_run()
+            {
                 state.push_sim_message(ConsoleMessage::warning(error));
             }
             self.mirror_discard_pending = true;
@@ -1212,7 +1214,7 @@ impl LiveSessionEngine {
         let Role::Host(host) = &mut self.role else {
             return;
         };
-        let running = state.simulation.is_running;
+        let running = state.simulation.has_active_execution();
         let fraction = state.simulation.progress.clamp(0.0, 1.0);
         let status = state.simulation.status.clone();
         let mut outgoing: Option<RunStatusPayload> = None;

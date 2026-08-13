@@ -108,11 +108,8 @@ pub struct SParameterData {
     pub s: Vec<Vec<Vec<Complex64>>>,
 }
 
-/// Run N-port S-parameter analysis by solving Y-parameters from AC source
-/// injections, with cooperative cancellation.
-///
-/// This is the shipping entry point; the frequency-analysis spec calls it
-/// directly, so unlike its siblings it resolves no source path.
+/// Test-only convenience wrapper without a source path.
+#[cfg(test)]
 pub fn run_sparameter_analysis_with_abort(
     netlist_text: &str,
     config: &SParameterRunConfig,

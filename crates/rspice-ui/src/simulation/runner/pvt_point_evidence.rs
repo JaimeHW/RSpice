@@ -103,6 +103,7 @@ fn run_declaration(
         source_digest: ContentDigest::from_bytes([9; 32]),
         reference_process: ProcessCorner::TT,
         reference_temperature_celsius,
+        run_set: None,
         tasks: vec![PreparedTask::new(
             crate::product::AnalysisInstanceId::from_namespace(TEST_NAMESPACE, label.as_bytes()),
             ObjectRevision::INITIAL,
@@ -184,12 +185,16 @@ fn run_declaration(
         let resolved = task
             .resolve_dependency_artifacts(&HashMap::new())
             .map_err(|error| error.to_string())?;
-        let (queued, netlist, _runtimes, dependencies) = resolved.into_runner_parts();
+        let (queued, netlist, _runtimes, dependencies, environment) = resolved.into_runner_parts();
 
         let outcome = match queued.config {
-            Some(config) => {
-                bridge.run_with_abort_and_source_path(&config, &netlist, None, None, &NoAbort)
-            }
+            Some(config) => bridge.run_with_abort_and_source_path_and_environment(
+                &config,
+                &netlist,
+                None,
+                environment,
+                &NoAbort,
+            ),
             None => super::spec::run_spec_request(
                 &bridge,
                 queued.spec,

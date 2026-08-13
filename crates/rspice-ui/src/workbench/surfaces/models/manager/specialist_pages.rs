@@ -686,7 +686,7 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
 }
 
 fn validate_current_model_execution_plan(
-    app: &ManagerRenderContext<'_>,
+    app: &mut ManagerRenderContext<'_>,
     unresolved: usize,
 ) -> Result<String, String> {
     if unresolved > 0 {
@@ -694,16 +694,92 @@ fn validate_current_model_execution_plan(
             "Corner validation found {unresolved} bindings without an exact source section."
         ));
     }
-    let sealed = if app.state.project_technology_in_effect() {
+    if app.state.workbench.safe_mode.project_read_only() {
+        return Err(
+            "A durable model-validation receipt cannot be published while the project is read-only."
+                .to_owned(),
+        );
+    }
+    let has_project_technology = app.state.project_technology_in_effect();
+    if has_project_technology {
+        app.state.technology_gate_block_reason()?;
+    }
+    let sealed = if has_project_technology {
         app.state.seal_project_execution_model_sources()?
     } else {
         app.state.model_library_manager.seal_execution_sources()?
     };
     let plan = sealed.reference_model_execution_plan(app.state.sim_setup.reference_pvt.process)?;
+    let mut findings = vec![
+        crate::state::model_library::ModelValidationFinding {
+            code: "SOURCE_CLOSURE_AUTHENTICATED".to_owned(),
+            severity: crate::state::model_library::ModelValidationFindingSeverity::Information,
+            message: "Every executable SPICE source and transitive dependency matched its accepted content digest.".to_owned(),
+        },
+        crate::state::model_library::ModelValidationFinding {
+            code: "SPICE_NAMESPACE_COMPILED".to_owned(),
+            severity: crate::state::model_library::ModelValidationFindingSeverity::Information,
+            message: format!(
+                "The frozen SPICE namespace compiled with {} bindings and {} explicit provider decisions.",
+                plan.bindings().len(),
+                plan.applied_resolutions().len()
+            ),
+        },
+    ];
+    let mut veriloga_count = 0_usize;
+    if let Some((package, archive_digest, artifacts, bindings)) = sealed.pdk_veriloga_authority() {
+        for binding in bindings {
+            crate::simulation::veriloga::compile_signed_pdk_source_runtime(
+                package,
+                archive_digest,
+                artifacts,
+                binding,
+            )?;
+            veriloga_count += 1;
+        }
+        findings.push(crate::state::model_library::ModelValidationFinding {
+            code: "VERILOGA_RUNTIME_COMPILED".to_owned(),
+            severity: crate::state::model_library::ModelValidationFindingSeverity::Information,
+            message: format!(
+                "Compiled and validated {veriloga_count} authenticated signed-PDK Verilog-A runtime bindings."
+            ),
+        });
+    }
+    let pdk_archive_digest = sealed
+        .pdk_model_identity()
+        .map(|(_, archive_digest)| archive_digest);
+    if pdk_archive_digest.is_some() {
+        findings.push(crate::state::model_library::ModelValidationFinding {
+            code: "SIGNED_PDK_TRUST_VERIFIED".to_owned(),
+            severity: crate::state::model_library::ModelValidationFindingSeverity::Information,
+            message: "The exact project-pinned signed PDK archive, platform contract, and trust chain were verified.".to_owned(),
+        });
+    }
+    let receipt = app
+        .state
+        .model_library_manager
+        .issue_model_validation_receipt(
+            app.state.workspace.project.revision(),
+            plan.digest(),
+            pdk_archive_digest,
+            crate::io::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
+            findings,
+        )?;
+    app.state
+        .model_library_manager
+        .validate_model_validation_receipt(
+            app.state.workspace.project.revision(),
+            plan.digest(),
+            pdk_archive_digest,
+            crate::io::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
+        )?;
+    app.state.workspace.project_metadata_dirty = true;
     Ok(format!(
-        "Validated exact model execution plan {} with {} authenticated bindings.",
+        "Published durable model-validation receipt {} for exact plan {} with {} authenticated bindings, {} source-qualified provider decisions, and {veriloga_count} Verilog-A runtimes.",
+        receipt.receipt_digest,
         plan.digest(),
-        plan.bindings().len()
+        plan.bindings().len(),
+        plan.applied_resolutions().len()
     ))
 }
 
@@ -718,6 +794,7 @@ struct CornerRow {
     has_statistics: bool,
     has_aging: bool,
     source: Option<String>,
+    source_digest: Option<String>,
 }
 
 impl CornerRow {
@@ -737,6 +814,9 @@ impl CornerRow {
 /// independent guesses. See `io::project_execution`'s
 /// `persisted_active_model_section_names`.
 fn corner_blocker(library: &ModelLibrary, corner: &ProcessCorner) -> Option<String> {
+    if let Err(errors) = corner.validate_contract() {
+        return Some(errors.join("; "));
+    }
     let bindings = corner.effective_section_bindings();
     if bindings.is_empty() {
         // A corner that names no section and has no retained source is not
@@ -797,11 +877,15 @@ fn corner_rows(app: &ManagerRenderContext<'_>) -> Vec<CornerRow> {
             .values()
             .any(|qualification| !qualification.evidence.is_empty());
         for corner in library.corners.values() {
-            let source = corner
-                .file_path
-                .as_deref()
-                .or(library.root_path.as_deref())
-                .map(|path| path.display().to_string());
+            let source_path = corner.file_path.as_deref().or(library.root_path.as_deref());
+            let source = source_path.map(|path| path.display().to_string());
+            let source_digest = source_path.and_then(|path| {
+                library
+                    .source_closure
+                    .iter()
+                    .find(|pin| pin.path == path)
+                    .map(|pin| short_digest(&pin.digest.to_string()))
+            });
             let blocker = if source.is_none() {
                 Some(format!(
                     "corner '{}' is not bound to a retained source",
@@ -818,6 +902,7 @@ fn corner_rows(app: &ManagerRenderContext<'_>) -> Vec<CornerRow> {
                 has_statistics,
                 has_aging,
                 source,
+                source_digest,
             });
         }
     }
@@ -845,6 +930,11 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
         return;
     };
     app.state.workbench.models_view.selected_corner = Some(row.key.clone());
+    let mut open_editor = false;
+    let mut duplicate = false;
+    let mut make_default = false;
+    let mut delete = false;
+    let mut unbind = None;
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         ui.label(
@@ -862,37 +952,31 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
                     .small()
                     .color(Tokens::get(ui.ctx()).color.err),
             );
-            if ui.button("Bind section…").clicked() {
-                let section = app
-                    .state
-                    .model_library_manager
-                    .get_library(&row.library)
-                    .and_then(|library| library.section_index().into_iter().next())
-                    .unwrap_or_default();
-                let domain = row
-                    .corner
-                    .effective_required_domains()
-                    .into_iter()
-                    .find(|required| {
-                        !row.corner
-                            .effective_section_bindings()
-                            .iter()
-                            .any(|binding| binding.domain == *required)
-                    })
-                    .or_else(|| {
-                        row.corner
-                            .effective_section_bindings()
-                            .first()
-                            .map(|binding| binding.domain)
-                    })
-                    .unwrap_or(CornerSectionDomain::Composite);
-                app.state.workbench.models_view.dialog =
-                    Some(ModelsWorkbenchDialog::BindCornerSection {
-                        library: row.library.clone(),
-                        corner: row.corner.name.clone(),
-                        domain,
-                        section,
-                    });
+        }
+        if ui.button("Edit corner…").clicked() {
+            open_editor = true;
+        }
+        if ui.button("Duplicate…").clicked() {
+            duplicate = true;
+        }
+        if ui
+            .add_enabled(!row.corner.is_default, egui::Button::new("Set default"))
+            .clicked()
+        {
+            make_default = true;
+        }
+        if ui.button("Delete corner…").clicked() {
+            delete = true;
+        }
+        if ui.button("Bind section…").clicked() {
+            open_corner_binding_dialog(app, &row);
+        }
+        for binding in row.corner.effective_section_bindings() {
+            if ui
+                .button(format!("Unbind {}", binding.domain.label()))
+                .clicked()
+            {
+                unbind = Some(binding.domain);
             }
         }
         // The corner's own retained file, not whichever model the library
@@ -910,11 +994,35 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
             app.queue_command(Command::ModelEditor);
         }
     });
+    if open_editor || duplicate {
+        open_corner_editor(app, &row, duplicate);
+    } else if make_default {
+        set_default_corner(app, &row.library, &row.corner.name);
+    } else if delete {
+        app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmDeleteCorner {
+            library: row.library.clone(),
+            corner: row.corner.name.clone(),
+        });
+    } else if let Some(domain) = unbind {
+        unbind_corner_section(app, &row.library, &row.corner.name, domain);
+    }
     detail_pane(
         ui,
         "CORNER BINDING DETAILS",
         Some("section, environment, statistics, and aging"),
         |ui| {
+            property(
+                ui,
+                "Description",
+                &row.corner.description,
+                "project metadata",
+            );
+            property(
+                ui,
+                "Default",
+                if row.corner.is_default { "yes" } else { "no" },
+                "library selection fallback",
+            );
             property(ui, "NMOS", &row.corner.nmos_corner, "exact section axis");
             property(ui, "PMOS", &row.corner.pmos_corner, "exact section axis");
             property(
@@ -929,6 +1037,12 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
             );
             property(
                 ui,
+                "Source digest",
+                row.source_digest.as_deref().unwrap_or("not pinned"),
+                "authenticated content identity",
+            );
+            property(
+                ui,
                 "Supply factor",
                 &format!("{:.6}", row.corner.vdd_factor),
                 "environment axis",
@@ -939,6 +1053,39 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
                 &format!("{:.3} °C", row.corner.temperature),
                 "environment axis",
             );
+            property(
+                ui,
+                "Qualified range",
+                &match (
+                    row.corner.minimum_temperature_c,
+                    row.corner.maximum_temperature_c,
+                ) {
+                    (Some(minimum), Some(maximum)) => {
+                        format!("{minimum:.3} to {maximum:.3} °C")
+                    }
+                    _ => "not declared".to_owned(),
+                },
+                "temperature validity",
+            );
+            property(
+                ui,
+                "Required domains",
+                &row.corner
+                    .effective_required_domains()
+                    .into_iter()
+                    .map(CornerSectionDomain::label)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                "execution contract",
+            );
+            for binding in row.corner.effective_section_bindings() {
+                property(
+                    ui,
+                    binding.domain.label(),
+                    &binding.section,
+                    "authenticated section",
+                );
+            }
             ui.separator();
             property(
                 ui,
@@ -966,8 +1113,96 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
                 },
                 "run expansion",
             );
+            if let Some(receipt) = app.state.model_library_manager.model_validation_receipt() {
+                let current_revision = app.state.workspace.project.revision();
+                let receipt_state = if receipt.project_revision == current_revision {
+                    "current revision"
+                } else {
+                    "stale revision"
+                };
+                property(
+                    ui,
+                    "Validation receipt",
+                    &format!(
+                        "{} ({receipt_state})",
+                        short_digest(&receipt.receipt_digest.to_string())
+                    ),
+                    &format!(
+                        "project revision {} · plan {} · {} authenticated sources · {}",
+                        receipt.project_revision.get(),
+                        short_digest(&receipt.model_execution_plan_digest.to_string()),
+                        receipt.source_count,
+                        receipt.platform
+                    ),
+                );
+            }
         },
     );
+}
+
+fn open_corner_binding_dialog(app: &mut ManagerRenderContext<'_>, row: &CornerRow) {
+    let section = app
+        .state
+        .model_library_manager
+        .get_library(&row.library)
+        .and_then(|library| library.section_index().into_iter().next())
+        .unwrap_or_default();
+    let bindings = row.corner.effective_section_bindings();
+    let domain = row
+        .corner
+        .effective_required_domains()
+        .into_iter()
+        .find(|required| !bindings.iter().any(|binding| binding.domain == *required))
+        .or_else(|| bindings.first().map(|binding| binding.domain))
+        .unwrap_or(CornerSectionDomain::Composite);
+    app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::BindCornerSection {
+        library: row.library.clone(),
+        corner: row.corner.name.clone(),
+        domain,
+        section,
+    });
+}
+
+fn open_corner_editor(app: &mut ManagerRenderContext<'_>, row: &CornerRow, duplicate: bool) {
+    let name = if duplicate {
+        let base = format!("{}_copy", row.corner.name);
+        let mut candidate = base.clone();
+        let mut suffix = 2_u32;
+        if let Some(library) = app.state.model_library_manager.get_library(&row.library) {
+            while library
+                .corners
+                .keys()
+                .any(|existing| existing.eq_ignore_ascii_case(&candidate))
+            {
+                candidate = format!("{base}_{suffix}");
+                suffix += 1;
+            }
+        }
+        candidate
+    } else {
+        row.corner.name.clone()
+    };
+    app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::EditCorner {
+        library: row.library.clone(),
+        original_name: row.corner.name.clone(),
+        duplicate,
+        name,
+        description: row.corner.description.clone(),
+        nmos_corner: row.corner.nmos_corner.clone(),
+        pmos_corner: row.corner.pmos_corner.clone(),
+        temperature_c: row.corner.temperature.to_string(),
+        supply_factor: row.corner.vdd_factor.to_string(),
+        minimum_temperature_c: row
+            .corner
+            .minimum_temperature_c
+            .map_or_else(String::new, |value| value.to_string()),
+        maximum_temperature_c: row
+            .corner
+            .maximum_temperature_c
+            .map_or_else(String::new, |value| value.to_string()),
+        required_domains: row.corner.effective_required_domains(),
+        make_default: !duplicate && row.corner.is_default,
+    });
 }
 
 /// Show the retained bytes of the file this corner is bound to.
@@ -1034,50 +1269,36 @@ fn open_corner_source(app: &mut ManagerRenderContext<'_>, row: &CornerRow) {
 }
 
 fn select_corner(app: &mut ManagerRenderContext<'_>, library_name: &str, corner_name: &str) {
-    let Some(library) = app
-        .state
-        .model_library_manager
-        .get_library(library_name)
-        .cloned()
-    else {
-        receipt(
-            app,
-            Err(format!("Library '{library_name}' no longer exists.")),
-        );
-        return;
-    };
     app.state.model_library_manager.select_library(library_name);
-    if let Some(root) = library.root_path {
-        let mut candidate = app.state.model_library_manager.clone();
-        let result = candidate
-            .load_library_file(&root, Some(corner_name))
-            .and_then(|loaded| {
-                if loaded != library_name {
-                    return Err(format!(
-                        "Corner selection resolved library '{loaded}' instead of '{library_name}'."
-                    ));
-                }
-                publish_model_library_candidate(
-                    app.state,
-                    candidate,
-                    library_name,
-                    format!("select model corner {corner_name}"),
-                )
-                .map(|revision| {
+    let mut candidate = app.state.model_library_manager.clone();
+    let result = candidate
+        .get_library_mut(library_name)
+        .ok_or_else(|| format!("Library '{library_name}' no longer exists."))
+        .and_then(|library| {
+            library
+                .select_corner(corner_name)
+                .then_some(())
+                .ok_or_else(|| {
                     format!(
-                        "Selected exact section '{corner_name}' for '{library_name}' at revision {}.",
-                        revision.get()
+                        "Corner '{corner_name}' no longer exists in library '{library_name}'."
                     )
                 })
-            });
-        receipt(app, result);
-    } else if let Some(library) = app
-        .state
-        .model_library_manager
-        .get_library_mut(library_name)
-    {
-        library.select_corner(corner_name);
-    }
+        })
+        .and_then(|()| {
+            publish_model_library_candidate(
+                app.state,
+                candidate,
+                library_name,
+                format!("select model corner {corner_name}"),
+            )
+        })
+        .map(|revision| {
+            format!(
+                "Selected exact corner '{corner_name}' for '{library_name}' at project revision {}.",
+                revision.get()
+            )
+        });
+    receipt(app, result);
 }
 
 fn symbol_key(reference: &CellViewRef) -> String {
@@ -1794,9 +2015,10 @@ fn include_closure_graph(
 /// One name an instance could reference, and everything that defines it.
 struct DefinitionRow {
     definition: String,
-    kind: &'static str,
+    scope: crate::state::model_library::ModelConsumerScope,
     providers: Vec<String>,
     provider_list: String,
+    resolution: String,
 }
 
 impl DefinitionRow {
@@ -1812,31 +2034,54 @@ impl DefinitionRow {
 /// Model names and subcircuit names share one namespace as far as an instance
 /// reference is concerned, so both are here for "contested" to mean anything.
 fn definition_index(app: &ManagerRenderContext<'_>) -> Vec<DefinitionRow> {
-    let mut providers = BTreeMap::<String, (BTreeSet<String>, &'static str)>::new();
+    use crate::state::model_library::ModelConsumerScope;
+    let mut providers = BTreeMap::<(ModelConsumerScope, String), BTreeSet<String>>::new();
     for library in app.state.model_library_manager.libraries_sorted() {
         for model in library.models.values() {
-            let entry = providers
-                .entry(model.name.to_ascii_lowercase())
-                .or_insert_with(|| (BTreeSet::new(), "model"));
-            entry.0.insert(library.name.clone());
+            providers
+                .entry((
+                    ModelConsumerScope::PrimitiveModel,
+                    model.name.to_ascii_lowercase(),
+                ))
+                .or_default()
+                .insert(library.name.clone());
         }
         for subcircuit in library.subcircuits.values() {
-            let entry = providers
-                .entry(subcircuit.name.to_ascii_lowercase())
-                .or_insert_with(|| (BTreeSet::new(), "subckt"));
-            entry.0.insert(library.name.clone());
-            if entry.1 == "model" {
-                entry.1 = "model · subckt";
+            if subcircuit.section.is_none() {
+                providers
+                    .entry((
+                        ModelConsumerScope::Subcircuit,
+                        subcircuit.name.to_ascii_lowercase(),
+                    ))
+                    .or_default()
+                    .insert(library.name.clone());
             }
         }
     }
     providers
         .into_iter()
-        .map(|(definition, (candidates, kind))| DefinitionRow {
-            definition,
-            kind,
-            provider_list: candidates.iter().cloned().collect::<Vec<_>>().join(", "),
-            providers: candidates.into_iter().collect(),
+        .map(|((scope, definition), candidates)| {
+            let resolution = app
+                .state
+                .model_library_manager
+                .model_resolution_record(scope, &definition)
+                .map_or_else(
+                    || {
+                        if candidates.len() > 1 {
+                            "contested · fails closed".to_owned()
+                        } else {
+                            "unique".to_owned()
+                        }
+                    },
+                    |record| format!("resolved · {}", record.provider_library),
+                );
+            DefinitionRow {
+                definition,
+                scope,
+                provider_list: candidates.iter().cloned().collect::<Vec<_>>().join(", "),
+                providers: candidates.into_iter().collect(),
+                resolution,
+            }
         })
         .collect()
 }
@@ -1905,29 +2150,31 @@ fn include_definition_table(
                         false,
                         &[
                             (&row.definition, 0.25, true),
-                            (row.kind, 0.13, false),
+                            (row.scope.label(), 0.13, false),
                             (&row.provider_list, 0.37, false),
-                            (
-                                if row.contested() {
-                                    "contested · fails closed"
-                                } else {
-                                    "unique"
-                                },
-                                0.25,
-                                true,
-                            ),
+                            (&row.resolution, 0.25, true),
                         ],
                     );
                     if row.contested() && response.clicked() {
-                        conflict = Some((row.definition.clone(), row.providers.clone()));
+                        conflict = Some((row.definition.clone(), row.scope, row.providers.clone()));
                     }
                 }
             });
     });
-    if let Some((definition, providers)) = conflict {
+    if let Some((definition, scope, providers)) = conflict {
+        let selected_provider = app
+            .state
+            .model_library_manager
+            .model_resolution_record(scope, &definition)
+            .map(|record| record.provider_library.clone())
+            .or_else(|| providers.first().cloned())
+            .unwrap_or_default();
         app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::DefinitionConflict {
             definition,
+            scope,
             providers,
+            selected_provider,
+            reason: String::new(),
         });
     }
 }
@@ -2064,6 +2311,75 @@ mod tests {
     }
 
     #[test]
+    fn corner_lifecycle_publishes_drafts_bindings_defaults_and_deletion() {
+        let mut state = AppState::default();
+        state.project_lifecycle.project_open = true;
+        let library = state
+            .model_library_manager
+            .load_library_bytes(
+                "corner-lifecycle.lib",
+                b".lib TT\n.model nch NMOS (LEVEL=1 KP=1e-3)\n.endl TT\n".to_vec(),
+                None,
+            )
+            .expect("sectioned source imports");
+        let initial_revision = state.workspace.project.revision();
+        let mut pending = Vec::new();
+        let mut app = ManagerRenderContext {
+            state: &mut state,
+            pending_actions: &mut pending,
+        };
+
+        add_corner(&mut app, &library, "hot", "125", "0.9");
+        let draft = app
+            .state
+            .model_library_manager
+            .get_library(&library)
+            .and_then(|library| library.corners.get("hot"))
+            .expect("draft corner publishes");
+        draft
+            .validate_draft_contract()
+            .expect("unbound draft remains persistable");
+        assert!(draft.validate_contract().is_err());
+
+        bind_corner_section(
+            &mut app,
+            &library,
+            "hot",
+            CornerSectionDomain::Composite,
+            "TT",
+        );
+        app.state
+            .model_library_manager
+            .get_library(&library)
+            .and_then(|library| library.corners.get("hot"))
+            .expect("bound corner remains present")
+            .validate_contract()
+            .expect("exact authenticated section makes the corner executable");
+
+        unbind_corner_section(&mut app, &library, "hot", CornerSectionDomain::Composite);
+        let unbound = app
+            .state
+            .model_library_manager
+            .get_library(&library)
+            .and_then(|library| library.corners.get("hot"))
+            .expect("unbound draft remains present");
+        assert!(unbound.validate_draft_contract().is_ok());
+        assert!(unbound.validate_contract().is_err());
+
+        set_default_corner(&mut app, &library, "hot");
+        delete_corner(&mut app, &library, "hot");
+        let retained = app
+            .state
+            .model_library_manager
+            .get_library(&library)
+            .expect("library remains attached");
+        assert!(!retained.corners.contains_key("hot"));
+        assert!(retained.corners.values().any(|corner| corner.is_default));
+        assert!(app.state.workspace.project.revision() > initial_revision);
+        assert!(app.state.workspace.project_metadata_dirty);
+    }
+
+    #[test]
     fn the_family_list_declares_the_height_a_row_really_takes() {
         // `show_rows` places rows from the height it is given. If that height
         // is short, every row after the first drifts up under the one above
@@ -2073,7 +2389,7 @@ mod tests {
         let mut declared = 0.0;
         let mut measured = 0.0;
         for _ in 0..2 {
-            ctx.run_ui(egui::RawInput::default(), |ctx| {
+            let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     declared = selectable_label_height(ui);
                     measured = ui

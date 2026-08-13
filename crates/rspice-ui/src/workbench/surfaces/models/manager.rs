@@ -13,15 +13,17 @@ use egui::{Align, Color32, Layout, RichText, ScrollArea, Sense, Stroke, Ui, Vec2
 
 use crate::state::model_library::{
     ClosureFacts, CornerSectionBinding, CornerSectionDomain, DeviceModel, GeometryEnvelope,
-    ModelLibrary, ModelSourceAuthority, PackModelHit, ProcessCorner, bin_family_name,
-    closure_facts, envelope_is_invalid, short_digest,
+    ModelConsumerScope, ModelLibrary, ModelSourceAuthority, PackModelHit, ProcessCorner,
+    bin_family_name, closure_facts, envelope_is_invalid, short_digest,
 };
 use crate::state::{
     CellViewRef, Component, ComponentType, ModelBoundSymbolDefinition, SymbolDocument, ViewType,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::app_state::design_history::publish_model_library_candidate;
+use crate::workbench::app_state::design_history::{
+    publish_model_library_candidate, publish_model_resolution_candidate,
+};
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::{
     ModelPackFacet, ModelsCatalogScope, ModelsOperationalState, ModelsPage, ModelsWorkbenchDialog,
@@ -2329,28 +2331,88 @@ fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         }
         ModelsWorkbenchDialog::DefinitionConflict {
             definition,
+            scope,
             providers,
+            mut selected_provider,
+            mut reason,
         } => {
             let mut open = true;
+            let mut decision = None;
             egui::Window::new("Contested model definition")
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(false)
                 .show(ui.ctx(), |ui| {
                     ui.label(format!(
-                        "'{definition}' is provided by {} loaded libraries. Primitive SPICE instances cannot safely bind until the duplicate is removed or renamed.",
+                        "{} '{definition}' is provided by {} loaded libraries. Execution remains blocked until an exact authenticated provider is published.",
+                        scope.label(),
                         providers.len()
                     ));
                     for provider in &providers {
-                        ui.label(RichText::new(provider).monospace());
+                        ui.radio_value(
+                            &mut selected_provider,
+                            provider.clone(),
+                            RichText::new(provider).monospace(),
+                        );
                     }
-                    if ui.button("Open Model Editor").clicked() {
-                        app.queue_command(Command::ModelEditor);
-                        app.state.workbench.models_view.dialog = None;
+                    ui.label("Engineering audit reason");
+                    ui.text_edit_multiline(&mut reason);
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            decision = Some("cancel");
+                        }
+                        if ui.button("Open Model Editor").clicked() {
+                            decision = Some("editor");
+                        }
+                        if app
+                            .state
+                            .model_library_manager
+                            .model_resolution_record(scope, &definition)
+                            .is_some()
+                            && ui.button("Clear provider decision").clicked()
+                        {
+                            decision = Some("clear");
+                        }
+                        if ui
+                            .add_enabled(
+                                !selected_provider.is_empty() && !reason.trim().is_empty(),
+                                egui::Button::new("Publish provider decision"),
+                            )
+                            .clicked()
+                        {
+                            decision = Some("publish");
+                        }
+                    });
+                    if reason.trim().is_empty() {
+                        ui.label(
+                            RichText::new("A nonempty audit reason is required.")
+                                .small()
+                                .color(Tokens::get(ui.ctx()).color.warn),
+                        );
                     }
                 });
-            if !open {
+            if decision == Some("publish") {
+                publish_definition_provider(app, scope, &definition, &selected_provider, &reason);
                 app.state.workbench.models_view.dialog = None;
+            } else if decision == Some("clear") {
+                clear_definition_provider(app, scope, &definition);
+                app.state.workbench.models_view.dialog = None;
+            } else if decision == Some("editor") {
+                app.queue_command(Command::ModelEditor);
+                app.state.workbench.models_view.dialog = None;
+            } else if decision == Some("cancel") || !open {
+                app.state.workbench.models_view.dialog = None;
+                app.state.workbench.models_view.operational_state =
+                    ModelsOperationalState::Cancelled;
+            } else {
+                app.state.workbench.models_view.dialog =
+                    Some(ModelsWorkbenchDialog::DefinitionConflict {
+                        definition,
+                        scope,
+                        providers,
+                        selected_provider,
+                        reason,
+                    });
             }
         }
         ModelsWorkbenchDialog::BindingTrace { model, consumers } => {
@@ -2391,11 +2453,11 @@ fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 .resizable(false)
                 .show(ui.ctx(), |ui| {
                     ui.label(
-                        "The corner definition is published as one guarded project revision. A source-backed library must still resolve an exact section with the same name before execution.",
+                        "The corner is retained as an unbound authoring draft in one guarded project revision. Bind an explicit authenticated section before execution.",
                     );
                     ui.label(RichText::new(&library).monospace().strong());
                     ui.horizontal(|ui| {
-                        ui.label("Section name");
+                        ui.label("Corner name");
                         ui.text_edit_singleline(&mut name);
                     });
                     ui.horizontal(|ui| {
@@ -2429,6 +2491,177 @@ fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                     temperature_c,
                     supply_factor,
                 });
+            }
+        }
+        ModelsWorkbenchDialog::EditCorner {
+            library,
+            original_name,
+            duplicate,
+            mut name,
+            mut description,
+            mut nmos_corner,
+            mut pmos_corner,
+            mut temperature_c,
+            mut supply_factor,
+            mut minimum_temperature_c,
+            mut maximum_temperature_c,
+            mut required_domains,
+            mut make_default,
+        } => {
+            let mut open = true;
+            let mut decision = None;
+            egui::Window::new(if duplicate {
+                "Duplicate process corner"
+            } else {
+                "Edit process corner"
+            })
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_width(520.0)
+            .show(ui.ctx(), |ui| {
+                ui.label(
+                    "Corner metadata and required domains are saved as one guarded revision. Incomplete bindings remain recoverable drafts and fail closed at execution.",
+                );
+                ui.label(
+                    RichText::new(format!("{library} / {original_name}"))
+                        .monospace()
+                        .strong(),
+                );
+                egui::Grid::new("models-corner-editor-fields")
+                    .num_columns(2)
+                    .spacing(egui::vec2(12.0, 8.0))
+                    .show(ui, |ui| {
+                        ui.label("Name");
+                        ui.text_edit_singleline(&mut name);
+                        ui.end_row();
+                        ui.label("Description");
+                        ui.text_edit_singleline(&mut description);
+                        ui.end_row();
+                        ui.label("NMOS axis");
+                        ui.text_edit_singleline(&mut nmos_corner);
+                        ui.end_row();
+                        ui.label("PMOS axis");
+                        ui.text_edit_singleline(&mut pmos_corner);
+                        ui.end_row();
+                        ui.label("Nominal temperature °C");
+                        ui.text_edit_singleline(&mut temperature_c);
+                        ui.end_row();
+                        ui.label("Supply factor");
+                        ui.text_edit_singleline(&mut supply_factor);
+                        ui.end_row();
+                        ui.label("Minimum qualified °C");
+                        ui.text_edit_singleline(&mut minimum_temperature_c);
+                        ui.end_row();
+                        ui.label("Maximum qualified °C");
+                        ui.text_edit_singleline(&mut maximum_temperature_c);
+                        ui.end_row();
+                    });
+                ui.separator();
+                ui.label(RichText::new("REQUIRED FUNCTIONAL DOMAINS").small().strong());
+                ui.horizontal_wrapped(|ui| {
+                    for domain in CornerSectionDomain::ALL {
+                        let mut required = required_domains.contains(&domain);
+                        if ui.checkbox(&mut required, domain.label()).changed() {
+                            if required {
+                                required_domains.push(domain);
+                                required_domains.sort();
+                                required_domains.dedup();
+                            } else {
+                                required_domains.retain(|candidate| *candidate != domain);
+                            }
+                        }
+                    }
+                });
+                ui.checkbox(&mut make_default, "Use as the library default corner");
+                ui.horizontal(|ui| {
+                    if ui.button("Cancel").clicked() {
+                        decision = Some(false);
+                    }
+                    if ui
+                        .button(if duplicate {
+                            "Duplicate corner"
+                        } else {
+                            "Save corner"
+                        })
+                        .clicked()
+                    {
+                        decision = Some(true);
+                    }
+                });
+            });
+            if decision == Some(true) {
+                edit_corner(
+                    app,
+                    &library,
+                    &original_name,
+                    duplicate,
+                    &name,
+                    &description,
+                    &nmos_corner,
+                    &pmos_corner,
+                    &temperature_c,
+                    &supply_factor,
+                    &minimum_temperature_c,
+                    &maximum_temperature_c,
+                    &required_domains,
+                    make_default,
+                );
+                app.state.workbench.models_view.dialog = None;
+            } else if decision == Some(false) || !open {
+                app.state.workbench.models_view.dialog = None;
+                app.state.workbench.models_view.operational_state =
+                    ModelsOperationalState::Cancelled;
+            } else {
+                app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::EditCorner {
+                    library,
+                    original_name,
+                    duplicate,
+                    name,
+                    description,
+                    nmos_corner,
+                    pmos_corner,
+                    temperature_c,
+                    supply_factor,
+                    minimum_temperature_c,
+                    maximum_temperature_c,
+                    required_domains,
+                    make_default,
+                });
+            }
+        }
+        ModelsWorkbenchDialog::ConfirmDeleteCorner { library, corner } => {
+            let mut open = true;
+            let mut decision = None;
+            egui::Window::new("Delete process corner")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ui.ctx(), |ui| {
+                    ui.label(
+                        "Delete this corner as one undoable project revision? If it is the default, a deterministic replacement will be selected.",
+                    );
+                    ui.label(
+                        RichText::new(format!("{library} / {corner}"))
+                            .monospace()
+                            .strong(),
+                    );
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            decision = Some(false);
+                        }
+                        if ui.button("Delete corner").clicked() {
+                            decision = Some(true);
+                        }
+                    });
+                });
+            if decision == Some(true) {
+                delete_corner(app, &library, &corner);
+                app.state.workbench.models_view.dialog = None;
+            } else if decision == Some(false) || !open {
+                app.state.workbench.models_view.dialog = None;
+                app.state.workbench.models_view.operational_state =
+                    ModelsOperationalState::Cancelled;
             }
         }
         ModelsWorkbenchDialog::BindCornerSection {
@@ -3013,11 +3246,18 @@ fn add_corner(
     corner.temperature = temperature;
     corner.vdd_factor = supply;
     corner.file_path = Some(root_path);
-    corner.section_bindings = vec![CornerSectionBinding::new(
-        CornerSectionDomain::Composite,
-        name,
-    )];
     corner.required_domains = vec![CornerSectionDomain::Composite];
+    corner.is_default = library.corners.is_empty();
+    if let Err(errors) = corner.validate_draft_contract() {
+        receipt(
+            app,
+            Err(format!("Corner draft is invalid: {}", errors.join("; "))),
+        );
+        return;
+    }
+    if corner.is_default {
+        library.selected_corner = Some(name.to_owned());
+    }
     library.corners.insert(name.to_owned(), corner);
     let result = publish_model_library_candidate(
         app.state,
@@ -3027,7 +3267,470 @@ fn add_corner(
     )
     .map(|revision| {
         format!(
-            "Added corner '{name}' to '{library_name}' at project revision {}.",
+            "Added unbound corner draft '{name}' to '{library_name}' at project revision {}. Bind an authenticated section before execution.",
+            revision.get()
+        )
+    });
+    receipt(app, result);
+}
+
+fn publish_definition_provider(
+    app: &mut ManagerRenderContext<'_>,
+    scope: ModelConsumerScope,
+    definition: &str,
+    provider_library: &str,
+    reason: &str,
+) {
+    let mut candidate = app.state.model_library_manager.clone();
+    let result = candidate
+        .resolve_definition_provider(scope, definition, provider_library, reason.trim())
+        .and_then(|record| {
+            publish_model_resolution_candidate(
+                app.state,
+                candidate,
+                format!(
+                    "resolve {} {} to {}",
+                    scope.label(),
+                    record.normalized_name,
+                    record.provider_library
+                ),
+            )
+            .map(|revision| {
+                format!(
+                    "Resolved {} '{}' to authenticated provider '{}' (source {}) at project revision {}.",
+                    scope.label(),
+                    record.normalized_name,
+                    record.provider_library,
+                    record.provider_source_digest,
+                    revision.get()
+                )
+            })
+        });
+    receipt(app, result);
+}
+
+fn clear_definition_provider(
+    app: &mut ManagerRenderContext<'_>,
+    scope: ModelConsumerScope,
+    definition: &str,
+) {
+    let mut candidate = app.state.model_library_manager.clone();
+    if !candidate.clear_definition_provider(scope, definition) {
+        receipt(
+            app,
+            Err(format!(
+                "No provider decision exists for {} '{}'.",
+                scope.label(),
+                definition
+            )),
+        );
+        return;
+    }
+    let result = publish_model_resolution_candidate(
+        app.state,
+        candidate,
+        format!("clear {} provider decision {definition}", scope.label()),
+    )
+    .map(|revision| {
+        format!(
+            "Cleared the provider decision for {} '{}' at project revision {}; execution now fails closed while the name remains contested.",
+            scope.label(),
+            definition,
+            revision.get()
+        )
+    });
+    receipt(app, result);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn edit_corner(
+    app: &mut ManagerRenderContext<'_>,
+    library_name: &str,
+    original_name: &str,
+    duplicate: bool,
+    name: &str,
+    description: &str,
+    nmos_corner: &str,
+    pmos_corner: &str,
+    temperature_c: &str,
+    supply_factor: &str,
+    minimum_temperature_c: &str,
+    maximum_temperature_c: &str,
+    required_domains: &[CornerSectionDomain],
+    make_default: bool,
+) {
+    let name = match validated_corner_name(name) {
+        Ok(name) => name,
+        Err(error) => {
+            receipt(app, Err(error));
+            return;
+        }
+    };
+    let temperature = match parse_corner_temperature("Nominal temperature", temperature_c) {
+        Ok(value) => value,
+        Err(error) => {
+            receipt(app, Err(error));
+            return;
+        }
+    };
+    let supply = match supply_factor.trim().parse::<f64>() {
+        Ok(value) if value.is_finite() && value > 0.0 && value <= 10.0 => value,
+        _ => {
+            receipt(
+                app,
+                Err(
+                    "Supply factor must be a finite value greater than 0 and no more than 10."
+                        .to_owned(),
+                ),
+            );
+            return;
+        }
+    };
+    let (minimum, maximum) =
+        match parse_corner_temperature_range(minimum_temperature_c, maximum_temperature_c) {
+            Ok(range) => range,
+            Err(error) => {
+                receipt(app, Err(error));
+                return;
+            }
+        };
+    if nmos_corner.trim().is_empty() || pmos_corner.trim().is_empty() {
+        receipt(
+            app,
+            Err("NMOS and PMOS corner-axis names cannot be empty.".to_owned()),
+        );
+        return;
+    }
+
+    let mut candidate = app.state.model_library_manager.clone();
+    let Some(library) = candidate.get_library_mut(library_name) else {
+        receipt(
+            app,
+            Err(format!("Library '{library_name}' no longer exists.")),
+        );
+        return;
+    };
+    let Some(original_key) = library
+        .corners
+        .keys()
+        .find(|key| key.eq_ignore_ascii_case(original_name))
+        .cloned()
+    else {
+        receipt(
+            app,
+            Err(format!(
+                "Corner '{original_name}' no longer exists in '{library_name}'."
+            )),
+        );
+        return;
+    };
+    if library.corners.keys().any(|existing| {
+        existing.eq_ignore_ascii_case(name) && (duplicate || existing != &original_key)
+    }) {
+        receipt(
+            app,
+            Err(format!(
+                "Corner '{name}' already exists in library '{library_name}'."
+            )),
+        );
+        return;
+    }
+
+    let mut corner = library
+        .corners
+        .get(&original_key)
+        .expect("the corner key was resolved above")
+        .clone();
+    let selected_original = library
+        .selected_corner
+        .as_deref()
+        .is_some_and(|selected| selected.eq_ignore_ascii_case(&original_key));
+    if !duplicate {
+        library.corners.remove(&original_key);
+    }
+    // Persist the legacy implicit binding before declaring explicit required
+    // domains, otherwise editing an old project would silently unbind it.
+    corner.section_bindings = corner.effective_section_bindings();
+    corner.name = name.to_owned();
+    corner.description = description.trim().to_owned();
+    corner.nmos_corner = nmos_corner.trim().to_owned();
+    corner.pmos_corner = pmos_corner.trim().to_owned();
+    corner.temperature = temperature;
+    corner.vdd_factor = supply;
+    corner.minimum_temperature_c = minimum;
+    corner.maximum_temperature_c = maximum;
+    corner.required_domains = required_domains.to_vec();
+    corner.required_domains.sort();
+    corner.required_domains.dedup();
+    corner.is_default = false;
+
+    if make_default {
+        for existing in library.corners.values_mut() {
+            existing.is_default = false;
+        }
+        corner.is_default = true;
+        library.selected_corner = Some(name.to_owned());
+    } else if !duplicate
+        && library
+            .corners
+            .values()
+            .all(|existing| !existing.is_default)
+    {
+        let replacement = library.corners.keys().min().cloned();
+        if let Some(replacement) = replacement {
+            if let Some(existing) = library.corners.get_mut(&replacement) {
+                existing.is_default = true;
+            }
+        } else {
+            corner.is_default = true;
+        }
+    }
+    if selected_original && !duplicate && !make_default {
+        library.selected_corner = Some(name.to_owned());
+    }
+    if let Err(errors) = corner.validate_draft_contract() {
+        receipt(
+            app,
+            Err(format!("Corner draft is invalid: {}", errors.join("; "))),
+        );
+        return;
+    }
+    let executable = corner.validate_contract().is_ok();
+    library.corners.insert(name.to_owned(), corner);
+    let action = if duplicate { "duplicate" } else { "edit" };
+    let result = publish_model_library_candidate(
+        app.state,
+        candidate,
+        library_name,
+        format!("{action} model corner {name}"),
+    )
+    .map(|revision| {
+        format!(
+            "{} corner '{name}' in '{library_name}' at project revision {} ({}).",
+            if duplicate { "Duplicated" } else { "Updated" },
+            revision.get(),
+            if executable {
+                "executable contract"
+            } else {
+                "retained non-executable draft"
+            }
+        )
+    });
+    receipt(app, result);
+}
+
+fn validated_corner_name(name: &str) -> Result<&str, String> {
+    let name = name.trim();
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    {
+        Err("Corner name must use ASCII letters, digits, or underscore.".to_owned())
+    } else {
+        Ok(name)
+    }
+}
+
+fn parse_corner_temperature(label: &str, value: &str) -> Result<f64, String> {
+    match value.trim().parse::<f64>() {
+        Ok(value) if value.is_finite() && (-273.15..=1000.0).contains(&value) => Ok(value),
+        _ => Err(format!(
+            "{label} must be finite and between -273.15 °C and 1000 °C."
+        )),
+    }
+}
+
+fn parse_corner_temperature_range(
+    minimum: &str,
+    maximum: &str,
+) -> Result<(Option<f64>, Option<f64>), String> {
+    match (minimum.trim(), maximum.trim()) {
+        ("", "") => Ok((None, None)),
+        ("", _) | (_, "") => {
+            Err("Qualified temperature range requires both minimum and maximum.".to_owned())
+        }
+        (minimum, maximum) => {
+            let minimum = parse_corner_temperature("Minimum qualified temperature", minimum)?;
+            let maximum = parse_corner_temperature("Maximum qualified temperature", maximum)?;
+            if minimum > maximum {
+                Err("Minimum qualified temperature exceeds the maximum.".to_owned())
+            } else {
+                Ok((Some(minimum), Some(maximum)))
+            }
+        }
+    }
+}
+
+fn set_default_corner(app: &mut ManagerRenderContext<'_>, library_name: &str, corner_name: &str) {
+    let mut candidate = app.state.model_library_manager.clone();
+    let result = candidate
+        .get_library_mut(library_name)
+        .ok_or_else(|| format!("Library '{library_name}' no longer exists."))
+        .and_then(|library| {
+            let key = library
+                .corners
+                .keys()
+                .find(|key| key.eq_ignore_ascii_case(corner_name))
+                .cloned()
+                .ok_or_else(|| {
+                    format!("Corner '{corner_name}' no longer exists in '{library_name}'.")
+                })?;
+            for corner in library.corners.values_mut() {
+                corner.is_default = false;
+            }
+            library
+                .corners
+                .get_mut(&key)
+                .expect("the corner key was resolved above")
+                .is_default = true;
+            library.selected_corner = Some(key);
+            Ok(())
+        })
+        .and_then(|()| {
+            publish_model_library_candidate(
+                app.state,
+                candidate,
+                library_name,
+                format!("set default model corner {corner_name}"),
+            )
+        })
+        .map(|revision| {
+            format!(
+                "Set '{library_name}/{corner_name}' as the default at project revision {}.",
+                revision.get()
+            )
+        });
+    receipt(app, result);
+}
+
+fn delete_corner(app: &mut ManagerRenderContext<'_>, library_name: &str, corner_name: &str) {
+    let mut candidate = app.state.model_library_manager.clone();
+    let Some(library) = candidate.get_library_mut(library_name) else {
+        receipt(
+            app,
+            Err(format!("Library '{library_name}' no longer exists.")),
+        );
+        return;
+    };
+    let Some(key) = library
+        .corners
+        .keys()
+        .find(|key| key.eq_ignore_ascii_case(corner_name))
+        .cloned()
+    else {
+        receipt(
+            app,
+            Err(format!(
+                "Corner '{corner_name}' no longer exists in '{library_name}'."
+            )),
+        );
+        return;
+    };
+    library
+        .corners
+        .remove(&key)
+        .expect("the corner key was resolved above");
+    let replacement = library.corners.keys().min().cloned();
+    if !library.corners.values().any(|corner| corner.is_default)
+        && let Some(replacement) = replacement.as_ref()
+    {
+        library
+            .corners
+            .get_mut(replacement)
+            .expect("the replacement key came from this map")
+            .is_default = true;
+    }
+    if library
+        .selected_corner
+        .as_deref()
+        .is_some_and(|selected| selected.eq_ignore_ascii_case(&key))
+    {
+        library.selected_corner = library
+            .corners
+            .iter()
+            .find_map(|(name, corner)| corner.is_default.then(|| name.clone()))
+            .or(replacement);
+    }
+    let result = publish_model_library_candidate(
+        app.state,
+        candidate,
+        library_name,
+        format!("delete model corner {corner_name}"),
+    )
+    .map(|revision| {
+        format!(
+            "Deleted corner '{corner_name}' from '{library_name}' at project revision {}.",
+            revision.get()
+        )
+    });
+    receipt(app, result);
+}
+
+fn unbind_corner_section(
+    app: &mut ManagerRenderContext<'_>,
+    library_name: &str,
+    corner_name: &str,
+    domain: CornerSectionDomain,
+) {
+    let mut candidate = app.state.model_library_manager.clone();
+    let Some(library) = candidate.get_library_mut(library_name) else {
+        receipt(
+            app,
+            Err(format!("Library '{library_name}' no longer exists.")),
+        );
+        return;
+    };
+    let Some(corner) = library
+        .corners
+        .values_mut()
+        .find(|candidate| candidate.name.eq_ignore_ascii_case(corner_name))
+    else {
+        receipt(
+            app,
+            Err(format!(
+                "Corner '{corner_name}' no longer exists in '{library_name}'."
+            )),
+        );
+        return;
+    };
+    let mut bindings = corner.effective_section_bindings();
+    if !bindings.iter().any(|binding| binding.domain == domain) {
+        receipt(
+            app,
+            Err(format!(
+                "{} is not bound for '{library_name}/{corner_name}'.",
+                domain.label()
+            )),
+        );
+        return;
+    }
+    let mut required = corner.effective_required_domains();
+    if !required.contains(&domain) {
+        required.push(domain);
+    }
+    bindings.retain(|binding| binding.domain != domain);
+    corner.section_bindings = bindings;
+    corner.required_domains = required;
+    corner.required_domains.sort();
+    corner.required_domains.dedup();
+    if let Err(errors) = corner.validate_draft_contract() {
+        receipt(
+            app,
+            Err(format!("Corner draft is invalid: {}", errors.join("; "))),
+        );
+        return;
+    }
+    let result = publish_model_library_candidate(
+        app.state,
+        candidate,
+        library_name,
+        format!("unbind {domain:?} section for corner {corner_name}"),
+    )
+    .map(|revision| {
+        format!(
+            "Unbound {} for '{library_name}/{corner_name}' at project revision {}; the retained draft now fails closed until rebound.",
+            domain.label(),
             revision.get()
         )
     });
@@ -3088,7 +3791,7 @@ fn bind_corner_section(
     if !corner.required_domains.contains(&domain) {
         corner.required_domains.push(domain);
     }
-    if let Err(errors) = corner.validate_contract() {
+    if let Err(errors) = corner.validate_draft_contract() {
         receipt(
             app,
             Err(format!(

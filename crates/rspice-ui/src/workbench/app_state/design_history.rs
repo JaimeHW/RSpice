@@ -37,6 +37,7 @@ enum ProjectDesignRecord {
     SymbolDefinition(Box<SymbolDefinitionRecord>),
     ModelDefinition(Box<ModelDefinitionRecord>),
     ModelLibraries(Box<ModelLibrariesRecord>),
+    ModelResolutions(Box<ModelResolutionRecordsRecord>),
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +121,15 @@ struct ModelLibrariesRecord {
     redo_guard_revision: Option<ObjectRevision>,
 }
 
+#[derive(Debug, Clone)]
+struct ModelResolutionRecordsRecord {
+    description: String,
+    before: Vec<crate::state::model_library::ModelResolutionRecord>,
+    after: Vec<crate::state::model_library::ModelResolutionRecord>,
+    undo_guard_revision: ObjectRevision,
+    redo_guard_revision: Option<ObjectRevision>,
+}
+
 /// Optional real schematic-buffer delta published together with a symbol
 /// definition. Create Symbol uses this for its generated simulation fixture;
 /// import and parameter-form edits pass `None`.
@@ -140,11 +150,32 @@ pub(crate) struct SymbolDefinitionHistoryEntry {
     fixture: Option<SymbolDefinitionFixtureRecord>,
 }
 
+fn require_unchanged_valid_model_resolution_ledger(
+    state: &AppState,
+    candidate: &ModelLibraryManager,
+    transaction: &str,
+) -> Result<(), String> {
+    let expected = state.model_library_manager.owned_model_resolution_records();
+    if candidate.owned_model_resolution_records() != expected {
+        return Err(format!(
+            "{transaction} cannot change model provider decisions; publish that ledger as a separate guarded transaction"
+        ));
+    }
+    let mut validated = candidate.clone();
+    validated
+        .restore_model_resolution_records(expected)
+        .map_err(|error| {
+            format!(
+                "{transaction} would invalidate an existing model provider decision: {error}. Clear or replace that decision first"
+            )
+        })
+}
+
 /// Publish an already validated model-manager candidate at the project
 /// revision boundary and add one guarded global undo step.
 pub(crate) fn publish_model_definition_candidate(
     state: &mut AppState,
-    candidate: ModelLibraryManager,
+    mut candidate: ModelLibraryManager,
     commit: ProjectModelCommit,
     description: impl Into<String>,
 ) -> Result<ObjectRevision, String> {
@@ -172,6 +203,29 @@ pub(crate) fn publish_model_definition_candidate(
     if !model_library_semantics_match(Some(candidate_library), Some(&commit.after)) {
         return Err("Candidate model manager does not contain the validated commit.".to_owned());
     }
+    let before_set = state.model_library_manager.library_snapshot();
+    let after_set = candidate.library_snapshot();
+    let unrelated_before = before_set
+        .iter()
+        .filter(|library| library.name != commit.library_name)
+        .cloned()
+        .collect::<Vec<_>>();
+    let unrelated_after = after_set
+        .iter()
+        .filter(|library| library.name != commit.library_name)
+        .cloned()
+        .collect::<Vec<_>>();
+    if !model_library_snapshots_match(&unrelated_before, &unrelated_after) {
+        return Err(format!(
+            "Candidate model manager changes libraries outside '{}'",
+            commit.library_name
+        ));
+    }
+    require_unchanged_valid_model_resolution_ledger(
+        state,
+        &candidate,
+        "The model-definition transaction",
+    )?;
     if !matches!(
         commit.after.source_authority,
         ModelSourceAuthority::ProjectOwned { .. }
@@ -193,6 +247,7 @@ pub(crate) fn publish_model_definition_candidate(
         .advance_revision()
         .map_err(|error| error.to_string())?;
     debug_assert_eq!(committed_revision, expected_revision);
+    candidate.invalidate_model_validation_receipt();
     state.model_library_manager = candidate;
     state.workspace.project_metadata_dirty = true;
     if commit.affects_execution {
@@ -217,7 +272,7 @@ pub(crate) fn publish_model_definition_candidate(
 /// still participate in undo conflict checks and execution invalidation.
 pub(crate) fn publish_model_library_candidate(
     state: &mut AppState,
-    candidate: ModelLibraryManager,
+    mut candidate: ModelLibraryManager,
     library_name: &str,
     description: impl Into<String>,
 ) -> Result<ObjectRevision, String> {
@@ -252,11 +307,17 @@ pub(crate) fn publish_model_library_candidate(
             "Candidate model manager changes libraries outside '{library_name}'"
         ));
     }
+    require_unchanged_valid_model_resolution_ledger(
+        state,
+        &candidate,
+        "The model-library transaction",
+    )?;
     let committed_revision = state
         .workspace
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
+    candidate.invalidate_model_validation_receipt();
     state.model_library_manager = candidate;
     state.workspace.project_metadata_dirty = true;
     state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
@@ -277,7 +338,7 @@ pub(crate) fn publish_model_library_candidate(
 /// revision and one guarded global Undo step.
 pub(crate) fn publish_model_library_set_candidate(
     state: &mut AppState,
-    candidate: ModelLibraryManager,
+    mut candidate: ModelLibraryManager,
     description: impl Into<String>,
 ) -> Result<Option<ObjectRevision>, String> {
     if !state.project_lifecycle.project_open {
@@ -288,6 +349,11 @@ pub(crate) fn publish_model_library_set_candidate(
     }
     let before = state.model_library_manager.library_snapshot();
     let after = candidate.library_snapshot();
+    require_unchanged_valid_model_resolution_ledger(
+        state,
+        &candidate,
+        "The model-library-set transaction",
+    )?;
     if model_library_snapshots_match(&before, &after) {
         return Ok(None);
     }
@@ -296,6 +362,7 @@ pub(crate) fn publish_model_library_set_candidate(
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
+    candidate.invalidate_model_validation_receipt();
     state.model_library_manager = candidate;
     state.workspace.project_metadata_dirty = true;
     state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
@@ -308,6 +375,55 @@ pub(crate) fn publish_model_library_set_candidate(
         redo_guard_revision: None,
     });
     Ok(Some(committed_revision))
+}
+
+/// Publish source-qualified contested-definition decisions as one guarded
+/// project transaction. The loaded libraries must remain byte-for-byte the
+/// same; only the durable provider ledger may change.
+pub(crate) fn publish_model_resolution_candidate(
+    state: &mut AppState,
+    mut candidate: ModelLibraryManager,
+    description: impl Into<String>,
+) -> Result<ObjectRevision, String> {
+    if !state.project_lifecycle.project_open {
+        return Err("Model provider decisions require an open project.".to_owned());
+    }
+    if state.workbench.safe_mode.project_read_only() {
+        return Err(
+            "Model provider decisions cannot change while the project is read-only.".to_owned(),
+        );
+    }
+    let before_libraries = state.model_library_manager.library_snapshot();
+    let after_libraries = candidate.library_snapshot();
+    if !model_library_snapshots_match(&before_libraries, &after_libraries) {
+        return Err("A provider-decision candidate cannot change model libraries.".to_owned());
+    }
+    let before = state.model_library_manager.owned_model_resolution_records();
+    let after = candidate.owned_model_resolution_records();
+    if before == after {
+        return Err("The model provider decision has no changes to publish.".to_owned());
+    }
+    // Re-run record/catalog validation at the publication boundary.
+    let mut validated = candidate.clone();
+    validated.restore_model_resolution_records(after.clone())?;
+    let committed_revision = state
+        .workspace
+        .project
+        .advance_revision()
+        .map_err(|error| error.to_string())?;
+    candidate.invalidate_model_validation_receipt();
+    state.model_library_manager = candidate;
+    state.workspace.project_metadata_dirty = true;
+    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+    state.ui.netlist.current_generation_input_digest = None;
+    state.record_model_resolution_transaction(ModelResolutionRecordsRecord {
+        description: description.into(),
+        before,
+        after,
+        undo_guard_revision: committed_revision,
+        redo_guard_revision: None,
+    });
+    Ok(committed_revision)
 }
 
 /// Atomically publish a fully validated candidate library manager and record
@@ -698,6 +814,19 @@ impl AppState {
         self.project_design_history.redo.clear();
     }
 
+    fn record_model_resolution_transaction(&mut self, record: ModelResolutionRecordsRecord) {
+        if record.before == record.after {
+            return;
+        }
+        self.project_design_history
+            .undo
+            .push(ProjectDesignRecord::ModelResolutions(Box::new(record)));
+        if self.project_design_history.undo.len() > MAX_PROJECT_DESIGN_STEPS {
+            self.project_design_history.undo.remove(0);
+        }
+        self.project_design_history.redo.clear();
+    }
+
     pub(crate) fn can_undo_project_design(&self) -> bool {
         self.project_design_history
             .undo
@@ -780,6 +909,7 @@ impl ProjectDesignRecord {
             Self::SymbolDefinition(record) => record.after_design_matches(state),
             Self::ModelDefinition(record) => record.after_design_matches(state),
             Self::ModelLibraries(record) => record.after_design_matches(state),
+            Self::ModelResolutions(record) => record.after_design_matches(state),
         }
     }
 
@@ -790,6 +920,7 @@ impl ProjectDesignRecord {
             Self::SymbolDefinition(record) => record.before_design_matches(state),
             Self::ModelDefinition(record) => record.before_design_matches(state),
             Self::ModelLibraries(record) => record.before_design_matches(state),
+            Self::ModelResolutions(record) => record.before_design_matches(state),
         }
     }
 
@@ -800,6 +931,7 @@ impl ProjectDesignRecord {
             Self::SymbolDefinition(record) => record.validate_mutation(state, operation),
             Self::ModelDefinition(record) => record.validate_mutation(state, operation),
             Self::ModelLibraries(record) => record.validate_mutation(state, operation),
+            Self::ModelResolutions(record) => record.validate_mutation(state, operation),
         }
     }
 
@@ -816,6 +948,7 @@ impl ProjectDesignRecord {
             }
             Self::ModelDefinition(_) => false,
             Self::ModelLibraries(_) => false,
+            Self::ModelResolutions(_) => false,
         }
     }
 
@@ -826,6 +959,7 @@ impl ProjectDesignRecord {
             Self::SymbolDefinition(record) => &record.description,
             Self::ModelDefinition(record) => &record.description,
             Self::ModelLibraries(record) => &record.description,
+            Self::ModelResolutions(record) => &record.description,
         }
     }
 
@@ -836,6 +970,7 @@ impl ProjectDesignRecord {
             Self::SymbolDefinition(record) => record.apply_before(state),
             Self::ModelDefinition(record) => record.apply_before(state),
             Self::ModelLibraries(record) => record.apply_before(state),
+            Self::ModelResolutions(record) => record.apply_before(state),
         }
     }
 
@@ -846,6 +981,7 @@ impl ProjectDesignRecord {
             Self::SymbolDefinition(record) => record.apply_after(state),
             Self::ModelDefinition(record) => record.apply_after(state),
             Self::ModelLibraries(record) => record.apply_after(state),
+            Self::ModelResolutions(record) => record.apply_after(state),
         }
     }
 }
@@ -900,6 +1036,58 @@ impl ModelLibrariesRecord {
         }
         self.validate_mutation(state, "redone")?;
         self.undo_guard_revision = replace_model_library_snapshot(state, &self.after)?;
+        Ok(())
+    }
+}
+
+impl ModelResolutionRecordsRecord {
+    fn after_design_matches(&self, state: &AppState) -> bool {
+        state.model_library_manager.owned_model_resolution_records() == self.after
+            && state.workspace.project.revision() == self.undo_guard_revision
+    }
+
+    fn before_design_matches(&self, state: &AppState) -> bool {
+        state.model_library_manager.owned_model_resolution_records() == self.before
+            && self
+                .redo_guard_revision
+                .is_some_and(|revision| state.workspace.project.revision() == revision)
+    }
+
+    fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
+        if !state.project_lifecycle.project_open {
+            return Err(format!(
+                "Model provider decisions cannot be {operation} without an open project."
+            ));
+        }
+        if state.workbench.safe_mode.project_read_only() {
+            return Err(format!(
+                "Model provider decisions cannot be {operation} while the project is read-only."
+            ));
+        }
+        Ok(())
+    }
+
+    fn apply_before(&mut self, state: &mut AppState) -> Result<(), String> {
+        if !self.after_design_matches(state) {
+            return Err(
+                "Model provider decisions cannot be undone because their catalog or project revision changed."
+                    .to_owned(),
+            );
+        }
+        self.validate_mutation(state, "undone")?;
+        self.redo_guard_revision = Some(replace_model_resolution_records(state, &self.before)?);
+        Ok(())
+    }
+
+    fn apply_after(&mut self, state: &mut AppState) -> Result<(), String> {
+        if !self.before_design_matches(state) {
+            return Err(
+                "Model provider decisions cannot be redone because their catalog or project revision changed."
+                    .to_owned(),
+            );
+        }
+        self.validate_mutation(state, "redone")?;
+        self.undo_guard_revision = replace_model_resolution_records(state, &self.after)?;
         Ok(())
     }
 }
@@ -1012,6 +1200,36 @@ fn replace_model_library_snapshot(
     state
         .model_library_manager
         .replace_library_snapshot(replacement.to_vec())?;
+    state
+        .model_library_manager
+        .invalidate_model_validation_receipt();
+    state
+        .workspace
+        .project
+        .advance_revision()
+        .map_err(|error| error.to_string())?;
+    debug_assert_eq!(state.workspace.project.revision(), revision);
+    state.workspace.project_metadata_dirty = true;
+    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+    state.ui.netlist.current_generation_input_digest = None;
+    Ok(revision)
+}
+
+fn replace_model_resolution_records(
+    state: &mut AppState,
+    replacement: &[crate::state::model_library::ModelResolutionRecord],
+) -> Result<ObjectRevision, String> {
+    let revision = state
+        .workspace
+        .project
+        .next_revision()
+        .map_err(|error| error.to_string())?;
+    state
+        .model_library_manager
+        .restore_model_resolution_records(replacement.to_vec())?;
+    state
+        .model_library_manager
+        .invalidate_model_validation_receipt();
     state
         .workspace
         .project
@@ -1813,6 +2031,72 @@ mod tests {
     use super::*;
     use crate::state::{Cell, ComponentType, LibraryCellInstance, Point, View, ViewType};
     use crate::workbench::state::LocalSafeModeOptions;
+
+    #[test]
+    fn library_transaction_cannot_smuggle_a_provider_ledger_change() {
+        let mut state = AppState::default();
+        state.project_lifecycle.project_open = true;
+        let approved = state
+            .model_library_manager
+            .load_library_bytes(
+                "approved.lib",
+                b".model shared NMOS (LEVEL=1 KP=1e-3)\n".to_vec(),
+                None,
+            )
+            .expect("approved source imports");
+        state
+            .model_library_manager
+            .load_library_bytes(
+                "alternate.lib",
+                b".model shared NMOS (LEVEL=1 KP=2e-3)\n".to_vec(),
+                None,
+            )
+            .expect("alternate source imports");
+        state
+            .model_library_manager
+            .resolve_definition_provider(
+                crate::state::model_library::ModelConsumerScope::PrimitiveModel,
+                "shared",
+                &approved,
+                "Test setup selects the approved provider.",
+            )
+            .expect("provider decision records");
+
+        let mut candidate = state.model_library_manager.clone();
+        assert!(candidate.clear_definition_provider(
+            crate::state::model_library::ModelConsumerScope::PrimitiveModel,
+            "shared"
+        ));
+        candidate
+            .get_library_mut(&approved)
+            .expect("approved library exists")
+            .corners
+            .insert(
+                "draft".to_owned(),
+                crate::state::model_library::ProcessCorner::new("draft"),
+            );
+
+        let error = publish_model_library_candidate(
+            &mut state,
+            candidate,
+            &approved,
+            "attempt mixed publication",
+        )
+        .expect_err("library publication must own only library state");
+        assert!(
+            error.contains("cannot change model provider decisions"),
+            "{error}"
+        );
+        assert!(
+            state
+                .model_library_manager
+                .model_resolution_record(
+                    crate::state::model_library::ModelConsumerScope::PrimitiveModel,
+                    "shared"
+                )
+                .is_some()
+        );
+    }
 
     fn state_with_hierarchy_record() -> (AppState, CellViewRef, CellViewRef) {
         let mut state = AppState::default();

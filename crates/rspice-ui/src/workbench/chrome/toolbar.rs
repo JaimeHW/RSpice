@@ -306,8 +306,10 @@ fn toolbar_outer_gap(viewport_width: f32) -> f32 {
     if viewport_width <= 560.0 { 2.0 } else { 5.0 }
 }
 
-fn reserved_run_control_width(ui: &egui::Ui, app: &RSpiceApp, layout: LayoutSpec) -> f32 {
-    let label = if app.state.simulation.is_running {
+fn run_control_label(app: &RSpiceApp, layout: LayoutSpec) -> String {
+    if app.state.simulation.cancellation_is_pending() {
+        "Stopping…".to_owned()
+    } else if app.state.simulation.has_active_execution() {
         "Stop".to_owned()
     } else if layout.compact_shell {
         format!(
@@ -316,7 +318,11 @@ fn reserved_run_control_width(ui: &egui::Ui, app: &RSpiceApp, layout: LayoutSpec
         )
     } else {
         "Run plan".to_owned()
-    };
+    }
+}
+
+fn reserved_run_control_width(ui: &egui::Ui, app: &RSpiceApp, layout: LayoutSpec) -> f32 {
+    let label = run_control_label(app, layout);
     let t = Tokens::get(ui.ctx());
     let label_width = ui
         .painter()
@@ -1456,29 +1462,21 @@ fn context_separator(ui: &mut egui::Ui, layout: LayoutSpec) {
 }
 
 fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    let running = app.state.simulation.is_running;
-    let command = if running {
+    let execution_active = app.state.simulation.has_active_execution();
+    let cancellation_pending = app.state.simulation.cancellation_is_pending();
+    let command = if execution_active {
         Command::StopSimulation
     } else {
         Command::RunSimulation
     };
-    let icon = if running {
+    let icon = if execution_active {
         WorkbenchIcon::Stop
     } else {
         WorkbenchIcon::Run
     };
     let t = Tokens::get(ui.ctx());
     let radius = t.radius.round().clamp(0.0, u8::MAX as f32) as u8;
-    let label = if running {
-        "Stop".to_owned()
-    } else if layout.compact_shell {
-        format!(
-            "Run · {}",
-            app.state.sim_setup.reference_pvt.process.short_name()
-        )
-    } else {
-        "Run plan".to_owned()
-    };
+    let label = run_control_label(app, layout);
     let label_width = ui
         .painter()
         .layout_no_wrap(
@@ -1500,7 +1498,9 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            let accessibility_label = if running {
+            let accessibility_label = if cancellation_pending {
+                "Simulation cancellation in progress".to_owned()
+            } else if execution_active {
                 "Stop active simulation".to_owned()
             } else {
                 let reference = app.state.sim_setup.reference_pvt;
@@ -1543,7 +1543,11 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 });
             }
             let base_fill = if enabled {
-                if running { t.color.err } else { t.color.accent }
+                if execution_active {
+                    t.color.err
+                } else {
+                    t.color.accent
+                }
             } else {
                 t.color.bg_inset
             };
@@ -1554,7 +1558,7 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             };
             let ink = if !enabled {
                 t.color.text_faint
-            } else if running {
+            } else if execution_active {
                 t.color.text
             } else {
                 t.color.accent_ink
@@ -1593,12 +1597,22 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 response.clone().on_hover_text(&accessibility_label);
             }
             if !enabled {
-                let reason = if app.state.workbench.workspace == Workspace::Netlist {
+                let reason = if execution_active {
+                    match command.availability(app) {
+                        CommandAvailability::Disabled(reason) => reason.to_owned(),
+                        CommandAvailability::Available | CommandAvailability::Hidden => {
+                            "Command unavailable".to_owned()
+                        }
+                    }
+                } else if app.state.workbench.workspace == Workspace::Netlist {
                     app.manual_deck_run_block_reason()
+                        .unwrap_or_else(|| "Command unavailable".to_owned())
                 } else {
-                    app.state.simulation_run_block_reason()
+                    app.state
+                        .simulation_run_block_reason()
+                        .unwrap_or_else(|| "Command unavailable".to_owned())
                 };
-                response.on_hover_text(reason.unwrap_or_else(|| "Command unavailable".to_owned()));
+                response.on_hover_text(reason);
             }
 
             let (more_response, _) = ui
@@ -1612,7 +1626,7 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     .ui(ui, |ui| {
                         ui.set_min_width(210.0);
                         ui.spacing_mut().item_spacing.y = 0.0;
-                        let primary = if running {
+                        let primary = if execution_active {
                             Command::StopSimulation
                         } else {
                             Command::RunSimulation
@@ -2150,6 +2164,26 @@ mod tests {
         assert_eq!(explicit_label_width("Run"), 76.0);
         assert!(explicit_label_width("Run schematic checks (Ctrl+E)") > 162.0);
         assert!(explicit_label_width("A very long engineering command label") <= 224.0);
+    }
+
+    #[test]
+    fn run_control_label_tracks_stable_execution_and_cancellation_lifecycle() {
+        let mut app = RSpiceApp::test_instance();
+        let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchState::default());
+        assert_eq!(run_control_label(&app, desktop), "Run plan");
+
+        let identity = app
+            .state
+            .simulation
+            .start_run()
+            .execution_identity()
+            .expect("current run has execution identity");
+        app.state.simulation.active_execution = Some(identity);
+        app.state.simulation.is_running = false;
+        assert_eq!(run_control_label(&app, desktop), "Stop");
+
+        app.state.simulation.request_abort_active_run().unwrap();
+        assert_eq!(run_control_label(&app, desktop), "Stopping…");
     }
 
     #[test]

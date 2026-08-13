@@ -946,8 +946,8 @@ impl AppState {
 
     /// User-facing reason the Run command is currently blocked.
     pub fn simulation_run_block_reason(&self) -> Option<String> {
-        if self.simulation.is_running {
-            return Some("A simulation is already running".to_string());
+        if self.simulation.has_active_execution() {
+            return Some("A simulation execution is already active".to_string());
         }
         self.simulation_run_preflight_block_reason()
     }
@@ -967,8 +967,8 @@ impl AppState {
 
     /// User-facing reason the Netlist workspace cannot run the current deck.
     pub fn manual_deck_run_block_reason(&self) -> Option<String> {
-        if self.simulation.is_running {
-            return Some("A simulation is already running".to_string());
+        if self.simulation.has_active_execution() {
+            return Some("A simulation execution is already active".to_string());
         }
         let active_document = if self.ui.netlist.active_document_initialized {
             self.ui.netlist.active_document
@@ -1039,7 +1039,7 @@ impl AppState {
     /// Request a Netlist workspace run, queuing one re-run if the engine is busy.
     pub(crate) fn request_netlist_manual_deck_run(&mut self) {
         self.simulation.run_intent = crate::state::SimulationRunIntent::ManualDeck;
-        if self.simulation.is_running {
+        if self.simulation.has_active_execution() {
             self.ui.netlist.rerun_queued = true;
         } else {
             self.simulation.request_manual_deck_run();

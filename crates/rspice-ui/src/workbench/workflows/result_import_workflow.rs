@@ -120,7 +120,7 @@ fn result_import_block_reason(state: &AppState) -> Option<String> {
     if state.workbench.safe_mode.project_read_only() {
         return Some("The project is read-only; result history cannot be changed.".to_owned());
     }
-    if state.simulation.active_execution.is_some() || state.simulation.is_running {
+    if state.simulation.has_active_execution() {
         return Some(
             "Wait for the active simulation execution to finish before importing result data."
                 .to_owned(),

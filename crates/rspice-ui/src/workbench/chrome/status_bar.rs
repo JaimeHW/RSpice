@@ -63,18 +63,17 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             } else {
                 format!("{}%", (zoom_factor(app) * 100.0).round())
             };
-            let (engine, engine_color) = if app.state.simulation.is_running {
-                (
-                    format!(
-                        "Engine running · {}%",
-                        simulation_progress_percent(app.state.simulation.progress)
-                    ),
-                    t.color.accent,
-                )
+            let (engine, cancellation_pending) = simulation_engine_status(&app.state.simulation);
+            let engine_color = if cancellation_pending {
+                t.color.warn
+            } else if app.state.simulation.has_active_execution() {
+                t.color.accent
             } else {
-                ("Engine ready".to_owned(), t.color.ok)
+                t.color.ok
             };
-            let engine_wash = if app.state.simulation.is_running {
+            let engine_wash = if cancellation_pending {
+                semantic_wash(t.color.warn, t.mode)
+            } else if app.state.simulation.has_active_execution() {
                 t.color.accent_dim
             } else {
                 semantic_wash(t.color.ok, t.mode)
@@ -311,6 +310,38 @@ fn check_tone(app: &RSpiceApp, tokens: &Tokens) -> egui::Color32 {
 
 fn simulation_progress_percent(progress: f64) -> u8 {
     (progress.clamp(0.0, 1.0) * 100.0).round() as u8
+}
+
+fn simulation_engine_status(simulation: &crate::state::SimulationState) -> (String, bool) {
+    if !simulation.has_active_execution() {
+        return ("Engine ready".to_owned(), false);
+    }
+    let phase = match simulation.active_execution_lifecycle() {
+        Some(crate::state::SimulationRunLifecycle::Preparing) => "preparing",
+        Some(crate::state::SimulationRunLifecycle::Cancelling) => "stopping",
+        Some(crate::state::SimulationRunLifecycle::Running)
+        | Some(
+            crate::state::SimulationRunLifecycle::LegacyUnknown
+            | crate::state::SimulationRunLifecycle::Completed
+            | crate::state::SimulationRunLifecycle::Failed
+            | crate::state::SimulationRunLifecycle::Aborted
+            | crate::state::SimulationRunLifecycle::Interrupted,
+        )
+        | None => "running",
+    };
+    let cancellation_pending = simulation.cancellation_is_pending();
+    let phase = if cancellation_pending {
+        "stopping"
+    } else {
+        phase
+    };
+    (
+        format!(
+            "Engine {phase} · {}%",
+            simulation_progress_percent(simulation.progress)
+        ),
+        cancellation_pending,
+    )
 }
 
 fn semantic_wash(color: egui::Color32, mode: crate::ui::tokens::Mode) -> egui::Color32 {
@@ -907,6 +938,29 @@ mod tests {
         assert_eq!(simulation_progress_percent(-1.0), 0);
         assert_eq!(simulation_progress_percent(0.375), 38);
         assert_eq!(simulation_progress_percent(1.5), 100);
+    }
+
+    #[test]
+    fn engine_status_follows_execution_lifecycle_not_worker_activity() {
+        let mut simulation = crate::state::SimulationState::default();
+        let identity = simulation
+            .start_run()
+            .execution_identity()
+            .expect("current run has execution identity");
+        simulation.active_execution = Some(identity);
+        simulation.progress = 0.375;
+        simulation.is_running = false;
+
+        assert_eq!(
+            simulation_engine_status(&simulation),
+            ("Engine preparing · 38%".to_owned(), false)
+        );
+
+        simulation.request_abort_active_run().unwrap();
+        assert_eq!(
+            simulation_engine_status(&simulation),
+            ("Engine stopping · 38%".to_owned(), true)
+        );
     }
 
     #[test]

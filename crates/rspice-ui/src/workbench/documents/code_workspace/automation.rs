@@ -169,7 +169,7 @@ pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
         .runtime_execution
         .clone()
     {
-        if app.state.simulation.is_running || app.state.simulation.trigger_simulation {
+        if app.state.simulation.has_active_execution() || app.state.simulation.trigger_simulation {
             if let Some(session_id) = pending.session_id
                 && let Err(error) = app
                     .automation_runtime
@@ -197,7 +197,8 @@ pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
     }
     match app.state.ui.code_workspace.automation.execution.clone() {
         AutomationExecutionState::AwaitingDispatch { .. }
-            if app.state.simulation.trigger_simulation && !app.state.simulation.is_running =>
+            if app.state.simulation.trigger_simulation
+                && !app.state.simulation.has_active_execution() =>
         {
             app.state.simulation.trigger_simulation = false;
             app.invalidate_simulation_preflight();
@@ -1651,7 +1652,7 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
                 return;
             }
             if let Some(run_id) = matching_run_ids.first().copied() {
-                if app.state.simulation.is_running {
+                if app.state.simulation.has_active_execution() {
                     app.state.ui.code_workspace.automation.execution =
                         AutomationExecutionState::Running {
                             token,
@@ -1662,7 +1663,9 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
                 } else {
                     finish_run(app, token, &plan, run_id, &snapshot);
                 }
-            } else if !app.state.simulation.trigger_simulation && !app.state.simulation.is_running {
+            } else if !app.state.simulation.trigger_simulation
+                && !app.state.simulation.has_active_execution()
+            {
                 fail(
                     app,
                     "Prepared-run preflight ended without creating a unique authenticated run matching the immutable Automation dispatch contract.",
@@ -1674,7 +1677,7 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
             plan,
             run_id,
             snapshot,
-        } if !app.state.simulation.is_running => {
+        } if !app.state.simulation.has_active_execution() => {
             if app.state.ui.code_workspace.automation.cancel_requested {
                 let runtime = &mut app.state.ui.code_workspace.automation;
                 runtime.execution = AutomationExecutionState::Cancelled;

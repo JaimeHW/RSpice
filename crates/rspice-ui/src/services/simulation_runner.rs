@@ -86,7 +86,8 @@ pub use reliability::{
 // unreachable; adding a fifth would mean the same thing again.
 pub use soa::{SoaRunConfig, run_soa_analysis_with_config_and_source_path_and_abort};
 pub use sparameter::{
-    SParameterPort, SParameterRunConfig, SParameterSweep, run_sparameter_analysis_with_abort,
+    SParameterPort, SParameterRunConfig, SParameterSweep,
+    run_sparameter_analysis_with_source_path_and_abort,
 };
 pub use stb::run_stb_analysis_with_sweep_and_source_path_and_abort;
 pub use sweeps::{
@@ -100,7 +101,8 @@ pub(crate) use sweeps::{
     materialize_corner_process_source,
 };
 pub use tf::{
-    TfAccuracy, TfNormalization, TfQuantity, TfRunConfig, run_tf_analysis_with_config_and_abort,
+    TfAccuracy, TfNormalization, TfQuantity, TfRunConfig,
+    run_tf_analysis_with_config_and_source_path_and_abort,
 };
 pub use transient::{TransientData, run_transient_analysis_with_source_path_and_abort};
 

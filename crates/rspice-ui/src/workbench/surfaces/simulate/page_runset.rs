@@ -43,6 +43,11 @@ const AXIS_CARD_W: f32 = 214.0;
 /// Width of the closing forecast tile.
 const FORECAST_TILE_W: f32 = 232.0;
 
+/// Approximate outside width of an axis card, including its horizontal frame
+/// margins. Used only to decide whether the run-space body can hold two cards;
+/// the cards themselves still own their exact layout.
+const AXIS_CARD_OUTER_W: f32 = AXIS_CARD_W + 18.0;
+
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let analyses = app.state.sim_setup.enabled_analysis_instance_count();
     let validation = run_set::validate(&app.state.sim_setup.run_set, analyses);
@@ -237,29 +242,47 @@ fn run_space(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
             card_body(ui, |ui| {
                 let selected = app.state.workbench.selected_run_set_dimension.clone();
                 let dimensions = app.state.sim_setup.run_set.dimensions.clone();
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                    for (index, dimension) in dimensions.iter().enumerate() {
-                        let is_selected = selected.as_deref() == Some(dimension.id.as_str());
-                        match axis_card(ui, dimension, index, is_selected) {
-                            Some(AxisEvent::Select) => {
-                                selection = Some(dimension.id.clone());
+                let two_columns = ui.available_width() >= AXIS_CARD_OUTER_W * 2.0 + 42.0;
+                let columns = if two_columns { 2 } else { 1 };
+                for row_start in (0..dimensions.len()).step_by(columns) {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let row_end = (row_start + columns).min(dimensions.len());
+                        let card_count = row_end - row_start;
+                        let row_width = AXIS_CARD_OUTER_W * card_count as f32
+                            + if card_count > 1 { 30.0 } else { 0.0 };
+                        ui.add_space(((ui.available_width() - row_width) * 0.5).max(0.0));
+                        for index in row_start..row_end {
+                            let dimension = &dimensions[index];
+                            if index > row_start {
+                                let previous = &dimensions[index - 1];
+                                operator_tile(
+                                    ui,
+                                    mode.operator(),
+                                    previous.enabled && dimension.enabled,
+                                );
                             }
-                            Some(AxisEvent::SetEnabled(enabled)) => {
-                                action = Some(RunSetAction::SetEnabled {
-                                    id: dimension.id.clone(),
-                                    enabled,
-                                });
+                            let is_selected = selected.as_deref() == Some(dimension.id.as_str());
+                            match axis_card(ui, dimension, index, is_selected) {
+                                Some(AxisEvent::Select) => {
+                                    selection = Some(dimension.id.clone());
+                                }
+                                Some(AxisEvent::SetEnabled(enabled)) => {
+                                    action = Some(RunSetAction::SetEnabled {
+                                        id: dimension.id.clone(),
+                                        enabled,
+                                    });
+                                }
+                                None => {}
                             }
-                            None => {}
                         }
-                        let next_enabled = dimensions
-                            .get(index + 1)
-                            .is_some_and(|next| next.enabled && dimension.enabled);
-                        if index + 1 < dimensions.len() {
-                            operator_tile(ui, mode.operator(), next_enabled);
-                        }
-                    }
+                    });
+                    ui.add_space(6.0);
+                }
+                ui.horizontal(|ui| {
+                    let forecast_width = FORECAST_TILE_W + 20.0;
+                    let row_width = forecast_width + if dimensions.is_empty() { 0.0 } else { 30.0 };
+                    ui.add_space(((ui.available_width() - row_width) * 0.5).max(0.0));
                     if !dimensions.is_empty() {
                         operator_tile(ui, "=", validation.is_ready());
                     }
