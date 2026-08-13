@@ -10022,6 +10022,44 @@ fn test_xyce_bug302_print_delimiter_relational_oracle() {
 }
 
 #[test]
+fn test_xyce_bug1797_bsim3_level_alias_relational_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, contract, wrapper, exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_1797/one-shot.cir",
+            "bug1797_bsim3_level_alias_relational_wrapper",
+            true,
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1797/one-shot_lev9.cir",
+            "bug1797_bsim3_level9_relational_worker",
+            false,
+            Some("Netlists/Certification_Tests/BUG_1797/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1797/one-shot_lev49.cir",
+            "bug1797_bsim3_level49_relational_worker",
+            false,
+            Some("Netlists/Certification_Tests/BUG_1797/exclude"),
+        ),
+    ] {
+        assert_eq!(runner.requires_upstream_wrapper(relative), wrapper);
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should reproduce the independently integrated BSIM3 selector relation, got {result:?}"
+        );
+        assert_eq!(result.contract, contract);
+        assert_eq!(result.upstream_exclusion_source.as_deref(), exclusion);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_bug352_diode_model_expression_equivalence_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

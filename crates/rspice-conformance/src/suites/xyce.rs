@@ -61,15 +61,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 221;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 223;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "d268cff78cd00f89984531804d67cfb0bc08f8480b978aeb5e840cdece80b716";
+    "472c3b82810505516672d93b738fd125990b2c9e6f9a18a7379cb4735cd9beb9";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "35186fa7367ee28b84b1dc2e8969f8e3664281f9dbe346e79fc6a1fadbbfbd9c";
+    "e4cffad64ee0f0b7e47a1589fb9ff25682bc828b9934d27ad77b266b49468e24";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "943b737bb05c40a26ffc06014114ff371633b7871baee85b95c069b2378bd6d6";
+    "9d10ea7c0967a564fbdc421eec9748e3c3ce28162a9b7cb8799d4f55b9b45c14";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -1756,6 +1756,114 @@ const XYCE_BUG352_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
         831,
         "adea694684c225d8cc84527b21205708c8891709f98e71838599920e1537884c",
         "51b8ed0ed86354d73459f4220498fdc8a6c6f8eb25d0f06ba6f6a932bb187f1b",
+    ),
+];
+
+const XYCE_BUG1797_OWNER_CONTRACT: &str = "bug1797_bsim3_level_alias_relational_wrapper";
+const XYCE_BUG1797_LEVEL9_CONTRACT: &str = "bug1797_bsim3_level9_relational_worker";
+const XYCE_BUG1797_LEVEL49_CONTRACT: &str = "bug1797_bsim3_level49_relational_worker";
+const XYCE_BUG1797_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_1797/one-shot.cir";
+const XYCE_BUG1797_LEVEL9_PATH: &str = "Netlists/Certification_Tests/BUG_1797/one-shot_lev9.cir";
+const XYCE_BUG1797_LEVEL49_PATH: &str = "Netlists/Certification_Tests/BUG_1797/one-shot_lev49.cir";
+const XYCE_BUG1797_OWNER_RECORD: &str = "netlists/certification_tests/bug_1797/one-shot.cir";
+const XYCE_BUG1797_LEVEL9_RECORD: &str = "netlists/certification_tests/bug_1797/one-shot_lev9.cir";
+const XYCE_BUG1797_LEVEL49_RECORD: &str =
+    "netlists/certification_tests/bug_1797/one-shot_lev49.cir";
+const XYCE_BUG1797_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_1797/exclude";
+const XYCE_BUG1797_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG1797_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG1797_HISTORICAL_RECORD_COUNT: usize = 10;
+const XYCE_BUG1797_HISTORICAL_RECORD_BYTES: usize = 2_381;
+const XYCE_BUG1797_HISTORICAL_RECORDS_SHA256: &str =
+    "ef09bc3deff030161eba7e51c697c3bda30bea107f56602518cdd2ea70e849dc";
+const XYCE_BUG1797_HISTORICAL_RECORDS_BLAKE3: &str =
+    "515dd9dbb60e3a648bbeddb25857440344958c7c05876750189941c55cd4493d";
+const XYCE_BUG1797_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 10] = [
+    (
+        "Netlists/Certification_Tests/BUG_1797/CMakeLists.txt",
+        2_057,
+        "a7f8cb3fbb63c4e2e5a6004e5a16e5ea945506adf830e7383ddd6b9e80fa757a",
+        "b5d811ac2a3f0b4833877798547ab41b3e164897e4cfe85d2483c0087a6cf99e",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1797/Manifest.txt",
+        86,
+        "feae63a70c21630b0ddc8cd9ec3d32392350e2abf818161baa7c8f1992d632fd",
+        "77af32a6824cd25fcfa6b7801ecfec77950db7c3827c15409a831b699c3ea890",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1797/README",
+        291,
+        "8d7bbcfee5d564732d82fafef0ede4c44807e5766b90154c3fabfc6cfaeb59a7",
+        "9b9bea05458b7c2862cd00179b2421459e1f75ac7fe6d4d91a2efa871a158001",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1797/exclude",
+        37,
+        "b060e161f951de612c91474529912e6c84137a9d38a57251acda99bf6ef65bb0",
+        "5fd44ea4650bb66c3cde2a8b42403fd68c7fdd4d7e31d1b46f17f612f78d59a7",
+    ),
+    (
+        XYCE_BUG1797_OWNER_PATH,
+        1,
+        "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "295192ea1ec8566d563b1a7587e5f0198580cdbd043842f5090a4c197c20c67a",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1797/one-shot.cir.sh",
+        1_432,
+        "77346929dc86a41166bc8ee079e8fcd85898cf3aed67e9afbace0fc348af2d11",
+        "d325eb36ac25e1b904cf42cd1791af83e7f8eb5e44aadf5279a9a30867629cdf",
+    ),
+    (
+        XYCE_BUG1797_LEVEL49_PATH,
+        997,
+        "c2a82d25b6774959fe22f1001c64ecce18e9571cf2de1ae50c0a296193587b3b",
+        "db72727f63d8216f23c3ac2971df52c66e7011bb5471d9739d8132e800f4b65a",
+    ),
+    (
+        XYCE_BUG1797_LEVEL9_PATH,
+        995,
+        "a174dc0f6c68d3979407b739a1f97e457f37bb3ee3ea3699ede31733639a025f",
+        "aa3e56fb3775d321962cb1b702bea44b85428d8508cb35e326c9fd1540dc1f2f",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1797/tags",
+        43,
+        "50662c44729f3312a23d4a634e1786ad5de7aec963cc0a1961dd60ad65e10fd8",
+        "c24cf5925bdd2de8cf8d81be30f0d6e1490f1af67ed08ad54a6195cdf3c7bc77",
+    ),
+    (
+        "TestScripts/file_compare.pl",
+        7_465,
+        "a700143baddab265ca2e74d69541432fb27ae66600c3fee71968797fc78efcb0",
+        "04dd69b4e4cfe543a39f663966229be877fa595a7c6c885dadf2173814f85895",
+    ),
+];
+const XYCE_BUG1797_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 4] = [
+    (
+        "README",
+        291,
+        "8d7bbcfee5d564732d82fafef0ede4c44807e5766b90154c3fabfc6cfaeb59a7",
+        "9b9bea05458b7c2862cd00179b2421459e1f75ac7fe6d4d91a2efa871a158001",
+    ),
+    (
+        "one-shot.cir",
+        1,
+        "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "295192ea1ec8566d563b1a7587e5f0198580cdbd043842f5090a4c197c20c67a",
+    ),
+    (
+        "one-shot_lev49.cir",
+        997,
+        "c2a82d25b6774959fe22f1001c64ecce18e9571cf2de1ae50c0a296193587b3b",
+        "db72727f63d8216f23c3ac2971df52c66e7011bb5471d9739d8132e800f4b65a",
+    ),
+    (
+        "one-shot_lev9.cir",
+        995,
+        "a174dc0f6c68d3979407b739a1f97e457f37bb3ee3ea3699ede31733639a025f",
+        "aa3e56fb3775d321962cb1b702bea44b85428d8508cb35e326c9fd1540dc1f2f",
     ),
 ];
 
@@ -7890,7 +7998,8 @@ impl XyceStaticTranPlan {
                     ) | (
                         XyceStaticTranPlanPurpose::RelationalFamily
                             | XyceStaticTranPlanPurpose::AgeCapRelationalFamily
-                            | XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
+                            | XyceStaticTranPlanPurpose::ScopedModelRelationalFamily
+                            | XyceStaticTranPlanPurpose::Bug1797RelationalFamily,
                         false,
                         XyceStaticTranContract::PlainStatic
                             | XyceStaticTranContract::PlainCsv
@@ -7898,7 +8007,8 @@ impl XyceStaticTranPlan {
                     ) | (
                         XyceStaticTranPlanPurpose::RelationalFamily
                             | XyceStaticTranPlanPurpose::AgeCapRelationalFamily
-                            | XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
+                            | XyceStaticTranPlanPurpose::ScopedModelRelationalFamily
+                            | XyceStaticTranPlanPurpose::Bug1797RelationalFamily,
                         true,
                         XyceStaticTranContract::WrapperStatic
                             | XyceStaticTranContract::WrapperCsv
@@ -8373,6 +8483,11 @@ enum XyceStaticTranPlanPurpose {
     /// so ordinary relational families cannot gain BJT eligibility by
     /// association.
     ScopedModelRelationalFamily,
+    /// Compare the exact Certification BUG 1797 bare BSIM3 LEVEL=9 and
+    /// LEVEL=49 one-shot representations.  This dedicated purpose admits no
+    /// general BSIM3 relational family; provenance and the complete typed
+    /// circuit envelope are owned by `contracts_bug1797`.
+    Bug1797RelationalFamily,
     /// Execute a wrapper-origin transient deck whose oracle is generated
     /// analytically on the simulator's own default-PRN time grid. The
     /// dedicated analytic contract supplies the missing reference and proves
@@ -11460,6 +11575,7 @@ mod contracts_bug1162;
 mod contracts_bug1398;
 mod contracts_bug159;
 mod contracts_bug1661;
+mod contracts_bug1797;
 mod contracts_bug206;
 mod contracts_bug267;
 mod contracts_bug271;

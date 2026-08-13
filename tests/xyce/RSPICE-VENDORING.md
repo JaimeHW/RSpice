@@ -223,6 +223,15 @@ The BJT contracts also execute the authored `DEVICE VOLTLIM=0` policy in the
 native Gummel-Poon model; unsupported nonlinear families fail closed under
 that global option rather than silently using voltage limiting.
 
+Certification BUG 1797 is reconstructed as the Release-7.10 BSIM3 selector
+relation. RSpice independently integrates the retained bare LEVEL=9 and
+LEVEL=49 one-shot workers, preserves the historical `file_compare.pl`
+direction and tolerances, and additionally enforces the README's intended
+numeric equality without the comparator's malformed FFT phase escape. The
+empty anchor remains the sole wrapper owner, both historical worker exclusions
+are independently qualified by exact role contracts, and no numerical gold is
+invented.
+
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
 and verifier identities. The PARAMS1, PARSER nakedAlgebra, and Certification

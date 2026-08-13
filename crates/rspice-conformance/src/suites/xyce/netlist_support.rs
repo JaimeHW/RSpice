@@ -2567,6 +2567,76 @@ impl XyceTestRunner {
             })
     }
 
+    pub(super) fn netlist_element_is_native_bug1797_bsim3(
+        netlist: &Netlist,
+        element: &rspice_core::netlist::Element,
+    ) -> bool {
+        let ElementKind::Mosfet {
+            model,
+            compact_syntax,
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            return false;
+        };
+        element.nodes.len() == 4
+            && !*compact_syntax
+            && deferred_params.is_empty()
+            && Self::native_absolute_transient_w_l_instance_params(instance_params)
+            && Self::find_unique_model_in(&netlist.models, model)
+                .is_some_and(Self::model_is_native_bug1797_bsim3)
+    }
+
+    pub(super) fn netlist_is_native_bug1797_bsim3_envelope(netlist: &Netlist) -> bool {
+        let mosfets = netlist
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Mosfet { .. }))
+            .collect::<Vec<_>>();
+        if mosfets.len() != 17
+            || mosfets
+                .iter()
+                .any(|element| !Self::netlist_element_is_native_bug1797_bsim3(netlist, element))
+            || netlist.elements.iter().any(|element| {
+                !Self::netlist_element_is_native_level9_xyce_verify_supported(element)
+            })
+        {
+            return false;
+        }
+        let referenced_models = mosfets
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::Mosfet { model, .. } => Some(model.to_ascii_lowercase()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        netlist.models.len() == 2
+            && referenced_models.len() == 2
+            && netlist.models.iter().all(|model| {
+                referenced_models.contains(&model.name.to_ascii_lowercase())
+                    && Self::model_is_native_bug1797_bsim3(model)
+            })
+    }
+
+    pub(super) fn model_is_native_bug1797_bsim3(model: &rspice_core::netlist::ModelDef) -> bool {
+        matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "NMOS" | "PMOS"
+        ) && model.expr_params.is_empty()
+            && model.string_params.is_empty()
+            && model.string_vector_params.is_empty()
+            && model.real_vector_params.is_empty()
+            && model.real_vector_expr_params.is_empty()
+            && model.integer_vector_params.is_empty()
+            && matches!(model.params.as_slice(), [(name, level)]
+                if name.eq_ignore_ascii_case("LEVEL")
+                    && level.is_finite()
+                    && matches!(level.to_bits(), bits
+                        if bits == 9.0f64.to_bits() || bits == 49.0f64.to_bits()))
+    }
+
     pub(super) fn model_is_native_absolute_transient_level9_bsim3(
         model: &rspice_core::netlist::ModelDef,
     ) -> bool {

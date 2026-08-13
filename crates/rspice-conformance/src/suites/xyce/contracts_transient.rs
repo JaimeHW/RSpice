@@ -3817,6 +3817,9 @@ impl XyceTestRunner {
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_absolute_transient_level9_bsim3(netlist, element)
             });
+        let has_qualified_bug1797_bsim3 = purpose
+            == XyceStaticTranPlanPurpose::Bug1797RelationalFamily
+            && Self::netlist_is_native_bug1797_bsim3_envelope(netlist);
         let has_qualified_bsim4_capacitor = purpose.validates_absolute_device_contract()
             && Self::netlist_is_native_transient_bsim4_capacitor(netlist);
         let has_qualified_bsim3_capacitor = purpose.validates_absolute_device_contract()
@@ -3840,6 +3843,7 @@ impl XyceTestRunner {
             || has_qualified_cmc_diode
             || has_qualified_juncap_diode
             || has_qualified_level9_bsim3
+            || has_qualified_bug1797_bsim3
             || has_qualified_bsim4_capacitor
             || has_qualified_bsim3_capacitor)
             && !has_qualified_bsim4_capacitor
@@ -4064,6 +4068,9 @@ impl XyceTestRunner {
                         && Self::netlist_element_is_native_absolute_transient_level9_bsim3(
                             netlist, element,
                         ) => {}
+                ElementKind::Mosfet { .. }
+                    if has_qualified_bug1797_bsim3
+                        && Self::netlist_element_is_native_bug1797_bsim3(netlist, element) => {}
                 ElementKind::Mosfet { .. } if has_qualified_bsim4_capacitor => {}
                 ElementKind::Mosfet { .. } if has_qualified_bsim3_capacitor => {}
                 ElementKind::Mosfet { .. }
@@ -4170,6 +4177,10 @@ impl XyceTestRunner {
                         ),
                         XyceStaticTranPlanPurpose::ScopedModelRelationalFamily => format!(
                             "native scoped-model relational .PRINT TRAN comparison currently supports finite independent and behavioral sources, static numeric R/C, finite VCCS, exact scalar IS/BF NPN models, and exact scalar IS diode models; element '{}' requires a broader scoped-model runtime contract",
+                            element.name
+                        ),
+                        XyceStaticTranPlanPurpose::Bug1797RelationalFamily => format!(
+                            "Certification BUG 1797 admits only the exact bare LEVEL=9/49 BSIM3 one-shot envelope; element '{}' is outside that contract",
                             element.name
                         ),
                     });
