@@ -112,12 +112,11 @@ fn render_tab(html: &mut String, id: &str, label: &str, count: Option<usize>) {
     html.push_str("</a>\n");
 }
 
-fn render_panel_header(html: &mut String, title: &str, description: &str) {
+fn render_panel_heading(html: &mut String, title: &str) {
     let _ = writeln!(
         html,
-        "<div class=\"panel-header\"><div><h2>{}</h2><p>{}</p></div></div>",
-        escape_html(title),
-        escape_html(description)
+        "<h2 class=\"visually-hidden\">{}</h2>",
+        escape_html(title)
     );
 }
 
@@ -140,22 +139,14 @@ fn render_figure(html: &mut String, snapshot: &PublicationSnapshot, figure: &Fig
         detail.accessible_summary.as_str()
     });
     let default_interactive = presentation.is_some_and(|detail| detail.default_interactive);
-    let (kind, control, hint) = match &figure.content {
-        FigureContent::SchematicSheet { .. } => (
-            "Schematic",
-            "Open interactive schematic",
-            "Pan, zoom, and inspect the published drawing",
-        ),
-        FigureContent::Plot(_) => (
-            "Result plot",
-            "Open interactive plot",
-            "Inspect the sealed simulation result",
-        ),
+    let control = match &figure.content {
+        FigureContent::SchematicSheet { .. } => "Open interactive schematic",
+        FigureContent::Plot(_) => "Open interactive plot",
     };
     let _ = write!(
         html,
         "<figure class=\"figure-card\" id=\"figure-{id}\"{default_interactive}>\n\
-         <div class=\"figure-heading\"><figcaption>{title}</figcaption><span class=\"figure-kind\">{kind}</span></div>\n\
+         <div class=\"figure-heading\"><figcaption>{title}</figcaption></div>\n\
          <div class=\"figure-stage\">{svg}<canvas id=\"figure-{id}-canvas\" class=\"viewer\" style=\"aspect-ratio:{width} / {height}\" hidden></canvas></div>\n",
         id = figure.id,
         title = escape_html(&figure.title),
@@ -168,24 +159,16 @@ fn render_figure(html: &mut String, snapshot: &PublicationSnapshot, figure: &Fig
             ""
         },
     );
-    if let Some(detail) = presentation {
-        let _ = write!(
+    if let Some(caption) = presentation.and_then(|detail| detail.caption.as_ref()) {
+        let _ = writeln!(
             html,
-            "<div class=\"figure-description\"><p>{}</p>",
-            escape_html(&detail.accessible_summary)
+            "<div class=\"figure-description\"><p class=\"figure-caption\">{}</p></div>",
+            escape_html(caption)
         );
-        if let Some(caption) = &detail.caption {
-            let _ = write!(
-                html,
-                "<p class=\"figure-caption\">{}</p>",
-                escape_html(caption)
-            );
-        }
-        html.push_str("</div>\n");
     }
     let _ = write!(
         html,
-        "<div class=\"figure-actions\"><button class=\"button primary hydrate\" type=\"button\" hidden>{control}</button><button class=\"button\" type=\"button\" data-figure-fullscreen data-js-only hidden>Fullscreen</button><button class=\"button\" type=\"button\" data-figure-svg data-js-only hidden>Download SVG</button><span class=\"hint\">{hint}</span></div>\n</figure>\n"
+        "<div class=\"figure-actions\"><button class=\"button primary hydrate\" type=\"button\" hidden>{control}</button><button class=\"button\" type=\"button\" data-figure-fullscreen data-js-only hidden>Fullscreen</button><button class=\"button\" type=\"button\" data-figure-svg data-js-only hidden>Download SVG</button></div>\n</figure>\n"
     );
 }
 
@@ -198,8 +181,8 @@ fn render_measurements(html: &mut String, snapshot: &PublicationSnapshot) {
     }
     html.push_str(
         "<section class=\"subsection\" aria-labelledby=\"measurements-heading\">\n\
-         <h3 id=\"measurements-heading\">Measurements</h3>\n\
-         <div class=\"table-wrap\"><table><caption>Published scalar measurements and declared limits</caption>\
+         <h3 class=\"visually-hidden\" id=\"measurements-heading\">Measurements</h3>\n\
+         <div class=\"table-wrap\"><table><caption class=\"visually-hidden\">Published scalar measurements and declared limits</caption>\
          <thead><tr><th scope=\"col\">Measurement</th><th scope=\"col\">Value</th><th scope=\"col\">Specification</th><th scope=\"col\">Status</th></tr></thead><tbody>\n",
     );
     for measurement in &results.measurements {
@@ -351,7 +334,7 @@ pub fn document(
          <button class=\"button\" type=\"button\" data-embed-copy data-js-only hidden><span aria-hidden=\"true\">&lt;/&gt;</span><span class=\"button-label\">Embed</span></button>\n\
          <button class=\"button primary\" type=\"button\" data-share data-js-only hidden><span aria-hidden=\"true\">↗</span><span class=\"button-label\">Share</span></button>\n\
          </div></nav>\n<header class=\"publication-header\">\n\
-         <p class=\"eyebrow\">Immutable engineering publication</p>\n<h1>{title}</h1>\n"
+         <h1>{title}</h1>\n"
     );
     if !snapshot.metadata.description.trim().is_empty() {
         let _ = writeln!(
@@ -393,17 +376,7 @@ pub fn document(
 
     if snapshot.schematic.is_some() {
         html.push_str("<section class=\"panel\" id=\"schematic\" data-panel tabindex=\"-1\">\n");
-        render_panel_header(
-            &mut html,
-            "Circuit schematic",
-            "Static by default and interactive on demand. The drawing is sealed with this publication.",
-        );
-        html.push_str(
-            "<div class=\"schematic-tools surface\" data-js-only hidden>\
-             <label class=\"search-field\"><span>Find a component or net</span><input type=\"search\" inputmode=\"search\" placeholder=\"R1, VOUT, ground…\" data-schematic-search></label>\
-             <p class=\"schematic-status\" data-schematic-status role=\"status\" aria-live=\"polite\">Select a tagged component or net to inspect it.</p>\
-             </div>\n",
-        );
+        render_panel_heading(&mut html, "Circuit schematic");
         html.push_str("<div class=\"figure-stack\">\n");
         for figure in &schematic_figures {
             render_figure(&mut html, snapshot, figure);
@@ -416,15 +389,11 @@ pub fn document(
 
     if !plot_figures.is_empty() || snapshot.results.is_some() {
         html.push_str("<section class=\"panel\" id=\"results\" data-panel tabindex=\"-1\">\n");
-        render_panel_header(
-            &mut html,
-            "Simulation results",
-            "Published plots, measurements, and analysis controls from the sealed simulation snapshot.",
-        );
+        render_panel_heading(&mut html, "Simulation results");
         html.push_str("<div class=\"section-stack\">\n");
         render_measurements(&mut html, snapshot);
         if !plot_figures.is_empty() {
-            html.push_str("<section class=\"subsection\" aria-labelledby=\"plots-heading\"><h3 id=\"plots-heading\">Plots</h3><div class=\"figure-stack\">\n");
+            html.push_str("<section class=\"subsection\" aria-labelledby=\"plots-heading\"><h3 class=\"visually-hidden\" id=\"plots-heading\">Plots</h3><div class=\"figure-stack\">\n");
             for figure in plot_figures {
                 render_figure(&mut html, snapshot, figure);
             }
@@ -445,11 +414,7 @@ pub fn document(
         && !engineering.components.is_empty()
     {
         html.push_str("<section class=\"panel\" id=\"components\" data-panel tabindex=\"-1\">\n");
-        render_panel_header(
-            &mut html,
-            "Components",
-            "Published component identity, model labels, pins, and connected nets.",
-        );
+        render_panel_heading(&mut html, "Components");
         html.push_str("<div class=\"table-wrap\"><table><caption>Components disclosed in this publication</caption><thead><tr><th scope=\"col\">Reference</th><th scope=\"col\">Value</th><th scope=\"col\">Device</th><th scope=\"col\">Model</th><th scope=\"col\">Pins and nets</th></tr></thead><tbody>\n");
         for component in &engineering.components {
             let model = component
@@ -481,11 +446,7 @@ pub fn document(
 
     if !assets.is_empty() {
         html.push_str("<section class=\"panel\" id=\"files\" data-panel tabindex=\"-1\">\n");
-        render_panel_header(
-            &mut html,
-            "Published files",
-            "Download only the engineering artifacts explicitly disclosed with this publication.",
-        );
+        render_panel_heading(&mut html, "Published files");
         html.push_str("<ul class=\"asset-list\">\n");
         for asset in &assets {
             let _ = writeln!(
@@ -501,11 +462,7 @@ pub fn document(
     }
 
     html.push_str("<section class=\"panel\" id=\"details\" data-panel tabindex=\"-1\">\n");
-    render_panel_header(
-        &mut html,
-        "Engineering details",
-        "Analysis controls, disclosed source, and immutable publication provenance.",
-    );
+    render_panel_heading(&mut html, "Engineering details");
     html.push_str("<div class=\"section-stack\">\n");
     if let Some(overview) = authored_overview {
         html.push_str("<section class=\"subsection design-notes\" aria-labelledby=\"design-notes-heading\"><h3 id=\"design-notes-heading\">Design notes</h3><div class=\"surface overview-copy\">");

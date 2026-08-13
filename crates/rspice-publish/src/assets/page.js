@@ -204,19 +204,10 @@ async function loadCloudContext() {
 
 void loadCloudContext();
 
-function tagLabel(element) {
-  if (element.dataset.instance) return `Component ${element.dataset.instance}`;
-  if (element.dataset.net) return `Net ${element.dataset.net}`;
-  return "Schematic object";
-}
-
 const schematicTags = Array.from(document.querySelectorAll("svg g[data-instance], svg g[data-net]"));
-const schematicSearch = document.querySelector("[data-schematic-search]");
-const schematicStatus = document.querySelector("[data-schematic-status]");
 
 function selectSchematicTag(element) {
   for (const tag of schematicTags) tag.classList.toggle("is-selected", tag === element);
-  if (schematicStatus) schematicStatus.textContent = `${tagLabel(element)} selected`;
 }
 
 for (const tag of schematicTags) {
@@ -225,41 +216,6 @@ for (const tag of schematicTags) {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
     selectSchematicTag(tag);
-  });
-}
-
-function searchSchematic() {
-  const query = (schematicSearch?.value || "").trim().toLocaleLowerCase();
-  let matches = 0;
-  for (const tag of schematicTags) {
-    const match = !query || tagLabel(tag).toLocaleLowerCase().includes(query);
-    tag.classList.toggle("search-match", Boolean(query) && match);
-    tag.classList.toggle("search-dimmed", Boolean(query) && !match);
-    if (query && match) matches += 1;
-  }
-  if (schematicStatus) {
-    schematicStatus.textContent = query
-      ? `${matches} matching tagged object${matches === 1 ? "" : "s"}`
-      : "Select a tagged component or net to inspect it.";
-  }
-  return schematicTags.find((tag) => tag.classList.contains("search-match"));
-}
-
-if (schematicSearch) {
-  schematicSearch.addEventListener("input", searchSchematic);
-  schematicSearch.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      schematicSearch.value = "";
-      searchSchematic();
-      return;
-    }
-    if (event.key !== "Enter") return;
-    const first = searchSchematic();
-    if (first) {
-      selectSchematicTag(first);
-      first.focus({ preventScroll: true });
-      first.closest("figure")?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
   });
 }
 
