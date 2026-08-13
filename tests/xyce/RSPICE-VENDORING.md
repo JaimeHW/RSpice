@@ -139,6 +139,14 @@ equal after default eight-digit PRN serialization on every finite output row.
 The historical wrapper ignored its nominal verifier and gold arguments, so no
 OutputData artifact or numerical waveform oracle is invented.
 
+Certification BUG 519 SON preserves the active Release-7.10 RAW-output
+wrapper. RSpice validates the exact one-ohm resistor/PWL transient and its
+`FORMAT=RAW FILE=...` request, exports the native observation through both
+binary RAW and Xyce-layout ASCII RAW, reparses both with the bounded production
+reader, and requires the converted `V(1)` and `I(R1)` columns to be numerically
+equal after the historical eight-digit serialization. The wrapper never read
+its nominal gold argument, so no OutputData artifact is invented.
+
 Certification BUG 206 preserves an active Release-7.10 hierarchy error
 wrapper. RSpice parses the exact malformed X instance, validates the otherwise
 complete DC/subcircuit envelope, and requires a typed undefined-subcircuit

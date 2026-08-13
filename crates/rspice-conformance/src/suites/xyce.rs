@@ -2162,6 +2162,73 @@ const XYCE_BUG1661_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 1] = [(
     "d59abb99dde37a857ce59902ca9ce93068ee27b46b173bcae5fabbd6d8604e1e",
 )];
 
+// BUG_519_SON's active Release-7.10 wrapper runs this transient once with
+// binary RAW output and once with ASCII RAW output, converts both through the
+// retained RAW reader boundary, and requires V(1) to equal I(R1) in each.
+// It does not use a checked-in numerical gold file.
+const XYCE_BUG519_CONTRACT: &str = "bug519_binary_ascii_raw_column_equality_wrapper";
+const XYCE_BUG519_PATH: &str = "Netlists/Certification_Tests/BUG_519_SON/bug_519_SON.cir";
+const XYCE_BUG519_RECORD: &str = "netlists/certification_tests/bug_519_son/bug_519_son.cir";
+const XYCE_BUG519_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG519_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG519_HISTORICAL_RECORD_COUNT: usize = 7;
+const XYCE_BUG519_HISTORICAL_RECORD_BYTES: usize = 1_658;
+const XYCE_BUG519_HISTORICAL_RECORDS_SHA256: &str =
+    "c1c463b78caa63d4d805c19a846b1128eb2559035dc326cd6c9420eeb73fb067";
+const XYCE_BUG519_HISTORICAL_RECORDS_BLAKE3: &str =
+    "fb834b337dd8fb61645005b4421f5990a02f7381a8c21634f2721375ace65d3a";
+const XYCE_BUG519_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
+    (
+        "Netlists/Certification_Tests/BUG_519_SON/CMakeLists.txt",
+        1_199,
+        "8c7e471b0c8b26b6179765f7ab3aa3ca4f2887dabbe2ef097ba5bdc81fa16439",
+        "6dfe3c481595e160025778e22b6800de7319340b3e0a272b69def0b98693d62e",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_519_SON/Manifest.txt",
+        40,
+        "74cc5dadcdacce4cbb709888eb0892d2ecc0f8bbc0c60481d48785a0f7665a0d",
+        "a9786f497874a7fe5f31c844fbcd78d7e4bd9fcc09bb2d1a83053016cb9a45cc",
+    ),
+    (
+        XYCE_BUG519_PATH,
+        132,
+        "21bc57148169d7effb9bf0e215d1a53b19355bfa3017742a8bf6baad8c9532c1",
+        "25ef552125f19dc15fc21ee9a2acd2deb95b9848e96e4cdfac3ce2de918cda3b",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_519_SON/bug_519_SON.cir.sh",
+        2_668,
+        "e89688f5012a61746164a51f8d89d416273bc0aaa783b27d5c86266e436aa2b3",
+        "db212b1474e70542f908a9c747ee355c577336004e4ad00b283f074e1d366e21",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_519_SON/tags",
+        28,
+        "4ec87257b57ad0473d88c43a6e17efca9cf879efc633d48c1188f44f19ba6c9c",
+        "8388849297713e605ed3de82616e0f5c4dbdc88d4d967c2650671bd008ce3b0a",
+    ),
+    (
+        "TestScripts/convertToPrn.py",
+        22_175,
+        "46ba3ec7be7b301deff35ed6cffa17541fc4b9eb98ce84bba0d1b75ea2713735",
+        "7256f6c3fbeeee7aded5e704ac85c519a90fdfbe51cff0177a3bd97796d16bbf",
+    ),
+    (
+        // convertToPrn.py imports this parser helper directly.
+        "TestScripts/findBlock.py",
+        3_648,
+        "56045f50bbaf567009ff4096c71d8f4cd0ae04a4a348fcc85b951b7a46ca49de",
+        "bced5e9eb6ce2df5a6b23e50593bcddbd03805585cc63f84278ce4fccf4cc6d8",
+    ),
+];
+const XYCE_BUG519_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 1] = [(
+    "bug_519_SON.cir",
+    132,
+    "21bc57148169d7effb9bf0e215d1a53b19355bfa3017742a8bf6baad8c9532c1",
+    "25ef552125f19dc15fc21ee9a2acd2deb95b9848e96e4cdfac3ce2de918cda3b",
+)];
+
 // BUG_1040_SON's Release-7.10 wrapper proves that the NOOP spelling of
 // transient startup produces the same diode-capacitor discharge waveform as
 // ordinary operating-point startup. The zero-byte .cir file is only the
@@ -11181,6 +11248,7 @@ mod contracts_bug38;
 mod contracts_bug39;
 mod contracts_bug402;
 mod contracts_bug48;
+mod contracts_bug519;
 mod contracts_bug636;
 mod contracts_bug784;
 mod contracts_bug864;
