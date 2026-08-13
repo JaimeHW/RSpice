@@ -4019,7 +4019,14 @@ pub(super) fn parse_diode(
     let name = expect_element_name(stream, line_num)?;
     let anode = expect_node(stream, line_num)?;
     let cathode = expect_node(stream, line_num)?;
-    let model = expect_model_name(stream, line_num)?;
+    let model = expect_model_name(stream, line_num).map_err(|_| {
+        ParseError::MissingDeviceModel(Box::new(super::super::MissingDeviceModelError {
+            line: line_num,
+            device_name: name.clone(),
+            canonical_device_name: name.to_ascii_uppercase(),
+            device_type: "DIODE".to_string(),
+        }))
+    })?;
 
     // Instance tail: positional AREA, bare OFF keyword, and PARAM=value
     // assignments (AREA/M/PJ/TEMP/DTEMP/IC...), mirroring ngspice's D-line

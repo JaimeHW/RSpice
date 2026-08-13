@@ -227,6 +227,20 @@ fn undefined_subcircuit_attributes(
     attributes
 }
 
+fn missing_device_model_attributes(
+    error: &rspice_core::netlist::MissingDeviceModelError,
+) -> ParseErrorAttributes {
+    let mut attributes = ParseErrorAttributes::new("missing_device_model");
+    attributes.category = Some("device_model_resolution");
+    attributes.line = Some(error.line);
+    attributes.primary_line = Some(error.line);
+    attributes.authored_name = Some(error.device_name.clone());
+    attributes.canonical_name = Some(error.canonical_device_name.clone());
+    attributes.device = Some(error.device_name.clone());
+    attributes.device_type = Some(error.device_type.clone());
+    attributes
+}
+
 fn undefined_mutual_inductor_reference_attributes(
     error: &rspice_core::netlist::UndefinedMutualInductorReferenceError,
 ) -> ParseErrorAttributes {
@@ -398,6 +412,7 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
             global_subcircuit_binding_attributes(error)
         }
         CoreParseError::UndefinedSubcircuit(error) => undefined_subcircuit_attributes(error),
+        CoreParseError::MissingDeviceModel(error) => missing_device_model_attributes(error),
         CoreParseError::UnresolvedSubcircuitParameter(error) => {
             unresolved_subcircuit_parameter_attributes(error)
         }
@@ -618,7 +633,7 @@ mod tests {
     use super::*;
     use rspice_core::netlist::{
         DuplicateSubcircuitPortBindingError, GlobalSubcircuitPortBindingError,
-        NetlistSourceLocation, OutputDirectiveKind, OutputExpressionIssue,
+        MissingDeviceModelError, NetlistSourceLocation, OutputDirectiveKind, OutputExpressionIssue,
         OutputExpressionValidationError, OutputSymbolKind, OutputSymbolValidationError,
         StartupDirectiveConflictError, StartupDirectiveKind, UndefinedMutualInductorReferenceError,
         UndefinedSubcircuitError, UnresolvedOutputSymbol, UnresolvedSubcircuitParameterError,
@@ -765,6 +780,34 @@ mod tests {
     fn undefined_subcircuit_is_declared_by_the_public_type_stub() {
         let stub = include_str!("../../rspice.pyi");
         for declaration in ["\"undefined_subcircuit\"", "\"subcircuit_resolution\""] {
+            assert!(
+                stub.contains(declaration),
+                "public Python type stub is missing {declaration:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn missing_device_model_exposes_structured_python_attributes() {
+        let attributes = missing_device_model_attributes(&MissingDeviceModelError {
+            line: 4,
+            device_name: "d1".into(),
+            canonical_device_name: "D1".into(),
+            device_type: "DIODE".into(),
+        });
+
+        assert_eq!(attributes.kind, "missing_device_model");
+        assert_eq!(attributes.category, Some("device_model_resolution"));
+        assert_eq!(attributes.line, Some(4));
+        assert_eq!(attributes.device.as_deref(), Some("d1"));
+        assert_eq!(attributes.canonical_name.as_deref(), Some("D1"));
+        assert_eq!(attributes.device_type.as_deref(), Some("DIODE"));
+    }
+
+    #[test]
+    fn missing_device_model_is_declared_by_the_public_type_stub() {
+        let stub = include_str!("../../rspice.pyi");
+        for declaration in ["\"missing_device_model\"", "\"device_model_resolution\""] {
             assert!(
                 stub.contains(declaration),
                 "public Python type stub is missing {declaration:?}"

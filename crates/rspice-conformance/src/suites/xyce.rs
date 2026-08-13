@@ -2816,6 +2816,93 @@ const XYCE_BUG206_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
     ),
 ];
 
+// BUG_1116 is an active Release-7.10 error-exit regression. Its malformed
+// diode card supplies only two tokens after the instance name, leaving the
+// mandatory model field absent.
+const XYCE_BUG1116_CONTRACT: &str = "expected_failure_bug1116_missing_diode_model_parse";
+const XYCE_BUG1116_PATH: &str = "Netlists/Certification_Tests/BUG_1116/bug_1116.cir";
+const XYCE_BUG1116_RECORD: &str = "netlists/certification_tests/bug_1116/bug_1116.cir";
+const XYCE_BUG1116_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG1116_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG1116_UPSTREAM_DIAGNOSTIC: &str =
+    "Model is required for device D1 and no valid model card found";
+const XYCE_BUG1116_HISTORICAL_RECORD_COUNT: usize = 8;
+const XYCE_BUG1116_HISTORICAL_RECORD_BYTES: usize = 1_899;
+const XYCE_BUG1116_HISTORICAL_RECORDS_SHA256: &str =
+    "a60748b07472db91a125d5dd60fbd1f00b66abaa55287eb0f808218e85fdaab7";
+const XYCE_BUG1116_HISTORICAL_RECORDS_BLAKE3: &str =
+    "96e9d35a37d8be9bfff2cbd8039319a12432c2488237abc2bdccc8045776d059";
+const XYCE_BUG1116_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 8] = [
+    (
+        "Netlists/Certification_Tests/BUG_1116/CMakeLists.txt",
+        1_857,
+        "6c8a721de3a07d25bfeb98045fc8053f00bdd4f29640b77dcbb7d11f40db1076",
+        "21fb5b5cf97be9ed3904c998109118905177d8246a49a6646bffccb09bd490d1",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1116/Manifest.txt",
+        49,
+        "724f9dd504aee2d6aca2c6d7640db251f16c00bc76133af9ad7e6010b838cdee",
+        "2f6fb0a097294b0faecf9c3f4352adbc5c89f64bb1de22b06b68adfa9c54eff0",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1116/README",
+        441,
+        "f9c58aafcb8043b1afd432804203eb29104bb246caa6db047d1f090267007089",
+        "3d855941607b9cabe338a5cdb2a09ac0eecf3e3e9aa2c5ea768f49ce16198352",
+    ),
+    (
+        XYCE_BUG1116_PATH,
+        200,
+        "e826c2b0cc5ccc49dc8219a95f03ba58a7be1d9a28d0204a9a7348b57a2388fd",
+        "60eff5369669c79d686af8e2b9095cf57833291ddd0ff14880057aa8da3ca42f",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1116/bug_1116.cir.sh",
+        1_382,
+        "cca7d72c275633c40ca5e89fc90835acad51f323bb75303cdb8b7b24eb79056f",
+        "631ad8201cb5484377cdbc2659e3443d9b103c3a936b4a284a4826a9c8c4f5da",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1116/options",
+        13,
+        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
+        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1116/tags",
+        36,
+        "38081d2c7c83cc0bf7ff6b2430777e4cfabfca9019dc9638fc59395b9ffb1095",
+        "851f6add160cd333cac9c53cb5ffd9d6f14f7f7bbd97185dfe930f14e30aede0",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG1116_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
+    (
+        "README",
+        441,
+        "f9c58aafcb8043b1afd432804203eb29104bb246caa6db047d1f090267007089",
+        "3d855941607b9cabe338a5cdb2a09ac0eecf3e3e9aa2c5ea768f49ce16198352",
+    ),
+    (
+        "bug_1116.cir",
+        200,
+        "e826c2b0cc5ccc49dc8219a95f03ba58a7be1d9a28d0204a9a7348b57a2388fd",
+        "60eff5369669c79d686af8e2b9095cf57833291ddd0ff14880057aa8da3ca42f",
+    ),
+    (
+        "options",
+        13,
+        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
+        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
+    ),
+];
+
 // BUG_784 is an archived error-exit regression: Release-7.10 retains its
 // wrapper and exact ordered diagnostic, while `tags=exclude` deliberately
 // leaves its generated CMake file without an active CTest registration.
@@ -10961,6 +11048,7 @@ mod comparison;
 mod contracts;
 mod contracts_bug1025;
 mod contracts_bug1040;
+mod contracts_bug1116;
 mod contracts_bug1162;
 mod contracts_bug1398;
 mod contracts_bug159;

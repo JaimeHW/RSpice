@@ -722,6 +722,10 @@ fn parse_error_diagnostic_at(
             error.qualified_instance_name,
             error.canonical_instance_name,
         )),
+        ParseError::MissingDeviceModel(error) => Diagnostic::error(format!(
+            "{}\nDevice: {} (canonical {}) · type: {}",
+            error, error.device_name, error.canonical_device_name, error.device_type,
+        )),
         ParseError::UndefinedMutualInductorReference(error) => Diagnostic::error(format!(
             "{}\nCoupling: {} (canonical {}) · missing inductor: {} (canonical {}) · scope: {} · reference position {}",
             error,
@@ -1314,6 +1318,23 @@ mod tests {
                 .contains("Subcircuit: missing (canonical MISSING)")
         );
         assert!(diagnostic.message.contains("TOP.X1 (canonical X1)"));
+    }
+
+    #[test]
+    fn missing_device_model_diagnostic_preserves_device_identity() {
+        let diagnostic =
+            parse_error_diagnostic(rspice_core::netlist::ParseError::MissingDeviceModel(
+                Box::new(rspice_core::netlist::MissingDeviceModelError {
+                    line: 4,
+                    device_name: "d1".into(),
+                    canonical_device_name: "D1".into(),
+                    device_type: "DIODE".into(),
+                }),
+            ));
+
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+        assert!(diagnostic.message.contains("Device: d1 (canonical D1)"));
+        assert!(diagnostic.message.contains("type: DIODE"));
     }
 
     #[test]

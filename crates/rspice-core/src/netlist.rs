@@ -214,6 +214,16 @@ pub struct UndefinedSubcircuitError {
     pub qualified_instance_name: String,
 }
 
+/// A model-backed device instance ended before its required model name.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("Model is required for device {canonical_device_name} and no valid model card found")]
+pub struct MissingDeviceModelError {
+    pub line: usize,
+    pub device_name: String,
+    pub canonical_device_name: String,
+    pub device_type: String,
+}
+
 /// A retained subcircuit-local `.PARAM` definition could not be resolved.
 ///
 /// The canonical definition name and the missing dependency are distinct
@@ -383,6 +393,9 @@ pub enum ParseError {
 
     #[error(transparent)]
     UndefinedSubcircuit(Box<UndefinedSubcircuitError>),
+
+    #[error(transparent)]
+    MissingDeviceModel(Box<MissingDeviceModelError>),
 
     #[error(transparent)]
     UnresolvedSubcircuitParameter(Box<UnresolvedSubcircuitParameterError>),

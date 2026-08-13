@@ -558,6 +558,15 @@ impl WasmError {
                 structured.qualified_instance_name = Some(error.qualified_instance_name);
                 structured
             }
+            rspice_core::netlist::ParseError::MissingDeviceModel(error) => {
+                let mut structured =
+                    Self::new(message, "missing_device_model", "device_model_resolution");
+                structured.primary_line = Some(error.line);
+                structured.instance_name = Some(error.device_name);
+                structured.canonical_instance_name = Some(error.canonical_device_name);
+                structured.reason = Some(error.device_type);
+                structured
+            }
             _ => Self::new(message, "parse_error", "netlist_parse"),
         }
     }
@@ -1180,6 +1189,26 @@ mod tests {
         assert_eq!(error.instance_name.as_deref(), Some("x1"));
         assert_eq!(error.canonical_instance_name.as_deref(), Some("X1"));
         assert_eq!(error.qualified_instance_name.as_deref(), Some("TOP.X1"));
+    }
+
+    #[test]
+    fn missing_device_model_error_preserves_typed_device_identity() {
+        let error =
+            WasmError::from_parse_error(rspice_core::netlist::ParseError::MissingDeviceModel(
+                Box::new(rspice_core::netlist::MissingDeviceModelError {
+                    line: 4,
+                    device_name: "d1".into(),
+                    canonical_device_name: "D1".into(),
+                    device_type: "DIODE".into(),
+                }),
+            ));
+
+        assert_eq!(error.kind, "missing_device_model");
+        assert_eq!(error.category, "device_model_resolution");
+        assert_eq!(error.primary_line, Some(4));
+        assert_eq!(error.instance_name.as_deref(), Some("d1"));
+        assert_eq!(error.canonical_instance_name.as_deref(), Some("D1"));
+        assert_eq!(error.reason.as_deref(), Some("DIODE"));
     }
 
     #[test]

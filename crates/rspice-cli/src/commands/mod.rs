@@ -167,6 +167,9 @@ pub(crate) fn map_parse_error(error: rspice_core::error::ParseError) -> crate::c
             error.to_string(),
             (conflict.conflicting.line != 0).then_some(conflict.conflicting.line),
         ),
+        rspice_core::netlist::ParseError::MissingDeviceModel(error) => {
+            (error.to_string(), (error.line != 0).then_some(error.line))
+        }
         _ => (error.to_string(), None),
     };
     crate::cli::CliError::ParseError {

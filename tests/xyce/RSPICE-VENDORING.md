@@ -137,6 +137,13 @@ failure carrying the authored subcircuit and qualified instance identities.
 The wrapper's source-location and undefined-subcircuit diagnostics remain
 ordered, and no numerical gold or exclusion row is invented.
 
+Certification BUG 1116 preserves an active Release-7.10 malformed-diode
+error wrapper. RSpice retains the exact two-field diode card and reports a
+typed missing-device-model error with source line, canonical device identity,
+and device family. A repaired counterfactual is parsed to prove that the
+surrounding model, transient analysis, and output request remain meaningful;
+no numerical gold or exclusion row is introduced.
+
 The serial Certification BUG 307 A/B wrapper is reconstructed as an exact
 subcircuit-model-scope relation. RSpice runs the collision owner followed by
 the active-only control, proves that both select the qualified

@@ -754,6 +754,28 @@ fn xyce_physical_line_is_comment(line: &str) -> bool {
 }
 
 #[cfg(test)]
+mod missing_device_model_tests {
+    use crate::netlist::{Netlist, ParseError};
+
+    #[test]
+    fn diode_without_model_is_a_typed_device_error() {
+        let error = Netlist::parse("missing diode model\nD1 anode cathode\n.end\n")
+            .expect_err("a diode model is required");
+        let ParseError::MissingDeviceModel(error) = error else {
+            panic!("expected typed missing-device-model error");
+        };
+        assert_eq!(error.line, 2);
+        assert_eq!(error.device_name, "D1");
+        assert_eq!(error.canonical_device_name, "D1");
+        assert_eq!(error.device_type, "DIODE");
+        assert_eq!(
+            error.to_string(),
+            "Model is required for device D1 and no valid model card found"
+        );
+    }
+}
+
+#[cfg(test)]
 mod xyce_physical_comment_tests {
     use super::NetlistParseOptions;
     use crate::config::ExpressionDialect;

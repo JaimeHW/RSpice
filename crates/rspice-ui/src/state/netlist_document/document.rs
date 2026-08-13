@@ -1956,6 +1956,7 @@ fn parse_error_line(error: &rspice_core::netlist::ParseError) -> Option<usize> {
         ParseError::Syntax { line, .. } => Some(*line),
         ParseError::DuplicateName { duplicate_line, .. } => Some(*duplicate_line),
         ParseError::MissingSubcircuitEnds(error) => Some(error.opened_at.line),
+        ParseError::MissingDeviceModel(error) => Some(error.line),
         ParseError::UndefinedMutualInductorReference(error) => Some(error.origin.line),
         ParseError::DeviceInitialCondition(error) => Some(match error.as_ref() {
             DeviceInitialConditionError::DuplicateDirective { duplicate, .. } => duplicate.line,
