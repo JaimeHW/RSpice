@@ -1126,6 +1126,22 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(role) = Bug667IcRole::for_record(&deck.relative_path) {
+            let result = match self.validate_bug667_ic_oracle(deck, role, start) {
+                Ok(()) => self.passed_result(deck, start, role.contract()),
+                Err(error) => self.failure_result(deck, start, role.contract(), error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.bug667_nodeset_relational_contract(deck) {
             let result = match contract {
                 Ok(contract) => self.run_bug667_nodeset_relational_contract(deck, contract, start),

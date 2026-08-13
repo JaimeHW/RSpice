@@ -45,8 +45,9 @@ pub(in crate::engine) struct AcceptedTransientOperatingPointContract {
 
 pub(in crate::engine) struct TransientOperatingPointSolution {
     pub(in crate::engine) values: Vec<Value>,
-    /// `None` denotes a NODESET-constrained recovery seed rather than an
-    /// accepted unconstrained operating point.
+    /// `None` denotes a startup-directive-constrained state rather than an
+    /// accepted unconstrained operating point. This includes a NODESET
+    /// recovery seed and Xyce's hard-constrained `.IC` transient state.
     pub(in crate::engine) accepted_contract: Option<AcceptedTransientOperatingPointContract>,
 }
 

@@ -480,21 +480,44 @@ impl Engine {
         SimulationError,
     > {
         let transient_node_hints = self.collect_node_voltage_hints(netlist, circuit);
+        // Xyce applies authored `.IC` node voltages as hard constraints while
+        // solving the t=0 transient operating point. Keep `.NODESET` in the
+        // broader startup-hint set: it may guide Newton, but it must not alter
+        // the final equation contract. Other dialects retain their existing
+        // post-solve `.IC` overlay semantics.
+        let transient_ic_constraints = if self.config.spice_dialect == SpiceDialect::Xyce {
+            self.collect_initial_condition_hints(netlist, circuit)
+        } else {
+            Vec::new()
+        };
         let transient_op = if circuit.has_nonlinear_devices() {
             self.solve_nonlinear_transient_op_with_node_hints_and_abort(
                 circuit,
                 matrix,
                 0.0,
                 &transient_node_hints,
+                &transient_ic_constraints,
                 abort,
             )
         } else {
-            self.solve_linear_transient_operating_point_with_abort(circuit, matrix, 0.0, abort)
+            self.solve_linear_transient_operating_point_with_constraints_and_abort(
+                circuit,
+                matrix,
+                0.0,
+                &transient_ic_constraints,
+                abort,
+            )
         };
 
         match transient_op {
             Ok(solution) => {
-                let mode = if solution.accepted_contract.is_some() {
+                // A hard `.IC` solve is a fully converged constrained
+                // operating point even though it intentionally has no
+                // unconstrained-KCL audit contract. Do not misclassify it as
+                // a linearized recovery seed and relax the first timesteps.
+                let mode = if solution.accepted_contract.is_some()
+                    || !transient_ic_constraints.is_empty()
+                {
                     InitialSolutionMode::TransientOperatingPoint
                 } else {
                     InitialSolutionMode::LinearizedSeed
@@ -503,6 +526,14 @@ impl Engine {
             }
             Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
             Err(transient_err) => {
+                if !transient_ic_constraints.is_empty() {
+                    // Subsequent recovery paths solve an unconstrained DC
+                    // system. Falling through and overlaying only the named
+                    // IC nodes would create an internally inconsistent t=0
+                    // state, so fail closed if the constrained solve itself
+                    // cannot establish the authored Xyce contract.
+                    return Err(transient_err);
+                }
                 log::warn!(
                     "Transient initial operating point failed: {}. Trying direct DC operating point startup.",
                     transient_err

@@ -10427,6 +10427,43 @@ fn test_xyce_startup_diagnostic_wrappers_run_with_exact_typed_contracts() {
 }
 
 #[test]
+fn test_xyce_bug667_direct_and_scoped_ic_relational_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, expected_exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_667_SON/ic_in_subckt.cir",
+            "bug667_ic_relational_wrapper_owner",
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_667_SON/ic_not_in_subckt.cir",
+            "bug667_ic_relational_wrapper_explicit_reference",
+            Some("Netlists/Certification_Tests/BUG_667_SON/exclude"),
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            expected_exclusion.is_none(),
+            "only the scoped-IC deck is the historical wrapper owner"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should execute the direct/scoped IC relation with a nonvacuous decay oracle, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(
+            result.upstream_exclusion_source.as_deref(),
+            expected_exclusion
+        );
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_bug991_upstream_exclusion_is_typed_without_hiding_sibling_coverage() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

@@ -250,6 +250,15 @@ workers, with the retained PRNs treated only as documentary corpus members.
 The blank anchor remains the sole wrapper owner, both historical worker
 exclusions are independently qualified, and no numerical gold is invented.
 
+Certification BUG 667's direct-versus-subcircuit `.IC` wrapper is reproduced
+with two independent adaptive transient runs and the historical byte-exact
+default-PRN relation. RSpice additionally proves that direct and flattened
+scoped ICs resolve to the same two-node map, constrain the complete t=0
+linear solution, and retain the authored RC decay relative to the deck's
+no-IC branch. A third native run with both IC forms removed closes the shared-
+failure counterfactual. The historical control exclusion is independently
+qualified, while the existing NODESET and warning roles remain unchanged.
+
 Certification ISSUE 202 reconstructs the Release-7.10 repeated-parameter
 mode matrix. Selection (`usefirst`/`uselast`) and diagnostics
 (`ignore`/`warning`/`error`) are independent typed parser policies. The owner

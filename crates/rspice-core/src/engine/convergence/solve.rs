@@ -307,15 +307,22 @@ impl Engine {
         solution: &[Value],
         time: Value,
         node_hints: &[(usize, Value)],
+        nodal_gmin: Value,
+        junction_gmin: Value,
+        use_transient_current_seed: bool,
     ) -> Result<bool, SimulationError> {
         let snapshot = circuit.nonlinear_state_snapshot();
-        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
-        let junction_gmin = self.effective_device_junction_gmin(gmin_floor);
         let result = matrix.with_probe_values(|probe, rhs| -> Result<bool, SimulationError> {
             circuit.refresh_jiles_atherton_inductances(solution);
-            Self::stamp_transient_operating_point_linear(
-                circuit, probe, rhs, time, gmin_floor, false,
-            );
+            if use_transient_current_seed {
+                Self::stamp_transient_current_seed_linear(
+                    circuit, probe, rhs, time, nodal_gmin, false,
+                );
+            } else {
+                Self::stamp_transient_operating_point_linear(
+                    circuit, probe, rhs, time, nodal_gmin, false,
+                );
+            }
             self.try_stamp_static_probe_nonlinear_devices_for_operating_point(
                 circuit,
                 probe,
@@ -1278,6 +1285,9 @@ impl Engine {
                     &new_solution,
                     time,
                     node_hints,
+                    gmin_floor,
+                    junction_gmin,
+                    false,
                 )?;
 
             std::mem::swap(&mut solution, &mut new_solution);
@@ -1296,6 +1306,23 @@ impl Engine {
         time: Value,
         abort: &dyn AbortSignal,
     ) -> Result<TransientOperatingPointSolution, SimulationError> {
+        self.solve_linear_transient_operating_point_with_constraints_and_abort(
+            circuit,
+            matrix,
+            time,
+            &[],
+            abort,
+        )
+    }
+
+    pub(in crate::engine) fn solve_linear_transient_operating_point_with_constraints_and_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        time: Value,
+        node_constraints: &[(usize, Value)],
+        abort: &dyn AbortSignal,
+    ) -> Result<TransientOperatingPointSolution, SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -1303,7 +1330,12 @@ impl Engine {
         let size = circuit.matrix_size();
         matrix.clear_values();
         let mut rhs = vec![0.0; size];
-        let nodal_gmin = self.dc_nodal_gmin_floor(circuit);
+        let nodal_gmin =
+            if self.config.spice_dialect == SpiceDialect::Xyce && !node_constraints.is_empty() {
+                0.0
+            } else {
+                self.dc_nodal_gmin_floor(circuit)
+            };
         Self::stamp_linear_transient_operating_point_system(
             circuit,
             matrix,
@@ -1312,15 +1344,19 @@ impl Engine {
             nodal_gmin,
             TransientOperatingPointLinearSystem::IdealInductorShorts,
         );
+        Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_constraints)?;
         match matrix.solve(&rhs) {
-            Ok(values) if values.iter().all(|value| value.is_finite()) => {
+            Ok(mut values) if values.iter().all(|value| value.is_finite()) => {
+                Self::enforce_node_voltage_hints(circuit, &mut values, node_constraints);
                 Ok(TransientOperatingPointSolution {
                     values,
-                    accepted_contract: Some(AcceptedTransientOperatingPointContract {
-                        linear_system: TransientOperatingPointLinearSystem::IdealInductorShorts,
-                        nodal_gmin,
-                        junction_gmin: None,
-                    }),
+                    accepted_contract: node_constraints.is_empty().then_some(
+                        AcceptedTransientOperatingPointContract {
+                            linear_system: TransientOperatingPointLinearSystem::IdealInductorShorts,
+                            nodal_gmin,
+                            junction_gmin: None,
+                        },
+                    ),
                 })
             }
             Ok(_) | Err(_) if !circuit.inductors.is_empty() => {
@@ -1334,16 +1370,20 @@ impl Engine {
                     nodal_gmin,
                     TransientOperatingPointLinearSystem::CurrentSeededInductors,
                 );
+                Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_constraints)?;
                 match matrix.solve(&rhs) {
-                    Ok(values) if values.iter().all(|value| value.is_finite()) => {
+                    Ok(mut values) if values.iter().all(|value| value.is_finite()) => {
+                        Self::enforce_node_voltage_hints(circuit, &mut values, node_constraints);
                         Ok(TransientOperatingPointSolution {
                             values,
-                            accepted_contract: Some(AcceptedTransientOperatingPointContract {
-                                linear_system:
-                                    TransientOperatingPointLinearSystem::CurrentSeededInductors,
-                                nodal_gmin,
-                                junction_gmin: None,
-                            }),
+                            accepted_contract: node_constraints.is_empty().then_some(
+                                AcceptedTransientOperatingPointContract {
+                                    linear_system:
+                                        TransientOperatingPointLinearSystem::CurrentSeededInductors,
+                                    nodal_gmin,
+                                    junction_gmin: None,
+                                },
+                            ),
                         })
                     }
                     Ok(_) => Err(SimulationError::Solver(
@@ -1365,6 +1405,7 @@ impl Engine {
         matrix: &mut StaticMatrix,
         time: Value,
         node_hints: &[(usize, Value)],
+        node_constraints: &[(usize, Value)],
         abort: &dyn AbortSignal,
     ) -> Result<TransientOperatingPointSolution, SimulationError> {
         let size = circuit.matrix_size();
@@ -1490,6 +1531,7 @@ impl Engine {
                 crate::xspice::AnalysisType::Transient,
                 junction_gmin,
             )?;
+            Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_constraints)?;
 
             match matrix.solve_into(&rhs, &mut raw_solution) {
                 Ok(()) => {}
@@ -1565,6 +1607,7 @@ impl Engine {
                 new_solution,
                 circuit.num_nodes().min(size),
             );
+            Self::enforce_node_voltage_hints(circuit, new_solution, node_constraints);
 
             let voltage_converged =
                 self.node_voltage_convergence_met(&solution, new_solution, circuit.num_nodes());
@@ -1576,9 +1619,10 @@ impl Engine {
                 junction_gmin,
             );
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
-            let nonlinear_residual_converged = voltage_converged
-                && device_converged
-                && self.nonlinear_residual_converged_with_linear_stamp_for_operating_point(
+            let nonlinear_residual_converged = if !voltage_converged || !device_converged {
+                false
+            } else if node_constraints.is_empty() {
+                self.nonlinear_residual_converged_with_linear_stamp_for_operating_point(
                     circuit,
                     matrix,
                     new_solution,
@@ -1597,7 +1641,19 @@ impl Engine {
                             );
                         }
                     },
-                );
+                )
+            } else {
+                self.constrained_transient_op_residual_converged(
+                    circuit,
+                    matrix,
+                    new_solution,
+                    time,
+                    node_constraints,
+                    gmin_floor,
+                    junction_gmin,
+                    use_transient_current_seed,
+                )?
+            };
 
             std::mem::swap(&mut solution, new_solution);
             if voltage_converged && device_converged && nonlinear_residual_converged {
@@ -1608,11 +1664,13 @@ impl Engine {
                 };
                 return Ok(TransientOperatingPointSolution {
                     values: solution,
-                    accepted_contract: Some(AcceptedTransientOperatingPointContract {
-                        linear_system,
-                        nodal_gmin: gmin_floor,
-                        junction_gmin: Some(junction_gmin),
-                    }),
+                    accepted_contract: node_constraints.is_empty().then_some(
+                        AcceptedTransientOperatingPointContract {
+                            linear_system,
+                            nodal_gmin: gmin_floor,
+                            junction_gmin: Some(junction_gmin),
+                        },
+                    ),
                 });
             }
         }

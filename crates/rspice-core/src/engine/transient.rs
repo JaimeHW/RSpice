@@ -7632,6 +7632,128 @@ mod tests {
     }
 
     #[test]
+    fn xyce_node_ic_constrains_the_complete_linear_t0_solution() {
+        let netlist = Netlist::parse(
+            "Xyce direct and scoped node IC constraints\n\
+             V1 direct_source 0 0\n\
+             R1 direct_source direct_out 1k\n\
+             R2 direct_ic direct_out 10\n\
+             C1 direct_tail direct_ic 1u\n\
+             R3 direct_tail 0 10\n\
+             .IC V(direct_ic)=0.5\n\
+             V2 scoped_source 0 0\n\
+             R4 scoped_source scoped_out 1k\n\
+             X1 scoped_out scoped_tail IC_CELL PARAMS: VMID=0.5\n\
+             R5 scoped_tail 0 10\n\
+             .SUBCKT IC_CELL in out PARAMS: VMID=5\n\
+             RS in mid 10\n\
+             CS mid out 1u\n\
+             .IC V(mid)={VMID}\n\
+             .ENDS\n\
+             .TRAN 0 10u\n\
+             .END\n",
+        )
+        .expect("linear IC deck parses");
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let result = engine
+            .run_tran(&netlist, 10.0e-6, 1.0e-6)
+            .expect("linear IC-constrained transient solves");
+        let expected = 50.0 / 101.0;
+
+        for node in ["direct_out", "scoped_out"] {
+            let waveform = result
+                .try_voltage_waveform_named(node)
+                .expect("IC response waveform exists");
+            assert!(
+                (waveform[0] - expected).abs() <= 1.0e-12,
+                "{node} must be solved consistently around its t=0 IC: got {:.17e}, expected {:.17e}",
+                waveform[0],
+                expected
+            );
+        }
+        assert_eq!(
+            result
+                .try_voltage_waveform_named("direct_ic")
+                .expect("direct IC node exists")[0]
+                .to_bits(),
+            0.5f64.to_bits()
+        );
+        assert_eq!(
+            result
+                .try_voltage_waveform_named("X1.mid")
+                .expect("scoped IC node exists")[0]
+                .to_bits(),
+            0.5f64.to_bits()
+        );
+    }
+
+    #[test]
+    fn xyce_node_ic_remains_hard_during_nonlinear_t0_newton() {
+        let netlist = Netlist::parse(
+            "Xyce nonlinear node IC constraint\n\
+             V1 source 0 0\n\
+             R1 source out 1k\n\
+             R2 held out 10\n\
+             D1 out 0 DM\n\
+             .MODEL DM D(IS=1e-12 N=1)\n\
+             .IC V(held)=0.5\n\
+             .TRAN 0 1u\n\
+             .END\n",
+        )
+        .expect("nonlinear IC deck parses");
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let result = engine
+            .run_tran(&netlist, 1.0e-6, 1.0e-7)
+            .expect("nonlinear IC-constrained transient solves");
+        let held = result
+            .try_voltage_waveform_named("held")
+            .expect("held waveform exists")[0];
+        let out = result
+            .try_voltage_waveform_named("out")
+            .expect("out waveform exists")[0];
+        assert_eq!(held.to_bits(), 0.5f64.to_bits());
+
+        let thermal_voltage = 0.025_864_186_384_551_46;
+        let diode_current = 1.0e-12 * ((out / thermal_voltage).exp() - 1.0);
+        let kcl = out / 1.0e3 + (out - held) / 10.0 + diode_current;
+        assert!(
+            kcl.abs() <= 1.0e-10,
+            "neighboring nonlinear t=0 state violates the IC-constrained KCL: out={out:.17e}, residual={kcl:.17e}"
+        );
+    }
+
+    #[test]
+    fn xyce_nodeset_remains_seed_only_for_a_linear_t0_solution() {
+        let netlist = Netlist::parse(
+            "Xyce linear NODESET seed\n\
+             V1 source 0 0\n\
+             R1 source out 1k\n\
+             R2 hinted out 10\n\
+             R3 hinted 0 10\n\
+             .NODESET V(hinted)=0.5\n\
+             .TRAN 0 1u\n\
+             .END\n",
+        )
+        .expect("linear NODESET deck parses");
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let result = engine
+            .run_tran(&netlist, 1.0e-6, 1.0e-7)
+            .expect("linear NODESET transient solves");
+        for node in ["hinted", "out"] {
+            let initial = result
+                .try_voltage_waveform_named(node)
+                .expect("NODESET test node exists")[0];
+            assert!(
+                initial.abs() <= 1.0e-14,
+                "NODESET must not replace the final linear equation at {node}: {initial:.17e}"
+            );
+        }
+    }
+
+    #[test]
     fn xyce_capacitor_ic_floating_terminal_is_constrained_at_start_then_held_by_companion() {
         let netlist = Netlist::parse(
             "floating capacitor IC transient\n\
