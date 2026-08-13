@@ -108,6 +108,16 @@ default bytes, although those references were not read by the historical
 wrapper. The empty owner has no invented numerical gold and no exclusion row is
 changed.
 
+The three `DIODE_ANALYTIC` transient wrappers retain no checked-in waveform.
+RSpice instead reconstructs each Release-7.10 Perl generator on the native
+adaptive output grid and applies the historical default `xyce_verify`
+contract to the resulting diode voltage. Forward conduction and avalanche
+breakdown preserve the wrapper's generated-GOOD/simulation-TEST direction;
+the ordinary reverse-region case also preserves the wrapper's explicit retry
+with GOOD and TEST exchanged. Admission is limited to the exact three
+legacy-diode cards and their retained source/wrapper/generator provenance, so
+it does not broaden the ordinary absolute transient diode envelope.
+
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
 and verifier identities. The PARAMS1, PARSER nakedAlgebra, and Certification

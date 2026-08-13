@@ -9527,6 +9527,40 @@ fn test_xyce_bug1025_bounded_no_analysis_error_oracle() {
 }
 
 #[test]
+fn test_xyce_diode_analytic_generated_gold_wrappers() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for (relative, expected_contract) in [
+        (
+            "Netlists/DIODE_ANALYTIC/forward_model.cir",
+            "analytic_diode_forward_tran_wrapper",
+        ),
+        (
+            "Netlists/DIODE_ANALYTIC/reverse_model.cir",
+            "analytic_diode_reverse_tran_wrapper",
+        ),
+        (
+            "Netlists/DIODE_ANALYTIC/breakdown_model.cir",
+            "analytic_diode_breakdown_tran_wrapper",
+        ),
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} must remain owned by its removed historical wrapper"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should reproduce its Release-7.10 generated analytic diode oracle, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(result.upstream_exclusion_source, None);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_bug48_level54_native_bsim4_success_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

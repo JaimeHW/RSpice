@@ -228,7 +228,11 @@ impl XyceTestRunner {
         purpose: XyceStaticTranPlanPurpose,
     ) -> Result<XyceStaticTranPlan, String> {
         let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
-        let analytic_wrapper = purpose == XyceStaticTranPlanPurpose::AnalyticOracle;
+        let analytic_wrapper = matches!(
+            purpose,
+            XyceStaticTranPlanPurpose::AnalyticOracle
+                | XyceStaticTranPlanPurpose::DiodeAnalyticOracle
+        );
         let analytic_passive_temperature =
             purpose == XyceStaticTranPlanPurpose::PassiveTemperatureAnalyticOracle;
         let generated_reference_wrapper =

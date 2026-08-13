@@ -2098,6 +2098,177 @@ const XYCE_BUG1025_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
     ),
 ];
 
+// DIODE_ANALYTIC is an active three-member Release-7.10 generated-gold
+// family. Each wrapper evaluates the analytic diode law on the simulator's
+// own transient output grid before invoking xyce_verify.
+const XYCE_DIODE_ANALYTIC_UPSTREAM_REGRESSION_COMMIT: &str =
+    "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_DIODE_ANALYTIC_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_DIODE_ANALYTIC_HISTORICAL_RECORD_COUNT: usize = 13;
+const XYCE_DIODE_ANALYTIC_HISTORICAL_RECORD_BYTES: usize = 3_020;
+const XYCE_DIODE_ANALYTIC_HISTORICAL_RECORDS_SHA256: &str =
+    "2ef729affb94fdc248b330b9d40e1e75f290e3507b1f3ba181623db3e569642a";
+const XYCE_DIODE_ANALYTIC_HISTORICAL_RECORDS_BLAKE3: &str =
+    "d4e68c7e1ca1ebbc47d0e3ed2014e0a870633689dd3ad32c869e86cc2d5c2215";
+const XYCE_DIODE_ANALYTIC_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 13] = [
+    (
+        "Netlists/DIODE_ANALYTIC/CMakeLists.txt",
+        5_169,
+        "4ca3c2e90c80726ab9a645669c4968363cb0509b080e038bd8b2b3f65a8a701d",
+        "83c21dd8dae4f2deb68d30bf10d7c0c4b7b420f9f346288110a398ee2409b7dc",
+    ),
+    (
+        "Netlists/DIODE_ANALYTIC/Manifest.txt",
+        200,
+        "01d309e6bb67b8fde6762636603e41617bc8ae07bcb4239e4684a9cdf619d43d",
+        "459f943734c2cf14b53b13b8490aa7efe87602cffdeea91933740fa38d8c2afc",
+    ),
+    (
+        "Netlists/DIODE_ANALYTIC/breakdown_model.cir",
+        2_337,
+        "c428a046c15bce99cb0f75a8346327a2becc1adb4c37b175c6d07da133159249",
+        "b25207e26ddd7e67c50980c0b53034c5a71b6f344040da120a71e5ffaa96cea0",
+    ),
+    (
+        "Netlists/DIODE_ANALYTIC/breakdown_model.cir.gs.pl",
+        507,
+        "9b469fddda2dfc87ccbe4beba1ed54d40dceeb445107e486eae5189350a4fc0d",
+        "a1a2dd1bca6f8d55b5b5e146d9b2a3fbd5548ada6b525571bb6379d78139de4b",
+    ),
+    (
+        "Netlists/DIODE_ANALYTIC/breakdown_model.cir.sh",
+        1_277,
+        "bb1ca31a6ff2c11a675a7b871bd6caafe01ab9590ef030c1b55e405f1ebcf3ee",
+        "4a9785f678b7a0c1b76e7c5877186aae05cc07193fd59d5a471f3a747a899730",
+    ),
+    (
+        "Netlists/DIODE_ANALYTIC/forward_model.cir",
+        1_442,
+        "f5e090a36963633e2be6dc76dee709dc51efb4b9fa97dc5d93667c25b64dca9c",
+        "25153718dd56bbe9f05d3e5c86769420de8b55bcf6d7c218911042dc7e0bda44",
+    ),
+    (
+        "Netlists/DIODE_ANALYTIC/forward_model.cir.gs.pl",
+        511,
+        "dbf061409dc5371deafaef55d0687ed07e4b8770450e2d276b5e5a9f9cbed830",
+        "b1724024d906f783c548c812d87b3b12b0453fa0dd9f8fb8d9cabc8e87362d6f",
+    ),
+    (
+        "Netlists/DIODE_ANALYTIC/forward_model.cir.sh",
+        1_273,
+        "7fc7eea6d2164aaeefd80ea2d86b887f9f3be3d43a0329df1ea767c164cb2988",
+        "69657a1309232ef50610e76a5599ba7e0f149a6c1415b1709d787ea0d878698e",
+    ),
+    (
+        "Netlists/DIODE_ANALYTIC/reverse_model.cir",
+        2_553,
+        "84ec00feef59479221276fd0c0b4421135b7ed62bfa0b8f36706acb67cdc63b4",
+        "99d3e4ed8f1371a44905644841db8f58ec74dac53642f0b6a9a2cfdaf31183f0",
+    ),
+    (
+        "Netlists/DIODE_ANALYTIC/reverse_model.cir.gs.pl",
+        759,
+        "7025ff54a22d7be56a1942ab5cfd7e645c40be9c9b4194961e254d62ebb98967",
+        "152a090659c78726bb54578dd92e686071e0f6ff35a2faad550b582f081393c8",
+    ),
+    (
+        "Netlists/DIODE_ANALYTIC/reverse_model.cir.sh",
+        3_402,
+        "c84ffe260bd68460c229ebdc9c81cd6b2954226d143eabe1920fa62d1829a43f",
+        "17e0a7af9157cdf8919c46ff5302a31ade92bb6078aef4cc2d3e28f5e05f1c19",
+    ),
+    (
+        "Netlists/DIODE_ANALYTIC/tags",
+        64,
+        "1ff198c2fd9e6222408cd30d4cdce15c2184fcb0ae18a6f585a91ca9d92261ee",
+        "1c58bd56195603e452af41dcd6c30cecb5539bc8eaaafb7bb4641410ab204943",
+    ),
+    (
+        "TestScripts/xyce_verify.pl",
+        59_566,
+        "6e5f84b1646b30d0e12879848d7653584b39472d640a14916ae8fda6e1df12b3",
+        "5eadb6dab06ed3091ea114146bd4a574de83784f87be9843ad7b721b0a793665",
+    ),
+];
+const XYCE_DIODE_ANALYTIC_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
+    (
+        "breakdown_model.cir",
+        2_337,
+        "c428a046c15bce99cb0f75a8346327a2becc1adb4c37b175c6d07da133159249",
+        "b25207e26ddd7e67c50980c0b53034c5a71b6f344040da120a71e5ffaa96cea0",
+    ),
+    (
+        "forward_model.cir",
+        1_442,
+        "f5e090a36963633e2be6dc76dee709dc51efb4b9fa97dc5d93667c25b64dca9c",
+        "25153718dd56bbe9f05d3e5c86769420de8b55bcf6d7c218911042dc7e0bda44",
+    ),
+    (
+        "reverse_model.cir",
+        2_553,
+        "84ec00feef59479221276fd0c0b4421135b7ed62bfa0b8f36706acb67cdc63b4",
+        "99d3e4ed8f1371a44905644841db8f58ec74dac53642f0b6a9a2cfdaf31183f0",
+    ),
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceDiodeAnalyticKind {
+    Forward,
+    Reverse,
+    Breakdown,
+}
+
+impl XyceDiodeAnalyticKind {
+    const ALL: [Self; 3] = [Self::Forward, Self::Reverse, Self::Breakdown];
+
+    fn file_name(self) -> &'static str {
+        match self {
+            Self::Forward => "forward_model.cir",
+            Self::Reverse => "reverse_model.cir",
+            Self::Breakdown => "breakdown_model.cir",
+        }
+    }
+
+    fn path(self) -> &'static str {
+        match self {
+            Self::Forward => "Netlists/DIODE_ANALYTIC/forward_model.cir",
+            Self::Reverse => "Netlists/DIODE_ANALYTIC/reverse_model.cir",
+            Self::Breakdown => "Netlists/DIODE_ANALYTIC/breakdown_model.cir",
+        }
+    }
+
+    fn record(self) -> &'static str {
+        match self {
+            Self::Forward => "netlists/diode_analytic/forward_model.cir",
+            Self::Reverse => "netlists/diode_analytic/reverse_model.cir",
+            Self::Breakdown => "netlists/diode_analytic/breakdown_model.cir",
+        }
+    }
+
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::Forward => "analytic_diode_forward_tran_wrapper",
+            Self::Reverse => "analytic_diode_reverse_tran_wrapper",
+            Self::Breakdown => "analytic_diode_breakdown_tran_wrapper",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Forward => "DIODE_ANALYTIC forward-region oracle",
+            Self::Reverse => "DIODE_ANALYTIC reverse-region oracle",
+            Self::Breakdown => "DIODE_ANALYTIC avalanche-breakdown oracle",
+        }
+    }
+
+    fn for_record(record: &str) -> Option<Self> {
+        let normalized = XyceTestRunner::normalize_manifest_key(record);
+        Self::ALL
+            .into_iter()
+            .find(|kind| normalized == kind.record())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct XyceAbmLookupOrderCaseSpec {
     family: &'static str,
@@ -6420,6 +6591,10 @@ impl XyceStaticTranPlan {
                         true,
                         XyceStaticTranContract::WrapperStatic
                     ) | (
+                        XyceStaticTranPlanPurpose::DiodeAnalyticOracle,
+                        true,
+                        XyceStaticTranContract::WrapperStatic
+                    ) | (
                         XyceStaticTranPlanPurpose::PassiveTemperatureAnalyticOracle,
                         false,
                         XyceStaticTranContract::PlainStatic
@@ -6920,6 +7095,10 @@ enum XyceStaticTranPlanPurpose {
     /// dedicated analytic contract supplies the missing reference and proves
     /// the exact bounded circuit/source/options envelope separately.
     AnalyticOracle,
+    /// Execute one exact DIODE_ANALYTIC Release-7.10 generated-gold wrapper.
+    /// This purpose admits only the dedicated three-card legacy-diode envelope;
+    /// it does not widen the ordinary absolute waveform contract.
+    DiodeAnalyticOracle,
     /// Execute one ordinary BUG546 passive-temperature RC member against an
     /// independently derived first-order analytic waveform on the simulator's
     /// own default-PRN grid. Admission is limited to the exact three-member
@@ -6941,6 +7120,7 @@ impl XyceStaticTranPlanPurpose {
             Self::AbsoluteOracle
                 | Self::DefaultLevel9XyceVerifyOracle
                 | Self::AnalyticOracle
+                | Self::DiodeAnalyticOracle
                 | Self::PassiveTemperatureAnalyticOracle
         )
     }
@@ -9998,6 +10178,7 @@ mod contracts_bug402;
 mod contracts_bug48;
 mod contracts_bug864;
 mod contracts_dc;
+mod contracts_diode_analytic;
 mod contracts_frequency;
 mod contracts_sources;
 mod contracts_splines;
