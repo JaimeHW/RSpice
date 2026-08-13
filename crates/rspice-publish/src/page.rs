@@ -35,6 +35,7 @@ figcaption{font-weight:600;margin-bottom:10px}
 figure svg{display:block;width:100%;height:auto}
 figure canvas.viewer{display:block;width:100%;border-radius:4px}
 button.hydrate{margin-top:10px;padding:5px 12px;background:none;border:1px solid var(--line);border-radius:4px;color:var(--link);font:12px Consolas,monospace;letter-spacing:.02em;cursor:pointer}
+figure canvas.viewer[hidden],button.hydrate[hidden]{display:none}
 button.hydrate:hover:enabled,button.hydrate:focus-visible{border-color:var(--link)}
 button.hydrate:disabled{color:var(--muted);cursor:default}
 table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}

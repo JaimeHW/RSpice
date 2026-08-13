@@ -154,6 +154,10 @@ fn figure_bundles_seal_the_viewer_runtime_and_its_handshake() {
         page.contains("<button class=\"hydrate\" type=\"button\" hidden>"),
         "controls stay hidden until the loader proves it can run"
     );
+    assert!(
+        page.contains("figure canvas.viewer[hidden],button.hydrate[hidden]{display:none}"),
+        "author styles must not override the hidden state and reserve a second figure height"
+    );
 }
 
 #[test]
