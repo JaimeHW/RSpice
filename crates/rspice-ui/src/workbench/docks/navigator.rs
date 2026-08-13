@@ -153,8 +153,16 @@ fn code_workspace_pages(ui: &mut Ui, app: &mut RSpiceApp) {
     );
     let content = strip.shrink2(Vec2::new(8.0, 0.0));
     let button_width = content.width() / CodeWorkspacePage::ALL.len() as f32;
+    let messages = app.state.ui.messages();
     let mut selected = None;
     for (index, page) in CodeWorkspacePage::ALL.into_iter().enumerate() {
+        // The tab's identity is its position, not its name. Keying the `Id` on
+        // the label made the widget move whenever the label was translated.
+        let name = messages.text(match page {
+            CodeWorkspacePage::Netlist => crate::workbench::MessageId::CodePageNetlist,
+            CodeWorkspacePage::VerilogA => crate::workbench::MessageId::CodePageVerilogA,
+            CodeWorkspacePage::Automation => crate::workbench::MessageId::CodePageAutomation,
+        });
         let left = content.left() + button_width * index as f32;
         let right = if index + 1 == CodeWorkspacePage::ALL.len() {
             content.right()
@@ -167,22 +175,17 @@ fn code_workspace_pages(ui: &mut Ui, app: &mut RSpiceApp) {
         );
         let response = ui.interact(
             rect,
-            egui::Id::new(("workbench.code.page", page.label())),
+            egui::Id::new(("workbench.code.page", index)),
             Sense::click(),
         );
         let active = app.state.ui.code_workspace.page == page;
         response.widget_info(|| {
-            egui::WidgetInfo::selected(
-                egui::WidgetType::Button,
-                ui.is_enabled(),
-                active,
-                page.label(),
-            )
+            egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), active, &name)
         });
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            page.label(),
+            &name,
             theme::sans(tokens::FS_0, FontWeight::Regular),
             if active || response.hovered() {
                 t.color.text

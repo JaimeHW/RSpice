@@ -16,6 +16,7 @@ use crate::state::{ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRole}
 use crate::workbench::documents::code_workspace::{
     SourceOutlineRow, VerilogAFileSelection, document_outline,
 };
+use crate::workbench::{MessageCatalog, MessageId};
 
 pub(super) fn veriloga(ui: &mut Ui, app: &mut RSpiceApp) {
     let language = ProjectSourceLanguage::VerilogA;
@@ -31,7 +32,10 @@ pub(super) fn veriloga(ui: &mut Ui, app: &mut RSpiceApp) {
         ui,
         app,
         "workbench.veriloga.navigator",
-        &[("Project sources", sources), ("Includes & build", build)],
+        &[
+            (MessageId::CodeNavigatorProjectSources, sources),
+            (MessageId::CodeNavigatorIncludesAndBuild, build),
+        ],
         active,
         language,
     );
@@ -45,7 +49,7 @@ pub(super) fn automation(ui: &mut Ui, app: &mut RSpiceApp) {
         ui,
         app,
         "workbench.automation.navigator",
-        &[("Workflow files", files)],
+        &[(MessageId::CodeNavigatorWorkflowFiles, files)],
         active,
         language,
     );
@@ -97,14 +101,18 @@ fn leaf_name(logical_path: &str) -> String {
 /// already scoped to it, so the rail states the short form. The match is
 /// exhaustive on purpose: a new role has to be given a name here rather than
 /// silently reading as ordinary source.
-fn role_label(role: Option<ProjectSourceRole>) -> &'static str {
+const fn role_message(role: Option<ProjectSourceRole>) -> MessageId {
     match role {
-        Some(ProjectSourceRole::VerilogABuildProfile) => "build profile",
-        Some(ProjectSourceRole::AutomationEntry) => "entry",
-        Some(ProjectSourceRole::AutomationRunPlan) => "run plan",
-        Some(ProjectSourceRole::AutomationEnvironmentLock) => "environment lock",
-        Some(ProjectSourceRole::AutomationPermissionManifest) => "permissions",
-        None => "source",
+        Some(ProjectSourceRole::VerilogABuildProfile) => MessageId::CodeNavigatorRoleBuildProfile,
+        Some(ProjectSourceRole::AutomationEntry) => MessageId::CodeNavigatorRoleEntry,
+        Some(ProjectSourceRole::AutomationRunPlan) => MessageId::CodeNavigatorRoleRunPlan,
+        Some(ProjectSourceRole::AutomationEnvironmentLock) => {
+            MessageId::CodeNavigatorRoleEnvironmentLock
+        }
+        Some(ProjectSourceRole::AutomationPermissionManifest) => {
+            MessageId::CodeNavigatorRolePermissions
+        }
+        None => MessageId::CodeNavigatorRoleSource,
     }
 }
 
@@ -144,10 +152,11 @@ fn show_rail(
     ui: &mut Ui,
     app: &mut RSpiceApp,
     id_salt: &str,
-    sections: &[(&str, Vec<BundleRow>)],
+    sections: &[(MessageId, Vec<BundleRow>)],
     active: Option<String>,
     language: ProjectSourceLanguage,
 ) {
+    let messages = app.state.ui.messages();
     let mut selected = None;
     let mut requested_line = None;
     let outline = active
@@ -174,7 +183,7 @@ fn show_rail(
                     continue;
                 }
                 any_file = true;
-                section_header(ui, title, Some(&rows.len().to_string()));
+                section_header(ui, &messages.text(*title), Some(&rows.len().to_string()));
                 for row in rows {
                     let is_active = active.as_deref() == Some(row.logical_path.as_str());
                     if nav_row(
@@ -182,17 +191,14 @@ fn show_rail(
                         source_row_icon(row.role),
                         &row.label,
                         is_active,
-                        Some(role_label(row.role)),
+                        Some(&messages.text(role_message(row.role))),
                     ) {
                         selected = Some(row.logical_path.clone());
                     }
                 }
             }
             if !any_file {
-                muted(
-                    ui,
-                    "This project owns no source bundle for this page yet. Create or import one from the document well.",
-                );
+                muted(ui, &messages.text(MessageId::CodeNavigatorNoBundle));
                 return;
             }
 
@@ -201,15 +207,18 @@ fn show_rail(
             };
             section_header(
                 ui,
-                &format!("Outline · {}", leaf_name(active)),
+                &messages.format(
+                    MessageId::CodeNavigatorFileOutline,
+                    &[("document", &leaf_name(active))],
+                ),
                 Some(&outline.len().to_string()),
             );
             if outline.is_empty() {
-                muted(ui, "No indexed symbol is declared in this document.");
+                muted(ui, &messages.text(MessageId::CodeNavigatorNoIndexedSymbol));
                 return;
             }
             for row in &outline {
-                if outline_row(ui, row) {
+                if outline_row(ui, row, messages) {
                     requested_line = Some(row.line);
                 }
             }
@@ -246,7 +255,7 @@ fn source_row_icon(role: Option<ProjectSourceRole>) -> WorkbenchIcon {
     }
 }
 
-fn outline_row(ui: &mut Ui, row: &SourceOutlineRow) -> bool {
+fn outline_row(ui: &mut Ui, row: &SourceOutlineRow, messages: MessageCatalog) -> bool {
     let label = if row.detail.is_empty() {
         row.name.clone()
     } else {
@@ -257,7 +266,10 @@ fn outline_row(ui: &mut Ui, row: &SourceOutlineRow) -> bool {
         WorkbenchIcon::Code,
         &label,
         false,
-        Some(&format!("line {}", row.line)),
+        Some(&messages.format(
+            MessageId::CodeNavigatorOutlineLine,
+            &[("line", &row.line.to_string())],
+        )),
         1,
     )
 }
@@ -321,10 +333,11 @@ mod tests {
     #[test]
     fn rows_state_the_recorded_role_rather_than_guessing_from_the_name() {
         let app = RSpiceApp::test_instance();
+        let messages = MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates);
         let rows = bundle_rows(&app, ProjectSourceLanguage::RSpiceAutomation);
         let roles = rows
             .iter()
-            .map(|row| role_label(row.role))
+            .map(|row| messages.text(role_message(row.role)))
             .collect::<std::collections::BTreeSet<_>>();
 
         assert!(roles.contains("run plan"), "roles were {roles:?}");

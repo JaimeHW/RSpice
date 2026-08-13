@@ -24,14 +24,6 @@ pub enum CodeWorkspacePage {
 
 impl CodeWorkspacePage {
     pub const ALL: [Self; 3] = [Self::Netlist, Self::VerilogA, Self::Automation];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Netlist => "Netlist",
-            Self::VerilogA => "Verilog-A",
-            Self::Automation => "Automation",
-        }
-    }
 }
 
 /// Project-owned source-tree transaction exposed by the Code Workspace file

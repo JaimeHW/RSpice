@@ -18,6 +18,7 @@ use std::collections::BTreeSet;
 use super::*;
 use crate::state::{OutlineSection, OutlineSectionKind};
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
+use crate::workbench::{MessageCatalog, MessageId};
 
 /// Width reserved for a disclosure caret. Root and include rows leave it
 /// empty so their icons line up with the groups' rather than sliding left.
@@ -32,6 +33,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         return;
     }
     let root_label = active_netlist_artifact_name(&app.state);
+    let messages = app.state.ui.messages();
     let index = crate::workbench::documents::netlist_document::visible_source_index(&mut app.state);
     let projection = NetlistNavigatorProjection::from_index(
         &index,
@@ -40,6 +42,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         app.state.ui.netlist.active_document == ActiveNetlistDocument::Generated,
         &app.state.workbench.netlist_outline_collapsed,
         &retained_include_states(&app.state),
+        messages,
     );
     let active_line = app.state.ui.netlist.cursor_line.saturating_add(1);
     let height = outline_row_height(ui, &app.state);
@@ -56,8 +59,15 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
             if projection.root_row.is_some() || !projection.groups.is_empty() {
                 section_header(
                     ui,
-                    "Structure",
-                    Some(&format!("{} lines", projection.line_count)),
+                    &messages.text(MessageId::NetlistNavigatorStructure),
+                    Some(&messages.format(
+                        if projection.line_count == 1 {
+                            MessageId::NetlistNavigatorLineSingular
+                        } else {
+                            MessageId::NetlistNavigatorLines
+                        },
+                        &[("count", &projection.line_count.to_string())],
+                    )),
                 );
             }
             if let Some(root) = &projection.root_row
@@ -85,7 +95,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                     continue;
                 }
                 if group.declarations() == 0 {
-                    outline_child_note(ui, group.empty_note, height);
+                    outline_child_note(ui, &messages.text(group.empty_note), height);
                     continue;
                 }
                 uniform_rows(ui, height, group.declarations(), |ui, position| {
@@ -115,7 +125,11 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
             }
 
             if !projection.include_rows.is_empty() {
-                section_header(ui, "Includes", Some(netlist_dependency_status(&app.state)));
+                section_header(
+                    ui,
+                    &messages.text(MessageId::NetlistNavigatorIncludes),
+                    Some(&messages.text(netlist_dependency_status(&app.state))),
+                );
                 for row in &projection.include_rows {
                     if netlist_outline_row(
                         ui,
@@ -139,14 +153,21 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
             if !projection.semantic_rows.is_empty() {
                 section_header(
                     ui,
-                    "Semantic index",
-                    Some(&format!("{} directives", projection.semantic_cards)),
+                    &messages.text(MessageId::NetlistNavigatorSemanticIndex),
+                    Some(&messages.format(
+                        if projection.semantic_cards == 1 {
+                            MessageId::NetlistNavigatorDirectiveSingular
+                        } else {
+                            MessageId::NetlistNavigatorDirectives
+                        },
+                        &[("count", &projection.semantic_cards.to_string())],
+                    )),
                 );
                 for row in &projection.semantic_rows {
                     if netlist_outline_row(
                         ui,
                         OutlineRowVisual {
-                            label: row.label,
+                            label: &row.label,
                             meta: Some(&row.meta),
                             icon: None,
                             shape: NetlistOutlineRowShape::Index,
@@ -163,15 +184,16 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
             }
 
             if projection.show_source_mapping {
-                section_header(ui, "Source mapping", None);
+                section_header(
+                    ui,
+                    &messages.text(MessageId::NetlistNavigatorSourceMapping),
+                    None,
+                );
                 netlist_source_mapping(ui, app, active_line);
             }
 
             if projection.is_empty() {
-                muted(
-                    ui,
-                    "No symbol, directive, or source line matches this filter.",
-                );
+                muted(ui, &messages.text(MessageId::NetlistNavigatorNoMatches));
             }
         });
 
@@ -268,7 +290,7 @@ pub(super) fn active_canonical_netlist_document(
 /// told from the ones that did not.
 pub(super) fn retained_include_states(
     state: &crate::workbench::AppState,
-) -> Vec<(String, &'static str)> {
+) -> Vec<(String, MessageId)> {
     active_canonical_netlist_document(state).map_or_else(Vec::new, |document| {
         document
             .dependencies()
@@ -277,10 +299,14 @@ pub(super) fn retained_include_states(
                 (
                     dependency.locator().logical_identity().to_owned(),
                     match dependency.resolution() {
-                        crate::state::DependencyResolution::Missing { .. } => "missing",
-                        crate::state::DependencyResolution::Unresolved => "unresolved",
+                        crate::state::DependencyResolution::Missing { .. } => {
+                            MessageId::NetlistNavigatorDependencyMissing
+                        }
+                        crate::state::DependencyResolution::Unresolved => {
+                            MessageId::NetlistNavigatorDependencyUnresolved
+                        }
                         crate::state::DependencyResolution::Resolved { .. } => {
-                            dependency.authority().label()
+                            dependency_authority_message(dependency.authority())
                         }
                     },
                 )
@@ -289,9 +315,29 @@ pub(super) fn retained_include_states(
     })
 }
 
-pub(super) fn netlist_dependency_status(state: &crate::workbench::AppState) -> &'static str {
+/// The catalog word for a retained dependency's provenance.
+const fn dependency_authority_message(
+    authority: crate::state::DependencySourceAuthority,
+) -> MessageId {
+    match authority {
+        crate::state::DependencySourceAuthority::External => {
+            MessageId::NetlistNavigatorAuthorityExternal
+        }
+        crate::state::DependencySourceAuthority::Vendor => {
+            MessageId::NetlistNavigatorAuthorityVendor
+        }
+        crate::state::DependencySourceAuthority::TechnologyPackage => {
+            MessageId::NetlistNavigatorAuthorityTechnology
+        }
+        crate::state::DependencySourceAuthority::StandardLibrary => {
+            MessageId::NetlistNavigatorAuthorityStandard
+        }
+    }
+}
+
+pub(super) fn netlist_dependency_status(state: &crate::workbench::AppState) -> MessageId {
     let Some(document) = active_canonical_netlist_document(state) else {
-        return "unavailable";
+        return MessageId::NetlistNavigatorDependencyUnavailable;
     };
     if document.dependencies().iter().any(|dependency| {
         matches!(
@@ -299,11 +345,11 @@ pub(super) fn netlist_dependency_status(state: &crate::workbench::AppState) -> &
             crate::state::DependencyResolution::Missing { .. }
         )
     }) {
-        "error"
+        MessageId::NetlistNavigatorDependencyError
     } else if document.dependency_graph_is_sealed() {
-        "resolved"
+        MessageId::NetlistNavigatorDependencyResolved
     } else {
-        "unresolved"
+        MessageId::NetlistNavigatorDependencyUnresolved
     }
 }
 
@@ -325,8 +371,9 @@ impl DiffHunk {
 }
 
 pub(super) fn netlist_diff(ui: &mut Ui, app: &mut RSpiceApp) {
+    let messages = app.state.ui.messages();
     let query = NetlistNavigatorQuery::new(&app.state.workbench.navigator_query);
-    let hunks = diff_hunks(&app.state.ui.netlist.generated_diff_source);
+    let hunks = diff_hunks(&app.state.ui.netlist.generated_diff_source, messages);
     let (additions, removals) = diff_totals(&app.state.ui.netlist.generated_diff_source);
     let matching = hunks
         .iter()
@@ -344,15 +391,24 @@ pub(super) fn netlist_diff(ui: &mut Ui, app: &mut RSpiceApp) {
             ui.set_width(ui.available_width());
             section_header(
                 ui,
-                "Revision comparison",
-                Some(&format!("+{additions} -{removals}")),
+                &messages.text(MessageId::NetlistNavigatorRevisionComparison),
+                Some(&messages.format(
+                    MessageId::NetlistNavigatorDiffTotals,
+                    &[
+                        ("added", &additions.to_string()),
+                        ("removed", &removals.to_string()),
+                    ],
+                )),
             );
             if hunks.is_empty() {
-                muted(ui, "The two revisions declare the same source.");
+                muted(ui, &messages.text(MessageId::NetlistNavigatorNoDifference));
                 return;
             }
             if matching.is_empty() {
-                muted(ui, "No changed region matches this filter.");
+                muted(
+                    ui,
+                    &messages.text(MessageId::NetlistNavigatorNoChangedRegion),
+                );
                 return;
             }
             uniform_rows(ui, height, matching.len(), |ui, index| {
@@ -387,14 +443,20 @@ pub(super) fn netlist_diff(ui: &mut Ui, app: &mut RSpiceApp) {
 /// The changed regions of a unified diff, addressed by their position in the
 /// comparison document — that is the buffer the editor is showing, so a hunk
 /// row navigates to the header the engineer can actually see.
-pub(super) fn diff_hunks(diff: &str) -> Vec<DiffHunk> {
+pub(super) fn diff_hunks(diff: &str, messages: MessageCatalog) -> Vec<DiffHunk> {
     let mut hunks = Vec::<DiffHunk>::new();
     let mut additions = 0usize;
     let mut removals = 0usize;
     let mut previous = 0usize;
     let finish = |hunks: &mut Vec<DiffHunk>, additions: usize, removals: usize, end_line: usize| {
         if let Some(last) = hunks.last_mut() {
-            last.meta = format!("+{additions} -{removals}");
+            last.meta = messages.format(
+                MessageId::NetlistNavigatorDiffTotals,
+                &[
+                    ("added", &additions.to_string()),
+                    ("removed", &removals.to_string()),
+                ],
+            );
             last.end_line = end_line.max(last.line);
         }
     };
@@ -405,7 +467,7 @@ pub(super) fn diff_hunks(diff: &str) -> Vec<DiffHunk> {
             additions = 0;
             removals = 0;
             hunks.push(DiffHunk {
-                label: diff_hunk_label(range),
+                label: diff_hunk_label(range, messages),
                 meta: String::new(),
                 line: zero_line + 1,
                 end_line: zero_line + 1,
@@ -422,7 +484,7 @@ pub(super) fn diff_hunks(diff: &str) -> Vec<DiffHunk> {
 
 /// Name a hunk by the lines it occupies in the newer revision, which is the
 /// side an engineer is reading the comparison to understand.
-fn diff_hunk_label(range: &str) -> String {
+fn diff_hunk_label(range: &str, messages: MessageCatalog) -> String {
     let new_side = range
         .split_whitespace()
         .find_map(|token| token.strip_prefix('+'));
@@ -430,13 +492,25 @@ fn diff_hunk_label(range: &str) -> String {
         Some((start, count)) => (start.parse::<usize>().ok(), count.parse::<usize>().ok()),
         None => (side.parse::<usize>().ok(), Some(1)),
     }) else {
-        return "Changed region".to_owned();
+        return messages.text(MessageId::NetlistNavigatorChangedRegion);
     };
     match (start, count) {
-        (Some(start), Some(0)) => format!("Removed before line {start}"),
-        (Some(start), Some(1)) => format!("Line {start}"),
-        (Some(start), Some(count)) => format!("Lines {start}\u{2013}{}", start + count - 1),
-        _ => "Changed region".to_owned(),
+        (Some(start), Some(0)) => messages.format(
+            MessageId::NetlistNavigatorRemovedBeforeLine,
+            &[("line", &start.to_string())],
+        ),
+        (Some(start), Some(1)) => messages.format(
+            MessageId::NetlistNavigatorHunkLine,
+            &[("line", &start.to_string())],
+        ),
+        (Some(start), Some(count)) => messages.format(
+            MessageId::NetlistNavigatorHunkLines,
+            &[
+                ("first", &start.to_string()),
+                ("last", &(start + count - 1).to_string()),
+            ],
+        ),
+        _ => messages.text(MessageId::NetlistNavigatorChangedRegion),
     }
 }
 
@@ -509,7 +583,7 @@ pub(super) struct NetlistOutlineGroup {
     pub(super) expanded: bool,
     /// What the deck does not declare, said in the group's own place. An empty
     /// group and a filtered-out group must not look alike.
-    pub(super) empty_note: &'static str,
+    pub(super) empty_note: MessageId,
 }
 
 impl NetlistOutlineGroup {
@@ -561,7 +635,7 @@ impl NetlistOutlineGroup {
 /// A parsed category the structure tree does not promote to a group.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct NetlistSemanticRow {
-    pub(super) label: &'static str,
+    pub(super) label: String,
     pub(super) meta: String,
     pub(super) line: usize,
 }
@@ -569,84 +643,92 @@ pub(super) struct NetlistSemanticRow {
 struct GroupSpec {
     kind: NetlistNavigatorRowKind,
     section: OutlineSectionKind,
-    label: &'static str,
-    empty_note: &'static str,
+    label: MessageId,
+    empty_note: MessageId,
 }
 
 const STRUCTURE_GROUPS: [GroupSpec; 5] = [
     GroupSpec {
         kind: NetlistNavigatorRowKind::Parameters,
         section: OutlineSectionKind::Parameters,
-        label: "Parameters",
-        empty_note: "No .param definitions.",
+        label: MessageId::NetlistNavigatorParameters,
+        empty_note: MessageId::NetlistNavigatorNoParameters,
     },
     GroupSpec {
         kind: NetlistNavigatorRowKind::Instances,
         section: OutlineSectionKind::Devices,
-        label: "Instances",
-        empty_note: "No device instances.",
+        label: MessageId::NetlistNavigatorInstances,
+        empty_note: MessageId::NetlistNavigatorNoInstances,
     },
     GroupSpec {
         kind: NetlistNavigatorRowKind::Models,
         section: OutlineSectionKind::Models,
-        label: "Model bindings",
-        empty_note: "No .model cards.",
+        label: MessageId::NetlistNavigatorModels,
+        empty_note: MessageId::NetlistNavigatorNoModels,
     },
     GroupSpec {
         kind: NetlistNavigatorRowKind::Analyses,
         section: OutlineSectionKind::Analyses,
-        label: "Analyses",
-        empty_note: "No analysis directives.",
+        label: MessageId::NetlistNavigatorAnalyses,
+        empty_note: MessageId::NetlistNavigatorNoAnalyses,
     },
     GroupSpec {
         kind: NetlistNavigatorRowKind::Measurements,
         section: OutlineSectionKind::Measurements,
-        label: "Measurements",
-        empty_note: "No .meas directives.",
+        label: MessageId::NetlistNavigatorMeasurements,
+        empty_note: MessageId::NetlistNavigatorNoMeasurements,
     },
 ];
 
 struct IndexSpec {
     section: OutlineSectionKind,
-    label: &'static str,
-    unit: &'static str,
+    label: MessageId,
+    unit: MessageId,
+    units: MessageId,
 }
 
 const SEMANTIC_INDEX: [IndexSpec; 7] = [
     IndexSpec {
         section: OutlineSectionKind::Subcircuits,
-        label: "Hierarchy",
-        unit: "definition",
+        label: MessageId::NetlistNavigatorHierarchy,
+        unit: MessageId::NetlistNavigatorUnitDefinition,
+        units: MessageId::NetlistNavigatorUnitDefinitions,
     },
     IndexSpec {
         section: OutlineSectionKind::Globals,
-        label: "Globals",
-        unit: "declaration",
+        label: MessageId::NetlistNavigatorGlobals,
+        unit: MessageId::NetlistNavigatorUnitDeclaration,
+        units: MessageId::NetlistNavigatorUnitDeclarations,
     },
     IndexSpec {
         section: OutlineSectionKind::Functions,
-        label: "Functions",
-        unit: "definition",
+        label: MessageId::NetlistNavigatorFunctions,
+        unit: MessageId::NetlistNavigatorUnitDefinition,
+        units: MessageId::NetlistNavigatorUnitDefinitions,
     },
     IndexSpec {
         section: OutlineSectionKind::Options,
-        label: "Solver options",
-        unit: "card",
+        label: MessageId::NetlistNavigatorOptions,
+        unit: MessageId::NetlistNavigatorUnitCard,
+        units: MessageId::NetlistNavigatorUnitCards,
     },
     IndexSpec {
         section: OutlineSectionKind::Outputs,
-        label: "Save and probe",
-        unit: "directive",
+        label: MessageId::NetlistNavigatorOutputs,
+        unit: MessageId::NetlistNavigatorUnitDirective,
+        units: MessageId::NetlistNavigatorUnitDirectives,
     },
     IndexSpec {
         section: OutlineSectionKind::Conditionals,
-        label: "Conditionals",
-        unit: "card",
+        label: MessageId::NetlistNavigatorConditionals,
+        unit: MessageId::NetlistNavigatorUnitCard,
+        units: MessageId::NetlistNavigatorUnitCards,
     },
     IndexSpec {
         section: OutlineSectionKind::Controls,
-        label: "Control",
-        unit: "directive",
+        label: MessageId::NetlistNavigatorControls,
+        unit: MessageId::NetlistNavigatorUnitDirective,
+        units: MessageId::NetlistNavigatorUnitDirectives,
     },
 ];
 
@@ -670,7 +752,8 @@ impl NetlistNavigatorProjection {
         root_label: &str,
         source_mapped: bool,
         collapsed: &BTreeSet<OutlineSectionKind>,
-        include_states: &[(String, &'static str)],
+        include_states: &[(String, MessageId)],
+        messages: MessageCatalog,
     ) -> Self {
         let outline = index.outline();
         let query = NetlistNavigatorQuery::new(query);
@@ -697,12 +780,11 @@ impl NetlistNavigatorProjection {
                 navigator_group_row(
                     NetlistNavigatorRowKind::Root,
                     root_label,
-                    if source_mapped {
-                        "root"
+                    messages.text(if source_mapped {
+                        MessageId::NetlistNavigatorRoot
                     } else {
-                        "source of truth"
-                    }
-                    .to_owned(),
+                        MessageId::NetlistNavigatorSourceOfTruth
+                    }),
                     root_target,
                     &root_entries,
                 )
@@ -711,7 +793,14 @@ impl NetlistNavigatorProjection {
         let groups = STRUCTURE_GROUPS
             .iter()
             .filter_map(|spec| {
-                outline_group(spec, section_of(spec.section), entries, &query, collapsed)
+                outline_group(
+                    spec,
+                    section_of(spec.section),
+                    entries,
+                    &query,
+                    collapsed,
+                    messages,
+                )
             })
             .collect::<Vec<_>>();
 
@@ -730,8 +819,13 @@ impl NetlistNavigatorProjection {
                             .iter()
                             .find(|(locator, _)| *locator == label)
                             .map_or_else(
-                                || format!("line {}", entry.line()),
-                                |(_, state)| (*state).to_owned(),
+                                || {
+                                    messages.format(
+                                        MessageId::NetlistNavigatorLine,
+                                        &[("line", &entry.line().to_string())],
+                                    )
+                                },
+                                |(_, state)| messages.text(*state),
                             ),
                     ),
                     label,
@@ -758,8 +852,10 @@ impl NetlistNavigatorProjection {
                 } else {
                     section.len()
                 };
-                if counted == 0
-                    || !query.matches_group(spec.label, section.iter().filter_map(entry_of))
+                // The filter matches what the reader can see, so it is compared
+                // against the drawn label rather than the English one behind it.
+                let label = messages.text(spec.label);
+                if counted == 0 || !query.matches_group(&label, section.iter().filter_map(entry_of))
                 {
                     return None;
                 }
@@ -768,11 +864,16 @@ impl NetlistNavigatorProjection {
                 // with itself.
                 semantic_cards += counted;
                 Some(NetlistSemanticRow {
-                    label: spec.label,
-                    meta: format!(
-                        "{counted} {}{}",
-                        spec.unit,
-                        if counted == 1 { "" } else { "s" }
+                    label,
+                    meta: messages.format(
+                        MessageId::NetlistNavigatorCounted,
+                        &[
+                            ("count", &counted.to_string()),
+                            (
+                                "unit",
+                                &messages.text(if counted == 1 { spec.unit } else { spec.units }),
+                            ),
+                        ],
                     ),
                     line: section
                         .first()
@@ -790,8 +891,8 @@ impl NetlistNavigatorProjection {
             semantic_rows,
             semantic_cards,
             show_source_mapping: source_mapped
-                && (query.matches_text("source mapping")
-                    || query.matches_text("provenance")
+                && (query.matches_text(&messages.text(MessageId::NetlistNavigatorSourceMapping))
+                    || query.matches_text(&messages.text(MessageId::NetlistNavigatorProvenance))
                     || query.is_empty()),
         }
     }
@@ -811,14 +912,19 @@ fn outline_group(
     entries: &[OutlineEntry],
     query: &NetlistNavigatorQuery,
     collapsed: &BTreeSet<OutlineSectionKind>,
+    messages: MessageCatalog,
 ) -> Option<NetlistOutlineGroup> {
     let entry_of = |position: &usize| entries.get(*position);
-    if !query.matches_group(spec.label, section.iter().filter_map(entry_of)) {
+    // The filter is matched against the label the reader can see. Matching the
+    // English behind it would leave a translated navigator unsearchable by the
+    // names it displays.
+    let label = messages.text(spec.label);
+    if !query.matches_group(&label, section.iter().filter_map(entry_of)) {
         return None;
     }
     // A filter names the declarations it kept, so the group discloses them
     // whatever the stored preference says.
-    let filtering = !query.is_empty() && !query.matches_text(spec.label);
+    let filtering = !query.is_empty() && !query.matches_text(&label);
     let expanded = filtering || !collapsed.contains(&spec.section);
     let selected = if filtering {
         section
@@ -841,7 +947,7 @@ fn outline_group(
     Some(NetlistOutlineGroup {
         row: NetlistNavigatorRow {
             kind: spec.kind,
-            label: spec.label.to_owned(),
+            label,
             meta: Some(meta),
             target_line: target.map(OutlineEntry::line),
             // Containment is answered by the group from its own entries. A
@@ -1390,8 +1496,9 @@ pub(super) fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_li
                 entry.component_identity().map(str::to_owned),
             )
         });
+    let messages = app.state.ui.messages();
     let Some((cell, view, instance, component)) = mapping else {
-        muted(ui, "No generated provenance is mapped to the active line.");
+        muted(ui, &messages.text(MessageId::NetlistNavigatorNoProvenance));
         return;
     };
     egui::Frame::new()
@@ -1404,9 +1511,12 @@ pub(super) fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_li
         .show(ui, |ui| {
             ui.set_width(ui.available_width().max(1.0));
             ui.label(
-                egui::RichText::new(format!("Line {active_line} \u{b7} {cell}"))
-                    .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                    .color(t.color.text_dim),
+                egui::RichText::new(messages.format(
+                    MessageId::NetlistNavigatorMappedLine,
+                    &[("line", &active_line.to_string()), ("cell", &cell)],
+                ))
+                .font(theme::sans(tokens::FS_0, FontWeight::Medium))
+                .color(t.color.text_dim),
             );
             ui.label(
                 egui::RichText::new(view)
@@ -1415,9 +1525,12 @@ pub(super) fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_li
             );
             if let Some(instance) = instance.as_deref() {
                 ui.label(
-                    egui::RichText::new(format!("Instance {instance}"))
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_faint),
+                    egui::RichText::new(messages.format(
+                        MessageId::NetlistNavigatorInstance,
+                        &[("instance", instance)],
+                    ))
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_faint),
                 );
             }
             if let Some(component_identity) = component
@@ -1425,14 +1538,21 @@ pub(super) fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_li
                     .rsplit('/')
                     .next()
                     .and_then(|value| value.parse::<u64>().ok())
-                && ui.button("Cross-probe schematic component").clicked()
+                && ui
+                    .button(messages.text(MessageId::NetlistNavigatorCrossProbe))
+                    .clicked()
             {
                 app.state.schematic.selection.clear();
                 app.state.schematic.selection.select_component(component_id);
+                let announced = messages.format(
+                    MessageId::NetlistNavigatorCrossProbeSucceeded,
+                    &[
+                        ("line", &active_line.to_string()),
+                        ("component", &component_id.to_string()),
+                    ],
+                );
                 app.state
-                    .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
-                        "Cross-probed generated line {active_line} to component {component_id}."
-                    )));
+                    .push_user_message(crate::diagnostics::ConsoleMessage::info(announced));
             }
         });
 }
@@ -1567,6 +1687,10 @@ mod tests {
         crate::state::NetlistSourceIndex::parse(source)
     }
 
+    fn english() -> MessageCatalog {
+        MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates)
+    }
+
     fn netlist_projection(source: &str, query: &str) -> NetlistNavigatorProjection {
         NetlistNavigatorProjection::from_index(
             &netlist_index(source),
@@ -1575,6 +1699,7 @@ mod tests {
             true,
             &std::collections::BTreeSet::new(),
             &[],
+            english(),
         )
     }
 
@@ -1635,8 +1760,14 @@ mod tests {
     #[test]
     fn an_include_row_names_the_fate_of_its_own_dependency() {
         let states = [
-            ("models/base.lib".to_owned(), "missing"),
-            ("corners/process.lib".to_owned(), "vendor source"),
+            (
+                "models/base.lib".to_owned(),
+                MessageId::NetlistNavigatorDependencyMissing,
+            ),
+            (
+                "corners/process.lib".to_owned(),
+                MessageId::NetlistNavigatorAuthorityVendor,
+            ),
         ];
         let projection = NetlistNavigatorProjection::from_index(
             &netlist_index(OUTLINE_DECK),
@@ -1645,6 +1776,7 @@ mod tests {
             true,
             &std::collections::BTreeSet::new(),
             &states,
+            english(),
         );
 
         // The header states one verdict for the whole closure; the row that
@@ -1715,8 +1847,15 @@ mod tests {
         let index = netlist_index(OUTLINE_DECK);
         let collapsed =
             std::collections::BTreeSet::from([crate::state::OutlineSectionKind::Devices]);
-        let projection =
-            NetlistNavigatorProjection::from_index(&index, "", "top.sp", true, &collapsed, &[]);
+        let projection = NetlistNavigatorProjection::from_index(
+            &index,
+            "",
+            "top.sp",
+            true,
+            &collapsed,
+            &[],
+            english(),
+        );
 
         let instances = projection
             .groups
@@ -1739,7 +1878,7 @@ mod tests {
         let index = projection
             .semantic_rows
             .iter()
-            .map(|row| (row.label, row.meta.as_str(), row.line))
+            .map(|row| (row.label.as_str(), row.meta.as_str(), row.line))
             .collect::<Vec<_>>();
         assert_eq!(
             index,
@@ -1780,7 +1919,51 @@ mod tests {
         assert!(projection.groups.iter().any(|group| group.row.kind
             == NetlistNavigatorRowKind::Measurements
             && group.declarations() == 0
-            && !group.empty_note.is_empty()));
+            && !english().text(group.empty_note).is_empty()));
+    }
+
+    /// The filter used to be compared against the English label behind a
+    /// section rather than the label the section draws, so a translated
+    /// navigator could not be searched by the names on its own rows.
+    #[test]
+    fn a_section_is_found_by_the_name_it_draws_in_the_locale_that_drew_it() {
+        for locale in crate::workbench::UiTextLocale::ALL {
+            let messages = MessageCatalog::new(locale);
+            let drawn = messages.text(MessageId::NetlistNavigatorParameters);
+            let projection = NetlistNavigatorProjection::from_index(
+                &netlist_index(OUTLINE_DECK),
+                &drawn,
+                "top.sp",
+                true,
+                &std::collections::BTreeSet::new(),
+                &[],
+                messages,
+            );
+            assert!(
+                projection
+                    .groups
+                    .iter()
+                    .any(|group| group.row.label == drawn),
+                "filtering by {drawn:?} found no group in {locale:?}"
+            );
+
+            // The provenance panel is disclosed by typing its own heading, and
+            // that heading was two English keywords compared against the query.
+            let heading = messages.text(MessageId::NetlistNavigatorSourceMapping);
+            let projection = NetlistNavigatorProjection::from_index(
+                &netlist_index(OUTLINE_DECK),
+                &heading,
+                "top.sp",
+                true,
+                &std::collections::BTreeSet::new(),
+                &[],
+                messages,
+            );
+            assert!(
+                projection.show_source_mapping,
+                "filtering by {heading:?} hid the section it names in {locale:?}"
+            );
+        }
     }
 
     #[test]
@@ -1814,8 +1997,15 @@ mod tests {
         let index = netlist_index("deck\nR1 in out 1k\nR2 out 0 2k\n.end\n");
         let collapsed =
             std::collections::BTreeSet::from([crate::state::OutlineSectionKind::Devices]);
-        let projection =
-            NetlistNavigatorProjection::from_index(&index, "r2", "top.sp", true, &collapsed, &[]);
+        let projection = NetlistNavigatorProjection::from_index(
+            &index,
+            "r2",
+            "top.sp",
+            true,
+            &collapsed,
+            &[],
+            english(),
+        );
 
         assert_eq!(projection.groups.len(), 1);
         assert!(projection.groups[0].expanded);
@@ -1911,7 +2101,7 @@ mod tests {
     #[test]
     fn a_comparison_navigator_lists_the_regions_that_changed() {
         let diff = "--- generated-aaaa\n+++ generated-bbbb\n@@ -1,4 +1,5 @@\n deck\n-R1 in out 1k\n+R1 in out 2k\n+R2 out 0 1k\n .end\n@@ -9,3 +10,3 @@\n .ac dec 10 1 1g\n-.meas ac peak max v(out)\n+.meas ac peak min v(out)\n";
-        let hunks = diff_hunks(diff);
+        let hunks = diff_hunks(diff, english());
 
         assert_eq!(hunks.len(), 2);
         assert_eq!(hunks[0].label, "Lines 1\u{2013}5");
@@ -1933,7 +2123,11 @@ mod tests {
     #[test]
     fn identical_revisions_produce_no_changed_regions() {
         assert!(
-            diff_hunks("--- owned-r1-aaaa\n+++ owned-r2-aaaa\n No source changes\n").is_empty()
+            diff_hunks(
+                "--- owned-r1-aaaa\n+++ owned-r2-aaaa\n No source changes\n",
+                english()
+            )
+            .is_empty()
         );
     }
 
@@ -1987,6 +2181,7 @@ mod tests {
             false,
             &std::collections::BTreeSet::new(),
             &[],
+            english(),
         );
         let devices = projection
             .groups
