@@ -61,15 +61,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 216;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 217;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "899de43826085ab3070f7c5fc1a159679b2aa1318b549dbac69f3278310ec2c4";
+    "e54b8e00bed443cde2ab97220a8971b80333028391553b325cdcb935ee774462";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "e4fdac894ce266dd5101bd73e4b6fcb347d217998dae21d2c2f210b082658703";
+    "f05fbd3c5828038f51deb1f662790aa1fe83dc12aeedaa11debd5c2c506fe09c";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "46285d86d3a7a4654b9a3ad19668553e741403aa2f2c5317abee832d02ab8cd9";
+    "e0d9de2c0a2d0a8df42845f12abfea3067bec0f2c219c3b2b9dcb1f041d70090";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -1951,6 +1951,102 @@ const XYCE_BUG28SON_RETAINED_OUTPUTS: [(&str, usize, &str, &str); 2] = [
         531,
         "3307e07168a40371d01793151760a4c87c600428127973f0237f8dafc3eb0b30",
         "45139bb1bb7d4ff441e77f7556f4a190fc8fbd7b54303eadeda7a9fe2184a80a",
+    ),
+];
+
+// BUG_1398's active Release-7.10 wrapper compares a PSpice-style inductor
+// model-card multiplier/temperature deck against the equivalent literal
+// inductances. There is no checked-in numerical gold; the control is the
+// executable oracle.
+const XYCE_BUG1398_OWNER_CONTRACT: &str = "bug1398_inductor_model_wrapper_owner";
+const XYCE_BUG1398_CONTROL_CONTRACT: &str = "bug1398_inductor_model_literal_control";
+const XYCE_BUG1398_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_1398/RLC.cir";
+const XYCE_BUG1398_CONTROL_PATH: &str = "Netlists/Certification_Tests/BUG_1398/RLC_simple.cir";
+const XYCE_BUG1398_OWNER_RECORD: &str = "netlists/certification_tests/bug_1398/rlc.cir";
+const XYCE_BUG1398_CONTROL_RECORD: &str = "netlists/certification_tests/bug_1398/rlc_simple.cir";
+const XYCE_BUG1398_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_1398/exclude";
+const XYCE_BUG1398_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG1398_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG1398_HISTORICAL_RECORD_COUNT: usize = 9;
+const XYCE_BUG1398_HISTORICAL_RECORD_BYTES: usize = 2_125;
+const XYCE_BUG1398_HISTORICAL_RECORDS_SHA256: &str =
+    "1d49e5e80e787735c0a493df81591f933386bff03d163de40ce9e70f446a4fc3";
+const XYCE_BUG1398_HISTORICAL_RECORDS_BLAKE3: &str =
+    "847ec1b72aae005db0723c729d346a096d4dbb355ea888fa6f5530008f315a83";
+const XYCE_BUG1398_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 9] = [
+    (
+        "Netlists/Certification_Tests/BUG_1398/CMakeLists.txt",
+        1_407,
+        "3ba7a0043a015de02d06bbfd287ff7aa603f6f4ce8676407a403cb9e6d3535e1",
+        "10c2937b7c7011c9a773f1bc7a2a7b92c17994e948303059ca6cfc33f670c200",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1398/Manifest.txt",
+        54,
+        "965055ad79e864b031d44be70eabbae0da035742c8c3a1cad3f56c5597cfd0ba",
+        "c0ce8b50741714dca2994cf18b878aa7638eabe962465f784ee0695db0bc5c07",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1398/README",
+        929,
+        "0b9ba507d1c6fe0e3069ca597f5d53ad22e1586efd2f8b93d49d2f87add0542d",
+        "2fd50c8db6245af365903c5d528cc663e0827b3b9a408d255be634a9c891b16c",
+    ),
+    (
+        XYCE_BUG1398_OWNER_PATH,
+        2_138,
+        "fd3f8981c807cfc9f765b1f35b1653ef3a8cd375f44fc9f97cd325d1dc4847c2",
+        "a1ac796d496fae47b8b2dcb572b01052f3e35d1393380625cce6b93ff4b1cfba",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1398/RLC.cir.sh",
+        1_253,
+        "c84c60afe9b2a93a7f728e7ec9caa5c34e16139fdcf55ec52f4d8670a9dc5cae",
+        "993f47e6eaa7799616ce9187f60fcbc58183bb14397be8812f8166f3860ed2e0",
+    ),
+    (
+        XYCE_BUG1398_CONTROL_PATH,
+        2_138,
+        "09e0948211087bd4694fc458639c30073801061c5b7f88002670667bd43daec5",
+        "f8cb087641c3697c49f96d42e2f32bd742f8e91ed657c85cc9791c00003ccbae",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1398/exclude",
+        15,
+        "77d7b65110d816a59680aac92540fba6b1ab8edf8237084b551c33d524adb0c7",
+        "91212edebf08bcfa881f31f15151c181a07dc51eece94caca73993f545427a59",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1398/tags",
+        25,
+        "74e8e1f00eefb3fa603b15f573d3055de3c8acfb459c4c5cf249307e84fc8221",
+        "f818cefd67a01c46afa08fd0db3adc873242ea1247675e884339900bbcdbe857",
+    ),
+    (
+        XYCE_RELEASE_710_XYCE_VERIFY_PATH,
+        XYCE_RELEASE_710_XYCE_VERIFY_BYTES,
+        XYCE_RELEASE_710_XYCE_VERIFY_SHA256,
+        XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3,
+    ),
+];
+const XYCE_BUG1398_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
+    (
+        "README",
+        929,
+        "0b9ba507d1c6fe0e3069ca597f5d53ad22e1586efd2f8b93d49d2f87add0542d",
+        "2fd50c8db6245af365903c5d528cc663e0827b3b9a408d255be634a9c891b16c",
+    ),
+    (
+        "RLC.cir",
+        2_138,
+        "fd3f8981c807cfc9f765b1f35b1653ef3a8cd375f44fc9f97cd325d1dc4847c2",
+        "a1ac796d496fae47b8b2dcb572b01052f3e35d1393380625cce6b93ff4b1cfba",
+    ),
+    (
+        "RLC_simple.cir",
+        2_138,
+        "09e0948211087bd4694fc458639c30073801061c5b7f88002670667bd43daec5",
+        "f8cb087641c3697c49f96d42e2f32bd742f8e91ed657c85cc9791c00003ccbae",
     ),
 ];
 
@@ -10361,6 +10457,7 @@ mod analysis_support;
 mod comparison;
 mod contracts;
 mod contracts_bug1025;
+mod contracts_bug1398;
 mod contracts_bug159;
 mod contracts_bug267;
 mod contracts_bug28;

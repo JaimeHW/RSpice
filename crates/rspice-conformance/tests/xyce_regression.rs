@@ -9594,6 +9594,37 @@ fn test_xyce_bug28_subcircuit_parameter_equivalence_wrapper() {
 }
 
 #[test]
+fn test_xyce_bug1398_inductor_model_equivalence_wrapper() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for (relative, expected_contract, expected_wrapper, exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_1398/RLC.cir",
+            "bug1398_inductor_model_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1398/RLC_simple.cir",
+            "bug1398_inductor_model_literal_control",
+            false,
+            Some("Netlists/Certification_Tests/BUG_1398/exclude"),
+        ),
+    ] {
+        assert_eq!(runner.requires_upstream_wrapper(relative), expected_wrapper);
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should execute the exact BUG1398 inductor-model relation, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(result.upstream_exclusion_source.as_deref(), exclusion);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_bug48_level54_native_bsim4_success_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

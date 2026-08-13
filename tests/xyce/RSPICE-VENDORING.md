@@ -60,7 +60,7 @@ reported separately from `expected_unsupported`.
 
 Some upstream exclusions are helper, baseline, or control decks tested by an
 upstream wrapper owner. RSpice has independently reconstructed and qualified
-exact native contracts for 216 such decks. Those rows use
+exact native contracts for 217 such decks. Those rows use
 `rspice_independently_qualified` and name the exact expected native contract.
 The adapter executes them, preserves their upstream provenance on the result,
 and fails closed if execution becomes unsupported, fails, or selects a
@@ -82,6 +82,14 @@ literal control, proves both resolve `IS` to exactly 1.5, and compares their
 case-sensitive default PRN serialization exactly as the historical shell
 `diff` did. No numerical gold is invented; the excluded control is promoted
 only through this paired contract.
+
+The active Certification BUG 1398 wrapper compares a PSpice-style inductor
+model owner with its literal-value control using Release-7.10 `xyce_verify`.
+RSpice preserves that GOOD=control, TEST=owner direction, pins the complete
+three-file retained family and historical wrapper/verifier provenance, and
+proves the model `L` multipliers plus `TC1`/`TC2` at DEVICE TEMP=37 resolve to
+the control's exact inductances before comparing their transient tables. No
+numerical gold is invented.
 
 The serial Certification BUG 307 A/B wrapper is reconstructed as an exact
 subcircuit-model-scope relation. RSpice runs the collision owner followed by
