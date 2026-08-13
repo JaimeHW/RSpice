@@ -99,6 +99,13 @@ discharge circuit and its sole startup delta, then preserves the historical
 GOOD=operating-point, TEST=NOOP `xyce_verify` direction. No numerical gold or
 exclusion row is introduced.
 
+Certification BUG 636 SON binds the active Release-7.10 error-exit wrapper and
+its exact two ordered diagnostics for an incomplete `.TRAN` card. RSpice's
+Xyce parser emits those diagnostics from the general missing-stop-time path,
+and the conformance contract proves the retained line, source family, wrapper
+ownership, nonzero parse result, and bounded no-hang behavior. No numerical
+gold or exclusion row is invented.
+
 Certification BUG 784 is intentionally distinguished from active Release-7.10
 CTest coverage: its retained upstream `tags` file is exactly `exclude`, and
 the generated CMake file contains no registration. RSpice nevertheless binds

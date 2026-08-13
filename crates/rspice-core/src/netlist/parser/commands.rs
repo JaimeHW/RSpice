@@ -193,6 +193,13 @@ pub(super) fn parse_command(
         }
         ".TRAN" => {
             let step = expect_value(stream, line_num, params)?;
+            if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: ".TRAN line has an unexpected number of fields\nUnrecognized dot line will be ignored"
+                        .to_string(),
+                });
+            }
             let stop = expect_value(stream, line_num, params)?;
             let start = try_value(stream, params);
             let max_step = try_value(stream, params);
@@ -5217,7 +5224,7 @@ pub(super) fn consume_uic_keyword(stream: &mut TokenStream) -> bool {
 mod tests {
     use crate::{
         Netlist,
-        netlist::{AnalysisCommand, DcSweepMode, PrintDelimiter, SaveSignal},
+        netlist::{AnalysisCommand, DcSweepMode, ParseError, PrintDelimiter, SaveSignal},
     };
 
     #[test]
@@ -6539,6 +6546,30 @@ mod tests {
         };
 
         assert!(*uic);
+    }
+
+    #[test]
+    fn incomplete_tran_uses_the_xyce_ordered_diagnostics() {
+        let error = Netlist::parse(
+            "incomplete transient analysis\n\
+             R1 1 0 1\n\
+             .tran 1u\n\
+             .end\n",
+        )
+        .expect_err("a transient analysis without a stop time must fail");
+        assert!(matches!(
+            error,
+            ParseError::Syntax { line: 3, ref message }
+                if message == ".TRAN line has an unexpected number of fields\nUnrecognized dot line will be ignored"
+        ));
+
+        Netlist::parse(
+            "complete transient analysis\n\
+             R1 1 0 1\n\
+             .tran 1u 1m\n\
+             .end\n",
+        )
+        .expect("supplying the stop time repairs the analysis");
     }
 
     #[test]

@@ -9527,6 +9527,30 @@ fn test_xyce_bug1025_bounded_no_analysis_error_oracle() {
 }
 
 #[test]
+fn test_xyce_bug636_incomplete_tran_error_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_636_SON/bug636.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "BUG636 must retain its active wrapper ownership"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported && !result.upstream_excluded,
+        "BUG636 should reproduce its ordered incomplete-.TRAN failure, got {result:?}"
+    );
+    assert_eq!(
+        result.contract,
+        "expected_failure_bug636_incomplete_tran_parse"
+    );
+    assert_eq!(result.upstream_exclusion_source, None);
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_bug784_archived_duplicate_subcircuit_port_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

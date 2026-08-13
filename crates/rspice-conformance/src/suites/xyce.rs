@@ -2679,6 +2679,67 @@ const XYCE_BUG1025_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
     ),
 ];
 
+// BUG_636_SON is an active Release-7.10 error-exit regression. Its wrapper
+// requires a nonzero simulator exit followed by these two ordered diagnostics
+// for the incomplete two-field `.TRAN` line.
+const XYCE_BUG636_CONTRACT: &str = "expected_failure_bug636_incomplete_tran_parse";
+const XYCE_BUG636_PATH: &str = "Netlists/Certification_Tests/BUG_636_SON/bug636.cir";
+const XYCE_BUG636_RECORD: &str = "netlists/certification_tests/bug_636_son/bug636.cir";
+const XYCE_BUG636_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG636_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG636_UPSTREAM_DIAGNOSTIC_ARITY: &str = ".TRAN line has an unexpected number of fields";
+const XYCE_BUG636_UPSTREAM_DIAGNOSTIC_IGNORED: &str = "Unrecognized dot line will be ignored";
+const XYCE_BUG636_HISTORICAL_RECORD_COUNT: usize = 6;
+const XYCE_BUG636_HISTORICAL_RECORD_BYTES: usize = 1_440;
+const XYCE_BUG636_HISTORICAL_RECORDS_SHA256: &str =
+    "b14b58e42be396acbaa972d89715777c8743ce460fdf5774af2b1559046f5aa8";
+const XYCE_BUG636_HISTORICAL_RECORDS_BLAKE3: &str =
+    "f3e0e44143ac1276a58d03c809c76187481b35000154e7dc5d5a2861619e806a";
+const XYCE_BUG636_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 6] = [
+    (
+        "Netlists/Certification_Tests/BUG_636_SON/CMakeLists.txt",
+        1_151,
+        "e408170ff2ef7e8c6a1104cfab1934ab1834b59900ade517e88da2df69df3e80",
+        "63b719cd8f2cecc657e4ec8523ca6feedce9853f3e3d0d50333711f8bb21717d",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_636_SON/Manifest.txt",
+        30,
+        "4cde8e876bb763f94faf9c81bf924b72c2fc11fa9d22f225a41c2b54d07bff3d",
+        "2c384dbf7e7c4d812cf54f0cd4d4be1f53e7befd7be834243e3521384da3fd48",
+    ),
+    (
+        XYCE_BUG636_PATH,
+        111,
+        "35c52026df1c0db86c2797c75f309a13e108d1f51f95b20632d64c72b8d67534",
+        "19641c3140f2b965f3e85d1145d84475ccb21b3b75d92f87a625203d632a73a8",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_636_SON/bug636.cir.sh",
+        1_658,
+        "a972c26fdac0afbe4b501bab71db56d07efe4b02e148788d8a7c531ae668bd79",
+        "94ec9d0adc46f2b103f6be57a7a15154dbfb4fb52c4765d153791597e01c755c",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_636_SON/tags",
+        30,
+        "345e0af2901a7957f378f2c04303c0d27cd9e7238e751e123101f23a3303bc7c",
+        "3e70684e3759f6743f839f366245f8394859533a4505fa866bf8bd7d652e0a75",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG636_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 1] = [(
+    "bug636.cir",
+    111,
+    "35c52026df1c0db86c2797c75f309a13e108d1f51f95b20632d64c72b8d67534",
+    "19641c3140f2b965f3e85d1145d84475ccb21b3b75d92f87a625203d632a73a8",
+)];
+
 // BUG_784 is an archived error-exit regression: Release-7.10 retains its
 // wrapper and exact ordered diagnostic, while `tags=exclude` deliberately
 // leaves its generated CMake file without an active CTest registration.
@@ -10838,6 +10899,7 @@ mod contracts_bug38;
 mod contracts_bug39;
 mod contracts_bug402;
 mod contracts_bug48;
+mod contracts_bug636;
 mod contracts_bug784;
 mod contracts_bug864;
 mod contracts_dc;
