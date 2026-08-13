@@ -250,6 +250,7 @@ pub fn document(
     let (analysis_count, measurement_count) = snapshot.results.as_ref().map_or((0, 0), |results| {
         (results.analyses.len(), results.measurements.len())
     });
+    let result_count = plot_figures.len().saturating_add(measurement_count);
     let assets = asset_links(snapshot, bundle);
     let component_count = snapshot
         .engineering
@@ -358,7 +359,12 @@ pub fn document(
         match section {
             PublicationSection::Overview | PublicationSection::Schematic => {}
             PublicationSection::Results => {
-                render_tab(&mut html, "results", "Results", Some(plot_figures.len()));
+                render_tab(
+                    &mut html,
+                    "results",
+                    "Results",
+                    (result_count > 0).then_some(result_count),
+                );
             }
             PublicationSection::Components => {
                 render_tab(&mut html, "components", "Components", Some(component_count));

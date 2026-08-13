@@ -101,6 +101,24 @@ fn rc_bundle_carries_every_disclosed_surface() {
 }
 
 #[test]
+fn result_tab_count_includes_measurements_without_claiming_zero() {
+    let mut value = snapshot(RC_LOWPASS);
+    value.figures.retain(|figure| {
+        !matches!(
+            figure.content,
+            rspice_publication_contract::FigureContent::Plot(_)
+        )
+    });
+
+    let bundle = render_bundle(&value, "0".repeat(64).as_str(), &viewer()).expect("render");
+    let page = utf8(&bundle["index.html"]);
+    assert!(page.contains(
+        "href=\"#results\" data-tab=\"results\">Results <span class=\"tab-count\">1</span>"
+    ));
+    assert!(!page.contains(">Results <span class=\"tab-count\">0</span>"));
+}
+
+#[test]
 fn figure_bundles_seal_the_viewer_runtime_and_its_handshake() {
     let value = snapshot(RC_LOWPASS);
     let bundle = render_bundle(&value, "0".repeat(64).as_str(), &viewer()).expect("render");

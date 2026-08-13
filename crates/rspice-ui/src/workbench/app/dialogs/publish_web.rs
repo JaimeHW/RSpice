@@ -61,7 +61,6 @@ pub(crate) struct PublishWebDialogState {
     pub include_schematic: bool,
     pub include_results: bool,
     pub include_netlist: bool,
-    pub default_section: rspice_publication_contract::PublicationSection,
     pub activate_featured: bool,
     /// Selected workspace for a first publish (index into the session list).
     pub workspace_index: usize,
@@ -448,7 +447,6 @@ fn publication_draft(dialog: &PublishWebDialogState) -> PublicationDraft {
         include_schematic: dialog.include_schematic,
         include_results: dialog.include_results,
         include_netlist: dialog.include_netlist,
-        default_section: dialog.default_section,
         activate_featured: dialog.activate_featured,
     }
 }
@@ -610,31 +608,6 @@ fn render_page_column(
         );
     });
 
-    field_label(ui, "Opening section");
-    egui::ComboBox::from_id_salt("publish-web-default-section")
-        .width(ui.available_width())
-        .selected_text(publication_section_label(dialog.default_section))
-        .show_ui(ui, |ui| {
-            use rspice_publication_contract::PublicationSection;
-            let mut sections = vec![PublicationSection::Overview];
-            if dialog.include_schematic {
-                sections.push(PublicationSection::Schematic);
-            }
-            if dialog.include_results {
-                sections.push(PublicationSection::Results);
-            }
-            if dialog.include_results || dialog.include_netlist {
-                sections.push(PublicationSection::Files);
-            }
-            sections.push(PublicationSection::Details);
-            for section in sections {
-                ui.selectable_value(
-                    &mut dialog.default_section,
-                    section,
-                    publication_section_label(section),
-                );
-            }
-        });
     ui.checkbox(
         &mut dialog.activate_featured,
         "Open the featured figure in interactive mode",
@@ -706,20 +679,6 @@ fn render_page_column(
 
     if publication_draft(dialog) != reviewed_draft {
         dialog.scope = None;
-    }
-}
-
-const fn publication_section_label(
-    section: rspice_publication_contract::PublicationSection,
-) -> &'static str {
-    use rspice_publication_contract::PublicationSection;
-    match section {
-        PublicationSection::Overview => "Overview",
-        PublicationSection::Schematic => "Schematic",
-        PublicationSection::Results => "Results",
-        PublicationSection::Components => "Components",
-        PublicationSection::Files => "Files",
-        PublicationSection::Details => "Details",
     }
 }
 

@@ -9,17 +9,21 @@
 //! cannot faithfully capture it reports as an error instead of approximating.
 
 use rspice_publication_contract::{
-    AnalysisRecord, AxisScale, Dataset, Disclosure, Figure, FigureContent, Measurement,
-    NetlistSection, Paint, PaintRole, PathPrimitive, PathSegment, PlotFigure, PlotHydration,
-    PlotTraceBinding, Point, Primitive, PrimitiveGroup, PublicationMetadata, PublicationOverview,
-    PublicationPresentation, PublicationSection, PublicationSnapshot, ResultsSection, Scene,
-    SchematicSection, SheetScene, SimulationProvenance, Specification, Stroke, StrokePattern,
-    SweepAxis, TextAnchor, TextFont, TextPrimitive, Trace, TraceTransform, TraceValues,
-    Validate as _,
+    AnalysisRecord, AxisScale, ComponentPin, ComponentRecord, Dataset, Disclosure,
+    EngineeringPublication, Figure, FigureContent, Measurement, ModelReference, NetConnection,
+    NetRecord, NetlistSection, Paint, PaintRole, PathPrimitive, PathSegment, PlotFigure,
+    PlotHydration, PlotTraceBinding, Point, Primitive, PrimitiveGroup, PublicationMetadata,
+    PublicationOverview, PublicationPresentation, PublicationSection, PublicationSnapshot,
+    ResultsSection, Scene, SchematicSection, SheetScene, SignalIdentity, SignalTarget,
+    SimulationProvenance, SimulationSetting, Specification, Stroke, StrokePattern, SweepAxis,
+    TextAnchor, TextFont, TextPrimitive, Trace, TraceTransform, TraceValues, Validate as _,
 };
 
 use crate::hardcopy::HardcopyScope;
 use crate::quantity::engineering::format_engineering_value;
+use crate::simulation::netlist_gen::{
+    HierarchySource, component_pin_names_with_hierarchy, design_nets_with_hierarchy,
+};
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry};
 use crate::workbench::app_state::AppState;
 use crate::workbench::hardcopy_adapters::render::{
@@ -49,7 +53,6 @@ pub(crate) struct PublicationDraft {
     pub include_schematic: bool,
     pub include_results: bool,
     pub include_netlist: bool,
-    pub default_section: PublicationSection,
     pub activate_featured: bool,
 }
 
@@ -68,7 +71,6 @@ impl Default for PublicationDraft {
             include_schematic: true,
             include_results: true,
             include_netlist: true,
-            default_section: PublicationSection::Overview,
             activate_featured: false,
         }
     }
@@ -198,6 +200,7 @@ pub(crate) fn build_publication_snapshot(
         next_figure_id += 1;
     }
 
+    let engineering = engineering_publication(state, draft.include_schematic, results.as_ref());
     let mut section_order = vec![PublicationSection::Overview];
     if !sheets.is_empty() {
         section_order.push(PublicationSection::Schematic);
@@ -205,15 +208,18 @@ pub(crate) fn build_publication_snapshot(
     if results.is_some() {
         section_order.push(PublicationSection::Results);
     }
+    if !engineering.components.is_empty() {
+        section_order.push(PublicationSection::Components);
+    }
     if netlist.is_some() || results.is_some() {
         section_order.push(PublicationSection::Files);
     }
     section_order.push(PublicationSection::Details);
-    let default_section = if section_order.contains(&draft.default_section) {
-        draft.default_section
-    } else {
-        PublicationSection::Overview
-    };
+    let default_section = section_order
+        .iter()
+        .copied()
+        .find(|section| *section != PublicationSection::Overview)
+        .unwrap_or(PublicationSection::Details);
     let narrative = if draft.overview_narrative.trim().is_empty() {
         draft.description.trim()
     } else {
@@ -250,14 +256,6 @@ pub(crate) fn build_publication_snapshot(
             default_interactive: draft.activate_featured && featured_figure_id == Some(figure.id),
         })
         .collect();
-    let simulation_provenance = results.as_ref().map(|_| SimulationProvenance {
-        engine: "RSpice".to_string(),
-        engine_version: env!("CARGO_PKG_VERSION").to_string(),
-        temperature_c_bits: None,
-        corner: None,
-        settings: Vec::new(),
-        warnings: Vec::new(),
-    });
     let snapshot = PublicationSnapshot {
         schema_version: rspice_publication_contract::PUBLICATION_SNAPSHOT_SCHEMA_VERSION,
         metadata: PublicationMetadata {
@@ -298,17 +296,239 @@ pub(crate) fn build_publication_snapshot(
             featured_figure_id,
             figure_details,
         }),
-        engineering: Some(rspice_publication_contract::EngineeringPublication {
-            components: Vec::new(),
-            nets: Vec::new(),
-            signals: Vec::new(),
-            simulation: simulation_provenance,
-        }),
+        engineering: Some(engineering),
     };
     snapshot
         .validate()
         .map_err(PublicationBuildError::Contract)?;
     Ok(snapshot)
+}
+
+/// Project engineering identity published alongside the visual scenes.
+///
+/// Connectivity and pin names come from the same hierarchy-aware netlist
+/// resolver used by simulation. This keeps the Components view truthful for
+/// real native publications instead of emitting a permanently empty shell.
+fn engineering_publication(
+    state: &AppState,
+    include_schematic: bool,
+    results: Option<&ResultsSection>,
+) -> EngineeringPublication {
+    let simulation = results.map(|_| simulation_provenance(state.simulation.active_run()));
+    if !include_schematic {
+        return EngineeringPublication {
+            components: Vec::new(),
+            nets: Vec::new(),
+            signals: signal_identities(results, &[], &[]),
+            simulation,
+        };
+    }
+
+    let hierarchy = HierarchySource::from_workspace_with_connectivity(
+        &state.library_manager,
+        &state.workspace.schematic_buffers,
+        &state.workspace.connectivity,
+    );
+    let design_nets = design_nets_with_hierarchy(&state.schematic, &hierarchy);
+    let resolved_pin_names = component_pin_names_with_hierarchy(&state.schematic, &hierarchy);
+    let published_components = state
+        .schematic
+        .components
+        .iter()
+        .filter(|component| !component.kind.spice_prefix().is_empty())
+        .collect::<Vec<_>>();
+
+    let components = published_components
+        .iter()
+        .map(|component| {
+            let mut pin_names = resolved_pin_names
+                .get(&component.id)
+                .cloned()
+                .unwrap_or_default();
+            for terminal in design_nets
+                .iter()
+                .flat_map(|net| &net.terminals)
+                .filter(|terminal| terminal.component_id == component.id)
+            {
+                if !pin_names
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(&terminal.pin))
+                {
+                    pin_names.push(terminal.pin.clone());
+                }
+            }
+            let pins = pin_names
+                .into_iter()
+                .map(|name| {
+                    let net = design_nets.iter().find_map(|net| {
+                        net.terminals
+                            .iter()
+                            .any(|terminal| {
+                                terminal.component_id == component.id
+                                    && terminal.pin.eq_ignore_ascii_case(&name)
+                            })
+                            .then(|| net.name.clone())
+                    });
+                    ComponentPin {
+                        name,
+                        number: None,
+                        net,
+                    }
+                })
+                .collect();
+            ComponentRecord {
+                reference: component.name.trim().to_owned(),
+                value: component.value.trim().to_owned(),
+                device: component.kind.display_name().to_owned(),
+                model: model_reference(component),
+                pins,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let nets = design_nets
+        .iter()
+        .map(|net| NetRecord {
+            name: net.name.clone(),
+            connections: net
+                .terminals
+                .iter()
+                .filter_map(|terminal| {
+                    published_components
+                        .iter()
+                        .find(|component| component.id == terminal.component_id)
+                        .map(|component| NetConnection {
+                            component_reference: component.name.trim().to_owned(),
+                            pin_name: terminal.pin.clone(),
+                        })
+                })
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    let signals = signal_identities(results, &components, &nets);
+
+    EngineeringPublication {
+        components,
+        nets,
+        signals,
+        simulation,
+    }
+}
+
+fn model_reference(component: &crate::state::Component) -> Option<ModelReference> {
+    let binding = component.library_cell.as_ref()?;
+    let name = binding
+        .generated_veriloga
+        .as_ref()
+        .map(|generated| generated.model_name.as_str())
+        .or_else(|| {
+            binding
+                .builtin_xspice
+                .as_ref()
+                .map(|builtin| builtin.model_type.as_str())
+        })
+        .or(binding.module_name.as_deref())
+        .unwrap_or(binding.cell.as_str());
+    Some(ModelReference {
+        name: name.to_owned(),
+        device_class: component.kind.display_name().to_owned(),
+        library: Some(binding.library.clone()),
+    })
+}
+
+fn signal_identities(
+    results: Option<&ResultsSection>,
+    components: &[ComponentRecord],
+    nets: &[NetRecord],
+) -> Vec<SignalIdentity> {
+    let Some(results) = results else {
+        return Vec::new();
+    };
+    results
+        .datasets
+        .iter()
+        .flat_map(|dataset| {
+            dataset
+                .traces
+                .iter()
+                .enumerate()
+                .filter_map(move |(trace_index, trace)| {
+                    let trace_index = u32::try_from(trace_index).ok()?;
+                    let target = signal_target(&trace.label, components, nets);
+                    Some(SignalIdentity {
+                        dataset_id: dataset.id,
+                        trace_index,
+                        target,
+                    })
+                })
+        })
+        .collect()
+}
+
+fn signal_target(label: &str, components: &[ComponentRecord], nets: &[NetRecord]) -> SignalTarget {
+    if let Some(candidate) = function_argument(label, "V")
+        && let Some(net) = nets
+            .iter()
+            .find(|net| net.name.eq_ignore_ascii_case(candidate))
+    {
+        return SignalTarget::NetVoltage {
+            net: net.name.clone(),
+        };
+    }
+    if let Some(candidate) = function_argument(label, "I")
+        && let Some(component) = components
+            .iter()
+            .find(|component| component.reference.eq_ignore_ascii_case(candidate))
+    {
+        return SignalTarget::DeviceCurrent {
+            reference: component.reference.clone(),
+        };
+    }
+    SignalTarget::Expression {
+        label: label.to_owned(),
+    }
+}
+
+fn function_argument<'a>(label: &'a str, function: &str) -> Option<&'a str> {
+    let label = label.trim();
+    let (head, remainder) = label.split_at_checked(function.len())?;
+    if !head.eq_ignore_ascii_case(function) {
+        return None;
+    }
+    let argument = remainder.strip_prefix('(')?.strip_suffix(')')?.trim();
+    (!argument.is_empty() && !argument.contains(['(', ')'])).then_some(argument)
+}
+
+fn simulation_provenance(run: Option<&SimulationRun>) -> SimulationProvenance {
+    let common_point = run.and_then(|run| {
+        let mut successful = run.analyses.iter().filter(|analysis| analysis.success);
+        let first = successful.next()?.provenance()?.pvt_point()?;
+        successful
+            .all(|analysis| {
+                analysis
+                    .provenance()
+                    .and_then(|provenance| provenance.pvt_point())
+                    == Some(first)
+            })
+            .then_some(first)
+    });
+    let settings = run
+        .and_then(|run| run.execution_target)
+        .map(|target| {
+            vec![SimulationSetting {
+                name: "Execution target".to_owned(),
+                value: target.label().to_owned(),
+            }]
+        })
+        .unwrap_or_default();
+    SimulationProvenance {
+        engine: "RSpice".to_owned(),
+        engine_version: env!("CARGO_PKG_VERSION").to_owned(),
+        temperature_c_bits: common_point.map(|point| point.temperature_celsius().to_bits()),
+        corner: common_point.map(|point| point.process().to_owned()),
+        settings,
+        warnings: Vec::new(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1282,7 +1502,6 @@ mod tests {
                 specification_label: "Cutoff".to_string(),
                 specification_value: "1.59".to_string(),
                 specification_unit: "kHz".to_string(),
-                default_section: PublicationSection::Results,
                 ..Default::default()
             },
         )
@@ -1297,7 +1516,7 @@ mod tests {
                 PublicationSection::Details,
             ]
         );
-        assert_eq!(presentation.default_section, PublicationSection::Overview);
+        assert_eq!(presentation.default_section, PublicationSection::Files);
         let overview = presentation.overview.expect("authored overview");
         assert_eq!(
             overview.narrative,
@@ -1338,6 +1557,100 @@ mod tests {
             ),
             Err(PublicationBuildError::NothingToPublish)
         ));
+    }
+
+    #[test]
+    fn native_engineering_projection_preserves_components_nets_and_signal_identity() {
+        let mut state = AppState::default();
+        state.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::new(0, 0),
+        );
+
+        let projected = engineering_publication(&state, true, None);
+        assert_eq!(projected.components.len(), 1);
+        let resistor = &projected.components[0];
+        assert_eq!(resistor.reference, "R1");
+        assert_eq!(resistor.device, "Resistor");
+        assert_eq!(resistor.pins.len(), 2);
+        assert!(resistor.pins.iter().all(|pin| pin.net.is_some()));
+        assert!(projected.nets.iter().all(|net| {
+            net.connections.iter().all(|connection| {
+                connection.component_reference == "R1"
+                    && resistor
+                        .pins
+                        .iter()
+                        .any(|pin| pin.name == connection.pin_name)
+            })
+        }));
+
+        let net_name = resistor.pins[0].net.as_deref().expect("resolved net");
+        let results = ResultsSection {
+            analyses: vec![AnalysisRecord {
+                id: 1,
+                label: "Operating point".to_owned(),
+                card: ".op".to_owned(),
+            }],
+            datasets: vec![Dataset {
+                id: 7,
+                analysis_id: 1,
+                name: "Operating point".to_owned(),
+                variant: None,
+                sweep: SweepAxis {
+                    label: "point".to_owned(),
+                    unit: String::new(),
+                    values_bits: vec![0.0_f64.to_bits()],
+                },
+                traces: vec![
+                    Trace {
+                        label: format!("V({net_name})"),
+                        unit: "V".to_owned(),
+                        values: TraceValues::Real {
+                            bits: vec![1.0_f64.to_bits()],
+                        },
+                    },
+                    Trace {
+                        label: "i(r1)".to_owned(),
+                        unit: "A".to_owned(),
+                        values: TraceValues::Real {
+                            bits: vec![0.001_f64.to_bits()],
+                        },
+                    },
+                    Trace {
+                        label: "V(out) - V(in)".to_owned(),
+                        unit: "V".to_owned(),
+                        values: TraceValues::Real {
+                            bits: vec![0.5_f64.to_bits()],
+                        },
+                    },
+                ],
+            }],
+            measurements: Vec::new(),
+        };
+
+        let projected = engineering_publication(&state, true, Some(&results));
+        assert!(matches!(
+            &projected.signals[0].target,
+            SignalTarget::NetVoltage { net } if net == net_name
+        ));
+        assert!(matches!(
+            &projected.signals[1].target,
+            SignalTarget::DeviceCurrent { reference } if reference == "R1"
+        ));
+        assert!(matches!(
+            &projected.signals[2].target,
+            SignalTarget::Expression { label } if label == "V(out) - V(in)"
+        ));
+
+        let withheld = engineering_publication(&state, false, Some(&results));
+        assert!(withheld.components.is_empty());
+        assert!(withheld.nets.is_empty());
+        assert!(
+            withheld
+                .signals
+                .iter()
+                .all(|signal| matches!(signal.target, SignalTarget::Expression { .. }))
+        );
     }
 
     #[test]

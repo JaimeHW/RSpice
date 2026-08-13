@@ -330,6 +330,33 @@ pub fn design_nets_with_hierarchy(
     collect_design_nets(schematic, &mut generator)
 }
 
+/// Resolved terminal names for every placed component, in the same order and
+/// with the same authored-symbol authority used by hierarchical netlisting.
+///
+/// Publication uses this alongside the hierarchy-aware net summary so
+/// disconnected pins remain visible without inventing names or falling back
+/// to generic pin numbers when an authored symbol is available.
+pub(crate) fn component_pin_names_with_hierarchy(
+    schematic: &SchematicState,
+    hierarchy: &HierarchySource<'_>,
+) -> HashMap<u64, Vec<String>> {
+    let generator = NetlistGenerator::with_hierarchy(schematic, hierarchy);
+    schematic
+        .components
+        .iter()
+        .map(|component| {
+            (
+                component.id,
+                generator
+                    .component_terminal_positions(component)
+                    .into_iter()
+                    .map(|(name, _)| name)
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
 fn collect_design_nets(
     schematic: &SchematicState,
     generator: &mut NetlistGenerator<'_>,
