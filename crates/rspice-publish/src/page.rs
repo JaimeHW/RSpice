@@ -21,6 +21,7 @@ use crate::{
 
 pub(crate) const PAGE_CSS_PATH: &str = "assets/page.css";
 pub(crate) const PAGE_JS_PATH: &str = "assets/page.js";
+const BRAND_LOGO_SVG: &str = include_str!("../../../assets/brand/logo.svg");
 
 /// Authored production stylesheet, emitted byte-for-byte into every bundle.
 pub const PAGE_STYLES: &str = include_str!("assets/page.css");
@@ -328,7 +329,7 @@ pub fn document(
          <script type=\"module\" src=\"{PAGE_JS_PATH}\" integrity=\"{page_js_integrity}\"></script>\n\
          </head>\n<body>\n<a class=\"skip-link\" href=\"#publication-content\">Skip to publication content</a>\n\
          <div class=\"shell\">\n<nav class=\"publication-nav\" aria-label=\"Publication\">\n\
-         <div class=\"brand\"><span class=\"brand-mark\" aria-hidden=\"true\">R</span><span>RSpice</span><span class=\"brand-context\">Published circuit</span></div>\n\
+         <div class=\"brand\"><span class=\"brand-mark\" aria-hidden=\"true\">{BRAND_LOGO_SVG}</span><span>RSpice</span><span class=\"brand-context\">Published circuit</span></div>\n\
          <div class=\"nav-actions\">\n\
          <button class=\"button\" type=\"button\" data-theme-toggle data-js-only hidden><span aria-hidden=\"true\">◐</span><span class=\"button-label\" data-theme-label>System</span></button>\n\
          <button class=\"button\" type=\"button\" data-embed-copy data-js-only hidden><span aria-hidden=\"true\">&lt;/&gt;</span><span class=\"button-label\">Embed</span></button>\n\

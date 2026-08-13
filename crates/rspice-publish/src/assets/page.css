@@ -148,7 +148,8 @@ a { color: var(--brand-strong); }
   background: var(--surface);
 }
 .brand { display: flex; align-items: center; gap: .6rem; color: var(--text); text-decoration: none; font-weight: 720; letter-spacing: -.01em; }
-.brand-mark { display: grid; width: 24px; height: 24px; place-items: center; border: 1px solid var(--brand); border-radius: 3px; background: var(--brand); color: var(--accent-ink); font: 800 11px/1 "IBM Plex Mono", ui-monospace, Consolas, monospace; }
+.brand-mark { display: block; width: 24px; height: 24px; flex: 0 0 auto; }
+.brand-mark svg { display: block; width: 100%; height: 100%; }
 .brand-context { display: none; }
 .nav-actions { display: flex; align-items: center; gap: .4rem; }
 .button {
@@ -191,8 +192,8 @@ h1 { grid-area: title; max-width: 30ch; margin: 0; font-size: clamp(1.65rem, 2.6
 .tabbar a:hover { background: var(--surface-strong); color: var(--text); }
 .tabbar a[aria-current="page"] { background: var(--paper); color: var(--text); }
 .tabbar a[aria-current="page"]::before { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 1px; background: var(--brand); content: ""; }
-.tab-count { color: var(--muted); font: 600 .63rem/1 "IBM Plex Mono", ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
-.tabbar a[aria-current="page"] .tab-count { color: var(--brand); }
+.tab-count { color: var(--muted); font: 600 .75rem/1.2 "IBM Plex Sans", "Segoe UI", sans-serif; font-variant-numeric: tabular-nums; opacity: .78; }
+.tabbar a[aria-current="page"] .tab-count { color: var(--muted); }
 
 .content { min-width: 0; padding: 0; }
 .js-ready .panel:not([data-active]) { display: none; }
