@@ -46,6 +46,16 @@ pub struct WaveformData {
     /// Y-axis values
     pub y: SharedWaveformValues,
 
+    /// The engineering unit the retained Y samples are measured in, as the
+    /// producer stated it.
+    ///
+    /// `None` does not mean dimensionless — it means unstated, which is what
+    /// every project written before this field carried and what a conversion
+    /// that invents a series has no right to claim. Surfaces that label a
+    /// waveform fall back to reading its name, then the analysis' own
+    /// quantity, exactly as they did before.
+    pub unit: Option<String>,
+
     /// Trace color (hex string)
     pub color: String,
 
@@ -72,11 +82,25 @@ impl WaveformData {
             name: name.into(),
             x: x.into(),
             y: y.into(),
+            unit: None,
             color: color.into(),
             complex: None,
             visible: true,
             display_cache: None,
         }
+    }
+
+    /// State the unit the retained samples are measured in.
+    ///
+    /// The producer contract spells "no unit for this quantity" as an empty
+    /// string, so that case is folded into `None` here rather than at each
+    /// conversion: a waveform must never claim `""` as its unit and have a
+    /// reader take that for a real one.
+    #[must_use]
+    pub fn with_unit(mut self, unit: impl Into<String>) -> Self {
+        let unit = unit.into();
+        self.unit = (!unit.is_empty()).then_some(unit);
+        self
     }
 
     /// Attach original complex samples to a derived display trace.

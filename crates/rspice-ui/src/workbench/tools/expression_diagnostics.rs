@@ -195,8 +195,11 @@ fn collect_rows(app: &RSpiceApp) -> Vec<ExpressionRow> {
                 .get(&(key, expression.text.clone()));
             rows.push(ExpressionRow {
                 analysis: analysis.label.clone(),
+                // An expression has no retained waveform to state a unit, so
+                // its text and the analysis are all there is to read.
                 unit: browser_signal_unit(
                     &expression.text,
+                    None,
                     analysis_default_unit(analysis.analysis_type),
                 ),
                 domain: domain_label(analysis),

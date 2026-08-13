@@ -236,20 +236,22 @@ fn convert_transient_result(
         } else {
             format!("I({branch})")
         };
-        let mut waveform = WaveformData::new_time_domain(
-            &name,
-            filtered_time.clone(),
-            filtered_transient_values(
-                &tran_result.time,
-                currents,
-                start_idx,
-                sample_count,
-                start_time,
-                interpolate_start,
-            )?,
+        waveforms.insert(
+            name.clone(),
+            WaveformData::new_time_domain_in_unit(
+                &name,
+                filtered_time.clone(),
+                filtered_transient_values(
+                    &tran_result.time,
+                    currents,
+                    start_idx,
+                    sample_count,
+                    start_time,
+                    interpolate_start,
+                )?,
+                "A",
+            ),
         );
-        waveform.y_unit = "A".to_owned();
-        waveforms.insert(name, waveform);
     }
 
     let measurements =

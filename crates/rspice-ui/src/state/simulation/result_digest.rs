@@ -20,6 +20,7 @@ const RESULT_DIGEST_ENCODING_VERSION_V2: u16 = 2;
 const RESULT_DIGEST_ENCODING_VERSION_V3: u16 = 3;
 const RESULT_DIGEST_ENCODING_VERSION_V4: u16 = 4;
 const RESULT_DIGEST_ENCODING_VERSION_V5: u16 = 5;
+const RESULT_DIGEST_ENCODING_VERSION_V6: u16 = 6;
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 
 struct ResultDigestWriter {
@@ -119,7 +120,7 @@ impl AnalysisResult {
     /// derived display caches are intentionally not part of the identity.
     #[must_use]
     pub fn result_data_digest(&self) -> ContentDigest {
-        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V5)
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V6)
     }
 
     /// Schema-v8 digest retained solely for authenticated migration. New
@@ -149,6 +150,13 @@ impl AnalysisResult {
         self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V4)
     }
 
+    /// Schema-v12 digest retained solely for authenticated migration. Its
+    /// waveform encoding predates the per-waveform retained unit.
+    #[must_use]
+    pub(crate) fn legacy_v5_result_data_digest(&self) -> ContentDigest {
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V5)
+    }
+
     fn result_data_digest_with_encoding(&self, version: u16) -> ContentDigest {
         let domain = match version {
             RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.analysis-result-data/v1",
@@ -156,6 +164,7 @@ impl AnalysisResult {
             RESULT_DIGEST_ENCODING_VERSION_V3 => "rspice.analysis-result-data/v3",
             RESULT_DIGEST_ENCODING_VERSION_V4 => "rspice.analysis-result-data/v4",
             RESULT_DIGEST_ENCODING_VERSION_V5 => "rspice.analysis-result-data/v5",
+            RESULT_DIGEST_ENCODING_VERSION_V6 => "rspice.analysis-result-data/v6",
             _ => unreachable!("supported result digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -175,6 +184,14 @@ impl AnalysisResult {
                 writer.f64_slice(&complex.real);
                 writer.f64_slice(&complex.imag);
             });
+            // The unit is not presentation: the same samples read as amps
+            // rather than volts are different data, and a dataset that
+            // restated one must not keep the identity of the one it replaced.
+            if version >= RESULT_DIGEST_ENCODING_VERSION_V6 {
+                writer.option(waveform.unit.as_deref(), |writer, unit| {
+                    writer.string(unit);
+                });
+            }
         }
 
         writer.option(self.dc_op.as_ref(), encode_dc_op);
@@ -230,7 +247,7 @@ impl SimulationRun {
     /// they address the dataset but do not define its sample content.
     #[must_use]
     pub fn dataset_content_digest(&self) -> ContentDigest {
-        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V5)
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V6)
     }
 
     /// Schema-v8 dataset digest retained solely for authenticated migration.
@@ -257,6 +274,12 @@ impl SimulationRun {
         self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V4)
     }
 
+    /// Schema-v12 dataset digest retained solely for authenticated migration.
+    #[must_use]
+    pub(crate) fn legacy_v5_dataset_content_digest(&self) -> ContentDigest {
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V5)
+    }
+
     fn dataset_content_digest_with_encoding(&self, version: u16) -> ContentDigest {
         let domain = match version {
             RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.simulation-dataset-data/v1",
@@ -264,6 +287,7 @@ impl SimulationRun {
             RESULT_DIGEST_ENCODING_VERSION_V3 => "rspice.simulation-dataset-data/v3",
             RESULT_DIGEST_ENCODING_VERSION_V4 => "rspice.simulation-dataset-data/v4",
             RESULT_DIGEST_ENCODING_VERSION_V5 => "rspice.simulation-dataset-data/v5",
+            RESULT_DIGEST_ENCODING_VERSION_V6 => "rspice.simulation-dataset-data/v6",
             _ => unreachable!("supported dataset digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -275,7 +299,8 @@ impl SimulationRun {
                 RESULT_DIGEST_ENCODING_VERSION_V2 => analysis.legacy_v2_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V3 => analysis.legacy_v3_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V4 => analysis.legacy_v4_result_data_digest(),
-                RESULT_DIGEST_ENCODING_VERSION_V5 => analysis.result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V5 => analysis.legacy_v5_result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V6 => analysis.result_data_digest(),
                 _ => unreachable!("supported dataset digest encoding"),
             });
         }
@@ -1039,6 +1064,42 @@ mod tests {
     }
 
     #[test]
+    fn retained_waveform_unit_is_content_identity_without_rewriting_v12_history() {
+        let unstated = analysis(AnalysisType::Transient);
+        let volts = {
+            let mut result = unstated.clone();
+            result.waveforms[0].unit = Some("V".to_owned());
+            result
+        };
+        let amps = {
+            let mut result = unstated.clone();
+            result.waveforms[0].unit = Some("A".to_owned());
+            result
+        };
+
+        assert_ne!(unstated.result_data_digest(), volts.result_data_digest());
+        assert_ne!(volts.result_data_digest(), amps.result_data_digest());
+        assert_eq!(
+            volts.legacy_v5_result_data_digest(),
+            amps.legacy_v5_result_data_digest(),
+            "schema-v12 never contained waveform unit bytes"
+        );
+
+        let mut stated_run = SimulationRun::new(1);
+        stated_run.analyses = vec![volts];
+        let mut restated_run = stated_run.clone();
+        restated_run.analyses = vec![amps];
+        assert_ne!(
+            stated_run.dataset_content_digest(),
+            restated_run.dataset_content_digest()
+        );
+        assert_eq!(
+            stated_run.legacy_v5_dataset_content_digest(),
+            restated_run.legacy_v5_dataset_content_digest()
+        );
+    }
+
+    #[test]
     fn canonical_float_encoding_normalizes_signed_zero_and_nan_payloads() {
         let mut positive_zero = analysis(AnalysisType::Ac);
         let mut negative_zero = positive_zero.clone();
@@ -1367,7 +1428,7 @@ mod tests {
         assert_ne!(
             source.result_data_digest(),
             source.legacy_v3_result_data_digest(),
-            "current results must be sealed in the v5 domain"
+            "current results must be sealed in the v6 domain"
         );
     }
 

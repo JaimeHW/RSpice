@@ -1006,6 +1006,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             kind.admits(
                                 crate::workbench::documents::result_document::browser_signal_unit(
                                     &waveform.name,
+                                    waveform.unit.as_deref(),
                                     crate::workbench::documents::result_document::analysis_default_unit(
                                         analysis.analysis_type,
                                     ),
@@ -1028,6 +1029,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             let unit =
                                 crate::workbench::documents::result_document::browser_signal_unit(
                                     &waveform.name,
+                                    waveform.unit.as_deref(),
                                     analysis.analysis_type.axis_info().3,
                                 );
                             let samples = waveform.y.len();
@@ -2206,7 +2208,7 @@ fn grouped_count(value: usize) -> String {
 /// Human name for a retained quantity's kind, read from the same accessor
 /// authority the browser's units come from. The metadata line states it once
 /// per row so no row needs a repeated kind chip.
-fn result_quantity_kind_label(name: &str, unit: &'static str) -> &'static str {
+fn result_quantity_kind_label(name: &str, unit: &str) -> &'static str {
     if crate::workbench::documents::result_document::browser_signal_is_current(name) {
         return if unit == "°" {
             "Current phase"

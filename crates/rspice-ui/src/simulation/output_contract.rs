@@ -1090,6 +1090,11 @@ fn subtract_waveforms(
         .map(|(positive, negative)| positive - negative)
         .collect::<Vec<_>>();
     let mut result = WaveformData::new(name, Arc::clone(&positive.x), y, "#f5b700");
+    // A difference is only in a unit when both probes agree on one. Two
+    // series that disagree have no common unit to inherit.
+    if positive.unit == negative.unit {
+        result.unit = positive.unit.clone();
+    }
     if let (Some(positive), Some(negative)) = (&positive.complex, &negative.complex)
         && positive.real.len() == negative.real.len()
         && positive.imag.len() == negative.imag.len()
@@ -1170,6 +1175,7 @@ fn resample_selected_and_final(
         .map(|point| interpolate(&waveform.x, &waveform.y, *point))
         .collect::<Result<Vec<_>, _>>()?;
     let mut result = WaveformData::new(&waveform.name, x.clone(), y, waveform.color.clone());
+    result.unit = waveform.unit.clone();
     result.visible = waveform.visible;
     if let Some(complex) = &waveform.complex {
         let real = x

@@ -161,8 +161,11 @@ impl ProjectSimulationResults {
     /// absence is preserved. Schema-v10 digests are authenticated before TF
     /// evidence absence is preserved. Schema-v11 digests are authenticated
     /// with their required scalar output-noise encoding before optional output
-    /// and input-referred totals are admitted. Each migrated result is then
-    /// resealed with the current encoding.
+    /// and input-referred totals are admitted. Schema-v12 digests are
+    /// authenticated with their unit-free waveform encoding before per-waveform
+    /// units are admitted; a v12 waveform that already carries one is rejected
+    /// rather than resealed, because no v12 digest ever covered those bytes.
+    /// Each migrated result is then resealed with the current encoding.
     pub(crate) fn migrate_to_current(&mut self, project_id: ProjectId) -> Result<(), String> {
         if self.schema_version == PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION {
             return Ok(());
@@ -175,6 +178,14 @@ impl ProjectSimulationResults {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema == OPERATING_POINT_RESULTS_SCHEMA_VERSION {
+            for run in &mut self.runs {
+                validate_v12_result_digests(run)?;
+                seal_project_result_digests(run)?;
+            }
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema == TRANSFER_FUNCTION_RESULTS_SCHEMA_VERSION {
             for run in &mut self.runs {
                 validate_v11_result_digests(run)?;
@@ -717,6 +728,7 @@ pub(super) fn validate_result_fields_for_source_schema(
     source_schema: u32,
 ) -> Result<(), String> {
     validate_legacy_noise_summary_shape(run, source_schema)?;
+    reject_legacy_waveform_units(run, source_schema)?;
     for analysis in &run.analyses {
         if source_schema < FAMILY_METADATA_RESULTS_SCHEMA_VERSION
             && analysis.family_metadata.is_some()
@@ -742,6 +754,7 @@ pub(super) fn validate_result_fields_for_source_schema(
 /// This must run before any v9 fields are introduced or digests are resealed.
 fn validate_v8_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
     validate_legacy_noise_summary_shape(run, CONTENT_DIGEST_RESULTS_SCHEMA_VERSION)?;
+    reject_legacy_waveform_units(run, CONTENT_DIGEST_RESULTS_SCHEMA_VERSION)?;
     for analysis in &run.analyses {
         if analysis.result_payload.is_present() {
             return Err(format!(
@@ -796,6 +809,7 @@ fn validate_v8_result_digests(run: &ProjectSimulationRun) -> Result<(), String> 
 fn validate_v9_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
     validate_legacy_noise_summary_shape(run, TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION)?;
     reject_legacy_operating_point_evidence(run, TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION)?;
+    reject_legacy_waveform_units(run, TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION)?;
     for analysis in &run.analyses {
         if matches!(
             analysis.result_payload.as_ref(),
@@ -864,6 +878,7 @@ fn validate_v9_result_digests(run: &ProjectSimulationRun) -> Result<(), String> 
 fn validate_v10_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
     validate_legacy_noise_summary_shape(run, RELIABILITY_SOA_RESULTS_SCHEMA_VERSION)?;
     reject_legacy_operating_point_evidence(run, RELIABILITY_SOA_RESULTS_SCHEMA_VERSION)?;
+    reject_legacy_waveform_units(run, RELIABILITY_SOA_RESULTS_SCHEMA_VERSION)?;
     for analysis in &run.analyses {
         if matches!(
             analysis.result_payload.as_ref(),
@@ -921,6 +936,7 @@ fn validate_v10_result_digests(run: &ProjectSimulationRun) -> Result<(), String>
 fn validate_v11_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
     validate_legacy_noise_summary_shape(run, TRANSFER_FUNCTION_RESULTS_SCHEMA_VERSION)?;
     reject_legacy_operating_point_evidence(run, TRANSFER_FUNCTION_RESULTS_SCHEMA_VERSION)?;
+    reject_legacy_waveform_units(run, TRANSFER_FUNCTION_RESULTS_SCHEMA_VERSION)?;
     for analysis in &run.analyses {
         let retained = analysis
             .result_data_digest
@@ -960,6 +976,75 @@ fn validate_v11_result_digests(run: &ProjectSimulationRun) -> Result<(), String>
             "schema-v11 simulation run {} dataset content digest does not match retained content",
             run.id
         ));
+    }
+    Ok(())
+}
+
+/// Authenticate a schema-v12 run with the exact digest encoding that wrote it,
+/// before per-waveform units are admitted and the run is resealed.
+fn validate_v12_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
+    reject_legacy_waveform_units(run, OPERATING_POINT_RESULTS_SCHEMA_VERSION)?;
+    for analysis in &run.analyses {
+        let retained = analysis
+            .result_data_digest
+            .as_ref()
+            .copied()
+            .ok_or_else(|| {
+                format!(
+                    "schema-v12 analysis {} is missing its result data digest",
+                    analysis.id
+                )
+            })?;
+        let computed = analysis
+            .clone()
+            .into_analysis()?
+            .legacy_v5_result_data_digest();
+        if retained != computed {
+            return Err(format!(
+                "schema-v12 analysis {} result data digest does not match retained content",
+                analysis.id
+            ));
+        }
+    }
+
+    let retained = run
+        .dataset_content_digest
+        .as_ref()
+        .copied()
+        .ok_or_else(|| {
+            format!(
+                "schema-v12 simulation run {} is missing its dataset content digest",
+                run.id
+            )
+        })?;
+    let computed = run.clone().into_run()?.legacy_v5_dataset_content_digest();
+    if retained != computed {
+        return Err(format!(
+            "schema-v12 simulation run {} dataset content digest does not match retained content",
+            run.id
+        ));
+    }
+    Ok(())
+}
+
+/// A unit on a waveform written before schema v13 is content the digest that
+/// sealed the file never covered. Admitting it would let an edited unit ride
+/// into a resealed document under an authentic older digest.
+fn reject_legacy_waveform_units(
+    run: &ProjectSimulationRun,
+    source_schema: u32,
+) -> Result<(), String> {
+    for analysis in &run.analyses {
+        if analysis
+            .waveforms
+            .iter()
+            .any(|waveform| waveform.unit.is_some())
+        {
+            return Err(format!(
+                "schema-v{source_schema} analysis {} contains a waveform unit introduced by schema v13",
+                analysis.id
+            ));
+        }
     }
     Ok(())
 }
@@ -2110,6 +2195,12 @@ pub struct ProjectWaveformData {
     pub color: String,
     #[serde(default = "default_true")]
     pub visible: bool,
+    /// The unit the samples are measured in, introduced by schema v13.
+    /// Absent in every earlier project, and absent in a current one whose
+    /// producer stated no unit — the two are the same fact, so both read
+    /// back as unstated rather than as a fabricated default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub complex: Option<ProjectComplexWaveformComponents>,
 }
@@ -2118,6 +2209,7 @@ impl ProjectWaveformData {
     fn into_waveform(self) -> WaveformData {
         let mut waveform = WaveformData::new(self.name, self.x, self.y, self.color);
         waveform.visible = self.visible;
+        waveform.unit = self.unit;
         if let Some(complex) = self.complex {
             waveform =
                 waveform.with_complex_components(complex.source_name, complex.real, complex.imag);
@@ -2151,6 +2243,7 @@ impl From<&WaveformData> for ProjectWaveformData {
             y: waveform.y.iter().copied().collect(),
             color: waveform.color.clone(),
             visible: waveform.visible,
+            unit: waveform.unit.clone(),
             complex: waveform
                 .complex
                 .as_ref()

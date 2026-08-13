@@ -801,23 +801,53 @@ fn a_marker_tag_names_the_note_only_when_there_is_one() {
 
 #[test]
 fn a_signal_owns_its_unit_rather_than_inheriting_the_analysis_default() {
-    // The accessor in the name is authoritative where there is one.
-    assert_eq!(signal_unit("V(out)", TraceKind::Value, "V"), "V");
-    assert_eq!(signal_unit("I(R1)", TraceKind::Value, "V"), "A");
-    assert_eq!(signal_unit("i(vsense)", TraceKind::Value, "V"), "A");
-    assert_eq!(signal_unit("P(M1)", TraceKind::Value, "V"), "W");
+    // The accessor in the name is authoritative where the run retained no
+    // unit of its own.
+    assert_eq!(signal_unit("V(out)", TraceKind::Value, None, "V"), "V");
+    assert_eq!(signal_unit("I(R1)", TraceKind::Value, None, "V"), "A");
+    assert_eq!(signal_unit("i(vsense)", TraceKind::Value, None, "V"), "A");
+    assert_eq!(signal_unit("P(M1)", TraceKind::Value, None, "V"), "W");
 
     // Derived projections keep the underlying signal's unit.
-    assert_eq!(signal_unit("re(V(out))", TraceKind::Real, ""), "V");
-    assert_eq!(signal_unit("im(I(R1))", TraceKind::Imaginary, ""), "A");
+    assert_eq!(signal_unit("re(V(out))", TraceKind::Real, None, ""), "V");
+    assert_eq!(
+        signal_unit("im(I(R1))", TraceKind::Imaginary, None, ""),
+        "A"
+    );
 
-    // The analysis default applies only where the name carries nothing
-    // to read a unit from.
-    assert_eq!(signal_unit("onoise", TraceKind::Value, "V^2/Hz"), "V^2/Hz");
+    // The analysis default applies only where neither the run nor the name
+    // carries anything to read a unit from.
+    assert_eq!(
+        signal_unit("onoise", TraceKind::Value, None, "V^2/Hz"),
+        "V^2/Hz"
+    );
+
+    // A retained unit outranks both: the producer measured the samples and
+    // said so, and no name convention covers a violation count or a cost.
+    assert_eq!(
+        signal_unit("SOA_VIOLATION_COUNT", TraceKind::Value, Some("count"), "V"),
+        "count"
+    );
+    assert_eq!(
+        signal_unit("OPT_COST", TraceKind::Value, Some("cost"), "V"),
+        "cost"
+    );
 
     // Derived kinds have their own units regardless of the source.
-    assert_eq!(signal_unit("V(out)", TraceKind::MagnitudeDb, "V"), "dB");
-    assert_eq!(signal_unit("V(out)", TraceKind::PhaseDeg, "V"), "°");
+    assert_eq!(
+        signal_unit("V(out)", TraceKind::MagnitudeDb, None, "V"),
+        "dB"
+    );
+    assert_eq!(signal_unit("V(out)", TraceKind::PhaseDeg, None, "V"), "°");
+    assert_eq!(
+        signal_unit("V(out)", TraceKind::MagnitudeDb, Some("V"), "V"),
+        "dB",
+        "a dB projection is computed here and is not in the source's unit"
+    );
+    assert_eq!(
+        signal_unit("onoise", TraceKind::NoiseDensity, Some("V^2/Hz"), "V^2/Hz"),
+        NOISE_DENSITY_UNIT
+    );
 }
 
 #[test]
@@ -1540,9 +1570,32 @@ fn browser_classification_reads_the_accessor_through_derived_wrappers() {
         ("re(I(R1))", "A", true),
         ("onoise", "V^2/Hz", false),
     ] {
-        assert_eq!(browser_signal_unit(name, "V^2/Hz"), unit, "{name}");
+        assert_eq!(browser_signal_unit(name, None, "V^2/Hz"), unit, "{name}");
         assert_eq!(browser_signal_is_current(name), current, "{name}");
     }
+}
+
+#[test]
+fn browser_reads_the_retained_unit_before_it_guesses_from_the_name() {
+    // The defect this closes: a retained count and a retained cost carry no
+    // accessor, so the browser filed both under the analysis default — volts.
+    assert_eq!(
+        browser_signal_unit("SOA_VIOLATION_COUNT", Some("count"), "V"),
+        "count"
+    );
+    assert_eq!(browser_signal_unit("OPT_COST", Some("cost"), "V"), "cost");
+    assert_eq!(browser_signal_unit("THD(%)", Some("%"), "dB"), "%");
+
+    // A waveform that states nothing — every project written before the unit
+    // was retained — reads exactly as it did before.
+    assert_eq!(browser_signal_unit("SOA_VIOLATION_COUNT", None, "V"), "V");
+    assert_eq!(browser_signal_unit("V(out)", None, "V"), "V");
+
+    // A stated unit is the producer's measurement of its own samples, so it
+    // outranks the name — including the phase convention.
+    assert_eq!(browser_signal_unit("I(R1)", Some("A"), "V"), "A");
+    assert_eq!(browser_signal_unit("phase(V(out))", Some("°"), "dB"), "°");
+    assert_eq!(browser_signal_unit("phase(V(out))", None, "dB"), "°");
 }
 
 #[test]

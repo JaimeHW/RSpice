@@ -664,8 +664,12 @@ fn sweep_axis_identity(analysis_type: AnalysisType) -> (&'static str, &'static s
     }
 }
 
-/// The unit convention results views derive from a trace name.
-fn trace_unit(name: &str) -> &'static str {
+/// The unit a published trace is labelled with: what the waveform states, or
+/// else the naming convention the results views derive from a trace name.
+fn trace_unit<'a>(name: &str, retained_unit: Option<&'a str>) -> &'a str {
+    if let Some(unit) = retained_unit {
+        return unit;
+    }
     let lower = name.to_ascii_lowercase();
     if lower.starts_with("i(") {
         "A"
@@ -761,7 +765,7 @@ fn analysis_datasets(
         };
         let trace = Trace {
             label: waveform.name.clone(),
-            unit: trace_unit(&waveform.name).to_string(),
+            unit: trace_unit(&waveform.name, waveform.unit.as_deref()).to_string(),
             values,
         };
 
@@ -1026,6 +1030,7 @@ mod tests {
             name: name.to_string(),
             x: Arc::new(x.to_vec()),
             y: Arc::new(y.to_vec()),
+            unit: None,
             color: "#000000".to_string(),
             complex: None,
             visible: true,

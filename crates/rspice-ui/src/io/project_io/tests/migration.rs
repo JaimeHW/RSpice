@@ -40,6 +40,120 @@ fn schema_v5_migrates_to_explicit_legacy_execution_state() {
     assert!(migrated.success, "legacy outcome evidence is preserved");
 }
 
+/// Build a completed one-analysis run whose single waveform optionally
+/// states a unit, sealed as legacy-unattributed so no plan fixture is needed.
+fn run_with_waveform_unit(sequence: u64, unit: Option<&str>) -> SimulationRun {
+    let mut waveform =
+        crate::state::WaveformData::new("I(V1)", vec![0.0, 1.0], vec![0.0, 1.0e-3], "#00aaff");
+    waveform.unit = unit.map(str::to_owned);
+    let mut run = SimulationRun::new(sequence);
+    run.mark_running().expect("fixture run starts");
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .expect("fixture run completes");
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![waveform]),
+    );
+    seal_legacy_unattributed(&mut run);
+    run
+}
+
+fn persisted_at_schema_v12(run: &SimulationRun) -> ProjectSimulationResults {
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run.clone()];
+    simulation.next_run_id = run.id;
+    let mut persisted = ProjectSimulationResults::from_state(&simulation);
+    persisted.schema_version = OPERATING_POINT_RESULTS_SCHEMA_VERSION;
+    persisted.runs[0].analyses[0].result_data_digest =
+        PersistedField::Value(run.analyses[0].legacy_v5_result_data_digest());
+    persisted.runs[0].dataset_content_digest =
+        PersistedField::Value(run.legacy_v5_dataset_content_digest());
+    persisted
+}
+
+#[test]
+fn schema_v12_is_authenticated_with_its_unit_free_encoding_then_resealed() {
+    let run = run_with_waveform_unit(31, None);
+    let mut persisted = persisted_at_schema_v12(&run);
+
+    persisted
+        .migrate_to_current(ProjectId::new())
+        .expect("an authentic schema-v12 result history migrates");
+
+    assert_eq!(
+        persisted.schema_version,
+        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+    );
+    let migrated = persisted.runs[0]
+        .clone()
+        .into_run()
+        .expect("migrated result restores");
+    assert_eq!(
+        migrated.analyses[0].waveforms[0].unit, None,
+        "a unit absent from a v12 file is never invented during migration"
+    );
+    assert_eq!(
+        persisted.runs[0].analyses[0].result_data_digest.as_ref(),
+        Some(&migrated.analyses[0].result_data_digest()),
+        "migrated results are resealed in the current digest domain"
+    );
+    assert_ne!(
+        migrated.analyses[0].result_data_digest(),
+        run.analyses[0].legacy_v5_result_data_digest()
+    );
+}
+
+#[test]
+fn schema_v12_rejects_a_waveform_unit_its_own_digest_never_covered() {
+    let mut persisted = persisted_at_schema_v12(&run_with_waveform_unit(32, None));
+    persisted.runs[0].analyses[0].waveforms[0].unit = Some("A".to_owned());
+
+    let error = persisted
+        .migrate_to_current(ProjectId::new())
+        .expect_err("a v12 file cannot carry a field introduced by v13");
+
+    assert!(
+        error.contains("waveform unit introduced by schema v13"),
+        "{error}"
+    );
+}
+
+#[test]
+fn schema_v12_rejects_samples_that_do_not_match_its_retained_digest() {
+    let mut persisted = persisted_at_schema_v12(&run_with_waveform_unit(33, None));
+    persisted.runs[0].analyses[0].waveforms[0].y[1] = 1.000_000_000_000_000_2e-3;
+
+    let error = persisted
+        .migrate_to_current(ProjectId::new())
+        .expect_err("tampered v12 samples fail their own digest");
+
+    assert!(
+        error.contains("schema-v12 analysis 1 result data digest does not match"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_retained_waveform_unit_survives_the_current_schema_round_trip() {
+    let run = run_with_waveform_unit(34, Some("A"));
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run];
+    simulation.next_run_id = 34;
+
+    let persisted = ProjectSimulationResults::from_state(&simulation);
+    assert_eq!(
+        persisted.schema_version,
+        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+    );
+    let restored = persisted
+        .into_simulation_state()
+        .expect("current result history restores");
+
+    assert_eq!(
+        restored.runs[0].analyses[0].waveforms[0].unit.as_deref(),
+        Some("A")
+    );
+}
+
 #[test]
 fn current_schema_requires_coherent_lifecycle_and_execution_identity() {
     let mut run = SimulationRun::new(15);
@@ -1137,7 +1251,7 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
     assert_ne!(
         restored.analyses[0].result_data_digest(),
         legacy_analysis_digest,
-        "v11 evidence must be resealed in the v12 digest domain"
+        "v11 evidence must be resealed in the current digest domain"
     );
     serialize_project_file(&loaded).expect("migrated project reserializes");
 
@@ -1599,6 +1713,7 @@ fn project_results_validation_rejects_duplicate_waveform_names_in_analysis() {
                         y: vec![1.0],
                         color: "#00aaff".to_string(),
                         visible: true,
+                        unit: None,
                         complex: None,
                     },
                     ProjectWaveformData {
@@ -1607,6 +1722,7 @@ fn project_results_validation_rejects_duplicate_waveform_names_in_analysis() {
                         y: vec![2.0],
                         color: "#ffaa00".to_string(),
                         visible: true,
+                        unit: None,
                         complex: None,
                     },
                 ],
@@ -1674,6 +1790,7 @@ fn project_results_validation_rejects_non_monotonic_waveform_x() {
                     y: vec![0.0, 1.0, 2.0, 3.0],
                     color: "#00aaff".to_string(),
                     visible: true,
+                    unit: None,
                     complex: None,
                 }],
                 dc_op: None,

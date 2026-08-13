@@ -5710,12 +5710,13 @@ mod availability_tests {
         assert_eq!(
             browser_signal_unit(
                 "onoise_spectrum",
+                None,
                 analysis_default_unit(AnalysisType::Noise)
             ),
             "V^2/Hz"
         );
         assert_eq!(
-            browser_signal_unit("I(VDD)", analysis_default_unit(AnalysisType::Noise)),
+            browser_signal_unit("I(VDD)", None, analysis_default_unit(AnalysisType::Noise)),
             "A",
             "an explicit accessor still wins over the analysis default"
         );

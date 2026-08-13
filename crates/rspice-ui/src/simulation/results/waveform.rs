@@ -27,13 +27,28 @@ pub struct WaveformData {
 }
 
 impl WaveformData {
-    /// Create new time-domain waveform
+    /// Create a new time-domain node-voltage waveform.
     pub fn new_time_domain(name: impl Into<String>, time: Vec<f64>, values: Vec<f64>) -> Self {
+        Self::new_time_domain_in_unit(name, time, values, "V")
+    }
+
+    /// Create a new time-domain waveform of a stated quantity.
+    ///
+    /// A retained unit is read as fact downstream — the results browser and
+    /// the plot axes both prefer it over guessing from the signal name — so a
+    /// series that is not a node voltage must name its own unit here rather
+    /// than inherit volts from [`Self::new_time_domain`].
+    pub fn new_time_domain_in_unit(
+        name: impl Into<String>,
+        time: Vec<f64>,
+        values: Vec<f64>,
+        y_unit: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             x_values: time,
             y_values: values,
-            y_unit: "V".to_string(),
+            y_unit: y_unit.into(),
             is_complex: false,
             y_imag: None,
         }

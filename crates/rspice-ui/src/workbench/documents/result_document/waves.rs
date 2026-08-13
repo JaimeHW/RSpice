@@ -141,6 +141,10 @@ struct StripTrace {
     /// active source is expanded into several family groups.
     base_name: String,
     name: String,
+    /// The unit the source waveform states for its retained samples, when it
+    /// states one. Overlay traces copy their active counterpart's so a run
+    /// overlay always lands on the pane it is being compared against.
+    unit: Option<String>,
     /// Ordinary signal color retained for non-family overlay runs.
     signal_color: egui::Color32,
     color: egui::Color32,
@@ -444,8 +448,13 @@ impl StripModel {
     }
 
     /// The unit one trace is measured in.
-    fn trace_unit(&self, trace: &StripTrace) -> &'static str {
-        signal_unit(&trace.base_name, trace.kind, self.y_unit)
+    fn trace_unit<'a>(&'a self, trace: &'a StripTrace) -> &'a str {
+        signal_unit(
+            &trace.base_name,
+            trace.kind,
+            trace.unit.as_deref(),
+            self.y_unit,
+        )
     }
 
     /// The strip's panes: retained signal identities grouped by unit, in the
@@ -457,8 +466,8 @@ impl StripModel {
     /// reads magnitude over phase as two weighted panes sharing one X
     /// domain, not a second axis on the magnitude pane. Phase panes order
     /// after the quantity panes so magnitude keeps the primary slot.
-    pub(super) fn unit_panes(&self) -> Vec<UnitPane> {
-        let mut panes: Vec<UnitPane> = Vec::new();
+    pub(super) fn unit_panes(&self) -> Vec<UnitPane<'_>> {
+        let mut panes: Vec<UnitPane<'_>> = Vec::new();
         for (index, trace) in self.traces.iter().enumerate() {
             let unit = self.trace_unit(trace);
             match panes.iter_mut().find(|pane| pane.unit == unit) {
@@ -739,6 +748,7 @@ fn append_projected_traces(
     selection_key: u64,
     source_waveform_name: &str,
     base_name: &str,
+    source_unit: Option<&str>,
     signal_color: egui::Color32,
     kind: TraceKind,
     source_x: &SharedWaveformValues,
@@ -783,6 +793,7 @@ fn append_projected_traces(
             source_waveform_name: source_waveform_name.to_owned(),
             base_name: base_name.to_owned(),
             name,
+            unit: source_unit.map(str::to_owned),
             signal_color,
             color: family_style.map_or(signal_color, |style| family_color(style, signal_color)),
             x: projection.x,
@@ -894,6 +905,7 @@ pub(super) fn build_models(
                             selection_key,
                             &waveform.name,
                             &name,
+                            waveform.unit.as_deref(),
                             signal_color,
                             kind,
                             &waveform.x,
@@ -939,6 +951,7 @@ pub(super) fn build_models(
                 selection_key,
                 &waveform.name,
                 &waveform.name,
+                waveform.unit.as_deref(),
                 color,
                 kind,
                 &waveform.x,
@@ -957,6 +970,7 @@ pub(super) fn build_models(
                     trace.source_waveform_name.clone(),
                     trace.base_name.clone(),
                     trace.name.clone(),
+                    trace.unit.clone(),
                     trace.signal_color,
                     trace.color,
                     trace.kind,
@@ -998,6 +1012,7 @@ pub(super) fn build_models(
                 source_name,
                 base_name,
                 signal_name,
+                signal_unit,
                 signal_color,
                 display_color,
                 signal_kind,
@@ -1081,6 +1096,7 @@ pub(super) fn build_models(
                     source_waveform_name: source_name.clone(),
                     base_name: base_name.clone(),
                     name: signal_name.clone(),
+                    unit: signal_unit.clone(),
                     signal_color: *signal_color,
                     color: *display_color,
                     x: projected.0,
@@ -1235,49 +1251,41 @@ fn fmt_in_unit(value: f64, unit: &str, significant_digits: usize) -> String {
     fmt_si_significant(value, unit, significant_digits)
 }
 
-fn signal_unit(name: &str, kind: TraceKind, analysis_unit: &'static str) -> &'static str {
+/// The projections a trace kind performs own their own unit: a decibel
+/// magnitude, a phase, and an amplitude-density projection are all computed
+/// here, so the source series' retained unit does not describe them.
+/// Everything else reads the source directly and takes its unit.
+fn signal_unit<'a>(
+    name: &str,
+    kind: TraceKind,
+    retained_unit: Option<&'a str>,
+    analysis_unit: &'a str,
+) -> &'a str {
     match kind {
         TraceKind::MagnitudeDb => "dB",
         TraceKind::PhaseDeg => "°",
         TraceKind::PhaseRad => "rad",
-        TraceKind::NoiseDensity => "nV/√Hz",
+        TraceKind::NoiseDensity => NOISE_DENSITY_UNIT,
         TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
-            let name = unwrap_projection(name);
-            if starts_with_accessor(name, "i(") {
-                "A"
-            } else if starts_with_accessor(name, "v(") {
-                "V"
-            } else if starts_with_accessor(name, "p(") {
-                "W"
-            } else {
-                analysis_unit
-            }
+            quantity_unit(name, retained_unit, analysis_unit)
         }
     }
 }
 
-/// The unit a retained waveform reads in when its own name declares no
-/// accessor — the analysis' own quantity.
+/// The unit a raw retained series reads in.
 ///
-/// This is the one owner of that mapping. Every surface that labels a raw
-/// dataset signal reads it through [`browser_signal_unit`]; a surface that
-/// guesses instead will label a noise density or a decibel magnitude as
-/// volts.
-pub(crate) const fn analysis_default_unit(analysis_type: AnalysisType) -> &'static str {
-    match analysis_type {
-        AnalysisType::Ac => "dB",
-        AnalysisType::Noise | AnalysisType::Pnoise => "V^2/Hz",
-        _ => "V",
-    }
-}
-
-/// Unit for a raw dataset waveform name in the results data browser, which
-/// carries no trace-kind projection: the name's accessor decides, however
-/// wrapped, and the analysis default applies only where there is none.
-pub(crate) fn browser_signal_unit(name: &str, analysis_unit: &'static str) -> &'static str {
-    let name = name.trim_start();
-    if starts_with_accessor(name, "phase(") {
-        return "°";
+/// The producer's own statement is the best evidence there is, so it is read
+/// first. Only a waveform that states none — every project written before the
+/// unit was retained, and every series a conversion invents rather than
+/// carries — falls back to its name's accessor and then to the analysis'
+/// nominal quantity.
+fn quantity_unit<'a>(
+    name: &str,
+    retained_unit: Option<&'a str>,
+    analysis_unit: &'a str,
+) -> &'a str {
+    if let Some(unit) = retained_unit {
+        return unit;
     }
     let name = unwrap_projection(name);
     if starts_with_accessor(name, "i(") {
@@ -1289,6 +1297,40 @@ pub(crate) fn browser_signal_unit(name: &str, analysis_unit: &'static str) -> &'
     } else {
         analysis_unit
     }
+}
+
+/// The unit a retained waveform reads in when it states none of its own and
+/// its name declares no accessor — the analysis' own quantity.
+///
+/// This is the last resort of the chain and the one owner of that mapping.
+/// Every surface that labels a raw dataset signal reads it through
+/// [`browser_signal_unit`]; a surface that guesses instead will label a noise
+/// density or a decibel magnitude as volts.
+pub(crate) const fn analysis_default_unit(analysis_type: AnalysisType) -> &'static str {
+    match analysis_type {
+        AnalysisType::Ac => "dB",
+        AnalysisType::Noise | AnalysisType::Pnoise => "V^2/Hz",
+        _ => "V",
+    }
+}
+
+/// Unit for a raw dataset waveform in the results data browser, which carries
+/// no trace-kind projection: the retained unit decides, then the name's
+/// accessor however wrapped, and the analysis default applies only where
+/// there is neither.
+///
+/// Pass `None` for a signal that has no retained waveform behind it — a saved
+/// expression, say, whose unit only its text can suggest.
+pub(crate) fn browser_signal_unit<'a>(
+    name: &str,
+    retained_unit: Option<&'a str>,
+    analysis_unit: &'a str,
+) -> &'a str {
+    let name = name.trim_start();
+    if retained_unit.is_none() && starts_with_accessor(name, "phase(") {
+        return "°";
+    }
+    quantity_unit(name, retained_unit, analysis_unit)
 }
 
 /// Whether a raw dataset waveform name reads a current, however wrapped.
@@ -1307,9 +1349,11 @@ pub(crate) fn browser_signal_is_current(name: &str) -> bool {
 /// Panes of a strip always share the strip's X domain — they are one
 /// measurement read against several scales, not several plots.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct UnitPane {
-    /// The unit every trace on this pane's axis is measured in.
-    pub unit: &'static str,
+pub(super) struct UnitPane<'a> {
+    /// The unit every trace on this pane's axis is measured in. Borrowed from
+    /// the strip model, because a retained unit is data rather than one of a
+    /// closed set of names the viewer knows in advance.
+    pub unit: &'a str,
     /// Trace indices on this pane's axis.
     pub traces: Vec<usize>,
 }
@@ -1392,7 +1436,7 @@ fn model_is_visible(model: &StripModel, models: &[StripModel], results: &Results
 fn active_pane<'a>(
     models: &'a [StripModel],
     results: &ResultsState,
-) -> Option<(&'a StripModel, usize, UnitPane)> {
+) -> Option<(&'a StripModel, usize, UnitPane<'a>)> {
     let active = results.active_wave_pane.as_ref()?;
     let model = models
         .iter()

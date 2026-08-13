@@ -704,6 +704,11 @@ impl SimulationController {
         let freq_len = shared_freqs.len();
         let mut results = Vec::new();
 
+        // These series carry no stated unit on purpose. The generic engine
+        // noise transport is the same vector for a V²/Hz output PSD and for
+        // dBc/Hz phase noise, and only the periodic-noise family metadata
+        // knows which one a run produced. Claiming one here would make every
+        // oscillator's phase noise read as a power spectral density.
         if Self::samples_match_shared_axis(&output_noise, freq_len) {
             results.push(crate::state::WaveformData::new(
                 "onoise".to_string(),
@@ -849,6 +854,10 @@ impl SimulationController {
 
         let mut results = Vec::new();
         for (name, waveform) in waveforms {
+            // A magnitude is the modulus of the source quantity, so it reads
+            // in the source's own unit. The phase projection does not: it is
+            // produced here, in degrees, and says so itself.
+            let unit = waveform.y_unit;
             let real = waveform.y_values;
             if !Self::samples_match_shared_axis(&real, freq_len) {
                 continue;
@@ -875,23 +884,30 @@ impl SimulationController {
                         magnitude_values,
                         Self::color_for_index(results.len()),
                     )
+                    .with_unit(unit)
                     .with_complex_components(name.clone(), real, imag);
                     results.push(magnitude);
 
-                    results.push(crate::state::WaveformData::new(
-                        format!("phase({})", name),
-                        Arc::clone(&shared_freqs),
-                        phase,
-                        Self::color_for_index(results.len()),
-                    ));
+                    results.push(
+                        crate::state::WaveformData::new(
+                            format!("phase({})", name),
+                            Arc::clone(&shared_freqs),
+                            phase,
+                            Self::color_for_index(results.len()),
+                        )
+                        .with_unit("°"),
+                    );
                 }
                 None => {
-                    results.push(crate::state::WaveformData::new(
-                        format!("|{}|", name),
-                        Arc::clone(&shared_freqs),
-                        real,
-                        Self::color_for_index(results.len()),
-                    ));
+                    results.push(
+                        crate::state::WaveformData::new(
+                            format!("|{}|", name),
+                            Arc::clone(&shared_freqs),
+                            real,
+                            Self::color_for_index(results.len()),
+                        )
+                        .with_unit(unit),
+                    );
                 }
             }
         }
@@ -914,16 +930,23 @@ impl SimulationController {
 
         let mut results = Vec::new();
         for (name, waveform) in waveforms {
+            // Read the stated unit before the mapper consumes the waveform:
+            // it is the producer's, and nothing downstream can recover it
+            // from the samples or the name.
+            let unit = waveform.y_unit.clone();
             let (display_name, y_values) = value_mapper(name, waveform);
             if !Self::samples_match_shared_axis(&y_values, shared_x.len()) {
                 continue;
             }
-            results.push(crate::state::WaveformData::new(
-                display_name,
-                Arc::clone(&shared_x),
-                y_values,
-                Self::color_for_index(results.len()),
-            ));
+            results.push(
+                crate::state::WaveformData::new(
+                    display_name,
+                    Arc::clone(&shared_x),
+                    y_values,
+                    Self::color_for_index(results.len()),
+                )
+                .with_unit(unit),
+            );
         }
 
         results
@@ -1094,6 +1117,154 @@ mod operating_point_conversion_tests {
         let currents = &result.dc_op.as_ref().unwrap().branch_currents;
         assert_eq!(currents.len(), 1);
         assert_eq!(currents[0].name, "I(V1)");
+    }
+}
+
+#[cfg(test)]
+mod waveform_unit_conversion_tests {
+    use super::*;
+
+    fn producer_waveform(
+        name: &str,
+        y_values: Vec<f64>,
+        y_unit: &str,
+    ) -> crate::simulation::results::WaveformData {
+        crate::simulation::results::WaveformData {
+            name: name.to_owned(),
+            x_values: Vec::new(),
+            y_values,
+            y_unit: y_unit.to_owned(),
+            is_complex: false,
+            y_imag: None,
+        }
+    }
+
+    fn retained_unit(result: &AnalysisResult, name: &str) -> Option<String> {
+        result
+            .waveforms
+            .iter()
+            .find(|waveform| waveform.name == name)
+            .unwrap_or_else(|| panic!("missing retained waveform {name}"))
+            .unit
+            .clone()
+    }
+
+    #[test]
+    fn a_waveform_retains_the_unit_its_producer_measured_it_in() {
+        let sim_result = crate::simulation::SimulationResult::Transient {
+            time: vec![0.0, 1.0],
+            waveforms: HashMap::from([
+                (
+                    "V(out)".to_owned(),
+                    producer_waveform("V(out)", vec![0.0, 5.0], "V"),
+                ),
+                (
+                    "I(V1)".to_owned(),
+                    producer_waveform("I(V1)", vec![0.0, 1.0e-3], "A"),
+                ),
+                (
+                    "SOA_VIOLATION_COUNT".to_owned(),
+                    producer_waveform("SOA_VIOLATION_COUNT", vec![0.0, 2.0], "count"),
+                ),
+            ]),
+            measurements: Vec::new(),
+            periodic_state: None,
+            convergence: Default::default(),
+            events: Default::default(),
+        };
+
+        let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
+            sim_result,
+            AnalysisType::Transient,
+            "TRAN",
+        );
+
+        assert_eq!(retained_unit(&result, "V(out)").as_deref(), Some("V"));
+        assert_eq!(retained_unit(&result, "I(V1)").as_deref(), Some("A"));
+        // The one the name cannot supply, and the reason this is carried at
+        // all: a violation count read as volts in the results browser.
+        assert_eq!(
+            retained_unit(&result, "SOA_VIOLATION_COUNT").as_deref(),
+            Some("count")
+        );
+    }
+
+    #[test]
+    fn an_ac_magnitude_keeps_the_source_unit_while_phase_states_degrees() {
+        let mut spectrum = crate::simulation::results::WaveformData::new_complex(
+            "V(out) Spectrum",
+            vec![1.0, 10.0],
+            vec![1.0, 0.0],
+            vec![0.0, 1.0],
+        );
+        spectrum.y_unit = "V".to_owned();
+        let sim_result = crate::simulation::SimulationResult::Ac {
+            frequencies: vec![1.0, 10.0],
+            waveforms: HashMap::from([("V(out) Spectrum".to_owned(), spectrum)]),
+            measurements: Vec::new(),
+        };
+
+        let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
+            sim_result,
+            AnalysisType::Ac,
+            "AC",
+        );
+
+        assert_eq!(
+            retained_unit(&result, "|V(out) Spectrum|").as_deref(),
+            Some("V")
+        );
+        assert_eq!(
+            retained_unit(&result, "phase(V(out) Spectrum)").as_deref(),
+            Some("°")
+        );
+    }
+
+    #[test]
+    fn a_producer_that_states_no_unit_retains_nothing_rather_than_an_empty_one() {
+        // AC's own complex waveforms leave the unit empty. Retaining "" would
+        // read downstream as a real unit and stop the browser and the axes
+        // falling back to the accessor in the name.
+        let sim_result = crate::simulation::SimulationResult::Ac {
+            frequencies: vec![1.0, 10.0],
+            waveforms: HashMap::from([(
+                "V(out)".to_owned(),
+                crate::simulation::results::WaveformData::new_complex(
+                    "V(out)",
+                    vec![1.0, 10.0],
+                    vec![1.0, 0.0],
+                    vec![0.0, 1.0],
+                ),
+            )]),
+            measurements: Vec::new(),
+        };
+
+        let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
+            sim_result,
+            AnalysisType::Ac,
+            "AC",
+        );
+
+        assert_eq!(retained_unit(&result, "|V(out)|"), None);
+    }
+
+    #[test]
+    fn retained_noise_series_state_no_unit_so_phase_noise_is_never_called_a_psd() {
+        let sim_result = crate::simulation::SimulationResult::Noise {
+            frequencies: vec![1.0e3, 1.0e6],
+            output_noise: vec![-90.0, -130.0],
+            input_noise: None,
+            contributors: HashMap::new(),
+            summary: None,
+        };
+
+        let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
+            sim_result,
+            AnalysisType::Pnoise,
+            "PNOISE",
+        );
+
+        assert_eq!(retained_unit(&result, "onoise"), None);
     }
 }
 

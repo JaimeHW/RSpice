@@ -140,9 +140,9 @@ impl FunctionCategory {
 }
 
 /// One signal row of the rail.
-struct SignalRow {
+struct SignalRow<'a> {
     name: String,
-    unit: &'static str,
+    unit: &'a str,
     color: egui::Color32,
 }
 
@@ -259,6 +259,7 @@ impl CalculatorPanel {
                             .map(|(index, w)| SignalRow {
                                 unit: crate::workbench::documents::result_document::browser_signal_unit(
                                     &w.name,
+                                    w.unit.as_deref(),
                                     analysis_unit,
                                 ),
                                 color: crate::workbench::documents::result_document::waveform_color(
