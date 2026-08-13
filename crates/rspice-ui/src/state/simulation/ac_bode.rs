@@ -114,13 +114,7 @@ pub fn ac_bode_summary_for_analysis(
             .iter()
             .enumerate()
             .find(|(_, waveform)| waveform.name == phase_name);
-        (
-            mag_index,
-            mag,
-            signal,
-            magnitude_to_db(&mag.y),
-            phase,
-        )
+        (mag_index, mag, signal, magnitude_to_db(&mag.y), phase)
     };
 
     let frequency = Arc::clone(&mag.x);
@@ -262,8 +256,7 @@ mod tests {
         analysis_type: AnalysisType,
         waveforms: Vec<WaveformData>,
     ) -> AnalysisResult {
-        AnalysisResult::new(1, analysis_type, analysis_type.short_label())
-            .with_waveforms(waveforms)
+        AnalysisResult::new(1, analysis_type, analysis_type.short_label()).with_waveforms(waveforms)
     }
 
     fn wave(name: &str, x: &[f64], y: &[f64], visible: bool) -> WaveformData {
@@ -351,7 +344,12 @@ mod tests {
         let analysis = response_analysis(
             AnalysisType::Stb,
             vec![
-                wave("Loop Gain (dB)", &[1.0, 10.0, 100.0], &[40.0, 0.0, -20.0], true),
+                wave(
+                    "Loop Gain (dB)",
+                    &[1.0, 10.0, 100.0],
+                    &[40.0, 0.0, -20.0],
+                    true,
+                ),
                 wave(
                     "Loop Phase (deg)",
                     &[1.0, 10.0, 100.0],

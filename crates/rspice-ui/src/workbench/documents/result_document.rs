@@ -3598,8 +3598,7 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         ResultViewer::Waves => {
             if active_run.is_some_and(|run| {
                 run.analyses.iter().any(|analysis| {
-                    analysis.analysis_type.is_time_domain()
-                        && !analysis.waveforms.is_empty()
+                    analysis.analysis_type.is_time_domain() && !analysis.waveforms.is_empty()
                 })
             }) {
                 ViewerAvailability::available(
@@ -3628,9 +3627,8 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
             }
         }
         ResultViewer::Bode => {
-            let has_frequency_response = active_run.is_some_and(|run| {
-                run.analyses.iter().any(bode_analysis_is_renderable)
-            });
+            let has_frequency_response =
+                active_run.is_some_and(|run| run.analyses.iter().any(bode_analysis_is_renderable));
             if has_frequency_response {
                 ViewerAvailability::available("A usable frequency response is available")
             } else {
@@ -4250,21 +4248,17 @@ mod availability_tests {
     fn periodic_and_stability_responses_enable_bode_but_pstb_modes_do_not() {
         for analysis_type in [AnalysisType::Pac, AnalysisType::Pxf] {
             let state = state_with_analysis(
-                AnalysisResult::new(1, analysis_type, analysis_type.short_label())
-                    .with_waveforms(vec![
-                        WaveformData::new(
-                            "|V(out)|",
-                            vec![1.0, 10.0],
-                            vec![10.0, 1.0],
-                            "#00aaff",
-                        ),
+                AnalysisResult::new(1, analysis_type, analysis_type.short_label()).with_waveforms(
+                    vec![
+                        WaveformData::new("|V(out)|", vec![1.0, 10.0], vec![10.0, 1.0], "#00aaff"),
                         WaveformData::new(
                             "phase(V(out))",
                             vec![1.0, 10.0],
                             vec![-90.0, -135.0],
                             "#ffbd2e",
                         ),
-                    ]),
+                    ],
+                ),
             );
             assert!(
                 viewer_availability(&state, ResultViewer::Bode).available,
@@ -4312,13 +4306,14 @@ mod availability_tests {
     fn pss_and_envelope_feed_waves_while_disto_feeds_unit_aware_frequency_curves() {
         for analysis_type in [AnalysisType::Pss, AnalysisType::Envelope] {
             let state = state_with_analysis(
-                AnalysisResult::new(1, analysis_type, analysis_type.short_label())
-                    .with_waveforms(vec![WaveformData::new(
+                AnalysisResult::new(1, analysis_type, analysis_type.short_label()).with_waveforms(
+                    vec![WaveformData::new(
                         "V(out)",
                         vec![0.0, 1.0e-6],
                         vec![0.0, 1.0],
                         "#00aaff",
-                    )]),
+                    )],
+                ),
             );
             assert!(viewer_availability(&state, ResultViewer::Waves).available);
         }
@@ -4347,23 +4342,27 @@ mod availability_tests {
                     vec![1.0, 0.1],
                     "#00aaff",
                 )
-                .with_complex_components("V(out) Spectrum", vec![1.0, 0.1], vec![0.0, 0.0]),
+                .with_complex_components(
+                    "V(out) Spectrum",
+                    vec![1.0, 0.1],
+                    vec![0.0, 0.0],
+                ),
             ]),
         );
         assert!(viewer_availability(&fourier, ResultViewer::HarmonicBalance).available);
 
-        for analysis_type in [AnalysisType::SParameter, AnalysisType::Psp, AnalysisType::Hbsp] {
+        for analysis_type in [
+            AnalysisType::SParameter,
+            AnalysisType::Psp,
+            AnalysisType::Hbsp,
+        ] {
             let state = state_with_analysis(
-                AnalysisResult::new(1, analysis_type, analysis_type.short_label())
-                    .with_waveforms(vec![
-                        WaveformData::new(
-                            "|S11|",
-                            vec![1.0e6, 2.0e6],
-                            vec![0.5, 0.25],
-                            "#00aaff",
-                        )
-                        .with_complex_components("S11", vec![0.5, 0.25], vec![0.0, -0.1]),
-                    ]),
+                AnalysisResult::new(1, analysis_type, analysis_type.short_label()).with_waveforms(
+                    vec![
+                        WaveformData::new("|S11|", vec![1.0e6, 2.0e6], vec![0.5, 0.25], "#00aaff")
+                            .with_complex_components("S11", vec![0.5, 0.25], vec![0.0, -0.1]),
+                    ],
+                ),
             );
             assert!(!viewer_availability(&state, ResultViewer::Smith).available);
             assert!(viewer_availability(&state, ResultViewer::Table).available);

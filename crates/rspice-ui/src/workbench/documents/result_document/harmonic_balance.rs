@@ -191,12 +191,12 @@ fn active_hb_failure(state: &AppState) -> Option<&str> {
         analysis.analysis_type,
         AnalysisType::HarmonicBalance | AnalysisType::Fourier
     ) && !analysis.success)
-    .then(|| {
-        analysis
-            .error_message
-            .as_deref()
-            .unwrap_or("spectrum execution failed")
-    })
+        .then(|| {
+            analysis
+                .error_message
+                .as_deref()
+                .unwrap_or("spectrum execution failed")
+        })
 }
 
 // ---------------------------------------------------------------------------

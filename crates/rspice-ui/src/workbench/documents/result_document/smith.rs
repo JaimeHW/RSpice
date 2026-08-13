@@ -33,7 +33,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .map(|(i, _)| i)
         .collect();
     if visible.is_empty() {
-        well_hint(ui, "No S-parameter traces — run an SP, PSP, or HBSP analysis");
+        well_hint(
+            ui,
+            "No S-parameter traces — run an SP, PSP, or HBSP analysis",
+        );
         return;
     }
 

@@ -1306,12 +1306,7 @@ fn viewer_partition_covers_every_results_family() {
 #[test]
 fn bode_hardcopy_exports_displayed_decibels_and_phase_for_periodic_response() {
     let analysis = AnalysisResult::new(1, AnalysisType::Pac, "PAC").with_waveforms(vec![
-        WaveformData::new(
-            "|V(out)|",
-            vec![1.0, 10.0],
-            vec![10.0, 1.0],
-            "#00aaff",
-        ),
+        WaveformData::new("|V(out)|", vec![1.0, 10.0], vec![10.0, 1.0], "#00aaff"),
         WaveformData::new(
             "phase(V(out))",
             vec![1.0, 10.0],

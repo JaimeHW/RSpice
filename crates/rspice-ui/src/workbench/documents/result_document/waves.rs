@@ -301,8 +301,7 @@ pub(super) fn cached_models(
         super::ResultViewer::DcSweep => model.analysis_type == AnalysisType::DcSweep,
         super::ResultViewer::Waves => model.analysis_type.is_time_domain(),
         super::ResultViewer::Bode => {
-            model.analysis_type.is_bode_response()
-                || model.analysis_type.is_raw_frequency_curve()
+            model.analysis_type.is_bode_response() || model.analysis_type.is_raw_frequency_curve()
         }
         super::ResultViewer::NoiseContrib => matches!(
             model.analysis_type,

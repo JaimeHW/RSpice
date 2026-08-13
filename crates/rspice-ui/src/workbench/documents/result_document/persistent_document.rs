@@ -784,9 +784,7 @@ pub(super) fn renderer_supports_analysis(id: &str, analysis: &AnalysisResult) ->
         "viewer-smith" => false,
         "viewer-table" => !analysis.waveforms.is_empty(),
         "viewer-histogram" => analysis.analysis_type == AnalysisType::MonteCarlo,
-        "eye-viewer" => {
-            analysis.analysis_type.is_time_domain() && !analysis.waveforms.is_empty()
-        }
+        "eye-viewer" => analysis.analysis_type.is_time_domain() && !analysis.waveforms.is_empty(),
         "viewer-pz" => analysis.analysis_type == AnalysisType::PoleZero,
         "viewer-contribution" => matches!(
             analysis.analysis_type,

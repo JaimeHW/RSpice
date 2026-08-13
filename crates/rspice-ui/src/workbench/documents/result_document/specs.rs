@@ -989,9 +989,7 @@ fn source_viewer(state: &AppState, analysis_type: AnalysisType) -> ResultViewer 
         | AnalysisType::Pac
         | AnalysisType::Pxf
         | AnalysisType::Stb
-        | AnalysisType::Disto => {
-            ResultViewer::Bode
-        }
+        | AnalysisType::Disto => ResultViewer::Bode,
         AnalysisType::Pstb => ResultViewer::Table,
         AnalysisType::Pss | AnalysisType::Envelope | AnalysisType::Soa => ResultViewer::Waves,
         AnalysisType::Noise | AnalysisType::Hbnoise => ResultViewer::NoiseContrib,

@@ -186,8 +186,7 @@ impl ViewerCompatibility {
 }
 
 const TIME_DC: &[&str] = &["tran", "pss", "envelope", "soa", "dc"];
-const FREQUENCY_RESPONSE_NOISE: &[&str] =
-    &["ac", "pac", "pxf", "stb", "disto", "noise", "hbnoise"];
+const FREQUENCY_RESPONSE_NOISE: &[&str] = &["ac", "pac", "pxf", "stb", "disto", "noise", "hbnoise"];
 const FOURIER_TRAN_HB_PSS: &[&str] = &["fourier", "tran", "hb", "pss"];
 const PNOISE_QPNOISE: &[&str] = &["pnoise", "qpnoise"];
 const TRAN_FOURIER_HB_ENVELOPE: &[&str] = &["tran", "fourier", "hb", "envelope"];

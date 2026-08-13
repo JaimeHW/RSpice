@@ -2009,13 +2009,8 @@ fn bode_models_include_pac_pxf_and_stb_but_exclude_pstb_mode_data() {
     }
     run.add_analysis(
         AnalysisResult::new(3, AnalysisType::Stb, "STB").with_waveforms(vec![
-            WaveformData::new(
-                "Loop Gain (dB)",
-                vec![1.0, 10.0],
-                vec![40.0, 0.0],
-                "#0af",
-            )
-            .with_unit("dB"),
+            WaveformData::new("Loop Gain (dB)", vec![1.0, 10.0], vec![40.0, 0.0], "#0af")
+                .with_unit("dB"),
             WaveformData::new(
                 "Loop Phase (deg)",
                 vec![1.0, 10.0],
@@ -2027,14 +2022,12 @@ fn bode_models_include_pac_pxf_and_stb_but_exclude_pstb_mode_data() {
         ]),
     );
     run.add_analysis(
-        AnalysisResult::new(4, AnalysisType::Pstb, "PSTB").with_waveforms(vec![
-            WaveformData::new(
-                "Stability Margin (dB)",
-                vec![0.0, 1.0],
-                vec![12.0, 4.0],
-                "#0af",
-            ),
-        ]),
+        AnalysisResult::new(4, AnalysisType::Pstb, "PSTB").with_waveforms(vec![WaveformData::new(
+            "Stability Margin (dB)",
+            vec![0.0, 1.0],
+            vec![12.0, 4.0],
+            "#0af",
+        )]),
     );
 
     state.ui.results.viewer = super::super::ResultViewer::Bode;
@@ -2057,9 +2050,11 @@ fn bode_models_include_pac_pxf_and_stb_but_exclude_pstb_mode_data() {
     assert!(stb.traces.iter().any(|trace| {
         trace.source_waveform_name == "Loop Gain (dB)" && trace.kind == TraceKind::Value
     }));
-    assert!(stb.traces.iter().all(|trace| {
-        trace.source_waveform_name != "|Nyquist L(jw)|"
-    }));
+    assert!(
+        stb.traces
+            .iter()
+            .all(|trace| { trace.source_waveform_name != "|Nyquist L(jw)|" })
+    );
 }
 
 #[test]
@@ -2067,21 +2062,19 @@ fn waves_models_include_pss_and_envelope_complex_data() {
     let mut state = AppState::default();
     let run = state.simulation.start_run();
     run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Pss, "PSS").with_waveforms(vec![
-            WaveformData::new("V(pss)", vec![0.0, 1.0], vec![0.0, 1.0], "#0af"),
-        ]),
+        AnalysisResult::new(1, AnalysisType::Pss, "PSS").with_waveforms(vec![WaveformData::new(
+            "V(pss)",
+            vec![0.0, 1.0],
+            vec![0.0, 1.0],
+            "#0af",
+        )]),
     );
     run.add_analysis(
         AnalysisResult::new(2, AnalysisType::Envelope, "ENV").with_waveforms(vec![
             WaveformData::new("|V(env)|", vec![0.0, 1.0], vec![1.0, 2.0], "#fa0")
                 .with_complex_components("V(env)", vec![1.0, 0.0], vec![0.0, 2.0]),
-            WaveformData::new(
-                "phase(V(env))",
-                vec![0.0, 1.0],
-                vec![0.0, 90.0],
-                "#fff",
-            )
-            .with_unit("°"),
+            WaveformData::new("phase(V(env))", vec![0.0, 1.0], vec![0.0, 90.0], "#fff")
+                .with_unit("°"),
         ]),
     );
 
