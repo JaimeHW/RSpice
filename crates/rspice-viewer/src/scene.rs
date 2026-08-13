@@ -126,6 +126,47 @@ impl Default for SceneCamera {
 
 const MAX_ZOOM: f32 = 64.0;
 
+impl SceneCamera {
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    /// Zoom around the pane center. Pointer-wheel zoom uses its own pivot in
+    /// [`scene_pane`], while these controls remain keyboard reachable.
+    pub fn zoom_by(&mut self, factor: f32) {
+        if !factor.is_finite() || factor <= 0.0 {
+            return;
+        }
+        let previous = self.zoom;
+        self.zoom = (self.zoom * factor).clamp(1.0, MAX_ZOOM);
+        self.offset *= self.zoom / previous;
+        if self.zoom <= 1.0 {
+            self.offset = Vec2::ZERO;
+        }
+    }
+}
+
+/// Keyboard-accessible camera controls shown above an interactive sheet.
+pub fn scene_toolbar(ui: &mut egui::Ui, camera: &mut SceneCamera) {
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .button("Fit")
+            .on_hover_text("Fit the sheet in the viewer")
+            .clicked()
+        {
+            camera.reset();
+        }
+        if ui.button("−").on_hover_text("Zoom out").clicked() {
+            camera.zoom_by(1.0 / 1.4);
+        }
+        if ui.button("+").on_hover_text("Zoom in").clicked() {
+            camera.zoom_by(1.4);
+        }
+        ui.monospace(format!("{:.0}%", camera.zoom * 100.0));
+        ui.weak("Drag to pan · wheel to zoom · double-click to fit");
+    });
+}
+
 /// Paint a scene into the given rect, honoring the camera. Returns the
 /// µm-per-point scale used, letting callers hit-test scene coordinates.
 pub fn paint_scene(
@@ -268,7 +309,7 @@ pub fn scene_pane(ui: &mut egui::Ui, scene: &Scene, camera: &mut SceneCamera) {
         camera.offset += response.drag_delta();
     }
     if response.double_clicked() {
-        *camera = SceneCamera::default();
+        camera.reset();
     }
     if response.hovered() {
         let scroll = ui.input(|input| input.smooth_scroll_delta.y);
@@ -338,5 +379,19 @@ mod tests {
             ]
         );
         assert_eq!(runs[1], vec![Pos2::new(3.0, 2.0), Pos2::new(3.0, 3.0)]);
+    }
+
+    #[test]
+    fn camera_controls_clamp_and_reset_without_losing_finite_state() {
+        let mut camera = SceneCamera::default();
+        camera.zoom_by(2.0);
+        assert_eq!(camera.zoom, 2.0);
+        camera.offset = Vec2::new(10.0, -4.0);
+        camera.zoom_by(0.01);
+        assert_eq!(camera, SceneCamera::default());
+        camera.zoom_by(1_000.0);
+        assert_eq!(camera.zoom, MAX_ZOOM);
+        camera.reset();
+        assert_eq!(camera, SceneCamera::default());
     }
 }

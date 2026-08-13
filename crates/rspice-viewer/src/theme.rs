@@ -37,16 +37,16 @@ pub const LIGHT: Palette = Palette {
     foreground: rgb(0x192026),
     secondary: rgb(0x5b6670),
     grid: rgb(0xb5bcc2),
-    accent: rgb(0xc48b00),
+    accent: rgb(0xb77900),
     warning: rgb(0xbe4336),
-    success: rgb(0x007d52),
+    success: rgb(0x087a58),
     traces: [
-        rgb(0x0d6b52),
-        rgb(0x1f5f8f),
-        rgb(0xa3572a),
+        rgb(0x087a58),
+        rgb(0x176a9b),
+        rgb(0xa34f22),
         rgb(0x6a4b8f),
         rgb(0x8f6a1f),
-        rgb(0x2a7d7d),
+        rgb(0x167676),
         rgb(0x9c3f68),
         rgb(0x4a6b2a),
     ],
@@ -56,19 +56,19 @@ pub const LIGHT: Palette = Palette {
 pub const DARK: Palette = Palette {
     foreground: rgb(0xd9e0dc),
     secondary: rgb(0x94a09b),
-    grid: rgb(0x333b37),
-    accent: rgb(0xd9a75a),
-    warning: rgb(0xe08585),
-    success: rgb(0x4cc19a),
+    grid: rgb(0x35413b),
+    accent: rgb(0xe2b45f),
+    warning: rgb(0xef8d82),
+    success: rgb(0x55d7a9),
     traces: [
-        rgb(0x4cc19a),
-        rgb(0x6aa8cf),
-        rgb(0xd99a6c),
-        rgb(0xa98fd0),
-        rgb(0xcfb46a),
-        rgb(0x6ac4c4),
-        rgb(0xd284a9),
-        rgb(0x96b96a),
+        rgb(0x55d7a9),
+        rgb(0x70b7e2),
+        rgb(0xe5a075),
+        rgb(0xb399dc),
+        rgb(0xdcc277),
+        rgb(0x72d0d0),
+        rgb(0xdd8db2),
+        rgb(0xa2c778),
     ],
 };
 
@@ -151,15 +151,24 @@ mod tests {
     fn palettes_match_the_published_page_styles_exactly() {
         let styles = rspice_publish::PAGE_STYLES;
         let dark_start = styles
-            .find("prefers-color-scheme:dark")
-            .expect("page styles must carry a dark scheme");
+            .find(":root[data-theme=\"dark\"]")
+            .expect("page styles must carry an explicit dark scheme");
         let (light_block, dark_block) = styles.split_at(dark_start);
-        let dark_end = dark_block
+        let declarations_start = dark_block
+            .find('{')
+            .expect("dark scheme must open its root rule");
+        let dark_end = dark_block[declarations_start..]
             .find('}')
-            .expect("dark scheme block must close its root rule");
+            .map(|end| declarations_start + end)
+            .expect("dark scheme must close its root rule");
 
         assert_eq!(LIGHT, palette_from(&css_variables(light_block)));
-        assert_eq!(DARK, palette_from(&css_variables(&dark_block[..dark_end])));
+        assert_eq!(
+            DARK,
+            palette_from(&css_variables(
+                &dark_block[declarations_start + 1..dark_end]
+            ))
+        );
     }
 
     #[test]

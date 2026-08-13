@@ -9,13 +9,22 @@ use crate::scene::SceneCamera;
 struct FigureApp {
     figure: LoadedFigure,
     camera: SceneCamera,
+    plot_view: crate::plot::PlotViewState,
 }
 
 impl eframe::App for FigureApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         match &self.figure.plot {
-            Some(plot) => crate::plot::plot_pane(ui, plot),
-            None => crate::scene::scene_pane(ui, &self.figure.scene, &mut self.camera),
+            Some(plot) => {
+                crate::plot::plot_toolbar(ui, plot, &mut self.plot_view);
+                ui.separator();
+                crate::plot::plot_pane(ui, plot, &mut self.plot_view);
+            }
+            None => {
+                crate::scene::scene_toolbar(ui, &mut self.camera);
+                ui.separator();
+                crate::scene::scene_pane(ui, &self.figure.scene, &mut self.camera);
+            }
         }
     }
 }
@@ -52,6 +61,7 @@ pub async fn hydrate_figure(
                 Ok(Box::new(FigureApp {
                     figure,
                     camera: SceneCamera::default(),
+                    plot_view: crate::plot::PlotViewState::default(),
                 }))
             }),
         )

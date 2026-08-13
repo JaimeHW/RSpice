@@ -99,9 +99,9 @@ fn render_tab(html: &mut String, id: &str, label: &str, count: Option<usize>) {
 }
 
 fn render_panel_header(html: &mut String, title: &str, description: &str) {
-    let _ = write!(
+    let _ = writeln!(
         html,
-        "<div class=\"panel-header\"><div><h2>{}</h2><p>{}</p></div></div>\n",
+        "<div class=\"panel-header\"><div><h2>{}</h2><p>{}</p></div></div>",
         escape_html(title),
         escape_html(description)
     );
@@ -254,9 +254,9 @@ pub fn document(
          <p class=\"eyebrow\">Immutable engineering publication</p>\n<h1>{title}</h1>\n"
     );
     if !snapshot.metadata.description.trim().is_empty() {
-        let _ = write!(
+        let _ = writeln!(
             html,
-            "<p class=\"description\">{}</p>\n",
+            "<p class=\"description\">{}</p>",
             escape_html(snapshot.metadata.description.trim())
         );
     }
@@ -397,9 +397,9 @@ pub fn document(
     html.push_str("<div class=\"section-stack\">\n");
     render_analyses(&mut html, snapshot);
     if let Some(netlist) = &snapshot.netlist {
-        let _ = write!(
+        let _ = writeln!(
             html,
-            "<section class=\"subsection\" aria-labelledby=\"netlist-heading\"><h3 id=\"netlist-heading\">Netlist</h3><details class=\"deck\"><summary>View the published SPICE deck</summary><pre class=\"deck\">{}</pre></details></section>\n",
+            "<section class=\"subsection\" aria-labelledby=\"netlist-heading\"><h3 id=\"netlist-heading\">Netlist</h3><details class=\"deck\"><summary>View the published SPICE deck</summary><pre class=\"deck\">{}</pre></details></section>",
             escape_html(&netlist.deck)
         );
     }

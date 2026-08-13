@@ -5,7 +5,9 @@
 //! engineering-notation formatting are unit-tested natively; the widget
 //! itself only maps data through those functions and paints.
 
-use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke as EguiStroke, Vec2};
+use egui::{
+    Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Shape, Stroke as EguiStroke, Vec2,
+};
 use rspice_publication_contract::AxisScale;
 
 use crate::payload::HydratedPlot;
@@ -181,6 +183,75 @@ pub fn nearest_sample(coordinates: &[f64], target: f64) -> Option<usize> {
     best.map(|(index, _)| index)
 }
 
+/// Reader-controlled state for one hydrated plot. The sealed data and axis
+/// semantics never change; this stores only presentation choices.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PlotViewState {
+    pub visible: Vec<bool>,
+    /// Current windows in plotting coordinates (`log10(value)` for log axes).
+    pub x_window: Option<(f64, f64)>,
+    pub y_window: Option<(f64, f64)>,
+    /// Locked cursor abscissas in plotting coordinates.
+    pub cursor_a: Option<f64>,
+    pub cursor_b: Option<f64>,
+}
+
+impl PlotViewState {
+    pub fn reconcile_series(&mut self, count: usize) {
+        self.visible.resize(count, true);
+        if self.visible.len() > count {
+            self.visible.truncate(count);
+        }
+    }
+
+    pub fn reset_view(&mut self) {
+        self.x_window = None;
+        self.y_window = None;
+    }
+
+    pub fn clear_cursors(&mut self) {
+        self.cursor_a = None;
+        self.cursor_b = None;
+    }
+}
+
+/// Zoom a finite plotting-coordinate range around a cursor coordinate.
+#[must_use]
+pub fn zoom_range(range: (f64, f64), pivot: f64, factor: f64) -> (f64, f64) {
+    let (low, high) = range;
+    if !(low.is_finite()
+        && high.is_finite()
+        && high > low
+        && pivot.is_finite()
+        && factor.is_finite()
+        && factor > 0.0)
+    {
+        return range;
+    }
+    let clamped = factor.clamp(0.001, 1_000.0);
+    (
+        pivot - (pivot - low) * clamped,
+        pivot + (high - pivot) * clamped,
+    )
+}
+
+/// Pan a plotting-coordinate range by a fraction of its span.
+#[must_use]
+pub fn pan_range(range: (f64, f64), fraction: f64) -> (f64, f64) {
+    if !fraction.is_finite() {
+        return range;
+    }
+    let shift = (range.1 - range.0) * fraction;
+    (range.0 + shift, range.1 + shift)
+}
+
+fn axis_value(scale: AxisScale, coordinate: f64) -> f64 {
+    match scale {
+        AxisScale::Linear => coordinate,
+        AxisScale::Logarithmic => 10f64.powf(coordinate),
+    }
+}
+
 /// Per-series plotting coordinates: abscissas and ordinates, `None` where a
 /// value cannot appear on the axis (non-finite, or non-positive on log).
 type SeriesCoordinates = (Vec<Option<f64>>, Vec<Option<f64>>);
@@ -190,15 +261,68 @@ const MARGIN_BOTTOM: f32 = 28.0;
 const MARGIN_TOP: f32 = 10.0;
 const MARGIN_RIGHT: f32 = 12.0;
 
+/// Compact controls kept inside the sealed viewer runtime. They operate on
+/// presentation state only: traces remain in the payload even when hidden.
+pub fn plot_toolbar(ui: &mut egui::Ui, plot: &HydratedPlot, state: &mut PlotViewState) {
+    state.reconcile_series(plot.series.len());
+    ui.horizontal_wrapped(|ui| {
+        ui.strong(format!("{} vs {}", plot.y_label, plot.x_label));
+        ui.separator();
+        if ui
+            .button("Fit")
+            .on_hover_text("Reset pan and zoom")
+            .clicked()
+        {
+            state.reset_view();
+        }
+        if (state.cursor_a.is_some() || state.cursor_b.is_some())
+            && ui
+                .button("Clear cursors")
+                .on_hover_text("Remove locked A/B cursors")
+                .clicked()
+        {
+            state.clear_cursors();
+        }
+        ui.separator();
+        for (index, series) in plot.series.iter().enumerate() {
+            let changed = ui
+                .checkbox(&mut state.visible[index], &series.label)
+                .on_hover_text("Show or hide this trace")
+                .changed();
+            if changed {
+                state.reset_view();
+            }
+        }
+        if let Some(cursor_a) = state.cursor_a {
+            ui.separator();
+            ui.monospace(format!(
+                "A {}",
+                engineering(axis_value(plot.x_scale, cursor_a))
+            ));
+        }
+        if let Some(cursor_b) = state.cursor_b {
+            ui.monospace(format!(
+                "B {}",
+                engineering(axis_value(plot.x_scale, cursor_b))
+            ));
+            if let Some(cursor_a) = state.cursor_a {
+                let delta = axis_value(plot.x_scale, cursor_b) - axis_value(plot.x_scale, cursor_a);
+                ui.monospace(format!("Δ {}", engineering(delta)));
+            }
+        }
+    });
+}
+
 /// The hydrated plot pane.
-pub fn plot_pane(ui: &mut egui::Ui, plot: &HydratedPlot) {
+pub fn plot_pane(ui: &mut egui::Ui, plot: &HydratedPlot, state: &mut PlotViewState) {
+    state.reconcile_series(plot.series.len());
     let palette = Palette::for_dark_mode(ui.visuals().dark_mode);
     let available = ui.available_size();
     let size = Vec2::new(
         available.x,
         (available.x * 0.55).clamp(180.0, available.y.max(180.0)),
     );
-    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
     let painter = ui.painter_at(rect);
 
     let frame = Rect::from_min_max(
@@ -229,23 +353,89 @@ pub fn plot_pane(ui: &mut egui::Ui, plot: &HydratedPlot) {
     let x_range = coordinate_range(
         series_coordinates
             .iter()
-            .flat_map(|(x, _)| x.iter().copied().flatten()),
+            .enumerate()
+            .filter(|(index, _)| state.visible[*index])
+            .flat_map(|(_, (x, _))| x.iter().copied().flatten()),
     );
     let y_range = coordinate_range(
         series_coordinates
             .iter()
-            .flat_map(|(_, y)| y.iter().copied().flatten()),
+            .enumerate()
+            .filter(|(index, _)| state.visible[*index])
+            .flat_map(|(_, (_, y))| y.iter().copied().flatten()),
     );
-    let (Some((x_low, x_high)), Some((y_low, y_high))) = (x_range, y_range) else {
+    let (Some(full_x), Some(full_y)) = (x_range, y_range) else {
         painter.text(
             frame.center(),
             Align2::CENTER_CENTER,
-            "no plottable samples",
+            if state.visible.iter().any(|visible| *visible) {
+                "no plottable samples"
+            } else {
+                "select a trace above"
+            },
             FontId::proportional(13.0),
             palette.secondary,
         );
         return;
     };
+
+    let mut view_x = state.x_window.unwrap_or(full_x);
+    let mut view_y = state.y_window.unwrap_or(full_y);
+    if response.double_clicked() {
+        state.reset_view();
+        view_x = full_x;
+        view_y = full_y;
+    } else {
+        if response.dragged_by(PointerButton::Primary) {
+            let delta = response.drag_delta();
+            if frame.width() > 0.0 && frame.height() > 0.0 {
+                view_x = pan_range(view_x, -f64::from(delta.x / frame.width()));
+                view_y = pan_range(view_y, f64::from(delta.y / frame.height()));
+                state.x_window = Some(view_x);
+                state.y_window = Some(view_y);
+            }
+        }
+        if response.hovered()
+            && let Some(pointer) = response
+                .hover_pos()
+                .filter(|pointer| frame.contains(*pointer))
+        {
+            let scroll = ui.input(|input| input.smooth_scroll_delta.y);
+            if scroll != 0.0 {
+                let x_fraction = f64::from((pointer.x - frame.min.x) / frame.width());
+                let y_fraction = f64::from((frame.max.y - pointer.y) / frame.height());
+                let x_pivot = view_x.0 + x_fraction * (view_x.1 - view_x.0);
+                let y_pivot = view_y.0 + y_fraction * (view_y.1 - view_y.0);
+                let factor = f64::from((-scroll * 0.0025).exp());
+                let next_x = zoom_range(view_x, x_pivot, factor);
+                let next_y = zoom_range(view_y, y_pivot, factor);
+                if next_x.1 - next_x.0 >= (full_x.1 - full_x.0) * 1e-9
+                    && next_y.1 - next_y.0 >= (full_y.1 - full_y.0) * 1e-9
+                {
+                    view_x = next_x;
+                    view_y = next_y;
+                    state.x_window = Some(view_x);
+                    state.y_window = Some(view_y);
+                }
+            }
+        }
+        if response.clicked_by(PointerButton::Primary)
+            && let Some(pointer) = response
+                .interact_pointer_pos()
+                .filter(|p| frame.contains(*p))
+        {
+            let coordinate = view_x.0
+                + f64::from((pointer.x - frame.min.x) / frame.width()) * (view_x.1 - view_x.0);
+            if ui.input(|input| input.modifiers.shift) {
+                state.cursor_b = Some(coordinate);
+            } else {
+                state.cursor_a = Some(coordinate);
+            }
+        }
+    }
+
+    let (x_low, x_high) = view_x;
+    let (y_low, y_high) = view_y;
 
     let to_screen = |x: f64, y: f64| -> Pos2 {
         Pos2::new(
@@ -306,7 +496,12 @@ pub fn plot_pane(ui: &mut egui::Ui, plot: &HydratedPlot) {
     );
 
     // Series polylines, broken at unplottable points.
-    for (series, (x_coords, y_coords)) in plot.series.iter().zip(&series_coordinates) {
+    for (index, (series, (x_coords, y_coords))) in
+        plot.series.iter().zip(&series_coordinates).enumerate()
+    {
+        if !state.visible[index] {
+            continue;
+        }
         let color = palette.traces[usize::from(series.series_index)];
         let stroke = EguiStroke::new(1.5, color);
         let mut run: Vec<Pos2> = Vec::new();
@@ -326,6 +521,26 @@ pub fn plot_pane(ui: &mut egui::Ui, plot: &HydratedPlot) {
         }
     }
 
+    // Locked A/B cursors survive pointer movement. A normal click places A;
+    // Shift-click places B, and the toolbar reports their exact delta.
+    for (label, cursor) in [("A", state.cursor_a), ("B", state.cursor_b)] {
+        let Some(cursor) = cursor.filter(|cursor| *cursor >= x_low && *cursor <= x_high) else {
+            continue;
+        };
+        let x = to_screen(cursor, y_low).x;
+        painter.add(Shape::line_segment(
+            [Pos2::new(x, frame.min.y), Pos2::new(x, frame.max.y)],
+            EguiStroke::new(1.0, palette.accent),
+        ));
+        painter.text(
+            Pos2::new(x + 3.0, frame.min.y + 3.0),
+            Align2::LEFT_TOP,
+            label,
+            FontId::monospace(10.0),
+            palette.accent,
+        );
+    }
+
     // Cursor readout: nearest abscissa sample per series.
     if let Some(pointer) = response.hover_pos()
         && frame.contains(pointer)
@@ -340,7 +555,12 @@ pub fn plot_pane(ui: &mut egui::Ui, plot: &HydratedPlot) {
             EguiStroke::new(0.75, palette.accent),
         ));
         let mut lines: Vec<(Color32, String)> = Vec::new();
-        for (series, (x_coords, y_coords)) in plot.series.iter().zip(&series_coordinates) {
+        for (index, (series, (x_coords, y_coords))) in
+            plot.series.iter().zip(&series_coordinates).enumerate()
+        {
+            if !state.visible[index] {
+                continue;
+            }
             let flattened: Vec<f64> = x_coords
                 .iter()
                 .map(|value| value.unwrap_or(f64::NAN))
@@ -447,5 +667,33 @@ mod tests {
     fn nearest_sample_skips_unplottable_points() {
         let index = nearest_sample(&[f64::NAN, 1.0, 2.0], 1.9).expect("nearest");
         assert_eq!(index, 2);
+    }
+
+    #[test]
+    fn zoom_keeps_the_cursor_coordinate_fixed() {
+        let zoomed = zoom_range((0.0, 10.0), 2.0, 0.5);
+        assert_eq!(zoomed, (1.0, 6.0));
+        let old_fraction = (2.0 - 0.0) / 10.0;
+        let new_fraction = (2.0 - zoomed.0) / (zoomed.1 - zoomed.0);
+        assert!((old_fraction - new_fraction).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn pan_moves_a_window_by_its_own_span() {
+        assert_eq!(pan_range((10.0, 20.0), -0.25), (7.5, 17.5));
+    }
+
+    #[test]
+    fn view_state_reconciles_trace_visibility_and_resets_presentation_only() {
+        let mut state = PlotViewState::default();
+        state.reconcile_series(3);
+        assert_eq!(state.visible, vec![true, true, true]);
+        state.visible[1] = false;
+        state.x_window = Some((1.0, 2.0));
+        state.cursor_a = Some(1.5);
+        state.reset_view();
+        assert_eq!(state.visible, vec![true, false, true]);
+        assert_eq!(state.x_window, None);
+        assert_eq!(state.cursor_a, Some(1.5));
     }
 }
