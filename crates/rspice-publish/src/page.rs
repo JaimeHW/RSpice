@@ -349,7 +349,7 @@ pub fn document(
          </header>\n"
     );
 
-    html.push_str("<div class=\"tabbar-wrap\"><nav class=\"tabbar\" aria-label=\"Circuit publication sections\">\n");
+    html.push_str("<noscript><p class=\"noscript-note\">All published content is available below. Interactive views, navigation, sharing, and theme controls require JavaScript.</p></noscript>\n<div class=\"publication-workspace\">\n<div class=\"tabbar-wrap\"><nav class=\"tabbar\" aria-label=\"Circuit publication sections\">\n");
     if snapshot.schematic.is_some() {
         render_tab(&mut html, "schematic", "Circuit", Some(schematic_count));
     }
@@ -370,7 +370,7 @@ pub fn document(
     }
     let _ = write!(
         html,
-        "</nav></div>\n<noscript><p class=\"noscript-note\">All published content is available below. Interactive views, tabs, sharing, and theme controls require JavaScript.</p></noscript>\n<main class=\"content\" id=\"publication-content\" data-default-panel=\"{}\">\n",
+        "</nav></div>\n<main class=\"content\" id=\"publication-content\" data-default-panel=\"{}\">\n",
         section_id(default_section)
     );
 
@@ -547,7 +547,7 @@ pub fn document(
          <div class=\"surface side-card\" data-cloud-artifacts-wrap hidden><span class=\"summary-label\">Original cloud artifacts</span><ul class=\"cloud-artifact-list\" data-cloud-artifacts></ul></div>\n\
          </div></section>\n",
     );
-    html.push_str("</div></section>\n</main>\n");
+    html.push_str("</div></section>\n</main>\n</div>\n");
 
     if let Some(hydration) = hydration {
         let _ = write!(

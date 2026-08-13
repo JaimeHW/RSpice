@@ -142,7 +142,10 @@ a { color: var(--brand-strong); }
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  border-bottom: 1px solid var(--border-strong);
+  margin: 8px -10px 0;
+  padding: 0 10px;
+  border-radius: 5px;
+  background: var(--surface);
 }
 .brand { display: flex; align-items: center; gap: .6rem; color: var(--text); text-decoration: none; font-weight: 720; letter-spacing: -.01em; }
 .brand-mark { display: grid; width: 24px; height: 24px; place-items: center; border: 1px solid var(--brand); border-radius: 3px; background: var(--brand); color: var(--accent-ink); font: 800 11px/1 "IBM Plex Mono", ui-monospace, Consolas, monospace; }
@@ -173,24 +176,24 @@ a { color: var(--brand-strong); }
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas: "title byline" "description byline";
   gap: 0 1.5rem;
-  padding: 13px 0 12px;
-  border-bottom: 1px solid var(--border-strong);
+  padding: 15px 4px 13px;
 }
 h1 { grid-area: title; max-width: 30ch; margin: 0; font-size: clamp(1.65rem, 2.6vw, 2.15rem); line-height: 1.04; letter-spacing: -.035em; text-wrap: balance; }
 .description { grid-area: description; max-width: 82ch; margin: .5rem 0 0; padding: 0; border: 0; color: var(--muted); font-size: .82rem; line-height: 1.45; }
 .byline { grid-area: byline; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .2rem .75rem; align-self: center; margin: 0; padding: 0; color: var(--muted); font: 620 .59rem/1.35 ui-monospace, Consolas, monospace; }
 .byline span { display: block; overflow-wrap: anywhere; }
 
-.tabbar-wrap { position: sticky; z-index: 15; top: 0; margin: 0; padding: 7px 0; border-bottom: var(--rule); background: var(--paper); }
-.tabbar { display: flex; width: fit-content; max-width: 100%; gap: 2px; overflow-x: auto; padding: 3px; border: var(--rule); border-radius: 4px; background: var(--surface); scrollbar-width: none; }
+.publication-workspace { display: grid; grid-template-columns: 142px minmax(0, 1fr); gap: 14px; align-items: start; padding-top: 4px; }
+.tabbar-wrap { position: sticky; z-index: 15; top: 12px; min-width: 0; margin: 0; padding: 0; background: transparent; }
+.tabbar { display: grid; width: 100%; gap: 3px; overflow: hidden; padding: 5px; border-radius: 6px; background: var(--surface); scrollbar-width: none; }
 .tabbar::-webkit-scrollbar { display: none; }
-.tabbar a { position: relative; flex: 0 0 auto; min-height: 30px; display: inline-flex; align-items: center; gap: .45rem; padding: .35rem .8rem; border: 1px solid transparent; border-radius: 3px; color: var(--muted); font: 650 .68rem/1.2 "IBM Plex Sans", "Segoe UI", sans-serif; letter-spacing: .035em; text-decoration: none; text-transform: uppercase; }
-.tabbar a:hover { border-color: var(--border); background: var(--surface-strong); color: var(--text); }
-.tabbar a[aria-current="page"] { border-color: var(--border-strong); background: var(--paper); box-shadow: inset 0 2px 0 var(--brand); color: var(--text); }
+.tabbar a { position: relative; min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: .55rem; padding: .48rem .65rem; border-radius: 3px; color: var(--muted); font: 600 .77rem/1.2 "IBM Plex Sans", "Segoe UI", sans-serif; letter-spacing: .01em; text-decoration: none; }
+.tabbar a:hover { background: var(--surface-strong); color: var(--text); }
+.tabbar a[aria-current="page"] { background: var(--paper); box-shadow: inset 3px 0 0 var(--brand); color: var(--text); }
 .tab-count { color: var(--muted); font: 600 .63rem/1 "IBM Plex Mono", ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
 .tabbar a[aria-current="page"] .tab-count { color: var(--brand); }
 
-.content { min-width: 0; padding-top: 10px; }
+.content { min-width: 0; padding: 0; }
 .js-ready .panel:not([data-active]) { display: none; }
 .panel { min-width: 0; scroll-margin-top: 54px; }
 .panel:focus-visible { outline: 0; }
@@ -292,6 +295,15 @@ svg .t-foreground { fill: var(--foreground); } svg .t-secondary { fill: var(--se
   .side-card, .cloud-context-grid .side-card { padding-inline: 0; border-width: 1px 0 0; }
 }
 
+@media (max-width: 760px) {
+  .publication-workspace { display: block; padding-top: 2px; }
+  .tabbar-wrap { position: sticky; top: 0; margin: 0 -4px; padding: 4px; background: var(--paper); }
+  .tabbar { display: flex; width: 100%; gap: 2px; overflow-x: auto; padding: 4px; }
+  .tabbar a { flex: 0 0 auto; min-height: 34px; justify-content: center; padding-inline: .75rem; }
+  .tabbar a[aria-current="page"] { box-shadow: inset 0 -3px 0 var(--brand); }
+  .content { padding-top: 6px; }
+}
+
 @media (max-width: 600px) {
   .shell { width: 100%; margin: 0; padding-inline: 14px; border: 0; }
   .publication-nav { min-height: 44px; }
@@ -306,12 +318,12 @@ svg .t-foreground { fill: var(--foreground); } svg .t-secondary { fill: var(--se
 
 html[data-rspice-embed] .publication-nav,
 html[data-rspice-embed] .publication-header,
-html[data-rspice-embed] .summary-grid,
 html[data-rspice-embed] .publication-footer,
 html[data-rspice-embed] .toast { display: none !important; }
 html[data-rspice-embed] .shell { width: 100%; padding: 0 12px 12px; border: 0; }
-html[data-rspice-embed] .tabbar-wrap { top: 0; }
-html[data-rspice-embed] .content { padding-top: 16px; }
+html[data-rspice-embed] .publication-workspace { display: block; padding: 0; }
+html[data-rspice-embed] .tabbar-wrap { display: none !important; }
+html[data-rspice-embed] .content { padding: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
@@ -322,6 +334,7 @@ html[data-rspice-embed] .content { padding-top: 16px; }
   body { background: #fff; color: #000; font-size: 10pt; }
   .shell { width: 100%; padding: 0; border: 0; }
   .publication-nav, .tabbar-wrap, .nav-actions, .figure-actions, .toast, .skip-link { display: none !important; }
+  .publication-workspace { display: block; padding: 0; }
   .publication-header { display: block; padding: 0 0 18pt; }
   .description, .byline { margin-top: 8pt; padding: 0; border: 0; }
   h1 { font-size: 26pt; }
