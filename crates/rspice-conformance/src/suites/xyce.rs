@@ -2050,6 +2050,64 @@ const XYCE_BUG1398_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
     ),
 ];
 
+// BUG_271_SON's active Release-7.10 shell wrapper is a success-only oracle:
+// it runs the exact tab-comment RLC/PULSE deck and passes iff Xyce exits zero.
+const XYCE_BUG271_CONTRACT: &str = "bug271_tab_comment_rlc_success_wrapper";
+const XYCE_BUG271_PATH: &str = "Netlists/Certification_Tests/BUG_271_SON/bug_271.cir";
+const XYCE_BUG271_RECORD: &str = "netlists/certification_tests/bug_271_son/bug_271.cir";
+const XYCE_BUG271_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG271_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG271_HISTORICAL_RECORD_COUNT: usize = 6;
+const XYCE_BUG271_HISTORICAL_RECORD_BYTES: usize = 1_442;
+const XYCE_BUG271_HISTORICAL_RECORDS_SHA256: &str =
+    "aed635c95ee18fb7bc07e3013023a788813ae20ca24f1fd365ecdf9b48d2a5bb";
+const XYCE_BUG271_HISTORICAL_RECORDS_BLAKE3: &str =
+    "f171727c2029c581207c82b383d56714ffd2814e4c78c2a1f616bd42aaab0663";
+const XYCE_BUG271_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 6] = [
+    (
+        "Netlists/Certification_Tests/BUG_271_SON/CMakeLists.txt",
+        1_568,
+        "89e6533aba1c92a29ab82655de716f35b61012aeb5210ef24aa308ff6514aa12",
+        "0dc0df79c99d2478925dd54d3882319c199f4cb90f47123db6275984fb27f2b8",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_271_SON/Manifest.txt",
+        32,
+        "9e9c38f0b58689bf011e086f46458b26e3b1f2306dea16cfd7123c3e5a26824a",
+        "d708db8cedaf97833c8bb9a6ed4796721f6d0bc49f2fe84127d81fb589824781",
+    ),
+    (
+        XYCE_BUG271_PATH,
+        328,
+        "81d71de5399ec46dbcac067d5f48e6f8d61423b0fe5866dc18bb97073d1cea29",
+        "2d718077d38a66e04d8b234e91c1c4ec480cbeb4500b45f498b76249635d5f0f",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_271_SON/bug_271.cir.sh",
+        1_030,
+        "477003d4bbdad6cc1abff98bd569cb73e1cd49f938cb9d55120b0a9dd11b9cbf",
+        "8d9b010dea1a98c1249df35fdfa5a86aa97bd085723b7f4737ba0e1394d98399",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_271_SON/tags",
+        27,
+        "4b8ea8000b121cc87df41e65f9ac43dece3eab840c84e864357b3c1b9021cdcb",
+        "c3661f9aadf0946ebc823f672267a34f3f9485b8a002ff0a2ff956cf0c9dc430",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG271_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 1] = [(
+    "bug_271.cir",
+    328,
+    "81d71de5399ec46dbcac067d5f48e6f8d61423b0fe5866dc18bb97073d1cea29",
+    "2d718077d38a66e04d8b234e91c1c4ec480cbeb4500b45f498b76249635d5f0f",
+)];
+
 // BUG_307's serial shell wrapper proves that an unused sibling subcircuit's
 // same-named local resistor model cannot escape its lexical scope. It runs the
 // collision owner followed by the active-only control and raw-diffs their
@@ -10460,6 +10518,7 @@ mod contracts_bug1025;
 mod contracts_bug1398;
 mod contracts_bug159;
 mod contracts_bug267;
+mod contracts_bug271;
 mod contracts_bug28;
 mod contracts_bug302;
 mod contracts_bug307;

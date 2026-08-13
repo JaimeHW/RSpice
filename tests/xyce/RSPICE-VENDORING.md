@@ -91,6 +91,14 @@ proves the model `L` multipliers plus `TC1`/`TC2` at DEVICE TEMP=37 resolve to
 the control's exact inductances before comparing their transient tables. No
 numerical gold is invented.
 
+Certification BUG 271 preserves an active Release-7.10 success-only wrapper
+whose deck proves that tab-prefixed prose and `*` lines remain comments around
+an otherwise ordinary RLC/PULSE transient. RSpice pins the exact retained
+source and removed wrapper provenance, validates the full typed circuit and
+print expression, and requires a finite nontrivial native observation under a
+shared deadline. The historical wrapper did not invoke a comparator, so no
+numerical gold is invented.
+
 The serial Certification BUG 307 A/B wrapper is reconstructed as an exact
 subcircuit-model-scope relation. RSpice runs the collision owner followed by
 the active-only control, proves that both select the qualified

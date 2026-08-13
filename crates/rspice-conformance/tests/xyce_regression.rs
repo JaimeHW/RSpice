@@ -9625,6 +9625,23 @@ fn test_xyce_bug1398_inductor_model_equivalence_wrapper() {
 }
 
 #[test]
+fn test_xyce_bug271_tab_comment_rlc_success_wrapper() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_271_SON/bug_271.cir";
+    assert!(runner.requires_upstream_wrapper(relative));
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported && !result.upstream_excluded,
+        "BUG271 should execute its exact tab-comment RLC success contract, got {result:?}"
+    );
+    assert_eq!(result.contract, "bug271_tab_comment_rlc_success_wrapper");
+    assert_eq!(result.upstream_exclusion_source, None);
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_bug48_level54_native_bsim4_success_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

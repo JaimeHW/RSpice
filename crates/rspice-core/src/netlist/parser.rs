@@ -415,11 +415,13 @@ fn parse_netlist_impl(
     if original_lines.is_empty() {
         return Ok(Netlist::default());
     }
-    let allow_non_semicolon_comments = options.expression_dialect != ExpressionDialect::Xyce;
+    let xyce_syntax = options.expression_dialect == ExpressionDialect::Xyce;
+    let allow_non_semicolon_comments = !xyce_syntax;
     let preprocess = prescan_root_preprocess_with_dialect(
         &original_lines,
         source_schedule.as_ref(),
         allow_non_semicolon_comments,
+        xyce_syntax,
         abort,
     )?;
     let transformed_input = apply_root_preprocessing(
@@ -428,6 +430,7 @@ fn parse_netlist_impl(
         source_schedule.as_ref(),
         preprocess.replace_ground == Some(true),
         allow_non_semicolon_comments,
+        xyce_syntax,
         abort,
     )?;
     let parse_input = transformed_input.as_str();
@@ -468,7 +471,8 @@ fn parse_netlist_impl(
     // Seed the statistical expression functions before any parameter
     // evaluation so the deck behaves identically regardless of where the
     // `.options seed=` line appears.
-    if let Some(seed) = prescan_random_seed_with_abort(&lines, allow_non_semicolon_comments, abort)?
+    if let Some(seed) =
+        prescan_random_seed_with_abort(&lines, allow_non_semicolon_comments, xyce_syntax, abort)?
     {
         state.params.set_random_seed(seed);
         log::info!("statistical expression functions seeded with {seed} (.options seed)");
@@ -477,6 +481,7 @@ fn parse_netlist_impl(
         &lines,
         &mut state,
         allow_non_semicolon_comments,
+        xyce_syntax,
         abort,
     )?;
 
@@ -523,6 +528,10 @@ fn parse_netlist_impl(
             .and_then(|schedule| schedule.origin(zero_based_line))
             .cloned()
             .unwrap_or_else(|| NetlistSourceLocation::in_memory(line_num));
+
+        if xyce_syntax && xyce_physical_line_is_comment(line) {
+            continue;
+        }
 
         // Strip inline comments (common SPICE syntax), then trim.
         // We intentionally keep this simple and treat these markers as comment
@@ -730,6 +739,93 @@ fn parse_netlist_impl(
     )
 }
 
+/// Xyce treats a new physical card that starts with horizontal whitespace as
+/// a comment. Its reader has one deliberate exception: one or more leading
+/// spaces may precede the `+` that continues the previous logical card. A tab
+/// in column one always starts a comment, including a tab followed by `+`.
+fn xyce_physical_line_is_comment(line: &str) -> bool {
+    if line.starts_with('\t') {
+        return true;
+    }
+    let Some(after_first_space) = line.strip_prefix(' ') else {
+        return false;
+    };
+    !after_first_space.trim_start_matches(' ').starts_with('+')
+}
+
+#[cfg(test)]
+mod xyce_physical_comment_tests {
+    use super::NetlistParseOptions;
+    use crate::config::ExpressionDialect;
+    use crate::netlist::Netlist;
+
+    fn options(dialect: ExpressionDialect) -> NetlistParseOptions {
+        NetlistParseOptions {
+            expression_dialect: dialect,
+            ..NetlistParseOptions::default()
+        }
+    }
+
+    #[test]
+    fn tab_prefixed_prose_and_controls_are_inert_in_xyce() {
+        let source = concat!(
+            "tab comments\n",
+            ".PARAM P=1\n",
+            "  + Q=2\n",
+            "\t+ TAB_CONTINUATION=3\n",
+            "\tNote: this prose is a physical comment.\n",
+            "\t.OPTIONS TEMP=99 SEED=17\n",
+            " R_SKIPPED 9 0 9\n",
+            "R1 1 0 {P+Q}\n",
+            "C1 1 0 1p\n",
+            "L1 1 2 1u\n",
+            "V1 2 0 PULSE(0 1 0 0 0 1 2)\n",
+            ".TRAN 0.01 1 0\n",
+            "\tNote: output prose remains a comment too.\n",
+            ".PRINT TRAN V(1) {I(V1)-1}\n",
+            "\t* An indented star record is also inert.\n",
+            ".END\n",
+        );
+        let netlist = Netlist::parse_with_options(source, options(ExpressionDialect::Xyce))
+            .expect("Xyce physical comments must not enter logical-card parsing");
+
+        assert_eq!(
+            netlist
+                .elements
+                .iter()
+                .map(|element| element.name.as_str())
+                .collect::<Vec<_>>(),
+            ["R1", "C1", "L1", "V1"]
+        );
+        assert_eq!(netlist.params.get("P"), Some(1.0));
+        assert_eq!(netlist.params.get("Q"), Some(2.0));
+        assert_eq!(netlist.params.get("TAB_CONTINUATION"), None);
+        assert_eq!(netlist.options.temp, None);
+        assert_eq!(netlist.analyses.len(), 1);
+        assert_eq!(netlist.output_requests.len(), 1);
+    }
+
+    #[test]
+    fn leading_space_cards_remain_active_outside_xyce() {
+        let source = "dialect indentation\n R1 1 0 1\nR2 2 0 2\n.END\n";
+        let xyce = Netlist::parse_with_options(source, options(ExpressionDialect::Xyce))
+            .expect("Xyce treats the indented physical card as a comment");
+        assert_eq!(xyce.elements.len(), 1);
+        assert_eq!(xyce.elements[0].name, "R2");
+
+        let ngspice = Netlist::parse_with_options(source, options(ExpressionDialect::Ngspice))
+            .expect("non-Xyce dialects retain their whitespace-insensitive card parsing");
+        assert_eq!(
+            ngspice
+                .elements
+                .iter()
+                .map(|element| element.name.as_str())
+                .collect::<Vec<_>>(),
+            ["R1", "R2"]
+        );
+    }
+}
+
 fn root_physical_origin(
     source_schedule: Option<&SourceEventSchedule>,
     expanded_line_count: usize,
@@ -755,6 +851,7 @@ fn apply_root_preprocessing(
     source_schedule: Option<&SourceEventSchedule>,
     replace_ground: bool,
     allow_non_semicolon_comments: bool,
+    xyce_syntax: bool,
     abort: &dyn AbortSignal,
 ) -> Result<String, ParseWithAbortError> {
     let root_path = source_schedule
@@ -821,7 +918,9 @@ fn apply_root_preprocessing(
             allow_non_semicolon_comments,
         )
         .trim();
-        let is_comment_or_blank = stripped.is_empty() || stripped.starts_with('*');
+        let is_comment_or_blank = stripped.is_empty()
+            || stripped.starts_with('*')
+            || (xyce_syntax && xyce_physical_line_is_comment(line));
         let is_continuation = !is_comment_or_blank && stripped.starts_with('+');
         let is_indented_preprocess_comment = line.starts_with([' ', '\t'])
             && !is_continuation
@@ -1025,8 +1124,9 @@ mod replaceground_lexical_tests {
                 "protected directive\n.PREPROCESS REPLACEGROUND TRUE\n{directive}\n+ GND GROUND\n"
             );
             let lines = source.lines().collect::<Vec<_>>();
-            let transformed = apply_root_preprocessing(&source, &lines, None, true, true, &NoAbort)
-                .expect("NoAbort cannot cancel preprocessing");
+            let transformed =
+                apply_root_preprocessing(&source, &lines, None, true, true, true, &NoAbort)
+                    .expect("NoAbort cannot cancel preprocessing");
             assert!(
                 transformed.contains("+ GND GROUND"),
                 "directive continuation changed for {directive}: {transformed}"
@@ -1772,6 +1872,7 @@ fn prescan_root_preprocess_with_dialect(
     lines: &[&str],
     source_schedule: Option<&SourceEventSchedule>,
     allow_non_semicolon_comments: bool,
+    xyce_syntax: bool,
     abort: &dyn AbortSignal,
 ) -> Result<RootPreprocessPolicy, ParseWithAbortError> {
     let root_path = source_schedule
@@ -1814,6 +1915,9 @@ fn prescan_root_preprocess_with_dialect(
             line,
             allow_non_semicolon_comments,
         );
+        if xyce_syntax && xyce_physical_line_is_comment(without_comment) {
+            continue;
+        }
         let first_nonblank = without_comment.trim_start_matches([' ', '\t']);
         if first_nonblank.is_empty() || first_nonblank.starts_with('*') {
             continue;
@@ -3554,6 +3658,7 @@ fn prescan_temperature_options_with_abort(
     lines: &[&str],
     state: &mut ParseState,
     allow_non_semicolon_comments: bool,
+    xyce_syntax: bool,
     abort: &dyn AbortSignal,
 ) -> Result<(), ParseWithAbortError> {
     let mut continuation = String::new();
@@ -3565,6 +3670,9 @@ fn prescan_temperature_options_with_abort(
         poll_parse_abort(abort, index)?;
         poll_parse_text(abort, line)?;
         line_num += 1;
+        if xyce_syntax && xyce_physical_line_is_comment(line) {
+            continue;
+        }
         let stripped = strip_inline_semicolon_comment_with_non_semicolon_comments(
             line,
             allow_non_semicolon_comments,
@@ -3710,6 +3818,7 @@ fn process_line_gated(
 fn prescan_random_seed_with_abort(
     lines: &[&str],
     allow_non_semicolon_comments: bool,
+    xyce_syntax: bool,
     abort: &dyn AbortSignal,
 ) -> Result<Option<u64>, ParseWithAbortError> {
     let mut seed = None;
@@ -3720,6 +3829,9 @@ fn prescan_random_seed_with_abort(
         poll_parse_abort(abort, index)?;
         poll_parse_text(abort, line)?;
         line_num += 1;
+        if xyce_syntax && xyce_physical_line_is_comment(line) {
+            continue;
+        }
         let stripped = strip_inline_semicolon_comment_with_non_semicolon_comments(
             line,
             allow_non_semicolon_comments,
