@@ -42,6 +42,7 @@ impl AppState {
         self.workspace.netlist_source = None;
         self.workspace.netlist_document = None;
         self.workspace.netlist_descriptor = None;
+        self.workspace.retained_netlist_decks.clear();
         self.workspace.netlist_source_path = None;
         self.workspace.netlist_source_dirty = false;
         self.simulation = crate::state::SimulationState::default();

@@ -125,14 +125,14 @@ pub const ANALYSIS_AVAILABILITY_ROWS: [AnalysisAvailabilityRow; 34] = [
         id: "pac",
         code: "PAC",
         title: "Periodic AC",
-        intended_tier: AnalysisIntendedTier::PreviewNonSignOff,
+        intended_tier: AnalysisIntendedTier::ReleaseTarget,
         analysis_kind: Some(AnalysisKind::Pac),
     },
     AnalysisAvailabilityRow {
         id: "pnoise",
         code: "PNOISE",
         title: "Periodic noise",
-        intended_tier: AnalysisIntendedTier::PreviewNonSignOff,
+        intended_tier: AnalysisIntendedTier::ReleaseTarget,
         analysis_kind: Some(AnalysisKind::Pnoise),
     },
     AnalysisAvailabilityRow {

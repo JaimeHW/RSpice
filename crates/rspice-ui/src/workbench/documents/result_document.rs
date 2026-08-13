@@ -5049,9 +5049,16 @@ mod availability_tests {
     /// without ever painting them, and a value that escapes an axis mapping
     /// does not fail an assert — it becomes a vertex at infinity.
     #[test]
-    fn every_sheet_draws_the_evidence_it_claims() {
+    fn every_available_sheet_draws_the_evidence_it_claims() {
         for viewer in ResultViewer::every() {
             let mut app = app_showing(viewer);
+            if viewer == ResultViewer::Smith {
+                assert!(
+                    !viewer_availability(&app.state, viewer).available,
+                    "Smith must remain unavailable until retained results carry reference impedance"
+                );
+                continue;
+            }
             assert!(
                 viewer_availability(&app.state, viewer).available,
                 "the {viewer:?} fixture does not satisfy the sheet's own contract: {}",

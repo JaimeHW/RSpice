@@ -1229,11 +1229,10 @@ pub(super) fn compile_project_bundle_source(
     let compiler = VerilogACompiler::new(resolved.profile.compiler_options());
     let qualifications = resolved.profile.qualification_options();
     let source = bundle.root().content();
-    let selected_module =
-        selected_module.or_else(|| match resolved.profile.entry_modules.as_slice() {
-            [module] => Some(module.as_str()),
-            _ => None,
-        });
+    let selected_module = selected_module.or(match resolved.profile.entry_modules.as_slice() {
+        [module] => Some(module.as_str()),
+        _ => None,
+    });
     let has_source_dependencies = bundle.files().iter().any(|file| {
         bundle.role_for_path(file.logical_path()) != Some(ProjectSourceRole::VerilogABuildProfile)
     });

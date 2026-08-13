@@ -575,11 +575,28 @@ mod tests {
         assert_eq!(toolbar::CODE_TOOLBAR_GAP, 5.0);
         assert_eq!(toolbar::CODE_TOOLBAR_ACTION_GUTTER, 12.0);
         assert_eq!(toolbar::CODE_TOOLBAR_COMPACT_BREAKPOINT, 720.0);
+        assert_eq!(toolbar::CODE_TOOLBAR_TABLET_VIEWPORT_BREAKPOINT, 1024.0);
+        assert_eq!(toolbar::CODE_TOOLBAR_FULL_STATUS_MIN_WIDTH, 320.0);
         assert_eq!(toolbar::PHONE_BREAKPOINT, 560.0);
         assert_eq!(toolbar::PHONE_PRIMARY_WIDTH, 154.0);
-        assert_eq!(toolbar::PHONE_ACTION_WIDTH, 250.0);
+        assert_eq!(toolbar::CODE_TOOLBAR_ICON_WIDTH, 28.0);
+        assert_eq!(toolbar::PHONE_ACTION_WIDTH, 283.0);
+        assert_eq!(toolbar::compact_action_width(false, false), 283.0);
+        assert_eq!(toolbar::compact_action_width(true, true), 316.0);
+        assert_eq!(toolbar::compact_action_width(true, false), 349.0);
+        assert_eq!(toolbar::code_toolbar_visible_width(1024.0, 745.0), 745.0);
+        assert_eq!(toolbar::code_toolbar_visible_width(700.0, 745.0), 700.0);
         assert!(toolbar::code_toolbar_compact(607.0));
         assert!(!toolbar::code_toolbar_compact(721.0));
+        assert!(
+            toolbar::code_toolbar_prefers_compact(1024.0, 744.0, 405.0),
+            "tablet viewport must retain the compact projection"
+        );
+        assert!(
+            toolbar::code_toolbar_prefers_compact(1280.0, 744.0, 405.0),
+            "dock collapse must not re-enable a crowded full action set"
+        );
+        assert!(!toolbar::code_toolbar_prefers_compact(1280.0, 800.0, 405.0));
         assert!(!toolbar::toolbar_status_visible(
             true,
             DocumentStatusTone::Warning

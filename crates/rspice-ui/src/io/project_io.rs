@@ -1586,6 +1586,7 @@ pub(crate) fn load_project_text(
         }
     };
     let project_id = project.workspace.project.id();
+    project.workspace.migrate_owned_netlist_deck_ids();
     if let Some(context) = &mut project.execution_context {
         context.migrate_to_current(project_id).map_err(|error| {
             ProjectIoError::InvalidData(format!("execution context migration failed: {error}"))

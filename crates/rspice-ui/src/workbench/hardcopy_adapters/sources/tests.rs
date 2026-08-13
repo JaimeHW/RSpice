@@ -1843,18 +1843,22 @@ fn nyquist_and_smith_require_active_retained_complex_samples() {
                 .collect::<Vec<_>>(),
         ),
     ]);
-    for viewer in [ResultViewer::Nyquist, ResultViewer::Smith] {
-        let state = quick_view_state(complex.clone(), viewer);
-        let resolved = resolve_quick_view(&state).unwrap();
-        let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
-            panic!("expected complex plot")
-        };
-        assert_eq!(plot.viewer, viewer);
-        assert_eq!(
-            plot.traces[0].source_samples[1],
-            ((1.0f64 / 16.0).to_bits(), (-1.0f64 / 32.0).to_bits())
-        );
-    }
+    let state = quick_view_state(complex.clone(), ResultViewer::Nyquist);
+    let resolved = resolve_quick_view(&state).unwrap();
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected complex plot")
+    };
+    assert_eq!(plot.viewer, ResultViewer::Nyquist);
+    assert_eq!(
+        plot.traces[0].source_samples[1],
+        ((1.0f64 / 16.0).to_bits(), (-1.0f64 / 32.0).to_bits())
+    );
+
+    let smith = quick_view_state(complex, ResultViewer::Smith);
+    assert!(matches!(
+        resolve_quick_view(&smith),
+        Err(HardcopySourceError::UnretainedResult(_))
+    ));
 }
 
 #[test]

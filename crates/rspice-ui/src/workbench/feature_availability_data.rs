@@ -79,12 +79,12 @@ pub const PLATFORM_AVAILABILITY_ROWS: [PlatformAvailabilityRow; 4] = [
     },
     PlatformAvailabilityRow {
         id: "browser",
-        label: "Desktop or mobile browser",
+        label: "Supported browser (desktop and tablet)",
         capability_mode_summary: "viewport: adaptive \u{00b7} pointer: full \u{00b7} keyboard: adaptive \u{00b7} stylus: adaptive \u{00b7} renderer: adaptive \u{00b7} storage: adaptive \u{00b7} filesystem: adaptive \u{00b7} network: adaptive \u{00b7} lifecycle: adaptive \u{00b7} windowing: adaptive \u{00b7} printing: adaptive \u{00b7} assistive-technology: adaptive",
         fixture_state: ReadinessState::Stale,
         fixture_qualification: "unqualified-design-target",
         qualification_boundary: "The browser branch intentionally represents stale platform evidence; viewport emulation is not browser qualification.",
-        design_qualification_boundary: "Design target for supported browser engines and web APIs; viewport emulation is not browser or device qualification.",
+        design_qualification_boundary: "Design target for supported desktop and tablet browser engines and web APIs; viewport emulation is not browser or device qualification.",
         sign_off_rule: PLATFORM_SIGN_OFF_RULE,
     },
     PlatformAvailabilityRow {
@@ -99,12 +99,12 @@ pub const PLATFORM_AVAILABILITY_ROWS: [PlatformAvailabilityRow; 4] = [
     },
     PlatformAvailabilityRow {
         id: "phone",
-        label: "Phone application or browser (deferred platform)",
-        capability_mode_summary: "viewport: adaptive \u{00b7} pointer: adaptive \u{00b7} keyboard: adaptive \u{00b7} stylus: adaptive \u{00b7} renderer: adaptive \u{00b7} storage: adaptive \u{00b7} filesystem: adaptive \u{00b7} network: adaptive \u{00b7} lifecycle: adaptive \u{00b7} windowing: unavailable-with-reason \u{00b7} printing: adaptive \u{00b7} assistive-technology: full",
-        fixture_state: ReadinessState::Unknown,
+        label: "Phone/mobile (future platform; excluded)",
+        capability_mode_summary: "viewport: unavailable-with-reason \u{00b7} pointer: unavailable-with-reason \u{00b7} keyboard: unavailable-with-reason \u{00b7} stylus: unavailable-with-reason \u{00b7} renderer: unavailable-with-reason \u{00b7} storage: unavailable-with-reason \u{00b7} filesystem: unavailable-with-reason \u{00b7} network: unavailable-with-reason \u{00b7} lifecycle: unavailable-with-reason \u{00b7} windowing: unavailable-with-reason \u{00b7} printing: unavailable-with-reason \u{00b7} assistive-technology: unavailable-with-reason",
+        fixture_state: ReadinessState::Unavailable,
         fixture_qualification: "unqualified-design-target",
-        qualification_boundary: "The phone branch intentionally represents unknown device evidence; responsive intent cannot substitute for device qualification.",
-        design_qualification_boundary: "Deferred platform (2026-07-24): phone portrait and landscape task compositions remain designed but are excluded from release scope, evidence, and test matrices until the platform is explicitly reactivated. This record is not real-device qualification.",
+        qualification_boundary: "Phone/mobile is intentionally deferred to a future platform program; this retained branch cannot contribute current implementation, platform, release, or sign-off evidence.",
+        design_qualification_boundary: "Phone/mobile support is intentionally deferred to a future platform program and is unavailable in the current desktop, browser, and tablet implementation scope. This retained boundary record is not a phone design or real-device qualification.",
         sign_off_rule: PLATFORM_SIGN_OFF_RULE,
     },
 ];
@@ -1499,11 +1499,11 @@ pub const TOUCH_EDIT_GUIDE_STEPS: [TouchEditGuideStep; 4] = [
     },
 ];
 
-pub const TOUCH_EDIT_GUIDE_CONCEPT: &str = "Phone layouts preserve the complete supported task by presenting one precise step at a time. Tablet and desktop layouts expose more tools simultaneously; capability, validation, undo, and stored precision remain the same.";
+pub const TOUCH_EDIT_GUIDE_CONCEPT: &str = "Tablet layouts preserve the complete supported task by presenting precise steps and adaptive tools. Desktop layouts expose more tools simultaneously; capability, validation, undo, and stored precision remain the same.";
 
-pub const PLATFORM_LIFECYCLE_DIALOG_TITLE: &str = "Browser and mobile lifecycle contract";
+pub const PLATFORM_LIFECYCLE_DIALOG_TITLE: &str = "Browser and tablet lifecycle contract";
 pub const PLATFORM_LIFECYCLE_DIALOG_EYEBROW: &str = "PLATFORM · SUSPENSION · STORAGE · RECOVERY";
-pub const PLATFORM_LIFECYCLE_WARNING: &str = "A backgrounded browser or mobile operating system may suspend or terminate execution without warning. RSpice never labels an interrupted run complete and never promotes partial results.";
+pub const PLATFORM_LIFECYCLE_WARNING: &str = "A backgrounded browser or tablet operating system may suspend or terminate execution without warning. RSpice never labels an interrupted run complete and never promotes partial results.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlatformLifecycleRow {

@@ -30,7 +30,7 @@ and the central engineering surface. Its seven canonical workspaces are:
 - **Netlist** — a syntax-highlighted SPICE netlist editor with completion
   and a parameter tuner panel.
 
-Desktop, browser, tablet, and phone use the same workbench state and command
+Desktop, browser, and tablet use the same workbench state and command
 registry. Layout composition adapts to available width and pointer capability;
 document engines never create a second application shell.
 
@@ -158,14 +158,12 @@ and fails unless its secondary-module ABI probe and real Verilog-A transient
 solver/Jacobian/matrix/RHS probe both pass. CI also enforces 64 MiB raw / 16
 MiB gzip limits for the UI image and 24 MiB raw / 8 MiB gzip for the worker.
 
-The default test suite is self-contained. Cross-repository parity checks for
-the separately governed `rspice-workbench-host` mockup sources are ignored by
-default; run them explicitly after pointing `RSPICE_MOCKUP_ROOT` at that
-source tree:
+The default test suite is self-contained. It runs parity checks against the
+governed `mockups/rspice-workbench-host` sources tracked in this repository.
+Set `RSPICE_MOCKUP_ROOT` only to qualify an alternate checkout explicitly:
 
 ```bash
-RSPICE_MOCKUP_ROOT=/path/to/rspice-workbench-host \
-  cargo test -p rspice-ui --lib -- --ignored
+RSPICE_MOCKUP_ROOT=/path/to/rspice-workbench-host cargo test -p rspice-ui --lib
 ```
 
 Capability-resolver security tests do not depend on that external tree. Their

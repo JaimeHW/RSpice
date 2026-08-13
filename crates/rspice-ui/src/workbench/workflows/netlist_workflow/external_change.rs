@@ -360,7 +360,10 @@ pub(crate) fn apply_staged_external_netlist_change(state: &mut AppState) -> Resu
         .workspace
         .netlist_descriptor
         .as_mut()
-        .unwrap()
+        .ok_or_else(|| {
+            "The conflict resolution lost the owned source descriptor before revision retention."
+                .to_owned()
+        })?
         .retain_revision(
             &next_document,
             match review.resolution {

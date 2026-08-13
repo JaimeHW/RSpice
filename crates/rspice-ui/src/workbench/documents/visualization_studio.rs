@@ -2390,7 +2390,19 @@ mod integrity_scan_tests {
             ResultViewer::DcSweep
         );
 
-        let hb = AnalysisResult::new(2, AnalysisType::HarmonicBalance, "HB");
+        let hb = AnalysisResult::new(2, AnalysisType::HarmonicBalance, "HB").with_waveforms(vec![
+            WaveformData::new(
+                "|V(out) Spectrum|",
+                vec![1.0e9, 2.0e9],
+                vec![1.0, 0.1],
+                "#00aaff",
+            )
+            .with_complex_components(
+                "V(out) Spectrum",
+                vec![1.0, 0.1],
+                vec![0.0, 0.02],
+            ),
+        ]);
         assert_eq!(
             result_document::project_viewer_for_analysis(ResultViewer::Fft, &hb),
             ResultViewer::HarmonicBalance

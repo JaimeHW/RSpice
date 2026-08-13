@@ -431,9 +431,7 @@ pub(crate) fn editor_command_menu(
             .add_enabled(editable, egui::Button::new("Format document"))
             .clicked()
         {
-            ui.ctx().data_mut(|data| {
-                data.insert_temp(editor_id.with("format-document"), true);
-            });
+            queue_format_document(ui.ctx(), editor_id);
             ui.close();
         }
         for command in [
@@ -500,6 +498,12 @@ pub(crate) fn editor_command_menu(
             });
             ui.close();
         }
+    });
+}
+
+pub(crate) fn queue_format_document(context: &egui::Context, editor_id: Id) {
+    context.data_mut(|data| {
+        data.insert_temp(editor_id.with("format-document"), true);
     });
 }
 

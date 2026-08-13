@@ -3,6 +3,22 @@
 use super::bundle::*;
 use super::compose::*;
 use super::external_change::*;
+
+#[test]
+fn netlist_import_and_conflict_resolution_have_no_panic_shortcuts() {
+    for source in [
+        include_str!("staging.rs"),
+        include_str!("external_change.rs"),
+    ] {
+        let production = crate::source_guard::production_source(source);
+        for forbidden in [".expect(", ".unwrap(", "panic!(", "unreachable!("] {
+            assert!(
+                !production.contains(forbidden),
+                "netlist workflow production code contains panic shortcut {forbidden}"
+            );
+        }
+    }
+}
 use super::import::*;
 use super::platform::*;
 use super::save::*;
@@ -931,6 +947,7 @@ fn state_with_owned_strategy(
     state.workspace.netlist_source = Some(authored_source.to_owned());
     state.workspace.netlist_document = Some(owned);
     state.workspace.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
+        deck_id: uuid::Uuid::new_v4(),
         artifact_name: "owned.cir".to_owned(),
         strategy,
         source_encoding: crate::state::NetlistTextEncoding::Utf8,
@@ -1067,6 +1084,7 @@ fn narrow_override_requires_retained_generated_base() {
     let authored = ".tran 1n 10n\n";
     let mut state = AppState::default();
     state.workspace.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
+        deck_id: uuid::Uuid::new_v4(),
         artifact_name: "analysis.cir".to_owned(),
         strategy: crate::state::OwnedNetlistEditStrategy::AnalysisOnlyDeck,
         source_encoding: crate::state::NetlistTextEncoding::Utf8,

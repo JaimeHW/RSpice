@@ -132,6 +132,34 @@ const DOT_COMMANDS: &[(&str, &str, &str)] = &[
     (".end", "", "End of the deck."),
 ];
 
+pub(crate) fn directive_signature_at(
+    source: &str,
+    cursor_char_index: usize,
+) -> Option<(String, String)> {
+    let cursor_byte = source
+        .char_indices()
+        .nth(cursor_char_index)
+        .map_or(source.len(), |(byte, _)| byte);
+    let line_start = source[..cursor_byte]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    let line_end = source[cursor_byte..]
+        .find('\n')
+        .map_or(source.len(), |index| cursor_byte + index);
+    let directive = source[line_start..line_end].split_whitespace().next()?;
+    DOT_COMMANDS
+        .iter()
+        .find(|(name, _, _)| name.eq_ignore_ascii_case(directive))
+        .map(|(name, signature, documentation)| {
+            let title = if signature.is_empty() {
+                (*name).to_owned()
+            } else {
+                format!("{name} {signature}")
+            };
+            (title, (*documentation).to_owned())
+        })
+}
+
 /// Pre-consume the popover's keys. Must run *before* the `TextEdit` so
 /// ⇥ and ↑↓ never reach the buffer while the popover is open. Returns
 /// (move_delta, accept, dismiss).
@@ -470,5 +498,14 @@ mod tests {
         assert!(signature.contains("ic=<value>"));
         assert!(signature.contains("file <path>"));
         assert!(documentation.contains("device initial-condition"));
+    }
+
+    #[test]
+    fn signature_help_uses_the_directive_on_the_caret_line() {
+        let source = ".param gain=2\n.tran 1n 10n\n";
+        let caret = source.find("10n").unwrap();
+        let (title, detail) = directive_signature_at(source, caret).unwrap();
+        assert!(title.starts_with(".tran <step> <stop>"));
+        assert_eq!(detail, "Transient analysis.");
     }
 }

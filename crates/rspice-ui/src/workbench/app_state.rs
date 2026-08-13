@@ -1021,18 +1021,19 @@ impl AppState {
                     .unwrap_or_else(|| "Regenerate the stale netlist before running".to_owned()),
             );
         }
-        let validated = self.ui.netlist.validation.as_ref().is_some_and(|receipt| {
-            receipt.visible_content_digest == current_digest
-                && receipt.project_revision == self.workspace.project.revision().get()
-        });
-        if !validated {
+        let publication =
+            crate::workbench::documents::netlist_document::owned_netlist_publication_state(
+                self,
+                current_digest,
+            );
+        if !publication.validated {
             return Some(
                 "Validate the exact current source and project revision before running".to_owned(),
             );
         }
         if active_document
             == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
-            && self.ui.netlist.externally_saved_content_digest != Some(current_digest)
+            && !publication.run_eligible
         {
             return Some("Save the validated owned source deck before running".to_owned());
         }

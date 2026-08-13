@@ -202,6 +202,7 @@ pub(super) fn create_owned_source(
     state.workspace.netlist_source_dirty = true;
     state.workspace.netlist_document = Some(owned.clone());
     let mut descriptor = crate::state::OwnedNetlistDescriptor {
+        deck_id: uuid::Uuid::new_v4(),
         artifact_name: name.to_owned(),
         strategy,
         source_encoding: crate::state::NetlistTextEncoding::Utf8,
@@ -377,6 +378,7 @@ pub(super) fn open_owned_source(state: &mut AppState) -> bool {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "top_override.sp".to_owned());
         state.workspace.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
+            deck_id: uuid::Uuid::new_v4(),
             artifact_name,
             strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
             source_encoding: crate::state::NetlistTextEncoding::Utf8,

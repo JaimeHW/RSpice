@@ -16,6 +16,15 @@ pub(crate) struct NetlistRenameDialogState {
     pub(crate) error: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct NetlistSignatureHelpState {
+    pub(crate) open: bool,
+    pub(crate) revision: u64,
+    pub(crate) cursor_char_index: usize,
+    pub(crate) title: String,
+    pub(crate) detail: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ProjectSymbolKind {
     Model,
@@ -586,6 +595,111 @@ pub(crate) fn go_to_definition_at_cursor(state: &mut AppState) -> Result<String,
             ))
         }
     }
+}
+
+pub(crate) fn go_to_declaration_at_cursor(state: &mut AppState) -> Result<String, String> {
+    go_to_definition_at_cursor(state).map(|message| message.replace("definition", "declaration"))
+}
+
+pub(crate) fn show_signature_help_at_cursor(state: &mut AppState) -> Result<String, String> {
+    let source = state.simulation.netlist_content.clone();
+    let cursor = state.ui.netlist.cursor_char_index;
+    let (title, detail) = if let Some((title, detail)) =
+        super::completion::directive_signature_at(&source, cursor)
+    {
+        (title, detail)
+    } else {
+        let symbol = symbol_at_cursor(&source, cursor).ok_or_else(|| {
+            "Place the caret on an analysis, subcircuit, model, parameter, or function name."
+                .to_owned()
+        })?;
+        let index = project_index(state)
+            .ok_or_else(|| "The active source has no authenticated project index.".to_owned())?;
+        let definitions = index.definitions_named(&symbol);
+        match definitions.as_slice() {
+            [definition] => (
+                format!("{} {}", definition.kind.label(), definition.name),
+                format!(
+                    "{} · declared at {}:{}",
+                    definition.detail,
+                    definition.definition.display_name,
+                    definition.definition.line
+                ),
+            ),
+            [] => {
+                return Err(format!(
+                    "No signature for {symbol:?} exists in the authenticated source closure."
+                ));
+            }
+            _ => {
+                return Err(format!(
+                    "Signature help is ambiguous because {symbol:?} has {} declarations.",
+                    definitions.len()
+                ));
+            }
+        }
+    };
+    state.ui.netlist.signature_help = NetlistSignatureHelpState {
+        open: true,
+        revision: state.ui.netlist.revision,
+        cursor_char_index: cursor,
+        title: title.clone(),
+        detail,
+    };
+    Ok(format!("Showing signature help for {title}"))
+}
+
+pub(crate) fn open_workspace_symbols(state: &mut AppState) -> Result<String, String> {
+    let index = project_index(state)
+        .ok_or_else(|| "The active source has no authenticated project index.".to_owned())?;
+    let count = index.symbols().len();
+    state.workbench.navigator_visible = true;
+    state.workbench.navigator_query.clear();
+    Ok(format!(
+        "Showing {count} project symbol(s) from the authenticated source closure."
+    ))
+}
+
+pub(crate) fn preferred_quick_fix_available(state: &AppState) -> bool {
+    preferred_quick_fix(state).is_some()
+}
+
+pub(crate) fn apply_preferred_quick_fix(state: &mut AppState) -> Result<String, String> {
+    if !super::active_netlist_source_is_editable(state) {
+        return Err("Quick fixes cannot edit this read-only source.".to_owned());
+    }
+    let fix = preferred_quick_fix(state)
+        .ok_or_else(|| "No preferred quick fix is available at the caret.".to_owned())?;
+    let source = state.simulation.netlist_content.clone();
+    if fix.span.start > fix.span.end
+        || fix.span.end > source.len()
+        || !source.is_char_boundary(fix.span.start)
+        || !source.is_char_boundary(fix.span.end)
+    {
+        return Err("The quick fix became stale; validate the document again.".to_owned());
+    }
+    let mut replacement = source.clone();
+    replacement.replace_range(fix.span.clone(), &fix.replacement);
+    let edit = if let Some(identity) = state.ui.netlist.active_dependency_identity.as_deref() {
+        super::OwnedNetlistReplacement::dependency(identity, &source, replacement, 1)
+    } else {
+        super::OwnedNetlistReplacement::root(&source, replacement, 1)
+    };
+    super::replace_owned_sources_atomically(state, vec![edit])?;
+    Ok(format!("Applied quick fix: {}", fix.label))
+}
+
+fn preferred_quick_fix(state: &AppState) -> Option<super::diagnostics::DiagnosticFix> {
+    state
+        .ui
+        .netlist
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.is_current())
+        .filter(|diagnostic| {
+            diagnostic.line.or(diagnostic.source_line) == Some(state.ui.netlist.cursor_line)
+        })
+        .find_map(|diagnostic| diagnostic.fix.clone())
 }
 
 pub(crate) fn find_references_at_cursor(state: &mut AppState) -> Result<String, String> {
@@ -1442,6 +1556,7 @@ B1 y 0 V={shape(V(out))*gain}\n\
         state.workspace.netlist_source = Some(root.to_owned());
         state.workspace.netlist_document = Some(owned.clone());
         state.workspace.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
+            deck_id: uuid::Uuid::new_v4(),
             artifact_name: "root.sp".to_owned(),
             strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
             source_encoding: crate::state::NetlistTextEncoding::Utf8,

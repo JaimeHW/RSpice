@@ -190,6 +190,7 @@ fn document_digests(
             &project.workspace.netlist_source_path,
             &project.workspace.netlist_document,
             &project.workspace.netlist_descriptor,
+            &project.workspace.retained_netlist_decks,
             code_workspace_sources,
         ))?,
     );

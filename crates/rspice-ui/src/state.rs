@@ -63,11 +63,12 @@ pub use netlist_document::{
     DiagnosticSeverity, DocumentOwnership, FindDirection, FindError, FindMatch, FindOptions,
     GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput,
     NetlistDocument, NetlistDocumentId, NetlistSourceIndex, OutlineEntry, OutlineEntryKind,
-    OutlineSection, OutlineSectionKind, ReplaceScope, SourceLocator, ValidationDiagnostic,
-    content_digest, find_all_in_source_bounded, replace_in_source, replace_source_ranges,
+    OutlineSection, OutlineSectionKind, SourceLocator, ValidationDiagnostic, content_digest,
+    find_all_in_source_bounded, replace_source_ranges,
 };
 pub(crate) use netlist_document::{
-    card_tokens, expand_retained_netlist_dependencies, parse_include_directives,
+    card_tokens, expand_retained_netlist_dependencies, find_all_in_source_range_bounded_filter,
+    parse_include_directives,
 };
 pub use params_string::{format_params_string, parse_params_string};
 pub use physical_layout::{
@@ -145,9 +146,10 @@ pub use workspace::{
     ProjectLibraryMutation, ProjectTechnologyBinding, ProjectTechnologyChangeAuthority,
     ProjectTechnologyChangeContext, ProjectWorkspace, RegressionComparisonMethod,
     RegressionComparisonWindow, RegressionTargetKind, RegressionTargetSelector,
-    RegressionToleranceRule, ResolvedHierarchyBinding, SavedOutput, SavedOutputCompatibility,
-    SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
-    SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry, SpecPointScope,
+    RegressionToleranceRule, ResolvedHierarchyBinding, RetainedOwnedNetlistDeck, SavedOutput,
+    SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision,
+    SavedOutputStreaming, SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry,
+    SpecPointScope, validate_owned_netlist_artifact_path,
 };
 
 #[cfg(test)]

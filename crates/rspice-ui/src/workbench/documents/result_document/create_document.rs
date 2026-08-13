@@ -1286,14 +1286,16 @@ mod tests {
     fn retained_run_with(analysis_type: AnalysisType) -> SimulationRun {
         let mut run = SimulationRun::new(7);
         run.lifecycle = SimulationRunLifecycle::Completed;
+        let (name, x) = if analysis_type.is_bode_response() {
+            ("|V(out)|", vec![1.0, 2.0, 3.0])
+        } else if analysis_type.is_raw_frequency_curve() {
+            ("V(out)", vec![1.0, 2.0, 3.0])
+        } else {
+            ("V(out)", vec![0.0, 0.5, 1.0])
+        };
         run.analyses.push(
             AnalysisResult::new(11, analysis_type, "analysis").with_waveforms(vec![
-                WaveformData::new(
-                    "V(out)",
-                    vec![0.0, 0.5, 1.0],
-                    vec![0.0, 1.0, 0.0],
-                    "#55aaff",
-                ),
+                WaveformData::new(name, x, vec![0.0, 1.0, 0.0], "#55aaff"),
             ]),
         );
         run

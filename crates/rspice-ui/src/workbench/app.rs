@@ -382,6 +382,7 @@ impl RSpiceApp {
             .is_open();
         state.workbench.apply_console_launch_behavior(console_open);
         state.workbench.window_session.normalize_after_restore();
+        state.workspace.migrate_owned_netlist_deck_ids();
 
         state.initialize_shortcut_library_persistence(&cc.egui_ctx);
         state

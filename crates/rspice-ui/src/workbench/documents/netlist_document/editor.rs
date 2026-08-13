@@ -140,6 +140,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let changed;
     let cursor_line;
     let cursor_char_index;
+    let selected_char_range;
     let hover_char_index;
     let editor_response;
     let anchor;
@@ -231,6 +232,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         changed = output.changed;
         cursor_line = output.cursor_line;
         cursor_char_index = output.cursor_char_index;
+        selected_char_range = output.selected_char_range;
         hover_char_index = output.hover_char_index;
         editor_response = output.response.clone();
         anchor = completion::CompletionAnchor {
@@ -243,6 +245,18 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let now = ui.input(|input| input.time);
     state.ui.netlist.cursor_line = cursor_line;
     state.ui.netlist.cursor_char_index = cursor_char_index;
+    state.ui.netlist.selected_byte_range = selected_char_range.and_then(|(start, end)| {
+        let (start, end) = (start.min(end), start.max(end));
+        (start < end).then(|| {
+            let byte_at = |char_index: usize| {
+                buffer
+                    .char_indices()
+                    .nth(char_index)
+                    .map_or(buffer.len(), |(byte, _)| byte)
+            };
+            byte_at(start)..byte_at(end)
+        })
+    });
 
     // Completion is an edit and therefore exists only for project-owned source.
     if editable
@@ -253,6 +267,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         buffer.replace_range(start..end, &text);
         completion::place_caret(ui, editor_id, caret);
     }
+    show_signature_help(ui, &mut state.ui.netlist, editor_id, anchor);
     let hover_symbol =
         hover_char_index.and_then(|index| super::language::symbol_name_at(&buffer, index));
 
@@ -278,6 +293,55 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             ui.label(hover.detail);
         });
     }
+}
+
+fn show_signature_help(
+    ui: &mut Ui,
+    netlist: &mut super::NetlistDocumentState,
+    editor_id: egui::Id,
+    anchor: completion::CompletionAnchor,
+) {
+    if !netlist.signature_help.open {
+        return;
+    }
+    if netlist.signature_help.revision != netlist.revision
+        || netlist.signature_help.cursor_char_index != anchor.caret_char_index
+        || !anchor.focused
+    {
+        netlist.signature_help.open = false;
+        return;
+    }
+    if ui
+        .ctx()
+        .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        netlist.signature_help.open = false;
+        return;
+    }
+    let Some(mut position) = anchor.screen_position else {
+        netlist.signature_help.open = false;
+        return;
+    };
+    let viewport = ui.ctx().content_rect().shrink(8.0);
+    position.x = position
+        .x
+        .min(viewport.right() - 320.0)
+        .max(viewport.left());
+    position.y = (position.y + 6.0)
+        .min(viewport.bottom() - 80.0)
+        .max(viewport.top());
+    egui::Area::new(editor_id.with("signature-help"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(position)
+        .show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_min_width(300.0);
+                ui.set_max_width(360.0);
+                ui.label(egui::RichText::new(&netlist.signature_help.title).strong());
+                ui.label(&netlist.signature_help.detail);
+                ui.weak("Signature help · Esc to close");
+            });
+        });
 }
 
 /// Commit a text/completion edit without promoting generated output to owned
@@ -538,8 +602,7 @@ fn bounded_netlist_diagnostics(
         );
         diagnostic.details = error;
         diagnostic.bind_validation(revision, validation_id);
-        NetlistDiagnosticCollection::try_new(vec![diagnostic], buffer)
-            .expect("one capacity diagnostic is bounded")
+        NetlistDiagnosticCollection::try_new(vec![diagnostic], buffer).unwrap_or_default()
     })
 }
 
@@ -798,9 +861,7 @@ fn parse_error_diagnostic_at(
             error.reference_position,
         ))
         .with_source_location(&error.origin, editor_source_path),
-        ParseError::OutputSymbolValidation(_) => {
-            unreachable!("aggregate output-symbol errors are expanded before scalar mapping")
-        }
+        ParseError::OutputSymbolValidation(error) => Diagnostic::error(error.to_string()),
         ParseError::OutputExpressionValidation(error) => Diagnostic::error(format!(
             "{}\nDirective: {} · expression: {{{}}}",
             error, error.directive, error.expression
@@ -898,6 +959,17 @@ fn harvest_symbols(netlist: &rspice_core::Netlist) -> Vec<completion::SymbolEntr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editor_diagnostic_pipeline_has_no_panic_shortcuts() {
+        let production = crate::source_guard::production_source(include_str!("editor.rs"));
+        for forbidden in [".expect(", ".unwrap(", "panic!(", "unreachable!("] {
+            assert!(
+                !production.contains(forbidden),
+                "netlist editor production code contains panic shortcut {forbidden}"
+            );
+        }
+    }
 
     /// The defect this exists for: completion used to be wired to a
     /// `TextEdit` branch that only ran for an *empty* buffer, so the popover

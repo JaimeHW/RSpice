@@ -82,7 +82,14 @@ pub(crate) fn save_owned_netlist_source(
                 .workspace
                 .netlist_descriptor
                 .as_ref()
-                .map(|descriptor| descriptor.artifact_name.clone())
+                .map(|descriptor| {
+                    std::path::Path::new(&descriptor.artifact_name)
+                        .file_name()
+                        .map_or_else(
+                            || descriptor.artifact_name.clone(),
+                            |name| name.to_string_lossy().into_owned(),
+                        )
+                })
         })
         .unwrap_or_else(|| "top.cir".to_owned());
     let reopenable_origin = io

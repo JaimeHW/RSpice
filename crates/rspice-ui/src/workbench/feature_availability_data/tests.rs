@@ -26,13 +26,9 @@ static STYLES_SOURCE: OnceLock<String> = OnceLock::new();
 
 fn mockup_root() -> PathBuf {
     std::env::var_os(MOCKUP_ROOT_ENV).map_or_else(
-            || {
-                panic!(
-                    "set {MOCKUP_ROOT_ENV} to the rspice-workbench-host root before running ignored mockup parity tests"
-                )
-            },
-            PathBuf::from,
-        )
+        || Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mockups/rspice-workbench-host"),
+        PathBuf::from,
+    )
 }
 
 fn read_mockup_source(relative_path: &Path) -> String {
@@ -302,7 +298,6 @@ fn interoperability_filters_are_explicit_complete_and_non_mutating() {
 }
 
 #[test]
-#[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
 fn interoperability_document_copy_matches_the_mockup_exactly() {
     let source = source_section(
         app_source(),
@@ -367,7 +362,6 @@ fn interoperability_document_copy_matches_the_mockup_exactly() {
 }
 
 #[test]
-#[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
 fn touch_edit_guide_document_and_responsive_contract_match_the_mockup_exactly() {
     let source = source_section(
         app_source(),
@@ -421,7 +415,6 @@ fn touch_edit_guide_document_and_responsive_contract_match_the_mockup_exactly() 
 }
 
 #[test]
-#[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
 fn platform_lifecycle_document_copy_matches_the_mockup_exactly() {
     let source = source_section(
         app_source(),
@@ -504,7 +497,6 @@ fn lookup_helpers_do_not_invent_fallback_rows() {
 }
 
 #[test]
-#[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
 fn platform_rows_match_both_governed_sources_exactly() {
     const DIMENSIONS: [&str; 12] = [
         "viewport",
@@ -560,7 +552,6 @@ fn platform_rows_match_both_governed_sources_exactly() {
 }
 
 #[test]
-#[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
 fn planned_and_analysis_rows_match_the_product_manifest_source() {
     let analyses = source_section(
         product_manifest_source(),
@@ -593,7 +584,6 @@ fn planned_and_analysis_rows_match_the_product_manifest_source() {
 }
 
 #[test]
-#[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
 fn planned_workflow_shared_frame_matches_the_mockup_exactly() {
     let frame = source_section(
         app_source(),
@@ -643,7 +633,6 @@ fn planned_workflow_shared_frame_matches_the_mockup_exactly() {
 }
 
 #[test]
-#[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
 fn all_eleven_planned_workflow_specifications_match_the_mockup_exactly() {
     let metadata_ids = PLANNED_WORKFLOW_ROWS
         .iter()
@@ -793,7 +782,6 @@ fn all_eleven_planned_workflow_specifications_match_the_mockup_exactly() {
 }
 
 #[test]
-#[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
 fn specialist_rows_match_manifest_and_registry_without_runtime_inference() {
     let manifest = source_section(
         product_manifest_source(),
@@ -841,7 +829,6 @@ fn specialist_rows_match_manifest_and_registry_without_runtime_inference() {
 }
 
 #[test]
-#[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
 fn engineering_profile_identity_copy_and_visibility_match_the_mockup_exactly() {
     let governed = [
         (
@@ -951,7 +938,6 @@ fn evidence_source_summary(evidence: &[&Value]) -> String {
 }
 
 #[test]
-#[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
 fn claim_projection_contains_only_product_cases_and_matches_fixture_sources() {
     let fixture = parse_json(capability_fixture_source());
     assert_eq!(

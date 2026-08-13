@@ -31,13 +31,22 @@ use crate::workbench::{MessageCatalog, MessageId};
 
 /// Bring the lifecycle dialog up for the page that is showing.
 ///
-/// The netlist page is deliberately refused: its deck is a generated artifact
-/// or an owned file, never a project source bundle, and it has its own
-/// ownership transaction.
 pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), String> {
     let page = state.ui.code_workspace.page;
+    if page == code_workspace::CodeWorkspacePage::Netlist {
+        if state.workspace.netlist_descriptor.is_none()
+            || state.workspace.netlist_document.is_none()
+        {
+            return Err(
+                "Create or import a project-owned top deck before opening its lifecycle."
+                    .to_owned(),
+            );
+        }
+        state.ui.code_workspace.source_document_dialog = true;
+        return Ok(());
+    }
     let language = code_workspace::page_source_language(page)
-        .ok_or_else(|| "The netlist deck is managed from its own ownership dialog.".to_owned())?;
+        .ok_or_else(|| "The visible Code workspace page has no source lifecycle.".to_owned())?;
     let owner = ProjectSourceOwner::code_workspace(language);
     if state
         .workspace
@@ -56,6 +65,10 @@ pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), St
 
 /// Whether the lifecycle dialog can be opened for the visible page.
 pub(crate) fn source_document_dialog_is_available(state: &AppState) -> bool {
+    if state.ui.code_workspace.page == code_workspace::CodeWorkspacePage::Netlist {
+        return state.workspace.netlist_descriptor.is_some()
+            && state.workspace.netlist_document.is_some();
+    }
     code_workspace::page_source_language(state.ui.code_workspace.page).is_some_and(|language| {
         let owner = ProjectSourceOwner::code_workspace(language);
         state
@@ -96,6 +109,99 @@ struct RevisionRow {
     digest: String,
     files: usize,
     current: bool,
+}
+
+struct NetlistLifecycleFacts {
+    deck_id: uuid::Uuid,
+    logical_path: String,
+    identity: String,
+    shape: String,
+    line_endings: MessageId,
+    published_origin: String,
+    history_count: usize,
+    decks: Vec<(uuid::Uuid, String)>,
+    operations_blocked: Option<String>,
+}
+
+fn netlist_lifecycle_facts(
+    app: &RSpiceApp,
+    messages: MessageCatalog,
+) -> Option<NetlistLifecycleFacts> {
+    let descriptor = app.state.workspace.netlist_descriptor.as_ref()?;
+    let document = app.state.workspace.netlist_document.as_ref()?;
+    let mut decks = Vec::with_capacity(app.state.workspace.retained_netlist_decks.len() + 1);
+    decks.push((descriptor.deck_id, descriptor.artifact_name.clone()));
+    decks.extend(
+        app.state
+            .workspace
+            .retained_netlist_decks
+            .iter()
+            .map(|deck| {
+                (
+                    deck.descriptor.deck_id,
+                    deck.descriptor.artifact_name.clone(),
+                )
+            }),
+    );
+    decks.sort_by(|left, right| {
+        left.1
+            .to_ascii_lowercase()
+            .cmp(&right.1.to_ascii_lowercase())
+    });
+    let revision = document.revision().get();
+    let identity = format!(
+        "{} · doc {} · rev {revision}",
+        descriptor
+            .deck_id
+            .simple()
+            .to_string()
+            .chars()
+            .take(12)
+            .collect::<String>(),
+        document
+            .id()
+            .as_uuid()
+            .simple()
+            .to_string()
+            .chars()
+            .take(12)
+            .collect::<String>(),
+    );
+    let published_origin = app
+        .state
+        .workspace
+        .netlist_source_path
+        .as_ref()
+        .map_or_else(
+            || messages.text(MessageId::NetlistNotPublished),
+            |path| path.display().to_string(),
+        );
+    Some(NetlistLifecycleFacts {
+        deck_id: descriptor.deck_id,
+        logical_path: descriptor.artifact_name.clone(),
+        identity,
+        shape: messages.format(
+            MessageId::CodeSourceContentShape,
+            &[
+                ("lines", &document.source().lines().count().to_string()),
+                ("bytes", &document.source().len().to_string()),
+            ],
+        ),
+        line_endings: line_ending_summary(document.source()),
+        published_origin,
+        history_count: descriptor.revision_history.len(),
+        decks,
+        operations_blocked: app
+            .state
+            .ui
+            .netlist
+            .active_dependency_identity
+            .as_ref()
+            .map(|_| {
+                "Return to the owned root deck before changing a top-level deck lifecycle."
+                    .to_owned()
+            }),
+    })
 }
 
 fn short_digest(digest: crate::product::ContentDigest) -> String {
@@ -249,6 +355,15 @@ enum LifecycleAction {
     AssignRole(Option<crate::state::ProjectSourceRole>),
 }
 
+enum NetlistLifecycleAction {
+    None,
+    Begin(CodeSourceFileAction),
+    Commit,
+    Cancel,
+    SelectDeck(uuid::Uuid),
+    OpenHistory,
+}
+
 /// Which section states a failure, chosen by the action that caused it.
 #[derive(Clone, Copy)]
 enum Report {
@@ -307,6 +422,10 @@ impl RSpiceApp {
             return;
         }
         if !self.state.ui.code_workspace.source_document_dialog {
+            return;
+        }
+        if self.state.ui.code_workspace.page == code_workspace::CodeWorkspacePage::Netlist {
+            self.render_netlist_source_document_dialog(ctx);
             return;
         }
         let messages = self.state.ui.messages();
@@ -440,6 +559,102 @@ impl RSpiceApp {
         // by the same call, so the console states it instead of losing it.
         if stated.is_none() {
             self.state.push_user_message(ConsoleMessage::error(error));
+        }
+    }
+
+    fn render_netlist_source_document_dialog(&mut self, ctx: &Context) {
+        let messages = self.state.ui.messages();
+        let Some(facts) = netlist_lifecycle_facts(self, messages) else {
+            self.state.ui.code_workspace.source_document_dialog = false;
+            self.state.ui.netlist.lifecycle_dialog.transaction = None;
+            return;
+        };
+        let mut dialog = Dialog::new(
+            messages.format(
+                MessageId::CodeSourceLifecycleEyebrow,
+                &[("document", &facts.logical_path.to_uppercase())],
+            ),
+            messages.text(MessageId::CodeSourceLifecycleTitle),
+            messages.text(MessageId::CommonClose),
+        )
+        .description(messages.format(
+            MessageId::CodeSourceLifecycleDescription,
+            &[("document", &facts.logical_path)],
+        ))
+        .size(DialogSize::SimulationWorkflow)
+        .initial_height(600.0)
+        .primary_on_enter(false)
+        .initial_focus(DialogInitialFocus::BodyControl);
+        if let Some(reason) = facts.operations_blocked.as_deref() {
+            dialog = dialog.transaction_state(
+                DialogTransactionTone::Progress,
+                messages.text(MessageId::CodeSourceOperationsHeld),
+                reason,
+            );
+        }
+
+        let mut action = NetlistLifecycleAction::None;
+        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+            action = netlist_lifecycle_body(ui, &mut self.state, &facts, messages);
+            None
+        });
+        match action {
+            NetlistLifecycleAction::None => {}
+            NetlistLifecycleAction::Begin(file_action) => {
+                if let Err(error) =
+                    crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action(
+                        &mut self.state,
+                        file_action,
+                    )
+                {
+                    self.state.push_user_message(ConsoleMessage::error(error));
+                }
+            }
+            NetlistLifecycleAction::Commit => {
+                match crate::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
+                    &mut self.state,
+                ) {
+                    Ok(message) => self.state.push_user_message(ConsoleMessage::info(message)),
+                    Err(error) => {
+                        if let Some(transaction) =
+                            self.state.ui.netlist.lifecycle_dialog.transaction.as_mut()
+                        {
+                            transaction.error = Some(error);
+                        } else {
+                            self.state.push_user_message(ConsoleMessage::error(error));
+                        }
+                    }
+                }
+            }
+            NetlistLifecycleAction::Cancel => {
+                self.state.ui.netlist.lifecycle_dialog.transaction = None;
+            }
+            NetlistLifecycleAction::SelectDeck(deck_id) => {
+                if let Err(error) =
+                    crate::workbench::documents::netlist_document::select_retained_top_deck(
+                        &mut self.state,
+                        deck_id,
+                    )
+                {
+                    self.state.push_user_message(ConsoleMessage::error(error));
+                }
+            }
+            NetlistLifecycleAction::OpenHistory => {
+                self.state.ui.netlist.comparison_dialog.open = true;
+                self.state
+                    .ui
+                    .netlist
+                    .comparison_dialog
+                    .selected_history_index = facts.history_count.saturating_sub(1);
+                self.state.ui.code_workspace.source_document_dialog = false;
+            }
+        }
+        if matches!(
+            choice,
+            DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled
+        ) {
+            self.state.ui.code_workspace.source_document_dialog = false;
+            self.state.ui.netlist.lifecycle_dialog.transaction = None;
         }
     }
 
@@ -587,6 +802,241 @@ fn lifecycle_body(
                 action = chosen;
             }
         });
+    action
+}
+
+fn netlist_lifecycle_body(
+    ui: &mut Ui,
+    state: &mut AppState,
+    facts: &NetlistLifecycleFacts,
+    messages: MessageCatalog,
+) -> NetlistLifecycleAction {
+    let t = Tokens::get(ui.ctx());
+    let mut action = NetlistLifecycleAction::None;
+    ScrollArea::vertical()
+        .id_salt("netlist-document-lifecycle")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            code_inspector_section(
+                ui,
+                &messages.text(MessageId::CodeSourceCurrentDocument),
+                Some((
+                    &messages.text(MessageId::CodeSourceOwnedEditable),
+                    t.color.ok,
+                )),
+                |ui| {
+                    code_inspector_property_list(ui, |ui| {
+                        let choices = facts
+                            .decks
+                            .iter()
+                            .map(|(_, path)| (path.clone(), path.clone()))
+                            .collect::<Vec<_>>();
+                        let mut selected = facts.logical_path.clone();
+                        if crate::workbench::design_system::property_row_combo(
+                            ui,
+                            &messages.text(MessageId::NetlistTopDeck),
+                            "netlist-top-deck-selector",
+                            &mut selected,
+                            &choices,
+                            facts.operations_blocked.is_none()
+                                && state.ui.netlist.lifecycle_dialog.transaction.is_none(),
+                        ) && let Some((deck_id, _)) =
+                            facts.decks.iter().find(|(_, path)| *path == selected)
+                            && *deck_id != facts.deck_id
+                        {
+                            action = NetlistLifecycleAction::SelectDeck(*deck_id);
+                        }
+                        property_row(
+                            ui,
+                            &messages.text(MessageId::CodeSourcePath),
+                            &facts.logical_path,
+                        );
+                        property_row(
+                            ui,
+                            &messages.text(MessageId::CodeSourceIdentity),
+                            &facts.identity,
+                        );
+                        property_row(
+                            ui,
+                            &messages.text(MessageId::CodeSourceContent),
+                            &facts.shape,
+                        );
+                        property_row(
+                            ui,
+                            &messages.text(MessageId::CodeSourceLineEndings),
+                            &messages.text(facts.line_endings),
+                        );
+                        property_row(
+                            ui,
+                            &messages.text(MessageId::NetlistPublishedOrigin),
+                            &facts.published_origin,
+                        );
+                        property_row(
+                            ui,
+                            &messages.text(MessageId::NetlistTopDeckCatalog),
+                            &messages.format(
+                                if facts.decks.len() == 1 {
+                                    MessageId::CodeSourceDocumentSingular
+                                } else {
+                                    MessageId::CodeSourceDocuments
+                                },
+                                &[("count", &facts.decks.len().to_string())],
+                            ),
+                        );
+                    });
+                },
+            );
+            code_inspector_section(
+                ui,
+                &messages.text(MessageId::CodeSourceFileOperations),
+                None,
+                |ui| {
+                    ui.add_space(6.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                        let transaction_open =
+                            state.ui.netlist.lifecycle_dialog.transaction.is_some();
+                        for (label, candidate) in FILE_OPERATIONS {
+                            let enabled = facts.operations_blocked.is_none() && !transaction_open;
+                            let response = Button::new(&messages.text(label))
+                                .enabled(enabled)
+                                .destructive(candidate == CodeSourceFileAction::Delete)
+                                .show(ui);
+                            if response.clicked() {
+                                action = NetlistLifecycleAction::Begin(candidate);
+                            }
+                            if let Some(reason) = facts.operations_blocked.as_deref() {
+                                response.on_disabled_hover_text(reason);
+                            }
+                        }
+                        if Button::new(&messages.text(MessageId::CodeSourceRevisionHistory))
+                            .enabled(
+                                facts.history_count > 0
+                                    && state.ui.netlist.lifecycle_dialog.transaction.is_none(),
+                            )
+                            .show(ui)
+                            .clicked()
+                        {
+                            action = NetlistLifecycleAction::OpenHistory;
+                        }
+                    });
+                    ui.add_space(6.0);
+                },
+            );
+            if let Some(chosen) = netlist_operation_review(ui, state, messages) {
+                action = chosen;
+            }
+        });
+    action
+}
+
+fn netlist_operation_review(
+    ui: &mut Ui,
+    state: &mut AppState,
+    messages: MessageCatalog,
+) -> Option<NetlistLifecycleAction> {
+    let t = Tokens::get(ui.ctx());
+    let transaction = state.ui.netlist.lifecycle_dialog.transaction.as_mut()?;
+    let (title, commit) = match transaction.action {
+        CodeSourceFileAction::New => (
+            MessageId::CodeSourceCreateTitle,
+            MessageId::CodeSourceCreatePrimary,
+        ),
+        CodeSourceFileAction::Rename => (
+            MessageId::CodeSourceRenameTitle,
+            MessageId::CodeSourceRenamePrimary,
+        ),
+        CodeSourceFileAction::Move => (
+            MessageId::CodeSourceMoveTitle,
+            MessageId::CodeSourceMovePrimary,
+        ),
+        CodeSourceFileAction::Duplicate => (
+            MessageId::CodeSourceDuplicateTitle,
+            MessageId::CodeSourceDuplicatePrimary,
+        ),
+        CodeSourceFileAction::Delete => (
+            MessageId::CodeSourceDeleteTitle,
+            MessageId::CodeSourceDeletePrimary,
+        ),
+    };
+    let deleting = transaction.action == CodeSourceFileAction::Delete;
+    let mut action = None;
+    code_inspector_section(
+        ui,
+        &messages.text(title),
+        Some((
+            &messages.text(MessageId::CodeSourceOpenTransaction),
+            t.color.accent,
+        )),
+        |ui| {
+            code_inspector_property_list(ui, |ui| {
+                if deleting {
+                    property_row(
+                        ui,
+                        &messages.text(MessageId::CodeSourceRemoving),
+                        &transaction.source_path,
+                    );
+                } else {
+                    property_row_input(
+                        ui,
+                        &messages.text(MessageId::CodeSourceLogicalPath),
+                        &mut transaction.proposed_path,
+                        transaction.error.is_some(),
+                    );
+                }
+                property_row(
+                    ui,
+                    &messages.text(MessageId::CodeSourceAgainst),
+                    &format!(
+                        "doc rev {} · {}",
+                        transaction.document_revision.get(),
+                        transaction
+                            .content_digest
+                            .to_string()
+                            .chars()
+                            .take(12)
+                            .collect::<String>()
+                    ),
+                );
+            });
+            if let Some(error) = transaction.error.as_deref() {
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(error)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Medium))
+                        .color(t.color.err),
+                );
+            }
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                if Button::new(&messages.text(commit))
+                    .accent()
+                    .destructive(deleting)
+                    .enabled(deleting || !transaction.proposed_path.trim().is_empty())
+                    .show(ui)
+                    .clicked()
+                {
+                    action = Some(NetlistLifecycleAction::Commit);
+                }
+                if Button::new(&messages.text(MessageId::CommonCancel))
+                    .ghost()
+                    .show(ui)
+                    .clicked()
+                {
+                    action = Some(NetlistLifecycleAction::Cancel);
+                }
+                if deleting {
+                    ui.label(
+                        RichText::new(messages.text(MessageId::CodeSourceDeleteWarning))
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_dim),
+                    );
+                }
+            });
+            ui.add_space(6.0);
+        },
+    );
     action
 }
 
@@ -1240,10 +1690,10 @@ mod tests {
         );
     }
 
-    /// The netlist deck is not a project source bundle, so the dialog refuses
-    /// it rather than naming the deck after somebody else's closure.
+    /// A generated artifact has no project-owned file lifecycle. The command
+    /// becomes available only after an explicit ownership/import transition.
     #[test]
-    fn the_netlist_page_is_refused() {
+    fn an_unowned_netlist_page_has_no_source_document_lifecycle() {
         let mut app = RSpiceApp::test_instance();
         app.state.ui.code_workspace.page = CodeWorkspacePage::Netlist;
         assert!(!source_document_dialog_is_available(&app.state));

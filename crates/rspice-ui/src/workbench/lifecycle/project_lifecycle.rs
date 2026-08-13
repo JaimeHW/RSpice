@@ -317,6 +317,7 @@ pub(crate) fn generated_netlist_input_digest(
     project.workspace.netlist_source_path = None;
     project.workspace.netlist_document = None;
     project.workspace.netlist_descriptor = None;
+    project.workspace.retained_netlist_decks.clear();
     registry::content_digest(&project).map_err(ProjectLifecycleError::InvalidState)
 }
 
@@ -438,7 +439,8 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
             != baseline.netlist_source
             || state.workspace.netlist_source_path != baseline.netlist_source_path
             || state.workspace.netlist_document != baseline.netlist_document
-            || state.workspace.netlist_descriptor != baseline.netlist_descriptor;
+            || state.workspace.netlist_descriptor != baseline.netlist_descriptor
+            || state.workspace.retained_netlist_decks != baseline.retained_netlist_decks;
         state.workspace.project_sources_dirty =
             state.workspace.project_sources != baseline.project_sources;
     }
@@ -1629,6 +1631,7 @@ fn revert_document_in_place(
             state.workspace.netlist_source_path = baseline.workspace.netlist_source_path;
             state.workspace.netlist_document = baseline.workspace.netlist_document;
             state.workspace.netlist_descriptor = baseline.workspace.netlist_descriptor;
+            state.workspace.retained_netlist_decks = baseline.workspace.retained_netlist_decks;
             state
                 .workspace
                 .project_sources
@@ -1861,6 +1864,8 @@ fn overlay_document(
             target.workspace.netlist_source_path = working.workspace.netlist_source_path.clone();
             target.workspace.netlist_document = working.workspace.netlist_document.clone();
             target.workspace.netlist_descriptor = working.workspace.netlist_descriptor.clone();
+            target.workspace.retained_netlist_decks =
+                working.workspace.retained_netlist_decks.clone();
             target
                 .workspace
                 .project_sources

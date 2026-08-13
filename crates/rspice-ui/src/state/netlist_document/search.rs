@@ -98,6 +98,8 @@ pub enum FindError {
     InvalidRegularExpression(String),
     #[error("the regular-expression match could not be reconstructed safely")]
     MatchReconstructionFailed,
+    #[error("replace all exceeds the safe transaction limit of {limit} matches; narrow the scope")]
+    ReplacementLimitExceeded { limit: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -186,15 +188,69 @@ pub fn find_all_in_source_bounded(
     options: FindOptions,
     limit: usize,
 ) -> Result<BoundedFindMatches, FindError> {
-    validate_request(source, query, 0)?;
-    let mut candidates = candidate_ranges_bounded(source, query, options, limit.saturating_add(1))?;
+    find_all_in_source_range_bounded_filter(source, 0..source.len(), query, options, limit, |_| {
+        true
+    })
+}
+
+/// Search only an exact byte range while retaining coordinates in the full
+/// source. The range must be ordered, in bounds, and on UTF-8 boundaries.
+#[cfg(test)]
+fn find_all_in_source_range_bounded(
+    source: &str,
+    range: Range<usize>,
+    query: &str,
+    options: FindOptions,
+    limit: usize,
+) -> Result<BoundedFindMatches, FindError> {
+    find_all_in_source_range_bounded_filter(source, range, query, options, limit, |_| true)
+}
+
+pub(crate) fn find_all_in_source_range_bounded_filter(
+    source: &str,
+    range: Range<usize>,
+    query: &str,
+    options: FindOptions,
+    limit: usize,
+    accept: impl Fn(&Range<usize>) -> bool,
+) -> Result<BoundedFindMatches, FindError> {
+    if range.start > range.end || range.end > source.len() {
+        return Err(FindError::OffsetOutsideSource {
+            offset: range.start.max(range.end),
+            source_len: source.len(),
+        });
+    }
+    if !source.is_char_boundary(range.start) {
+        return Err(FindError::OffsetInsideCharacter(range.start));
+    }
+    if !source.is_char_boundary(range.end) {
+        return Err(FindError::OffsetInsideCharacter(range.end));
+    }
+
+    let selected = &source[range.clone()];
+    validate_request(selected, query, 0)?;
+    let candidate_options = FindOptions {
+        whole_word: false,
+        ..options
+    };
+    let mut candidates = candidate_ranges_bounded(
+        selected,
+        query,
+        candidate_options,
+        limit.saturating_add(1),
+        &|candidate| {
+            let full = candidate.start + range.start..candidate.end + range.start;
+            (!options.whole_word || is_whole_word(source, &full)) && accept(&full)
+        },
+    )?;
     let truncated = candidates.len() > limit;
     candidates.truncate(limit);
     let mut cursor = SourceCursor::new(source);
     Ok(BoundedFindMatches {
         matches: candidates
             .into_iter()
-            .map(|byte_range| {
+            .map(|candidate| {
+                let byte_range = candidate.start + range.start..candidate.end + range.start;
                 let (line, column) = cursor.line_column(byte_range.start);
                 FindMatch {
                     byte_range,
@@ -357,16 +413,19 @@ fn candidate_ranges_bounded(
     query: &str,
     options: FindOptions,
     limit: usize,
+    accept: &impl Fn(&Range<usize>) -> bool,
 ) -> Result<Vec<Range<usize>>, FindError> {
     if limit == 0 {
         return Ok(Vec::new());
     }
-    let whole_word = |range: &Range<usize>| !options.whole_word || is_whole_word(source, range);
+    let accepted = |range: &Range<usize>| {
+        (!options.whole_word || is_whole_word(source, range)) && accept(range)
+    };
     if options.regular_expression {
         return Ok(build_regex(query, options.match_case)?
             .find_iter(source)
             .map(|found| found.range())
-            .filter(whole_word)
+            .filter(accepted)
             .take(limit)
             .collect());
     }
@@ -374,7 +433,7 @@ fn candidate_ranges_bounded(
         return Ok(source
             .match_indices(query)
             .map(|(start, value)| start..start + value.len())
-            .filter(whole_word)
+            .filter(accepted)
             .take(limit)
             .collect());
     }
@@ -383,6 +442,7 @@ fn candidate_ranges_bounded(
         query,
         limit,
         options.whole_word,
+        accept,
     ))
 }
 
@@ -415,7 +475,7 @@ fn select_range(
 }
 
 fn case_insensitive_ranges(source: &str, query: &str) -> Vec<Range<usize>> {
-    case_insensitive_ranges_bounded(source, query, usize::MAX, false)
+    case_insensitive_ranges_bounded(source, query, usize::MAX, false, &|_| true)
 }
 
 /// Non-overlapping case-insensitive matches in source order.
@@ -430,6 +490,7 @@ fn case_insensitive_ranges_bounded(
     query: &str,
     limit: usize,
     whole_word: bool,
+    accept: &impl Fn(&Range<usize>) -> bool,
 ) -> Vec<Range<usize>> {
     let folded_query = query.to_lowercase();
     if folded_query.is_empty() || limit == 0 {
@@ -454,6 +515,9 @@ fn case_insensitive_ranges_bounded(
             next_character(start)
         };
         if whole_word && !is_whole_word(source, &range) {
+            continue;
+        }
+        if !accept(&range) {
             continue;
         }
         found.push(range);
@@ -689,6 +753,24 @@ mod tests {
         let exact = find_all_in_source_bounded("x x", "x", FindOptions::default(), 2).unwrap();
         assert_eq!(exact.matches().len(), 2);
         assert!(!exact.truncated());
+    }
+
+    #[test]
+    fn range_search_retains_full_source_coordinates_and_rejects_bad_boundaries() {
+        let source = "first gain\nsecond gain gain\n";
+        let start = source.find("second").unwrap();
+        let end = source.len();
+        let found =
+            find_all_in_source_range_bounded(source, start..end, "gain", FindOptions::default(), 1)
+                .unwrap();
+        assert_eq!(found.matches()[0].line(), 2);
+        assert_eq!(found.matches()[0].column(), 8);
+        assert!(found.truncated());
+
+        assert!(matches!(
+            find_all_in_source_range_bounded("µgain", 1..6, "gain", FindOptions::default(), 1,),
+            Err(FindError::OffsetInsideCharacter(1))
+        ));
     }
 
     #[test]

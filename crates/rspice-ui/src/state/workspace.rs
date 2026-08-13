@@ -1986,6 +1986,11 @@ fn is_ads_spice_export_header(line: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OwnedNetlistDescriptor {
+    /// Stable project identity for this top-level deck. This identity follows
+    /// the deck across logical rename/move operations and remains distinct when
+    /// a deck is duplicated.
+    #[serde(default)]
+    pub deck_id: Uuid,
     pub artifact_name: String,
     pub strategy: OwnedNetlistEditStrategy,
     #[serde(default)]
@@ -2017,6 +2022,19 @@ pub struct OwnedNetlistDescriptor {
     /// retained dependency absent from this list remains find-only/read-only.
     #[serde(default)]
     pub owned_includes: Vec<OwnedNetlistIncludeDescriptor>,
+}
+
+/// One inactive, project-owned top-level deck. The active deck continues to
+/// use the long-standing `netlist_*` workspace fields as the single execution
+/// authority; this catalog retains complete inactive documents so switching
+/// decks is an atomic swap rather than a lossy import.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetainedOwnedNetlistDeck {
+    pub descriptor: OwnedNetlistDescriptor,
+    pub document: crate::state::NetlistDocument,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<PathBuf>,
 }
 
 impl OwnedNetlistDescriptor {
@@ -2083,6 +2101,145 @@ impl OwnedNetlistDescriptor {
         self.revision_history = next;
         Ok(())
     }
+}
+
+/// Validate one portable, project-relative top-deck path. Forward slashes are
+/// the persisted separator on every platform; native publication paths remain
+/// separate in `netlist_source_path`.
+pub fn validate_owned_netlist_artifact_path(path: &str) -> Result<(), String> {
+    if path.is_empty()
+        || path != path.trim()
+        || path.len() > 4_096
+        || path.chars().any(char::is_control)
+        || path.contains('\\')
+        || path.starts_with('/')
+        || path.ends_with('/')
+        || path
+            .split('/')
+            .any(|part| part.is_empty() || matches!(part, "." | ".."))
+        || path.contains(':')
+    {
+        return Err(
+            "owned top-deck path must be a trimmed, portable project-relative path".to_owned(),
+        );
+    }
+    Ok(())
+}
+
+fn validate_owned_netlist_projection(
+    document: &crate::state::NetlistDocument,
+    descriptor: &OwnedNetlistDescriptor,
+    source: &str,
+) -> Result<(), String> {
+    if descriptor.deck_id.is_nil() {
+        return Err("owned top-deck identity cannot be nil".to_owned());
+    }
+    validate_owned_netlist_artifact_path(&descriptor.artifact_name)?;
+    if document.ownership() == crate::state::DocumentOwnership::Generated {
+        return Err("project-owned netlist document cannot have generated ownership".to_owned());
+    }
+    if document.source() != source {
+        return Err("canonical document bytes differ from the owned source projection".to_owned());
+    }
+
+    let declared_dialect = descriptor
+        .imported_dialect
+        .unwrap_or(NetlistSourceDialect::RSpice);
+    let expected_profile = declared_dialect.execution_profile();
+    if descriptor.execution_profile.is_some() && descriptor.execution_profile != expected_profile {
+        return Err(format!(
+            "owned netlist dialect {} does not match its recorded execution profile",
+            declared_dialect.label()
+        ));
+    }
+    if declared_dialect.requires_compatibility_review() {
+        let reviewed = descriptor.compatibility_reviewed
+            && descriptor.execution_profile == expected_profile
+            && expected_profile.is_some();
+        let quarantined =
+            !descriptor.compatibility_reviewed && descriptor.execution_profile.is_none();
+        if !reviewed && !quarantined {
+            return Err(format!(
+                "owned non-canonical netlist dialect {} has neither an exact reviewed executable profile nor a fail-closed quarantine",
+                declared_dialect.label()
+            ));
+        }
+    }
+
+    let mut previous_revision = 0_u64;
+    for record in &descriptor.save_history {
+        if record.document_revision == 0
+            || record.document_revision <= previous_revision
+            || record.document_revision > document.revision().get()
+            || record.message.trim().is_empty()
+            || record.message != record.message.trim()
+            || record.message.chars().any(char::is_control)
+        {
+            return Err(
+                "owned source save history is not strictly revision ordered or has an invalid message"
+                    .to_owned(),
+            );
+        }
+        previous_revision = record.document_revision;
+    }
+    if descriptor.revision_history.len() > MAX_OWNED_NETLIST_HISTORY_REVISIONS {
+        return Err("owned source revision history exceeds its bounded entry limit".to_owned());
+    }
+    previous_revision = 0;
+    let mut retained_bytes = 0_usize;
+    for snapshot in &descriptor.revision_history {
+        snapshot.validate()?;
+        if snapshot.document_revision <= previous_revision
+            || snapshot.document_revision > document.revision().get()
+        {
+            return Err(
+                "owned source revision history is not strictly revision ordered".to_owned(),
+            );
+        }
+        retained_bytes = retained_bytes
+            .checked_add(snapshot.retained_bytes())
+            .ok_or_else(|| "owned source revision history size overflowed".to_owned())?;
+        previous_revision = snapshot.document_revision;
+    }
+    if retained_bytes > MAX_OWNED_NETLIST_HISTORY_BYTES {
+        return Err("owned source revision history exceeds its bounded byte limit".to_owned());
+    }
+    if descriptor.owned_includes.len() > crate::state::MAX_PROJECT_SOURCE_FILES {
+        return Err("owned include catalog exceeds the project file limit".to_owned());
+    }
+    let mut include_ids = HashSet::new();
+    let mut include_identities = HashSet::new();
+    for include in &descriptor.owned_includes {
+        include.validate()?;
+        if !include_ids.insert(include.document_id)
+            || !include_identities.insert(include.logical_identity.as_str())
+        {
+            return Err("owned include identities must be unique".to_owned());
+        }
+        let dependency = document
+            .dependencies()
+            .iter()
+            .find(|dependency| dependency.locator().logical_identity() == include.logical_identity)
+            .ok_or_else(|| {
+                format!(
+                    "owned include '{}' is absent from the canonical dependency closure",
+                    include.logical_identity
+                )
+            })?;
+        let dependency_source = dependency.source().ok_or_else(|| {
+            format!(
+                "owned include '{}' has no retained source bytes",
+                include.logical_identity
+            )
+        })?;
+        if include.content_digest != crate::state::content_digest(dependency_source) {
+            return Err(format!(
+                "owned include '{}' digest does not identify its retained bytes",
+                include.logical_identity
+            ));
+        }
+    }
+    Ok(())
 }
 
 // The source bundle API, re-exported from its historical workspace path. This
@@ -2198,6 +2355,10 @@ pub struct ProjectWorkspace {
     /// Ownership-dialog selection for the project-owned source artifact.
     #[serde(default)]
     pub netlist_descriptor: Option<OwnedNetlistDescriptor>,
+    /// Complete inactive top-level source decks. Only the active deck is
+    /// projected into `netlist_source`/`netlist_document` and may execute.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub retained_netlist_decks: Vec<RetainedOwnedNetlistDeck>,
     /// Project-owned source documents shown by the Verilog-A and Automation
     /// pages of the Code workspace. Older projects intentionally restore an
     /// empty registry rather than receiving demonstration content.
@@ -2278,6 +2439,7 @@ impl Default for ProjectWorkspace {
             netlist_source: None,
             netlist_document: None,
             netlist_descriptor: None,
+            retained_netlist_decks: Vec::new(),
             project_sources: ProjectSourceRegistry::default(),
             netlist_source_path: None,
             netlist_source_dirty: false,
@@ -2376,6 +2538,35 @@ fn validate_physical_layout_document_catalog(
 }
 
 impl ProjectWorkspace {
+    /// Assign deterministic stable identities to legacy top decks that predate
+    /// the multi-deck catalog. Migration uses only already-persisted project,
+    /// document, and logical-path identities, so loading identical bytes on a
+    /// second machine produces the same project state.
+    pub fn migrate_owned_netlist_deck_ids(&mut self) {
+        let namespace = self.project.id().as_uuid();
+        if let (Some(descriptor), Some(document)) =
+            (&mut self.netlist_descriptor, &self.netlist_document)
+            && descriptor.deck_id.is_nil()
+        {
+            let name = format!(
+                "rspice/top-deck/v1/{}/{}",
+                document.id().as_uuid(),
+                descriptor.artifact_name
+            );
+            descriptor.deck_id = Uuid::new_v5(&namespace, name.as_bytes());
+        }
+        for (index, deck) in self.retained_netlist_decks.iter_mut().enumerate() {
+            if deck.descriptor.deck_id.is_nil() {
+                let name = format!(
+                    "rspice/retained-top-deck/v1/{index}/{}/{}",
+                    deck.document.id().as_uuid(),
+                    deck.descriptor.artifact_name
+                );
+                deck.descriptor.deck_id = Uuid::new_v5(&namespace, name.as_bytes());
+            }
+        }
+    }
+
     pub fn physical_layout_documents(
         &self,
     ) -> &BTreeMap<String, crate::state::PhysicalLayoutDocument> {
@@ -2820,19 +3011,16 @@ impl ProjectWorkspace {
                     message: "canonical document has no owned-artifact descriptor".to_owned(),
                 }
             })?;
-            let name = descriptor.artifact_name.trim();
-            if name.is_empty()
-                || name != descriptor.artifact_name
-                || name.chars().any(char::is_control)
-                || name.contains('/')
-                || name.contains('\\')
-            {
+            if descriptor.deck_id.is_nil() {
                 return Err(
                     SimulationConfigurationError::InvalidNetlistDocumentProjection {
-                        message: "owned artifact name must be one trimmed file name".to_owned(),
+                        message: "owned top-deck identity cannot be nil".to_owned(),
                     },
                 );
             }
+            validate_owned_netlist_artifact_path(&descriptor.artifact_name).map_err(|message| {
+                SimulationConfigurationError::InvalidNetlistDocumentProjection { message }
+            })?;
             let declared_dialect = descriptor
                 .imported_dialect
                 .unwrap_or(NetlistSourceDialect::RSpice);
@@ -2986,6 +3174,39 @@ impl ProjectWorkspace {
                     message: "owned-artifact descriptor has no canonical document".to_owned(),
                 },
             );
+        }
+
+        if self.retained_netlist_decks.len() > crate::state::MAX_PROJECT_SOURCE_FILES {
+            return Err(
+                SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                    message: "retained top-deck catalog exceeds the project file limit".to_owned(),
+                },
+            );
+        }
+        let mut deck_ids = HashSet::new();
+        let mut deck_paths = HashSet::new();
+        if let Some(descriptor) = &self.netlist_descriptor {
+            deck_ids.insert(descriptor.deck_id);
+            deck_paths.insert(descriptor.artifact_name.to_ascii_lowercase());
+        }
+        for deck in &self.retained_netlist_decks {
+            validate_owned_netlist_projection(
+                &deck.document,
+                &deck.descriptor,
+                deck.document.source(),
+            )
+            .map_err(|message| {
+                SimulationConfigurationError::InvalidNetlistDocumentProjection { message }
+            })?;
+            if !deck_ids.insert(deck.descriptor.deck_id)
+                || !deck_paths.insert(deck.descriptor.artifact_name.to_ascii_lowercase())
+            {
+                return Err(
+                    SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                        message: "top-deck identities and logical paths must be unique".to_owned(),
+                    },
+                );
+            }
         }
 
         let mut plan_ids = HashMap::<SimulationPlanId, usize>::new();

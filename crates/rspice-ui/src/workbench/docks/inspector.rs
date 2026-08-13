@@ -3262,22 +3262,8 @@ fn generated_input_revision(state: &AppState) -> String {
 }
 
 fn owned_source_state(state: &AppState, digest: crate::product::ContentDigest) -> &'static str {
-    let validated = state.ui.netlist.validation.as_ref().is_some_and(|receipt| {
-        receipt.visible_content_digest == digest
-            && receipt.project_revision == state.workspace.project.revision().get()
-    });
-    let saved = state.ui.netlist.externally_saved_content_digest == Some(digest);
-    if state.workspace.netlist_source_dirty {
-        "modified · validation pending"
-    } else if validated && saved {
-        "saved · validated"
-    } else if validated {
-        "validated · save required"
-    } else if saved {
-        "saved · validation required"
-    } else {
-        "owned · validation required"
-    }
+    crate::workbench::documents::netlist_document::owned_netlist_publication_state(state, digest)
+        .label()
 }
 
 fn short_digest(digest: crate::product::ContentDigest) -> String {
@@ -3756,13 +3742,18 @@ mod tests {
         );
 
         assert_eq!(owned_source_state(&state, digest), "saved · validated");
+        state.workspace.netlist_source_dirty = true;
+        assert_eq!(
+            owned_source_state(&state, digest),
+            "saved · validated · project modified"
+        );
         state.simulation.netlist_content.push_str("* edit\n");
         let edited = crate::workbench::documents::netlist_document::source_content_digest(
             &state.simulation.netlist_content,
         );
         assert_eq!(
             owned_source_state(&state, edited),
-            "owned · validation required"
+            "modified · validation required"
         );
     }
 

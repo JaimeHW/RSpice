@@ -27,6 +27,69 @@ pub fn source_content_digest(source: &str) -> crate::product::ContentDigest {
     crate::state::content_digest(source)
 }
 
+/// Exact, derived state of one project-owned netlist publication.
+///
+/// Project dirtiness, external publication, validation, and run eligibility
+/// are independent facts. Keeping the projection here prevents the inspector,
+/// toolbar, and execution gate from inventing contradictory interpretations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OwnedNetlistPublicationState {
+    pub project_modified: bool,
+    pub source_modified: bool,
+    pub published_before: bool,
+    pub saved: bool,
+    pub validated: bool,
+    pub external_change_pending: bool,
+    pub run_eligible: bool,
+}
+
+impl OwnedNetlistPublicationState {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        if self.external_change_pending {
+            "external change · review required"
+        } else if !self.published_before && self.validated {
+            "validated · save required"
+        } else if !self.published_before {
+            "owned · validation required"
+        } else if self.source_modified && self.validated {
+            "modified · validated · save required"
+        } else if self.source_modified {
+            "modified · validation required"
+        } else if self.saved && self.validated && self.project_modified {
+            "saved · validated · project modified"
+        } else if self.saved && self.validated {
+            "saved · validated"
+        } else if self.saved {
+            "saved · validation required"
+        } else {
+            "owned · validation required"
+        }
+    }
+}
+
+#[must_use]
+pub(crate) fn owned_netlist_publication_state(
+    state: &AppState,
+    digest: crate::product::ContentDigest,
+) -> OwnedNetlistPublicationState {
+    let saved_digest = state.ui.netlist.externally_saved_content_digest;
+    let saved = saved_digest == Some(digest);
+    let validated = state.ui.netlist.validation.as_ref().is_some_and(|receipt| {
+        receipt.visible_content_digest == digest
+            && receipt.project_revision == state.workspace.project.revision().get()
+    });
+    OwnedNetlistPublicationState {
+        project_modified: state.workspace.netlist_source_dirty,
+        source_modified: saved_digest.is_some() && !saved,
+        published_before: saved_digest.is_some(),
+        saved,
+        validated,
+        external_change_pending: state.ui.netlist.external_change.is_some(),
+        run_eligible: saved && validated,
+    }
+}
+
 /// The outline and line offsets of the buffer the editor is showing.
 ///
 /// Parsing costs the whole deck and the navigator reads the outline on every
@@ -56,6 +119,11 @@ pub fn invalidate_source_evidence(document: &mut NetlistDocumentState) {
 enum OwnedNetlistReplacementTarget {
     Root,
     Dependency(String),
+    RetainedRoot(uuid::Uuid),
+    RetainedDependency {
+        deck_id: uuid::Uuid,
+        logical_identity: String,
+    },
 }
 
 /// One revision-bound source replacement prepared before a workspace-wide
@@ -91,6 +159,42 @@ impl OwnedNetlistReplacement {
     ) -> Self {
         Self {
             target: OwnedNetlistReplacementTarget::Dependency(logical_identity.into()),
+            original: original.to_owned(),
+            expected_digest: source_content_digest(original),
+            replacement,
+            replacement_count,
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn retained_root(
+        deck_id: uuid::Uuid,
+        original: &str,
+        replacement: String,
+        replacement_count: usize,
+    ) -> Self {
+        Self {
+            target: OwnedNetlistReplacementTarget::RetainedRoot(deck_id),
+            original: original.to_owned(),
+            expected_digest: source_content_digest(original),
+            replacement,
+            replacement_count,
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn retained_dependency(
+        deck_id: uuid::Uuid,
+        logical_identity: impl Into<String>,
+        original: &str,
+        replacement: String,
+        replacement_count: usize,
+    ) -> Self {
+        Self {
+            target: OwnedNetlistReplacementTarget::RetainedDependency {
+                deck_id,
+                logical_identity: logical_identity.into(),
+            },
             original: original.to_owned(),
             expected_digest: source_content_digest(original),
             replacement,
@@ -192,9 +296,12 @@ fn replace_owned_sources_atomically_impl(
         .netlist_descriptor
         .clone()
         .ok_or_else(|| "Owned netlist metadata is unavailable.".to_owned())?;
+    let mut next_retained_decks = state.workspace.retained_netlist_decks.clone();
     let mut next_root_source = root_source.clone();
     let mut root_seen = false;
     let mut dependency_seen = HashSet::new();
+    let mut retained_roots_seen = HashSet::new();
+    let mut retained_dependencies_seen = HashSet::new();
     let mut changed_count = 0usize;
     let mut root_changed = false;
     let mut dependencies_changed = false;
@@ -287,6 +394,127 @@ fn replace_owned_sources_atomically_impl(
                     .checked_add(edit.replacement_count)
                     .ok_or_else(|| "Replacement count overflowed.".to_owned())?;
             }
+            OwnedNetlistReplacementTarget::RetainedRoot(deck_id) => {
+                if !retained_roots_seen.insert(deck_id) {
+                    return Err(format!(
+                        "Retained top deck {deck_id} was included twice in one replacement."
+                    ));
+                }
+                let deck = next_retained_decks
+                    .iter_mut()
+                    .find(|deck| deck.descriptor.deck_id == deck_id)
+                    .ok_or_else(|| {
+                        format!("Retained top deck {deck_id} is no longer available.")
+                    })?;
+                if deck.document.content_digest() != edit.expected_digest
+                    || source_content_digest(deck.document.source()) != edit.expected_digest
+                {
+                    return Err(format!(
+                        "Retained top deck {:?} changed after search results were produced; no source was changed.",
+                        deck.descriptor.artifact_name
+                    ));
+                }
+                if edit.replacement == deck.document.source() {
+                    continue;
+                }
+                let original_includes = deck.document.include_directives().to_vec();
+                let original_dependencies = deck.document.dependencies().to_vec();
+                deck.document
+                    .replace_editable_source(
+                        edit.expected_digest,
+                        edit.replacement.as_bytes().to_vec(),
+                    )
+                    .map_err(|error| error.to_string())?;
+                if deck.document.include_directives() != original_includes {
+                    return Err(format!(
+                        "Workspace-wide replacement would change the include graph of {:?}. Edit that top deck directly, then resolve its dependencies before retrying.",
+                        deck.descriptor.artifact_name
+                    ));
+                }
+                deck.document
+                    .acknowledge_dependencies(deck.document.content_digest(), original_dependencies)
+                    .map_err(|error| error.to_string())?;
+                changed_count = changed_count
+                    .checked_add(edit.replacement_count)
+                    .ok_or_else(|| "Replacement count overflowed.".to_owned())?;
+            }
+            OwnedNetlistReplacementTarget::RetainedDependency {
+                deck_id,
+                logical_identity,
+            } => {
+                if logical_identity.trim().is_empty()
+                    || !retained_dependencies_seen.insert((deck_id, logical_identity.clone()))
+                {
+                    return Err(format!(
+                        "An owned include in retained top deck {deck_id} was missing or included twice in one replacement."
+                    ));
+                }
+                let deck = next_retained_decks
+                    .iter_mut()
+                    .find(|deck| deck.descriptor.deck_id == deck_id)
+                    .ok_or_else(|| {
+                        format!("Retained top deck {deck_id} is no longer available.")
+                    })?;
+                let dependency_index = deck
+                    .document
+                    .dependencies()
+                    .iter()
+                    .position(|dependency| {
+                        dependency.locator().logical_identity() == logical_identity
+                    })
+                    .ok_or_else(|| {
+                        format!(
+                            "Owned include {logical_identity:?} is no longer in retained top deck {:?}.",
+                            deck.descriptor.artifact_name
+                        )
+                    })?;
+                let original = deck.document.dependencies()[dependency_index]
+                    .source()
+                    .ok_or_else(|| {
+                        format!(
+                            "Owned include {logical_identity:?} in retained top deck {:?} is no longer resolved.",
+                            deck.descriptor.artifact_name
+                        )
+                    })?
+                    .to_owned();
+                let include = deck
+                    .descriptor
+                    .owned_includes
+                    .iter_mut()
+                    .find(|include| include.logical_identity == logical_identity)
+                    .ok_or_else(|| {
+                        format!(
+                            "Owned include {logical_identity:?} in retained top deck {:?} is no longer replacement-eligible.",
+                            deck.descriptor.artifact_name
+                        )
+                    })?;
+                if source_content_digest(&original) != edit.expected_digest
+                    || include.content_digest != edit.expected_digest
+                {
+                    return Err(format!(
+                        "Owned include {logical_identity:?} in retained top deck {:?} changed after search results were produced; no source was changed.",
+                        deck.descriptor.artifact_name
+                    ));
+                }
+                if edit.replacement == original {
+                    continue;
+                }
+                let mut dependencies = deck.document.dependencies().to_vec();
+                dependencies[dependency_index] = dependencies[dependency_index]
+                    .clone()
+                    .resolve_utf8(edit.replacement.as_bytes().to_vec())
+                    .map_err(|error| error.to_string())?;
+                deck.document
+                    .acknowledge_dependencies(deck.document.content_digest(), dependencies)
+                    .map_err(|error| error.to_string())?;
+                include.revision = include.revision.checked_add(1).ok_or_else(|| {
+                    format!("Owned include {logical_identity:?} revision overflowed.")
+                })?;
+                include.content_digest = source_content_digest(&edit.replacement);
+                changed_count = changed_count
+                    .checked_add(edit.replacement_count)
+                    .ok_or_else(|| "Replacement count overflowed.".to_owned())?;
+            }
         }
     }
 
@@ -309,6 +537,7 @@ fn replace_owned_sources_atomically_impl(
     }
     candidate.workspace.netlist_descriptor = Some(next_descriptor);
     candidate.workspace.netlist_document = Some(next_document.clone());
+    candidate.workspace.retained_netlist_decks = next_retained_decks;
     candidate.workspace.netlist_source_dirty = true;
     candidate.ui.netlist.owned_document = Some(next_document.clone());
     if candidate.ui.netlist.active_document == ActiveNetlistDocument::OwnedSource {
@@ -1178,14 +1407,16 @@ pub enum ActiveNetlistDocument {
 pub enum NetlistFindScope {
     #[default]
     CurrentDocument,
-    AllOwnedSources,
+    Selection,
+    OpenDocuments,
+    ActiveLanguageProject,
     ProjectReferences,
 }
 
 /// Persistent, keyboard-reachable state for the mockup's Find and replace
 /// surface. Match rows are derived from the current exact source every frame,
 /// so they cannot become stale after an edit.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct NetlistFindState {
     pub open: bool,
     pub find: String,
@@ -1193,9 +1424,29 @@ pub struct NetlistFindState {
     pub match_case: bool,
     pub whole_symbol: bool,
     pub regular_expression: bool,
+    pub include_comments: bool,
+    pub include_generated_references: bool,
     pub scope: NetlistFindScope,
     pub selected_match: usize,
     pub error: Option<String>,
+}
+
+impl Default for NetlistFindState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            find: String::new(),
+            replacement: String::new(),
+            match_case: false,
+            whole_symbol: false,
+            regular_expression: false,
+            include_comments: true,
+            include_generated_references: false,
+            scope: NetlistFindScope::CurrentDocument,
+            selected_match: 0,
+            error: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1204,6 +1455,443 @@ pub struct NetlistOwnershipDialogState {
     pub artifact_name: String,
     pub strategy: crate::state::OwnedNetlistEditStrategy,
     pub error: Option<String>,
+}
+
+/// Revision-bound lifecycle transaction for the active project-owned top deck.
+/// Native publication paths are deliberately not edited here: rename and move
+/// operate on the portable project path, while Save As controls publication.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NetlistLifecycleTransaction {
+    pub action: super::code_workspace::CodeSourceFileAction,
+    pub project_id: crate::product::ProjectId,
+    pub deck_id: uuid::Uuid,
+    pub document_id: crate::state::NetlistDocumentId,
+    pub document_revision: crate::product::ObjectRevision,
+    pub content_digest: crate::product::ContentDigest,
+    pub source_path: String,
+    pub proposed_path: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct NetlistLifecycleDialogState {
+    pub transaction: Option<NetlistLifecycleTransaction>,
+}
+
+pub(crate) fn begin_netlist_lifecycle_action(
+    state: &mut AppState,
+    action: super::code_workspace::CodeSourceFileAction,
+) -> Result<(), String> {
+    if state.ui.netlist.active_dependency_identity.is_some() {
+        return Err(
+            "Return to the owned root deck before changing a top-level deck lifecycle.".to_owned(),
+        );
+    }
+    let descriptor = state
+        .workspace
+        .netlist_descriptor
+        .as_ref()
+        .ok_or_else(|| "No project-owned top deck is active.".to_owned())?;
+    let document = state
+        .workspace
+        .netlist_document
+        .as_ref()
+        .ok_or_else(|| "The active top deck has no canonical document.".to_owned())?;
+    let proposed_path = match action {
+        super::code_workspace::CodeSourceFileAction::New => {
+            unique_top_deck_path(state, "untitled.cir")
+        }
+        super::code_workspace::CodeSourceFileAction::Rename
+        | super::code_workspace::CodeSourceFileAction::Move => descriptor.artifact_name.clone(),
+        super::code_workspace::CodeSourceFileAction::Duplicate => {
+            duplicate_top_deck_path(state, &descriptor.artifact_name)
+        }
+        super::code_workspace::CodeSourceFileAction::Delete => String::new(),
+    };
+    state.ui.netlist.lifecycle_dialog.transaction = Some(NetlistLifecycleTransaction {
+        action,
+        project_id: state.workspace.project.id(),
+        deck_id: descriptor.deck_id,
+        document_id: document.id(),
+        document_revision: document.revision(),
+        content_digest: document.content_digest(),
+        source_path: descriptor.artifact_name.clone(),
+        proposed_path,
+        error: None,
+    });
+    Ok(())
+}
+
+pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<String, String> {
+    let transaction = state
+        .ui
+        .netlist
+        .lifecycle_dialog
+        .transaction
+        .clone()
+        .ok_or_else(|| "No top-deck lifecycle transaction is open.".to_owned())?;
+    let descriptor = state
+        .workspace
+        .netlist_descriptor
+        .as_ref()
+        .ok_or_else(|| "The active top deck no longer exists.".to_owned())?;
+    let document = state
+        .workspace
+        .netlist_document
+        .as_ref()
+        .ok_or_else(|| "The active top deck no longer has a canonical document.".to_owned())?;
+    if state.workspace.project.id() != transaction.project_id
+        || descriptor.deck_id != transaction.deck_id
+        || document.id() != transaction.document_id
+        || document.revision() != transaction.document_revision
+        || document.content_digest() != transaction.content_digest
+    {
+        return Err(
+            "The active top deck changed while the lifecycle dialog was open; review it and retry."
+                .to_owned(),
+        );
+    }
+
+    let mut candidate = state.clone();
+    let message = match transaction.action {
+        super::code_workspace::CodeSourceFileAction::New => {
+            let path = normalized_top_deck_path(&transaction.proposed_path)?;
+            ensure_top_deck_path_available(&candidate, &path, None)?;
+            let generated = candidate
+                .workspace
+                .netlist_document
+                .as_ref()
+                .map(|document| document.generated_artifact().clone())
+                .ok_or_else(|| {
+                    "No generated primary is available as the new deck baseline.".to_owned()
+                })?;
+            let source = "* New RSpice top deck\n.end\n".to_owned();
+            let generated = crate::state::NetlistDocument::from_generated(
+                crate::state::NetlistDocumentId::new(),
+                generated,
+            )
+            .map_err(|error| error.to_string())?;
+            let mut next = generated
+                .create_editable_copy(
+                    crate::state::NetlistDocumentId::new(),
+                    generated.content_digest(),
+                )
+                .map_err(|error| error.to_string())?;
+            next.replace_editable_source(next.content_digest(), source.as_bytes().to_vec())
+                .map_err(|error| error.to_string())?;
+            let mut next_descriptor = new_owned_netlist_descriptor(
+                path.clone(),
+                crate::state::OwnedNetlistEditStrategy::OwnedSource,
+                &source,
+            );
+            next_descriptor.retain_revision(&next, "Created new top deck")?;
+            retain_active_top_deck(&mut candidate)?;
+            install_active_top_deck(&mut candidate, next_descriptor, next, None);
+            format!("Created and selected project top deck {path}.")
+        }
+        super::code_workspace::CodeSourceFileAction::Rename => {
+            let path = normalized_top_deck_path(&transaction.proposed_path)?;
+            if top_deck_parent(&path) != top_deck_parent(&transaction.source_path) {
+                return Err(
+                    "Rename changes only the file name. Use Move to change the project folder."
+                        .to_owned(),
+                );
+            }
+            ensure_top_deck_path_available(&candidate, &path, Some(transaction.deck_id))?;
+            candidate
+                .workspace
+                .netlist_descriptor
+                .as_mut()
+                .ok_or_else(|| "The active top-deck descriptor disappeared.".to_owned())?
+                .artifact_name = path.clone();
+            candidate.workspace.netlist_source_dirty = true;
+            format!("Renamed the project top deck to {path}.")
+        }
+        super::code_workspace::CodeSourceFileAction::Move => {
+            let path = normalized_top_deck_path(&transaction.proposed_path)?;
+            ensure_top_deck_path_available(&candidate, &path, Some(transaction.deck_id))?;
+            candidate
+                .workspace
+                .netlist_descriptor
+                .as_mut()
+                .ok_or_else(|| "The active top-deck descriptor disappeared.".to_owned())?
+                .artifact_name = path.clone();
+            candidate.workspace.netlist_source_dirty = true;
+            format!("Moved the project top deck to {path}.")
+        }
+        super::code_workspace::CodeSourceFileAction::Duplicate => {
+            let path = normalized_top_deck_path(&transaction.proposed_path)?;
+            ensure_top_deck_path_available(&candidate, &path, None)?;
+            let current = candidate
+                .workspace
+                .netlist_document
+                .as_ref()
+                .ok_or_else(|| "The active top-deck document disappeared.".to_owned())?;
+            let duplicate = current
+                .create_editable_copy(
+                    crate::state::NetlistDocumentId::new(),
+                    current.content_digest(),
+                )
+                .map_err(|error| error.to_string())?;
+            let mut duplicate_descriptor = candidate
+                .workspace
+                .netlist_descriptor
+                .as_ref()
+                .cloned()
+                .ok_or_else(|| "The active top-deck descriptor disappeared.".to_owned())?;
+            duplicate_descriptor.deck_id = uuid::Uuid::new_v4();
+            duplicate_descriptor.artifact_name = path.clone();
+            duplicate_descriptor.external_file_sha256 = None;
+            duplicate_descriptor.save_history.clear();
+            duplicate_descriptor.revision_history.clear();
+            for include in &mut duplicate_descriptor.owned_includes {
+                include.document_id = uuid::Uuid::new_v4();
+            }
+            duplicate_descriptor.retain_revision(&duplicate, "Duplicated top deck")?;
+            retain_active_top_deck(&mut candidate)?;
+            install_active_top_deck(&mut candidate, duplicate_descriptor, duplicate, None);
+            format!("Duplicated and selected project top deck {path}.")
+        }
+        super::code_workspace::CodeSourceFileAction::Delete => {
+            let removed = transaction.source_path.clone();
+            if let Some(next) = candidate.workspace.retained_netlist_decks.pop() {
+                candidate.workspace.return_to_generated_netlist();
+                install_active_top_deck(
+                    &mut candidate,
+                    next.descriptor,
+                    next.document,
+                    next.source_path,
+                );
+            } else {
+                let generated_artifact = candidate
+                    .workspace
+                    .netlist_document
+                    .as_ref()
+                    .map(|document| document.generated_artifact().clone())
+                    .ok_or_else(|| "The removed top deck has no generated baseline.".to_owned())?;
+                let generated = crate::state::NetlistDocument::from_generated(
+                    crate::state::NetlistDocumentId::new(),
+                    generated_artifact,
+                )
+                .map_err(|error| error.to_string())?;
+                candidate.workspace.return_to_generated_netlist();
+                candidate.ui.netlist.owned_document = None;
+                candidate.ui.netlist.generated_source = generated.source().to_owned();
+                candidate.ui.netlist.generated_document = Some(generated);
+                candidate.ui.netlist.active_document = ActiveNetlistDocument::Generated;
+                candidate.ui.netlist.active_dependency_identity = None;
+                candidate.ui.netlist.active_dependency_root = None;
+                candidate.simulation.netlist_content =
+                    candidate.ui.netlist.generated_source.clone();
+                candidate.ui.netlist.externally_saved_content_digest = None;
+            }
+            format!(
+                "Removed project top deck {removed}. Any separately published native file was not deleted."
+            )
+        }
+    };
+    candidate.ui.netlist.lifecycle_dialog.transaction = None;
+    candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
+    candidate.ui.netlist.completion_open = false;
+    candidate.ui.netlist.selected_byte_range = None;
+    invalidate_source_evidence(&mut candidate.ui.netlist);
+    clear_netlist_edit_journal(&mut candidate.ui.netlist);
+    candidate
+        .workspace
+        .validate_simulation_configuration()
+        .map_err(|error| error.to_string())?;
+    *state = candidate;
+    Ok(message)
+}
+
+pub(crate) fn select_retained_top_deck(
+    state: &mut AppState,
+    deck_id: uuid::Uuid,
+) -> Result<(), String> {
+    let index = state
+        .workspace
+        .retained_netlist_decks
+        .iter()
+        .position(|deck| deck.descriptor.deck_id == deck_id)
+        .ok_or_else(|| "The selected retained top deck no longer exists.".to_owned())?;
+    let mut candidate = state.clone();
+    let next = candidate.workspace.retained_netlist_decks.remove(index);
+    retain_active_top_deck(&mut candidate)?;
+    install_active_top_deck(
+        &mut candidate,
+        next.descriptor,
+        next.document,
+        next.source_path,
+    );
+    candidate.workspace.netlist_source_dirty = true;
+    candidate.ui.netlist.lifecycle_dialog.transaction = None;
+    candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
+    invalidate_source_evidence(&mut candidate.ui.netlist);
+    clear_netlist_edit_journal(&mut candidate.ui.netlist);
+    candidate
+        .workspace
+        .validate_simulation_configuration()
+        .map_err(|error| error.to_string())?;
+    *state = candidate;
+    Ok(())
+}
+
+pub(crate) fn retain_active_top_deck(state: &mut AppState) -> Result<(), String> {
+    let descriptor = state
+        .workspace
+        .netlist_descriptor
+        .take()
+        .ok_or_else(|| "No active top-deck descriptor could be retained.".to_owned())?;
+    let document = state
+        .workspace
+        .netlist_document
+        .take()
+        .ok_or_else(|| "No active top-deck document could be retained.".to_owned())?;
+    if state.workspace.netlist_source.as_deref() != Some(document.source()) {
+        return Err("The active top-deck source projection is inconsistent.".to_owned());
+    }
+    state.workspace.netlist_source = None;
+    state
+        .workspace
+        .retained_netlist_decks
+        .push(crate::state::RetainedOwnedNetlistDeck {
+            descriptor,
+            document,
+            source_path: state.workspace.netlist_source_path.take(),
+        });
+    Ok(())
+}
+
+pub(crate) fn install_active_top_deck(
+    state: &mut AppState,
+    descriptor: crate::state::OwnedNetlistDescriptor,
+    document: crate::state::NetlistDocument,
+    source_path: Option<std::path::PathBuf>,
+) {
+    let source = document.source().to_owned();
+    state.workspace.netlist_source = Some(source.clone());
+    state.workspace.netlist_document = Some(document.clone());
+    state.workspace.netlist_descriptor = Some(descriptor);
+    state.workspace.netlist_source_path = source_path;
+    state.workspace.netlist_source_dirty = true;
+    state.ui.netlist.externally_saved_content_digest = document.saved_digest();
+    state.ui.netlist.owned_document = Some(document);
+    state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+    state.ui.netlist.active_dependency_identity = None;
+    state.ui.netlist.active_dependency_root = None;
+    state.ui.netlist.active_document_initialized = true;
+    state.simulation.netlist_content = source;
+}
+
+fn new_owned_netlist_descriptor(
+    artifact_name: String,
+    strategy: crate::state::OwnedNetlistEditStrategy,
+    source: &str,
+) -> crate::state::OwnedNetlistDescriptor {
+    crate::state::OwnedNetlistDescriptor {
+        deck_id: uuid::Uuid::new_v4(),
+        artifact_name,
+        strategy,
+        source_encoding: crate::state::NetlistTextEncoding::Utf8,
+        source_line_ending: crate::state::NetlistLineEnding::detect(source),
+        imported_dialect: None,
+        compatibility_reviewed: false,
+        execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
+        external_file_sha256: None,
+        save_history: Vec::new(),
+        revision_history: Vec::new(),
+        owned_includes: Vec::new(),
+    }
+}
+
+fn normalized_top_deck_path(path: &str) -> Result<String, String> {
+    let path = path.trim().replace('\\', "/");
+    crate::state::validate_owned_netlist_artifact_path(&path)?;
+    Ok(path)
+}
+
+fn top_deck_parent(path: &str) -> &str {
+    path.rsplit_once('/').map_or("", |(parent, _)| parent)
+}
+
+fn ensure_top_deck_path_available(
+    state: &AppState,
+    path: &str,
+    except: Option<uuid::Uuid>,
+) -> Result<(), String> {
+    let conflicts_with_active =
+        state
+            .workspace
+            .netlist_descriptor
+            .as_ref()
+            .is_some_and(|descriptor| {
+                Some(descriptor.deck_id) != except
+                    && descriptor.artifact_name.eq_ignore_ascii_case(path)
+            });
+    let conflicts_with_retained = state.workspace.retained_netlist_decks.iter().any(|deck| {
+        Some(deck.descriptor.deck_id) != except
+            && deck.descriptor.artifact_name.eq_ignore_ascii_case(path)
+    });
+    if conflicts_with_active || conflicts_with_retained {
+        return Err(format!("A project top deck already owns path {path}."));
+    }
+    Ok(())
+}
+
+fn unique_top_deck_path(state: &AppState, preferred: &str) -> String {
+    if ensure_top_deck_path_available(state, preferred, None).is_ok() {
+        return preferred.to_owned();
+    }
+    let (parent, leaf) = preferred
+        .rsplit_once('/')
+        .map_or(("", preferred), |value| value);
+    let path = std::path::Path::new(leaf);
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("deck");
+    let extension = path.extension().and_then(|value| value.to_str());
+    for suffix in 2..=crate::state::MAX_PROJECT_SOURCE_FILES {
+        let leaf = extension.map_or_else(
+            || format!("{stem}_{suffix}"),
+            |extension| format!("{stem}_{suffix}.{extension}"),
+        );
+        let candidate = if parent.is_empty() {
+            leaf
+        } else {
+            format!("{parent}/{leaf}")
+        };
+        if ensure_top_deck_path_available(state, &candidate, None).is_ok() {
+            return candidate;
+        }
+    }
+    format!("deck_{}.cir", uuid::Uuid::new_v4().simple())
+}
+
+pub(crate) fn available_top_deck_path(state: &AppState, preferred: &str) -> String {
+    unique_top_deck_path(state, preferred)
+}
+
+fn duplicate_top_deck_path(state: &AppState, source: &str) -> String {
+    let (parent, leaf) = source.rsplit_once('/').map_or(("", source), |value| value);
+    let path = std::path::Path::new(leaf);
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("deck");
+    let extension = path.extension().and_then(|value| value.to_str());
+    let candidate = extension.map_or_else(
+        || format!("{stem}_copy"),
+        |extension| format!("{stem}_copy.{extension}"),
+    );
+    unique_top_deck_path(
+        state,
+        &if parent.is_empty() {
+            candidate
+        } else {
+            format!("{parent}/{candidate}")
+        },
+    )
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1544,7 +2232,9 @@ pub struct NetlistDocumentState {
     edit_undo: Vec<NetlistEditJournalEntry>,
     edit_redo: Vec<NetlistEditJournalEntry>,
     pub(crate) rename_dialog: language::NetlistRenameDialogState,
+    pub(crate) signature_help: language::NetlistSignatureHelpState,
     pub ownership_dialog: NetlistOwnershipDialogState,
+    pub(crate) lifecycle_dialog: NetlistLifecycleDialogState,
     pub comparison_dialog: NetlistComparisonDialogState,
     pub save_dialog: NetlistSaveDialogState,
     /// Native external-file compare/merge transaction. Browser downloads have
@@ -1591,6 +2281,9 @@ pub struct NetlistDocumentState {
     /// Unicode-scalar caret position in the visible source. Language actions
     /// use this exact editor result rather than guessing from the line.
     pub cursor_char_index: usize,
+    /// Last non-empty editor selection expressed as an exact byte range in
+    /// the visible source. Selection-scoped find never guesses from a line.
+    pub selected_byte_range: Option<std::ops::Range<usize>>,
     /// A re-run requested while the engine was busy.
     pub rerun_queued: bool,
     /// Whether the completion popover was open last frame.
@@ -1617,6 +2310,7 @@ impl NetlistDocumentState {
         self.find.open
             || self.rename_dialog.open
             || self.ownership_dialog.open
+            || self.lifecycle_dialog.transaction.is_some()
             || self.comparison_dialog.open
             || self.save_dialog.open
             || self.external_change.is_some()
@@ -1703,6 +2397,7 @@ mod tests {
         state.workspace.netlist_source = Some(ROOT.to_owned());
         state.workspace.netlist_document = Some(owned.clone());
         state.workspace.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
+            deck_id: uuid::Uuid::new_v4(),
             artifact_name: "owned.cir".to_owned(),
             strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
             source_encoding: crate::state::NetlistTextEncoding::Utf8,
@@ -2166,5 +2861,183 @@ mod tests {
             Some(ORIGINAL_INCLUDE),
             "relinking generated review authority must not mutate the owned root"
         );
+    }
+
+    #[test]
+    fn top_deck_lifecycle_is_atomic_and_preserves_inactive_decks() {
+        use crate::workbench::documents::code_workspace::CodeSourceFileAction;
+
+        let mut state = owned_dependency_state();
+        let original_id = state.workspace.netlist_descriptor.as_ref().unwrap().deck_id;
+
+        begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::Rename).unwrap();
+        state
+            .ui
+            .netlist
+            .lifecycle_dialog
+            .transaction
+            .as_mut()
+            .unwrap()
+            .proposed_path = "renamed.cir".to_owned();
+        commit_netlist_lifecycle_action(&mut state).unwrap();
+
+        begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::Move).unwrap();
+        state
+            .ui
+            .netlist
+            .lifecycle_dialog
+            .transaction
+            .as_mut()
+            .unwrap()
+            .proposed_path = "decks/renamed.cir".to_owned();
+        commit_netlist_lifecycle_action(&mut state).unwrap();
+
+        begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::Duplicate).unwrap();
+        commit_netlist_lifecycle_action(&mut state).unwrap();
+        let duplicate_id = state.workspace.netlist_descriptor.as_ref().unwrap().deck_id;
+        assert_ne!(duplicate_id, original_id);
+        assert_eq!(state.workspace.retained_netlist_decks.len(), 1);
+        assert_eq!(
+            state.workspace.netlist_source.as_deref(),
+            Some(ROOT),
+            "duplicating retains the exact source bytes"
+        );
+        assert_eq!(
+            state.workspace.retained_netlist_decks[0]
+                .descriptor
+                .artifact_name,
+            "decks/renamed.cir"
+        );
+
+        select_retained_top_deck(&mut state, original_id).unwrap();
+        assert_eq!(
+            state.workspace.netlist_descriptor.as_ref().unwrap().deck_id,
+            original_id
+        );
+        assert_eq!(
+            state.workspace.retained_netlist_decks[0].descriptor.deck_id,
+            duplicate_id
+        );
+
+        begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::New).unwrap();
+        commit_netlist_lifecycle_action(&mut state).unwrap();
+        assert_eq!(state.workspace.retained_netlist_decks.len(), 2);
+        assert_eq!(
+            state.workspace.netlist_source.as_deref(),
+            Some("* New RSpice top deck\n.end\n")
+        );
+
+        begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::Delete).unwrap();
+        let message = commit_netlist_lifecycle_action(&mut state).unwrap();
+        assert!(message.contains("native file was not deleted"));
+        assert_eq!(state.workspace.retained_netlist_decks.len(), 1);
+        assert!(state.workspace.netlist_document.is_some());
+        state.workspace.validate_simulation_configuration().unwrap();
+    }
+
+    #[test]
+    fn project_replace_is_atomic_across_active_and_retained_top_decks() {
+        use crate::workbench::documents::code_workspace::CodeSourceFileAction;
+
+        let mut state = owned_dependency_state();
+        open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
+        copy_active_dependency_to_project(&mut state).unwrap();
+        assert!(open_owned_primary(&mut state));
+        let retained_id = state.workspace.netlist_descriptor.as_ref().unwrap().deck_id;
+
+        begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::Duplicate).unwrap();
+        commit_netlist_lifecycle_action(&mut state).unwrap();
+        let active_id = state.workspace.netlist_descriptor.as_ref().unwrap().deck_id;
+        assert_ne!(active_id, retained_id);
+
+        let edited_root = ROOT.replace("V1 out 0 1", "V1 out 0 2");
+        let edits = vec![
+            OwnedNetlistReplacement::retained_root(retained_id, ROOT, edited_root.clone(), 1),
+            OwnedNetlistReplacement::retained_dependency(
+                retained_id,
+                INCLUDE_IDENTITY,
+                ORIGINAL_INCLUDE,
+                EDITED_INCLUDE.to_owned(),
+                1,
+            ),
+        ];
+        assert_eq!(
+            replace_owned_sources_atomically(&mut state, edits).unwrap(),
+            2
+        );
+
+        assert_eq!(state.workspace.netlist_source.as_deref(), Some(ROOT));
+        let retained = state
+            .workspace
+            .retained_netlist_decks
+            .iter()
+            .find(|deck| deck.descriptor.deck_id == retained_id)
+            .unwrap();
+        assert_eq!(retained.document.source(), edited_root);
+        assert_eq!(
+            retained.document.dependencies()[0].source(),
+            Some(EDITED_INCLUDE)
+        );
+        assert_eq!(
+            retained.descriptor.owned_includes[0].content_digest,
+            crate::state::content_digest(EDITED_INCLUDE)
+        );
+        state.workspace.validate_simulation_configuration().unwrap();
+
+        assert!(undo_netlist_edit(&mut state).unwrap().is_some());
+        let retained = state
+            .workspace
+            .retained_netlist_decks
+            .iter()
+            .find(|deck| deck.descriptor.deck_id == retained_id)
+            .unwrap();
+        assert_eq!(retained.document.source(), ROOT);
+        assert_eq!(
+            retained.document.dependencies()[0].source(),
+            Some(ORIGINAL_INCLUDE)
+        );
+        state.workspace.validate_simulation_configuration().unwrap();
+    }
+
+    #[test]
+    fn top_deck_lifecycle_rejects_a_stale_document_revision() {
+        use crate::workbench::documents::code_workspace::CodeSourceFileAction;
+
+        let mut state = owned_dependency_state();
+        begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::Rename).unwrap();
+        assert!(replace_owned_source(
+            &mut state,
+            ROOT.replace("V1 out 0 1", "V1 out 0 2")
+        ));
+
+        let error = commit_netlist_lifecycle_action(&mut state).unwrap_err();
+        assert!(error.contains("changed while the lifecycle dialog was open"));
+        assert_eq!(
+            state
+                .workspace
+                .netlist_descriptor
+                .as_ref()
+                .unwrap()
+                .artifact_name,
+            "owned.cir"
+        );
+    }
+
+    #[test]
+    fn legacy_top_deck_identity_migration_is_deterministic() {
+        let mut first = owned_dependency_state().workspace;
+        first.netlist_descriptor.as_mut().unwrap().deck_id = uuid::Uuid::nil();
+        let mut second = first.clone();
+
+        first.migrate_owned_netlist_deck_ids();
+        second.migrate_owned_netlist_deck_ids();
+
+        let first_id = first.netlist_descriptor.as_ref().unwrap().deck_id;
+        assert!(!first_id.is_nil());
+        assert_eq!(
+            first_id,
+            second.netlist_descriptor.as_ref().unwrap().deck_id
+        );
+        first.validate_simulation_configuration().unwrap();
     }
 }

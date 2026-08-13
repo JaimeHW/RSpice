@@ -27,16 +27,23 @@ pub(super) const CODE_TOOLBAR_PADDING_X: f32 = 8.0;
 pub(super) const CODE_TOOLBAR_GAP: f32 = 5.0;
 pub(super) const CODE_TOOLBAR_ACTION_GUTTER: f32 = 12.0;
 pub(super) const CODE_TOOLBAR_COMPACT_BREAKPOINT: f32 = 720.0;
+pub(super) const CODE_TOOLBAR_TABLET_VIEWPORT_BREAKPOINT: f32 = 1024.0;
+pub(super) const CODE_TOOLBAR_FULL_STATUS_MIN_WIDTH: f32 = 320.0;
 pub(super) const PHONE_BREAKPOINT: f32 = 560.0;
 pub(super) const PHONE_PRIMARY_WIDTH: f32 = 154.0;
 pub(super) const EDITOR_MENU_WIDTH: f32 = 58.0;
-pub(super) const PHONE_ACTION_WIDTH: f32 =
-    PHONE_PRIMARY_WIDTH + CODE_TOOLBAR_GAP * 2.0 + 28.0 + EDITOR_MENU_WIDTH;
+pub(super) const CODE_TOOLBAR_ICON_WIDTH: f32 = 28.0;
+pub(super) const PHONE_ACTION_WIDTH: f32 = PHONE_PRIMARY_WIDTH
+    + EDITOR_MENU_WIDTH
+    + CODE_TOOLBAR_ICON_WIDTH * 2.0
+    + CODE_TOOLBAR_GAP * 3.0;
 pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
     let messages = app.state.ui.messages();
     let t = Tokens::get(ui.ctx());
-    let width = ui.available_width();
-    let compact = code_toolbar_compact(width);
+    // A child UI can retain the pre-dock available width while its painter is
+    // clipped to the visible center document. Base both allocation and
+    // responsive projection on the width a user can actually see.
+    let width = code_toolbar_visible_width(ui.available_width(), ui.clip_rect().width());
     let phone = width <= PHONE_BREAKPOINT;
     let (rect, _) = ui.allocate_exact_size(vec2(width, CODE_TOOLBAR_HEIGHT), egui::Sense::hover());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
@@ -56,9 +63,15 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             .map(crate::state::DependencyMetadata::authority);
     let generated_ready = generated_primary_ready(&app.state);
     let active_available = active_document_available(&app.state);
-    let action_width: f32 = if compact {
-        PHONE_ACTION_WIDTH
-    } else if dependency_visible {
+    let active_editable =
+        crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
+            &app.state,
+        );
+    let quick_fix_available =
+        crate::workbench::documents::netlist_document::language::preferred_quick_fix_available(
+            &app.state,
+        );
+    let full_action_width: f32 = if dependency_visible {
         if dependency_owned { 280.0 } else { 390.0 }
     } else {
         (match active {
@@ -73,6 +86,20 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             ActiveNetlistDocument::GeneratedDiff => 152.0,
         }) + EDITOR_MENU_WIDTH
             + CODE_TOOLBAR_GAP
+    };
+    // Dock collapse can make the document wider at a smaller outer viewport.
+    // Decide from both the canonical breakpoint and the space left after the
+    // exact full action set, so that discontinuity cannot re-enable a crowded
+    // toolbar on tablet landscape.
+    let compact = code_toolbar_prefers_compact(
+        crate::ui::viewport::root_viewport_width(ui.ctx()),
+        width,
+        full_action_width,
+    );
+    let action_width = if compact {
+        compact_action_width(dependency_visible, dependency_owned)
+    } else {
+        full_action_width
     };
     let (left_rect, right_rect) = code_toolbar_regions(content, action_width);
     let language = match active {
@@ -271,6 +298,8 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui,
                 messages,
                 active_available && active != ActiveNetlistDocument::GeneratedDiff,
+                active_editable,
+                quick_fix_available,
             ) {
                 action = Some(language_action);
             }
@@ -321,13 +350,16 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             } else {
             match active {
                 ActiveNetlistDocument::Generated => {
-                    let (label, candidate) = if app.state.workspace.netlist_source.is_some() {
+                    let source_exists = app.state.workspace.netlist_source.is_some();
+                    let (label, full_label, candidate) = if source_exists {
                         (
+                            messages.text(MessageId::NetlistOpenEditableCompact),
                             messages.text(MessageId::NetlistOpenEditable),
                             NetlistToolbarAction::OpenOwned,
                         )
                     } else {
                         (
+                            messages.text(MessageId::NetlistCreateEditableCompact),
                             messages.text(MessageId::NetlistCreateEditable),
                             NetlistToolbarAction::OpenOwnershipDialog(
                                 crate::state::OwnedNetlistEditStrategy::OwnedSource,
@@ -336,32 +368,38 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                     };
                     let primary_ready =
                         app.state.workspace.netlist_source.is_some() || generated_ready;
-                    if ui
-                        .add_enabled(
-                            primary_ready,
-                            egui::Button::new(&label)
-                                .truncate()
-                                .min_size(vec2(PHONE_PRIMARY_WIDTH, 28.0)),
-                        )
-                        .on_disabled_hover_text(generation_block_reason(&app.state))
-                        .clicked()
+                    let primary = ui
+                        .add_enabled_ui(primary_ready, |ui| {
+                            ui.add_sized(
+                                [PHONE_PRIMARY_WIDTH, 28.0],
+                                egui::Button::new(&label).truncate(),
+                            )
+                        })
+                        .inner
+                        .on_hover_text(full_label)
+                        .on_disabled_hover_text(generation_block_reason(&app.state));
+                    if primary.clicked()
                     {
                         action = Some(candidate);
                     }
                 }
                 ActiveNetlistDocument::OwnedSource => {
                     let save_ready = owned_source_save_ready(app);
-                    if ui
-                        .add_enabled(
-                            save_ready,
-                            egui::Button::new(messages.text(MessageId::NetlistSaveSourceDeck))
-                                .truncate()
-                                .min_size(vec2(PHONE_PRIMARY_WIDTH, 28.0)),
-                        )
+                    let save = ui
+                        .add_enabled_ui(save_ready, |ui| {
+                            ui.add_sized(
+                                [PHONE_PRIMARY_WIDTH, 28.0],
+                                egui::Button::new(
+                                    messages.text(MessageId::NetlistSaveSourceDeck),
+                                )
+                                .truncate(),
+                            )
+                        })
+                        .inner
                         .on_disabled_hover_text(
                             messages.text(MessageId::NetlistValidateBeforeSave),
-                        )
-                        .clicked()
+                        );
+                    if save.clicked()
                     {
                         action = Some(NetlistToolbarAction::Save);
                     }
@@ -417,6 +455,8 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui,
                 messages,
                 active_available && active != ActiveNetlistDocument::GeneratedDiff,
+                active_editable,
+                quick_fix_available,
             ) {
                 action = Some(language_action);
             }
@@ -579,6 +619,29 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                 Err(error) => app.state.push_user_message(ConsoleMessage::warning(error)),
             }
         }
+        Some(NetlistToolbarAction::GoToDeclaration) => {
+            match crate::workbench::documents::netlist_document::language::go_to_declaration_at_cursor(
+                &mut app.state,
+            ) {
+                Ok(message) => app.state.push_user_message(ConsoleMessage::info(message)),
+                Err(error) => app.state.push_user_message(ConsoleMessage::warning(error)),
+            }
+        }
+        Some(NetlistToolbarAction::SignatureHelp) => {
+            match crate::workbench::documents::netlist_document::language::show_signature_help_at_cursor(
+                &mut app.state,
+            ) {
+                Ok(message) => {
+                    ui.ctx().memory_mut(|memory| {
+                        memory.request_focus(
+                            crate::workbench::documents::netlist_document::editor_id(&app.state),
+                        );
+                    });
+                    app.state.push_user_message(ConsoleMessage::info(message));
+                }
+                Err(error) => app.state.push_user_message(ConsoleMessage::warning(error)),
+            }
+        }
         Some(NetlistToolbarAction::FindReferences) => {
             match crate::workbench::documents::netlist_document::language::find_references_at_cursor(
                 &mut app.state,
@@ -594,6 +657,28 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                 app.state.push_user_message(ConsoleMessage::warning(error));
             }
         }
+        Some(NetlistToolbarAction::WorkspaceSymbols) => {
+            match crate::workbench::documents::netlist_document::language::open_workspace_symbols(
+                &mut app.state,
+            ) {
+                Ok(message) => app.state.push_user_message(ConsoleMessage::info(message)),
+                Err(error) => app.state.push_user_message(ConsoleMessage::warning(error)),
+            }
+        }
+        Some(NetlistToolbarAction::ApplyQuickFix) => {
+            match crate::workbench::documents::netlist_document::language::apply_preferred_quick_fix(
+                &mut app.state,
+            ) {
+                Ok(message) => app.state.push_user_message(ConsoleMessage::info(message)),
+                Err(error) => app.state.push_user_message(ConsoleMessage::warning(error)),
+            }
+        }
+        Some(NetlistToolbarAction::FormatDocument) => {
+            crate::workbench::documents::text_editor_commands::queue_format_document(
+                ui.ctx(),
+                crate::workbench::documents::netlist_document::editor_id(&app.state),
+            );
+        }
         None => {}
     }
 }
@@ -602,6 +687,8 @@ fn language_tools_menu(
     ui: &mut Ui,
     messages: crate::workbench::MessageCatalog,
     enabled: bool,
+    editable: bool,
+    quick_fix_available: bool,
 ) -> Option<NetlistToolbarAction> {
     let mut action = None;
     let (response, _) = ui
@@ -614,6 +701,20 @@ fn language_tools_menu(
             )
             .ui(ui, |ui| {
                 ui.set_min_width(180.0);
+                if ui
+                    .button(messages.text(MessageId::NetlistSignatureHelp))
+                    .clicked()
+                {
+                    action = Some(NetlistToolbarAction::SignatureHelp);
+                    ui.close();
+                }
+                if ui
+                    .button(messages.text(MessageId::NetlistGoToDeclaration))
+                    .clicked()
+                {
+                    action = Some(NetlistToolbarAction::GoToDeclaration);
+                    ui.close();
+                }
                 if ui
                     .button(messages.text(MessageId::NetlistGoToDefinition))
                     .clicked()
@@ -635,6 +736,36 @@ fn language_tools_menu(
                     action = Some(NetlistToolbarAction::RenameSymbol);
                     ui.close();
                 }
+                if ui
+                    .button(messages.text(MessageId::NetlistWorkspaceSymbols))
+                    .clicked()
+                {
+                    action = Some(NetlistToolbarAction::WorkspaceSymbols);
+                    ui.close();
+                }
+                ui.separator();
+                ui.menu_button(messages.text(MessageId::NetlistCodeActions), |ui| {
+                    if ui
+                        .add_enabled(
+                            editable && quick_fix_available,
+                            egui::Button::new(messages.text(MessageId::NetlistApplyQuickFix)),
+                        )
+                        .clicked()
+                    {
+                        action = Some(NetlistToolbarAction::ApplyQuickFix);
+                        ui.close();
+                    }
+                    if ui
+                        .add_enabled(
+                            editable,
+                            egui::Button::new(messages.text(MessageId::NetlistFormatDocument)),
+                        )
+                        .clicked()
+                    {
+                        action = Some(NetlistToolbarAction::FormatDocument);
+                        ui.close();
+                    }
+                });
             })
         })
         .inner;
@@ -666,6 +797,34 @@ fn language_tools_menu(
 
 pub(super) const fn code_toolbar_compact(width: f32) -> bool {
     width <= CODE_TOOLBAR_COMPACT_BREAKPOINT
+}
+
+pub(super) fn code_toolbar_visible_width(available_width: f32, clip_width: f32) -> f32 {
+    available_width.min(clip_width).max(0.0)
+}
+
+pub(super) fn code_toolbar_prefers_compact(
+    viewport_width: f32,
+    local_width: f32,
+    full_action_width: f32,
+) -> bool {
+    if viewport_width <= CODE_TOOLBAR_TABLET_VIEWPORT_BREAKPOINT
+        || code_toolbar_compact(local_width)
+    {
+        return true;
+    }
+    let content_width = (local_width - CODE_TOOLBAR_PADDING_X * 2.0).max(0.0);
+    let left_width = (content_width - full_action_width - CODE_TOOLBAR_ACTION_GUTTER).max(0.0);
+    left_width < CODE_TOOLBAR_FULL_STATUS_MIN_WIDTH
+}
+
+pub(super) const fn compact_action_width(dependency_visible: bool, dependency_owned: bool) -> f32 {
+    let dependency_controls = if dependency_visible {
+        if dependency_owned { 1.0 } else { 2.0 }
+    } else {
+        0.0
+    };
+    PHONE_ACTION_WIDTH + dependency_controls * (CODE_TOOLBAR_ICON_WIDTH + CODE_TOOLBAR_GAP)
 }
 
 pub(super) fn code_toolbar_regions(
@@ -732,7 +891,12 @@ enum NetlistToolbarAction {
     Validate,
     Save,
     Find,
+    SignatureHelp,
+    GoToDeclaration,
     GoToDefinition,
     FindReferences,
     RenameSymbol,
+    WorkspaceSymbols,
+    ApplyQuickFix,
+    FormatDocument,
 }

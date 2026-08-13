@@ -979,7 +979,13 @@ pub(crate) fn commit_staged_netlist_import(state: &mut AppState) -> bool {
             NetlistImportMode::ImportIntoProject
         }
         crate::workbench::documents::netlist_document::NetlistImportOperation::RequalifyOwnedSource => {
-            unreachable!("owned-source profile review commits before import-mode dispatch")
+            if let Some(current) = state.ui.netlist.import_review.as_mut() {
+                current.error = Some(
+                    "The owned-source profile review reached the import dispatcher without committing. Review the source profile again."
+                        .to_owned(),
+                );
+            }
+            return false;
         }
     };
     let mut committed = state.clone();
@@ -1065,8 +1071,10 @@ pub(crate) fn cancel_staged_netlist_import(state: &mut AppState) {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod dependency_tests {
+#[cfg(test)]
+mod tests {
+    #![cfg(not(target_arch = "wasm32"))]
+
     use super::*;
 
     struct Fixture(std::path::PathBuf);

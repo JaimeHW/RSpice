@@ -74,7 +74,7 @@ pub(super) fn apply_imported_netlist_transaction(
         return false;
     }
 
-    let (document, descriptor) = match canonical_import_document(
+    let (document, mut descriptor) = match canonical_import_document(
         state,
         &source,
         source_path.as_deref(),
@@ -90,33 +90,54 @@ pub(super) fn apply_imported_netlist_transaction(
             return false;
         }
     };
+    let mut candidate = state.clone();
+    if !initializing_netlist_project
+        && candidate.workspace.netlist_document.is_some()
+        && let Err(error) =
+            crate::workbench::documents::netlist_document::retain_active_top_deck(&mut candidate)
+    {
+        state.push_user_message(ConsoleMessage::error(format!(
+            "SPICE deck import failed: {error}"
+        )));
+        return false;
+    }
+    descriptor.artifact_name =
+        crate::workbench::documents::netlist_document::available_top_deck_path(
+            &candidate,
+            &descriptor.artifact_name,
+        );
     // Importing a new source deck changes future execution authority but does
-    // not delete immutable datasets produced by earlier sources. Every run
-    // carries its own provenance, so retained history remains truthful and
-    // reviewable after this project-owned document changes.
-    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
-    state.ui.netlist = Default::default();
-    state.workbench.netlist_open_documents.clear();
+    // not delete immutable datasets or a previously active top deck.
+    candidate.design_execution_epoch = candidate.design_execution_epoch.wrapping_add(1);
+    candidate.ui.netlist = Default::default();
+    candidate.workbench.netlist_open_documents.clear();
     let source_digest =
         crate::workbench::documents::netlist_document::source_content_digest(&source);
-    state.workspace.netlist_source = Some(source.clone());
-    state.workspace.netlist_document = Some(document.clone());
-    state.workspace.netlist_descriptor = Some(descriptor);
-    state.workspace.netlist_source_path = source_path;
-    state.workspace.set_netlist_source_dirty(true);
-    state.simulation.netlist_content = source;
-    state.ui.netlist.owned_document = Some(document);
-    state.ui.netlist.externally_saved_content_digest = Some(source_digest);
-    state.ui.netlist.active_document =
+    candidate.workspace.netlist_source = Some(source.clone());
+    candidate.workspace.netlist_document = Some(document.clone());
+    candidate.workspace.netlist_descriptor = Some(descriptor);
+    candidate.workspace.netlist_source_path = source_path;
+    candidate.workspace.set_netlist_source_dirty(true);
+    candidate.simulation.netlist_content = source;
+    candidate.ui.netlist.owned_document = Some(document);
+    candidate.ui.netlist.externally_saved_content_digest = Some(source_digest);
+    candidate.ui.netlist.active_document =
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
-    state.ui.netlist.active_document_initialized = true;
-    state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
+    candidate.ui.netlist.active_document_initialized = true;
+    candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
     crate::workbench::documents::netlist_document::invalidate_source_evidence(
-        &mut state.ui.netlist,
+        &mut candidate.ui.netlist,
     );
-    state
+    candidate
         .workbench
         .activate(crate::workbench::state::Workspace::Netlist);
+    if let Err(error) = candidate.workspace.validate_simulation_configuration() {
+        state.push_user_message(ConsoleMessage::error(format!(
+            "SPICE deck import failed: {error}"
+        )));
+        return false;
+    }
+    *state = candidate;
     state.push_user_message(ConsoleMessage::info(format!(
         "Imported SPICE deck: {display_name}"
     )));
@@ -324,6 +345,7 @@ pub(super) fn canonical_import_document(
     }
 
     let mut descriptor = crate::state::OwnedNetlistDescriptor {
+        deck_id: uuid::Uuid::new_v4(),
         artifact_name,
         strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
         source_encoding: metadata.encoding,
