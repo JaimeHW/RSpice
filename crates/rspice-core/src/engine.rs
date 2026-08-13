@@ -56,6 +56,7 @@ mod hb;
 mod health;
 mod matrix;
 mod monte_carlo;
+pub use monte_carlo::{MonteCarloEnvironment, apply_supply_voltage_scale_with_abort};
 mod noise;
 mod pole_zero;
 mod pss;
@@ -96,8 +97,8 @@ pub use error::{
     SimulationError, SimulationErrorCategory, SimulationErrorCode, SimulationErrorDescriptor,
 };
 pub use hb::{
-    HbAnalysisResult, HbEnvelopeContinuationState, HbEnvelopeStateGuarantee, PacAnalysisResult,
-    PnoiseAnalysisResult,
+    HbAnalysisResult, HbEnvelopeContinuationState, HbEnvelopeStateGuarantee, HbOperatingPoint,
+    PacAnalysisResult, PnoiseAnalysisResult,
 };
 pub use health::EngineHealthReport;
 pub use pss::{

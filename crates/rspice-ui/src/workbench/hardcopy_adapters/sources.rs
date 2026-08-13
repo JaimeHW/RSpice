@@ -1069,11 +1069,12 @@ fn quick_result_availability(
                     .get(state.analysis.histogram_state.selected)
                     .is_some_and(|variable| !variable.samples.is_empty())
         ),
-        ResultViewer::Nyquist | ResultViewer::Smith => visible_waveforms().any(|waveform| {
+        ResultViewer::Nyquist => visible_waveforms().any(|waveform| {
             waveform.complex.as_ref().is_some_and(|complex| {
                 !complex.real.is_empty() && complex.real.len() == complex.imag.len()
             })
         }),
+        ResultViewer::Smith => false,
         ResultViewer::Op => {
             analysis.dc_op.is_some()
                 || matches!(
@@ -1203,19 +1204,25 @@ fn retained_noise_waveform_is_renderable(waveform: &WaveformData) -> bool {
 }
 
 fn ordinary_noise_spectrum_is_renderable(analysis: &AnalysisResult) -> bool {
-    analysis.analysis_type == AnalysisType::Noise
-        && analysis.waveforms.iter().any(|waveform| {
-            retained_noise_reference(&waveform.name).is_some()
-                && retained_noise_waveform_is_renderable(waveform)
-        })
+    matches!(
+        analysis.analysis_type,
+        AnalysisType::Noise | AnalysisType::Hbnoise
+    ) && analysis.waveforms.iter().any(|waveform| {
+        retained_noise_reference(&waveform.name).is_some()
+            && retained_noise_waveform_is_renderable(waveform)
+    })
 }
 
 fn transient_waveform_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
     analysis.success
-        && analysis.analysis_type == AnalysisType::Transient
+        && analysis.analysis_type.is_time_domain()
         && analysis.waveforms.iter().any(|waveform| {
             waveform.visible && !waveform.x.is_empty() && waveform.x.len() == waveform.y.len()
         })
+}
+
+fn bode_response_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
+    crate::workbench::documents::result_document::bode_analysis_is_renderable(analysis)
 }
 
 fn quick_result_analysis_index(
@@ -1263,6 +1270,19 @@ fn quick_result_analysis_index(
                     .iter()
                     .position(|analysis| analysis.analysis_type == AnalysisType::DcSweep)
             }),
+        ResultViewer::Bode => state
+            .simulation
+            .active_analysis_idx
+            .filter(|&index| {
+                run.analyses
+                    .get(index)
+                    .is_some_and(bode_response_analysis_is_renderable)
+            })
+            .or_else(|| {
+                run.analyses
+                    .iter()
+                    .position(bode_response_analysis_is_renderable)
+            }),
         ResultViewer::PhaseNoise => state
             .simulation
             .active_analysis_idx
@@ -1297,6 +1317,7 @@ fn quick_result_analysis_index(
                     )
                 })
             }),
+        ResultViewer::Smith => None,
         _ => state.simulation.active_analysis_idx,
     }
 }

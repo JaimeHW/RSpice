@@ -299,9 +299,15 @@ pub(super) fn cached_models(
     );
     built.retain(|model| match results.viewer {
         super::ResultViewer::DcSweep => model.analysis_type == AnalysisType::DcSweep,
-        super::ResultViewer::Waves => model.analysis_type == AnalysisType::Transient,
-        super::ResultViewer::Bode => model.analysis_type == AnalysisType::Ac,
-        super::ResultViewer::NoiseContrib => model.analysis_type == AnalysisType::Noise,
+        super::ResultViewer::Waves => model.analysis_type.is_time_domain(),
+        super::ResultViewer::Bode => {
+            model.analysis_type.is_bode_response()
+                || model.analysis_type.is_raw_frequency_curve()
+        }
+        super::ResultViewer::NoiseContrib => matches!(
+            model.analysis_type,
+            AnalysisType::Noise | AnalysisType::Hbnoise
+        ),
         _ => true,
     });
     let models = Arc::new(built);
@@ -833,7 +839,8 @@ pub(super) fn build_models(
         if analysis.waveforms.is_empty() {
             continue;
         }
-        let displays_cartesian_complex = analysis.analysis_type == AnalysisType::Ac
+        let displays_cartesian_complex = (analysis.analysis_type.uses_complex_bode_projection()
+            || analysis.analysis_type.is_time_domain())
             && complex_display == ComplexNumberDisplay::RealImaginary
             && analysis
                 .waveforms
@@ -842,15 +849,18 @@ pub(super) fn build_models(
         let sample_selection = selection.filter(|selection| {
             selection.dataset_id == run.dataset_id && selection.analysis_sequence == analysis.id
         });
-        let (mut x_scale, mut x_dimension_key, mut x_label, mut x_unit) = match analysis
-            .analysis_type
-        {
-            AnalysisType::Ac => (XScale::Log10, "frequency", "f", "Hz"),
-            AnalysisType::Noise | AnalysisType::Pnoise => (XScale::Log10, "frequency", "f", "Hz"),
-            AnalysisType::Transient => (XScale::Linear, "time", "t", "s"),
-            AnalysisType::DcSweep => (XScale::Linear, "dc-sweep", "x", "V"),
-            _ => (XScale::Linear, "x", "x", ""),
-        };
+        let (mut x_scale, mut x_dimension_key, mut x_label, mut x_unit) =
+            match analysis.analysis_type {
+                kind if kind.is_bode_response() || kind.is_raw_frequency_curve() => {
+                    (XScale::Log10, "frequency", "f", "Hz")
+                }
+                AnalysisType::Noise | AnalysisType::Pnoise | AnalysisType::Hbnoise => {
+                    (XScale::Log10, "frequency", "f", "Hz")
+                }
+                kind if kind.is_time_domain() => (XScale::Linear, "time", "t", "s"),
+                AnalysisType::DcSweep => (XScale::Linear, "dc-sweep", "x", "V"),
+                _ => (XScale::Linear, "x", "x", ""),
+            };
         // Cartesian complex parts carry the source quantity, not the
         // magnitude projection's decibels, so that one case overrides the
         // analysis default.
@@ -877,9 +887,28 @@ pub(super) fn build_models(
             .unwrap_or_default()
             .rotate_left(17);
         for (waveform_index, waveform) in analysis.waveforms.iter().enumerate() {
+            // STB's optional complex contour feeds the dedicated Nyquist
+            // viewer. Its Bode sheet is the retained loop-gain pair only;
+            // presenting the contour's linear magnitude beside an already-dB
+            // loop gain would mix two different projections and units.
+            if analysis.analysis_type == AnalysisType::Stb
+                && !matches!(
+                    waveform.name.as_str(),
+                    "Loop Gain (dB)" | "Loop Phase (deg)"
+                )
+            {
+                continue;
+            }
             let color = waveform_color(waveform, waveform_index, tokens);
             let is_phase = waveform.name.starts_with("phase(");
             let is_mag = waveform.name.starts_with('|');
+            let is_time_complex_phase = analysis.analysis_type.is_time_domain()
+                && is_phase
+                && analysis.waveforms.iter().any(|candidate| {
+                    candidate.complex.as_ref().is_some_and(|complex| {
+                        waveform.name == format!("phase({})", complex.source_name)
+                    })
+                });
             if displays_cartesian_complex {
                 if let Some(complex) = &waveform.complex {
                     for (kind, name, signal_color, y) in [
@@ -928,14 +957,19 @@ pub(super) fn build_models(
                     continue;
                 }
             }
-            let kind = if analysis.analysis_type == AnalysisType::Ac && is_phase {
+            let kind = if (analysis.analysis_type.uses_complex_bode_projection() && is_phase)
+                || is_time_complex_phase
+            {
                 match complex_display {
                     ComplexNumberDisplay::MagnitudePhaseRadians => TraceKind::PhaseRad,
                     _ => TraceKind::PhaseDeg,
                 }
-            } else if analysis.analysis_type == AnalysisType::Ac && is_mag {
+            } else if analysis.analysis_type.uses_complex_bode_projection() && is_mag {
                 TraceKind::MagnitudeDb
-            } else if analysis.analysis_type == AnalysisType::Noise {
+            } else if matches!(
+                analysis.analysis_type,
+                AnalysisType::Noise | AnalysisType::Hbnoise
+            ) {
                 // Retained noise PSDs are V²/Hz; the pane reads nV/√Hz like
                 // the mockup's noise instrument.
                 TraceKind::NoiseDensity
@@ -1308,8 +1342,9 @@ fn quantity_unit<'a>(
 /// density or a decibel magnitude as volts.
 pub(crate) const fn analysis_default_unit(analysis_type: AnalysisType) -> &'static str {
     match analysis_type {
-        AnalysisType::Ac => "dB",
-        AnalysisType::Noise | AnalysisType::Pnoise => "V^2/Hz",
+        AnalysisType::Pstb => "",
+        kind if kind.is_bode_response() => "dB",
+        AnalysisType::Noise | AnalysisType::Pnoise | AnalysisType::Hbnoise => "V^2/Hz",
         _ => "V",
     }
 }

@@ -18,60 +18,51 @@ pub(crate) fn apply_voltage_corner(
     nominal_voltage: Value,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<()> {
+    rspice_core::engine::apply_supply_voltage_scale_with_abort(
+        netlist,
+        corner_voltage,
+        nominal_voltage,
+        abort,
+    )
+    .map_err(|error| match error {
+        rspice_core::SimulationError::Aborted => ServiceRunError::Aborted,
+        error => ServiceRunError::Failure(error.to_string()),
+    })
+}
+
+/// Apply the temperature and supply values of one authenticated Run Set point
+/// to a parsed deck.
+///
+/// Keeping this mutation in the service layer gives config-backed and
+/// spec-driven analyses one validation contract. In particular, Monte Carlo
+/// must apply the point before every trial is solved rather than merely label
+/// a nominal distribution with PVT metadata.
+pub(crate) fn apply_run_environment(
+    netlist: &mut rspice_core::Netlist,
+    temperature_celsius: Value,
+    supply_voltage: Option<Value>,
+    nominal_supply_voltage: Option<Value>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<()> {
     ensure_not_aborted(abort)?;
-    if !corner_voltage.is_finite() || corner_voltage <= 0.0 {
+    if !temperature_celsius.is_finite()
+        || rspice_core::constants::celsius_to_kelvin(temperature_celsius) <= 0.0
+    {
         return Err(ServiceRunError::Failure(
-            "Corner voltage must be a positive finite value".to_string(),
+            "Run Set temperature must be finite and above absolute zero".to_owned(),
         ));
     }
-    if !nominal_voltage.is_finite() || nominal_voltage <= 0.0 {
-        return Err(ServiceRunError::Failure(
-            "Corner nominal voltage must be a positive finite value".to_string(),
-        ));
-    }
-    let scale = corner_voltage / nominal_voltage;
-
-    let mut candidate_indices = Vec::new();
-    for (idx, element) in netlist.elements.iter().enumerate() {
-        poll_periodically(abort, idx)?;
-        let Some(neg) = element.nodes.get(1) else {
-            continue;
-        };
-        if !is_ground_node(neg) {
-            continue;
-        }
-        if let ElementKind::VoltageSource(spec) = &element.kind
-            && dc_value_from_source(spec).is_some()
-        {
-            candidate_indices.push(idx);
+    netlist.options.temp = Some(temperature_celsius);
+    match (supply_voltage, nominal_supply_voltage) {
+        (Some(supply), Some(nominal)) => apply_voltage_corner(netlist, supply, nominal, abort)?,
+        (None, None) => {}
+        _ => {
+            return Err(ServiceRunError::Failure(
+                "Run Set supply and nominal voltage must be provided together".to_owned(),
+            ));
         }
     }
-
-    if candidate_indices.is_empty() {
-        for (idx, element) in netlist.elements.iter().enumerate() {
-            poll_periodically(abort, idx)?;
-            if let ElementKind::VoltageSource(spec) = &element.kind
-                && dc_value_from_source(spec).is_some()
-            {
-                candidate_indices.push(idx);
-            }
-        }
-    }
-
-    for (candidate_index, idx) in candidate_indices.into_iter().enumerate() {
-        poll_periodically(abort, candidate_index)?;
-        let Some(element) = netlist.elements.get_mut(idx) else {
-            continue;
-        };
-        if let ElementKind::VoltageSource(spec) = &mut element.kind
-            && let Some(dc) = dc_value_from_source(spec)
-        {
-            let _ = set_dc_value_for_source(spec, dc * scale);
-        }
-    }
-
-    ensure_not_aborted(abort)?;
-    Ok(())
+    ensure_not_aborted(abort)
 }
 
 pub(crate) fn infer_nominal_supply_voltage(
@@ -121,19 +112,5 @@ fn dc_value_from_source(spec: &SourceSpec) -> Option<Value> {
         SourceSpec::Dc(v) => Some(*v),
         SourceSpec::DcAc { dc_value, .. } => Some(*dc_value),
         _ => None,
-    }
-}
-
-fn set_dc_value_for_source(spec: &mut SourceSpec, value: Value) -> bool {
-    match spec {
-        SourceSpec::Dc(v) => {
-            *v = value;
-            true
-        }
-        SourceSpec::DcAc { dc_value, .. } => {
-            *dc_value = value;
-            true
-        }
-        _ => false,
     }
 }

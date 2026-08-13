@@ -14,7 +14,7 @@ use super::super::engine_bridge::{EngineBridge, SupplyCornerScale};
 use super::super::execution::ResolvedExecutionDependencies;
 use super::super::multi_run::AnalysisSpec;
 use super::super::results::SimulationResult;
-use super::{SimulationError, SpecExecutionOptions};
+use super::{AnalysisExecutionEnvironment, SimulationError, SpecExecutionOptions};
 
 mod config;
 mod device;
@@ -22,6 +22,7 @@ mod frequency;
 mod periodic;
 mod sweeps;
 
+#[cfg(test)]
 pub(super) fn run_spec_request(
     bridge: &EngineBridge,
     spec: AnalysisSpec,
@@ -29,6 +30,28 @@ pub(super) fn run_spec_request(
     netlist: &str,
     source_path: Option<&Path>,
     dependencies: &ResolvedExecutionDependencies,
+    abort_flag: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    run_spec_request_with_environment(
+        bridge,
+        spec,
+        options,
+        netlist,
+        source_path,
+        dependencies,
+        None,
+        abort_flag,
+    )
+}
+
+pub(super) fn run_spec_request_with_environment(
+    bridge: &EngineBridge,
+    spec: AnalysisSpec,
+    options: SpecExecutionOptions,
+    netlist: &str,
+    source_path: Option<&Path>,
+    dependencies: &ResolvedExecutionDependencies,
+    environment: Option<AnalysisExecutionEnvironment>,
     abort_flag: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     ensure_not_aborted(abort_flag)?;
@@ -39,6 +62,13 @@ pub(super) fn run_spec_request(
     dependencies
         .validate_for_spec(&spec)
         .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
+
+    if environment.is_some() && !matches!(spec, AnalysisSpec::MonteCarlo { .. }) {
+        return Err(SimulationError::InvalidConfig(format!(
+            "{} cannot yet execute inside a multi-point Studio Run Set",
+            spec.run_type().display_name()
+        )));
+    }
 
     if let Some(config) = config::analysis_config_from_spec(&spec) {
         return bridge.run_with_abort_and_source_path(
@@ -52,7 +82,7 @@ pub(super) fn run_spec_request(
 
     match spec {
         AnalysisSpec::MonteCarlo { .. } | AnalysisSpec::Parametric | AnalysisSpec::Corner => {
-            sweeps::run_sweep_spec(spec, options, netlist, source_path, abort_flag)
+            sweeps::run_sweep_spec(spec, options, netlist, source_path, environment, abort_flag)
         }
         AnalysisSpec::AcData { frequencies, .. } => bridge.run_ac_frequencies_with_source_path(
             netlist,
@@ -70,7 +100,10 @@ pub(super) fn run_spec_request(
         | AnalysisSpec::HarmonicBalance { .. }
         | AnalysisSpec::Envelope { .. }
         | AnalysisSpec::Fourier { .. }
-        | AnalysisSpec::Disto { .. } => {
+        | AnalysisSpec::Disto { .. }
+        | AnalysisSpec::Hbsp { .. }
+        | AnalysisSpec::Hbnoise { .. }
+        | AnalysisSpec::Psp { .. } => {
             periodic::run_periodic_spec(spec, netlist, source_path, dependencies, abort_flag)
         }
         AnalysisSpec::SParameter { .. }
@@ -88,9 +121,6 @@ pub(super) fn run_spec_request(
             abort_flag,
         ),
         AnalysisSpec::Qpss { .. }
-        | AnalysisSpec::Hbsp { .. }
-        | AnalysisSpec::Hbnoise { .. }
-        | AnalysisSpec::Psp { .. }
         | AnalysisSpec::Qpac { .. }
         | AnalysisSpec::Qpnoise { .. }
         | AnalysisSpec::Qpxf { .. }
@@ -603,6 +633,7 @@ R2 out 0 1k\n\
                     AnalysisSpec::dc_op(),
                     SpecExecutionOptions::default(),
                     "",
+                    None,
                     None,
                     &rspice_core::abort_signal::NoAbort,
                 ),

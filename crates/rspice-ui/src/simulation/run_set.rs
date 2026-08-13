@@ -24,8 +24,12 @@ pub use model::{
     RunSetDimensionKind, RunSetState,
 };
 pub use points::{RunSetPoint, compose, resolve};
-pub use transaction::{RunSetAction, RunSetReceipt, RunSetReceiptStatus, dispatch};
-pub use validate::{RunSetForecast, RunSetStatus, RunSetValidation, validate};
+#[cfg(test)]
+pub use transaction::dispatch;
+pub use transaction::{RunSetAction, RunSetReceipt, RunSetReceiptStatus, dispatch_for_plan};
+#[cfg(test)]
+pub use validate::validate_with_task_count;
+pub use validate::{RunSetForecast, RunSetStatus, RunSetValidation, validate, validate_for_plan};
 
 use crate::simulation::dialog::corner::{
     CornerBaseAnalysis, CornerConfig, CornerPointSpec, ProcessCorner,

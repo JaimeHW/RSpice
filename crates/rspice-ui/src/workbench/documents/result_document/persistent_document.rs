@@ -766,30 +766,26 @@ pub(super) fn renderer_supports_analysis(id: &str, analysis: &AnalysisResult) ->
     }
     match id {
         "viewer-waveform" => {
-            matches!(
-                analysis.analysis_type,
-                AnalysisType::Transient | AnalysisType::DcSweep
-            ) && !analysis.waveforms.is_empty()
+            (analysis.analysis_type.is_time_domain()
+                || analysis.analysis_type == AnalysisType::DcSweep)
+                && !analysis.waveforms.is_empty()
         }
         "viewer-bode" => {
-            (analysis.analysis_type == AnalysisType::Ac && !analysis.waveforms.is_empty())
+            super::bode_analysis_is_renderable(analysis)
                 || super::bode::ordinary_noise_spectrum_is_renderable(analysis)
         }
-        // The native spectrum renderer currently derives an FFT from retained
-        // transient samples. It does not reinterpret HB/PSS tone tables as an
-        // FFT document.
         "viewer-spectrum" => {
-            (analysis.analysis_type == AnalysisType::Transient && !analysis.waveforms.is_empty())
+            (analysis.analysis_type.is_time_domain() && !analysis.waveforms.is_empty())
                 || super::harmonic_balance_analysis_is_renderable(analysis)
         }
         "viewer-phase-noise" => super::phase_noise_analysis_is_renderable(analysis),
-        "viewer-smith" => {
-            analysis.analysis_type == AnalysisType::SParameter && !analysis.waveforms.is_empty()
-        }
+        // Reference impedance is not yet retained with SP/PSP/HBSP results;
+        // accepting the default 50 Ω would fabricate impedance and VSWR.
+        "viewer-smith" => false,
         "viewer-table" => !analysis.waveforms.is_empty(),
         "viewer-histogram" => analysis.analysis_type == AnalysisType::MonteCarlo,
         "eye-viewer" => {
-            analysis.analysis_type == AnalysisType::Transient && !analysis.waveforms.is_empty()
+            analysis.analysis_type.is_time_domain() && !analysis.waveforms.is_empty()
         }
         "viewer-pz" => analysis.analysis_type == AnalysisType::PoleZero,
         "viewer-contribution" => matches!(

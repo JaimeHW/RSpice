@@ -404,13 +404,7 @@ impl SimulationController {
     }
 
     pub(crate) fn analysis_supports_transient_derivation(analysis_type: AnalysisType) -> bool {
-        matches!(
-            analysis_type,
-            AnalysisType::Transient
-                | AnalysisType::Envelope
-                | AnalysisType::Soa
-                | AnalysisType::Pss
-        )
+        analysis_type.is_time_domain()
     }
 }
 

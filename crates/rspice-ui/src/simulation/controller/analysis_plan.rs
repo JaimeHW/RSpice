@@ -269,6 +269,10 @@ impl SimulationController {
                             matches!(task.queued_analysis().spec, AnalysisSpec::Pss { .. }),
                             matches!(
                                 task.queued_analysis().spec,
+                                AnalysisSpec::HarmonicBalance { .. }
+                            ),
+                            matches!(
+                                task.queued_analysis().spec,
                                 AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. }
                             ),
                         ),
@@ -286,10 +290,14 @@ impl SimulationController {
                     } => Some(
                         crate::simulation::execution::ExecutionArtifactKind::DcOperatingPointSeed,
                     ),
+                    AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. } => {
+                        Some(crate::simulation::execution::ExecutionArtifactKind::HbState)
+                    }
                     AnalysisSpec::Pac
                     | AnalysisSpec::Pxf
                     | AnalysisSpec::Pnoise
                     | AnalysisSpec::Pstb
+                    | AnalysisSpec::Psp { .. }
                     // The spectrum is a reading of a converged steady state,
                     // so it binds the same artifact its small-signal siblings
                     // do rather than re-solving the period.
@@ -307,15 +315,17 @@ impl SimulationController {
                     .filter_map(|dependency| {
                         producer_identities
                             .get(dependency)
-                            .filter(|(_, _, transient, pss, op)| match required_kind {
+                            .filter(|(_, _, transient, pss, hb, op)| match required_kind {
                                 crate::simulation::execution::ExecutionArtifactKind::TransientTrajectory => *transient,
                                 crate::simulation::execution::ExecutionArtifactKind::PeriodicState => *pss,
+                                crate::simulation::execution::ExecutionArtifactKind::HbState => *hb,
                                 crate::simulation::execution::ExecutionArtifactKind::DcOperatingPointSeed => *op,
                             })
-                            .map(|(revision, config_digest, _, _, _)| {
+                            .map(|(revision, config_digest, _, _, _, _)| {
                                 match required_kind {
                                     crate::simulation::execution::ExecutionArtifactKind::TransientTrajectory => PreparedDependencyBinding::transient_trajectory(*dependency, *revision, *config_digest),
                                     crate::simulation::execution::ExecutionArtifactKind::PeriodicState => PreparedDependencyBinding::periodic_state(*dependency, *revision, *config_digest),
+                                    crate::simulation::execution::ExecutionArtifactKind::HbState => PreparedDependencyBinding::hb_state(*dependency, *revision, *config_digest),
                                     crate::simulation::execution::ExecutionArtifactKind::DcOperatingPointSeed => PreparedDependencyBinding::dc_operating_point_seed(*dependency, *revision, *config_digest),
                                 }
                             })
@@ -328,6 +338,7 @@ impl SimulationController {
                         match required_kind {
                             crate::simulation::execution::ExecutionArtifactKind::TransientTrajectory => "Transient",
                             crate::simulation::execution::ExecutionArtifactKind::PeriodicState => "shooting PSS",
+                            crate::simulation::execution::ExecutionArtifactKind::HbState => "Harmonic Balance",
                             crate::simulation::execution::ExecutionArtifactKind::DcOperatingPointSeed => "operating point",
                         },
                         producers.len()
@@ -452,6 +463,7 @@ impl SimulationController {
                 pnoise: None,
                 pstb: Some(Self::pstb_run_config_from_dialog(state)?),
             }),
+            AnalysisSpec::Psp { .. } => Ok(SpecExecutionOptions::default()),
             _ => Ok(SpecExecutionOptions {
                 temp: None,
                 corner: None,

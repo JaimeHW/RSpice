@@ -1,4 +1,5 @@
-//! Pure AC/Bode summary extraction shared by Results and netlist summaries.
+//! Pure frequency-response/Bode summary extraction shared by Results and
+//! netlist summaries.
 
 use std::sync::Arc;
 
@@ -32,12 +33,13 @@ pub struct AcBodeSummary {
 
 pub fn ac_bode_summary_for_run(run: &SimulationRun) -> Option<AcBodeSummary> {
     let (analysis_index, analysis) = run.analyses.iter().enumerate().find(|(_, analysis)| {
-        analysis.analysis_type == AnalysisType::Ac && !analysis.waveforms.is_empty()
+        analysis.analysis_type.is_bode_response() && !analysis.waveforms.is_empty()
     })?;
     ac_bode_summary_for_analysis(analysis, analysis_index)
 }
 
-/// Resolve the AC response produced by one exact prepared analysis instance.
+/// Resolve the frequency response produced by one exact prepared analysis
+/// instance.
 ///
 /// Analysis kind and display label are deliberately not used as identity:
 /// both can be identical when a run contains multiple AC configurations.
@@ -54,12 +56,13 @@ pub fn ac_bode_summary_for_source_instance(
     ac_bode_summary_for_analysis(analysis, analysis_index)
 }
 
-/// Resolve the AC response selected in a result browser.
+/// Resolve the frequency response selected in a result browser.
 ///
 /// A selected AC result with current provenance is re-resolved through its
 /// stable prepared-instance identity. Legacy results, which predate that
 /// identity, remain addressable by their run-local index. When the current
-/// selection is not an AC result, the run's normal AC fallback is retained.
+/// selection is not a frequency response, the run's normal response fallback
+/// is retained.
 pub fn ac_bode_summary_for_selection(
     run: &SimulationRun,
     selected_analysis_index: Option<usize>,
@@ -70,7 +73,7 @@ pub fn ac_bode_summary_for_selection(
     let Some(analysis) = run.analyses.get(analysis_index) else {
         return ac_bode_summary_for_run(run);
     };
-    if analysis.analysis_type != AnalysisType::Ac {
+    if !analysis.analysis_type.is_bode_response() {
         return ac_bode_summary_for_run(run);
     }
 
@@ -86,21 +89,41 @@ pub fn ac_bode_summary_for_analysis(
     analysis: &AnalysisResult,
     analysis_index: usize,
 ) -> Option<AcBodeSummary> {
-    if analysis.analysis_type != AnalysisType::Ac || analysis.waveforms.is_empty() {
+    if !analysis.analysis_type.is_bode_response() || analysis.waveforms.is_empty() {
         return None;
     }
 
-    let (mag_index, mag) = select_magnitude_trace(&analysis.waveforms)?;
-    let signal = mag.name.trim_start_matches('|').trim_end_matches('|');
-    let phase_name = format!("phase({signal})");
-    let phase = analysis
-        .waveforms
-        .iter()
-        .enumerate()
-        .find(|(_, waveform)| waveform.name == phase_name);
+    let (mag_index, mag, signal, gain_db, phase) = if analysis.analysis_type == AnalysisType::Stb {
+        let (mag_index, mag) = analysis
+            .waveforms
+            .iter()
+            .enumerate()
+            .find(|(_, waveform)| waveform.name == "Loop Gain (dB)")?;
+        let phase = analysis
+            .waveforms
+            .iter()
+            .enumerate()
+            .find(|(_, waveform)| waveform.name == "Loop Phase (deg)");
+        (mag_index, mag, "Loop Gain", Arc::clone(&mag.y), phase)
+    } else {
+        let (mag_index, mag) = select_magnitude_trace(&analysis.waveforms)?;
+        let signal = mag.name.trim_start_matches('|').trim_end_matches('|');
+        let phase_name = format!("phase({signal})");
+        let phase = analysis
+            .waveforms
+            .iter()
+            .enumerate()
+            .find(|(_, waveform)| waveform.name == phase_name);
+        (
+            mag_index,
+            mag,
+            signal,
+            magnitude_to_db(&mag.y),
+            phase,
+        )
+    };
 
     let frequency = Arc::clone(&mag.x);
-    let gain_db = magnitude_to_db(&mag.y);
     let phase_deg = phase.map(|(_, waveform)| Arc::clone(&waveform.y));
     let phase_index = phase.map(|(index, _)| index);
     let metrics = metrics_from_curves(
@@ -131,6 +154,9 @@ pub fn log_frequency_crossing(frequency: &[f64], series: &[f64], level: f64) -> 
         let (y0, y1) = (series[i - 1] - level, series[i] - level);
         if y0 == 0.0 {
             return Some(f0);
+        }
+        if y1 == 0.0 {
+            return Some(f1);
         }
         if y0 * y1 < 0.0 {
             let t = y0 / (y0 - y1);
@@ -232,6 +258,14 @@ mod tests {
         AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(waveforms)
     }
 
+    fn response_analysis(
+        analysis_type: AnalysisType,
+        waveforms: Vec<WaveformData>,
+    ) -> AnalysisResult {
+        AnalysisResult::new(1, analysis_type, analysis_type.short_label())
+            .with_waveforms(waveforms)
+    }
+
     fn wave(name: &str, x: &[f64], y: &[f64], visible: bool) -> WaveformData {
         let mut waveform = WaveformData::new(name, x.to_vec(), y.to_vec(), "#fff");
         waveform.visible = visible;
@@ -292,6 +326,65 @@ mod tests {
         assert_eq!(summary.metrics.pm_deg, None);
         assert_eq!(summary.metrics.f180, None);
         assert_eq!(summary.metrics.gm_db, None);
+    }
+
+    #[test]
+    fn pac_summary_uses_the_same_exact_complex_response_projection() {
+        let analysis = response_analysis(
+            AnalysisType::Pac,
+            vec![
+                wave("|V(out,0)|", &[1.0, 10.0], &[10.0, 1.0], true),
+                wave("phase(V(out,0))", &[1.0, 10.0], &[-90.0, -135.0], true),
+            ],
+        );
+
+        let summary = ac_bode_summary_for_analysis(&analysis, 2).expect("PAC summary");
+
+        assert_eq!(summary.signal, "V(out,0)");
+        assert_eq!(summary.analysis_index, 2);
+        assert_close(summary.metrics.adc_db, 20.0);
+        assert_close(summary.metrics.ugf, 10.0);
+    }
+
+    #[test]
+    fn stb_summary_preserves_retained_decibels_without_double_conversion() {
+        let analysis = response_analysis(
+            AnalysisType::Stb,
+            vec![
+                wave("Loop Gain (dB)", &[1.0, 10.0, 100.0], &[40.0, 0.0, -20.0], true),
+                wave(
+                    "Loop Phase (deg)",
+                    &[1.0, 10.0, 100.0],
+                    &[-90.0, -135.0, -180.0],
+                    true,
+                ),
+            ],
+        );
+
+        let summary = ac_bode_summary_for_analysis(&analysis, 4).expect("STB summary");
+
+        assert_eq!(summary.signal, "Loop Gain");
+        assert_eq!(summary.gain_db.as_slice(), &[40.0, 0.0, -20.0]);
+        assert_close(summary.metrics.adc_db, 40.0);
+        assert_close(summary.metrics.ugf, 10.0);
+        assert_close(summary.metrics.pm_deg, 45.0);
+        assert_close(summary.metrics.f180, 100.0);
+        assert_close(summary.metrics.gm_db, 20.0);
+    }
+
+    #[test]
+    fn pstb_mode_samples_never_impersonate_a_frequency_response() {
+        let analysis = response_analysis(
+            AnalysisType::Pstb,
+            vec![wave(
+                "Stability Margin (dB)",
+                &[0.0, 1.0],
+                &[12.0, 4.0],
+                true,
+            )],
+        );
+
+        assert_eq!(ac_bode_summary_for_analysis(&analysis, 0), None);
     }
 
     #[test]

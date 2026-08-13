@@ -1438,6 +1438,7 @@ impl SimulationController {
                                             | AnalysisSpec::Pxf
                                             | AnalysisSpec::Pnoise
                                             | AnalysisSpec::Pstb
+                                            | AnalysisSpec::Psp { .. }
                                     )
                             })
                         });
@@ -1454,6 +1455,19 @@ impl SimulationController {
                                             method: PssMethod::Shooting,
                                             ..
                                         }
+                                    )
+                            })
+                        });
+                    let hb_artifact_required = self
+                        .current_provenance
+                        .as_ref()
+                        .map(|provenance| provenance.source_instance_id())
+                        .is_some_and(|producer| {
+                            self.pending_analyses.iter().any(|task| {
+                                task.dependencies().contains(&producer)
+                                    && matches!(
+                                        task.spec(),
+                                        AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. }
                                     )
                             })
                         });
@@ -1500,6 +1514,23 @@ impl SimulationController {
                                 )
                             })
                         }
+                        (
+                            Some(hb_spec @ AnalysisSpec::HarmonicBalance { .. }),
+                            Some(provenance),
+                            Some(config_digest),
+                        ) if hb_artifact_required => ExecutionArtifactEnvelope::from_hb_result(
+                            provenance.prepared_snapshot_digest(),
+                            provenance.source_instance_id(),
+                            provenance.source_revision(),
+                            config_digest,
+                            hb_spec,
+                            &sim_result,
+                        )
+                        .map_err(|error| {
+                            format!(
+                                "HB result could not produce its authenticated spectral-state artifact: {error}"
+                            )
+                        }),
                         (
                             Some(AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. }),
                             Some(provenance),

@@ -9,7 +9,7 @@
 
 use egui::{Sense, Ui, vec2};
 
-use crate::simulation::plan::AnalysisKind;
+use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::simulation::run_set::{
     self, InvalidValuePolicy, RunSetAction, RunSetBudgets, RunSetCompositionMode, RunSetDimension,
     RunSetDimensionKind, RunSetReceiptStatus, RunSetState, RunSetValidation,
@@ -48,9 +48,12 @@ const FORECAST_TILE_W: f32 = 232.0;
 /// the cards themselves still own their exact layout.
 const AXIS_CARD_OUTER_W: f32 = AXIS_CARD_W + 18.0;
 
+/// Stable row height for every axis slot. Equal allocation keeps adjacent
+/// cards top-aligned even when one source label or chip row measures wider.
+const AXIS_CARD_SLOT_H: f32 = 130.0;
+
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let analyses = app.state.sim_setup.enabled_analysis_instance_count();
-    let validation = run_set::validate(&app.state.sim_setup.run_set, analyses);
+    let validation = plan_run_set_validation(app);
 
     toolbar(ui, app, &validation);
     if !validation.errors.is_empty() || !validation.warnings.is_empty() {
@@ -337,113 +340,123 @@ fn axis_card(
         t.color.text_faint
     };
 
-    egui::Frame::new()
-        .fill(fill)
-        .stroke(stroke)
-        .corner_radius(t.radius)
-        .inner_margin(egui::Margin::symmetric(8, 7))
-        .show(ui, |ui| {
-            ui.set_width(AXIS_CARD_W);
-            ui.spacing_mut().item_spacing.y = 5.0;
+    ui.allocate_ui_with_layout(
+        vec2(AXIS_CARD_OUTER_W, AXIS_CARD_SLOT_H),
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| {
+            ui.set_width(AXIS_CARD_OUTER_W);
+            egui::Frame::new()
+                .fill(fill)
+                .stroke(stroke)
+                .corner_radius(t.radius)
+                .inner_margin(egui::Margin::symmetric(8, 7))
+                .show(ui, |ui| {
+                    ui.set_width(AXIS_CARD_W);
+                    ui.spacing_mut().item_spacing.y = 5.0;
 
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(format!("{:02}", index + 1))
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_faint),
-                );
-                let title = ui
-                    .add(
-                        egui::Label::new(
-                            egui::RichText::new(&dimension.name)
-                                .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                                .color(text_color),
-                        )
-                        .sense(Sense::click()),
-                    )
-                    .on_hover_text("Edit this dimension");
-                title.widget_info(|| {
-                    egui::WidgetInfo::labeled(
-                        egui::WidgetType::Button,
-                        ui.is_enabled(),
-                        format!("Edit dimension {}", dimension.name),
-                    )
-                });
-                theme::paint_focus_ring(ui, &title, title.rect);
-                if title.clicked() {
-                    event = Some(AxisEvent::Select);
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let mut enabled = dimension.enabled;
-                    if ui
-                        .add(egui::Checkbox::without_text(&mut enabled))
-                        .on_hover_text(format!("Include {} in the run space", dimension.name))
-                        .changed()
-                    {
-                        event = Some(AxisEvent::SetEnabled(enabled));
-                    }
-                });
-            });
-            ui.label(
-                egui::RichText::new(format!(
-                    "{} · {}",
-                    dimension.kind.as_str(),
-                    dimension.kind.value_type().as_str()
-                ))
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_faint),
-            );
-
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-                for value in dimension.values.iter().take(AXIS_CHIP_LIMIT) {
-                    let tone = if value.canonical.is_some() {
-                        text_color
-                    } else {
-                        t.color.err
-                    };
-                    value_chip(ui, &value.lexical, tone);
-                }
-                if dimension.values.len() > AXIS_CHIP_LIMIT {
-                    value_chip(
-                        ui,
-                        &format!("+{}", dimension.values.len() - AXIS_CHIP_LIMIT),
-                        t.color.text_faint,
-                    );
-                }
-                if dimension.values.is_empty() {
-                    value_chip(ui, "no values", t.color.err);
-                }
-            });
-
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(format!(
-                        "{} value{}",
-                        dimension.values.len(),
-                        if dimension.values.len() == 1 { "" } else { "s" }
-                    ))
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_faint),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let short = dimension
-                        .source
-                        .rsplit(':')
-                        .next()
-                        .unwrap_or(&dimension.source);
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(short)
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(format!("{:02}", index + 1))
                                 .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                                 .color(t.color.text_faint),
-                        )
-                        .truncate(),
-                    )
-                    .on_hover_text(&dimension.source);
+                        );
+                        let title = ui
+                            .add(
+                                egui::Label::new(
+                                    egui::RichText::new(&dimension.name)
+                                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                                        .color(text_color),
+                                )
+                                .sense(Sense::click()),
+                            )
+                            .on_hover_text("Edit this dimension");
+                        title.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                ui.is_enabled(),
+                                format!("Edit dimension {}", dimension.name),
+                            )
+                        });
+                        theme::paint_focus_ring(ui, &title, title.rect);
+                        if title.clicked() {
+                            event = Some(AxisEvent::Select);
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let mut enabled = dimension.enabled;
+                            if ui
+                                .add(egui::Checkbox::without_text(&mut enabled))
+                                .on_hover_text(format!(
+                                    "Include {} in the run space",
+                                    dimension.name
+                                ))
+                                .changed()
+                            {
+                                event = Some(AxisEvent::SetEnabled(enabled));
+                            }
+                        });
+                    });
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} · {}",
+                            dimension.kind.as_str(),
+                            dimension.kind.value_type().as_str()
+                        ))
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_faint),
+                    );
+
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+                        for value in dimension.values.iter().take(AXIS_CHIP_LIMIT) {
+                            let tone = if value.canonical.is_some() {
+                                text_color
+                            } else {
+                                t.color.err
+                            };
+                            value_chip(ui, &value.lexical, tone);
+                        }
+                        if dimension.values.len() > AXIS_CHIP_LIMIT {
+                            value_chip(
+                                ui,
+                                &format!("+{}", dimension.values.len() - AXIS_CHIP_LIMIT),
+                                t.color.text_faint,
+                            );
+                        }
+                        if dimension.values.is_empty() {
+                            value_chip(ui, "no values", t.color.err);
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{} value{}",
+                                dimension.values.len(),
+                                if dimension.values.len() == 1 { "" } else { "s" }
+                            ))
+                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_faint),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let short = dimension
+                                .source
+                                .rsplit(':')
+                                .next()
+                                .unwrap_or(&dimension.source);
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(short)
+                                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                        .color(t.color.text_faint),
+                                )
+                                .truncate(),
+                            )
+                            .on_hover_text(&dimension.source);
+                        });
+                    });
                 });
-            });
-        });
+        },
+    );
     event
 }
 
@@ -493,71 +506,81 @@ fn operator_tile(ui: &mut Ui, glyph: &str, active: bool) {
 fn forecast_tile(ui: &mut Ui, validation: &RunSetValidation) {
     let t = Tokens::get(ui.ctx());
     let forecast = validation.forecast;
-    egui::Frame::new()
-        .fill(t.color.bg_panel_2)
-        .stroke(egui::Stroke::new(
-            1.0,
-            if validation.is_ready() {
-                t.color.ok
-            } else {
-                t.color.border
-            },
-        ))
-        .corner_radius(t.radius)
-        .inner_margin(egui::Margin::symmetric(9, 7))
-        .show(ui, |ui| {
-            ui.set_width(FORECAST_TILE_W);
-            ui.spacing_mut().item_spacing.y = 4.0;
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(forecast.point_count.to_string())
-                        .font(theme::mono(tokens::FS_4, FontWeight::SemiBold))
-                        .color(t.color.text),
-                );
-                ui.label(
-                    egui::RichText::new(if forecast.point_count == 1 {
-                        "point"
+    ui.allocate_ui_with_layout(
+        vec2(FORECAST_TILE_W + 20.0, 0.0),
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| {
+            ui.set_width(FORECAST_TILE_W + 20.0);
+            egui::Frame::new()
+                .fill(t.color.bg_panel_2)
+                .stroke(egui::Stroke::new(
+                    1.0,
+                    if validation.is_ready() {
+                        t.color.ok
                     } else {
-                        "points"
-                    })
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-                );
-            });
-            ui.label(
-                egui::RichText::new(format!(
-                    "× {} task{} / point",
-                    forecast.enabled_analysis_count,
-                    if forecast.enabled_analysis_count == 1 {
-                        ""
-                    } else {
-                        "s"
-                    }
+                        t.color.border
+                    },
                 ))
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_faint),
-            );
-            for (label, value) in [
-                ("Tasks", forecast.task_count.to_string()),
-                ("Cost", run_set::format_duration_ms(forecast.cost_ms)),
-                ("Storage", run_set::format_bytes(forecast.storage_bytes)),
-            ] {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(label)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                .corner_radius(t.radius)
+                .inner_margin(egui::Margin::symmetric(9, 7))
+                .show(ui, |ui| {
+                    ui.set_width(FORECAST_TILE_W);
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new(value)
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                            egui::RichText::new(forecast.point_count.to_string())
+                                .font(theme::mono(tokens::FS_4, FontWeight::SemiBold))
                                 .color(t.color.text),
                         );
+                        ui.label(
+                            egui::RichText::new(if forecast.point_count == 1 {
+                                "point"
+                            } else {
+                                "points"
+                            })
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_dim),
+                        );
                     });
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} enabled analysis instance{}",
+                            forecast.enabled_analysis_count,
+                            if forecast.enabled_analysis_count == 1 {
+                                ""
+                            } else {
+                                "s"
+                            }
+                        ))
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_faint),
+                    );
+                    for (label, value) in [
+                        ("Tasks", forecast.task_count.to_string()),
+                        ("Cost", run_set::format_duration_ms(forecast.cost_ms)),
+                        ("Storage", run_set::format_bytes(forecast.storage_bytes)),
+                    ] {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(label)
+                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                    .color(t.color.text_dim),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label(
+                                        egui::RichText::new(value)
+                                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                            .color(t.color.text),
+                                    );
+                                },
+                            );
+                        });
+                    }
                 });
-            }
-        });
+        },
+    );
 }
 
 /// Statistical variation is a Monte Carlo analysis, not an axis of this space.
@@ -567,6 +590,13 @@ fn variation_strip(ui: &mut Ui, app: &mut RSpiceApp) {
         .state
         .sim_setup
         .has_enabled_analysis_kind(AnalysisKind::MonteCarlo);
+    let sample_count = if active {
+        let mut setup = app.state.sim_setup.mc.clone();
+        setup.ensure_initialized();
+        setup.to_config().ok().map(|config| config.num_runs)
+    } else {
+        None
+    };
     egui::Frame::new()
         .fill(t.color.bg_panel_2)
         .inner_margin(egui::Margin {
@@ -589,13 +619,19 @@ fn variation_strip(ui: &mut Ui, app: &mut RSpiceApp) {
                 );
                 ui.add(
                     egui::Label::new(
-                        egui::RichText::new(if active {
-                            "Statistical variation multiplies every point by the Monte Carlo \
-                             sample count; each point draws its own deterministic seed."
-                        } else {
-                            "Statistical variation is owned by a Monte Carlo analysis instance. \
-                             None is enabled in this plan, so the matrix carries deterministic \
-                             points only."
+                        egui::RichText::new(match sample_count {
+                            Some(samples) => format!(
+                                "Each PVT point executes one Monte Carlo task with {samples} \
+                                 configured samples. The task forecast remains analysis-level; \
+                                 the declared seed keeps the trial stream reproducible."
+                            ),
+                            None if active => "Monte Carlo is enabled, but its sample count is \
+                                invalid. Correct the analysis before dispatch."
+                                .to_owned(),
+                            None => "Statistical variation is owned by a Monte Carlo analysis \
+                                instance. None is enabled in this plan, so the matrix carries \
+                                deterministic points only."
+                                .to_owned(),
                         })
                         .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                         .color(t.color.text_dim),
@@ -881,7 +917,7 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
                     ui,
                     "Statistical variation",
                     if variation {
-                        "enabled · a Monte Carlo analysis is in the plan"
+                        "enabled · one Monte Carlo task executes at every point"
                     } else {
                         "disabled · no Monte Carlo analysis is enabled"
                     },
@@ -925,8 +961,7 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn budgets(ui: &mut Ui, app: &mut RSpiceApp) {
     let current = app.state.sim_setup.run_set.budgets;
-    let analyses = app.state.sim_setup.enabled_analysis_instance_count();
-    let validation = run_set::validate(&app.state.sim_setup.run_set, analyses);
+    let validation = plan_run_set_validation(app);
     let exceeded = validation
         .errors
         .iter()
@@ -1374,9 +1409,19 @@ fn point_table_note(composed: usize, drawn: usize, excludable: bool) -> String {
 /// Without this an authorized preflight could be followed by a sweep change
 /// and then a dispatch that ran a different space than the one checked.
 fn commit(app: &mut RSpiceApp, action: RunSetAction) {
-    let analyses = app.state.sim_setup.enabled_analysis_instance_count();
     let previewing = matches!(action, RunSetAction::Preview);
-    let transaction = run_set::dispatch(&mut app.state.sim_setup.run_set, action, analyses.max(1));
+    let kinds = enabled_analysis_kinds(app);
+    let (exact_task_count, workload_error) = match exact_plan_task_count(app) {
+        Ok(count) => (count, None),
+        Err(error) => (None, Some(error)),
+    };
+    let transaction = run_set::dispatch_for_plan(
+        &mut app.state.sim_setup.run_set,
+        action,
+        &kinds,
+        exact_task_count,
+        workload_error,
+    );
 
     if !transaction.was_adopted() {
         // `was_adopted` is exactly `status == Completed`, so a transaction that
@@ -1433,6 +1478,115 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
                 .workbench
                 .analysis_lifecycle_status
                 .record_refusal(error.to_string());
+        }
+    }
+}
+
+fn enabled_analysis_kinds(app: &RSpiceApp) -> Vec<AnalysisKind> {
+    app.state
+        .sim_setup
+        .enabled_analysis_instances()
+        .map(|instance| instance.kind())
+        .collect()
+}
+
+/// The exact queue cardinality of a reference-only global Run Set.
+///
+/// With active global axes, ordinary point multiplication is exact and the
+/// domain validator owns it. With no axes, Temperature and Corner retain their
+/// analysis-owned point declarations: every point is one task and the final
+/// family assembly is one more.
+pub(super) fn exact_plan_task_count(app: &RSpiceApp) -> Result<Option<usize>, String> {
+    let global_axes_active = app
+        .state
+        .sim_setup
+        .run_set
+        .enabled_dimensions()
+        .next()
+        .is_some();
+
+    let mut tasks = 0usize;
+    for instance in app.state.sim_setup.enabled_analysis_instances() {
+        let contribution = match instance.draft() {
+            AnalysisDraft::Temperature(state) if !global_axes_active => {
+                let mut state = state.clone();
+                state.ensure_initialized();
+                let config = state
+                    .to_config()
+                    .map_err(|error| format!("Temperature workload is invalid: {error}"))?;
+                config
+                    .num_temps()
+                    .checked_add(1)
+                    .ok_or_else(|| "Temperature workload exceeds task capacity".to_owned())?
+            }
+            AnalysisDraft::Corner(state) if !global_axes_active => {
+                let mut state = state.clone();
+                state.ensure_initialized();
+                let config = state
+                    .to_config(app.state.sim_setup.reference_pvt)
+                    .map_err(|error| format!("Corner workload is invalid: {error}"))?;
+                config
+                    .validate()
+                    .map_err(|error| format!("Corner workload is invalid: {error}"))?;
+                let points = if !config.points.is_empty() {
+                    config.points.len()
+                } else if config.full_matrix {
+                    config
+                        .process_corners
+                        .len()
+                        .checked_mul(config.voltages.len())
+                        .and_then(|count| count.checked_mul(config.temperatures.len()))
+                        .ok_or_else(|| "Corner workload exceeds task capacity".to_owned())?
+                } else {
+                    config
+                        .process_corners
+                        .len()
+                        .max(config.voltages.len())
+                        .max(config.temperatures.len())
+                };
+                points
+                    .checked_add(1)
+                    .ok_or_else(|| "Corner workload exceeds task capacity".to_owned())?
+            }
+            AnalysisDraft::Pss(state) => {
+                let mut state = state.clone();
+                state.ensure_initialized();
+                let config = state
+                    .to_config()
+                    .map_err(|error| format!("PSS workload is invalid: {error}"))?;
+                1 + usize::from(config.num_harmonics > 0)
+            }
+            _ => 1,
+        };
+        tasks = tasks
+            .checked_add(contribution)
+            .ok_or_else(|| "Plan workload exceeds task capacity".to_owned())?;
+    }
+    if global_axes_active {
+        let point_count = run_set::validate(
+            &app.state.sim_setup.run_set,
+            app.state.sim_setup.enabled_analysis_instance_count(),
+        )
+        .forecast
+        .point_count;
+        tasks = tasks
+            .checked_mul(point_count)
+            .ok_or_else(|| "Plan workload exceeds task capacity".to_owned())?;
+    }
+    Ok(Some(tasks))
+}
+
+fn plan_run_set_validation(app: &RSpiceApp) -> RunSetValidation {
+    let kinds = enabled_analysis_kinds(app);
+    match exact_plan_task_count(app) {
+        Ok(exact_task_count) => {
+            run_set::validate_for_plan(&app.state.sim_setup.run_set, &kinds, exact_task_count)
+        }
+        Err(error) => {
+            let mut validation =
+                run_set::validate_for_plan(&app.state.sim_setup.run_set, &kinds, None);
+            validation.push_global_error("RUNSET-PLAN-WORKLOAD", error);
+            validation
         }
     }
 }

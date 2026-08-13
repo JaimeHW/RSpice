@@ -12,6 +12,40 @@ use super::*;
 use crate::product::{ContentDigest, ObjectRevision};
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationState};
 
+#[test]
+fn run_set_workload_counts_analysis_owned_temperature_points_and_assembly() {
+    let mut app = RSpiceApp::test_instance();
+    let before = page_runset::exact_plan_task_count(&app)
+        .unwrap()
+        .expect("baseline workload");
+    insert_analysis_instance(&mut app, AnalysisKind::Temperature);
+
+    let tasks = page_runset::exact_plan_task_count(&app)
+        .expect("workload is valid")
+        .expect("reference-only Run Set has an exact workload");
+
+    // Default temperature range: -40 through 110 in 25-degree steps, plus
+    // one family-assembly task. The stop at 125 is not a step point.
+    assert_eq!(tasks - before, 8);
+}
+
+#[test]
+fn run_set_workload_counts_generated_pss_spectrum_task() {
+    let mut app = RSpiceApp::test_instance();
+    let before = page_runset::exact_plan_task_count(&app)
+        .unwrap()
+        .expect("baseline workload");
+    insert_analysis_instance(&mut app, AnalysisKind::Pss);
+
+    let tasks = page_runset::exact_plan_task_count(&app)
+        .expect("workload is valid")
+        .expect("reference-only Run Set has an exact workload");
+
+    // The default plan already owns the OP prerequisite, so this adds one PSS
+    // solve and its generated spectrum task.
+    assert_eq!(tasks - before, 2);
+}
+
 /// A specification bounding `measurement`, used to order a dataset's points.
 fn spec(measurement: &str, min: Option<f64>, max: Option<f64>) -> crate::state::SpecEntry {
     crate::state::SpecEntry {
@@ -879,6 +913,30 @@ fn analysis_catalog_uses_the_mockup_dialog_and_row_contracts() {
     );
     assert_eq!(analysis_catalog_readiness(AnalysisKind::Transient), None);
     assert_eq!(
+        analysis_catalog_readiness(AnalysisKind::Psp),
+        Some("Preview engine · non-sign-off")
+    );
+    assert_eq!(
+        analysis_catalog_disposition(&[], AnalysisKind::Psp),
+        "Add instance"
+    );
+    assert_eq!(
+        analysis_catalog_readiness(AnalysisKind::Hbsp),
+        Some("Preview engine · non-sign-off")
+    );
+    assert_eq!(
+        analysis_catalog_disposition(&[], AnalysisKind::Hbsp),
+        "Add instance"
+    );
+    assert_eq!(
+        analysis_catalog_readiness(AnalysisKind::Hbnoise),
+        Some("Preview engine · non-sign-off")
+    );
+    assert_eq!(
+        analysis_catalog_disposition(&[], AnalysisKind::Hbnoise),
+        "Add instance"
+    );
+    assert_eq!(
         analysis_catalog_readiness(AnalysisKind::Qpss),
         Some("the QPSS spectral-lattice solver is not available in this engine build")
     );
@@ -893,9 +951,6 @@ fn analysis_catalog_search_preserves_canonical_group_order() {
     let all = filtered_catalog_kinds("");
     let unavailable = [
         AnalysisKind::Qpss,
-        AnalysisKind::Hbsp,
-        AnalysisKind::Hbnoise,
-        AnalysisKind::Psp,
         AnalysisKind::Qpac,
         AnalysisKind::Qpnoise,
         AnalysisKind::Qpxf,

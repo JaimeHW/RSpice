@@ -51,6 +51,12 @@ impl Default for TempConfig {
 
 impl TempConfig {
     pub fn validate(&self) -> Result<(), String> {
+        if !self.temp_start.is_finite()
+            || !self.temp_stop.is_finite()
+            || !self.temp_step.is_finite()
+        {
+            return Err("Temperature range values must be finite".into());
+        }
         if self.temp_start < -273.15 || self.temp_stop < -273.15 {
             return Err("Temperature cannot be below absolute zero (-273.15°C)".into());
         }
@@ -84,7 +90,7 @@ impl TempConfig {
         }
         ((self.temp_stop - self.temp_start) / self.temp_step)
             .abs()
-            .ceil() as usize
+            .floor() as usize
             + 1
     }
 }
@@ -242,7 +248,26 @@ mod tests {
         let config = state.to_config().expect("range parses");
 
         assert!(config.specific_temps.is_empty());
-        assert_eq!(config.num_temps(), 8);
+        assert_eq!(config.num_temps(), 7);
+    }
+
+    #[test]
+    fn a_range_count_matches_the_executor_when_the_stop_is_not_a_step_point() {
+        let config = TempConfig {
+            temp_start: -40.0,
+            temp_stop: 125.0,
+            temp_step: 25.0,
+            ..TempConfig::default()
+        };
+
+        assert_eq!(config.num_temps(), 7);
+    }
+
+    #[test]
+    fn non_finite_range_values_are_rejected() {
+        let mut config = TempConfig::default();
+        config.temp_start = f64::NAN;
+        assert!(config.validate().unwrap_err().contains("finite"));
     }
 
     #[test]

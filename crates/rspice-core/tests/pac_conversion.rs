@@ -9,6 +9,8 @@
 //!    conversion gain is A/pi and whose direct feedthrough is A/2.
 
 use num_complex::Complex64;
+use rspice_core::abort_signal::NoAbort;
+use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::pac::PacConfig;
 use rspice_core::engine::{Engine, PacAnalysisResult, SimulationConfig};
 use rspice_core::netlist::Netlist;
@@ -77,6 +79,139 @@ c1 out 0 159.154943091895p
             "sideband data at offset {offset:.3e}: got {direct}, want {expected}"
         );
     }
+}
+
+#[test]
+fn pac_conversion_matrix_measures_the_configured_differential_output() {
+    let deck = "\
+* unequal dividers produce a known differential output
+vin in 0 dc 0 ac 1
+r1 in outp 1k
+r2 outp 0 1k
+r3 in outn 1k
+r4 outn 0 3k
+.end
+";
+    let config = PacConfig::new()
+        .with_fundamental(F0)
+        .with_sweep(1.0e4, 1.0e4, 1)
+        .with_sweep_type(rspice_core::analysis::pac::PacSweepType::Linear)
+        .with_sidebands(-1, 1)
+        .with_input_source("vin")
+        .with_output_node("outp")
+        .with_output_ref("outn");
+
+    let analysis = run_pac(deck, config);
+    let differential = analysis.result.conversion_matrix.get(0, 0, 0);
+
+    // V(outp) = 1/2 and V(outn) = 3/4 for a unit input.
+    assert!(
+        (differential - Complex64::new(-0.25, 0.0)).norm() < 1.0e-9,
+        "differential PAC response = {differential}"
+    );
+}
+
+#[test]
+fn pac_drives_a_physical_rf_port_through_its_reference_impedance() {
+    let deck = "\
+* 50 ohm series network between matched RF ports
+P1 p1 0 PORT=1 Z0=50
+R1 p1 p2 50
+C1 p1 0 1e-18
+P2 p2 0 PORT=2 Z0=50
+.end
+";
+    let config = PacConfig::new()
+        .with_fundamental(F0)
+        .with_sweep(1.0e4, 1.0e4, 1)
+        .with_sweep_type(rspice_core::analysis::pac::PacSweepType::Linear)
+        .with_sidebands(-1, 1)
+        .with_input_source("P1")
+        .with_output_node("P1");
+
+    let analysis = run_pac(deck, config);
+    let voltage = analysis.result.conversion_matrix.get(0, 0, 0);
+    assert!(
+        (voltage - Complex64::new(2.0 / 3.0, 0.0)).norm() < 1.0e-8,
+        "port-plane voltage = {voltage}"
+    );
+}
+
+#[test]
+fn retained_pss_pac_drives_a_physical_rf_port_through_z0() {
+    let deck = "\
+* dynamic state plus 50 ohm series network between matched RF ports
+P1 p1 0 PORT=1 Z0=50
+R1 p1 p2 50
+C1 p1 0 1e-18
+P2 p2 0 PORT=2 Z0=50
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let operating_point = engine
+        .run_pss_operating_point_with_abort(
+            &netlist,
+            PssConfig::new(F0)
+                .with_tstab_periods(1)
+                .with_points_per_period(32)
+                .with_harmonics(4)
+                .with_tolerance(1.0e-7),
+            &NoAbort,
+        )
+        .expect("PSS converges");
+    let config = PacConfig::new()
+        .with_fundamental(F0)
+        .with_sweep(1.0e4, 1.0e4, 1)
+        .with_sweep_type(rspice_core::analysis::pac::PacSweepType::Linear)
+        .with_sidebands(-1, 1)
+        .with_input_source("P1")
+        .with_output_node("P1");
+
+    let analysis = engine
+        .run_pac_from_pss_with_abort(&netlist, config, &operating_point, &NoAbort)
+        .expect("PAC consumes PSS");
+    let voltage = analysis.result.conversion_matrix.get(0, 0, 0);
+    assert!(
+        (voltage - Complex64::new(2.0 / 3.0, 0.0)).norm() < 1.0e-8,
+        "port-plane voltage = {voltage}"
+    );
+}
+
+#[test]
+fn retained_hb_pac_drives_a_physical_rf_port_through_z0() {
+    let deck = "\
+* 50 ohm series network between matched RF ports
+P1 p1 0 PORT=1 Z0=50
+R1 p1 p2 50
+C1 p1 0 1e-18
+P2 p2 0 PORT=2 Z0=50
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let hb = engine
+        .run_hb(
+            &netlist,
+            rspice_core::analysis::HbConfig::new(F0).with_harmonics(8),
+        )
+        .expect("HB converges");
+    let config = PacConfig::new()
+        .with_fundamental(F0)
+        .with_sweep(1.0e4, 1.0e4, 1)
+        .with_sweep_type(rspice_core::analysis::pac::PacSweepType::Linear)
+        .with_sidebands(-1, 1)
+        .with_input_source("P1")
+        .with_output_node("P1");
+
+    let analysis = engine
+        .run_pac_from_hb_with_abort(&netlist, config, &hb.operating_point, &NoAbort)
+        .expect("PAC consumes retained HB state");
+    let voltage = analysis.result.conversion_matrix.get(0, 0, 0);
+    assert!(
+        (voltage - Complex64::new(2.0 / 3.0, 0.0)).norm() < 1.0e-8,
+        "port-plane voltage = {voltage}"
+    );
 }
 
 #[test]

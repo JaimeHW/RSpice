@@ -46,6 +46,7 @@ impl AppState {
         self.workspace.netlist_source_dirty = false;
         self.simulation = crate::state::SimulationState::default();
         self.ui.netlist = Default::default();
+        self.workbench.netlist_open_documents.clear();
         self.ui.results_seen_version = 0;
         self.ui.results.clear_project_scoped_state();
         self.dialogs.drc_results = None;

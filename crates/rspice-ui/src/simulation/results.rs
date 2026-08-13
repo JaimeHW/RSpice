@@ -146,6 +146,16 @@ pub enum SimulationResult {
         measurements: Vec<rspice_core::MeasureResult>,
     },
 
+    /// Harmonic-balance spectra plus the exact retained numerical state used
+    /// by HB-dependent analyses. Display behavior matches frequency-domain
+    /// AC data; the operating point is an execution artifact, not a trace.
+    HarmonicBalance {
+        frequencies: Vec<f64>,
+        waveforms: HashMap<String, WaveformData>,
+        measurements: Vec<rspice_core::MeasureResult>,
+        operating_point: std::sync::Arc<rspice_core::engine::HbOperatingPoint>,
+    },
+
     /// Noise analysis results
     Noise {
         /// Frequency vector

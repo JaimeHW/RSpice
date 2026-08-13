@@ -87,6 +87,54 @@ pub(super) fn validate_worker_response_before_transport(
     let WorkerOutcome::Success(result) = &response.outcome else {
         return Ok(());
     };
+    if let WorkerSimulationResult::Hb {
+        frequencies,
+        waveforms,
+        operating_point,
+        ..
+    } = result.as_ref()
+    {
+        let waveform_buffer_count = waveforms.iter().try_fold(0usize, |count, waveform| {
+            count
+                .checked_add(2 + usize::from(waveform.y_imag.is_some()))
+                .ok_or_else(|| {
+                    "retained HB response buffer count overflows this platform".to_owned()
+                })
+        })?;
+        let transfer_buffer_count = operating_point
+            .spectral_state()
+            .len()
+            .checked_mul(2)
+            .and_then(|count| count.checked_add(waveform_buffer_count))
+            .and_then(|count| count.checked_add(1))
+            .ok_or_else(|| {
+                "retained HB response buffer count overflows this platform".to_owned()
+            })?;
+        if transfer_buffer_count > MAX_WORKER_TRANSFER_BUFFERS {
+            return Err(format!(
+                "retained HB response requires {transfer_buffer_count} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit"
+            ));
+        }
+        let mut numeric_values = frequencies.len();
+        for waveform in waveforms {
+            numeric_values = numeric_values
+                .checked_add(waveform.x_values.len())
+                .and_then(|count| count.checked_add(waveform.y_values.len()))
+                .and_then(|count| count.checked_add(waveform.y_imag.as_ref().map_or(0, Vec::len)))
+                .ok_or_else(|| "retained HB response size overflows this platform".to_owned())?;
+        }
+        for spectrum in operating_point.spectral_state() {
+            numeric_values = numeric_values
+                .checked_add(spectrum.len().saturating_mul(2))
+                .ok_or_else(|| "retained HB response size overflows this platform".to_owned())?;
+        }
+        if numeric_values > MAX_WORKER_F64_VALUES {
+            return Err(format!(
+                "retained HB response contains {numeric_values} numerical values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
+            ));
+        }
+        return Ok(());
+    }
     let WorkerSimulationResult::Pss {
         operating_point, ..
     } = result.as_ref()
@@ -677,6 +725,101 @@ impl WorkerPssOperatingPointTransport {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerHbSpectrumTransport {
+    node_name: String,
+    real: WorkerF64Series,
+    imaginary: WorkerF64Series,
+    real_digest: crate::product::ContentDigest,
+    imaginary_digest: crate::product::ContentDigest,
+}
+
+/// Scalar HB basis metadata plus transferable complex spectral rows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerHbOperatingPointTransport {
+    config: rspice_core::analysis::HbConfig,
+    spectra: Vec<WorkerHbSpectrumTransport>,
+    iterations: usize,
+    residual_norm: f64,
+}
+
+impl WorkerHbOperatingPointTransport {
+    pub(super) fn from_operating_point(
+        operating_point: rspice_core::engine::HbOperatingPoint,
+        buffers: &mut Vec<Vec<f64>>,
+    ) -> Self {
+        let spectra = operating_point
+            .node_names()
+            .iter()
+            .cloned()
+            .zip(operating_point.spectral_state())
+            .map(|(node_name, coefficients)| {
+                let (real, imaginary): (Vec<_>, Vec<_>) = coefficients
+                    .iter()
+                    .map(|value| (value.re, value.im))
+                    .unzip();
+                WorkerHbSpectrumTransport {
+                    node_name,
+                    real_digest: crate::simulation::execution::f64_sequence_digest(
+                        "rspice.worker-hb-spectrum-real/v1",
+                        &real,
+                    ),
+                    imaginary_digest: crate::simulation::execution::f64_sequence_digest(
+                        "rspice.worker-hb-spectrum-imaginary/v1",
+                        &imaginary,
+                    ),
+                    real: WorkerF64Series::from_vec(real, buffers),
+                    imaginary: WorkerF64Series::from_vec(imaginary, buffers),
+                }
+            })
+            .collect();
+        Self {
+            config: operating_point.config().clone(),
+            spectra,
+            iterations: operating_point.iterations(),
+            residual_norm: operating_point.residual_norm(),
+        }
+    }
+
+    pub(super) fn into_operating_point(
+        self,
+        buffers: &[Vec<f64>],
+    ) -> Result<rspice_core::engine::HbOperatingPoint, String> {
+        if self.spectra.len() > 65_536 {
+            return Err("retained HB worker metadata exceeds structural limits".to_owned());
+        }
+        let mut node_names = Vec::with_capacity(self.spectra.len());
+        let mut spectral_state = Vec::with_capacity(self.spectra.len());
+        for spectrum in self.spectra {
+            node_names.push(spectrum.node_name);
+            let real = spectrum.real.into_vec(buffers)?;
+            let imaginary = spectrum.imaginary.into_vec(buffers)?;
+            let actual_real_digest = crate::simulation::execution::f64_sequence_digest(
+                "rspice.worker-hb-spectrum-real/v1",
+                &real,
+            );
+            let actual_imaginary_digest = crate::simulation::execution::f64_sequence_digest(
+                "rspice.worker-hb-spectrum-imaginary/v1",
+                &imaginary,
+            );
+            if actual_real_digest != spectrum.real_digest
+                || actual_imaginary_digest != spectrum.imaginary_digest
+            {
+                return Err("retained HB worker spectral payload digest mismatch".to_owned());
+            }
+            spectral_state.push(worker_join_complex("HB spectral row", real, imaginary)?);
+        }
+        rspice_core::engine::HbOperatingPoint::try_from_parts(
+            self.config,
+            node_names,
+            spectral_state,
+            self.iterations,
+            self.residual_norm,
+        )
+        .map_err(|error| format!("invalid retained HB worker payload: {error}"))
+    }
+}
+
 pub(super) fn worker_join_complex(
     label: &str,
     real: Vec<f64>,
@@ -729,6 +872,12 @@ pub(crate) enum WorkerSimulationResultTransport {
     Pss {
         measurements: Vec<WorkerMeasurement>,
         operating_point: WorkerPssOperatingPointTransport,
+    },
+    Hb {
+        frequencies: WorkerF64Series,
+        waveforms: Vec<WorkerWaveformTransport>,
+        measurements: Vec<WorkerMeasurement>,
+        operating_point: WorkerHbOperatingPointTransport,
     },
     Ac {
         frequencies: WorkerF64Series,
@@ -874,6 +1023,20 @@ impl WorkerSimulationResultTransport {
             } => Self::Pss {
                 measurements,
                 operating_point: WorkerPssOperatingPointTransport::from_operating_point(
+                    operating_point,
+                    buffers,
+                ),
+            },
+            WorkerSimulationResult::Hb {
+                frequencies,
+                waveforms,
+                measurements,
+                operating_point,
+            } => Self::Hb {
+                frequencies: WorkerF64Series::from_vec(frequencies, buffers),
+                waveforms: transport_waveforms(waveforms, buffers),
+                measurements,
+                operating_point: WorkerHbOperatingPointTransport::from_operating_point(
                     operating_point,
                     buffers,
                 ),
@@ -1039,6 +1202,17 @@ impl WorkerSimulationResultTransport {
                 measurements,
                 operating_point,
             } => Ok(WorkerSimulationResult::Pss {
+                measurements,
+                operating_point: operating_point.into_operating_point(buffers)?,
+            }),
+            Self::Hb {
+                frequencies,
+                waveforms,
+                measurements,
+                operating_point,
+            } => Ok(WorkerSimulationResult::Hb {
+                frequencies: frequencies.into_vec(buffers)?,
+                waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
                 measurements,
                 operating_point: operating_point.into_operating_point(buffers)?,
             }),

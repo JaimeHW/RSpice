@@ -48,6 +48,24 @@ pub(super) fn retained_pss_operating_point() -> rspice_core::engine::PssOperatin
     .unwrap()
 }
 
+fn retained_hb_operating_point() -> rspice_core::engine::HbOperatingPoint {
+    let config = rspice_core::analysis::HbConfig::new(1.0).with_harmonics(4);
+    rspice_core::engine::HbOperatingPoint::try_from_parts(
+        config,
+        vec!["out".to_owned()],
+        vec![vec![
+            num_complex::Complex64::new(0.1, 0.0),
+            num_complex::Complex64::new(0.2, -0.1),
+            num_complex::Complex64::new(0.05, 0.02),
+            num_complex::Complex64::new(0.01, 0.0),
+            num_complex::Complex64::new(0.005, -0.001),
+        ]],
+        3,
+        1.0e-10,
+    )
+    .unwrap()
+}
+
 fn tf_spec() -> AnalysisSpec {
     AnalysisSpec::Tf {
         input_source: "Vstim".to_owned(),
@@ -964,6 +982,38 @@ fn worker_transport_round_trips_ac_and_noise_buffers() {
     assert_eq!(
         noise_transport.into_response().expect("noise reconstructs"),
         noise
+    );
+}
+
+#[test]
+fn worker_transport_round_trips_hb_display_and_retained_state() {
+    let response = WorkerResponse {
+        id: 12,
+        outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Hb {
+            frequencies: vec![0.0, 1.0, 2.0, 3.0, 4.0],
+            waveforms: vec![WorkerWaveform {
+                name: "V(out)".to_owned(),
+                x_values: vec![0.0, 1.0, 2.0, 3.0, 4.0],
+                y_values: vec![0.1, 0.4, 0.1, 0.02, 0.01],
+                y_unit: String::new(),
+                is_complex: true,
+                y_imag: Some(vec![0.0, -0.2, 0.04, 0.0, -0.002]),
+            }],
+            measurements: Vec::new(),
+            operating_point: retained_hb_operating_point(),
+        })),
+    };
+    let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
+    assert_eq!(transport.buffers.len(), 6);
+    assert_eq!(transport.clone().into_response().unwrap(), response);
+
+    let mut tampered = transport;
+    tampered.buffers[5][1] += 1.0;
+    assert!(
+        tampered
+            .into_response()
+            .unwrap_err()
+            .contains("spectral payload digest mismatch")
     );
 }
 

@@ -38,6 +38,143 @@ pub use pac::PacAnalysisResult;
 pub use pnoise::PnoiseAnalysisResult;
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 
+/// Exact converged harmonic-balance numerical state retained for dependent
+/// periodic small-signal analyses.
+///
+/// Display spectra are not an execution contract: they may be filtered or
+/// converted to magnitude/phase. This payload keeps the frozen HB basis and
+/// the solver's complex Fourier coefficients in canonical node order so a
+/// dependent analysis never has to re-solve or infer the large-signal state.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
+pub struct HbOperatingPoint {
+    config: HbConfig,
+    node_names: Vec<String>,
+    spectral_state: Vec<Vec<Complex64>>,
+    iterations: usize,
+    residual_norm: Value,
+}
+
+impl HbOperatingPoint {
+    /// Frozen HB configuration that produced this state.
+    pub fn config(&self) -> &HbConfig {
+        &self.config
+    }
+
+    /// Canonical non-ground node order used by every spectral row.
+    pub fn node_names(&self) -> &[String] {
+        &self.node_names
+    }
+
+    /// Solver Fourier coefficients indexed `[node][harmonic]`.
+    pub fn spectral_state(&self) -> &[Vec<Complex64>] {
+        &self.spectral_state
+    }
+
+    /// Number of nonlinear iterations used by the producer solve.
+    pub fn iterations(&self) -> usize {
+        self.iterations
+    }
+
+    /// Final producer residual norm.
+    pub fn residual_norm(&self) -> Value {
+        self.residual_norm
+    }
+
+    /// Highest retained positive harmonic.
+    pub fn spectral_harmonic_capacity(&self) -> usize {
+        self.config.num_harmonics
+    }
+
+    /// Reconstruct an HB operating point after authenticated transport.
+    /// Shape, finiteness, and canonical-name checks are repeated at this
+    /// boundary before the state can enter a numerical kernel.
+    pub fn try_from_parts(
+        config: HbConfig,
+        node_names: Vec<String>,
+        spectral_state: Vec<Vec<Complex64>>,
+        iterations: usize,
+        residual_norm: Value,
+    ) -> Result<Self, SimulationError> {
+        if !config.fundamental_freq.is_finite() || config.fundamental_freq <= 0.0 {
+            return Err(SimulationError::Circuit(
+                "retained HB state has an invalid fundamental frequency".to_owned(),
+            ));
+        }
+        if config.num_harmonics == 0 {
+            return Err(SimulationError::Circuit(
+                "retained HB state has no harmonic basis".to_owned(),
+            ));
+        }
+        if !residual_norm.is_finite() || residual_norm < 0.0 {
+            return Err(SimulationError::Circuit(
+                "retained HB state has an invalid residual norm".to_owned(),
+            ));
+        }
+        if node_names.is_empty() || spectral_state.len() != node_names.len() {
+            return Err(SimulationError::Circuit(format!(
+                "retained HB state contains {} spectral row(s) for {} node name(s)",
+                spectral_state.len(),
+                node_names.len()
+            )));
+        }
+        let expected_harmonics = config.num_harmonics.saturating_add(1);
+        let mut seen = std::collections::HashSet::with_capacity(node_names.len());
+        for (node, spectrum) in node_names.iter().zip(&spectral_state) {
+            if node.is_empty() || node.trim() != node {
+                return Err(SimulationError::Circuit(
+                    "retained HB state contains a non-canonical node name".to_owned(),
+                ));
+            }
+            if !seen.insert(node.to_ascii_uppercase()) {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB state contains duplicate node name '{node}'"
+                )));
+            }
+            if spectrum.len() != expected_harmonics {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB node '{node}' contains {} coefficients; the frozen basis requires {expected_harmonics}",
+                    spectrum.len()
+                )));
+            }
+            if spectrum
+                .iter()
+                .any(|value| !value.re.is_finite() || !value.im.is_finite())
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB node '{node}' contains a non-finite coefficient"
+                )));
+            }
+        }
+        Ok(Self {
+            config,
+            node_names,
+            spectral_state,
+            iterations,
+            residual_norm,
+        })
+    }
+
+    fn to_solver_state(
+        &self,
+        expected_node_names: &[String],
+    ) -> Result<HbSolverState, SimulationError> {
+        if self.node_names != expected_node_names {
+            return Err(SimulationError::Circuit(format!(
+                "retained HB node basis does not match the elaborated circuit: expected {:?}, received {:?}",
+                expected_node_names, self.node_names
+            )));
+        }
+        let mut state = HbSolverState::new(self.node_names.len(), self.config.num_harmonics);
+        state.x.clone_from(&self.spectral_state);
+        state.iteration = self.iterations;
+        state.total_iterations = self.iterations;
+        state.residual_norm = self.residual_norm;
+        state.converged = true;
+        Ok(state)
+    }
+}
+
 /// HB-specific error types
 #[derive(Debug, Clone)]
 pub enum HbError {
@@ -100,6 +237,8 @@ pub struct HbAnalysisResult {
     pub num_harmonics: usize,
     /// Whether solution converged
     pub converged: bool,
+    /// Exact spectral operating point consumed by HB-dependent analyses.
+    pub operating_point: HbOperatingPoint,
 }
 
 const HB_NORTON_G: Value = 1e6; // Rs = 1 uOhm for stiff source conversion in nonlinear HB.
@@ -405,11 +544,19 @@ impl Engine {
         let mut result = solver.build_result(&state);
         self.hb_attach_periodic_state(&circuit, &mut result, has_supported_nonlinear);
 
+        let operating_point = HbOperatingPoint::try_from_parts(
+            config.clone(),
+            result.node_names.clone(),
+            state.x.clone(),
+            state.total_iterations.max(state.iteration),
+            state.residual_norm,
+        )?;
         Ok(HbAnalysisResult {
             result,
             fundamental_freq: config.fundamental_freq,
             num_harmonics: config.num_harmonics,
             converged: state.converged,
+            operating_point,
         })
     }
 }

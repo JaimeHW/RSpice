@@ -302,10 +302,16 @@ pub struct PeriodicNetworkDraft {
 
 impl Default for PeriodicNetworkDraft {
     fn default() -> Self {
+        let output_port = NetworkPortDraft {
+            node_pos: "out".to_owned(),
+            ..NetworkPortDraft::default()
+        };
         Self {
             sweep: FrequencySweepDraft::default(),
-            ports: vec![NetworkPortDraft::default()],
-            max_sideband: "7".to_owned(),
+            ports: vec![NetworkPortDraft::default(), output_port],
+            // A ±4 sideband span needs harmonic coupling through order 8,
+            // which fits the default nine-harmonic HB producer.
+            max_sideband: "4".to_owned(),
             mixed_mode: false,
             noise_parameters: false,
         }
@@ -332,9 +338,14 @@ impl Default for HbNoiseDraft {
             output_node: "out".to_owned(),
             output_ref: "0".to_owned(),
             input_source: "V1".to_owned(),
-            max_sideband: "7".to_owned(),
+            // A ±4 sideband span fits the default nine-harmonic HB producer;
+            // larger spans remain available when the producer retains them.
+            max_sideband: "4".to_owned(),
             integrated_noise: true,
-            noise_figure: true,
+            // NF needs an explicit source impedance and available-noise
+            // temperature. The current HBNOISE contract intentionally leaves
+            // it off rather than assuming 50 ohms and 290 K.
+            noise_figure: false,
             contributor_ranking: true,
         }
     }
@@ -720,7 +731,8 @@ impl AnalysisDraft {
         match self {
             Self::Noise(draft) => draft.to_config().err(),
             Self::Qpss(draft) => validate_qpss(draft),
-            Self::Hbsp(draft) | Self::Psp(draft) => validate_periodic_network(draft),
+            Self::Hbsp(draft) => validate_periodic_network(draft),
+            Self::Psp(draft) => validate_psp_network(draft),
             Self::Hbnoise(draft) => validate_hbnoise(draft),
             Self::Qpac(draft) => validate_qpac(draft),
             Self::Qpnoise(draft) => validate_qpnoise(draft),
@@ -1195,8 +1207,8 @@ fn validate_periodic_network(draft: &PeriodicNetworkDraft) -> Option<String> {
     (|| {
         validate_sweep(&draft.sweep)?;
         parse_positive_usize(&draft.max_sideband, "maximum sideband")?;
-        if draft.ports.is_empty() {
-            return Err("at least one network port is required".to_owned());
+        if draft.ports.len() < 2 {
+            return Err("at least two network ports are required".to_owned());
         }
         for (index, port) in draft.ports.iter().enumerate() {
             if port.node_pos.trim().is_empty() {
@@ -1209,6 +1221,22 @@ fn validate_periodic_network(draft: &PeriodicNetworkDraft) -> Option<String> {
     .err()
 }
 
+fn validate_psp_network(draft: &PeriodicNetworkDraft) -> Option<String> {
+    if let Some(error) = validate_periodic_network(draft) {
+        return Some(error);
+    }
+    if draft.mixed_mode {
+        return Some("PSP mixed-mode conversion is not implemented; disable mixed mode".to_owned());
+    }
+    if draft.noise_parameters {
+        return Some(
+            "PSP noise parameters require a correlated periodic-noise solve and are not implemented"
+                .to_owned(),
+        );
+    }
+    None
+}
+
 fn validate_hbnoise(draft: &HbNoiseDraft) -> Option<String> {
     (|| {
         validate_sweep(&draft.sweep)?;
@@ -1219,6 +1247,12 @@ fn validate_hbnoise(draft: &HbNoiseDraft) -> Option<String> {
             return Err("HBNOISE requires an input source".to_owned());
         }
         parse_positive_usize(&draft.max_sideband, "maximum sideband")?;
+        if draft.noise_figure {
+            return Err(
+                "HBNOISE noise figure requires explicit source impedance and available-noise temperature references"
+                    .to_owned(),
+            );
+        }
         Ok(())
     })()
     .err()
@@ -1653,6 +1687,13 @@ mod tests {
         let mut network = PeriodicNetworkDraft::default();
         network.ports.clear();
         assert!(validate_periodic_network(&network).is_some());
+
+        let mut psp = PeriodicNetworkDraft::default();
+        psp.mixed_mode = true;
+        assert!(validate_psp_network(&psp).is_some());
+        psp.mixed_mode = false;
+        psp.noise_parameters = true;
+        assert!(validate_psp_network(&psp).is_some());
 
         let mut tnoise = TransientNoiseDraft::default();
         tnoise.seed = "0".to_owned();

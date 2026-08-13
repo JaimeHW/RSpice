@@ -595,9 +595,10 @@ pub(super) fn resolve_results_quick_view_parts(
     }
     let viewer = presentation.viewer;
     let semantic_document = match viewer {
-        ResultViewer::Waves | ResultViewer::DcSweep | ResultViewer::Bode => {
+        ResultViewer::Waves | ResultViewer::DcSweep => {
             HardcopySemanticDocument::Plot(quick_waveform_plot(active, viewer)?)
         }
+        ResultViewer::Bode => HardcopySemanticDocument::Plot(quick_bode_plot(active)?),
         ResultViewer::Fft => HardcopySemanticDocument::Plot(quick_fft_plot(presentation, active)?),
         ResultViewer::HarmonicBalance => {
             HardcopySemanticDocument::Plot(quick_harmonic_balance_plot(active)?)
@@ -903,6 +904,46 @@ pub(super) fn quick_waveform_plot(
         })
         .collect();
     quick_plot_from_series(viewer, "Results", 0, series)
+}
+
+fn quick_bode_plot(active: ActiveQuickResult<'_>) -> Result<SemanticPlot, HardcopySourceError> {
+    let Some(summary) = crate::state::ac_bode_summary_for_analysis(active.analysis, 0) else {
+        if active.analysis.analysis_type.is_raw_frequency_curve() {
+            return quick_waveform_plot(active, ResultViewer::Bode);
+        }
+        return Err(HardcopySourceError::MissingViewerEvidence(
+            "frequency response",
+        ));
+    };
+    let mut series = vec![QuickResultSeries {
+        identity: format!(
+            "{}:{}:{}:{}:magnitude-db",
+            active.run.dataset_id, active.run.run_id, active.analysis.id, summary.signal
+        ),
+        label: format!("|{}| (dB)", summary.signal),
+        points: summary
+            .frequency
+            .iter()
+            .copied()
+            .zip(summary.gain_db.iter().copied())
+            .collect(),
+    }];
+    if let Some(phase) = summary.phase_deg {
+        series.push(QuickResultSeries {
+            identity: format!(
+                "{}:{}:{}:{}:phase-deg",
+                active.run.dataset_id, active.run.run_id, active.analysis.id, summary.signal
+            ),
+            label: format!("phase({}) (°)", summary.signal),
+            points: summary
+                .frequency
+                .iter()
+                .copied()
+                .zip(phase.iter().copied())
+                .collect(),
+        });
+    }
+    quick_plot_from_series(ResultViewer::Bode, "Results", 0, series)
 }
 
 fn quick_noise_spectrum_plot(

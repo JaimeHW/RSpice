@@ -134,9 +134,8 @@ pub struct PacData {
     pub spectra: Vec<(String, Vec<(Value, Value, Value)>)>,
 }
 
-pub(super) struct PacInternalResult {
-    pub(super) pac_result: rspice_core::analysis::pac::PacResult,
-    pub(super) output_node_idx: usize,
+pub(crate) struct PacInternalResult {
+    pub(crate) pac_result: rspice_core::analysis::pac::PacResult,
     pub(super) output_node_name: String,
 }
 
@@ -148,7 +147,7 @@ pub(super) fn run_pac_internal_with_abort(
     run_pac_internal_impl(netlist, config, None, abort)
 }
 
-pub(super) fn run_pac_internal_from_pss_with_abort(
+pub(crate) fn run_pac_internal_from_pss_with_abort(
     netlist: &rspice_core::Netlist,
     config: &PacRunConfig,
     operating_point: &rspice_core::engine::PssOperatingPoint,
@@ -157,20 +156,61 @@ pub(super) fn run_pac_internal_from_pss_with_abort(
     run_pac_internal_impl(netlist, config, Some(operating_point), abort)
 }
 
-fn run_pac_internal_impl(
+pub(crate) fn run_pac_internal_from_hb_with_abort(
     netlist: &rspice_core::Netlist,
     config: &PacRunConfig,
-    operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
+    operating_point: &rspice_core::engine::HbOperatingPoint,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PacInternalResult> {
-    use rspice_core::analysis::pac::PacConfig;
-
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
 
     let mut sim_config = build_engine_config(netlist, None);
     sim_config.tolerance = config.pss_tolerance;
     let engine = Engine::new(sim_config);
+    let pac_config = build_core_pac_config(config)?;
+    let pac_result = engine
+        .run_pac_from_hb_with_abort(netlist, pac_config, operating_point, abort)
+        .map_err(|error| ServiceRunError::from_core("PAC error", error))?
+        .result;
+    finish_pac_internal(pac_result, config, abort)
+}
+
+fn run_pac_internal_impl(
+    netlist: &rspice_core::Netlist,
+    config: &PacRunConfig,
+    operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacInternalResult> {
+    ensure_not_aborted(abort)?;
+    config.validate().map_err(ServiceRunError::Failure)?;
+
+    let mut sim_config = build_engine_config(netlist, None);
+    sim_config.tolerance = config.pss_tolerance;
+    let engine = Engine::new(sim_config);
+
+    let pac_config = build_core_pac_config(config)?;
+
+    ensure_not_aborted(abort)?;
+
+    // The engine solves the periodic operating point with harmonic balance
+    // and the sideband-coupled small-signal system around it.
+    let pac_result = match operating_point {
+        Some(operating_point) => {
+            engine.run_pac_from_pss_with_abort(netlist, pac_config, operating_point, abort)
+        }
+        None => engine.run_pac_with_abort(netlist, pac_config, abort),
+    }
+    .map_err(|error| ServiceRunError::from_core("PAC error", error))?
+    .result;
+
+    finish_pac_internal(pac_result, config, abort)
+}
+
+fn build_core_pac_config(
+    config: &PacRunConfig,
+) -> ServiceRunResult<rspice_core::analysis::pac::PacConfig> {
+    use rspice_core::analysis::pac::PacConfig;
 
     let mut pac_config = PacConfig::new()
         .with_sweep(config.start_freq, config.stop_freq, config.points_per_unit)
@@ -192,19 +232,14 @@ fn run_pac_internal_impl(
     pac_config
         .validate()
         .map_err(|error| ServiceRunError::Failure(format!("PAC configuration error: {error}")))?;
-    ensure_not_aborted(abort)?;
+    Ok(pac_config)
+}
 
-    // The engine solves the periodic operating point with harmonic balance
-    // and the sideband-coupled small-signal system around it.
-    let pac_result = match operating_point {
-        Some(operating_point) => {
-            engine.run_pac_from_pss_with_abort(netlist, pac_config, operating_point, abort)
-        }
-        None => engine.run_pac_with_abort(netlist, pac_config, abort),
-    }
-    .map_err(|error| ServiceRunError::from_core("PAC error", error))?
-    .result;
-
+fn finish_pac_internal(
+    pac_result: rspice_core::analysis::pac::PacResult,
+    config: &PacRunConfig,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacInternalResult> {
     let output_node_idx =
         resolve_pac_output_node_with_abort(&pac_result, &config.output_node, abort)?.ok_or_else(
             || {
@@ -223,7 +258,6 @@ fn run_pac_internal_impl(
 
     Ok(PacInternalResult {
         pac_result,
-        output_node_idx,
         output_node_name,
     })
 }
@@ -295,7 +329,6 @@ fn run_pac_analysis_for_netlist_with_operating_point_abort(
         }
         None => run_pac_internal_with_abort(netlist, config, abort)?,
     };
-    let output_node_idx = pac_internal.output_node_idx;
     let pac_result = pac_internal.pac_result;
 
     let mut sidebands = Vec::new();
@@ -321,7 +354,10 @@ fn run_pac_analysis_for_netlist_with_operating_point_abort(
         let mut spectrum = Vec::with_capacity(frequencies.len());
         for (freq_idx, freq_offset) in frequencies.iter().copied().enumerate() {
             poll_periodically(abort, freq_idx)?;
-            let voltage = pac_result.voltage(output_node_idx, freq_idx, *sideband)
+            // The configured conversion matrix is the authoritative output
+            // channel: unlike the per-node spectra, it includes output_ref
+            // for a differential PAC measurement.
+            let voltage = pac_result.conversion_matrix.get(freq_idx, *sideband, 0)
                 * Complex64::new(config.pac_magnitude, 0.0);
             spectrum.push((freq_offset, voltage.norm(), voltage.arg().to_degrees()));
         }

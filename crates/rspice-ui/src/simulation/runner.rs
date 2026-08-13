@@ -873,20 +873,15 @@ pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observe
             }
         }
         SimulationRequest::Spec { spec, options } => {
-            if input.environment.is_some() {
-                return Err(SimulationError::InvalidConfig(format!(
-                    "{} cannot yet execute inside a multi-point Studio Run Set",
-                    spec.run_type().display_name()
-                )));
-            }
             log::info!("Running simulation via spec path: {:?}", spec.run_type());
-            spec::run_spec_request(
+            spec::run_spec_request_with_environment(
                 &bridge,
                 *spec,
                 *options,
                 &input.netlist,
                 input.source_path.as_deref(),
                 &input.dependencies,
+                input.environment,
                 &signal,
             )?
         }

@@ -185,14 +185,14 @@ impl ViewerCompatibility {
     }
 }
 
-const TRAN_DC: &[&str] = &["tran", "dc"];
-const AC_STB_NOISE: &[&str] = &["ac", "stb", "noise"];
+const TIME_DC: &[&str] = &["tran", "pss", "envelope", "soa", "dc"];
+const FREQUENCY_RESPONSE_NOISE: &[&str] =
+    &["ac", "pac", "pxf", "stb", "disto", "noise", "hbnoise"];
 const FOURIER_TRAN_HB_PSS: &[&str] = &["fourier", "tran", "hb", "pss"];
 const PNOISE_QPNOISE: &[&str] = &["pnoise", "qpnoise"];
 const TRAN_FOURIER_HB_ENVELOPE: &[&str] = &["tran", "fourier", "hb", "envelope"];
 const SP_HBSP_PSP: &[&str] = &["sp", "hbsp", "psp"];
 const AC_SP_HB: &[&str] = &["ac", "sp", "hb"];
-const SP_HBSP_PSP_HBNOISE: &[&str] = &["sp", "hbsp", "psp", "hbnoise"];
 const ENVELOPE_TRAN: &[&str] = &["envelope", "tran"];
 const SP_TRAN: &[&str] = &["sp", "tran"];
 const MC_CORNER: &[&str] = &["mc", "corner"];
@@ -205,23 +205,23 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         id: "viewer-waveform",
         group: ViewerGroup::TimeAndFrequency,
         title: "Waveform",
-        domain: "TRAN · exact samples",
+        domain: "TRAN · PSS · ENVELOPE · exact samples",
         x_axis: "Time · ms",
         y_axis: "Voltage · V",
         art: ViewerArt::Wave,
-        analysis_ids: TRAN_DC,
+        analysis_ids: TIME_DC,
         external_capability: None,
         release: ViewerReleaseClass::ReleaseTarget,
     },
     ViewerDocumentDefinition {
         id: "viewer-bode",
         group: ViewerGroup::TimeAndFrequency,
-        title: "Bode / Nyquist",
-        domain: "AC · complex response",
+        title: "Frequency response / noise",
+        domain: "AC · PAC · PXF · STB · DISTO · NOISE · HBNOISE",
         x_axis: "Frequency · Hz",
-        y_axis: "Magnitude · dB / phase · °",
+        y_axis: "Magnitude · dB / phase · ° / noise density",
         art: ViewerArt::Bode,
-        analysis_ids: AC_STB_NOISE,
+        analysis_ids: FREQUENCY_RESPONSE_NOISE,
         external_capability: None,
         release: ViewerReleaseClass::ReleaseTarget,
     },
@@ -307,7 +307,10 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Smith,
         analysis_ids: SP_HBSP_PSP,
         external_capability: None,
-        release: ViewerReleaseClass::ReleaseTarget,
+        // The complex Γ samples are retained, but the configured reference
+        // impedance is not. Keep the Smith impedance surface out of release
+        // scope until Z₀ is part of the immutable result contract.
+        release: ViewerReleaseClass::ReleasePlanned,
     },
     ViewerDocumentDefinition {
         id: "viewer-polar",
@@ -349,11 +352,11 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         id: "viewer-network-quality",
         group: ViewerGroup::RfAndNetwork,
         title: "Noise figure / gain circles",
-        domain: "SP · HBSP · PSP · HBNOISE",
+        domain: "SP · HBSP · PSP",
         x_axis: "Frequency · Hz",
         y_axis: "Gain / NF / stability",
         art: ViewerArt::Bode,
-        analysis_ids: SP_HBSP_PSP_HBNOISE,
+        analysis_ids: SP_HBSP_PSP,
         external_capability: None,
         release: ViewerReleaseClass::ReleasePlanned,
     },
@@ -816,7 +819,7 @@ mod tests {
         assert_eq!(
             viewer_compatibility("viewer-bode", empty),
             ViewerCompatibility::MissingAnalysis {
-                accepted_analysis_ids: AC_STB_NOISE,
+                accepted_analysis_ids: FREQUENCY_RESPONSE_NOISE,
             }
         );
 

@@ -15,12 +15,14 @@ mod disto;
 mod envelope_fourier;
 mod error;
 mod hb;
+mod hbnoise;
 mod helpers;
 mod monte_carlo;
 mod optimization;
 mod pac_pxf;
 mod pnoise;
 mod pnoise_sideband;
+mod psp;
 mod pss;
 mod pstb;
 mod reliability;
@@ -45,16 +47,22 @@ pub(crate) use envelope_fourier::{
     fourier_output_is_current, run_fourier_from_signal_with_abort, validate_fourier_output_accessor,
 };
 pub use error::{ServiceRunError, ServiceRunResult};
+pub(crate) use hb::build_core_hb_config;
 pub use hb::{HbRunConfig, HbToneRunConfig, run_hb_analysis_with_source_path_and_abort};
+pub(crate) use hbnoise::integrate_psd;
+pub use hbnoise::{
+    HbnoiseFrequencySweep, HbnoiseRunConfig,
+    run_hbnoise_analysis_from_hb_with_source_path_and_abort,
+};
 use helpers::{
     build_voltage_output_expr, generate_freq_points_with_abort,
     infer_primary_output_node_with_abort, infer_primary_source_name_with_abort, is_ground_like,
     netlist_has_independent_source_named_with_abort, normalize_voltage_signal_name,
     parse_runner_netlist_with_abort,
 };
-pub use monte_carlo::{
-    run_monte_carlo_analysis_with_source_path_and_abort,
-    run_statistical_monte_carlo_with_source_path_and_abort,
+pub(crate) use monte_carlo::{
+    run_monte_carlo_analysis_with_environment_and_source_path_and_abort,
+    run_statistical_monte_carlo_with_environment_and_source_path_and_abort,
 };
 pub use optimization::{
     OptimizationAlgorithmMode, OptimizationGoalMode, OptimizationRunConfig, OptimizationVariable,
@@ -68,6 +76,11 @@ pub use pac_pxf::{
 pub use pnoise::{
     PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
     run_pnoise_analysis_from_pss_with_source_path_and_abort,
+};
+pub(crate) use psp::PspData;
+pub use psp::{
+    PspRunConfig, PspSweep, run_hbsp_analysis_from_hb_with_source_path_and_abort,
+    run_psp_analysis_from_pss_with_source_path_and_abort,
 };
 pub use pss::{
     PssData, PssRunConfig, compute_fft_harmonics_with_abort,
@@ -96,9 +109,9 @@ pub use sweeps::{
 };
 pub(crate) use sweeps::{
     REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END, SweepPointResult,
-    apply_voltage_corner, expand_corner_pvt_points, expand_step_sweep_values,
-    infer_nominal_supply_voltage, map_corner_results, map_temperature_results,
-    materialize_corner_process_source,
+    apply_run_environment, apply_voltage_corner, expand_corner_pvt_points,
+    expand_step_sweep_values, infer_nominal_supply_voltage, map_corner_results,
+    map_temperature_results, materialize_corner_process_source,
 };
 pub use tf::{
     TfAccuracy, TfNormalization, TfQuantity, TfRunConfig,

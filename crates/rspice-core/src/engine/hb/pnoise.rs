@@ -36,6 +36,11 @@ pub struct PnoiseAnalysisResult {
     pub converged: bool,
 }
 
+enum PnoiseOperatingPoint<'a> {
+    Shooting(&'a super::super::PssOperatingPoint),
+    HarmonicBalance(&'a HbOperatingPoint),
+}
+
 impl Engine {
     /// Run periodic noise analysis at `output_node` (optionally referenced
     /// to `output_ref` for a differential output) over `offsets`.
@@ -115,7 +120,35 @@ impl Engine {
             output_ref,
             input_source,
             max_sideband,
-            Some(operating_point),
+            Some(PnoiseOperatingPoint::Shooting(operating_point)),
+            abort,
+        )
+    }
+
+    /// Run driven periodic noise from an exact retained harmonic-balance
+    /// operating point. The frozen spectral state is consumed directly and
+    /// the large-signal operating point is never re-solved.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_pnoise_from_hb_with_abort(
+        &self,
+        netlist: &Netlist,
+        offsets: &[Value],
+        output_node: &str,
+        output_ref: Option<&str>,
+        input_source: Option<&str>,
+        max_sideband: i32,
+        operating_point: &HbOperatingPoint,
+        abort: &dyn AbortSignal,
+    ) -> Result<PnoiseAnalysisResult, SimulationError> {
+        self.run_pnoise_impl(
+            netlist,
+            operating_point.config().fundamental_freq,
+            offsets,
+            output_node,
+            output_ref,
+            input_source,
+            max_sideband,
+            Some(PnoiseOperatingPoint::HarmonicBalance(operating_point)),
             abort,
         )
     }
@@ -130,7 +163,7 @@ impl Engine {
         output_ref: Option<&str>,
         input_source: Option<&str>,
         max_sideband: i32,
-        operating_point: Option<&super::super::PssOperatingPoint>,
+        operating_point: Option<PnoiseOperatingPoint<'_>>,
         abort: &dyn AbortSignal,
     ) -> Result<PnoiseAnalysisResult, SimulationError> {
         if abort.is_aborted() {
@@ -162,17 +195,29 @@ impl Engine {
 
         let span = (max_sideband as usize).saturating_mul(2);
         let op_harmonics = span.max(8);
-        if let Some(operating_point) = operating_point
-            && op_harmonics > operating_point.spectral_harmonic_capacity()
+        if let Some(operating_point) = &operating_point
+            && op_harmonics
+                > match operating_point {
+                    PnoiseOperatingPoint::Shooting(point) => point.spectral_harmonic_capacity(),
+                    PnoiseOperatingPoint::HarmonicBalance(point) => {
+                        point.spectral_harmonic_capacity()
+                    }
+                }
         {
+            let capacity = match operating_point {
+                PnoiseOperatingPoint::Shooting(point) => point.spectral_harmonic_capacity(),
+                PnoiseOperatingPoint::HarmonicBalance(point) => point.spectral_harmonic_capacity(),
+            };
             return Err(SimulationError::Circuit(format!(
-                "pnoise requires {op_harmonics} periodic harmonics for its sideband span, but the retained PSS time orbit has Nyquist capacity {}",
-                operating_point.spectral_harmonic_capacity()
+                "pnoise requires {op_harmonics} periodic harmonics for its sideband span, but the retained periodic state has capacity {capacity}"
             )));
         }
-        let hb_config = HbConfig::new(fundamental_freq)
-            .with_harmonics(op_harmonics)
-            .with_oversample(4);
+        let hb_config = match &operating_point {
+            Some(PnoiseOperatingPoint::HarmonicBalance(point)) => point.config().clone(),
+            _ => HbConfig::new(fundamental_freq)
+                .with_harmonics(op_harmonics)
+                .with_oversample(4),
+        };
         self.ensure_analysis_points(hb_config.fft_size())?;
         self.ensure_result_shape(op_harmonics.saturating_add(1), num_nodes.saturating_mul(2))?;
         let drive_tones = Self::hb_collect_drive_tones(&hb_config)?;
@@ -193,7 +238,14 @@ impl Engine {
         }
 
         let state = if let Some(operating_point) = operating_point {
-            self.hb_state_from_pss_operating_point(operating_point, &hb_config, &node_names)?
+            match operating_point {
+                PnoiseOperatingPoint::Shooting(point) => {
+                    self.hb_state_from_pss_operating_point(point, &hb_config, &node_names)?
+                }
+                PnoiseOperatingPoint::HarmonicBalance(point) => {
+                    point.to_solver_state(&node_names)?
+                }
+            }
         } else {
             let mut state = HbSolverState::new(num_nodes, op_harmonics);
             if has_nonlinear {

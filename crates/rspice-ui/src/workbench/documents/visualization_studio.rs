@@ -1993,9 +1993,7 @@ fn resolved_viewer_availability_for_binding(
             .is_some_and(|active| active.id == analysis_sequence);
     let available = match viewer {
         ResultViewer::Waves | ResultViewer::DcSweep => !analysis.waveforms.is_empty(),
-        ResultViewer::Bode => {
-            crate::state::ac_bode_summary_for_selection(run, Some(analysis_index)).is_some()
-        }
+        ResultViewer::Bode => result_document::bode_analysis_is_renderable(analysis),
         ResultViewer::Fft | ResultViewer::Eye => {
             crate::simulation::SimulationController::analysis_supports_transient_derivation(
                 analysis.analysis_type,
@@ -2016,8 +2014,8 @@ fn resolved_viewer_availability_for_binding(
             matches!(payload, AnalysisResultPayload::TransferFunction { .. })
                 && payload.validate_for(analysis.analysis_type).is_ok()
         }),
+        ResultViewer::Smith => false,
         ResultViewer::Hist
-        | ResultViewer::Smith
         | ResultViewer::Op
         | ResultViewer::NoiseContrib
         | ResultViewer::Nyquist => {
@@ -2880,7 +2878,9 @@ mod integrity_scan_tests {
                     external_capabilities: &[],
                 },
             );
-            let ships_a_renderer = ResultViewer::from_viewer_document_id(definition.id).is_some();
+            let ships_a_renderer = ResultViewer::from_viewer_document_id(definition.id).is_some()
+                && definition.release
+                    == crate::results::viewer_catalog::ViewerReleaseClass::ReleaseTarget;
             drawable += usize::from(ships_a_renderer);
             match availability {
                 Ok(_) => assert!(ships_a_renderer, "{} drew without a sheet", definition.id),

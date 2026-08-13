@@ -103,6 +103,21 @@ impl SimulationController {
                 echo_measurements(state, measurements);
             }
 
+            SimulationResult::HarmonicBalance {
+                frequencies,
+                waveforms,
+                measurements,
+                ..
+            } => {
+                self.populate_ac_post_views(state, frequencies, waveforms);
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
+                    "Harmonic Balance: {} components, {} waveforms",
+                    frequencies.len(),
+                    waveforms.len()
+                )));
+                echo_measurements(state, measurements);
+            }
+
             SimulationResult::DcSweep {
                 sweep_var,
                 sweep_values,

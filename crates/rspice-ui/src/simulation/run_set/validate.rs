@@ -8,6 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::model::{InvalidValuePolicy, RunSetCompositionMode, RunSetDimensionKind, RunSetState};
+use crate::simulation::plan::AnalysisKind;
 
 /// One refusal, identified by a stable code.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,6 +99,64 @@ impl RunSetValidation {
     pub fn is_ready(&self) -> bool {
         self.status == RunSetStatus::Ready
     }
+
+    pub(crate) fn push_global_error(&mut self, id: &'static str, message: impl Into<String>) {
+        self.errors.push(RunSetError::global(id, message));
+        self.status = RunSetStatus::Invalid;
+    }
+}
+
+/// Validate the Run Set against the enabled analysis kinds and exact queue
+/// cardinality of the active plan.
+#[must_use]
+pub fn validate_for_plan(
+    state: &RunSetState,
+    enabled_analysis_kinds: &[AnalysisKind],
+    exact_task_count: Option<usize>,
+) -> RunSetValidation {
+    let mut validation =
+        validate_with_task_count(state, enabled_analysis_kinds.len(), exact_task_count);
+    if enabled_analysis_kinds.is_empty() {
+        validation.push_global_error(
+            "RUNSET-PLAN-EMPTY",
+            "Enable at least one analysis instance before previewing the Run Set.",
+        );
+    }
+    let has_axes = state.enabled_dimensions().next().is_some();
+    if !has_axes {
+        return validation;
+    }
+    let runtime_environment_required = state.enabled_dimensions().any(|dimension| {
+        matches!(
+            dimension.kind,
+            RunSetDimensionKind::Supply | RunSetDimensionKind::Temperature
+        )
+    });
+
+    for kind in enabled_analysis_kinds.iter().copied() {
+        let nested_declaration = matches!(kind, AnalysisKind::Temperature | AnalysisKind::Corner);
+        let accepts_runtime_environment = matches!(
+            kind,
+            AnalysisKind::OperatingPoint
+                | AnalysisKind::Transient
+                | AnalysisKind::Ac
+                | AnalysisKind::DcSweep
+                | AnalysisKind::Noise
+                | AnalysisKind::PoleZero
+                | AnalysisKind::Sensitivity
+                | AnalysisKind::MonteCarlo
+        );
+        if nested_declaration || (runtime_environment_required && !accepts_runtime_environment) {
+            validation.push_global_error(
+                "RUNSET-ANALYSIS-COMPOSITION",
+                format!(
+                    "{} cannot execute across the enabled global Run Set axes. Disable those axes or disable this analysis; nested or unbound point composition is never dispatched implicitly.",
+                    kind.label()
+                ),
+            );
+        }
+    }
+    validation
 }
 
 /// Validate `state` against a plan with `enabled_analysis_count` analyses.
@@ -107,6 +166,23 @@ impl RunSetValidation {
 /// count the plan had already contradicted.
 #[must_use]
 pub fn validate(state: &RunSetState, enabled_analysis_count: usize) -> RunSetValidation {
+    validate_with_task_count(state, enabled_analysis_count, None)
+}
+
+/// Validate with an exact plan-aware queue cardinality.
+///
+/// Most analyses contribute one queue task per Run Set point, so callers can
+/// use [`validate`]. Temperature and Corner declarations additionally create
+/// their point solves and one family-assembly task when the global space is
+/// reference-only. The Simulation Studio computes that exact count from the
+/// enabled drafts and supplies it here so budgets and receipts describe the
+/// queue preflight will actually authorize.
+#[must_use]
+pub fn validate_with_task_count(
+    state: &RunSetState,
+    enabled_analysis_count: usize,
+    exact_task_count: Option<usize>,
+) -> RunSetValidation {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
 
@@ -264,8 +340,8 @@ pub fn validate(state: &RunSetState, enabled_analysis_count: usize) -> RunSetVal
         ));
     }
 
-    let analyses = enabled_analysis_count.max(1);
-    let task_count = point_count.checked_mul(analyses);
+    let analyses = enabled_analysis_count;
+    let task_count = exact_task_count.or_else(|| point_count.checked_mul(analyses));
     if task_count.is_none() {
         errors.push(RunSetError::global(
             "RUNSET-CARDINALITY-OVERFLOW",
@@ -273,6 +349,16 @@ pub fn validate(state: &RunSetState, enabled_analysis_count: usize) -> RunSetVal
         ));
     }
     let task_count = task_count.unwrap_or(usize::MAX);
+
+    let engine_task_limit = rspice_core::ResourceLimits::default().max_batch_runs;
+    if task_count > engine_task_limit {
+        errors.push(RunSetError::global(
+            "RUNSET-ENGINE-TASK-LIMIT",
+            format!(
+                "{task_count} tasks exceed the engine batch limit of {engine_task_limit}. Narrow the run space or disable analyses before previewing."
+            ),
+        ));
+    }
 
     if task_count > state.budgets.maximum_tasks {
         errors.push(RunSetError::global(

@@ -14,7 +14,9 @@ mod types;
 
 pub(crate) use corner::materialize_corner_process_source;
 pub(crate) use mapping::{map_corner_results, map_temperature_results};
-pub(crate) use netlist_mutation::{apply_voltage_corner, infer_nominal_supply_voltage};
+pub(crate) use netlist_mutation::{
+    apply_run_environment, apply_voltage_corner, infer_nominal_supply_voltage,
+};
 pub(crate) use sweep_points::expand_step_sweep_values;
 pub(crate) use types::{
     REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END, SweepPointResult,

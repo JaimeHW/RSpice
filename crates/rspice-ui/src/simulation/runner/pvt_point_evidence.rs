@@ -195,13 +195,14 @@ fn run_declaration(
                 environment,
                 &NoAbort,
             ),
-            None => super::spec::run_spec_request(
+            None => super::spec::run_spec_request_with_environment(
                 &bridge,
                 queued.spec,
                 queued.spec_options,
                 &netlist,
                 None,
                 &dependencies,
+                environment,
                 &NoAbort,
             ),
         };

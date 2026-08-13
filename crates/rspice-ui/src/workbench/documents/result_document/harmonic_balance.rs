@@ -56,10 +56,14 @@ pub(super) fn spectrum_trace_is_renderable(waveform: &WaveformData) -> bool {
         && waveform.x.windows(2).all(|window| window[0] <= window[1])
 }
 
-/// Whether this exact retained analysis can drive the HB viewer.
+/// Whether this exact retained analysis can drive the discrete retained
+/// coefficient-spectrum viewer.
 pub(super) fn analysis_is_renderable(analysis: &AnalysisResult) -> bool {
     analysis.success
-        && analysis.analysis_type == AnalysisType::HarmonicBalance
+        && matches!(
+            analysis.analysis_type,
+            AnalysisType::HarmonicBalance | AnalysisType::Fourier
+        )
         && analysis.waveforms.iter().any(spectrum_trace_is_renderable)
 }
 
@@ -183,11 +187,15 @@ fn automatic_y_range(model: &HarmonicBalanceModel) -> Option<(f64, f64)> {
 
 fn active_hb_failure(state: &AppState) -> Option<&str> {
     let analysis = state.simulation.active_analysis()?;
-    (analysis.analysis_type == AnalysisType::HarmonicBalance && !analysis.success).then(|| {
+    (matches!(
+        analysis.analysis_type,
+        AnalysisType::HarmonicBalance | AnalysisType::Fourier
+    ) && !analysis.success)
+    .then(|| {
         analysis
             .error_message
             .as_deref()
-            .unwrap_or("HB execution failed")
+            .unwrap_or("spectrum execution failed")
     })
 }
 
@@ -203,11 +211,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let Some(model) = build_model(state, &tokens) else {
         if let Some(error) = active_hb_failure(state) {
-            well_hint(ui, &format!("Harmonic-balance execution failed: {error}"));
+            well_hint(ui, &format!("Spectrum execution failed: {error}"));
         } else {
             well_hint(
                 ui,
-                "No retained harmonic-balance spectrum for the selected analysis",
+                "No retained complex coefficient spectrum for the selected analysis",
             );
         }
         return;
@@ -227,7 +235,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .results
         .plot_view(super::ResultViewer::HarmonicBalance, 0);
     let header = strip::StripHeader::new(
-        "HB",
+        "SPECTRUM",
         &format!(
             "{} · {} retained spectral samples",
             model.label, model.retained_frequency_count
@@ -269,7 +277,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         XScale::Linear,
         Axis::linear_with(y0, y1, "", 7).with_label("magnitude"),
     )
-    .accessible_name("Harmonic-balance coefficient spectrum")
+    .accessible_name("Retained complex coefficient spectrum")
     .accessible_detail(
         "Exact retained harmonic-balance magnitude coefficients. Solver tone configuration, harmonic order, convergence iterations, fundamental, and THD are shown only when retained.",
     );
@@ -360,15 +368,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 /// panel states those absences explicitly instead of reverse-engineering
 /// plausible-looking values from the plotted grid.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    section_header(ui, "Harmonic balance", None);
+    section_header(ui, "Retained spectrum", None);
     let tokens = Tokens::get(ui.ctx());
     let Some(model) = build_model(state, &tokens) else {
         if let Some(error) = active_hb_failure(state) {
-            super::panel_note(ui, &format!("Harmonic-balance execution failed: {error}"));
+            super::panel_note(ui, &format!("Spectrum execution failed: {error}"));
         } else {
             super::panel_note(
                 ui,
-                "Select a completed harmonic-balance result with retained complex coefficients.",
+                "Select a completed HB or Fourier result with retained complex coefficients.",
             );
         }
         return;
@@ -473,6 +481,10 @@ mod tests {
                 "#ffffff",
             )]);
         assert!(!analysis_is_renderable(&phase_only));
+
+        let fourier = AnalysisResult::new(2, AnalysisType::Fourier, "FOURIER")
+            .with_waveforms(vec![spectrum_waveform()]);
+        assert!(analysis_is_renderable(&fourier));
     }
 
     #[test]

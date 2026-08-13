@@ -174,10 +174,39 @@ impl RunSetTransaction {
 ///
 /// A mutation is applied to a clone and adopted only if it succeeds, so a
 /// refused command cannot leave a half-applied edit behind.
+#[cfg(test)]
 pub fn dispatch(
     state: &mut RunSetState,
     action: RunSetAction,
     enabled_analysis_count: usize,
+) -> RunSetTransaction {
+    dispatch_with_validation(state, action, |next| {
+        super::validate(next, enabled_analysis_count)
+    })
+}
+
+/// Apply an action against the exact enabled analysis kinds in the plan.
+pub fn dispatch_for_plan(
+    state: &mut RunSetState,
+    action: RunSetAction,
+    enabled_analysis_kinds: &[crate::simulation::plan::AnalysisKind],
+    exact_task_count: Option<usize>,
+    workload_error: Option<String>,
+) -> RunSetTransaction {
+    dispatch_with_validation(state, action, |next| {
+        let mut validation =
+            super::validate_for_plan(next, enabled_analysis_kinds, exact_task_count);
+        if let Some(error) = workload_error {
+            validation.push_global_error("RUNSET-PLAN-WORKLOAD", error);
+        }
+        validation
+    })
+}
+
+fn dispatch_with_validation(
+    state: &mut RunSetState,
+    action: RunSetAction,
+    validate_preview: impl FnOnce(&RunSetState) -> RunSetValidation,
 ) -> RunSetTransaction {
     let before_revision = state.revision;
     let snapshot = state.snapshot();
@@ -350,8 +379,7 @@ pub fn dispatch(
         },
     }
 
-    let validation = matches!(action, RunSetAction::Preview)
-        .then(|| super::validate(&next, enabled_analysis_count));
+    let validation = matches!(action, RunSetAction::Preview).then(|| validate_preview(&next));
 
     let mut error_ids: Vec<&'static str> = refusal.iter().map(|error| error.id).collect();
     if let Some(validation) = &validation {

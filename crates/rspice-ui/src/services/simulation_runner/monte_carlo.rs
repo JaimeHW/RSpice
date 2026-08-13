@@ -41,8 +41,7 @@ pub struct MonteCarloData {
 /// Run Monte Carlo analysis by executing the first `.MC` command in the
 /// netlist.
 ///
-/// Test-only. The shipping path is
-/// [`run_monte_carlo_analysis_with_source_path_and_abort`].
+/// Test-only. Shipping dispatch uses the environment-aware entry point below.
 #[cfg(test)]
 pub fn run_monte_carlo_analysis(netlist_text: &str) -> Result<MonteCarloData, String> {
     run_monte_carlo_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
@@ -60,12 +59,39 @@ pub fn run_monte_carlo_analysis_with_abort(
 
 /// Run Monte Carlo analysis with source-path resolution and cooperative
 /// cancellation through parsing, trial execution, and result conversion.
+#[cfg(test)]
 pub fn run_monte_carlo_analysis_with_source_path_and_abort(
     netlist_text: &str,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<MonteCarloData> {
+    run_monte_carlo_analysis_with_environment_and_source_path_and_abort(
+        netlist_text,
+        source_path,
+        None,
+        None,
+        None,
+        abort,
+    )
+}
+
+/// Run parameter-tolerance Monte Carlo under one exact Run Set environment.
+pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abort(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+    temperature_celsius: Option<Value>,
+    supply_voltage: Option<Value>,
+    nominal_supply_voltage: Option<Value>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<MonteCarloData> {
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    if temperature_celsius.is_none()
+        && (supply_voltage.is_some() || nominal_supply_voltage.is_some())
+    {
+        return Err(ServiceRunError::Failure(
+            "Run Set supply overrides require a temperature-scoped environment".to_owned(),
+        ));
+    }
     ensure_not_aborted(abort)?;
 
     let mc_cmd = netlist
@@ -96,14 +122,27 @@ pub fn run_monte_carlo_analysis_with_source_path_and_abort(
     let seed = mc_cmd.seed.unwrap_or(DEFAULT_MONTE_CARLO_SEED);
     let parameter_filter = (!mc_cmd.params.is_empty()).then_some(mc_cmd.params.as_slice());
 
-    let engine = Engine::new(build_engine_config(&netlist, None));
+    let mut engine_config = build_engine_config(&netlist, None);
+    if let Some(temperature_celsius) = temperature_celsius {
+        engine_config.temperature = rspice_core::constants::celsius_to_kelvin(temperature_celsius);
+    }
+    let engine = Engine::new(engine_config);
+    let environment =
+        temperature_celsius.map(
+            |temperature_celsius| rspice_core::engine::MonteCarloEnvironment {
+                temperature_celsius,
+                supply_voltage,
+                nominal_supply_voltage,
+            },
+        );
     let result = engine
-        .run_monte_carlo_with_options_and_abort(
+        .run_monte_carlo_with_options_environment_and_abort(
             &netlist,
             mc_cmd.runs,
             seed,
             distribution,
             parameter_filter,
+            environment,
             abort,
         )
         .map_err(|error| ServiceRunError::from_core("Monte Carlo analysis error", error))?;
@@ -148,12 +187,47 @@ pub fn run_monte_carlo_analysis_with_source_path_and_abort(
 /// The `.MC` command's seed is the base seed. Per-trial seeds are expanded
 /// from it, so the whole analysis is reproducible from one number and no two
 /// trials share a stream.
+#[cfg(test)]
 pub fn run_statistical_monte_carlo_with_source_path_and_abort(
     netlist_text: &str,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<MonteCarloData> {
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    run_statistical_monte_carlo_with_environment_and_source_path_and_abort(
+        netlist_text,
+        source_path,
+        None,
+        None,
+        None,
+        abort,
+    )
+}
+
+/// Run deck-statistical Monte Carlo under one exact Run Set environment.
+/// Every trial is reparsed to redraw statistical expressions, so the
+/// environment is applied to every reparsed deck before its operating point.
+pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_abort(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+    temperature_celsius: Option<Value>,
+    supply_voltage: Option<Value>,
+    nominal_supply_voltage: Option<Value>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<MonteCarloData> {
+    let mut netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    if let Some(temperature_celsius) = temperature_celsius {
+        super::apply_run_environment(
+            &mut netlist,
+            temperature_celsius,
+            supply_voltage,
+            nominal_supply_voltage,
+            abort,
+        )?;
+    } else if supply_voltage.is_some() || nominal_supply_voltage.is_some() {
+        return Err(ServiceRunError::Failure(
+            "Run Set supply overrides require a temperature-scoped environment".to_owned(),
+        ));
+    }
     ensure_not_aborted(abort)?;
 
     let (runs, base_seed) = netlist
@@ -180,7 +254,16 @@ pub fn run_statistical_monte_carlo_with_source_path_and_abort(
     for trial in 0..runs {
         poll_periodically(abort, trial)?;
         let deck = with_statistical_seed(netlist_text, trial_seed(base_seed, trial));
-        let trial_netlist = parse_runner_netlist_with_abort(&deck, source_path, abort)?;
+        let mut trial_netlist = parse_runner_netlist_with_abort(&deck, source_path, abort)?;
+        if let Some(temperature_celsius) = temperature_celsius {
+            super::apply_run_environment(
+                &mut trial_netlist,
+                temperature_celsius,
+                supply_voltage,
+                nominal_supply_voltage,
+                abort,
+            )?;
+        }
         ensure_not_aborted(abort)?;
         let engine = Engine::new(build_engine_config(&trial_netlist, None));
         // A trial that fails to converge is dropped from the distribution and
@@ -340,6 +423,38 @@ R2 out 0 1k
 .end
 ";
 
+    const STATISTICAL_PARAMETER_DECK: &str = "\
+Statistical parameter environment
+.param rload={agauss(1k, 100, 1)}
+V1 in 0 1
+R1 in out {rload}
+R2 out 0 1k
+.mc 8 seed 23
+.end
+";
+
+    fn samples<'a>(data: &'a MonteCarloData, name: &str) -> &'a [Value] {
+        &data
+            .variables
+            .iter()
+            .find(|variable| variable.name.eq_ignore_ascii_case(name))
+            .unwrap_or_else(|| panic!("missing Monte Carlo variable {name}"))
+            .samples
+    }
+
+    fn assert_supply_doubles_samples(reference: &MonteCarloData, doubled: &MonteCarloData) {
+        let reference = samples(reference, "V(out)");
+        let doubled = samples(doubled, "V(out)");
+        assert_eq!(reference.len(), doubled.len());
+        for (reference, doubled) in reference.iter().zip(doubled) {
+            let tolerance = reference.abs().max(1.0) * 1.0e-10;
+            assert!(
+                (*doubled - 2.0 * *reference).abs() <= tolerance,
+                "bound supply did not double the trial sample: {reference} -> {doubled}"
+            );
+        }
+    }
+
     fn run_statistical(deck: &str) -> ServiceRunResult<MonteCarloData> {
         run_statistical_monte_carlo_with_source_path_and_abort(deck, None, &NoAbort)
     }
@@ -376,6 +491,54 @@ R2 out 0 1k
                 .collect::<Vec<_>>()
         };
         assert_eq!(samples(&first), samples(&second));
+    }
+
+    #[test]
+    fn parameter_tolerance_monte_carlo_applies_the_run_set_environment() {
+        let reference = run_monte_carlo_analysis_with_environment_and_source_path_and_abort(
+            RETENTION_DECK,
+            None,
+            Some(25.0),
+            None,
+            None,
+            &NoAbort,
+        )
+        .expect("reference Monte Carlo executes");
+        let doubled = run_monte_carlo_analysis_with_environment_and_source_path_and_abort(
+            RETENTION_DECK,
+            None,
+            Some(125.0),
+            Some(2.0),
+            Some(1.0),
+            &NoAbort,
+        )
+        .expect("PVT Monte Carlo executes");
+
+        assert_supply_doubles_samples(&reference, &doubled);
+    }
+
+    #[test]
+    fn deck_statistical_monte_carlo_applies_the_environment_to_every_trial() {
+        let reference = run_statistical_monte_carlo_with_environment_and_source_path_and_abort(
+            STATISTICAL_PARAMETER_DECK,
+            None,
+            Some(25.0),
+            None,
+            None,
+            &NoAbort,
+        )
+        .expect("reference statistical Monte Carlo executes");
+        let doubled = run_statistical_monte_carlo_with_environment_and_source_path_and_abort(
+            STATISTICAL_PARAMETER_DECK,
+            None,
+            Some(125.0),
+            Some(2.0),
+            Some(1.0),
+            &NoAbort,
+        )
+        .expect("PVT statistical Monte Carlo executes");
+
+        assert_supply_doubles_samples(&reference, &doubled);
     }
 
     #[test]

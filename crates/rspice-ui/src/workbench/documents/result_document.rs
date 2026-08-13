@@ -60,6 +60,23 @@ pub(crate) fn phase_noise_waveform_is_renderable(waveform: &WaveformData) -> boo
     phase_noise::phase_noise_waveform_is_renderable(waveform)
 }
 
+pub(crate) fn bode_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
+    crate::state::ac_bode_summary_for_analysis(analysis, 0).is_some()
+        || (analysis.success
+            && analysis.analysis_type.is_raw_frequency_curve()
+            && analysis.waveforms.iter().any(|waveform| {
+                waveform.visible
+                    && waveform.x.len() == waveform.y.len()
+                    && waveform.x.len() >= 2
+                    && waveform
+                        .x
+                        .iter()
+                        .zip(waveform.y.iter())
+                        .all(|(&x, &y)| x.is_finite() && x > 0.0 && y.is_finite())
+                    && waveform.x.windows(2).all(|pair| pair[0] < pair[1])
+            }))
+}
+
 /// Open the dataset/manifest browser in its canonical Results frame.
 ///
 /// The navigator and inspector are parts of that frame; this command exposes
@@ -2403,7 +2420,9 @@ pub(crate) fn project_viewer_for_analysis(
         ResultViewer::Waves if analysis.analysis_type == AnalysisType::DcSweep => {
             ResultViewer::DcSweep
         }
-        ResultViewer::Fft if analysis.analysis_type == AnalysisType::HarmonicBalance => {
+        ResultViewer::Fft | ResultViewer::HarmonicBalance
+            if harmonic_balance_analysis_is_renderable(analysis) =>
+        {
             ResultViewer::HarmonicBalance
         }
         ResultViewer::Bode if bode::ordinary_noise_spectrum_is_renderable(analysis) => {
@@ -3579,16 +3598,16 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         ResultViewer::Waves => {
             if active_run.is_some_and(|run| {
                 run.analyses.iter().any(|analysis| {
-                    analysis.analysis_type == crate::state::AnalysisType::Transient
+                    analysis.analysis_type.is_time_domain()
                         && !analysis.waveforms.is_empty()
                 })
             }) {
                 ViewerAvailability::available(
-                    "Transient waveforms are present in the active dataset",
+                    "Time-domain waveforms are present in the active dataset",
                 )
             } else {
                 ViewerAvailability::unavailable(
-                    "Requires transient waveform data in the active dataset",
+                    "Requires transient, PSS, envelope, or other time-domain waveform data",
                 )
             }
         }
@@ -3609,19 +3628,14 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
             }
         }
         ResultViewer::Bode => {
-            let has_ac_response = active_run
-                .and_then(|run| {
-                    crate::state::ac_bode_summary_for_selection(
-                        run,
-                        state.simulation.active_analysis_idx,
-                    )
-                })
-                .is_some();
-            if has_ac_response {
-                ViewerAvailability::available("An AC response is available")
+            let has_frequency_response = active_run.is_some_and(|run| {
+                run.analyses.iter().any(bode_analysis_is_renderable)
+            });
+            if has_frequency_response {
+                ViewerAvailability::available("A usable frequency response is available")
             } else {
                 ViewerAvailability::unavailable(
-                    "Requires a usable AC response in the active dataset",
+                    "Requires a usable AC, PAC, PXF, STB, or distortion response",
                 )
             }
         }
@@ -3629,11 +3643,11 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         ResultViewer::HarmonicBalance => {
             if harmonic_balance::active_analysis_is_renderable(state) {
                 ViewerAvailability::available(
-                    "The selected analysis contains retained complex HB coefficients",
+                    "A retained complex HB or Fourier coefficient spectrum is available",
                 )
             } else {
                 ViewerAvailability::unavailable(
-                    "Requires the selected harmonic-balance analysis to retain complex coefficients",
+                    "Requires HB or Fourier to retain exact complex coefficients",
                 )
             }
         }
@@ -3729,7 +3743,13 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
             }
         }
         ResultViewer::Nyquist => specialized_availability(state, ActiveViewer::Nyquist),
-        ResultViewer::Smith => specialized_availability(state, ActiveViewer::SmithChart),
+        // Smith impedance/admittance readout requires the exact configured
+        // reference impedance. Current SP/PSP/HBSP retained results preserve
+        // complex Γ but not Z₀, so the viewer must stay unavailable instead
+        // of asserting its mutable cache's 50 Ω default.
+        ResultViewer::Smith => ViewerAvailability::unavailable(
+            "Smith requires retained reference-impedance metadata; use Nyquist for the exact complex locus",
+        ),
         ResultViewer::PoleZero => specialized_availability(state, ActiveViewer::PoleZero),
         ResultViewer::Events => {
             if events::active_analysis_is_renderable(state) {
@@ -4224,6 +4244,151 @@ mod availability_tests {
 
         assert!(viewer_availability(&state, ResultViewer::NoiseContrib).available);
         assert!(!viewer_availability(&state, ResultViewer::Bode).available);
+    }
+
+    #[test]
+    fn periodic_and_stability_responses_enable_bode_but_pstb_modes_do_not() {
+        for analysis_type in [AnalysisType::Pac, AnalysisType::Pxf] {
+            let state = state_with_analysis(
+                AnalysisResult::new(1, analysis_type, analysis_type.short_label())
+                    .with_waveforms(vec![
+                        WaveformData::new(
+                            "|V(out)|",
+                            vec![1.0, 10.0],
+                            vec![10.0, 1.0],
+                            "#00aaff",
+                        ),
+                        WaveformData::new(
+                            "phase(V(out))",
+                            vec![1.0, 10.0],
+                            vec![-90.0, -135.0],
+                            "#ffbd2e",
+                        ),
+                    ]),
+            );
+            assert!(
+                viewer_availability(&state, ResultViewer::Bode).available,
+                "{} must feed Bode",
+                analysis_type.short_label()
+            );
+        }
+
+        let stb = state_with_analysis(
+            AnalysisResult::new(1, AnalysisType::Stb, "STB").with_waveforms(vec![
+                WaveformData::new(
+                    "Loop Gain (dB)",
+                    vec![1.0, 10.0],
+                    vec![40.0, 0.0],
+                    "#00aaff",
+                )
+                .with_unit("dB"),
+                WaveformData::new(
+                    "Loop Phase (deg)",
+                    vec![1.0, 10.0],
+                    vec![-90.0, -135.0],
+                    "#ffbd2e",
+                )
+                .with_unit("°"),
+            ]),
+        );
+        assert!(viewer_availability(&stb, ResultViewer::Bode).available);
+
+        let pstb = state_with_analysis(
+            AnalysisResult::new(1, AnalysisType::Pstb, "PSTB").with_waveforms(vec![
+                WaveformData::new(
+                    "Stability Margin (dB)",
+                    vec![0.0, 1.0],
+                    vec![12.0, 4.0],
+                    "#00aaff",
+                )
+                .with_unit("dB"),
+            ]),
+        );
+        assert!(!viewer_availability(&pstb, ResultViewer::Bode).available);
+        assert!(viewer_availability(&pstb, ResultViewer::Table).available);
+    }
+
+    #[test]
+    fn pss_and_envelope_feed_waves_while_disto_feeds_unit_aware_frequency_curves() {
+        for analysis_type in [AnalysisType::Pss, AnalysisType::Envelope] {
+            let state = state_with_analysis(
+                AnalysisResult::new(1, analysis_type, analysis_type.short_label())
+                    .with_waveforms(vec![WaveformData::new(
+                        "V(out)",
+                        vec![0.0, 1.0e-6],
+                        vec![0.0, 1.0],
+                        "#00aaff",
+                    )]),
+            );
+            assert!(viewer_availability(&state, ResultViewer::Waves).available);
+        }
+
+        let disto = state_with_analysis(
+            AnalysisResult::new(1, AnalysisType::Disto, "DISTO").with_waveforms(vec![
+                WaveformData::new(
+                    "V(out) HD3(dBc)",
+                    vec![1.0e3, 1.0e4],
+                    vec![-80.0, -60.0],
+                    "#00aaff",
+                )
+                .with_unit("dBc"),
+            ]),
+        );
+        assert!(viewer_availability(&disto, ResultViewer::Bode).available);
+    }
+
+    #[test]
+    fn fourier_coefficients_feed_spectrum_and_periodic_sparameters_feed_smith() {
+        let fourier = state_with_analysis(
+            AnalysisResult::new(1, AnalysisType::Fourier, "FOURIER").with_waveforms(vec![
+                WaveformData::new(
+                    "|V(out) Spectrum|",
+                    vec![1.0e3, 2.0e3],
+                    vec![1.0, 0.1],
+                    "#00aaff",
+                )
+                .with_complex_components("V(out) Spectrum", vec![1.0, 0.1], vec![0.0, 0.0]),
+            ]),
+        );
+        assert!(viewer_availability(&fourier, ResultViewer::HarmonicBalance).available);
+
+        for analysis_type in [AnalysisType::SParameter, AnalysisType::Psp, AnalysisType::Hbsp] {
+            let state = state_with_analysis(
+                AnalysisResult::new(1, analysis_type, analysis_type.short_label())
+                    .with_waveforms(vec![
+                        WaveformData::new(
+                            "|S11|",
+                            vec![1.0e6, 2.0e6],
+                            vec![0.5, 0.25],
+                            "#00aaff",
+                        )
+                        .with_complex_components("S11", vec![0.5, 0.25], vec![0.0, -0.1]),
+                    ]),
+            );
+            assert!(!viewer_availability(&state, ResultViewer::Smith).available);
+            assert!(viewer_availability(&state, ResultViewer::Table).available);
+        }
+    }
+
+    #[test]
+    fn hbnoise_uses_the_noise_density_projection_and_never_impersonates_ac() {
+        let analysis =
+            AnalysisResult::new(1, AnalysisType::Hbnoise, "HBNOISE").with_waveforms(vec![
+                WaveformData::new(
+                    "onoise",
+                    vec![1.0e3, 1.0e4],
+                    vec![1.0e-18, 2.0e-18],
+                    "#00aaff",
+                ),
+            ]);
+        let state = state_with_analysis(analysis.clone());
+
+        assert!(viewer_availability(&state, ResultViewer::NoiseContrib).available);
+        assert!(!viewer_availability(&state, ResultViewer::Bode).available);
+        assert_eq!(
+            project_viewer_for_analysis(ResultViewer::Bode, &analysis),
+            ResultViewer::NoiseContrib
+        );
     }
 
     #[test]

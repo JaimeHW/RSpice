@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::simulation::dialog::corner::{CornerBaseAnalysis, ProcessCorner};
+use crate::simulation::plan::AnalysisKind;
 
 fn reference() -> ReferencePoint {
     ReferencePoint {
@@ -52,6 +53,23 @@ fn the_default_run_set_is_the_commercial_pvt_space_and_validates() {
         state
             .enabled_dimension_of(RunSetDimensionKind::Supply)
             .is_some()
+    );
+}
+
+#[test]
+fn plan_aware_validation_refuses_an_empty_plan_without_inventing_a_task() {
+    let state = RunSetState::default();
+    let validation = validate_for_plan(&state, &[], Some(0));
+
+    assert_eq!(validation.forecast.enabled_analysis_count, 0);
+    assert_eq!(validation.forecast.task_count, 0);
+    assert!(
+        validation
+            .errors
+            .iter()
+            .any(|error| error.id == "RUNSET-PLAN-EMPTY"),
+        "{:?}",
+        validation.errors
     );
 }
 
@@ -181,6 +199,17 @@ fn a_budget_refusal_names_the_budget_it_exceeded() {
         "{:?}",
         validation.errors
     );
+}
+
+#[test]
+fn the_engine_batch_limit_blocks_preview_even_when_the_authored_budget_is_larger() {
+    let state = RunSetState::default();
+    let engine_limit = rspice_core::ResourceLimits::default().max_batch_runs;
+    let validation = validate_with_task_count(&state, 1, Some(engine_limit + 1));
+
+    assert!(validation.errors.iter().any(|error| {
+        error.id == "RUNSET-ENGINE-TASK-LIMIT" && error.message.contains(&engine_limit.to_string())
+    }));
 }
 
 #[test]
@@ -683,4 +712,51 @@ fn a_point_label_states_every_coordinate_with_its_unit() {
 
     assert_eq!(points[0].label(), "TT · 1.0 V · -40 °C");
     assert_eq!(points[2].label(), "TT · 1.0 V · 125 °C");
+}
+
+#[test]
+fn plan_validation_blocks_an_analysis_that_cannot_accept_active_pvt_axes() {
+    let mut state = RunSetState::reference_only();
+    enable(&mut state, RunSetDimensionKind::Temperature, true);
+
+    let validation = validate_for_plan(&state, &[AnalysisKind::SParameter], Some(3));
+
+    assert!(!validation.is_ready());
+    assert!(validation.errors.iter().any(|error| {
+        error.id == "RUNSET-ANALYSIS-COMPOSITION" && error.message.contains("S-parameters")
+    }));
+}
+
+#[test]
+fn plan_validation_accepts_monte_carlo_across_active_pvt_axes() {
+    let mut state = RunSetState::reference_only();
+    enable(&mut state, RunSetDimensionKind::Temperature, true);
+
+    let validation = validate_for_plan(&state, &[AnalysisKind::MonteCarlo], Some(3));
+
+    assert!(validation.is_ready(), "{:?}", validation.errors);
+    assert_eq!(validation.forecast.task_count, 3);
+}
+
+#[test]
+fn plan_preview_receipt_blocks_incompatible_analysis_composition() {
+    let mut state = RunSetState::reference_only();
+    enable(&mut state, RunSetDimensionKind::Supply, true);
+
+    let transaction = dispatch_for_plan(
+        &mut state,
+        RunSetAction::Preview,
+        &[AnalysisKind::Pss],
+        Some(3),
+        None,
+    );
+
+    assert!(!transaction.was_adopted());
+    assert!(
+        transaction
+            .receipt
+            .error_ids
+            .contains(&"RUNSET-ANALYSIS-COMPOSITION")
+    );
+    assert!(state.preview.is_none());
 }

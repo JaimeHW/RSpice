@@ -68,6 +68,18 @@ fn temperature_task(temperatures_c: Vec<f64>) -> QueuedAnalysis {
     }
 }
 
+fn monte_carlo_task() -> QueuedAnalysis {
+    QueuedAnalysis {
+        numeric_override: None,
+        spec: AnalysisSpec::MonteCarlo {
+            variation_source: crate::simulation::dialog::McVariationSource::ParameterTolerance,
+        },
+        config: None,
+        spec_options: SpecExecutionOptions::default(),
+        analysis_line: ".mc 4 gauss 0.1 seed 17 params rload".to_owned(),
+    }
+}
+
 fn corner_task(
     process_corners: Vec<crate::services::simulation_runner::CornerProcess>,
     voltages: Vec<f64>,
@@ -187,6 +199,14 @@ fn global_temperature_run_set(temperatures: &[&str]) -> PreparedRunSet {
     PreparedRunSet::new(state, contract)
 }
 
+fn reference_only_run_set() -> PreparedRunSet {
+    let state = crate::simulation::run_set::RunSetState::reference_only();
+    PreparedRunSet::new(
+        state,
+        crate::services::simulation_runner::CornerRunConfig::default(),
+    )
+}
+
 #[test]
 fn global_run_set_expands_every_core_analysis_at_every_point() {
     let mut run = parts();
@@ -240,6 +260,98 @@ fn global_run_set_refuses_an_analysis_that_cannot_receive_a_point_environment() 
         PreparedRunSnapshot::new(run).expect_err("nested spec-driven sweep must fail closed");
     assert!(error.message().contains("cannot yet execute"));
     assert!(error.message().contains("Temperature"));
+}
+
+#[test]
+fn global_run_set_expands_monte_carlo_at_every_point() {
+    let mut run = parts();
+    run.executable_netlist = "Monte Carlo PVT\n\
+.param rload=1k\n\
+V1 out 0 1\n\
+R1 out 0 {rload}\n\
+.mc 4 gauss 0.1 seed 17 params rload\n\
+.end\n"
+        .to_owned();
+    run.tasks = vec![prepared("mc", "Monte Carlo", monte_carlo_task())];
+    run.run_set = Some(global_temperature_run_set(&["-40", "125"]));
+
+    let snapshot = PreparedRunSnapshot::new(run).expect("global Monte Carlo Run Set prepares");
+    assert_eq!(snapshot.tasks.len(), 2);
+    assert!(
+        snapshot
+            .tasks
+            .iter()
+            .all(|task| matches!(task.task.spec, AnalysisSpec::MonteCarlo { .. }))
+    );
+    assert_eq!(
+        snapshot
+            .tasks
+            .iter()
+            .map(|task| task.execution_environment.unwrap().temperature_celsius)
+            .collect::<Vec<_>>(),
+        vec![-40.0, 125.0],
+    );
+    assert_ne!(snapshot.tasks[0].instance_id, snapshot.tasks[1].instance_id);
+    assert_ne!(
+        snapshot.tasks[0].config_digest,
+        snapshot.tasks[1].config_digest
+    );
+}
+
+#[test]
+fn reference_only_run_set_accepts_a_spec_driven_analysis_without_an_environment() {
+    let mut run = parts();
+    run.tasks = vec![prepared(
+        "ac-data",
+        "AC Data",
+        QueuedAnalysis {
+            numeric_override: None,
+            spec: AnalysisSpec::AcData {
+                table_name: "FREQS".to_owned(),
+                frequencies: vec![1.0e3, 1.0e6],
+            },
+            config: None,
+            spec_options: SpecExecutionOptions::default(),
+            analysis_line: ".ac data=FREQS".to_owned(),
+        },
+    )];
+    run.run_set = Some(reference_only_run_set());
+
+    let snapshot = PreparedRunSnapshot::new(run).expect("reference-only Run Set prepares");
+    assert_eq!(snapshot.tasks.len(), 1);
+    assert!(snapshot.tasks[0].execution_environment.is_none());
+    assert!(matches!(
+        snapshot.tasks[0].task.spec,
+        AnalysisSpec::AcData { .. }
+    ));
+}
+
+#[test]
+fn reference_only_run_set_preserves_an_analysis_owned_temperature_declaration() {
+    let mut run = parts();
+    run.tasks = vec![prepared(
+        "temperature",
+        "Temperature",
+        temperature_task(vec![-40.0, 125.0]),
+    )];
+    run.run_set = Some(reference_only_run_set());
+
+    let snapshot = PreparedRunSnapshot::new(run)
+        .expect("a reference-only global space delegates to the analysis declaration");
+    assert_eq!(snapshot.tasks.len(), 3);
+    assert_eq!(
+        snapshot
+            .tasks
+            .iter()
+            .filter_map(PreparedTask::pvt_point)
+            .map(|point| point.temperature_celsius())
+            .collect::<Vec<_>>(),
+        vec![-40.0, 125.0],
+    );
+    assert!(matches!(
+        snapshot.tasks.last().unwrap().task.spec,
+        AnalysisSpec::Parametric
+    ));
 }
 
 fn project_runtime() -> crate::simulation::veriloga::PreparedVerilogARuntime {

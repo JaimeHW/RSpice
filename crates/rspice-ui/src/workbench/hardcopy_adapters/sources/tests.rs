@@ -1304,6 +1304,75 @@ fn viewer_partition_covers_every_results_family() {
 }
 
 #[test]
+fn bode_hardcopy_exports_displayed_decibels_and_phase_for_periodic_response() {
+    let analysis = AnalysisResult::new(1, AnalysisType::Pac, "PAC").with_waveforms(vec![
+        WaveformData::new(
+            "|V(out)|",
+            vec![1.0, 10.0],
+            vec![10.0, 1.0],
+            "#00aaff",
+        ),
+        WaveformData::new(
+            "phase(V(out))",
+            vec![1.0, 10.0],
+            vec![-90.0, -135.0],
+            "#ffbd2e",
+        ),
+    ]);
+    let state = quick_view_state(analysis, ResultViewer::Bode);
+
+    let resolved = resolve_quick_view(&state).expect("PAC Bode semantic hardcopy");
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected semantic Bode plot")
+    };
+    assert_eq!(plot.viewer, ResultViewer::Bode);
+    assert_eq!(plot.traces.len(), 2);
+    assert_eq!(
+        plot.traces[0]
+            .source_samples
+            .iter()
+            .map(|(_, value)| f64::from_bits(*value))
+            .collect::<Vec<_>>(),
+        vec![20.0, 0.0]
+    );
+    assert_eq!(
+        plot.traces[1]
+            .source_samples
+            .iter()
+            .map(|(_, value)| f64::from_bits(*value))
+            .collect::<Vec<_>>(),
+        vec![-90.0, -135.0]
+    );
+}
+
+#[test]
+fn disto_hardcopy_preserves_retained_engineering_values() {
+    let analysis = AnalysisResult::new(1, AnalysisType::Disto, "DISTO").with_waveforms(vec![
+        WaveformData::new(
+            "V(out) HD3(dBc)",
+            vec![1.0e3, 1.0e4],
+            vec![-80.0, -60.0],
+            "#00aaff",
+        )
+        .with_unit("dBc"),
+    ]);
+    let state = quick_view_state(analysis, ResultViewer::Bode);
+
+    let resolved = resolve_quick_view(&state).expect("DISTO semantic hardcopy");
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected semantic distortion plot")
+    };
+    assert_eq!(
+        plot.traces[0]
+            .source_samples
+            .iter()
+            .map(|(_, value)| f64::from_bits(*value))
+            .collect::<Vec<_>>(),
+        vec![-80.0, -60.0]
+    );
+}
+
+#[test]
 fn harmonic_balance_quick_view_exports_only_retained_complex_coefficients() {
     let spectrum = WaveformData::new(
         "|V(out)|",
@@ -1480,6 +1549,34 @@ fn noise_quick_view_exports_retained_psd_as_amplitude_density_without_summary() 
     );
     for (actual, expected) in samples.iter().map(|sample| sample.1).zip([1.0, 2.0, 3.0]) {
         assert!((actual - expected).abs() < 1.0e-12);
+    }
+}
+
+#[test]
+fn hbnoise_quick_view_exports_retained_psd_as_amplitude_density() {
+    let analysis = AnalysisResult::new(9, AnalysisType::Hbnoise, "HBNOISE").with_waveforms(vec![
+        WaveformData::new(
+            "onoise",
+            vec![1.0e3, 1.0e4, 1.0e5],
+            vec![1.0e-18, 4.0e-18, 9.0e-18],
+            "#00ffff",
+        ),
+    ]);
+    let state = quick_view_state(analysis, ResultViewer::NoiseContrib);
+    let resolved =
+        resolve_quick_view(&state).expect("HBNOISE density exports through the noise instrument");
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected semantic HBNOISE plot");
+    };
+    assert_eq!(plot.viewer, ResultViewer::NoiseContrib);
+    assert_eq!(plot.traces.len(), 1);
+    let samples = plot.traces[0]
+        .source_samples
+        .iter()
+        .map(|(x, y)| (f64::from_bits(*x), f64::from_bits(*y)))
+        .collect::<Vec<_>>();
+    for (actual, expected) in samples.iter().map(|sample| sample.1).zip([1.0, 2.0, 3.0]) {
+        assert!((actual - expected).abs() < 1.0e-15);
     }
 }
 

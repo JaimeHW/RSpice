@@ -12,6 +12,7 @@ mod shared;
 pub use pac::{
     PacFrequencySweep, PacRunConfig, run_pac_analysis_from_pss_with_source_path_and_abort,
 };
+pub(crate) use pac::{run_pac_internal_from_hb_with_abort, run_pac_internal_from_pss_with_abort};
 pub use pxf::{
     PxfFrequencySweep, PxfRunConfig, run_pxf_analysis_from_pss_with_source_path_and_abort,
 };

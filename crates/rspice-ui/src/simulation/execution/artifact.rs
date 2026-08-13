@@ -24,6 +24,7 @@ use crate::simulation::runner::SpecExecutionOptions;
 pub(in crate::simulation) enum ExecutionArtifactKind {
     TransientTrajectory,
     PeriodicState,
+    HbState,
     DcOperatingPointSeed,
 }
 
@@ -75,6 +76,19 @@ impl PreparedDependencyBinding {
         }
     }
 
+    pub(in crate::simulation) const fn hb_state(
+        producer_instance_id: AnalysisInstanceId,
+        producer_source_revision: ObjectRevision,
+        producer_config_digest: ContentDigest,
+    ) -> Self {
+        Self {
+            kind: ExecutionArtifactKind::HbState,
+            producer_instance_id,
+            producer_source_revision,
+            producer_config_digest,
+        }
+    }
+
     pub(in crate::simulation) const fn kind(&self) -> ExecutionArtifactKind {
         self.kind
     }
@@ -107,6 +121,7 @@ impl PreparedDependencyBinding {
             ExecutionArtifactKind::TransientTrajectory => 0,
             ExecutionArtifactKind::PeriodicState => 1,
             ExecutionArtifactKind::DcOperatingPointSeed => 2,
+            ExecutionArtifactKind::HbState => 3,
         });
         writer.uuid(self.producer_instance_id.as_uuid());
         writer.u64(self.producer_source_revision.get());
@@ -153,11 +168,25 @@ pub(in crate::simulation) fn validate_prepared_dependency_contract_with_options(
     }
     if matches!(
         consumer,
+        AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. }
+    ) {
+        return match producer {
+            AnalysisSpec::HarmonicBalance { .. } => Ok(()),
+            _ => Err(ExecutionArtifactError::ContractMismatch(format!(
+                "{} cannot consume an HB state produced by {}",
+                consumer.run_type().display_name(),
+                producer.run_type().display_name()
+            ))),
+        };
+    }
+    if matches!(
+        consumer,
         AnalysisSpec::PssSpectrum { .. }
             | AnalysisSpec::Pac
             | AnalysisSpec::Pxf
             | AnalysisSpec::Pnoise
             | AnalysisSpec::Pstb
+            | AnalysisSpec::Psp { .. }
     ) {
         let require_autonomous = matches!(consumer, AnalysisSpec::Pnoise)
             && consumer_options.pnoise.as_ref().is_some_and(|config| {
@@ -285,6 +314,65 @@ fn validate_periodic_producer_config(
     if actual != &expected {
         return Err(ExecutionArtifactError::ContractMismatch(
             "returned PSS numerical state was produced with a configuration that does not match the frozen producer specification"
+                .to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_hb_producer_config(
+    producer_spec: &AnalysisSpec,
+    actual: &rspice_core::analysis::HbConfig,
+) -> Result<(), ExecutionArtifactError> {
+    let AnalysisSpec::HarmonicBalance {
+        tones,
+        reltol,
+        abstol,
+        max_iterations,
+        damping,
+        oversample,
+        collocation_points,
+        max_mixing_order,
+        use_krylov,
+        gmres_restart,
+        source_stepping,
+        verbose,
+    } = producer_spec
+    else {
+        return Err(ExecutionArtifactError::ContractMismatch(
+            "HB-state artifact producer is not a Harmonic Balance analysis".to_owned(),
+        ));
+    };
+    let run_config = crate::services::simulation_runner::HbRunConfig {
+        tones: tones
+            .iter()
+            .map(|tone| crate::services::simulation_runner::HbToneRunConfig {
+                frequency: tone.frequency,
+                harmonics: tone.harmonics,
+                source: tone.source.clone(),
+                name: tone.name.clone(),
+            })
+            .collect(),
+        reltol: *reltol,
+        abstol: *abstol,
+        max_iterations: *max_iterations,
+        damping: *damping,
+        oversample: *oversample,
+        collocation_points: *collocation_points,
+        max_mixing_order: *max_mixing_order,
+        use_krylov: *use_krylov,
+        gmres_restart: *gmres_restart,
+        source_stepping: *source_stepping,
+        verbose: *verbose,
+    };
+    let expected = crate::services::simulation_runner::build_core_hb_config(
+        &run_config,
+        &rspice_core::abort_signal::NoAbort,
+    )
+    .map_err(|error| ExecutionArtifactError::ContractMismatch(error.to_string()))?;
+    if actual != &expected {
+        return Err(ExecutionArtifactError::ContractMismatch(
+            "returned HB numerical state was produced with a configuration that does not match the frozen producer specification"
                 .to_owned(),
         ));
     }
@@ -799,9 +887,107 @@ fn encode_complex_values(writer: &mut CanonicalWriter, values: &[num_complex::Co
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(in crate::simulation) struct HbStateArtifact {
+    operating_point: Arc<rspice_core::engine::HbOperatingPoint>,
+    spectral_real: Vec<Vec<f64>>,
+    spectral_imaginary: Vec<Vec<f64>>,
+}
+
+impl HbStateArtifact {
+    const MAX_NUMERIC_VALUES: usize = 16_777_216;
+
+    pub(in crate::simulation) fn operating_point(&self) -> &rspice_core::engine::HbOperatingPoint {
+        &self.operating_point
+    }
+
+    fn validate(&self) -> Result<(), ExecutionArtifactError> {
+        rspice_core::engine::HbOperatingPoint::try_from_parts(
+            self.operating_point.config().clone(),
+            self.operating_point.node_names().to_vec(),
+            self.operating_point.spectral_state().to_vec(),
+            self.operating_point.iterations(),
+            self.operating_point.residual_norm(),
+        )
+        .map_err(|error| ExecutionArtifactError::InvalidPayload(error.to_string()))?;
+        if self.spectral_real.len() != self.operating_point.spectral_state().len()
+            || self.spectral_imaginary.len() != self.operating_point.spectral_state().len()
+        {
+            return Err(ExecutionArtifactError::InvalidPayload(
+                "HB-state transfer cache row count does not match the retained state".to_owned(),
+            ));
+        }
+        let mut numeric_values = 0usize;
+        for (index, coefficients) in self.operating_point.spectral_state().iter().enumerate() {
+            let real = &self.spectral_real[index];
+            let imaginary = &self.spectral_imaginary[index];
+            validate_complex_cache("HB spectral row", coefficients, real, imaginary)?;
+            numeric_values = numeric_values
+                .checked_add(real.len().saturating_mul(2))
+                .ok_or_else(|| {
+                    ExecutionArtifactError::InvalidPayload(
+                        "HB-state numeric payload size overflows this platform".to_owned(),
+                    )
+                })?;
+        }
+        if numeric_values > Self::MAX_NUMERIC_VALUES {
+            return Err(ExecutionArtifactError::InvalidPayload(format!(
+                "HB-state payload contains {numeric_values} numerical values, exceeding the authenticated transport limit {}",
+                Self::MAX_NUMERIC_VALUES
+            )));
+        }
+        Ok(())
+    }
+
+    fn digest(&self) -> ContentDigest {
+        let point = &self.operating_point;
+        let config = point.config();
+        let mut writer = CanonicalWriter::new("rspice.hb-state-artifact/v1");
+        encode_hb_config(&mut writer, config);
+        writer.usize(point.iterations());
+        writer.f64(point.residual_norm());
+        writer.sequence(point.node_names().len());
+        for (node, spectrum) in point.node_names().iter().zip(point.spectral_state()) {
+            writer.string(node);
+            encode_complex_values(&mut writer, spectrum);
+        }
+        writer.finish()
+    }
+}
+
+fn encode_hb_config(writer: &mut CanonicalWriter, config: &rspice_core::analysis::HbConfig) {
+    writer.f64(config.fundamental_freq);
+    writer.usize(config.num_harmonics);
+    writer.sequence(config.tones.len());
+    for tone in &config.tones {
+        writer.f64(tone.frequency);
+        writer.usize(tone.num_harmonics);
+        writer.string(&tone.name);
+        writer.option(tone.source_name.as_deref(), |writer, source| {
+            writer.string(source)
+        });
+    }
+    writer.f64(config.tolerance);
+    writer.f64(config.abstol);
+    writer.usize(config.max_iterations);
+    writer.f64(config.damping);
+    writer.f64(config.min_damping);
+    writer.usize(config.oversample_factor);
+    writer.option(config.collocation_points.as_ref(), |writer, points| {
+        writer.usize(*points)
+    });
+    writer.usize(config.max_mixing_order);
+    writer.bool(config.use_krylov);
+    writer.usize(config.gmres_restart);
+    writer.bool(config.source_stepping);
+    writer.bool(config.use_exact_jacobian);
+    writer.bool(config.verbose);
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 enum ExecutionArtifactPayload {
     TransientTrajectory(Arc<TransientTrajectoryArtifact>),
     PeriodicState(Arc<PeriodicStateArtifact>),
+    HbState(Arc<HbStateArtifact>),
     DcOperatingPointSeed(Arc<DcOperatingPointSeedArtifact>),
 }
 
@@ -941,6 +1127,46 @@ impl ExecutionArtifactEnvelope {
         }))
     }
 
+    pub(in crate::simulation) fn from_hb_result(
+        snapshot_digest: ContentDigest,
+        producer_instance_id: AnalysisInstanceId,
+        producer_source_revision: ObjectRevision,
+        producer_config_digest: ContentDigest,
+        producer_spec: &AnalysisSpec,
+        result: &SimulationResult,
+    ) -> Result<Option<Self>, ExecutionArtifactError> {
+        let SimulationResult::HarmonicBalance {
+            operating_point, ..
+        } = result
+        else {
+            return Err(ExecutionArtifactError::InvalidPayload(
+                "HB producer returned a non-HB result variant".to_owned(),
+            ));
+        };
+        validate_hb_producer_config(producer_spec, operating_point.config())?;
+        let (spectral_real, spectral_imaginary): (Vec<_>, Vec<_>) = operating_point
+            .spectral_state()
+            .iter()
+            .map(|row| split_complex_values(row))
+            .unzip();
+        let state = HbStateArtifact {
+            operating_point: Arc::clone(operating_point),
+            spectral_real,
+            spectral_imaginary,
+        };
+        state.validate()?;
+        let payload_digest = state.digest();
+        Ok(Some(Self {
+            snapshot_digest,
+            producer_instance_id,
+            producer_source_revision,
+            producer_config_digest,
+            kind: ExecutionArtifactKind::HbState,
+            payload_digest,
+            payload: ExecutionArtifactPayload::HbState(Arc::new(state)),
+        }))
+    }
+
     pub(in crate::simulation) fn from_dc_operating_point_result(
         snapshot_digest: ContentDigest,
         producer_instance_id: AnalysisInstanceId,
@@ -988,6 +1214,7 @@ impl ExecutionArtifactEnvelope {
         match &self.payload {
             ExecutionArtifactPayload::TransientTrajectory(trajectory) => Some(trajectory),
             ExecutionArtifactPayload::PeriodicState(_)
+            | ExecutionArtifactPayload::HbState(_)
             | ExecutionArtifactPayload::DcOperatingPointSeed(_) => None,
         }
     }
@@ -996,6 +1223,16 @@ impl ExecutionArtifactEnvelope {
         match &self.payload {
             ExecutionArtifactPayload::PeriodicState(state) => Some(state),
             ExecutionArtifactPayload::TransientTrajectory(_)
+            | ExecutionArtifactPayload::HbState(_)
+            | ExecutionArtifactPayload::DcOperatingPointSeed(_) => None,
+        }
+    }
+
+    pub(in crate::simulation) fn hb_state(&self) -> Option<&HbStateArtifact> {
+        match &self.payload {
+            ExecutionArtifactPayload::HbState(state) => Some(state),
+            ExecutionArtifactPayload::TransientTrajectory(_)
+            | ExecutionArtifactPayload::PeriodicState(_)
             | ExecutionArtifactPayload::DcOperatingPointSeed(_) => None,
         }
     }
@@ -1006,7 +1243,8 @@ impl ExecutionArtifactEnvelope {
         match &self.payload {
             ExecutionArtifactPayload::DcOperatingPointSeed(seed) => Some(seed),
             ExecutionArtifactPayload::TransientTrajectory(_)
-            | ExecutionArtifactPayload::PeriodicState(_) => None,
+            | ExecutionArtifactPayload::PeriodicState(_)
+            | ExecutionArtifactPayload::HbState(_) => None,
         }
     }
 
@@ -1050,6 +1288,15 @@ impl ExecutionArtifactEnvelope {
                 };
                 periodic_state.validate()?;
                 periodic_state.digest()
+            }
+            ExecutionArtifactKind::HbState => {
+                let ExecutionArtifactPayload::HbState(state) = &self.payload else {
+                    return Err(ExecutionArtifactError::InvalidPayload(
+                        "HB-state artifact carries the wrong payload variant".to_owned(),
+                    ));
+                };
+                state.validate()?;
+                state.digest()
             }
             ExecutionArtifactKind::DcOperatingPointSeed => {
                 let ExecutionArtifactPayload::DcOperatingPointSeed(seed) = &self.payload else {
@@ -1123,15 +1370,18 @@ impl ResolvedExecutionDependencies {
     ) -> Result<(), ExecutionArtifactError> {
         let expected_kind = match spec {
             AnalysisSpec::Fourier { .. } => Some(ExecutionArtifactKind::TransientTrajectory),
+            AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. } => {
+                Some(ExecutionArtifactKind::HbState)
+            }
             AnalysisSpec::Pss {
                 method: PssMethod::Shooting,
                 ..
             } => Some(ExecutionArtifactKind::DcOperatingPointSeed),
-            AnalysisSpec::PssSpectrum { .. }
-            | AnalysisSpec::Pac
+            AnalysisSpec::Pac
             | AnalysisSpec::Pxf
             | AnalysisSpec::Pnoise
-            | AnalysisSpec::Pstb => Some(ExecutionArtifactKind::PeriodicState),
+            | AnalysisSpec::Pstb
+            | AnalysisSpec::Psp { .. } => Some(ExecutionArtifactKind::PeriodicState),
             _ => None,
         };
         let expected_count = usize::from(expected_kind.is_some());
@@ -1211,6 +1461,24 @@ impl ResolvedExecutionDependencies {
         self.artifacts[0].periodic_state().ok_or_else(|| {
             ExecutionArtifactError::ContractMismatch(
                 "resolved periodic dependency has no numerical state payload".to_owned(),
+            )
+        })
+    }
+
+    pub(in crate::simulation) fn hb_state(
+        &self,
+    ) -> Result<&HbStateArtifact, ExecutionArtifactError> {
+        if self.artifacts.len() != 1
+            || self.bindings.len() != 1
+            || self.bindings[0].kind != ExecutionArtifactKind::HbState
+        {
+            return Err(ExecutionArtifactError::ContractMismatch(
+                "exactly one HB-state artifact is required".to_owned(),
+            ));
+        }
+        self.artifacts[0].hb_state().ok_or_else(|| {
+            ExecutionArtifactError::ContractMismatch(
+                "resolved HB dependency has no numerical state payload".to_owned(),
             )
         })
     }
@@ -1369,6 +1637,33 @@ impl ResolvedExecutionDependencies {
                                 analysis_floquet_imag,
                                 is_stable: analysis.is_stable,
                                 shooting_state,
+                            },
+                        )
+                    }
+                    ExecutionArtifactPayload::HbState(state) => {
+                        let spectra = state
+                            .operating_point
+                            .node_names()
+                            .iter()
+                            .enumerate()
+                            .map(|(index, node_name)| HbSpectrumTransferMetadata {
+                                node_name: node_name.clone(),
+                                real: push_transfer_slice(
+                                    &mut buffers,
+                                    &state.spectral_real[index],
+                                ),
+                                imaginary: push_transfer_slice(
+                                    &mut buffers,
+                                    &state.spectral_imaginary[index],
+                                ),
+                            })
+                            .collect();
+                        ExecutionArtifactPayloadTransferMetadata::HbState(
+                            HbStateTransferMetadata {
+                                config: state.operating_point.config().clone(),
+                                spectra,
+                                iterations: state.operating_point.iterations(),
+                                residual_norm: state.operating_point.residual_norm(),
                             },
                         )
                     }
@@ -1586,6 +1881,40 @@ impl ResolvedExecutionDependencies {
                         periodic.validate()?;
                         ExecutionArtifactPayload::PeriodicState(Arc::new(periodic))
                     }
+                    ExecutionArtifactPayloadTransferMetadata::HbState(metadata) => {
+                        let mut node_names = Vec::with_capacity(metadata.spectra.len());
+                        let mut spectral_state = Vec::with_capacity(metadata.spectra.len());
+                        let mut spectral_real = Vec::with_capacity(metadata.spectra.len());
+                        let mut spectral_imaginary = Vec::with_capacity(metadata.spectra.len());
+                        for spectrum in metadata.spectra {
+                            node_names.push(spectrum.node_name);
+                            let real = take_transfer_buffer(&mut buffers, spectrum.real)?;
+                            let imaginary =
+                                take_transfer_buffer(&mut buffers, spectrum.imaginary)?;
+                            spectral_state.push(join_complex_values(
+                                "HB spectral row",
+                                &real,
+                                &imaginary,
+                            )?);
+                            spectral_real.push(real);
+                            spectral_imaginary.push(imaginary);
+                        }
+                        let operating_point = rspice_core::engine::HbOperatingPoint::try_from_parts(
+                            metadata.config,
+                            node_names,
+                            spectral_state,
+                            metadata.iterations,
+                            metadata.residual_norm,
+                        )
+                        .map_err(|error| ExecutionArtifactError::InvalidPayload(error.to_string()))?;
+                        let state = HbStateArtifact {
+                            operating_point: Arc::new(operating_point),
+                            spectral_real,
+                            spectral_imaginary,
+                        };
+                        state.validate()?;
+                        ExecutionArtifactPayload::HbState(Arc::new(state))
+                    }
                 };
                 Ok(ExecutionArtifactEnvelope {
                     snapshot_digest: artifact.snapshot_digest,
@@ -1703,6 +2032,23 @@ struct PeriodicStateTransferMetadata {
 
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct HbSpectrumTransferMetadata {
+    node_name: String,
+    real: TransferBufferRef,
+    imaginary: TransferBufferRef,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct HbStateTransferMetadata {
+    config: rspice_core::analysis::HbConfig,
+    spectra: Vec<HbSpectrumTransferMetadata>,
+    iterations: usize,
+    residual_norm: f64,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct DcOperatingPointSeedTransferMetadata {
     effective_source_content_digest: ContentDigest,
     temperature_celsius: f64,
@@ -1718,6 +2064,7 @@ struct DcOperatingPointSeedTransferMetadata {
 enum ExecutionArtifactPayloadTransferMetadata {
     TransientTrajectory(TransientTrajectoryTransferMetadata),
     PeriodicState(PeriodicStateTransferMetadata),
+    HbState(HbStateTransferMetadata),
     DcOperatingPointSeed(DcOperatingPointSeedTransferMetadata),
 }
 
@@ -1910,6 +2257,200 @@ mod tests {
             convergence: Default::default(),
             events: Default::default(),
         }
+    }
+
+    fn hb_spec() -> AnalysisSpec {
+        AnalysisSpec::HarmonicBalance {
+            tones: vec![crate::simulation::multi_run::HbToneSpec {
+                frequency: 1.0,
+                harmonics: 8,
+                source: Some("V1".to_owned()),
+                name: Some("fundamental".to_owned()),
+            }],
+            reltol: 1.0e-6,
+            abstol: 1.0e-12,
+            max_iterations: 100,
+            damping: 1.0,
+            oversample: 2,
+            collocation_points: None,
+            max_mixing_order: 5,
+            use_krylov: false,
+            gmres_restart: 30,
+            source_stepping: false,
+            verbose: false,
+        }
+    }
+
+    fn hb_result() -> SimulationResult {
+        let producer = hb_spec();
+        let AnalysisSpec::HarmonicBalance {
+            tones,
+            reltol,
+            abstol,
+            max_iterations,
+            damping,
+            oversample,
+            collocation_points,
+            max_mixing_order,
+            use_krylov,
+            gmres_restart,
+            source_stepping,
+            verbose,
+        } = producer
+        else {
+            unreachable!()
+        };
+        let config = crate::services::simulation_runner::build_core_hb_config(
+            &crate::services::simulation_runner::HbRunConfig {
+                tones: tones
+                    .into_iter()
+                    .map(|tone| crate::services::simulation_runner::HbToneRunConfig {
+                        frequency: tone.frequency,
+                        harmonics: tone.harmonics,
+                        source: tone.source,
+                        name: tone.name,
+                    })
+                    .collect(),
+                reltol,
+                abstol,
+                max_iterations,
+                damping,
+                oversample,
+                collocation_points,
+                max_mixing_order,
+                use_krylov,
+                gmres_restart,
+                source_stepping,
+                verbose,
+            },
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .unwrap();
+        let coefficients = (0..=config.num_harmonics)
+            .map(|harmonic| num_complex::Complex64::new(harmonic as f64 * 0.1, -0.25))
+            .collect::<Vec<_>>();
+        let operating_point = rspice_core::engine::HbOperatingPoint::try_from_parts(
+            config,
+            vec!["out".to_owned()],
+            vec![coefficients.clone()],
+            4,
+            1.0e-10,
+        )
+        .unwrap();
+        SimulationResult::HarmonicBalance {
+            frequencies: (0..=8).map(|harmonic| harmonic as f64).collect(),
+            waveforms: HashMap::from([(
+                "V(out)".to_owned(),
+                WaveformData::new_complex(
+                    "V(out)",
+                    (0..=8).map(|harmonic| harmonic as f64).collect(),
+                    coefficients.iter().map(|value| value.re * 2.0).collect(),
+                    coefficients.iter().map(|value| value.im * 2.0).collect(),
+                ),
+            )]),
+            measurements: Vec::new(),
+            operating_point: Arc::new(operating_point),
+        }
+    }
+
+    #[test]
+    fn hb_state_transfer_round_trips_and_rejects_tamper() {
+        let producer = AnalysisInstanceId::new();
+        let revision = ObjectRevision::new(18).unwrap();
+        let snapshot = digest(41);
+        let config_digest = digest(42);
+        let binding = PreparedDependencyBinding::hb_state(producer, revision, config_digest);
+        let artifact = ExecutionArtifactEnvelope::from_hb_result(
+            snapshot,
+            producer,
+            revision,
+            config_digest,
+            &hb_spec(),
+            &hb_result(),
+        )
+        .unwrap()
+        .unwrap();
+        let resolved = ResolvedExecutionDependencies::resolve(
+            snapshot,
+            vec![binding],
+            &HashMap::from([(producer, artifact)]),
+        )
+        .unwrap();
+        let hbsp = AnalysisSpec::Hbsp {
+            start_freq: 1.0e3,
+            stop_freq: 1.0e6,
+            points_per_unit: 3,
+            sweep: crate::simulation::multi_run::FrequencySweep::Decade,
+            ports: vec![
+                crate::simulation::multi_run::SpPort {
+                    node_pos: "p1".to_owned(),
+                    node_neg: "0".to_owned(),
+                    z0: Some(50.0),
+                },
+                crate::simulation::multi_run::SpPort {
+                    node_pos: "p2".to_owned(),
+                    node_neg: "0".to_owned(),
+                    z0: Some(50.0),
+                },
+            ],
+            max_sideband: 1,
+            mixed_mode: false,
+            noise_parameters: false,
+        };
+        validate_prepared_dependency_contract(&hbsp, &hb_spec()).unwrap();
+        resolved.validate_for_spec(&hbsp).unwrap();
+        let hbnoise = AnalysisSpec::Hbnoise {
+            start_freq: 1.0e3,
+            stop_freq: 1.0e6,
+            points_per_unit: 10,
+            sweep: crate::simulation::multi_run::FrequencySweep::Decade,
+            output_node: "out".to_owned(),
+            output_ref: "0".to_owned(),
+            input_source: "vin".to_owned(),
+            max_sideband: 4,
+            integrated_noise: true,
+            noise_figure: false,
+            contributor_ranking: true,
+        };
+        validate_prepared_dependency_contract(&hbnoise, &hb_spec()).unwrap();
+        resolved.validate_for_spec(&hbnoise).unwrap();
+        assert_eq!(
+            resolved.hb_state().unwrap().operating_point().iterations(),
+            4
+        );
+
+        let (metadata, buffers) = resolved.encode_transfer().unwrap();
+        assert_eq!(buffers.len(), 2, "one real and one imaginary HB row");
+        assert_eq!(
+            ResolvedExecutionDependencies::decode_transfer(&metadata, buffers.clone()).unwrap(),
+            resolved
+        );
+        let mut tampered = buffers;
+        tampered[0][3] += 1.0;
+        assert!(matches!(
+            ResolvedExecutionDependencies::decode_transfer(&metadata, tampered),
+            Err(ExecutionArtifactError::PayloadDigestMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn hb_artifact_rejects_returned_state_from_another_frozen_config() {
+        let mut producer = hb_spec();
+        let AnalysisSpec::HarmonicBalance { reltol, .. } = &mut producer else {
+            unreachable!()
+        };
+        *reltol = 1.0e-5;
+        let error = ExecutionArtifactEnvelope::from_hb_result(
+            digest(51),
+            AnalysisInstanceId::new(),
+            ObjectRevision::new(19).unwrap(),
+            digest(52),
+            &producer,
+            &hb_result(),
+        )
+        .expect_err("HB state from a different frozen basis must fail closed");
+        assert!(matches!(error, ExecutionArtifactError::ContractMismatch(_)));
+        assert!(error.to_string().contains("frozen producer specification"));
     }
 
     fn dc_operating_point_result() -> SimulationResult {

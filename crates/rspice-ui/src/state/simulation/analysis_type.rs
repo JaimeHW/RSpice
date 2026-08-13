@@ -74,6 +74,41 @@ pub enum AnalysisType {
 }
 
 impl AnalysisType {
+    /// Whether retained samples use time as their physical abscissa and can
+    /// therefore share the exact waveform workspace.
+    pub const fn is_time_domain(self) -> bool {
+        matches!(
+            self,
+            Self::Transient | Self::TransientNoise | Self::Pss | Self::Envelope | Self::Soa
+        )
+    }
+
+    /// Whether retained samples from this analysis describe a swept complex
+    /// frequency response that the shared magnitude/phase workspace can
+    /// present. PSTB is deliberately absent: its current retained abscissa is
+    /// a Floquet mode index, not frequency.
+    pub const fn is_bode_response(self) -> bool {
+        matches!(
+            self,
+            Self::Ac | Self::Pac | Self::Pxf | Self::Stb | Self::Qpac | Self::Qpxf
+        )
+    }
+
+    /// Whether the retained response uses the standard complex-to-
+    /// magnitude/phase projection. STB already retains loop gain in dB and
+    /// phase in degrees, so applying the projection again would double-scale
+    /// its engineering values.
+    pub const fn uses_complex_bode_projection(self) -> bool {
+        self.is_bode_response() && !matches!(self, Self::Stb)
+    }
+
+    /// Whether this frequency-domain result already carries plotted
+    /// engineering quantities (dB, dBc, percent, seconds) and must therefore
+    /// bypass the complex magnitude/phase projection.
+    pub const fn is_raw_frequency_curve(self) -> bool {
+        matches!(self, Self::Disto)
+    }
+
     /// Get SPICE directive keyword for this analysis type.
     pub fn spice_command(&self) -> &'static str {
         match self {
@@ -209,7 +244,6 @@ impl AnalysisType {
             | AnalysisType::Tf
             | AnalysisType::Pac
             | AnalysisType::Pxf
-            | AnalysisType::Pstb
             | AnalysisType::Stb
             | AnalysisType::SParameter
             | AnalysisType::HarmonicBalance
@@ -219,6 +253,7 @@ impl AnalysisType {
             | AnalysisType::Psp
             | AnalysisType::Qpac
             | AnalysisType::Qpxf => ("Frequency", "Hz", "Magnitude", "V"),
+            AnalysisType::Pstb => ("Mode", "index", "Stability metric", ""),
             AnalysisType::Noise
             | AnalysisType::Pnoise
             | AnalysisType::Hbnoise

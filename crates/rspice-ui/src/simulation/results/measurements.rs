@@ -19,6 +19,7 @@ impl SimulationResult {
             SimulationResult::DcSweep { waveforms, .. }
             | SimulationResult::Transient { waveforms, .. }
             | SimulationResult::Ac { waveforms, .. }
+            | SimulationResult::HarmonicBalance { waveforms, .. }
             | SimulationResult::Parametric { waveforms, .. }
             | SimulationResult::Corner { waveforms, .. }
             | SimulationResult::Reliability { waveforms, .. }
@@ -125,6 +126,7 @@ impl SimulationResult {
             SimulationResult::DcSweep { waveforms, .. }
             | SimulationResult::Transient { waveforms, .. }
             | SimulationResult::Ac { waveforms, .. }
+            | SimulationResult::HarmonicBalance { waveforms, .. }
             | SimulationResult::Parametric { waveforms, .. }
             | SimulationResult::Corner { waveforms, .. }
             | SimulationResult::Reliability { waveforms, .. }

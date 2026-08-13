@@ -530,9 +530,9 @@ pub(crate) enum WorkerAnalysisSpec {
         #[serde(default)]
         normalize: bool,
     },
-    /// Canonical manifest analysis whose typed request is transportable but
-    /// whose engine capability is not present. The worker preserves the exact
-    /// request and the dispatcher rejects it fail-closed.
+    /// Canonical complex analysis carried verbatim when a dedicated wire
+    /// mirror would merely duplicate the domain shape. The dispatcher remains
+    /// responsible for capability validation after lossless reconstruction.
     ManifestPreview(AnalysisSpec),
 }
 
@@ -866,6 +866,12 @@ pub(crate) enum WorkerSimulationResult {
         waveforms: Vec<WorkerWaveform>,
         measurements: Vec<WorkerMeasurement>,
     },
+    Hb {
+        frequencies: Vec<f64>,
+        waveforms: Vec<WorkerWaveform>,
+        measurements: Vec<WorkerMeasurement>,
+        operating_point: rspice_core::engine::HbOperatingPoint,
+    },
     Noise {
         frequencies: Vec<f64>,
         output_noise: Vec<f64>,
@@ -1005,6 +1011,24 @@ impl WorkerSimulationResult {
                 waveforms_payload_bytes(waveforms),
                 measurements_payload_bytes(measurements),
             ]),
+            WorkerSimulationResult::Hb {
+                frequencies,
+                waveforms,
+                measurements,
+                operating_point,
+            } => sum_payload_bytes([
+                f64_payload_bytes(frequencies.len()),
+                waveforms_payload_bytes(waveforms),
+                measurements_payload_bytes(measurements),
+                f64_payload_bytes(
+                    operating_point
+                        .spectral_state()
+                        .iter()
+                        .map(Vec::len)
+                        .sum::<usize>()
+                        .saturating_mul(2),
+                ),
+            ]),
             WorkerSimulationResult::Noise {
                 frequencies,
                 output_noise,
@@ -1116,7 +1140,7 @@ impl WorkerSimulationResult {
     }
 }
 
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 7;
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 8;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
@@ -1187,6 +1211,17 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 frequencies,
                 waveforms: worker_waveforms(waveforms),
                 measurements: worker_measurements(measurements),
+            }),
+            SimulationResult::HarmonicBalance {
+                frequencies,
+                waveforms,
+                measurements,
+                operating_point,
+            } => Ok(Self::Hb {
+                frequencies,
+                waveforms: worker_waveforms(waveforms),
+                measurements: worker_measurements(measurements),
+                operating_point: std::sync::Arc::unwrap_or_clone(operating_point),
             }),
             SimulationResult::Noise {
                 frequencies,
@@ -1400,6 +1435,17 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 frequencies,
                 waveforms: waveform_map(waveforms),
                 measurements: measure_results(measurements),
+            },
+            WorkerSimulationResult::Hb {
+                frequencies,
+                waveforms,
+                measurements,
+                operating_point,
+            } => Self::HarmonicBalance {
+                frequencies,
+                waveforms: waveform_map(waveforms),
+                measurements: measure_results(measurements),
+                operating_point: std::sync::Arc::new(operating_point),
             },
             WorkerSimulationResult::Noise {
                 frequencies,

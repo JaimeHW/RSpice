@@ -24,6 +24,8 @@ pub struct HbData {
     pub dc_voltages: Vec<(String, Value)>,
     /// Harmonic spectra: (node_name, [(freq, magnitude, phase_deg)])
     pub spectra: Vec<(String, Vec<(Value, Value, Value)>)>,
+    /// Exact converged state retained for HB-dependent analyses.
+    pub operating_point: std::sync::Arc<rspice_core::engine::HbOperatingPoint>,
 }
 
 /// Harmonic Balance run configuration passed from the simulation pipeline.
@@ -200,16 +202,58 @@ pub fn run_hb_analysis_with_source_path_and_abort(
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<HbData> {
-    use rspice_core::analysis::{HbConfig, HbTone};
     ensure_not_aborted(abort)?;
-    let validation = config.validate_with_abort(abort);
-    ensure_not_aborted(abort)?;
-    validation?;
+    let hb_config = build_core_hb_config(config, abort)?;
 
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
 
     let engine = Engine::new(build_engine_config(&netlist, None));
+    // Run actual HB analysis
+    let hb_result = engine
+        .run_hb_with_abort(&netlist, hb_config, abort)
+        .map_err(|error| ServiceRunError::from_core("HB error", error))?;
 
+    // Extract DC operating point from spectral data
+    let mut dc_voltages = Vec::with_capacity(hb_result.result.spectral_voltages.len());
+    for sv in &hb_result.result.spectral_voltages {
+        ensure_not_aborted(abort)?;
+        let dc_val = sv.coefficients.first().map(|c| c.re).unwrap_or(0.0);
+        dc_voltages.push((sv.node_name.clone(), dc_val));
+    }
+
+    // Build spectra from HB result's spectral voltages
+    let mut spectra = Vec::new();
+    for sv in &hb_result.result.spectral_voltages {
+        ensure_not_aborted(abort)?;
+        let mut spectrum = Vec::new();
+
+        // For each harmonic coefficient
+        for (h, coeff) in sv.coefficients.iter().enumerate() {
+            poll_periodically(abort, h)?;
+            let freq = hb_result.fundamental_freq * h as Value;
+            let magnitude = coeff.norm();
+            let phase_deg = coeff.arg().to_degrees();
+            spectrum.push((freq, magnitude, phase_deg));
+        }
+
+        spectra.push((format!("V({})", sv.node_name), spectrum));
+    }
+
+    ensure_not_aborted(abort)?;
+    Ok(HbData {
+        dc_voltages,
+        spectra,
+        operating_point: std::sync::Arc::new(hb_result.operating_point),
+    })
+}
+
+pub(crate) fn build_core_hb_config(
+    config: &HbRunConfig,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<rspice_core::analysis::HbConfig> {
+    use rspice_core::analysis::{HbConfig, HbTone};
+
+    config.validate_with_abort(abort)?;
     let layout =
         build_multi_tone_hb_layout_with_abort(&config.tones, config.max_mixing_order, abort)?;
     let mut hb_config = HbConfig::new(layout.base_frequency).with_harmonics(layout.max_harmonic);
@@ -253,51 +297,8 @@ pub fn run_hb_analysis_with_source_path_and_abort(
     hb_config.source_stepping = config.source_stepping;
     hb_config.verbose = config.verbose;
 
-    // Run actual HB analysis
-    let hb_result = engine
-        .run_hb_with_abort(&netlist, hb_config, abort)
-        .map_err(|error| ServiceRunError::from_core("HB error", error))?;
-
-    // Build fundamentals list
-    let mut fundamentals = Vec::with_capacity(config.tones.len());
-    let mut harmonics_per_tone = Vec::with_capacity(config.tones.len());
-    for tone in &config.tones {
-        ensure_not_aborted(abort)?;
-        fundamentals.push(tone.frequency);
-        harmonics_per_tone.push(tone.harmonics);
-    }
-
-    // Extract DC operating point from spectral data
-    let mut dc_voltages = Vec::with_capacity(hb_result.result.spectral_voltages.len());
-    for sv in &hb_result.result.spectral_voltages {
-        ensure_not_aborted(abort)?;
-        let dc_val = sv.coefficients.first().map(|c| c.re).unwrap_or(0.0);
-        dc_voltages.push((sv.node_name.clone(), dc_val));
-    }
-
-    // Build spectra from HB result's spectral voltages
-    let mut spectra = Vec::new();
-    for sv in &hb_result.result.spectral_voltages {
-        ensure_not_aborted(abort)?;
-        let mut spectrum = Vec::new();
-
-        // For each harmonic coefficient
-        for (h, coeff) in sv.coefficients.iter().enumerate() {
-            poll_periodically(abort, h)?;
-            let freq = hb_result.fundamental_freq * h as Value;
-            let magnitude = coeff.norm();
-            let phase_deg = coeff.arg().to_degrees();
-            spectrum.push((freq, magnitude, phase_deg));
-        }
-
-        spectra.push((format!("V({})", sv.node_name), spectrum));
-    }
-
     ensure_not_aborted(abort)?;
-    Ok(HbData {
-        dc_voltages,
-        spectra,
-    })
+    Ok(hb_config)
 }
 
 #[cfg(test)]

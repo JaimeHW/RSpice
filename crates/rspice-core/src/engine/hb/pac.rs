@@ -27,6 +27,11 @@ pub struct PacAnalysisResult {
     pub converged: bool,
 }
 
+enum PacOperatingPoint<'a> {
+    Shooting(&'a super::super::PssOperatingPoint),
+    HarmonicBalance(&'a HbOperatingPoint),
+}
+
 impl Engine {
     /// Run Periodic AC analysis.
     ///
@@ -66,21 +71,47 @@ impl Engine {
         operating_point: &super::super::PssOperatingPoint,
         abort: &dyn AbortSignal,
     ) -> Result<PacAnalysisResult, SimulationError> {
-        self.run_pac_impl(netlist, config, Some(operating_point), abort)
+        self.run_pac_impl(
+            netlist,
+            config,
+            Some(PacOperatingPoint::Shooting(operating_point)),
+            abort,
+        )
+    }
+
+    /// Run periodic AC from an exact previously converged harmonic-balance
+    /// operating point. The large-signal state is consumed directly and is
+    /// never re-solved.
+    pub fn run_pac_from_hb_with_abort(
+        &self,
+        netlist: &Netlist,
+        config: PacConfig,
+        operating_point: &HbOperatingPoint,
+        abort: &dyn AbortSignal,
+    ) -> Result<PacAnalysisResult, SimulationError> {
+        self.run_pac_impl(
+            netlist,
+            config,
+            Some(PacOperatingPoint::HarmonicBalance(operating_point)),
+            abort,
+        )
     }
 
     fn run_pac_impl(
         &self,
         netlist: &Netlist,
         mut config: PacConfig,
-        operating_point: Option<&super::super::PssOperatingPoint>,
+        operating_point: Option<PacOperatingPoint<'_>>,
         abort: &dyn AbortSignal,
     ) -> Result<PacAnalysisResult, SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        if let Some(operating_point) = operating_point {
-            config.fundamental_freq = operating_point.analysis().result.frequency;
+        if let Some(operating_point) = &operating_point {
+            config.fundamental_freq = match operating_point {
+                PacOperatingPoint::Shooting(point) => point.analysis().result.frequency,
+                PacOperatingPoint::HarmonicBalance(point) => point.config().fundamental_freq,
+            };
         }
         if !config.fundamental_freq.is_finite() || config.fundamental_freq <= 0.0 {
             return Err(SimulationError::Circuit(
@@ -113,12 +144,20 @@ impl Engine {
         .unwrap_or(usize::MAX);
         let op_harmonics = span.max(extreme).max(8);
         self.ensure_analysis_points(op_harmonics.saturating_add(1))?;
-        if let Some(operating_point) = operating_point
-            && op_harmonics > operating_point.spectral_harmonic_capacity()
+        if let Some(operating_point) = &operating_point
+            && op_harmonics
+                > match operating_point {
+                    PacOperatingPoint::Shooting(point) => point.spectral_harmonic_capacity(),
+                    PacOperatingPoint::HarmonicBalance(point) => point.spectral_harmonic_capacity(),
+                }
         {
+            let capacity = match operating_point {
+                PacOperatingPoint::Shooting(point) => point.spectral_harmonic_capacity(),
+                PacOperatingPoint::HarmonicBalance(point) => point.spectral_harmonic_capacity(),
+            };
             return Err(SimulationError::Circuit(format!(
-                "PAC requires {op_harmonics} periodic harmonics for its sideband span, but the retained PSS time orbit has Nyquist capacity {}",
-                operating_point.spectral_harmonic_capacity()
+                "PAC requires {op_harmonics} periodic harmonics for its sideband span, but the retained periodic state has capacity {}",
+                capacity
             )));
         }
 
@@ -149,9 +188,12 @@ impl Engine {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
 
-        let mut hb_config = HbConfig::new(config.fundamental_freq)
-            .with_harmonics(op_harmonics)
-            .with_oversample(4);
+        let mut hb_config = match &operating_point {
+            Some(PacOperatingPoint::HarmonicBalance(point)) => point.config().clone(),
+            _ => HbConfig::new(config.fundamental_freq)
+                .with_harmonics(op_harmonics)
+                .with_oversample(4),
+        };
         self.ensure_analysis_points(hb_config.fft_size())?;
         // PAC's tolerances govern the nonlinear periodic operating point.
         // The subsequent sideband systems use deterministic direct solves and
@@ -179,7 +221,12 @@ impl Engine {
         }
 
         let state = if let Some(operating_point) = operating_point {
-            self.hb_state_from_pss_operating_point(operating_point, &hb_config, &node_names)?
+            match operating_point {
+                PacOperatingPoint::Shooting(point) => {
+                    self.hb_state_from_pss_operating_point(point, &hb_config, &node_names)?
+                }
+                PacOperatingPoint::HarmonicBalance(point) => point.to_solver_state(&node_names)?,
+            }
         } else {
             let mut state = HbSolverState::new(num_nodes, op_harmonics);
             if has_nonlinear {
@@ -203,7 +250,9 @@ impl Engine {
         };
 
         // Resolve the small-signal input source to node-space injections of
-        // unit amplitude.
+        // unit amplitude. A physical RF port is a Thevenin source behind Z0;
+        // the source itself is still stiff, so its Norton equivalent remains
+        // the exact unit-voltage excitation at the far side of that resistor.
         let injections = Self::pac_input_injections(&circuit, &input_name, num_nodes)?;
 
         let mut sweep_config = config.clone();
@@ -233,7 +282,47 @@ impl Engine {
         let output_idx = config
             .output_node
             .as_deref()
-            .and_then(|name| node_names.iter().position(|n| n.eq_ignore_ascii_case(name)));
+            .map(|name| {
+                if netlist.ground_policy().is_ground(name) {
+                    return Err(SimulationError::Circuit(
+                        "PAC output node cannot be ground".to_owned(),
+                    ));
+                }
+                node_names
+                    .iter()
+                    .position(|node| node.eq_ignore_ascii_case(name))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "PAC output node '{name}' not found in circuit nodes"
+                        ))
+                    })
+            })
+            .transpose()?;
+        let output_ref_idx = config
+            .output_ref
+            .as_deref()
+            .filter(|name| !name.trim().is_empty())
+            .map(|name| {
+                if netlist.ground_policy().is_ground(name) {
+                    return Ok(None);
+                }
+                node_names
+                    .iter()
+                    .position(|node| node.eq_ignore_ascii_case(name))
+                    .map(Some)
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "PAC output reference node '{name}' not found in circuit nodes"
+                        ))
+                    })
+            })
+            .transpose()?
+            .flatten();
+        if output_idx.is_some() && output_idx == output_ref_idx {
+            return Err(SimulationError::Circuit(
+                "PAC output node and reference node must be different".to_owned(),
+            ));
+        }
 
         // Excitation columns: the input source's own frequency (m = 0)
         // always; every input sideband when a conversion matrix is wanted.
@@ -290,9 +379,11 @@ impl Engine {
                 if let Some(out) = output_idx {
                     for k_idx in 0..(config.sideband_max - config.sideband_min + 1) as usize {
                         let k = config.sideband_min + k_idx as i32;
-                        result
-                            .conversion_matrix
-                            .set(freq_idx, k, m, by_node[out][k_idx]);
+                        let output_voltage = output_ref_idx
+                            .map_or(by_node[out][k_idx], |reference| {
+                                by_node[out][k_idx] - by_node[reference][k_idx]
+                            });
+                        result.conversion_matrix.set(freq_idx, k, m, output_voltage);
                     }
                 }
             }

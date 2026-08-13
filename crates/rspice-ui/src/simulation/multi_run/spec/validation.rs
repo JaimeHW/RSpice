@@ -756,14 +756,6 @@ impl AnalysisSpec {
                 ports,
                 max_sideband,
                 ..
-            }
-            | AnalysisSpec::Psp {
-                start_freq,
-                stop_freq,
-                points_per_unit,
-                ports,
-                max_sideband,
-                ..
             } => validate_periodic_network(
                 *start_freq,
                 *stop_freq,
@@ -771,6 +763,37 @@ impl AnalysisSpec {
                 ports,
                 *max_sideband,
             ),
+            AnalysisSpec::Psp {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                ports,
+                max_sideband,
+                mixed_mode,
+                noise_parameters,
+                ..
+            } => {
+                validate_periodic_network(
+                    *start_freq,
+                    *stop_freq,
+                    *points_per_unit,
+                    ports,
+                    *max_sideband,
+                )?;
+                if *mixed_mode {
+                    return Err(
+                        "PSP mixed-mode conversion is not implemented; disable mixed mode"
+                            .to_owned(),
+                    );
+                }
+                if *noise_parameters {
+                    return Err(
+                        "PSP noise parameters require a correlated periodic-noise solve and are not implemented"
+                            .to_owned(),
+                    );
+                }
+                Ok(())
+            }
             AnalysisSpec::Hbnoise {
                 start_freq,
                 stop_freq,
@@ -778,6 +801,7 @@ impl AnalysisSpec {
                 output_node,
                 input_source,
                 max_sideband,
+                noise_figure,
                 ..
             } => {
                 validate_frequency_sweep(*start_freq, *stop_freq, *points_per_unit)?;
@@ -786,6 +810,12 @@ impl AnalysisSpec {
                 }
                 if *max_sideband == 0 {
                     return Err("HBNOISE max_sideband must be > 0".to_owned());
+                }
+                if *noise_figure {
+                    return Err(
+                        "HBNOISE noise figure requires explicit source impedance and available-noise temperature references"
+                            .to_owned(),
+                    );
                 }
                 Ok(())
             }
@@ -1014,9 +1044,10 @@ fn validate_periodic_network(
     max_sideband: usize,
 ) -> Result<(), String> {
     validate_frequency_sweep(start, stop, points)?;
-    if ports.is_empty() || max_sideband == 0 {
+    if ports.len() < 2 || max_sideband == 0 {
         return Err(
-            "periodic network analysis requires a port and positive max_sideband".to_owned(),
+            "periodic network analysis requires at least two ports and positive max_sideband"
+                .to_owned(),
         );
     }
     for (index, port) in ports.iter().enumerate() {

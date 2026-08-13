@@ -985,15 +985,23 @@ fn source_viewer(state: &AppState, analysis_type: AnalysisType) -> ResultViewer 
     let candidate = match analysis_type {
         AnalysisType::DcOp => ResultViewer::Op,
         AnalysisType::DcSweep => ResultViewer::DcSweep,
-        AnalysisType::Ac | AnalysisType::Pac | AnalysisType::Stb | AnalysisType::Pstb => {
+        AnalysisType::Ac
+        | AnalysisType::Pac
+        | AnalysisType::Pxf
+        | AnalysisType::Stb
+        | AnalysisType::Disto => {
             ResultViewer::Bode
         }
-        AnalysisType::Fourier => ResultViewer::Fft,
+        AnalysisType::Pstb => ResultViewer::Table,
+        AnalysisType::Pss | AnalysisType::Envelope | AnalysisType::Soa => ResultViewer::Waves,
+        AnalysisType::Noise | AnalysisType::Hbnoise => ResultViewer::NoiseContrib,
+        AnalysisType::Fourier => ResultViewer::HarmonicBalance,
         AnalysisType::HarmonicBalance => ResultViewer::HarmonicBalance,
         AnalysisType::Pnoise | AnalysisType::Qpnoise => ResultViewer::PhaseNoise,
         AnalysisType::Sensitivity => ResultViewer::Contribution,
-        AnalysisType::Tf | AnalysisType::Pxf | AnalysisType::Qpxf => ResultViewer::TransferFunction,
+        AnalysisType::Tf | AnalysisType::Qpxf => ResultViewer::TransferFunction,
         AnalysisType::PoleZero => ResultViewer::PoleZero,
+        AnalysisType::SParameter | AnalysisType::Hbsp | AnalysisType::Psp => ResultViewer::Table,
         _ => ResultViewer::Waves,
     };
     if super::viewer_availability(state, candidate).available {

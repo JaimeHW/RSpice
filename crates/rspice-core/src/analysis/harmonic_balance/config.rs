@@ -6,7 +6,8 @@
 use crate::Value;
 
 /// Configuration for a single tone in Harmonic Balance analysis
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
 pub struct HbTone {
     /// Tone frequency in Hz
     pub frequency: Value,
@@ -76,7 +77,8 @@ impl HbTone {
 /// ])
 /// .with_tolerance(1e-6);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
 pub struct HbConfig {
     /// Primary fundamental frequency (Hz)
     /// For single-tone analysis, this is the only frequency.

@@ -63,6 +63,73 @@ impl SimulationController {
             AnalysisSpec::Pnoise => self.build_pnoise_command(state),
             AnalysisSpec::Pxf => self.build_pxf_command(state),
             AnalysisSpec::Pstb => self.build_pstb_command(state),
+            AnalysisSpec::Psp {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+                max_sideband,
+                ..
+            } => Ok(format!(
+                "* RSPICE PSP {} {} {:.16e} {:.16e} MAXSIDEBAND={}",
+                match sweep {
+                    FrequencySweep::Decade => "DEC",
+                    FrequencySweep::Octave => "OCT",
+                    FrequencySweep::Linear => "LIN",
+                },
+                points_per_unit,
+                start_freq,
+                stop_freq,
+                max_sideband
+            )),
+            AnalysisSpec::Hbsp {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+                max_sideband,
+                ..
+            } => Ok(format!(
+                "* RSPICE HBSP {} {} {:.16e} {:.16e} MAXSIDEBAND={}",
+                match sweep {
+                    FrequencySweep::Decade => "DEC",
+                    FrequencySweep::Octave => "OCT",
+                    FrequencySweep::Linear => "LIN",
+                },
+                points_per_unit,
+                start_freq,
+                stop_freq,
+                max_sideband
+            )),
+            AnalysisSpec::Hbnoise {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+                output_node,
+                output_ref,
+                input_source,
+                max_sideband,
+                integrated_noise,
+                contributor_ranking,
+                ..
+            } => Ok(format!(
+                "* RSPICE HBNOISE {} {} {:.16e} {:.16e} OUT={} REF={} IN={} MAXSIDEBAND={} INTEGRATED={} CONTRIBUTORS={}",
+                match sweep {
+                    FrequencySweep::Decade => "DEC",
+                    FrequencySweep::Octave => "OCT",
+                    FrequencySweep::Linear => "LIN",
+                },
+                points_per_unit,
+                start_freq,
+                stop_freq,
+                output_node.trim(),
+                output_ref.trim(),
+                input_source.trim(),
+                max_sideband,
+                integrated_noise,
+                contributor_ranking
+            )),
             AnalysisSpec::Tf {
                 input_source,
                 output_expression,
@@ -73,9 +140,6 @@ impl SimulationController {
                 input_source.trim()
             )),
             AnalysisSpec::Qpss { .. }
-            | AnalysisSpec::Hbsp { .. }
-            | AnalysisSpec::Hbnoise { .. }
-            | AnalysisSpec::Psp { .. }
             | AnalysisSpec::Qpac { .. }
             | AnalysisSpec::Qpnoise { .. }
             | AnalysisSpec::Qpxf { .. }
@@ -371,7 +435,6 @@ const fn manifest_spec_kind(spec: &AnalysisSpec) -> Option<crate::simulation::pl
         AnalysisSpec::Qpss { .. } => AnalysisKind::Qpss,
         AnalysisSpec::Hbsp { .. } => AnalysisKind::Hbsp,
         AnalysisSpec::Hbnoise { .. } => AnalysisKind::Hbnoise,
-        AnalysisSpec::Psp { .. } => AnalysisKind::Psp,
         AnalysisSpec::Qpac { .. } => AnalysisKind::Qpac,
         AnalysisSpec::Qpnoise { .. } => AnalysisKind::Qpnoise,
         AnalysisSpec::Qpxf { .. } => AnalysisKind::Qpxf,

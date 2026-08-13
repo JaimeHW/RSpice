@@ -18,6 +18,9 @@ impl SimulationResult {
             SimulationResult::Ac { waveforms, .. } => {
                 waveforms.keys().map(|s| s.as_str()).collect()
             }
+            SimulationResult::HarmonicBalance { waveforms, .. } => {
+                waveforms.keys().map(|s| s.as_str()).collect()
+            }
             SimulationResult::Parametric { waveforms, .. } => {
                 waveforms.keys().map(|s| s.as_str()).collect()
             }
@@ -47,6 +50,7 @@ impl SimulationResult {
             SimulationResult::DcSweep { waveforms, .. } => waveforms.get(name),
             SimulationResult::Transient { waveforms, .. } => waveforms.get(name),
             SimulationResult::Ac { waveforms, .. } => waveforms.get(name),
+            SimulationResult::HarmonicBalance { waveforms, .. } => waveforms.get(name),
             SimulationResult::Parametric { waveforms, .. } => waveforms.get(name),
             SimulationResult::Corner { waveforms, .. } => waveforms.get(name),
             SimulationResult::Reliability { waveforms, .. } => waveforms.get(name),
@@ -64,6 +68,7 @@ impl SimulationResult {
             SimulationResult::DcSweep { waveforms, .. } => !waveforms.is_empty(),
             SimulationResult::Transient { time, .. } => !time.is_empty(),
             SimulationResult::Ac { frequencies, .. } => !frequencies.is_empty(),
+            SimulationResult::HarmonicBalance { frequencies, .. } => !frequencies.is_empty(),
             SimulationResult::Noise { frequencies, .. } => !frequencies.is_empty(),
             SimulationResult::PoleZero { gain, .. } => gain.is_finite(),
             SimulationResult::Sensitivity {
@@ -120,6 +125,7 @@ impl SimulationResult {
             SimulationResult::DcSweep { .. } => "DC Sweep",
             SimulationResult::Transient { .. } => "Transient",
             SimulationResult::Ac { .. } => "AC Analysis",
+            SimulationResult::HarmonicBalance { .. } => "Harmonic Balance",
             SimulationResult::Noise { .. } => "Noise Analysis",
             SimulationResult::PoleZero { .. } => "Pole-Zero",
             SimulationResult::Sensitivity { .. } => "Sensitivity",

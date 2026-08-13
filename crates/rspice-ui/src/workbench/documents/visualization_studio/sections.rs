@@ -1058,6 +1058,9 @@ pub(super) fn resolved_viewer_availability(
     let Some(viewer) = ResultViewer::from_viewer_document_id(definition.id) else {
         return Err(definition.release.unavailable_reason().to_owned());
     };
+    if definition.release != crate::results::viewer_catalog::ViewerReleaseClass::ReleaseTarget {
+        return Err(definition.release.unavailable_reason().to_owned());
+    }
     match viewer_compatibility(definition.id, capabilities) {
         ViewerCompatibility::Compatible => {}
         ViewerCompatibility::MissingAnalysis {

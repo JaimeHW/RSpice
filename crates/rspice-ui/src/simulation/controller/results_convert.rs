@@ -210,11 +210,7 @@ impl SimulationController {
                 ..
             } => {
                 let result = AnalysisResult::new(1, analysis_type, label.to_string())
-                    .with_waveforms(self.build_sorted_waveforms_with_shared_x_owned(
-                        time,
-                        waveforms,
-                        |name, waveform| (name, waveform.y_values),
-                    ))
+                    .with_waveforms(self.build_time_waveforms_owned(time, waveforms))
                     .with_measurements(measurements);
                 // Only a deck with event nodes carries a payload. Attaching an
                 // empty one would make every transient claim event evidence it
@@ -229,6 +225,15 @@ impl SimulationController {
                 frequencies,
                 waveforms,
                 measurements,
+            } => AnalysisResult::new(1, analysis_type, label.to_string())
+                .with_waveforms(self.build_ac_waveforms_owned(frequencies, waveforms))
+                .with_measurements(measurements),
+
+            SimulationResult::HarmonicBalance {
+                frequencies,
+                waveforms,
+                measurements,
+                ..
             } => AnalysisResult::new(1, analysis_type, label.to_string())
                 .with_waveforms(self.build_ac_waveforms_owned(frequencies, waveforms))
                 .with_measurements(measurements),
@@ -686,6 +691,71 @@ impl SimulationController {
         })
     }
 
+    fn build_time_waveforms_owned(
+        &self,
+        time: Vec<f64>,
+        waveforms: HashMap<String, crate::simulation::WaveformData>,
+    ) -> Vec<crate::state::WaveformData> {
+        let shared_time = Arc::new(time);
+        let sample_count = shared_time.len();
+        let mut waveforms = waveforms.into_iter().collect::<Vec<_>>();
+        waveforms.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut results = Vec::new();
+
+        for (name, waveform) in waveforms {
+            let unit = waveform.y_unit;
+            let real = waveform.y_values;
+            if !Self::samples_match_shared_axis(&real, sample_count) {
+                continue;
+            }
+            if let Some(imag) = waveform.y_imag {
+                if !Self::samples_match_shared_axis(&imag, sample_count) {
+                    continue;
+                }
+                let magnitude = real
+                    .iter()
+                    .zip(imag.iter())
+                    .map(|(real, imag)| real.hypot(*imag))
+                    .collect::<Vec<_>>();
+                let phase = real
+                    .iter()
+                    .zip(imag.iter())
+                    .map(|(real, imag)| imag.atan2(*real).to_degrees())
+                    .collect::<Vec<_>>();
+                results.push(
+                    crate::state::WaveformData::new(
+                        format!("|{name}|"),
+                        Arc::clone(&shared_time),
+                        magnitude,
+                        Self::color_for_index(results.len()),
+                    )
+                    .with_unit(unit)
+                    .with_complex_components(name.clone(), real, imag),
+                );
+                results.push(
+                    crate::state::WaveformData::new(
+                        format!("phase({name})"),
+                        Arc::clone(&shared_time),
+                        phase,
+                        Self::color_for_index(results.len()),
+                    )
+                    .with_unit("°"),
+                );
+            } else {
+                results.push(
+                    crate::state::WaveformData::new(
+                        name,
+                        Arc::clone(&shared_time),
+                        real,
+                        Self::color_for_index(results.len()),
+                    )
+                    .with_unit(unit),
+                );
+            }
+        }
+        results
+    }
+
     fn build_noise_waveforms_owned(
         &self,
         frequencies: Vec<f64>,
@@ -858,13 +928,18 @@ impl SimulationController {
             // in the source's own unit. The phase projection does not: it is
             // produced here, in degrees, and says so itself.
             let unit = waveform.y_unit;
+            let waveform_x = waveform.x_values;
             let real = waveform.y_values;
-            if !Self::samples_match_shared_axis(&real, freq_len) {
+            let x = if Self::samples_match_shared_axis(&real, waveform_x.len()) {
+                Arc::new(waveform_x)
+            } else if Self::samples_match_shared_axis(&real, freq_len) {
+                Arc::clone(&shared_freqs)
+            } else {
                 continue;
-            }
+            };
             match waveform.y_imag {
                 Some(imag) => {
-                    if !Self::samples_match_shared_axis(&imag, freq_len) {
+                    if !Self::samples_match_shared_axis(&imag, x.len()) {
                         continue;
                     }
                     let magnitude_values: Vec<f64> = real
@@ -880,7 +955,7 @@ impl SimulationController {
 
                     let magnitude = crate::state::WaveformData::new(
                         format!("|{}|", name),
-                        Arc::clone(&shared_freqs),
+                        Arc::clone(&x),
                         magnitude_values,
                         Self::color_for_index(results.len()),
                     )
@@ -891,7 +966,7 @@ impl SimulationController {
                     results.push(
                         crate::state::WaveformData::new(
                             format!("phase({})", name),
-                            Arc::clone(&shared_freqs),
+                            Arc::clone(&x),
                             phase,
                             Self::color_for_index(results.len()),
                         )
@@ -899,10 +974,15 @@ impl SimulationController {
                     );
                 }
                 None => {
+                    // A real-valued frequency-domain quantity is not a
+                    // complex magnitude. Preserve its producer name and unit
+                    // so group delay, stability margin, and Floquet-mode
+                    // metrics are never wrapped in |...| or converted to dB
+                    // by the viewer.
                     results.push(
                         crate::state::WaveformData::new(
-                            format!("|{}|", name),
-                            Arc::clone(&shared_freqs),
+                            name,
+                            x,
                             real,
                             Self::color_for_index(results.len()),
                         )
@@ -1218,6 +1298,83 @@ mod waveform_unit_conversion_tests {
             retained_unit(&result, "phase(V(out) Spectrum)").as_deref(),
             Some("°")
         );
+    }
+
+    #[test]
+    fn a_real_frequency_quantity_keeps_its_name_and_unit_without_magnitude_wrapping() {
+        let group_delay = crate::simulation::results::WaveformData::new_time_domain_in_unit(
+            "group_delay",
+            vec![1.0, 10.0],
+            vec![2.0e-9, 3.0e-9],
+            "s",
+        );
+        let sim_result = crate::simulation::SimulationResult::Ac {
+            frequencies: vec![1.0, 10.0],
+            waveforms: HashMap::from([("group_delay".to_owned(), group_delay)]),
+            measurements: Vec::new(),
+        };
+
+        let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
+            sim_result,
+            AnalysisType::Pxf,
+            "PXF",
+        );
+
+        assert_eq!(result.waveforms[0].name, "group_delay");
+        assert_eq!(result.waveforms[0].unit.as_deref(), Some("s"));
+    }
+
+    #[test]
+    fn a_frequency_companion_curve_keeps_its_own_exact_abscissa() {
+        let group_delay = crate::simulation::results::WaveformData::new_time_domain_in_unit(
+            "group_delay",
+            vec![3.0, 30.0],
+            vec![2.0e-9, 3.0e-9],
+            "s",
+        );
+        let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
+            crate::simulation::SimulationResult::Ac {
+                frequencies: vec![1.0, 10.0, 100.0],
+                waveforms: HashMap::from([("group_delay".to_owned(), group_delay)]),
+                measurements: Vec::new(),
+            },
+            AnalysisType::Pxf,
+            "PXF",
+        );
+
+        assert_eq!(result.waveforms[0].x.as_slice(), &[3.0, 30.0]);
+        assert_eq!(result.waveforms[0].y.as_slice(), &[2.0e-9, 3.0e-9]);
+    }
+
+    #[test]
+    fn a_complex_time_domain_waveform_retains_both_components_and_phase() {
+        let waveform = crate::simulation::results::WaveformData::new_complex_time_domain(
+            "V(env)",
+            vec![0.0, 1.0],
+            vec![3.0, 0.0],
+            vec![4.0, 1.0],
+        );
+        let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
+            crate::simulation::SimulationResult::Transient {
+                time: vec![0.0, 1.0],
+                waveforms: HashMap::from([("V(env)".to_owned(), waveform)]),
+                measurements: Vec::new(),
+                periodic_state: None,
+                convergence: Default::default(),
+                events: Default::default(),
+            },
+            AnalysisType::Envelope,
+            "Envelope",
+        );
+
+        assert_eq!(result.waveforms.len(), 2);
+        assert_eq!(result.waveforms[0].name, "|V(env)|");
+        assert_eq!(result.waveforms[0].y.as_slice(), &[5.0, 1.0]);
+        let complex = result.waveforms[0].complex.as_ref().expect("retained I/Q");
+        assert_eq!(complex.real.as_slice(), &[3.0, 0.0]);
+        assert_eq!(complex.imag.as_slice(), &[4.0, 1.0]);
+        assert_eq!(result.waveforms[1].name, "phase(V(env))");
+        assert_eq!(result.waveforms[1].unit.as_deref(), Some("°"));
     }
 
     #[test]

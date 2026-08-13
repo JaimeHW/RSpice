@@ -401,7 +401,7 @@ impl AnalysisKind {
                 "Multiport small-signal network response linearized around an immutable harmonic-balance state."
             }
             Self::Hbnoise => {
-                "Large-signal noise, folding, correlation, and noise-figure metrics around harmonic balance."
+                "Large-signal output/input-referred noise, folding, correlation, integration, and contributor ranking around harmonic balance."
             }
             Self::Envelope => {
                 "Slow modulation envelope with an internally authenticated periodic initializer."
@@ -576,15 +576,6 @@ impl AnalysisKind {
         match self {
             Self::Qpss => {
                 Some("the QPSS spectral-lattice solver is not available in this engine build")
-            }
-            Self::Hbsp => Some(
-                "large-signal S-parameter linearization around HB is not available in this engine build",
-            ),
-            Self::Hbnoise => Some(
-                "harmonic-balance noise and correlation are not available in this engine build",
-            ),
-            Self::Psp => {
-                Some("periodic S-parameter conversion is not available in this engine build")
             }
             Self::Qpac => {
                 Some("QPAC conversion-matrix execution is not available in this engine build")

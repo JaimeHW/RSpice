@@ -962,7 +962,11 @@ impl PreparedRunSnapshot {
             parts.reference_temperature_celsius,
             parts.run_set.as_ref(),
         )?;
-        parts.tasks = if parts.run_set.is_some() {
+        let global_run_set_has_axes = parts
+            .run_set
+            .as_ref()
+            .is_some_and(|run_set| run_set.state.enabled_dimensions().next().is_some());
+        parts.tasks = if global_run_set_has_axes {
             expand_global_run_set_tasks(
                 parts.tasks,
                 &pvt_points,
@@ -971,6 +975,10 @@ impl PreparedRunSnapshot {
                 parts.reference_temperature_celsius,
             )?
         } else {
+            // A Run Set object exists even when all of its axes are disabled.
+            // That reference-only state must not hide an analysis's own
+            // Temperature or Corner declaration; the declaration-aware path
+            // expands those exact points and keeps its family assembly task.
             expand_pvt_point_tasks(
                 parts.tasks,
                 &pvt_points,
@@ -1077,6 +1085,9 @@ impl PreparedRunSnapshot {
 
             let expected_artifact_kind = match task.task.spec {
                 AnalysisSpec::Fourier { .. } => Some(ExecutionArtifactKind::TransientTrajectory),
+                AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. } => {
+                    Some(ExecutionArtifactKind::HbState)
+                }
                 AnalysisSpec::Pss {
                     method: crate::simulation::multi_run::PssMethod::Shooting,
                     ..
@@ -1085,7 +1096,8 @@ impl PreparedRunSnapshot {
                 | AnalysisSpec::Pac
                 | AnalysisSpec::Pxf
                 | AnalysisSpec::Pnoise
-                | AnalysisSpec::Pstb => Some(ExecutionArtifactKind::PeriodicState),
+                | AnalysisSpec::Pstb
+                | AnalysisSpec::Psp { .. } => Some(ExecutionArtifactKind::PeriodicState),
                 _ => None,
             };
             let expected_binding_count = usize::from(expected_artifact_kind.is_some());
@@ -1128,6 +1140,9 @@ impl PreparedRunSnapshot {
                     }
                     ExecutionArtifactKind::PeriodicState => {
                         matches!(producer.task.spec, AnalysisSpec::Pss { .. })
+                    }
+                    ExecutionArtifactKind::HbState => {
+                        matches!(producer.task.spec, AnalysisSpec::HarmonicBalance { .. })
                     }
                     ExecutionArtifactKind::DcOperatingPointSeed => matches!(
                         producer.task.spec,
@@ -1569,12 +1584,26 @@ fn expand_global_run_set_tasks(
         rspice_core::ResourceLimits::default().max_batch_runs,
     )?;
 
-    // The remaining spec-driven analysis families still own internal sweep
-    // services that do not accept a single prepared environment. Refuse them
-    // here instead of running them once at nominal while the Studio reports a
-    // point matrix. Config-backed DC/AC/transient/noise/PZ/sensitivity tasks
-    // all use the shared EngineBridge environment path below.
-    if let Some(task) = tasks.iter().find(|task| task.task.config.is_none()) {
+    let runtime_environment_required = pvt_points.iter().any(|point| {
+        point.voltage.is_some() || point.temperature_celsius != reference_temperature_celsius
+    });
+
+    // Monte Carlo owns an internal trial loop, but that service accepts the
+    // point environment and applies it before every trial solve. Other
+    // spec-driven families can still compose with a reference-only or
+    // process-only Run Set because process binding is materialized into their
+    // source. Refuse them only when temperature/supply must be injected, or
+    // when the analysis is itself a PVT declaration whose internal point
+    // family would make the global matrix and task forecast untrue.
+    if let Some(task) = tasks.iter().find(|task| {
+        task.task.config.is_none()
+            && match task.task.spec {
+                AnalysisSpec::MonteCarlo { .. } => false,
+                AnalysisSpec::Corner => true,
+                AnalysisSpec::Parametric if task.task.spec_options.temp.is_some() => true,
+                _ => runtime_environment_required,
+            }
+    }) {
         return Err(PreparationError::new(
             PreparationStage::AnalysisPlan,
             format!(
@@ -1696,12 +1725,15 @@ fn expand_global_run_set_tasks(
                     *temperature =
                         rspice_core::constants::celsius_to_kelvin(point.temperature_celsius);
                 }
-                point_task.execution_environment =
-                    Some(crate::simulation::runner::AnalysisExecutionEnvironment {
+                let accepts_runtime_environment = point_task.task.config.is_some()
+                    || matches!(point_task.task.spec, AnalysisSpec::MonteCarlo { .. });
+                point_task.execution_environment = accepts_runtime_environment.then_some(
+                    crate::simulation::runner::AnalysisExecutionEnvironment {
                         temperature_celsius: point.temperature_celsius,
                         supply_voltage: point.voltage,
                         nominal_supply_voltage: *nominal_supply_voltage,
-                    });
+                    },
+                );
             }
 
             if pvt_points.len() > 1 {

@@ -1979,3 +1979,160 @@ fn the_log_frequency_sheets_survive_a_non_positive_abscissa() {
     state.ui.results.viewer = super::super::ResultViewer::NoiseContrib;
     draw_and_tessellate(&mut state, show_noise);
 }
+
+#[test]
+fn bode_models_include_pac_pxf_and_stb_but_exclude_pstb_mode_data() {
+    let mut state = AppState::default();
+    let run = state.simulation.start_run();
+    for (id, analysis_type, signal) in [
+        (1, AnalysisType::Pac, "V(pac)"),
+        (2, AnalysisType::Pxf, "H(pxf)"),
+    ] {
+        run.add_analysis(
+            AnalysisResult::new(id, analysis_type, analysis_type.short_label()).with_waveforms(
+                vec![
+                    WaveformData::new(
+                        format!("|{signal}|"),
+                        vec![1.0, 10.0],
+                        vec![10.0, 1.0],
+                        "#0af",
+                    ),
+                    WaveformData::new(
+                        format!("phase({signal})"),
+                        vec![1.0, 10.0],
+                        vec![-90.0, -135.0],
+                        "#fa0",
+                    ),
+                ],
+            ),
+        );
+    }
+    run.add_analysis(
+        AnalysisResult::new(3, AnalysisType::Stb, "STB").with_waveforms(vec![
+            WaveformData::new(
+                "Loop Gain (dB)",
+                vec![1.0, 10.0],
+                vec![40.0, 0.0],
+                "#0af",
+            )
+            .with_unit("dB"),
+            WaveformData::new(
+                "Loop Phase (deg)",
+                vec![1.0, 10.0],
+                vec![-90.0, -135.0],
+                "#fa0",
+            )
+            .with_unit("°"),
+            WaveformData::new("|Nyquist L(jw)|", vec![1.0, 10.0], vec![1.0, 0.5], "#fff"),
+        ]),
+    );
+    run.add_analysis(
+        AnalysisResult::new(4, AnalysisType::Pstb, "PSTB").with_waveforms(vec![
+            WaveformData::new(
+                "Stability Margin (dB)",
+                vec![0.0, 1.0],
+                vec![12.0, 4.0],
+                "#0af",
+            ),
+        ]),
+    );
+
+    state.ui.results.viewer = super::super::ResultViewer::Bode;
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+
+    assert_eq!(
+        models
+            .iter()
+            .map(StripModel::analysis_type)
+            .collect::<Vec<_>>(),
+        vec![AnalysisType::Pac, AnalysisType::Pxf, AnalysisType::Stb]
+    );
+    let stb = models.last().expect("STB model");
+    assert!(stb.traces.iter().any(|trace| {
+        trace.source_waveform_name == "Loop Gain (dB)" && trace.kind == TraceKind::Value
+    }));
+    assert!(stb.traces.iter().all(|trace| {
+        trace.source_waveform_name != "|Nyquist L(jw)|"
+    }));
+}
+
+#[test]
+fn waves_models_include_pss_and_envelope_complex_data() {
+    let mut state = AppState::default();
+    let run = state.simulation.start_run();
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Pss, "PSS").with_waveforms(vec![
+            WaveformData::new("V(pss)", vec![0.0, 1.0], vec![0.0, 1.0], "#0af"),
+        ]),
+    );
+    run.add_analysis(
+        AnalysisResult::new(2, AnalysisType::Envelope, "ENV").with_waveforms(vec![
+            WaveformData::new("|V(env)|", vec![0.0, 1.0], vec![1.0, 2.0], "#fa0")
+                .with_complex_components("V(env)", vec![1.0, 0.0], vec![0.0, 2.0]),
+            WaveformData::new(
+                "phase(V(env))",
+                vec![0.0, 1.0],
+                vec![0.0, 90.0],
+                "#fff",
+            )
+            .with_unit("°"),
+        ]),
+    );
+
+    state.ui.results.viewer = super::super::ResultViewer::Waves;
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+
+    assert_eq!(
+        models
+            .iter()
+            .map(StripModel::analysis_type)
+            .collect::<Vec<_>>(),
+        vec![AnalysisType::Pss, AnalysisType::Envelope]
+    );
+    let envelope = &models[1];
+    assert!(envelope.traces.iter().any(|trace| {
+        trace.source_waveform_name == "phase(V(env))" && trace.kind == TraceKind::PhaseDeg
+    }));
+}
+
+#[test]
+fn disto_frequency_curves_preserve_raw_values_and_units() {
+    let mut state = AppState::default();
+    state.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Disto, "DISTO").with_waveforms(vec![
+            WaveformData::new(
+                "V(out) HD3(dBc)",
+                vec![1.0e3, 1.0e4],
+                vec![-80.0, -60.0],
+                "#0af",
+            )
+            .with_unit("dBc"),
+        ]),
+    );
+    state.ui.results.viewer = super::super::ResultViewer::Bode;
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].x_scale, XScale::Log10);
+    assert!(models[0].traces[0].kind == TraceKind::Value);
+    assert_eq!(models[0].traces[0].unit.as_deref(), Some("dBc"));
+    assert_eq!(models[0].traces[0].y.as_slice(), &[-80.0, -60.0]);
+}

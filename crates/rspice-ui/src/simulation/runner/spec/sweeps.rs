@@ -8,19 +8,22 @@ use rspice_core::abort_signal::AbortSignal;
 use crate::services::simulation_runner as svc_runner;
 use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::results::{MonteCarloVariableResult, SimulationResult, WaveformData};
-use crate::simulation::runner::{SimulationError, SpecExecutionOptions};
+use crate::simulation::runner::{
+    AnalysisExecutionEnvironment, SimulationError, SpecExecutionOptions,
+};
 
 pub(super) fn run_sweep_spec(
     spec: AnalysisSpec,
     options: SpecExecutionOptions,
     netlist: &str,
     source_path: Option<&Path>,
+    environment: Option<AnalysisExecutionEnvironment>,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     super::ensure_not_aborted(abort)?;
     match spec {
         AnalysisSpec::MonteCarlo { variation_source } => {
-            run_monte_carlo(variation_source, netlist, source_path, abort)
+            run_monte_carlo(variation_source, netlist, source_path, environment, abort)
         }
         AnalysisSpec::Parametric => run_parametric(netlist, options, source_path, abort),
         // A corner declaration is expanded into one task per declared point
@@ -35,22 +38,29 @@ fn run_monte_carlo(
     variation_source: crate::simulation::dialog::McVariationSource,
     netlist: &str,
     source_path: Option<&Path>,
+    environment: Option<AnalysisExecutionEnvironment>,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     use crate::simulation::dialog::McVariationSource;
 
     let data = super::run_abort_aware_service(abort, || match variation_source {
         McVariationSource::ParameterTolerance => {
-            svc_runner::run_monte_carlo_analysis_with_source_path_and_abort(
+            svc_runner::run_monte_carlo_analysis_with_environment_and_source_path_and_abort(
                 netlist,
                 source_path,
+                environment.map(|environment| environment.temperature_celsius),
+                environment.and_then(|environment| environment.supply_voltage),
+                environment.and_then(|environment| environment.nominal_supply_voltage),
                 abort,
             )
         }
         McVariationSource::DeckStatistics => {
-            svc_runner::run_statistical_monte_carlo_with_source_path_and_abort(
+            svc_runner::run_statistical_monte_carlo_with_environment_and_source_path_and_abort(
                 netlist,
                 source_path,
+                environment.map(|environment| environment.temperature_celsius),
+                environment.and_then(|environment| environment.supply_voltage),
+                environment.and_then(|environment| environment.nominal_supply_voltage),
                 abort,
             )
         }

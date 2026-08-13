@@ -166,8 +166,358 @@ pub(super) fn run_periodic_spec(
             source_path,
             abort,
         ),
+        AnalysisSpec::Psp {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            ports,
+            max_sideband,
+            mixed_mode,
+            noise_parameters,
+        } => run_psp(
+            netlist,
+            PspRunRequest {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+                ports,
+                max_sideband,
+                mixed_mode,
+                noise_parameters,
+            },
+            source_path,
+            dependencies,
+            abort,
+        ),
+        AnalysisSpec::Hbsp {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            ports,
+            max_sideband,
+            mixed_mode,
+            noise_parameters,
+        } => run_hbsp(
+            netlist,
+            PspRunRequest {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+                ports,
+                max_sideband,
+                mixed_mode,
+                noise_parameters,
+            },
+            source_path,
+            dependencies,
+            abort,
+        ),
+        AnalysisSpec::Hbnoise {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            output_node,
+            output_ref,
+            input_source,
+            max_sideband,
+            integrated_noise,
+            noise_figure,
+            contributor_ranking,
+        } => run_hbnoise(
+            netlist,
+            HbnoiseRunRequest {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+                output_node,
+                output_ref,
+                input_source,
+                max_sideband,
+                integrated_noise,
+                noise_figure,
+                contributor_ranking,
+            },
+            source_path,
+            dependencies,
+            abort,
+        ),
         other => Err(super::misrouted_spec_error("periodic", &other)),
     }
+}
+
+struct HbnoiseRunRequest {
+    start_freq: f64,
+    stop_freq: f64,
+    points_per_unit: usize,
+    sweep: FrequencySweep,
+    output_node: String,
+    output_ref: String,
+    input_source: String,
+    max_sideband: usize,
+    integrated_noise: bool,
+    noise_figure: bool,
+    contributor_ranking: bool,
+}
+
+fn run_hbnoise(
+    netlist: &str,
+    request: HbnoiseRunRequest,
+    source_path: Option<&Path>,
+    dependencies: &ResolvedExecutionDependencies,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let hb_state = dependencies.hb_state().map_err(|error| {
+        SimulationError::InvalidConfig(format!(
+            "HBNOISE harmonic-balance dependency is unavailable: {error}"
+        ))
+    })?;
+    let config = svc_runner::HbnoiseRunConfig {
+        start_freq: request.start_freq,
+        stop_freq: request.stop_freq,
+        points_per_unit: request.points_per_unit,
+        sweep: match request.sweep {
+            FrequencySweep::Decade => svc_runner::HbnoiseFrequencySweep::Decade,
+            FrequencySweep::Octave => svc_runner::HbnoiseFrequencySweep::Octave,
+            FrequencySweep::Linear => svc_runner::HbnoiseFrequencySweep::Linear,
+        },
+        output_node: request.output_node,
+        output_ref: Some(request.output_ref),
+        input_source: request.input_source,
+        max_sideband: request.max_sideband,
+        integrated_noise: request.integrated_noise,
+        noise_figure: request.noise_figure,
+        contributor_ranking: request.contributor_ranking,
+    };
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_hbnoise_analysis_from_hb_with_source_path_and_abort(
+            netlist,
+            &config,
+            hb_state.operating_point(),
+            source_path,
+            abort,
+        )
+    })?;
+
+    let mut contributors = HashMap::with_capacity(data.contributors.len());
+    let output_power = if config.contributor_ranking {
+        Some(
+            svc_runner::integrate_psd(&data.frequencies, &data.output_noise, abort)
+                .map_err(|error| SimulationError::SolverError(error.to_string()))?,
+        )
+    } else {
+        None
+    };
+    let mut rows = Vec::with_capacity(data.contributors.len());
+    for (index, (name, values)) in data.contributors.into_iter().enumerate() {
+        poll_periodically(abort, index)?;
+        let power = svc_runner::integrate_psd(&data.frequencies, &values, abort)
+            .map_err(|error| SimulationError::SolverError(error.to_string()))?;
+        let (device, mechanism) = split_noise_contributor_name(&name);
+        rows.push(crate::state::NoiseContributorRow {
+            device,
+            mechanism,
+            power,
+            share_pct: output_power
+                .filter(|total| *total > 0.0)
+                .map_or(0.0, |total| 100.0 * power / total),
+        });
+        contributors.insert(name, values);
+    }
+    rows.sort_by(|left, right| {
+        right
+            .power
+            .total_cmp(&left.power)
+            .then_with(|| left.device.cmp(&right.device))
+            .then_with(|| left.mechanism.cmp(&right.mechanism))
+    });
+    let band = (
+        data.frequencies.first().copied().unwrap_or(0.0),
+        data.frequencies.last().copied().unwrap_or(0.0),
+    );
+    let summary = (config.integrated_noise || config.contributor_ranking).then_some(
+        crate::state::NoiseSummary {
+            rows,
+            total_rms: data.output_rms,
+            input_rms: data.input_rms,
+            band,
+        },
+    );
+    Ok(SimulationResult::Noise {
+        frequencies: data.frequencies,
+        output_noise: data.output_noise,
+        input_noise: Some(data.input_noise),
+        contributors,
+        summary,
+    })
+}
+
+fn split_noise_contributor_name(name: &str) -> (String, String) {
+    let trimmed = name.trim();
+    match trimmed.rsplit_once(' ') {
+        Some((device, mechanism)) if !device.trim().is_empty() && !mechanism.trim().is_empty() => {
+            (device.trim().to_owned(), mechanism.trim().to_owned())
+        }
+        _ => (trimmed.to_owned(), "periodic".to_owned()),
+    }
+}
+
+struct PspRunRequest {
+    start_freq: f64,
+    stop_freq: f64,
+    points_per_unit: usize,
+    sweep: FrequencySweep,
+    ports: Vec<crate::simulation::multi_run::SpPort>,
+    max_sideband: usize,
+    mixed_mode: bool,
+    noise_parameters: bool,
+}
+
+fn run_psp(
+    netlist: &str,
+    request: PspRunRequest,
+    source_path: Option<&Path>,
+    dependencies: &ResolvedExecutionDependencies,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let periodic_state = dependencies.periodic_state().map_err(|error| {
+        SimulationError::InvalidConfig(format!(
+            "PSP periodic-state dependency is unavailable: {error}"
+        ))
+    })?;
+    run_periodic_sparameters(request, abort, |config| {
+        svc_runner::run_psp_analysis_from_pss_with_source_path_and_abort(
+            netlist,
+            config,
+            periodic_state.operating_point(),
+            source_path,
+            abort,
+        )
+    })
+}
+
+fn run_hbsp(
+    netlist: &str,
+    request: PspRunRequest,
+    source_path: Option<&Path>,
+    dependencies: &ResolvedExecutionDependencies,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let hb_state = dependencies.hb_state().map_err(|error| {
+        SimulationError::InvalidConfig(format!(
+            "HBSP harmonic-balance dependency is unavailable: {error}"
+        ))
+    })?;
+    run_periodic_sparameters(request, abort, |config| {
+        svc_runner::run_hbsp_analysis_from_hb_with_source_path_and_abort(
+            netlist,
+            config,
+            hb_state.operating_point(),
+            source_path,
+            abort,
+        )
+    })
+}
+
+fn run_periodic_sparameters(
+    request: PspRunRequest,
+    abort: &dyn AbortSignal,
+    run: impl FnOnce(&svc_runner::PspRunConfig) -> svc_runner::ServiceRunResult<svc_runner::PspData>,
+) -> Result<SimulationResult, SimulationError> {
+    let PspRunRequest {
+        start_freq,
+        stop_freq,
+        points_per_unit,
+        sweep,
+        ports,
+        max_sideband,
+        mixed_mode,
+        noise_parameters,
+    } = request;
+    let mut configured_ports = Vec::with_capacity(ports.len());
+    for port in ports {
+        super::ensure_not_aborted(abort)?;
+        configured_ports.push(svc_runner::SParameterPort {
+            node_pos: port.node_pos,
+            node_neg: port.node_neg,
+            z0: port.z0,
+        });
+    }
+    let config = svc_runner::PspRunConfig {
+        start_freq,
+        stop_freq,
+        points_per_unit,
+        sweep: match sweep {
+            FrequencySweep::Decade => svc_runner::PspSweep::Decade,
+            FrequencySweep::Octave => svc_runner::PspSweep::Octave,
+            FrequencySweep::Linear => svc_runner::PspSweep::Linear,
+        },
+        ports: configured_ports,
+        max_sideband,
+        mixed_mode,
+        noise_parameters,
+        reltol: 1.0e-3,
+        abstol: 1.0e-12,
+    };
+    let data = super::run_abort_aware_service(abort, || run(&config))?;
+    periodic_sparameter_result(data, &config, abort)
+}
+
+fn periodic_sparameter_result(
+    data: svc_runner::PspData,
+    config: &svc_runner::PspRunConfig,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let mut waveforms = HashMap::with_capacity(data.paths.len().saturating_add(config.ports.len()));
+    for path in data.paths {
+        super::ensure_not_aborted(abort)?;
+        let base_name = if config.ports.len() <= 9 {
+            format!("S{}{}", path.output_port, path.input_port)
+        } else {
+            format!("S{}_{}", path.output_port, path.input_port)
+        };
+        let name = format!(
+            "{base_name}[k={:+},m={:+}]",
+            path.output_sideband, path.input_sideband
+        );
+        let mut real = Vec::with_capacity(path.values.len());
+        let mut imaginary = Vec::with_capacity(path.values.len());
+        for (value_index, value) in path.values.into_iter().enumerate() {
+            poll_periodically(abort, value_index)?;
+            real.push(value.re);
+            imaginary.push(value.im);
+        }
+        waveforms.insert(
+            name.clone(),
+            WaveformData::new_complex(
+                name,
+                clone_values_with_abort(&data.frequencies, abort)?,
+                real.clone(),
+                imaginary.clone(),
+            ),
+        );
+        if path.output_sideband == 0 && path.input_sideband == 0 {
+            waveforms.insert(
+                base_name.clone(),
+                WaveformData::new_complex(
+                    base_name,
+                    clone_values_with_abort(&data.frequencies, abort)?,
+                    real,
+                    imaginary,
+                ),
+            );
+        }
+    }
+    Ok(SimulationResult::Ac {
+        frequencies: data.frequencies,
+        waveforms,
+        measurements: Vec::new(),
+    })
 }
 
 fn run_pss(
@@ -345,10 +695,11 @@ fn run_harmonic_balance(
         .transpose()?
         .unwrap_or_default();
 
-    Ok(SimulationResult::Ac {
+    Ok(SimulationResult::HarmonicBalance {
         frequencies,
         waveforms,
         measurements: Vec::new(),
+        operating_point: data.operating_point,
     })
 }
 

@@ -1,4 +1,4 @@
-//! BODE derivations — the active run's AC stability numbers (unity-gain,
+//! BODE derivations — the active run's frequency-response stability numbers (unity-gain,
 //! phase and gain margins) for the right panel's inspector card, plus the
 //! ordinary-noise spectrum instrument. The Bode sheet itself renders through
 //! the waves pane-stack; margins and curves read the same data by
@@ -16,7 +16,7 @@ use crate::workbench::AppState;
 
 use super::BodeDerived;
 
-/// The AC signal pair's computed stability numbers.
+/// The selected frequency-response signal pair's computed stability numbers.
 struct BodeModel {
     /// The phase trace as displayed: raw ±180°-wrapped samples, or the
     /// unwrapped series when the continuous toggle is on. The margins are
@@ -63,11 +63,13 @@ fn noise_waveform_is_renderable(waveform: &crate::state::WaveformData) -> bool {
 }
 
 pub(super) fn ordinary_noise_spectrum_is_renderable(analysis: &AnalysisResult) -> bool {
-    analysis.analysis_type == AnalysisType::Noise
-        && analysis.waveforms.iter().any(|waveform| {
-            (is_input_noise_name(&waveform.name) || is_output_noise_name(&waveform.name))
-                && noise_waveform_is_renderable(waveform)
-        })
+    matches!(
+        analysis.analysis_type,
+        AnalysisType::Noise | AnalysisType::Hbnoise
+    ) && analysis.waveforms.iter().any(|waveform| {
+        (is_input_noise_name(&waveform.name) || is_output_noise_name(&waveform.name))
+            && noise_waveform_is_renderable(waveform)
+    })
 }
 
 fn build_model(state: &mut AppState) -> Option<BodeModel> {
@@ -223,10 +225,22 @@ fn build_noise_model(state: &AppState) -> Option<NoiseSpectrumModel> {
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+    if state
+        .simulation
+        .active_analysis()
+        .is_some_and(|analysis| analysis.analysis_type.is_raw_frequency_curve())
+    {
+        section_header(ui, "Distortion curves", None);
+        super::panel_note(
+            ui,
+            "Fundamental gain, harmonic distortion, intermodulation, and THD use the exact retained engineering units shown on each trace.",
+        );
+        return;
+    }
     section_header(ui, "Stability", None);
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let Some(model) = build_model(state) else {
-        super::panel_note(ui, "No AC analysis in the active run.");
+        super::panel_note(ui, "No usable frequency response in the active run.");
         return;
     };
     let m = model.margins;
@@ -268,7 +282,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     if model.phase_deg.is_none() {
         super::panel_note(
             ui,
-            "Phase data unavailable for this run — re-run the AC analysis to compute margins.",
+            "Phase data unavailable for this response — re-run the analysis to compute margins.",
         );
     } else {
         super::panel_note(
@@ -460,5 +474,14 @@ mod tests {
                 "#fff",
             )]);
         assert!(!ordinary_noise_spectrum_is_renderable(&contributor_only));
+    }
+
+    #[test]
+    fn hbnoise_psd_uses_the_noise_density_instrument() {
+        let hbnoise =
+            AnalysisResult::new(1, AnalysisType::Hbnoise, "HBNOISE").with_waveforms(vec![
+                WaveformData::new("onoise", vec![1.0e3, 1.0e4], vec![1.0e-18, 2.0e-18], "#fff"),
+            ]);
+        assert!(ordinary_noise_spectrum_is_renderable(&hbnoise));
     }
 }

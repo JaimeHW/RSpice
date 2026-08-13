@@ -8,6 +8,8 @@
 //!    source is its intensity times the time-average squared transfer,
 //!    computable in closed form from the two switch states.
 
+use rspice_core::abort_signal::NoAbort;
+use rspice_core::analysis::harmonic_balance::HbConfig;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
@@ -176,6 +178,68 @@ c1 mid 0 1n
             "input-referred noise at {f:.0e} Hz must be output/|H|^2: \
              got {:.4e}, want {expected:.4e}",
             input_noise[i]
+        );
+    }
+}
+
+#[test]
+fn retained_hb_pnoise_matches_the_same_exact_periodic_noise_problem() {
+    let deck = "\
+* retained-HB periodic-noise parity
+vin in 0 dc 0
+r1 in mid 10k
+r2 mid 0 10k
+c1 mid 0 1n
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let f0 = 1.0e6;
+    let offsets = [1.0e3, 1.0e5];
+    let hb = engine
+        .run_hb(&netlist, HbConfig::new(f0).with_harmonics(8))
+        .expect("HB operating point completes");
+
+    let retained = engine
+        .run_pnoise_from_hb_with_abort(
+            &netlist,
+            &offsets,
+            "mid",
+            None,
+            Some("vin"),
+            3,
+            &hb.operating_point,
+            &NoAbort,
+        )
+        .expect("retained-HB pnoise completes");
+    let reference = engine
+        .run_pnoise(&netlist, f0, &offsets, "mid", None, Some("vin"), 3)
+        .expect("reference pnoise completes");
+
+    assert_eq!(retained.frequencies, reference.frequencies);
+    assert_eq!(retained.output_noise.len(), offsets.len());
+    assert_eq!(retained.contributors.len(), reference.contributors.len());
+    for (actual, expected) in retained.output_noise.iter().zip(&reference.output_noise) {
+        assert!(
+            (actual - expected).abs() <= 1e-12 * expected.abs().max(1e-300),
+            "retained state changed output noise: {actual:.6e} vs {expected:.6e}"
+        );
+    }
+    for (actual, expected) in retained
+        .input_noise
+        .as_ref()
+        .expect("retained input noise")
+        .iter()
+        .zip(
+            reference
+                .input_noise
+                .as_ref()
+                .expect("reference input noise"),
+        )
+    {
+        assert!(
+            (actual - expected).abs() <= 1e-12 * expected.abs().max(1e-300),
+            "retained state changed input-referred noise: {actual:.6e} vs {expected:.6e}"
         );
     }
 }
