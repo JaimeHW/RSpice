@@ -10229,6 +10229,38 @@ fn test_xyce_bug1455_model_parameter_punctuation_relation() {
 }
 
 #[test]
+fn test_xyce_tr_tran_short_analysis_alias_relation() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, contract, wrapper, exclusion) in [
+        (
+            "Netlists/TR_TRAN/tr2.cir",
+            "tr_tran_short_alias_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/TR_TRAN/tran2.cir",
+            "tr_tran_long_form_reference",
+            false,
+            Some("Netlists/TR_TRAN/exclude"),
+        ),
+    ] {
+        assert_eq!(runner.requires_upstream_wrapper(relative), wrapper);
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should reproduce the TR/TRAN transient alias relation, got {result:?}"
+        );
+        assert_eq!(result.contract, contract);
+        assert_eq!(result.upstream_exclusion_source.as_deref(), exclusion);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_bug352_diode_model_expression_equivalence_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

@@ -2701,7 +2701,10 @@ impl XyceTestRunner {
             let Some(analysis) = token_refs.get(1).copied() else {
                 return Err(".PRINT statement has no analysis type".to_string());
             };
-            if !analysis.eq_ignore_ascii_case(expected_analysis) {
+            let analysis_matches = analysis.eq_ignore_ascii_case(expected_analysis)
+                || (expected_analysis.eq_ignore_ascii_case("TRAN")
+                    && Self::is_tran_analysis_keyword(analysis));
+            if !analysis_matches {
                 continue;
             }
 

@@ -75,7 +75,7 @@ pub enum OutputAnalysisKind {
 impl OutputAnalysisKind {
     pub(crate) fn from_keyword(keyword: &str) -> Option<Self> {
         match keyword.trim().to_ascii_uppercase().as_str() {
-            "TRAN" | "TRAN_CONT" => Some(Self::Tran),
+            "TR" | "TRAN" | "TRAN_CONT" => Some(Self::Tran),
             "AC" | "AC_CONT" => Some(Self::Ac),
             "DC" | "DC_CONT" => Some(Self::Dc),
             "NOISE" | "NOISE_CONT" => Some(Self::Noise),
@@ -3217,6 +3217,7 @@ V1 1 0 1
     #[test]
     fn continuous_measurements_retain_their_base_analysis_domain() {
         for (keyword, expected) in [
+            ("TR", OutputAnalysisKind::Tran),
             ("TRAN_CONT", OutputAnalysisKind::Tran),
             ("DC_CONT", OutputAnalysisKind::Dc),
             ("AC_CONT", OutputAnalysisKind::Ac),

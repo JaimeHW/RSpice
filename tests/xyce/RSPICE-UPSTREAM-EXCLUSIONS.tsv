@@ -1079,7 +1079,7 @@ Netlists/TIA/TRAP/IC_AND_NODESET/pierce1.cir	Netlists/TIA/TRAP/IC_AND_NODESET/ex
 Netlists/TIA/TRAP/IC_AND_NODESET/pierce2.cir	Netlists/TIA/TRAP/IC_AND_NODESET/exclude	upstream_excluded
 Netlists/TIA/TRAP/push_pull_xyce_baseline.cir	Netlists/TIA/TRAP/exclude	upstream_excluded
 Netlists/TR_TRAN/tran.cir	Netlists/TR_TRAN/exclude	upstream_excluded
-Netlists/TR_TRAN/tran2.cir	Netlists/TR_TRAN/exclude	upstream_excluded
+Netlists/TR_TRAN/tran2.cir	Netlists/TR_TRAN/exclude	rspice_independently_qualified	tr_tran_long_form_reference
 Netlists/TwoLevelAPI/resInner.cir	Netlists/TwoLevelAPI/exclude	upstream_excluded
 Netlists/TwoLevelAPI/resInnerTran.cir	Netlists/TwoLevelAPI/exclude	upstream_excluded
 Netlists/TwoLevelAPI/resTop.cir	Netlists/TwoLevelAPI/exclude	upstream_excluded

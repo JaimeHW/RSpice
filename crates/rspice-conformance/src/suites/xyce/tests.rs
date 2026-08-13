@@ -3285,6 +3285,14 @@ fn print_output_requests_preserve_grouped_probe_fields() {
 }
 
 #[test]
+fn print_output_requests_normalize_xyce_tr_to_transient() {
+    let requests = XyceTestRunner::print_output_requests(".PRINT TR V(1)", "TRAN")
+        .expect("Xyce TR output alias parses as transient");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].probes, ["V(1)"]);
+}
+
+#[test]
 fn print_output_requests_canonicalize_only_whole_single_quoted_expressions() {
     let request = XyceTestRunner::print_output_requests(
         ".PRINT DC FILE='quoted-output.prn' '(abs(I(Vsense)))' V(1)",

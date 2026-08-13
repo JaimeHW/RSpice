@@ -193,7 +193,7 @@ pub(super) fn parse_command(
             let disto = parse_disto_command(stream, line_num, params)?;
             analyses.push(disto);
         }
-        ".TRAN" => {
+        ".TRAN" | ".TR" => {
             let step = expect_value(stream, line_num, params)?;
             if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
                 return Err(ParseError::Syntax {
@@ -6896,6 +6896,38 @@ mod tests {
         };
 
         assert!(*uic);
+    }
+
+    #[test]
+    fn xyce_tr_alias_normalizes_analysis_and_output_domains() {
+        let netlist = Netlist::parse(
+            "Xyce TR alias\n\
+             V1 1 0 1\n\
+             R1 1 0 1k\n\
+             .tr 1n 10n\n\
+             .print tr v(1)\n\
+             .plot tr v(1)\n\
+             .measure tr vmax max v(1)\n\
+             .end\n",
+        )
+        .expect("Xyce .TR and TR-qualified outputs should parse as transient");
+
+        assert!(matches!(
+            netlist.analyses.as_slice(),
+            [crate::netlist::AnalysisCommand::Tran { step, stop, .. }]
+                if step.to_bits() == 1.0e-9f64.to_bits()
+                    && stop.to_bits() == 10.0e-9f64.to_bits()
+        ));
+        assert_eq!(netlist.output_requests.len(), 3);
+        assert!(
+            netlist.output_requests.iter().all(|request| {
+                request.analysis == Some(crate::netlist::OutputAnalysisKind::Tran)
+            })
+        );
+        assert!(matches!(
+            netlist.measurements.as_slice(),
+            [measurement] if measurement.analysis == "TRAN"
+        ));
     }
 
     #[test]

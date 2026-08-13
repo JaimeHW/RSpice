@@ -601,6 +601,10 @@ impl XyceTestRunner {
         )
     }
 
+    pub(super) fn is_tran_analysis_keyword(keyword: &str) -> bool {
+        matches!(keyword.trim().to_ascii_uppercase().as_str(), "TR" | "TRAN")
+    }
+
     pub(super) fn is_ignorable_wrapper_tran_measure_side_output(
         line: &str,
     ) -> Result<bool, String> {

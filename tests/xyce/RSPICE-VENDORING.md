@@ -285,6 +285,15 @@ historical whitespace control exclusion is independently qualified; the
 wrapper, family census, and imported harness utility are provenance-bound, and
 no numerical gold is invented.
 
+The Release-7.10 `TR_TRAN/tr2.cir` wrapper proves that `.TR` and `.PRINT TR`
+are production aliases for `.TRAN` and `.PRINT TRAN`. RSpice parses both forms
+into the same typed transient/output domains, independently integrates the two
+passive RC decks, checks each result against the one-millisecond analytic decay,
+and requires exact default-PRN equality. The long-form control is independently
+qualified and the removed wrapper, verifier, complete retained family, and
+absence of numerical gold are provenance-bound. The separate, larger BSIM3
+`tr.cir`/`tran.cir` pair remains outside this bounded native contract.
+
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
 and verifier identities. The PARAMS1, PARSER nakedAlgebra, and Certification

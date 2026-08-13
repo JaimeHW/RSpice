@@ -1941,7 +1941,7 @@ impl XyceTestRunner {
                 let Some(analysis) = token_refs.get(1).copied() else {
                     return Err("wrapper-origin .PRINT statement has no analysis type".to_string());
                 };
-                if !analysis.eq_ignore_ascii_case("TRAN") {
+                if !Self::is_tran_analysis_keyword(analysis) {
                     return Err(format!(
                         "wrapper-origin transient .prn contract does not cover .PRINT {analysis}"
                     ));
@@ -2039,7 +2039,7 @@ impl XyceTestRunner {
                 let Some(analysis) = token_refs.get(1).copied() else {
                     return Err("wrapper-origin .PRINT statement has no analysis type".to_string());
                 };
-                if !analysis.eq_ignore_ascii_case("TRAN") {
+                if !Self::is_tran_analysis_keyword(analysis) {
                     return Err(format!(
                         "wrapper-origin transient CSV contract does not cover .PRINT {analysis}"
                     ));
@@ -2124,7 +2124,7 @@ impl XyceTestRunner {
                 let Some(analysis) = token_refs.get(1).copied() else {
                     return Err("wrapper-origin .PRINT statement has no analysis type".to_string());
                 };
-                if !analysis.eq_ignore_ascii_case("TRAN") {
+                if !Self::is_tran_analysis_keyword(analysis) {
                     return Err(format!(
                         "wrapper-origin transient CSDF contract does not cover .PRINT {analysis}"
                     ));
