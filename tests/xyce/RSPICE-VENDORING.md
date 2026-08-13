@@ -99,6 +99,14 @@ discharge circuit and its sole startup delta, then preserves the historical
 GOOD=operating-point, TEST=NOOP `xyce_verify` direction. No numerical gold or
 exclusion row is introduced.
 
+Certification BUG 784 is intentionally distinguished from active Release-7.10
+CTest coverage: its retained upstream `tags` file is exactly `exclude`, and
+the generated CMake file contains no registration. RSpice nevertheless binds
+the archived error-exit wrapper and its ordered diagnostic, then proves the
+retained deck reaches the structured duplicate-subcircuit-port failure with
+the exact conflicting formal, positions, actual nodes, and invocation under a
+bounded no-hang contract. No numerical gold or exclusion row is invented.
+
 Certification BUG 1162 SON preserves the Release-7.10 one-point behavior for
 inconsistent linear, decade, and octave DC sweep directions. RSpice emits one
 typed Xyce warning for each defective control, evaluates only the authored

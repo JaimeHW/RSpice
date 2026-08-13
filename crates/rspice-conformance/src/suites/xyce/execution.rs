@@ -293,6 +293,24 @@ impl XyceTestRunner {
             return result;
         }
 
+        if Self::normalize_manifest_key(&deck.relative_path) == XYCE_BUG784_RECORD {
+            let result = match self.validate_bug784_oracle(deck, start) {
+                Ok(()) => self.passed_result(deck, start, XYCE_BUG784_CONTRACT),
+                Err(error) => {
+                    self.failure_result(deck, start, XYCE_BUG784_CONTRACT, error, Vec::new())
+                }
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(kind) = XyceDiodeAnalyticKind::for_record(&deck.relative_path) {
             let contract = kind.result_contract();
             let result = match self.validate_diode_analytic_oracle(deck, kind, start) {

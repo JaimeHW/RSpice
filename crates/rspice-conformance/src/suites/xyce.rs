@@ -2679,6 +2679,82 @@ const XYCE_BUG1025_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
     ),
 ];
 
+// BUG_784 is an archived error-exit regression: Release-7.10 retains its
+// wrapper and exact ordered diagnostic, while `tags=exclude` deliberately
+// leaves its generated CMake file without an active CTest registration.
+const XYCE_BUG784_CONTRACT: &str = "archived_expected_failure_bug784_duplicate_subcircuit_port";
+const XYCE_BUG784_PATH: &str = "Netlists/Certification_Tests/BUG_784/bug_784.cir";
+const XYCE_BUG784_RECORD: &str = "netlists/certification_tests/bug_784/bug_784.cir";
+const XYCE_BUG784_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG784_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG784_UPSTREAM_DIAGNOSTIC_PREFIX: &str = "in file bug_784.cir at or near line 7";
+const XYCE_BUG784_UPSTREAM_DIAGNOSTIC: &str = "Duplicate node in .SUBCKT line: b";
+const XYCE_BUG784_HISTORICAL_TAGS: &[u8] = b"exclude\n";
+const XYCE_BUG784_HISTORICAL_RECORD_COUNT: usize = 7;
+const XYCE_BUG784_HISTORICAL_RECORD_BYTES: usize = 1_654;
+const XYCE_BUG784_HISTORICAL_RECORDS_SHA256: &str =
+    "c26641ba9051f33f9a679b6e0a838571a3398cc8ff2eef563e5e0e15faf48dbc";
+const XYCE_BUG784_HISTORICAL_RECORDS_BLAKE3: &str =
+    "0dc66de822046b9d5910a754755e979eece906bb52e9141e877bd98336dc7e78";
+const XYCE_BUG784_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
+    (
+        "Netlists/Certification_Tests/BUG_784/CMakeLists.txt",
+        221,
+        "0a9a790e450a09c7fbd82dbb1dc3364381138f241c48e3b1f75817fd373510ed",
+        "d79d375b1f7b5ac8830c1ecb8cf8a599ede1a8d49a1323ba8a41effcc5fceaa1",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_784/Manifest.txt",
+        39,
+        "43084f444d2f44172f2d5d27c0194d7aae20ab7e09ecb0820ff059a44121a86d",
+        "4d51db0a1643a4a5e8d4ad61871e43b261b728beafac535f8f905f6950467af8",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_784/README",
+        714,
+        "9da94f156415b21ac76eb9c7501af4e6aa98c6263c6309b38650944c213253ad",
+        "e9e15644dfbf3f69303cf2727151c40a0107ff530e978ae6bbc261829c44f1aa",
+    ),
+    (
+        XYCE_BUG784_PATH,
+        102,
+        "e97755c1e31c7bc9b061beb1baf48f5b0febca2001129b6f47f3d28934cdad68",
+        "e44835e871303f4d78ee52e9d4d6239bf89efe295c454c5091f230d03c690690",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_784/bug_784.cir.sh",
+        1_401,
+        "2d9c4ac45e85dd6ed79bc7a91f87bda28be6448c325e1070a2d65d0afa052c0a",
+        "ba73d0b67cd2981c83aa02b4b826516ed786bdca6dec36454c5ff54ee25ef69c",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_784/tags",
+        8,
+        "4e6c23fcd9140520f152d969561caee073952c6027b65f96b07cd01da70432e1",
+        "c76ce284ba1075a571da61a7e0227cb9734e4965b3ebdf09e920a45dccc758f5",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG784_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
+    (
+        "README",
+        714,
+        "9da94f156415b21ac76eb9c7501af4e6aa98c6263c6309b38650944c213253ad",
+        "e9e15644dfbf3f69303cf2727151c40a0107ff530e978ae6bbc261829c44f1aa",
+    ),
+    (
+        "bug_784.cir",
+        102,
+        "e97755c1e31c7bc9b061beb1baf48f5b0febca2001129b6f47f3d28934cdad68",
+        "e44835e871303f4d78ee52e9d4d6239bf89efe295c454c5091f230d03c690690",
+    ),
+];
+
 // DIODE_ANALYTIC is an active three-member Release-7.10 generated-gold
 // family. Each wrapper evaluates the analytic diode law on the simulator's
 // own transient output grid before invoking xyce_verify.
@@ -10762,6 +10838,7 @@ mod contracts_bug38;
 mod contracts_bug39;
 mod contracts_bug402;
 mod contracts_bug48;
+mod contracts_bug784;
 mod contracts_bug864;
 mod contracts_dc;
 mod contracts_diode_analytic;
