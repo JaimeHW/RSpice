@@ -136,11 +136,18 @@ pub(super) fn try_route_generated_bjt_model(
     deferred_params: &[(String, String)],
     spice_dialect: crate::config::SpiceDialect,
     temperature: f64,
+    voltage_limiting_enabled: bool,
 ) -> Result<bool, SimulationError> {
     let target = generated_bjt_target(model_name, model_def, element.nodes.len(), spice_dialect)?;
     let Some(target) = target else {
         return Ok(false);
     };
+    if !voltage_limiting_enabled {
+        return Err(SimulationError::Circuit(format!(
+            "DEVICE.VOLTLIM=0 is not implemented for generated BJT '{}' model '{}' family '{}'; only native legacy Gummel-Poon BJT limiting can currently be disabled",
+            element.name, model_name, target.model_name
+        )));
+    }
     if !target.is_available() {
         return Err(SimulationError::Circuit(format!(
             "BJT '{}': model '{}' selects generated Verilog-A model '{}' under {:?} compatibility, but that exact model is not available in this build",

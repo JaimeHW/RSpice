@@ -136,7 +136,9 @@ impl Bjt {
         external: [Value; EXTERNAL_DIM],
     ) -> [Value; INTERNAL_DIM] {
         let mut seed = self.intrinsic_state_seed_for_external_bias(external);
-        if self.charge_model != BjtChargeModel::LegacyGummelPoon {
+        if self.charge_model != BjtChargeModel::LegacyGummelPoon
+            || (!self.uses_legacy_junction_limiting() && !self.initial_off)
+        {
             return seed;
         }
 
@@ -160,6 +162,9 @@ impl Bjt {
         &self,
         target_external: [Value; EXTERNAL_DIM],
     ) -> Option<[Value; EXTERNAL_DIM]> {
+        if !self.uses_legacy_junction_limiting() {
+            return None;
+        }
         let p = self.polarity();
         let max_forward_bias = 0.8;
         let mut anchor = target_external;

@@ -566,6 +566,10 @@ pub struct Bjt {
     pub temperature: Value,
     /// Select Xyce's historical SPICE device constants for `kT/q`.
     xyce_compatibility: bool,
+    /// Whether the legacy Gummel-Poon load owns Newton junction limiting.
+    /// Xyce's global `DEVICE VOLTLIM` defaults this on and may disable both
+    /// the initial tVcrit replacement and per-iteration pnjlim path.
+    voltage_limiting_enabled: bool,
     /// Saturation-current temperature exponent (XTI)
     pub xti: Value,
     /// Bandgap used for IS temperature scaling (EG, eV)
@@ -1049,6 +1053,7 @@ impl Bjt {
             ambient_temperature: crate::constants::TEMP_REFERENCE,
             temperature: crate::constants::TEMP_REFERENCE,
             xyce_compatibility: false,
+            voltage_limiting_enabled: true,
             xti: 3.0,
             eg: 1.11,
             vje: 0.75, // B-E built-in potential
@@ -1608,7 +1613,7 @@ impl NonlinearDevice for Bjt {
         // the limited state value rather than the raw solution bias.
         let mut anchor = [vc, vb, ve, vs];
         self.legacy_junction_limited = false;
-        if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+        if self.uses_legacy_junction_limiting() {
             let raw_vbe = state.vbi - state.vei;
             let raw_vbc = state.vbi - state.vci;
             state = self.limit_legacy_terminal_state_against_iterate(
@@ -1617,6 +1622,27 @@ impl NonlinearDevice for Bjt {
             );
             self.legacy_junction_limited = (state.vbi - state.vei - raw_vbe).abs() > 1e-12
                 || (state.vbi - state.vci - raw_vbc).abs() > 1e-12;
+            if !Self::series_active(self.rcx) && !Self::series_active(self.rci) {
+                anchor[EXT_C] = state.vci;
+            }
+            if !Self::series_active(self.rbx) && !Self::series_active(self.rbi) {
+                anchor[EXT_B] = state.vbi;
+            }
+            if !Self::series_active(self.re) {
+                anchor[EXT_E] = state.vei;
+            }
+            if !Self::series_active(self.rs) {
+                anchor[EXT_S] = state.vsi;
+            }
+        } else if self.charge_model == BjtChargeModel::LegacyGummelPoon
+            && self.xyce_compatibility
+            && self.initial_off
+            && !self.reduced_linearization_cache_valid.get()
+        {
+            // Xyce's explicit OFF initialization is outside the global
+            // VOLTLIM guard. Preserve that zero-junction first state without
+            // re-enabling pnjlim or reporting a limiter-owned iteration.
+            state = self.limit_legacy_terminal_state_against_iterate(state, false);
             if !Self::series_active(self.rcx) && !Self::series_active(self.rci) {
                 anchor[EXT_C] = state.vci;
             }

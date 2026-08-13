@@ -578,7 +578,7 @@ pub(crate) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
 
 pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> String {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"rspice-transient-resolved-config-v3\0");
+    hasher.update(b"rspice-transient-resolved-config-v4\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);
@@ -595,6 +595,11 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
         config.resolved_jfet_level2_model(),
     );
     hash_field(&mut hasher, "b3soi_gmin_scaling", config.b3soi_gmin_scaling);
+    hash_field(
+        &mut hasher,
+        "device_voltage_limiting",
+        config.device_voltage_limiting,
+    );
     hash_field(&mut hasher, "rshunt", config.rshunt.map(f64::to_bits));
     hash_field(
         &mut hasher,
@@ -2271,6 +2276,20 @@ mod tests {
             simulation_checkpoint_identity(&base),
             simulation_checkpoint_identity(&with_rshunt),
             "changing the physical global shunt must invalidate transient and HB continuation state"
+        );
+    }
+
+    #[test]
+    fn voltage_limiting_policy_participates_in_checkpoint_identity() {
+        let enabled = SimulationConfig::default();
+        let disabled = SimulationConfig {
+            device_voltage_limiting: false,
+            ..enabled.clone()
+        };
+        assert_ne!(
+            simulation_checkpoint_identity(&enabled),
+            simulation_checkpoint_identity(&disabled),
+            "limiter-owned and raw Newton state must never share a checkpoint identity"
         );
     }
 

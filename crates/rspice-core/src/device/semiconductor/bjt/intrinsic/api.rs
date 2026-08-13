@@ -417,4 +417,42 @@ mod tests {
             "an unchanged cached candidate must advance convergence history"
         );
     }
+
+    #[test]
+    fn xyce_voltlim_false_uses_raw_legacy_junction_state_and_preserves_off_seed() {
+        let mut raw = Bjt::new_npn("qraw".to_string(), 1, 2, 3)
+            .with_params(&std::collections::HashMap::new());
+        raw.set_xyce_compatibility(true);
+        raw.set_voltage_limiting_enabled(false);
+        raw.update(&[0.0, 1.0, 0.0]);
+        assert!((raw.vbe - 1.0).abs() <= 1e-14);
+        assert!((raw.eval_anchor[EXT_B] - 1.0).abs() <= 1e-14);
+        assert!(!raw.legacy_junction_limited_for_trace());
+
+        raw.update(&[0.0, 2.0, 0.0]);
+        assert!((raw.vbe - 2.0).abs() <= 1e-14);
+        assert!(!raw.legacy_junction_limited_for_trace());
+
+        let mut limited = Bjt::new_npn("qlimited".to_string(), 1, 2, 3)
+            .with_params(&std::collections::HashMap::new());
+        limited.set_xyce_compatibility(true);
+        limited.update(&[0.0, 1.0, 0.0]);
+        assert!(limited.vbe < 1.0);
+        assert!(limited.legacy_junction_limited_for_trace());
+
+        let mut off = Bjt::new_npn("qoff".to_string(), 1, 2, 3)
+            .with_params(&std::collections::HashMap::new());
+        off.set_xyce_compatibility(true);
+        off.set_voltage_limiting_enabled(false);
+        off.initial_off = true;
+        off.update(&[0.0, 1.0, 0.0]);
+        assert!(off.vbe.abs() <= 1e-14);
+        assert!(
+            (off.eval_anchor[EXT_B] - off.eval_anchor[EXT_E]).abs() <= 1e-14
+                && (off.eval_anchor[EXT_B] - off.eval_anchor[EXT_C]).abs() <= 1e-14,
+            "OFF anchor junctions must be zeroed, found {:?}",
+            off.eval_anchor
+        );
+        assert!(!off.legacy_junction_limited_for_trace());
+    }
 }

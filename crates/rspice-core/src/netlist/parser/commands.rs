@@ -1364,7 +1364,11 @@ pub(super) fn parse_options_command(
             continue;
         }
 
-        if !has_equals && option_package_key_is_known(&key_upper) {
+        let is_supported_linsol_package = key_upper == "LINSOL"
+            && matches!(&stream.peek().kind, TokenKind::Ident(next)
+                if next.eq_ignore_ascii_case("TR_PARTITION")
+                    || next.eq_ignore_ascii_case("TRPARTITION"));
+        if !has_equals && (option_package_key_is_known(&key_upper) || is_supported_linsol_package) {
             option_package = Some(key_upper);
             continue;
         }
@@ -1517,6 +1521,10 @@ pub(super) fn parse_options_command(
                 options.b3soi_gmin_scaling =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
             }
+            (Some("DEVICE"), "VOLTLIM" | "VOLT_LIM") => {
+                options.device_voltage_limiting =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
             (Some("DEVICE"), "TRYTOCOMPACT" | "TRY_TO_COMPACT") => {
                 options.device_try_to_compact =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
@@ -1555,6 +1563,10 @@ pub(super) fn parse_options_command(
             }
             (None, "TRYTOCOMPACT" | "TRY_TO_COMPACT" | "DEVICE_TRYTOCOMPACT") => {
                 options.device_try_to_compact =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
+            (Some("LINSOL"), "TR_PARTITION" | "TRPARTITION") => {
+                options.linsol_tr_partition =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
             }
             (Some("XSPICE"), "AUTO_BRIDGE" | "AUTOBRIDGE")
@@ -6392,6 +6404,60 @@ mod tests {
         };
         merged.merge(&disabled.options);
         assert_eq!(merged.device_try_to_compact, Some(false));
+    }
+
+    #[test]
+    fn xyce_voltage_limiting_and_serial_partition_options_are_typed() {
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options device voltlim=0\n.options linsol tr_partition=0",
+        ))
+        .expect("Xyce DEVICE/LINSOL options parse");
+        assert_eq!(netlist.options.device_voltage_limiting, Some(false));
+        assert_eq!(netlist.options.linsol_tr_partition, Some(false));
+        assert!(
+            netlist
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "unknown-option"),
+            "typed Xyce options must not be diagnosed as unknown: {:?}",
+            netlist.diagnostics
+        );
+
+        let repeated = Netlist::parse(&deck_with_options(
+            ".options device voltlim=0 voltlim=2\n.options linsol tr_partition=1 tr_partition=0",
+        ))
+        .expect("repeated Xyce boolean options parse");
+        assert_eq!(repeated.options.device_voltage_limiting, Some(true));
+        assert_eq!(repeated.options.linsol_tr_partition, Some(false));
+
+        let bare = Netlist::parse(&deck_with_options(
+            ".options device voltlim\n.options linsol tr_partition",
+        ))
+        .expect("bare Xyce boolean options mean enabled");
+        assert_eq!(bare.options.device_voltage_limiting, Some(true));
+        assert_eq!(bare.options.linsol_tr_partition, Some(true));
+
+        let mut merged = crate::netlist::SimulationOptions {
+            device_voltage_limiting: Some(true),
+            linsol_tr_partition: Some(true),
+            ..Default::default()
+        };
+        merged.merge(&netlist.options);
+        assert_eq!(merged.device_voltage_limiting, Some(false));
+        assert_eq!(merged.linsol_tr_partition, Some(false));
+
+        let unrelated_linsol = Netlist::parse(&deck_with_options(".options linsol type=klu"))
+            .expect("unimplemented LINSOL option remains a warning");
+        assert_eq!(unrelated_linsol.options.linsol_tr_partition, None);
+        assert_eq!(unrelated_linsol.diagnostics.len(), 2);
+        assert_eq!(
+            unrelated_linsol.diagnostics[0].message,
+            "unknown .options key 'LINSOL' ignored"
+        );
+        assert_eq!(
+            unrelated_linsol.diagnostics[1].message,
+            "unknown .options key 'TYPE' ignored"
+        );
     }
 
     #[test]

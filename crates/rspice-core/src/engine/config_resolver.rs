@@ -78,6 +78,7 @@ pub struct SimulationConfigOverrides {
     pub charge_abstol: Option<Value>,
     pub residual_reltol: Option<Value>,
     pub gmin_initial: Option<Value>,
+    pub device_voltage_limiting: Option<bool>,
     pub spice_dialect: Option<SpiceDialect>,
     pub jfet_level2_model: Option<JfetLevel2Model>,
 }
@@ -126,6 +127,7 @@ pub fn resolve_simulation_config(
     let gmin_target = base.convergence_config.gmin_target;
     let mut junction_gmin_target = base.convergence_config.junction_gmin_target;
     let mut b3soi_gmin_scaling = base.b3soi_gmin_scaling;
+    let mut device_voltage_limiting = base.device_voltage_limiting;
     let mut nonlinear_continuation = base.convergence_config.nonlinear_continuation;
 
     if let Some(opts) = netlist_options {
@@ -263,6 +265,9 @@ pub fn resolve_simulation_config(
         if let Some(scaling) = opts.b3soi_gmin_scaling {
             b3soi_gmin_scaling = scaling;
         }
+        if let Some(enabled) = opts.device_voltage_limiting {
+            device_voltage_limiting = enabled;
+        }
         if let Some(rshunt) = opts.rshunt {
             resolved.rshunt = Some(rshunt);
         }
@@ -363,6 +368,9 @@ pub fn resolve_simulation_config(
     if let Some(gmin) = overrides.gmin_initial {
         gmin_initial = gmin;
     }
+    if let Some(enabled) = overrides.device_voltage_limiting {
+        device_voltage_limiting = enabled;
+    }
     if let Some(dialect) = overrides.spice_dialect {
         resolved = resolved.with_spice_dialect(dialect);
         if base.transient_lte_reference.is_none()
@@ -418,6 +426,7 @@ pub fn resolve_simulation_config(
     resolved.convergence_config.junction_gmin_target = junction_gmin_target;
     resolved.convergence_config.nonlinear_continuation = nonlinear_continuation;
     resolved.b3soi_gmin_scaling = b3soi_gmin_scaling;
+    resolved.device_voltage_limiting = device_voltage_limiting;
     if resolved.convergence_config.gmin_target > resolved.convergence_config.gmin_initial {
         resolved.convergence_config.gmin_initial = resolved.convergence_config.gmin_target;
     }
@@ -457,6 +466,32 @@ fn parse_integration_method_option(method: &str) -> Option<IntegrationMethod> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_voltage_limiting_follows_base_deck_override_precedence() {
+        let base = SimulationConfig {
+            device_voltage_limiting: true,
+            ..Default::default()
+        };
+        let options = NetlistSimulationOptions {
+            device_voltage_limiting: Some(false),
+            ..Default::default()
+        };
+        let deck =
+            resolve_simulation_config(&base, Some(&options), &SimulationConfigOverrides::default());
+        assert!(!deck.device_voltage_limiting);
+
+        let overridden = resolve_simulation_config(
+            &base,
+            Some(&options),
+            &SimulationConfigOverrides {
+                device_voltage_limiting: Some(true),
+                ..Default::default()
+            },
+        );
+        assert!(overridden.device_voltage_limiting);
+        assert!(SimulationConfig::default().device_voltage_limiting);
+    }
 
     #[test]
     fn deck_abstol_updates_current_tolerance_only() {

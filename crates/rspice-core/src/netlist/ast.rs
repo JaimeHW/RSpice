@@ -3100,6 +3100,15 @@ pub struct SimulationOptions {
     /// receives `GMIN * 1e-6` in its terminal GMIN branches. Xyce enables this
     /// by default and decks may set it to zero to request the full GMIN.
     pub b3soi_gmin_scaling: Option<bool>,
+    /// Xyce `.OPTIONS DEVICE VOLTLIM`: enable the global nonlinear-device
+    /// voltage-limiting policy. Xyce enables this by default; an explicit
+    /// zero disables device-local junction initialization and limiting.
+    pub device_voltage_limiting: Option<bool>,
+    /// Xyce `.OPTIONS LINSOL TR_PARTITION`: requested transform partitioning.
+    /// Serial Xyce 7.10 forces this value to zero, but retaining the authored
+    /// option keeps parsing lossless and prevents it from becoming a probe or
+    /// an unknown-option diagnostic.
+    pub linsol_tr_partition: Option<bool>,
     /// Xyce `.options device trytocompact=...`: compact redundant LTRA
     /// accepted-history points. Xyce also forces linear LTRA interpolation
     /// while this option is enabled.
@@ -3282,6 +3291,12 @@ impl SimulationOptions {
         }
         if other.b3soi_gmin_scaling.is_some() {
             self.b3soi_gmin_scaling = other.b3soi_gmin_scaling;
+        }
+        if other.device_voltage_limiting.is_some() {
+            self.device_voltage_limiting = other.device_voltage_limiting;
+        }
+        if other.linsol_tr_partition.is_some() {
+            self.linsol_tr_partition = other.linsol_tr_partition;
         }
         if other.device_try_to_compact.is_some() {
             self.device_try_to_compact = other.device_try_to_compact;

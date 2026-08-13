@@ -718,7 +718,10 @@ impl Engine {
         };
 
         for bjt in &circuit.bjts.devices {
-            if bjt.is_initially_off() || bjt.vbic_mna_promoted() || !bjt.uses_legacy_gummel_poon() {
+            if bjt.is_initially_off()
+                || bjt.vbic_mna_promoted()
+                || !bjt.uses_legacy_junction_limiting()
+            {
                 continue;
             }
 

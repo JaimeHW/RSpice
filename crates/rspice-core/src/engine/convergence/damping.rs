@@ -212,7 +212,7 @@ impl Engine {
                 .bjts
                 .devices
                 .iter()
-                .any(|bjt| bjt.uses_legacy_gummel_poon() || bjt.uses_vbic_dynamic_charges())
+                .any(|bjt| bjt.uses_legacy_junction_limiting() || bjt.uses_vbic_dynamic_charges())
             || circuit
                 .vdmoses
                 .devices
@@ -537,5 +537,20 @@ mod tests {
         ));
 
         assert!(Engine::junction_limiting_owns_newton_steps(&circuit));
+    }
+
+    #[test]
+    fn legacy_bjt_owns_newton_steps_only_while_voltage_limiting_is_enabled() {
+        let mut circuit = CircuitData::new();
+        let collector = circuit.get_or_create_node("c");
+        let base = circuit.get_or_create_node("b");
+        let mut bjt = crate::device::Bjt::new_npn("q1".to_string(), collector, base, 0);
+        circuit.bjts.add(bjt.clone());
+        assert!(Engine::junction_limiting_owns_newton_steps(&circuit));
+
+        bjt.set_voltage_limiting_enabled(false);
+        circuit.bjts.devices.clear();
+        circuit.bjts.add(bjt);
+        assert!(!Engine::junction_limiting_owns_newton_steps(&circuit));
     }
 }

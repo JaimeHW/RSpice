@@ -697,6 +697,24 @@ impl Bjt {
         self.xyce_compatibility = enabled;
     }
 
+    /// Apply Xyce's global nonlinear-device voltage-limiting policy to this
+    /// native BJT. Changing the policy invalidates every bias-dependent cache
+    /// because the next load may evaluate at a different junction state.
+    pub(crate) fn set_voltage_limiting_enabled(&mut self, enabled: bool) {
+        if self.voltage_limiting_enabled != enabled {
+            self.voltage_limiting_enabled = enabled;
+            self.legacy_junction_limited = false;
+            self.reduced_linearization_cache_valid.set(false);
+            self.charge_snapshot_cache_valid.set(false);
+        }
+    }
+
+    /// Whether a native legacy Gummel-Poon BJT owns Newton globalization via
+    /// its local tVcrit/pnjlim path.
+    pub(crate) fn uses_legacy_junction_limiting(&self) -> bool {
+        self.charge_model == BjtChargeModel::LegacyGummelPoon && self.voltage_limiting_enabled
+    }
+
     /// Set optional substrate node (0 for ground/unconnected).
     pub fn set_substrate_node(&mut self, substrate: NodeId) {
         self.node_substrate = substrate;

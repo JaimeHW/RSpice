@@ -241,6 +241,11 @@ pub struct SimulationConfig {
     /// Xyce BSIMSOI3 terminal-GMIN policy. When true, B3SOI devices receive
     /// `GMIN * 1e-6`; when false, they receive the full device GMIN.
     pub b3soi_gmin_scaling: bool,
+    /// Xyce global nonlinear-device voltage-limiting policy. The default is
+    /// enabled. RSpice currently implements the disabled policy for native
+    /// legacy Gummel-Poon BJTs and rejects other nonlinear device families at
+    /// circuit construction instead of silently retaining their limiters.
+    pub device_voltage_limiting: bool,
     /// Ngspice `.OPTIONS RSHUNT`: resistance of a shunt resistor from every
     /// node to ground, raising the DC nodal conductance floor to `1/RSHUNT`.
     ///
@@ -736,6 +741,7 @@ impl Default for SimulationConfig {
             matrix_pivot_tolerance: 1.0e-3,
             matrix_absolute_pivot_tolerance: 0.0,
             b3soi_gmin_scaling: true,
+            device_voltage_limiting: true,
             rshunt: None,
             transient_trtol: crate::constants::TRTOL,
             transient_lte_reltol: None,

@@ -3483,6 +3483,51 @@ mod tests {
         assert!(global_error.to_string().contains("finite"));
     }
 
+    #[test]
+    fn voltlim_false_builds_legacy_bjt_and_rejects_unimplemented_families() {
+        let mut config = SimulationConfig {
+            device_voltage_limiting: false,
+            spice_dialect: SpiceDialect::Xyce,
+            ..Default::default()
+        };
+        let bjt = Netlist::parse(
+            "legacy BJT raw limiting\nV1 c 0 1\nQ1 c c 0 QMOD\n.model QMOD NPN LEVEL=1\n.end\n",
+        )
+        .expect("legacy BJT fixture parses");
+        let circuit = Engine::new(config.clone())
+            .build_circuit(&bjt)
+            .expect("legacy GP BJT supports VOLTLIM=0");
+        let [device] = circuit.bjts.devices.as_slice() else {
+            panic!("expected one native BJT");
+        };
+        assert!(!device.uses_legacy_junction_limiting());
+
+        let diode = Netlist::parse(
+            "unsupported diode limiting\nV1 in 0 1\nD1 in 0 DMOD\n.model DMOD D\n.end\n",
+        )
+        .expect("diode fixture parses");
+        let error = Engine::new(config.clone())
+            .build_circuit(&diode)
+            .expect_err("VOLTLIM=0 must fail closed for diode limiting");
+        assert!(error.to_string().contains("DEVICE.VOLTLIM=0"));
+        assert!(error.to_string().contains("diode"));
+
+        let vbic = Netlist::parse(
+            "unsupported VBIC limiting\nV1 c 0 1\nQ1 c c 0 QMOD\n.model QMOD NPN LEVEL=11\n.end\n",
+        )
+        .expect("VBIC fixture parses");
+        let error = Engine::new(config.clone())
+            .build_circuit(&vbic)
+            .expect_err("VOLTLIM=0 must fail closed for VBIC limiting");
+        assert!(error.to_string().contains("DEVICE.VOLTLIM=0"));
+        assert!(error.to_string().contains("LEVEL=11"));
+
+        config.device_voltage_limiting = true;
+        Engine::new(config)
+            .build_circuit(&bjt)
+            .expect("default limiter policy remains buildable");
+    }
+
     /// A geometry sitting exactly on a shared bin edge takes the *lower* bin.
     ///
     /// ngspice's ranges are inclusive at both ends and it returns the first
@@ -4893,6 +4938,23 @@ impl Engine {
             &effective_model_netlist
         };
         let mut flat_elements = flattened.elements;
+        if !self.config.device_voltage_limiting {
+            for element in &flat_elements {
+                let family = match &element.kind {
+                    ElementKind::Diode { .. } => Some("diode"),
+                    ElementKind::Mosfet { .. } => Some("MOSFET/VDMOS"),
+                    ElementKind::Jfet { .. } => Some("JFET"),
+                    ElementKind::Mesfet { .. } => Some("MESFET"),
+                    _ => None,
+                };
+                if let Some(family) = family {
+                    return Err(SimulationError::Circuit(format!(
+                        "DEVICE.VOLTLIM=0 is not implemented for {family} device '{}'; only native legacy Gummel-Poon BJT limiting can currently be disabled",
+                        element.name
+                    )));
+                }
+            }
+        }
         let known_device_names = flat_elements
             .iter()
             .map(|element| element.name.to_ascii_uppercase())
@@ -5810,6 +5872,23 @@ impl Engine {
                     let bjt_level;
                     // Resolve polarity from model card when available.
                     let model_def = find_model_def(netlist, model);
+                    if !self.config.device_voltage_limiting {
+                        if let Some(device_model) = model_def {
+                            let params_map = model_params_upper_map(&device_model.params);
+                            let level = params_map.get("LEVEL").copied().unwrap_or(1.0);
+                            if resolve_bjt_type_from_model(&device_model.model_type).is_none()
+                                || !legacy_gummel_poon_bjt_level(level)
+                            {
+                                return Err(SimulationError::Circuit(format!(
+                                    "DEVICE.VOLTLIM=0 is not implemented for BJT '{}' model '{}' family '{}' {}; only native legacy Gummel-Poon BJT limiting can currently be disabled",
+                                    element.name,
+                                    model,
+                                    device_model.model_type,
+                                    bjt_level_descriptor(level)
+                                )));
+                            }
+                        }
+                    }
                     #[cfg(feature = "veriloga-builtins-base")]
                     if try_route_generated_bjt_model(
                         &mut circuit,
@@ -5821,6 +5900,7 @@ impl Engine {
                         deferred_params,
                         self.config.spice_dialect,
                         self.config.temperature,
+                        self.config.device_voltage_limiting,
                     )? {
                         continue;
                     }
@@ -5930,6 +6010,7 @@ impl Engine {
 
                     bjt = bjt.with_instance_params(instance_params);
                     bjt.set_xyce_compatibility(self.config.spice_dialect == SpiceDialect::Xyce);
+                    bjt.set_voltage_limiting_enabled(self.config.device_voltage_limiting);
                     bjt.set_temperature(self.config.temperature);
                     bjt.refresh_noise_temperature_offset(
                         self.config.temperature,
