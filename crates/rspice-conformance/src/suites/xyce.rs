@@ -2903,6 +2903,68 @@ const XYCE_BUG1116_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
     ),
 ];
 
+// ISSUE_61 is the active Xyce regression for a behavioral current expression
+// attempting to read the nonexistent MNA branch of another current-output B
+// source. Release-7.10 requires a clean error instead of the historical crash.
+const XYCE_ISSUE61_CONTRACT: &str =
+    "expected_failure_issue61_behavioral_lead_current_reference_build";
+const XYCE_ISSUE61_PATH: &str = "Netlists/Certification_Tests/ISSUE_61/issue61.cir";
+const XYCE_ISSUE61_RECORD: &str = "netlists/certification_tests/issue_61/issue61.cir";
+const XYCE_ISSUE61_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_ISSUE61_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_ISSUE61_UPSTREAM_DIAGNOSTIC: &str =
+    "Device instance B2: Problem with value for B1 in B2";
+const XYCE_ISSUE61_HISTORICAL_RECORD_COUNT: usize = 6;
+const XYCE_ISSUE61_HISTORICAL_RECORD_BYTES: usize = 1_427;
+const XYCE_ISSUE61_HISTORICAL_RECORDS_SHA256: &str =
+    "c778d83c506695fce669b54a041900ecd612ada666b779744daf59613b38c786";
+const XYCE_ISSUE61_HISTORICAL_RECORDS_BLAKE3: &str =
+    "4f09ca56e3ef3dc08c4e1a81bcd1da102f7aac7905e97d7cc0ea5781cfd66e4f";
+const XYCE_ISSUE61_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 6] = [
+    (
+        "Netlists/Certification_Tests/ISSUE_61/CMakeLists.txt",
+        1_173,
+        "a365a140d5dfc6e0be56f4bdcf8e5b1b5336445be345ddcf1378aacb4c7ea040",
+        "255592e5c1c2ca5ba104815776be904c0c596ac97727694705cd6387393c76a5",
+    ),
+    (
+        "Netlists/Certification_Tests/ISSUE_61/Manifest.txt",
+        32,
+        "7d673910c3536ef6710395dd10720d472fd9b3b9bfdf5f84dca099d527f90841",
+        "bd89f5857652ce7610d23497f7cbef17fdb24504e15949ae2814b63459510910",
+    ),
+    (
+        XYCE_ISSUE61_PATH,
+        127,
+        "b47aa5c601fe34acc7750ff468e3e71c5c65949f1488691fc182c0ef0299d502",
+        "91e85ed903e6ba2cc5e0fbaee08ddb074357c11f6cbd5c689bdff4b7226becfe",
+    ),
+    (
+        "Netlists/Certification_Tests/ISSUE_61/issue61.cir.sh",
+        1_462,
+        "3703fba38de711ad606ee4b7b28dadc123e2148247519dbdd4c19c50ec41db6b",
+        "c760f796c158381dd18004a52feb76290b09f02b720b9f0debeab3cc32379776",
+    ),
+    (
+        "Netlists/Certification_Tests/ISSUE_61/tags",
+        50,
+        "eb1565476d986a5b5fea167d0d8f24d9bcb644faf7ebc7f2627d949f04818ad2",
+        "41b6b8d29add052502d5727e57b2cbf99f2089d49358a995363eb47ea29b8a8e",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_ISSUE61_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 1] = [(
+    "issue61.cir",
+    127,
+    "b47aa5c601fe34acc7750ff468e3e71c5c65949f1488691fc182c0ef0299d502",
+    "91e85ed903e6ba2cc5e0fbaee08ddb074357c11f6cbd5c689bdff4b7226becfe",
+)];
+
 // BUG_784 is an archived error-exit regression: Release-7.10 retains its
 // wrapper and exact ordered diagnostic, while `tags=exclude` deliberately
 // leaves its generated CMake file without an active CTest registration.
@@ -11070,6 +11132,7 @@ mod contracts_bug864;
 mod contracts_dc;
 mod contracts_diode_analytic;
 mod contracts_frequency;
+mod contracts_issue61;
 mod contracts_sources;
 mod contracts_splines;
 mod contracts_transient;

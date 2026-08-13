@@ -9599,6 +9599,30 @@ fn test_xyce_bug1116_missing_diode_model_error_oracle() {
 }
 
 #[test]
+fn test_xyce_issue61_behavioral_lead_current_error_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/ISSUE_61/issue61.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "ISSUE61 must retain its active wrapper ownership"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported && !result.upstream_excluded,
+        "ISSUE61 should reproduce its typed behavioral-reference failure, got {result:?}"
+    );
+    assert_eq!(
+        result.contract,
+        "expected_failure_issue61_behavioral_lead_current_reference_build"
+    );
+    assert_eq!(result.upstream_exclusion_source, None);
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_bug784_archived_duplicate_subcircuit_port_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

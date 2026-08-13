@@ -144,6 +144,15 @@ and device family. A repaired counterfactual is parsed to prove that the
 surrounding model, transient analysis, and output request remain meaningful;
 no numerical gold or exclusion row is introduced.
 
+Certification ISSUE 61 preserves the active Release-7.10 regression for a
+behavioral current source reading `I(B1)` when `B1` is itself a current-output
+B source and therefore owns no MNA branch-current solution variable. RSpice
+distinguishes that known non-branch device from an absent instance, reports a
+typed owner/dependency/reason error through its public simulation interfaces,
+and verifies the repaired voltage-output counterfactual builds. This is a
+bounded crash-prevention error oracle; no numerical gold or exclusion row is
+introduced.
+
 The serial Certification BUG 307 A/B wrapper is reconstructed as an exact
 subcircuit-model-scope relation. RSpice runs the collision owner followed by
 the active-only control, proves that both select the qualified

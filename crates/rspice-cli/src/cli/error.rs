@@ -23,6 +23,14 @@ pub struct ErrorDetails {
     pub requested: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canonical_instance_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub missing_dependency: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<&'static str>,
 }
 
 impl ErrorDetails {
@@ -36,6 +44,10 @@ impl ErrorDetails {
             resource: None,
             requested: None,
             limit: None,
+            instance_name: None,
+            canonical_instance_name: None,
+            missing_dependency: None,
+            reason: None,
         }
     }
 }
@@ -224,6 +236,12 @@ impl CliError {
                     details.requested = Some(limit.requested);
                     details.limit = Some(limit.limit);
                 }
+                if let rspice_core::SimulationError::BehavioralReference(error) = source {
+                    details.instance_name = Some(error.owner_name.clone());
+                    details.canonical_instance_name = Some(error.canonical_owner_name.clone());
+                    details.missing_dependency = Some(error.canonical_dependency_name.clone());
+                    details.reason = Some(error.reason.as_str());
+                }
                 details
             }
             Self::SimulationError { analysis, .. } => {
@@ -403,5 +421,25 @@ mod tests {
         assert_eq!(details.category, "convergence");
         assert_eq!(details.iterations, Some(31));
         assert!(!details.retryable);
+    }
+
+    #[test]
+    fn behavioral_reference_errors_preserve_device_identity() {
+        let error = CliError::from(rspice_core::SimulationError::BehavioralReference(Box::new(
+            rspice_core::device::BehavioralReferenceError {
+                owner_name: "b2".to_string(),
+                canonical_owner_name: "B2".to_string(),
+                dependency_name: "b1".to_string(),
+                canonical_dependency_name: "B1".to_string(),
+                reason:
+                    rspice_core::device::BehavioralReferenceReason::LeadCurrentNotSolutionVariable,
+            },
+        )));
+        let details = error.details();
+        assert_eq!(details.code, "behavioral_reference_error");
+        assert_eq!(details.instance_name.as_deref(), Some("b2"));
+        assert_eq!(details.canonical_instance_name.as_deref(), Some("B2"));
+        assert_eq!(details.missing_dependency.as_deref(), Some("B1"));
+        assert_eq!(details.reason, Some("lead_current_not_solution_variable"));
     }
 }

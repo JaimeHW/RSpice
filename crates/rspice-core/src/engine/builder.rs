@@ -18,7 +18,7 @@ use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 use crate::{CircuitData, Netlist};
 #[cfg(feature = "veriloga")]
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 #[cfg(feature = "veriloga")]
 use std::io::Read;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -3870,6 +3870,59 @@ mod tests {
         );
     }
 
+    fn build_xyce_behavioral_reference_fixture(
+        controlling_source: &str,
+        dependency: &str,
+    ) -> Result<CircuitData, SimulationError> {
+        let source = format!(
+            "behavioral branch reference\n{controlling_source}\nR1 1 0 1\nB2 2 0 I={{I({dependency})*20}}\nR2 2 0 1\n.END\n"
+        );
+        let netlist = Netlist::parse_with_options(
+            &source,
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .map_err(|error| SimulationError::Netlist(error.to_string()))?;
+        Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+            .build_circuit(&netlist)
+    }
+
+    #[test]
+    fn behavioral_lead_current_rejects_known_device_without_branch_variable() {
+        let error = build_xyce_behavioral_reference_fixture("B1 1 0 I={1m}", "b1")
+            .expect_err("a current-output B source has no branch-current solution variable");
+        let SimulationError::BehavioralReference(error) = error else {
+            panic!("expected typed behavioral-reference failure, got {error:?}");
+        };
+        assert_eq!(error.owner_name, "B2");
+        assert_eq!(error.canonical_owner_name, "B2");
+        assert_eq!(error.dependency_name, "b1");
+        assert_eq!(error.canonical_dependency_name, "B1");
+        assert_eq!(
+            error.reason,
+            crate::device::BehavioralReferenceReason::LeadCurrentNotSolutionVariable
+        );
+    }
+
+    #[test]
+    fn behavioral_branch_reference_distinguishes_valid_and_missing_devices() {
+        build_xyce_behavioral_reference_fixture("B1 1 0 V={1m}", "b1")
+            .expect("a voltage-output B source owns an MNA branch variable");
+
+        let error = build_xyce_behavioral_reference_fixture("B1 1 0 I={1m}", "missing")
+            .expect_err("an absent behavioral dependency must fail");
+        let SimulationError::BehavioralReference(error) = error else {
+            panic!("expected typed behavioral-reference failure, got {error:?}");
+        };
+        assert_eq!(error.canonical_dependency_name, "MISSING");
+        assert_eq!(
+            error.reason,
+            crate::device::BehavioralReferenceReason::UnknownDevice
+        );
+    }
+
     #[test]
     fn generic_switch_retains_scoped_runtime_params_and_resolved_context() {
         let netlist = Netlist::parse_with_options(
@@ -4840,6 +4893,10 @@ impl Engine {
             &effective_model_netlist
         };
         let mut flat_elements = flattened.elements;
+        let known_device_names = flat_elements
+            .iter()
+            .map(|element| element.name.to_ascii_uppercase())
+            .collect::<HashSet<_>>();
         if netlist.options.topology_supernode.unwrap_or(false) {
             let reduction = reduce_supernode_topology(
                 flat_elements,
@@ -8297,8 +8354,8 @@ impl Engine {
         // Resolve behavioral source expression references after final node IDs
         // are stabilized (including any automatic ground remap).
         circuit
-            .bind_behavioral_references()
-            .map_err(|e| SimulationError::Circuit(e.to_string()))?;
+            .bind_behavioral_references(&known_device_names)
+            .map_err(SimulationError::from)?;
 
         // Resolve all pending control element references after final node count
         // is established (required for current-controlled switch branch indexing).

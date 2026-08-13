@@ -15,12 +15,74 @@ use crate::expr::{
 };
 use crate::solver::StaticMatrix;
 use std::path::Path;
+use thiserror::Error;
 
 const DERIVATIVE_REL_STEP: Value = 1e-6;
 const DERIVATIVE_ABS_STEP: Value = 1e-9;
 const EXPR_ZERO_TOLERANCE: Value = 1.0e-12;
 const XYCE_ATANH_EPSILON: Value = 1.0e-12;
 const XYCE_TANH_SATURATION_THRESHOLD: Value = 20.0;
+
+/// Result of resolving an `I(device)` operand in a behavioral expression.
+///
+/// A device can exist without owning an MNA branch-current solution variable.
+/// Keeping that state distinct from an absent device prevents invalid lead
+/// currents from being misreported as misspelled instance names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BehavioralBranchResolution {
+    Branch(usize),
+    DeviceWithoutBranch,
+    MissingDevice,
+}
+
+/// Stable reason why a behavioral expression reference could not be bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BehavioralReferenceReason {
+    LeadCurrentNotSolutionVariable,
+    UnknownDevice,
+    UnknownNode,
+}
+
+impl BehavioralReferenceReason {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LeadCurrentNotSolutionVariable => "lead_current_not_solution_variable",
+            Self::UnknownDevice => "unknown_device",
+            Self::UnknownNode => "unknown_node",
+        }
+    }
+}
+
+impl std::fmt::Display for BehavioralReferenceReason {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// A node or `I(device)` operand in a behavioral expression could not be bound.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error(
+    "Device instance {canonical_owner_name}: Problem with value for {canonical_dependency_name} in {canonical_owner_name} ({reason})"
+)]
+pub struct BehavioralReferenceError {
+    pub owner_name: String,
+    pub canonical_owner_name: String,
+    pub dependency_name: String,
+    pub canonical_dependency_name: String,
+    pub reason: BehavioralReferenceReason,
+}
+
+impl BehavioralReferenceError {
+    fn new(owner_name: &str, dependency_name: &str, reason: BehavioralReferenceReason) -> Self {
+        Self {
+            owner_name: owner_name.to_string(),
+            canonical_owner_name: owner_name.to_ascii_uppercase(),
+            dependency_name: dependency_name.to_string(),
+            canonical_dependency_name: dependency_name.to_ascii_uppercase(),
+            reason,
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 enum DerivativeTarget {
@@ -173,10 +235,10 @@ impl BehavioralVoltageSource {
         &mut self,
         resolve_node: FN,
         resolve_branch: FB,
-    ) -> Result<(), String>
+    ) -> Result<(), BehavioralReferenceError>
     where
         FN: Fn(&str) -> Option<usize>,
-        FB: Fn(&str) -> Option<usize>,
+        FB: Fn(&str) -> BehavioralBranchResolution,
     {
         self.invalidate_cached_exact_constraint();
         self.node_bindings = vec![None; self.program.node_map.len()];
@@ -187,9 +249,10 @@ impl BehavioralVoltageSource {
                 resolve_node(name)
             }
             .ok_or_else(|| {
-                format!(
-                    "Behavioral source '{}' references unknown node '{}'",
-                    self.name, name
+                BehavioralReferenceError::new(
+                    &self.name,
+                    name,
+                    BehavioralReferenceReason::UnknownNode,
                 )
             })?;
             self.node_bindings[local_idx] = resolved.checked_sub(1);
@@ -197,12 +260,23 @@ impl BehavioralVoltageSource {
 
         self.branch_bindings = vec![None; self.program.branch_map.len()];
         for (name, &local_idx) in &self.program.branch_map {
-            let resolved = resolve_branch(name).ok_or_else(|| {
-                format!(
-                    "Behavioral source '{}' references unknown branch source '{}'",
-                    self.name, name
-                )
-            })?;
+            let resolved = match resolve_branch(name) {
+                BehavioralBranchResolution::Branch(index) => index,
+                BehavioralBranchResolution::DeviceWithoutBranch => {
+                    return Err(BehavioralReferenceError::new(
+                        &self.name,
+                        name,
+                        BehavioralReferenceReason::LeadCurrentNotSolutionVariable,
+                    ));
+                }
+                BehavioralBranchResolution::MissingDevice => {
+                    return Err(BehavioralReferenceError::new(
+                        &self.name,
+                        name,
+                        BehavioralReferenceReason::UnknownDevice,
+                    ));
+                }
+            };
             self.branch_bindings[local_idx] = Some(resolved);
         }
 
@@ -1844,10 +1918,10 @@ impl BehavioralCurrentSource {
         &mut self,
         resolve_node: FN,
         resolve_branch: FB,
-    ) -> Result<(), String>
+    ) -> Result<(), BehavioralReferenceError>
     where
         FN: Fn(&str) -> Option<usize>,
-        FB: Fn(&str) -> Option<usize>,
+        FB: Fn(&str) -> BehavioralBranchResolution,
     {
         self.node_bindings = vec![None; self.program.node_map.len()];
         for (name, &local_idx) in &self.program.node_map {
@@ -1857,9 +1931,10 @@ impl BehavioralCurrentSource {
                 resolve_node(name)
             }
             .ok_or_else(|| {
-                format!(
-                    "Behavioral source '{}' references unknown node '{}'",
-                    self.name, name
+                BehavioralReferenceError::new(
+                    &self.name,
+                    name,
+                    BehavioralReferenceReason::UnknownNode,
                 )
             })?;
             self.node_bindings[local_idx] = resolved.checked_sub(1);
@@ -1867,12 +1942,23 @@ impl BehavioralCurrentSource {
 
         self.branch_bindings = vec![None; self.program.branch_map.len()];
         for (name, &local_idx) in &self.program.branch_map {
-            let resolved = resolve_branch(name).ok_or_else(|| {
-                format!(
-                    "Behavioral source '{}' references unknown branch source '{}'",
-                    self.name, name
-                )
-            })?;
+            let resolved = match resolve_branch(name) {
+                BehavioralBranchResolution::Branch(index) => index,
+                BehavioralBranchResolution::DeviceWithoutBranch => {
+                    return Err(BehavioralReferenceError::new(
+                        &self.name,
+                        name,
+                        BehavioralReferenceReason::LeadCurrentNotSolutionVariable,
+                    ));
+                }
+                BehavioralBranchResolution::MissingDevice => {
+                    return Err(BehavioralReferenceError::new(
+                        &self.name,
+                        name,
+                        BehavioralReferenceReason::UnknownDevice,
+                    ));
+                }
+            };
             self.branch_bindings[local_idx] = Some(resolved);
         }
 
@@ -2249,10 +2335,10 @@ impl BehavioralSources {
         &mut self,
         resolve_node: FN,
         resolve_branch: FB,
-    ) -> Result<(), String>
+    ) -> Result<(), BehavioralReferenceError>
     where
         FN: Fn(&str) -> Option<usize> + Copy,
-        FB: Fn(&str) -> Option<usize> + Copy,
+        FB: Fn(&str) -> BehavioralBranchResolution + Copy,
     {
         for source in &mut self.voltage_sources {
             source.bind_references(resolve_node, resolve_branch)?;
@@ -2361,7 +2447,10 @@ mod tests {
             BehavioralVoltageSource::new("Bdependent".to_string(), 1, 0, 1, "v(ctrl)+1")
                 .expect("solution-dependent behavioral voltage source parses");
         dependent
-            .bind_references(|name| (name == "ctrl").then_some(1), |_| None)
+            .bind_references(
+                |name| (name == "ctrl").then_some(1),
+                |_| BehavioralBranchResolution::MissingDevice,
+            )
             .expect("solution-dependent source binds");
         dependent.linearize_expression(&[2.0], time);
 
@@ -2429,7 +2518,10 @@ mod tests {
         let mut invariant = BehavioralCurrentSource::new("Binvariant".to_string(), 1, 0, "2*v(n)")
             .expect("invariant source parses");
         invariant
-            .bind_references(|name| (name == "n").then_some(1), |_| None)
+            .bind_references(
+                |name| (name == "n").then_some(1),
+                |_| BehavioralBranchResolution::MissingDevice,
+            )
             .expect("invariant source binds");
         invariant.linearize_at(&[3.0]);
         let initial_partials = invariant.linearized_partials().collect::<Vec<_>>();
@@ -2444,7 +2536,10 @@ mod tests {
             BehavioralCurrentSource::new("Bdependent".to_string(), 1, 0, "freq*v(n)")
                 .expect("frequency-dependent source parses");
         dependent
-            .bind_references(|name| (name == "n").then_some(1), |_| None)
+            .bind_references(
+                |name| (name == "n").then_some(1),
+                |_| BehavioralBranchResolution::MissingDevice,
+            )
             .expect("frequency-dependent source binds");
         dependent.linearize_at(&[3.0]);
         dependent.linearize_at_frequency(&[3.0], 100.0);
@@ -2607,7 +2702,10 @@ mod tests {
         .expect("inline Akima source resolves");
         akima.set_expression_dialect(ExpressionDialect::Xyce);
         akima
-            .bind_references(|name| name.eq_ignore_ascii_case("a").then_some(1), |_| None)
+            .bind_references(
+                |name| name.eq_ignore_ascii_case("a").then_some(1),
+                |_| BehavioralBranchResolution::MissingDevice,
+            )
             .expect("Akima input binds");
         akima.linearize_at(&[0.3]);
         let (_, derivative) = akima
@@ -2640,7 +2738,10 @@ mod tests {
         .expect("inline table source resolves");
         table.set_expression_dialect(ExpressionDialect::Xyce);
         table
-            .bind_references(|name| name.eq_ignore_ascii_case("a").then_some(1), |_| None)
+            .bind_references(
+                |name| name.eq_ignore_ascii_case("a").then_some(1),
+                |_| BehavioralBranchResolution::MissingDevice,
+            )
             .expect("table input binds");
         table.linearize_at(&[0.1]);
         let (_, derivative) = table
@@ -2670,7 +2771,10 @@ mod tests {
         .expect("barycentric source resolves");
         source.set_expression_dialect(ExpressionDialect::Xyce);
         source
-            .bind_references(|name| name.eq_ignore_ascii_case("a").then_some(1), |_| None)
+            .bind_references(
+                |name| name.eq_ignore_ascii_case("a").then_some(1),
+                |_| BehavioralBranchResolution::MissingDevice,
+            )
             .expect("inactive voltage reference binds");
 
         source.linearize_at(&[7.0]);

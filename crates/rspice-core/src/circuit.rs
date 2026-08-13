@@ -158,6 +158,9 @@ pub enum CircuitError {
     #[error("Invalid component: {0}")]
     InvalidComponent(String),
 
+    #[error(transparent)]
+    BehavioralReference(Box<crate::device::BehavioralReferenceError>),
+
     #[error("No ground node in circuit")]
     NoGround,
 
@@ -166,6 +169,12 @@ pub enum CircuitError {
 
     #[error("Singular matrix - circuit may have issues")]
     SingularMatrix,
+}
+
+impl From<crate::device::BehavioralReferenceError> for CircuitError {
+    fn from(error: crate::device::BehavioralReferenceError) -> Self {
+        Self::BehavioralReference(Box::new(error))
+    }
 }
 
 /// Pre-computed index into the matrix values array for O(1) stamping

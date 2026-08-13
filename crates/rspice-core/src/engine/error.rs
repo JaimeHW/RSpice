@@ -18,6 +18,8 @@ pub enum SimulationErrorCode {
     ResourceLimit,
     /// Circuit construction or device evaluation failed.
     CircuitError,
+    /// A behavioral expression names an invalid node or branch-current operand.
+    BehavioralReferenceError,
     /// The numerical solver failed.
     SolverError,
     /// A netlist-dependent simulation operation failed.
@@ -35,6 +37,7 @@ impl SimulationErrorCode {
             Self::InvalidConfiguration => "invalid_configuration",
             Self::ResourceLimit => "resource_limit",
             Self::CircuitError => "circuit_error",
+            Self::BehavioralReferenceError => "behavioral_reference_error",
             Self::SolverError => "solver_error",
             Self::NetlistError => "netlist_error",
             Self::ConvergenceError => "convergence_error",
@@ -110,6 +113,9 @@ pub enum SimulationError {
     #[error("Circuit error: {0}")]
     Circuit(String),
 
+    #[error(transparent)]
+    BehavioralReference(Box<crate::device::BehavioralReferenceError>),
+
     #[error("Solver error: {0}")]
     Solver(#[from] crate::solver::SolverError),
 
@@ -125,7 +131,12 @@ pub enum SimulationError {
 
 impl From<crate::circuit::CircuitError> for SimulationError {
     fn from(error: crate::circuit::CircuitError) -> Self {
-        Self::Circuit(error.to_string())
+        match error {
+            crate::circuit::CircuitError::BehavioralReference(error) => {
+                Self::BehavioralReference(error)
+            }
+            error => Self::Circuit(error.to_string()),
+        }
     }
 }
 
@@ -162,6 +173,11 @@ impl SimulationError {
             ),
             Self::Circuit(_) => (
                 SimulationErrorCode::CircuitError,
+                SimulationErrorCategory::Simulation,
+                false,
+            ),
+            Self::BehavioralReference(_) => (
+                SimulationErrorCode::BehavioralReferenceError,
                 SimulationErrorCategory::Simulation,
                 false,
             ),

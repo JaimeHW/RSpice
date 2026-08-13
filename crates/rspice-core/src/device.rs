@@ -52,7 +52,10 @@ pub use passive::{
 pub use semiconductor::{Bjt, BjtType, Diode, DiodeLevel};
 
 // Re-export from root-level modules
-pub use behavioral::{BehavioralCurrentSource, BehavioralSources, BehavioralVoltageSource};
+pub use behavioral::{
+    BehavioralBranchResolution, BehavioralCurrentSource, BehavioralReferenceError,
+    BehavioralReferenceReason, BehavioralSources, BehavioralVoltageSource,
+};
 pub use controlled::{Cccs, Ccvs, Vccs, Vcvs};
 pub use coupled_transmission_line::CoupledTransmissionLine;
 pub use memristor_pem::{

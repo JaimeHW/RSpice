@@ -206,6 +206,10 @@ class SimulationError(RSpiceError):
     resource: str | None
     requested: int | None
     limit: int | None
+    instance_name: str | None
+    canonical_instance_name: str | None
+    missing_dependency: str | None
+    reason: str | None
 
 class ConvergenceError(SimulationError):
     """Raised when Newton-Raphson iteration fails to converge."""

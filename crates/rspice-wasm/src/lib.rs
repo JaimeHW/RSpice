@@ -393,6 +393,12 @@ impl WasmError {
         structured.category = descriptor.category.as_str().to_string();
         structured.retryable = descriptor.retryable;
         structured.iterations = descriptor.iterations;
+        if let rspice_core::engine::SimulationError::BehavioralReference(error) = &error {
+            structured.instance_name = Some(error.owner_name.clone());
+            structured.canonical_instance_name = Some(error.canonical_owner_name.clone());
+            structured.missing_dependency = Some(error.canonical_dependency_name.clone());
+            structured.reason = Some(error.reason.as_str().to_string());
+        }
         structured
     }
 
@@ -1302,6 +1308,26 @@ mod tests {
         assert_eq!(convergence.code, "convergence_error");
         assert_eq!(convergence.iterations, Some(37));
         assert!(!convergence.retryable);
+
+        let behavioral = WasmError::from_simulation_error(
+            rspice_core::engine::SimulationError::BehavioralReference(Box::new(
+                rspice_core::device::BehavioralReferenceError {
+                    owner_name: "b2".to_string(),
+                    canonical_owner_name: "B2".to_string(),
+                    dependency_name: "b1".to_string(),
+                    canonical_dependency_name: "B1".to_string(),
+                    reason: rspice_core::device::BehavioralReferenceReason::LeadCurrentNotSolutionVariable,
+                },
+            )),
+        );
+        assert_eq!(behavioral.code, "behavioral_reference_error");
+        assert_eq!(behavioral.instance_name.as_deref(), Some("b2"));
+        assert_eq!(behavioral.canonical_instance_name.as_deref(), Some("B2"));
+        assert_eq!(behavioral.missing_dependency.as_deref(), Some("B1"));
+        assert_eq!(
+            behavioral.reason.as_deref(),
+            Some("lead_current_not_solution_variable")
+        );
     }
 
     #[test]

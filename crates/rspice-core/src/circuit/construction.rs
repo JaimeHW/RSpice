@@ -177,7 +177,10 @@ impl CircuitData {
     }
 
     /// Resolve behavioral expression references against current node/branch maps.
-    pub fn bind_behavioral_references(&mut self) -> Result<(), CircuitError> {
+    pub fn bind_behavioral_references(
+        &mut self,
+        known_device_names: &HashSet<String>,
+    ) -> Result<(), CircuitError> {
         let node_lookup = self.node_map.clone();
         let branch_lookup = self.branch_names.clone();
         let num_nodes = self.num_nodes;
@@ -196,14 +199,20 @@ impl CircuitData {
                         })
                 },
                 |name: &str| {
-                    branch_lookup
+                    if let Some(ordinal) = branch_lookup
                         .get(name)
                         .or_else(|| branch_lookup.get(&name.to_uppercase()))
                         .copied()
-                        .map(|ordinal| num_nodes + ordinal - 1)
+                    {
+                        crate::device::BehavioralBranchResolution::Branch(num_nodes + ordinal - 1)
+                    } else if known_device_names.contains(&name.to_ascii_uppercase()) {
+                        crate::device::BehavioralBranchResolution::DeviceWithoutBranch
+                    } else {
+                        crate::device::BehavioralBranchResolution::MissingDevice
+                    }
                 },
             )
-            .map_err(CircuitError::InvalidComponent)?;
+            .map_err(CircuitError::from)?;
         self.capacitors
             .bind_value_expression_references(
                 |name: &str| {
