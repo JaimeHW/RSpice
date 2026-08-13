@@ -213,6 +213,16 @@ with GOOD and TEST exchanged. Admission is limited to the exact three
 legacy-diode cards and their retained source/wrapper/generator provenance, so
 it does not broaden the ordinary absolute transient diode envelope.
 
+The two `BJT_ANALYTIC` ramp wrappers and the `NMOS_ANALYTIC` Level-1 wrapper
+likewise retain no checked-in waveform. RSpice reconstructs their
+Release-7.10 Perl generators from the candidate's default-PRN-rounded time
+grid, then preserves the historical generated-GOOD/simulation-TEST
+`xyce_verify` direction. Admission is limited to the exact retained Level-1
+device cards, topology, numerical options, and wrapper/generator provenance.
+The BJT contracts also execute the authored `DEVICE VOLTLIM=0` policy in the
+native Gummel-Poon model; unsupported nonlinear families fail closed under
+that global option rather than silently using voltage limiting.
+
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
 and verifier identities. The PARAMS1, PARSER nakedAlgebra, and Certification

@@ -3800,6 +3800,11 @@ impl XyceTestRunner {
             && elements.iter().any(|element| {
                 Self::netlist_element_is_diode_analytic_oracle_candidate(netlist, element)
             });
+        let has_qualified_legacy_device_analytic = purpose
+            == XyceStaticTranPlanPurpose::LegacyDeviceAnalyticOracle
+            && elements.iter().any(|element| {
+                Self::netlist_element_is_legacy_device_analytic_oracle_candidate(netlist, element)
+            });
         let has_qualified_cmc_diode = purpose.validates_absolute_device_contract()
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_generated_cmc_diode(netlist, element)
@@ -3831,6 +3836,7 @@ impl XyceTestRunner {
             || has_qualified_minimum_diode
             || has_qualified_legacy_diode
             || has_qualified_diode_analytic
+            || has_qualified_legacy_device_analytic
             || has_qualified_cmc_diode
             || has_qualified_juncap_diode
             || has_qualified_level9_bsim3
@@ -3840,6 +3846,8 @@ impl XyceTestRunner {
             && !has_qualified_bsim3_capacitor
             && !has_qualified_generated_bsimsoi461
             && purpose != XyceStaticTranPlanPurpose::DiodeAnalyticOracle
+            && !(purpose == XyceStaticTranPlanPurpose::LegacyDeviceAnalyticOracle
+                && has_qualified_legacy_device_analytic)
             && !Self::native_transient_uses_standard_startup(netlist)
         {
             return Err(
@@ -4145,6 +4153,7 @@ impl XyceTestRunner {
                         XyceStaticTranPlanPurpose::AbsoluteOracle
                         | XyceStaticTranPlanPurpose::AnalyticOracle
                         | XyceStaticTranPlanPurpose::DiodeAnalyticOracle
+                        | XyceStaticTranPlanPurpose::LegacyDeviceAnalyticOracle
                         | XyceStaticTranPlanPurpose::PassiveTemperatureAnalyticOracle => format!(
                             "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN and extended Level-1 NPN IRB/RBM, EKV26, generated BSIM-SOI 4.6.1 LEVEL=70, validated native VDMOS LEVEL=18 integrated-RMS, bounded native classic MOSFET LEVEL=1/2/3 models, exact IS-only, validated legacy, Level=2 TBV, and validated MINRES/MINCAP legacy-diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
                             element.name

@@ -3333,6 +3333,221 @@ impl XyceDiodeAnalyticKind {
     }
 }
 
+// BJT_ANALYTIC and NMOS_ANALYTIC are active Release-7.10 generated-gold
+// families. Their wrappers evaluate the corresponding legacy compact-model
+// law on the simulator's own default-PRN transient grid before invoking the
+// shared xyce_verify comparator.
+const XYCE_BJT_ANALYTIC_UPSTREAM_REGRESSION_COMMIT: &str =
+    "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BJT_ANALYTIC_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BJT_ANALYTIC_HISTORICAL_RECORD_COUNT: usize = 10;
+const XYCE_BJT_ANALYTIC_HISTORICAL_RECORD_BYTES: usize = 2_271;
+const XYCE_BJT_ANALYTIC_HISTORICAL_RECORDS_SHA256: &str =
+    "28b5f42e510263b778fdc028b4bade56321b399517fb7bed7f5a19af4042ccb2";
+const XYCE_BJT_ANALYTIC_HISTORICAL_RECORDS_BLAKE3: &str =
+    "e6a987bf12645161566c4771e7fb7a5ef13f1c5b55e0b5caa7f55ebc75d9f6bd";
+const XYCE_BJT_ANALYTIC_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 10] = [
+    (
+        "Netlists/BJT_ANALYTIC/CMakeLists.txt",
+        3_425,
+        "99eb326fa8b22ce6722049a3b2b55dcd0dcb030b6b9b52f433e00cd25db49204",
+        "bfcea7ff71d2deffdafa6a61701530b1e5b97b3ac5d0f6ea3cf6cd4f379c852a",
+    ),
+    (
+        "Netlists/BJT_ANALYTIC/Manifest.txt",
+        113,
+        "c1a6f817863a87284722a98b4922ae0e281c7adf6efb04a8e3e7484fbd678683",
+        "b734fd40ccc58c44d8b63f1e1f40386e51408bbdde09556a70fa26e698c805cd",
+    ),
+    (
+        "Netlists/BJT_ANALYTIC/ramp_test1.cir",
+        2_906,
+        "f5bb4d0e330f0bbb2f5683a870e1312c1de364184dce6aafb147d87e940bf19e",
+        "d4ee18831b6631da058ca151909d5b6937a1e28ec302e938bc6013fedbf698a6",
+    ),
+    (
+        "Netlists/BJT_ANALYTIC/ramp_test1.cir.gs.pl",
+        711,
+        "8f8895cbe88c726e9bb3ced49de5d3c447879d469dbe1e1fa27178b6c11f902a",
+        "6b21abad73ebaf159db30d086d2ea1c222cdd9446c250777fe04645f608e93af",
+    ),
+    (
+        "Netlists/BJT_ANALYTIC/ramp_test1.cir.sh",
+        1_278,
+        "f53275edade218e6c66cfe4e05d59d8961ae51aa24d0921437d1f8ae61a54c83",
+        "1186e29aaef87324169947df094be3631c4de64e3baa35cbd03c89b738618f51",
+    ),
+    (
+        "Netlists/BJT_ANALYTIC/ramp_test2.cir",
+        2_788,
+        "4117823840f391e2e11481991d86efd58583043bbfa1e93f20808d8d77f89ef2",
+        "e58df196d817bc4118193419caf8d91d58e24a80eb0bbe608990407b0eca84f9",
+    ),
+    (
+        "Netlists/BJT_ANALYTIC/ramp_test2.cir.gs.pl",
+        537,
+        "d5f254b62ec976878da825af831ebe2f8811aecdc4592202c0f71bbe2e7f390f",
+        "e485c5c8c14d72375760566dc861252a72e306b209cf78f8c135c42e11422725",
+    ),
+    (
+        "Netlists/BJT_ANALYTIC/ramp_test2.cir.sh",
+        1_278,
+        "de426dba993333412707c9c1bd3e5d1f697eabbaaf368675d5a32558f7ab960a",
+        "d321b54657c8f9ecddb9c37c6c5e313921dbe2675ea882d1033624bfe55ff4db",
+    ),
+    (
+        "Netlists/BJT_ANALYTIC/tags",
+        68,
+        "c248a3ff42cc089d9e4cf2412af952909fda19e3f6dc17c1e75f185fc6b2ef9f",
+        "a836eccaa84bdef1d96d6a8fc6a751b4113fa2ab088da0c662c63dee2faac9b7",
+    ),
+    (
+        "TestScripts/xyce_verify.pl",
+        59_566,
+        "6e5f84b1646b30d0e12879848d7653584b39472d640a14916ae8fda6e1df12b3",
+        "5eadb6dab06ed3091ea114146bd4a574de83784f87be9843ad7b721b0a793665",
+    ),
+];
+const XYCE_BJT_ANALYTIC_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
+    (
+        "ramp_test1.cir",
+        2_906,
+        "f5bb4d0e330f0bbb2f5683a870e1312c1de364184dce6aafb147d87e940bf19e",
+        "d4ee18831b6631da058ca151909d5b6937a1e28ec302e938bc6013fedbf698a6",
+    ),
+    (
+        "ramp_test2.cir",
+        2_788,
+        "4117823840f391e2e11481991d86efd58583043bbfa1e93f20808d8d77f89ef2",
+        "e58df196d817bc4118193419caf8d91d58e24a80eb0bbe608990407b0eca84f9",
+    ),
+];
+
+const XYCE_NMOS_ANALYTIC_UPSTREAM_REGRESSION_COMMIT: &str =
+    "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_NMOS_ANALYTIC_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_NMOS_ANALYTIC_HISTORICAL_RECORD_COUNT: usize = 7;
+const XYCE_NMOS_ANALYTIC_HISTORICAL_RECORD_BYTES: usize = 1_593;
+const XYCE_NMOS_ANALYTIC_HISTORICAL_RECORDS_SHA256: &str =
+    "d366c275ef0b7131c5d7342f35a999ce4316e28eacf42189f82c34df760be8bf";
+const XYCE_NMOS_ANALYTIC_HISTORICAL_RECORDS_BLAKE3: &str =
+    "2e4b198e215c293d06d683c56bc6c8508aa480e44e0f5db6984a2660c267cb6c";
+const XYCE_NMOS_ANALYTIC_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
+    (
+        "Netlists/NMOS_ANALYTIC/CMakeLists.txt",
+        1_887,
+        "4ed6b055fbda88059dbfdaca044ab84a75dbb3992c65a836470a836ff144d889",
+        "db4f0e1f9b040225de65511958296b8c185e89e39785d36cd9ee67f12628f311",
+    ),
+    (
+        "Netlists/NMOS_ANALYTIC/Manifest.txt",
+        68,
+        "aaac9d14e9b8634e47d5fa507edd18ad35c1e0ace6cf9b3f41c42a068d679890",
+        "48a10aee6277dec173f5d239697819cccdeb21d4bf280b4e9ade5d8ca57ad9e3",
+    ),
+    (
+        "Netlists/NMOS_ANALYTIC/mosfet_level1.cir",
+        2_029,
+        "b4cffa7173991ad37e46b005fb0761d3b07cd9aa3d8734554b0790367b583048",
+        "fa694e4e2ec7645fad00286f7cda19beadb6640aa6d0e6a978502f1c1b8885c6",
+    ),
+    (
+        "Netlists/NMOS_ANALYTIC/mosfet_level1.cir.gs.pl",
+        611,
+        "5c9a6132182064eb7468112b20a3b1890a316ef64e2b5e79dc8ab50d9e8f81dd",
+        "beb718b4ee596fbd1dc63e958f96661d33bce1b84803bee51bc5df86ac8f7ebe",
+    ),
+    (
+        "Netlists/NMOS_ANALYTIC/mosfet_level1.cir.sh",
+        1_273,
+        "6fda3ce1c9bb53b4a7482b9bb38931bd2a5827a0e841a30afa1f2bc5cd34987d",
+        "e8eeeb415a41d87acb159a36e0c389081331dad7a3c860ee7d7b3b9a8942a2b5",
+    ),
+    (
+        "Netlists/NMOS_ANALYTIC/tags",
+        46,
+        "a725c65e1fba0d3241656fedb9caf217f464e8a2b9e14b21bf823f43f83c1047",
+        "4933a5eed19ded7b1fe188959c216a5d1d7ab77b700e72aeb6fc8ae583e27923",
+    ),
+    (
+        "TestScripts/xyce_verify.pl",
+        59_566,
+        "6e5f84b1646b30d0e12879848d7653584b39472d640a14916ae8fda6e1df12b3",
+        "5eadb6dab06ed3091ea114146bd4a574de83784f87be9843ad7b721b0a793665",
+    ),
+];
+const XYCE_NMOS_ANALYTIC_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 1] = [(
+    "mosfet_level1.cir",
+    2_029,
+    "b4cffa7173991ad37e46b005fb0761d3b07cd9aa3d8734554b0790367b583048",
+    "fa694e4e2ec7645fad00286f7cda19beadb6640aa6d0e6a978502f1c1b8885c6",
+)];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceLegacyDeviceAnalyticKind {
+    BjtRamp1,
+    BjtRamp2,
+    NmosLevel1,
+}
+
+impl XyceLegacyDeviceAnalyticKind {
+    const ALL: [Self; 3] = [Self::BjtRamp1, Self::BjtRamp2, Self::NmosLevel1];
+
+    fn family(self) -> &'static str {
+        match self {
+            Self::BjtRamp1 | Self::BjtRamp2 => "BJT_ANALYTIC",
+            Self::NmosLevel1 => "NMOS_ANALYTIC",
+        }
+    }
+
+    fn file_name(self) -> &'static str {
+        match self {
+            Self::BjtRamp1 => "ramp_test1.cir",
+            Self::BjtRamp2 => "ramp_test2.cir",
+            Self::NmosLevel1 => "mosfet_level1.cir",
+        }
+    }
+
+    fn path(self) -> &'static str {
+        match self {
+            Self::BjtRamp1 => "Netlists/BJT_ANALYTIC/ramp_test1.cir",
+            Self::BjtRamp2 => "Netlists/BJT_ANALYTIC/ramp_test2.cir",
+            Self::NmosLevel1 => "Netlists/NMOS_ANALYTIC/mosfet_level1.cir",
+        }
+    }
+
+    fn record(self) -> &'static str {
+        match self {
+            Self::BjtRamp1 => "netlists/bjt_analytic/ramp_test1.cir",
+            Self::BjtRamp2 => "netlists/bjt_analytic/ramp_test2.cir",
+            Self::NmosLevel1 => "netlists/nmos_analytic/mosfet_level1.cir",
+        }
+    }
+
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::BjtRamp1 => "analytic_bjt_level1_depletion_charge_tran_wrapper",
+            Self::BjtRamp2 => "analytic_bjt_level1_transit_charge_tran_wrapper",
+            Self::NmosLevel1 => "analytic_nmos_level1_regions_tran_wrapper",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::BjtRamp1 => "BJT_ANALYTIC Level-1 depletion-charge oracle",
+            Self::BjtRamp2 => "BJT_ANALYTIC Level-1 transit-charge oracle",
+            Self::NmosLevel1 => "NMOS_ANALYTIC Level-1 saturation/triode oracle",
+        }
+    }
+
+    fn for_record(record: &str) -> Option<Self> {
+        let normalized = XyceTestRunner::normalize_manifest_key(record);
+        Self::ALL
+            .into_iter()
+            .find(|kind| normalized == kind.record())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct XyceAbmLookupOrderCaseSpec {
     family: &'static str,
@@ -7659,6 +7874,10 @@ impl XyceStaticTranPlan {
                         true,
                         XyceStaticTranContract::WrapperStatic
                     ) | (
+                        XyceStaticTranPlanPurpose::LegacyDeviceAnalyticOracle,
+                        true,
+                        XyceStaticTranContract::WrapperStatic
+                    ) | (
                         XyceStaticTranPlanPurpose::PassiveTemperatureAnalyticOracle,
                         false,
                         XyceStaticTranContract::PlainStatic
@@ -8163,6 +8382,10 @@ enum XyceStaticTranPlanPurpose {
     /// This purpose admits only the dedicated three-card legacy-diode envelope;
     /// it does not widen the ordinary absolute waveform contract.
     DiodeAnalyticOracle,
+    /// Execute one exact BJT_ANALYTIC or NMOS_ANALYTIC Release-7.10
+    /// generated-gold wrapper. The dedicated contract owns the bounded
+    /// legacy-device topology, startup, and analytic-law proof.
+    LegacyDeviceAnalyticOracle,
     /// Execute one ordinary BUG546 passive-temperature RC member against an
     /// independently derived first-order analytic waveform on the simulator's
     /// own default-PRN grid. Admission is limited to the exact three-member
@@ -8185,6 +8408,7 @@ impl XyceStaticTranPlanPurpose {
                 | Self::DefaultLevel9XyceVerifyOracle
                 | Self::AnalyticOracle
                 | Self::DiodeAnalyticOracle
+                | Self::LegacyDeviceAnalyticOracle
                 | Self::PassiveTemperatureAnalyticOracle
         )
     }
@@ -11256,6 +11480,7 @@ mod contracts_dc;
 mod contracts_diode_analytic;
 mod contracts_frequency;
 mod contracts_issue61;
+mod contracts_legacy_device_analytic;
 mod contracts_sources;
 mod contracts_splines;
 mod contracts_transient;

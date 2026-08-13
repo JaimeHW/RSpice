@@ -232,6 +232,7 @@ impl XyceTestRunner {
             purpose,
             XyceStaticTranPlanPurpose::AnalyticOracle
                 | XyceStaticTranPlanPurpose::DiodeAnalyticOracle
+                | XyceStaticTranPlanPurpose::LegacyDeviceAnalyticOracle
         );
         let analytic_passive_temperature =
             purpose == XyceStaticTranPlanPurpose::PassiveTemperatureAnalyticOracle;

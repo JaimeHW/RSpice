@@ -9681,6 +9681,41 @@ fn test_xyce_diode_analytic_generated_gold_wrappers() {
 }
 
 #[test]
+fn test_xyce_legacy_device_analytic_generated_gold_wrappers() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for (relative, expected_contract) in [
+        (
+            "Netlists/BJT_ANALYTIC/ramp_test1.cir",
+            "analytic_bjt_level1_depletion_charge_tran_wrapper",
+        ),
+        (
+            "Netlists/BJT_ANALYTIC/ramp_test2.cir",
+            "analytic_bjt_level1_transit_charge_tran_wrapper",
+        ),
+        (
+            "Netlists/NMOS_ANALYTIC/mosfet_level1.cir",
+            "analytic_nmos_level1_regions_tran_wrapper",
+        ),
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} must remain owned by its removed historical wrapper"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should reproduce its Release-7.10 generated legacy-device oracle, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(result.upstream_exclusion_source, None);
+        assert!(result.mismatches.is_empty());
+        assert!(result.error.is_none());
+    }
+}
+
+#[test]
 fn test_xyce_bug28_subcircuit_parameter_equivalence_wrapper() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

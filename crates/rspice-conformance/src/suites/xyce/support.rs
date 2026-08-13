@@ -2332,6 +2332,8 @@ impl XyceTestRunner {
             device_zero_resistance_tol,
             device_min_resistance: _,
             device_min_capacitance: _,
+            device_voltage_limiting,
+            linsol_tr_partition,
             b3soi_gmin_scaling,
             device_try_to_compact,
             hb_num_frequencies,
@@ -2355,6 +2357,8 @@ impl XyceTestRunner {
             && timeint_abstol.is_some_and(|value| value.to_bits() == abstol_bits)
             && timeint_delmax.is_none()
             && timeint_use_device_max_timestep.is_none()
+            && device_voltage_limiting.is_none()
+            && linsol_tr_partition.is_none()
             && nonlin_transient_reltol.is_none()
             && nonlin_transient_abstol.is_none()
             && nonlin_transient_deltaxtol.is_none()
