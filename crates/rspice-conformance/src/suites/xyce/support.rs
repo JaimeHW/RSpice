@@ -2273,8 +2273,8 @@ impl XyceTestRunner {
 
     pub(super) fn analytic_timeint_only_options_match(
         options: &rspice_core::netlist::SimulationOptions,
-        reltol_bits: u64,
-        abstol_bits: u64,
+        reltol_bits: Option<u64>,
+        abstol_bits: Option<u64>,
         method_selector: Option<&str>,
         lte_reference: Option<TransientLteReference>,
     ) -> bool {
@@ -2353,8 +2353,8 @@ impl XyceTestRunner {
         } = options;
         reltol.is_none()
             && abstol.is_none()
-            && timeint_reltol.is_some_and(|value| value.to_bits() == reltol_bits)
-            && timeint_abstol.is_some_and(|value| value.to_bits() == abstol_bits)
+            && timeint_reltol.map(Value::to_bits) == reltol_bits
+            && timeint_abstol.map(Value::to_bits) == abstol_bits
             && timeint_delmax.is_none()
             && timeint_use_device_max_timestep.is_none()
             && device_voltage_limiting.is_none()
@@ -2424,8 +2424,8 @@ impl XyceTestRunner {
     ) -> bool {
         Self::analytic_timeint_only_options_match(
             options,
-            source.reltol_bits,
-            source.abstol_bits,
+            Some(source.reltol_bits),
+            Some(source.abstol_bits),
             None,
             source.transient_lte_reference,
         )
@@ -2437,8 +2437,8 @@ impl XyceTestRunner {
     ) -> bool {
         Self::analytic_timeint_only_options_match(
             options,
-            source.timeint_reltol_bits,
-            source.timeint_abstol_bits,
+            Some(source.timeint_reltol_bits),
+            Some(source.timeint_abstol_bits),
             Some(source.method_selector.as_str()),
             None,
         )

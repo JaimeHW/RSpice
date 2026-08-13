@@ -11599,6 +11599,7 @@ mod contracts_issue61;
 mod contracts_legacy_device_analytic;
 mod contracts_sources;
 mod contracts_splines;
+mod contracts_tia_passive_analytic;
 mod contracts_transient;
 mod discovery;
 mod execution;
@@ -11609,6 +11610,8 @@ mod netlist_support;
 mod output;
 mod reference;
 mod support;
+
+use contracts_tia_passive_analytic::XyceTiaPassiveAnalyticKind;
 
 #[cfg(test)]
 mod tests;

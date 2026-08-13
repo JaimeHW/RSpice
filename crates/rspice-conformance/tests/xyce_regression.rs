@@ -1726,6 +1726,35 @@ fn test_xyce_capacitor_analytic_first_order_rc_wrapper_runs() {
 }
 
 #[test]
+fn test_xyce_tia_passive_analytic_initial_condition_wrappers_run() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for (relative, contract) in [
+        (
+            "Netlists/TIA/TRAP/CAPACITOR/capacitor.cir",
+            "tia_trap_capacitor_instance_ic_analytic_wrapper",
+        ),
+        (
+            "Netlists/TIA/TRAP/IC_AND_NODESET/ic_cap2.cir",
+            "tia_trap_positional_ic_analytic_wrapper",
+        ),
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain removed analytic-wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should pass its generated Release-7.10 analytic RC oracle, got {result:?}"
+        );
+        assert!(result.mismatches.is_empty());
+        assert_eq!(result.contract, contract);
+    }
+}
+
+#[test]
 fn test_xyce_analytic_int_floor_ceil_transient_wrapper_runs() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

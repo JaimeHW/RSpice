@@ -213,6 +213,15 @@ with GOOD and TEST exchanged. Admission is limited to the exact three
 legacy-diode cards and their retained source/wrapper/generator provenance, so
 it does not broaden the ordinary absolute transient diode envelope.
 
+The two retained `TIA/TRAP` passive RC wrappers likewise use generated rather
+than checked-in waveforms. RSpice preserves the Release-7.10 generator's
+`exp(-printed_TIME/1ms)` reference and generated-GOOD/simulation-TEST
+`xyce_verify` direction for both initialization forms: capacitor-local `IC=1`
+and positional `.IC 1 1.0`. Admission pins both exact passive topologies,
+trapezoidal/NEWLTE option state, retained family and output censuses, wrapper
+ownership, exclusions, generators, and verifier. The `CONSTSTEP` sibling stays
+excluded because its runtime policy is not part of these contracts.
+
 The two `BJT_ANALYTIC` ramp wrappers and the `NMOS_ANALYTIC` Level-1 wrapper
 likewise retain no checked-in waveform. RSpice reconstructs their
 Release-7.10 Perl generators from the candidate's default-PRN-rounded time

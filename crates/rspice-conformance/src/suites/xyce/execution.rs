@@ -401,6 +401,23 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(kind) = XyceTiaPassiveAnalyticKind::for_record(&deck.relative_path) {
+            let contract = kind.contract();
+            let result = match self.validate_tia_passive_analytic_oracle(deck, kind, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(kind) = XyceLegacyDeviceAnalyticKind::for_record(&deck.relative_path) {
             let contract = kind.result_contract();
             let result = match self.validate_legacy_device_analytic_oracle(deck, kind, start) {
