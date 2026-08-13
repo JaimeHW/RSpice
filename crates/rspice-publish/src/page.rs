@@ -1,63 +1,183 @@
-//! The published document page.
+//! Production document shell for published circuits.
 //!
-//! One self-contained HTML document: inline styles, inline SVG figures, the
-//! netlist text, the measurement table, raw-asset links, and a provenance
-//! footer. The document is complete without any of the hydration pieces it
-//! carries: an inert canvas and a hidden activation control per figure, a
-//! JSON island of sealed digests, and one integrity-pinned loader script
-//! that only ever adds to the static page.
+//! The semantic document is complete without JavaScript: every disclosed
+//! figure, result, measurement, deck, download, and provenance fact is in
+//! the HTML. Sealed page chrome progressively adds tabs, theme selection,
+//! and sharing, while the independent hydration loader can replace a static
+//! figure with its digest-verified interactive canvas on demand.
 
 use std::fmt::Write as _;
 
-use rspice_publication_contract::{FigureContent, PublicationSnapshot};
+use rspice_publication_contract::{Figure, FigureContent, PublicationSnapshot, Scene};
 
 use crate::{
     Bundle, dataset_csv_path, escape_html,
-    hydration::{HydrationEmission, LOADER_PATH},
+    hydration::{HydrationEmission, LOADER_PATH, sri_sha384},
     svg::scene_svg,
 };
 
-/// Palette, typography, and print rules for the published page and its
-/// scenes. Scene classes are the `s-`/`f-`/`t-` role tokens emitted by the
-/// SVG module.
-pub const PAGE_STYLES: &str = r#":root{--paper:#f7f8f7;--card:#ffffff;--ink:#181c1a;--muted:#5c6663;--line:#dce1de;--link:#0d6b52;--fail:#a33232;--foreground:#192026;--secondary:#5b6670;--grid:#b5bcc2;--accent:#c48b00;--warning:#be4336;--success:#007d52;--trace-0:#0d6b52;--trace-1:#1f5f8f;--trace-2:#a3572a;--trace-3:#6a4b8f;--trace-4:#8f6a1f;--trace-5:#2a7d7d;--trace-6:#9c3f68;--trace-7:#4a6b2a}
-@media (prefers-color-scheme:dark){:root{--paper:#111514;--card:#181d1b;--ink:#e4e9e6;--muted:#94a09b;--line:#2b332f;--link:#4cc19a;--fail:#e08585;--foreground:#d9e0dc;--secondary:#94a09b;--grid:#333b37;--accent:#d9a75a;--warning:#e08585;--success:#4cc19a;--trace-0:#4cc19a;--trace-1:#6aa8cf;--trace-2:#d99a6c;--trace-3:#a98fd0;--trace-4:#cfb46a;--trace-5:#6ac4c4;--trace-6:#d284a9;--trace-7:#96b96a}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.6 "Segoe UI",system-ui,sans-serif}
-.page{max-width:960px;margin:0 auto;padding:40px 24px 80px}
-header .eyebrow{font-family:Consolas,monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--link);margin:0 0 8px}
-h1{font-size:28px;line-height:1.2;margin:0 0 8px;letter-spacing:-.01em}
-.description{color:var(--muted);margin:0 0 4px;max-width:70ch}
-.byline{font-family:Consolas,monospace;font-size:12px;color:var(--muted);margin:0 0 32px}
-h2{font-size:17px;margin:36px 0 10px}
-figure{margin:0 0 28px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px}
-figcaption{font-weight:600;margin-bottom:10px}
-figure svg{display:block;width:100%;height:auto}
-figure canvas.viewer{display:block;width:100%;border-radius:4px}
-button.hydrate{margin-top:10px;padding:5px 12px;background:none;border:1px solid var(--line);border-radius:4px;color:var(--link);font:12px Consolas,monospace;letter-spacing:.02em;cursor:pointer}
-figure canvas.viewer[hidden],button.hydrate[hidden]{display:none}
-button.hydrate:hover:enabled,button.hydrate:focus-visible{border-color:var(--link)}
-button.hydrate:disabled{color:var(--muted);cursor:default}
-table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
-th{text-align:left;font-family:Consolas,monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:6px 12px 6px 0;border-bottom:1px solid var(--line)}
-td{padding:7px 12px 7px 0;border-bottom:1px solid var(--line)}
-td.num{font-family:Consolas,monospace}
-td.status{font-family:Consolas,monospace;font-size:12px}
-td.status.pass{color:var(--link)}
-td.status.fail{color:var(--fail)}
-pre.deck{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;font:12.5px/1.55 Consolas,monospace}
-ul.assets{list-style:none;margin:0;padding:0}
-ul.assets li{padding:6px 0;border-bottom:1px solid var(--line);font-size:13.5px}
-ul.assets a{color:var(--link);font-family:Consolas,monospace;text-decoration:none}
-ul.assets a:hover,ul.assets a:focus-visible{text-decoration:underline}
-footer{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);font-family:Consolas,monospace;font-size:11.5px;color:var(--muted);overflow-wrap:anywhere}
-svg .s-foreground{stroke:var(--foreground)}svg .s-secondary{stroke:var(--secondary)}svg .s-grid{stroke:var(--grid)}svg .s-accent{stroke:var(--accent)}svg .s-warning{stroke:var(--warning)}svg .s-success{stroke:var(--success)}
-svg .s-trace-0{stroke:var(--trace-0)}svg .s-trace-1{stroke:var(--trace-1)}svg .s-trace-2{stroke:var(--trace-2)}svg .s-trace-3{stroke:var(--trace-3)}svg .s-trace-4{stroke:var(--trace-4)}svg .s-trace-5{stroke:var(--trace-5)}svg .s-trace-6{stroke:var(--trace-6)}svg .s-trace-7{stroke:var(--trace-7)}
-svg .f-foreground{fill:var(--foreground)}svg .f-secondary{fill:var(--secondary)}svg .f-grid{fill:var(--grid)}svg .f-accent{fill:var(--accent)}svg .f-warning{fill:var(--warning)}svg .f-success{fill:var(--success)}
-svg .f-trace-0{fill:var(--trace-0)}svg .f-trace-1{fill:var(--trace-1)}svg .f-trace-2{fill:var(--trace-2)}svg .f-trace-3{fill:var(--trace-3)}svg .f-trace-4{fill:var(--trace-4)}svg .f-trace-5{fill:var(--trace-5)}svg .f-trace-6{fill:var(--trace-6)}svg .f-trace-7{fill:var(--trace-7)}
-svg .t-foreground{fill:var(--foreground)}svg .t-secondary{fill:var(--secondary)}svg .t-grid{fill:var(--grid)}svg .t-accent{fill:var(--accent)}svg .t-warning{fill:var(--warning)}svg .t-success{fill:var(--success)}
-@media print{body{background:#fff;color:#000}.page{max-width:none;padding:0}figure{break-inside:avoid;border:none;padding:0}ul.assets,footer{display:none}figure svg{display:block!important}canvas.viewer,button.hydrate{display:none!important}}
-"#;
+pub(crate) const PAGE_CSS_PATH: &str = "assets/page.css";
+pub(crate) const PAGE_JS_PATH: &str = "assets/page.js";
+
+/// Authored production stylesheet, emitted byte-for-byte into every bundle.
+pub const PAGE_STYLES: &str = include_str!("assets/page.css");
+/// Progressive page chrome, separate from the figure hydration loader.
+pub(crate) const PAGE_SCRIPT: &str = include_str!("assets/page.js");
+
+struct AssetLink {
+    path: String,
+    label: String,
+    detail: String,
+    bytes: usize,
+}
+
+fn figure_scene<'a>(snapshot: &'a PublicationSnapshot, figure: &'a Figure) -> &'a Scene {
+    match &figure.content {
+        FigureContent::SchematicSheet { sheet_index } => {
+            &snapshot
+                .schematic
+                .as_ref()
+                .expect("validated snapshot has a schematic for sheet figures")
+                .sheets[*sheet_index as usize]
+                .scene
+        }
+        FigureContent::Plot(plot) => &plot.scene,
+    }
+}
+
+fn asset_links(snapshot: &PublicationSnapshot, bundle: &Bundle) -> Vec<AssetLink> {
+    let mut assets = Vec::new();
+    if snapshot.netlist.is_some()
+        && let Some(bytes) = bundle.get("netlist.cir")
+    {
+        assets.push(AssetLink {
+            path: "netlist.cir".to_string(),
+            label: "SPICE netlist".to_string(),
+            detail: "The exact deck included in this publication".to_string(),
+            bytes: bytes.len(),
+        });
+    }
+    if let Some(results) = &snapshot.results {
+        for dataset in &results.datasets {
+            let path = dataset_csv_path(dataset);
+            let Some(bytes) = bundle.get(&path) else {
+                continue;
+            };
+            let detail = match &dataset.variant {
+                Some(variant) => format!("{} · {variant} · CSV data", dataset.name),
+                None => format!("{} · CSV data", dataset.name),
+            };
+            assets.push(AssetLink {
+                label: format!("{}.csv", dataset.name),
+                path,
+                detail,
+                bytes: bytes.len(),
+            });
+        }
+    }
+    assets
+}
+
+fn format_bytes(bytes: usize) -> String {
+    const KIB: usize = 1024;
+    const MIB: usize = KIB * KIB;
+    if bytes >= MIB {
+        format!("{:.1} MiB", bytes as f64 / MIB as f64)
+    } else if bytes >= KIB {
+        format!("{:.1} KiB", bytes as f64 / KIB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+fn render_tab(html: &mut String, id: &str, label: &str, count: Option<usize>) {
+    let _ = write!(html, "<a href=\"#{id}\" data-tab=\"{id}\">{label}");
+    if let Some(count) = count {
+        let _ = write!(html, " <span class=\"tab-count\">{count}</span>");
+    }
+    html.push_str("</a>\n");
+}
+
+fn render_panel_header(html: &mut String, title: &str, description: &str) {
+    let _ = write!(
+        html,
+        "<div class=\"panel-header\"><div><h2>{}</h2><p>{}</p></div></div>\n",
+        escape_html(title),
+        escape_html(description)
+    );
+}
+
+fn render_figure(html: &mut String, snapshot: &PublicationSnapshot, figure: &Figure) {
+    let scene = figure_scene(snapshot, figure);
+    let (kind, control, hint) = match &figure.content {
+        FigureContent::SchematicSheet { .. } => (
+            "Schematic",
+            "Open interactive schematic",
+            "Pan, zoom, and inspect the published drawing",
+        ),
+        FigureContent::Plot(_) => (
+            "Result plot",
+            "Open interactive plot",
+            "Inspect the sealed simulation result",
+        ),
+    };
+    let _ = write!(
+        html,
+        "<figure class=\"figure-card\" id=\"figure-{id}\">\n\
+         <div class=\"figure-heading\"><figcaption>{title}</figcaption><span class=\"figure-kind\">{kind}</span></div>\n\
+         <div class=\"figure-stage\">{svg}<canvas id=\"figure-{id}-canvas\" class=\"viewer\" style=\"aspect-ratio:{width} / {height}\" hidden></canvas></div>\n\
+         <div class=\"figure-actions\"><button class=\"button primary hydrate\" type=\"button\" hidden>{control}</button><span class=\"hint\">{hint}</span></div>\n\
+         </figure>\n",
+        id = figure.id,
+        title = escape_html(&figure.title),
+        svg = scene_svg(scene, &figure.title),
+        width = scene.width_um,
+        height = scene.height_um,
+    );
+}
+
+fn render_measurements(html: &mut String, snapshot: &PublicationSnapshot) {
+    let Some(results) = &snapshot.results else {
+        return;
+    };
+    if results.measurements.is_empty() {
+        return;
+    }
+    html.push_str(
+        "<section class=\"subsection\" aria-labelledby=\"measurements-heading\">\n\
+         <h3 id=\"measurements-heading\">Measurements</h3>\n\
+         <div class=\"table-wrap\"><table><caption>Published scalar measurements and declared limits</caption>\
+         <thead><tr><th scope=\"col\">Measurement</th><th scope=\"col\">Value</th><th scope=\"col\">Specification</th><th scope=\"col\">Status</th></tr></thead><tbody>\n",
+    );
+    for measurement in &results.measurements {
+        html.push_str(&crate::measurement_row(measurement));
+        html.push('\n');
+    }
+    html.push_str("</tbody></table></div></section>\n");
+}
+
+fn render_analyses(html: &mut String, snapshot: &PublicationSnapshot) {
+    let Some(results) = &snapshot.results else {
+        return;
+    };
+    if results.analyses.is_empty() {
+        return;
+    }
+    html.push_str(
+        "<section class=\"subsection\" aria-labelledby=\"analyses-heading\">\n\
+         <h3 id=\"analyses-heading\">Published analyses</h3>\n\
+         <div class=\"table-wrap\"><table><thead><tr><th scope=\"col\">Analysis</th><th scope=\"col\">Control card</th></tr></thead><tbody>\n",
+    );
+    for analysis in &results.analyses {
+        let _ = writeln!(
+            html,
+            "<tr><td>{}</td><td class=\"num\">{}</td></tr>",
+            escape_html(&analysis.label),
+            escape_html(&analysis.card),
+        );
+    }
+    html.push_str("</tbody></table></div></section>\n");
+}
 
 /// Assemble the complete `index.html` document.
 pub fn document(
@@ -69,168 +189,239 @@ pub fn document(
     let title = escape_html(&snapshot.metadata.title);
     let author = escape_html(&snapshot.metadata.author_display);
     let created = escape_html(&snapshot.metadata.created_utc);
+    let license = escape_html(snapshot.metadata.license.display_name());
     let description_plain = snapshot
         .metadata
         .description
         .split('\n')
         .next()
         .unwrap_or_default();
+    let schematic_figures: Vec<&Figure> = snapshot
+        .figures
+        .iter()
+        .filter(|figure| matches!(figure.content, FigureContent::SchematicSheet { .. }))
+        .collect();
+    let plot_figures: Vec<&Figure> = snapshot
+        .figures
+        .iter()
+        .filter(|figure| matches!(figure.content, FigureContent::Plot(_)))
+        .collect();
+    let (analysis_count, dataset_count, measurement_count) =
+        snapshot.results.as_ref().map_or((0, 0, 0), |results| {
+            (
+                results.analyses.len(),
+                results.datasets.len(),
+                results.measurements.len(),
+            )
+        });
+    let assets = asset_links(snapshot, bundle);
+    let page_css_integrity = sri_sha384(PAGE_STYLES.as_bytes());
+    let page_js_integrity = sri_sha384(PAGE_SCRIPT.as_bytes());
 
     let mut html = String::new();
     let _ = write!(
         html,
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>{title}</title>\n"
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+         <meta name=\"color-scheme\" content=\"light dark\">\n\
+         <meta name=\"theme-color\" content=\"#0d1210\">\n<title>{title} · RSpice</title>\n"
     );
     if !description_plain.is_empty() {
+        let description = escape_html(description_plain);
         let _ = writeln!(
             html,
-            "<meta name=\"description\" content=\"{}\">",
-            escape_html(description_plain)
+            "<meta name=\"description\" content=\"{description}\">"
+        );
+        let _ = writeln!(
+            html,
+            "<meta property=\"og:description\" content=\"{description}\">"
         );
     }
     let _ = write!(
         html,
-        "<meta property=\"og:title\" content=\"{title}\">\n<meta property=\"og:type\" content=\"article\">\n<meta property=\"og:site_name\" content=\"RSpice\">\n"
+        "<meta property=\"og:title\" content=\"{title}\">\n\
+         <meta property=\"og:type\" content=\"article\">\n\
+         <meta property=\"og:site_name\" content=\"RSpice\">\n\
+         <link rel=\"stylesheet\" href=\"{PAGE_CSS_PATH}\" integrity=\"{page_css_integrity}\">\n\
+         <script type=\"module\" src=\"{PAGE_JS_PATH}\" integrity=\"{page_js_integrity}\"></script>\n\
+         </head>\n<body>\n<a class=\"skip-link\" href=\"#publication-content\">Skip to publication content</a>\n\
+         <div class=\"shell\">\n<nav class=\"publication-nav\" aria-label=\"Publication\">\n\
+         <div class=\"brand\"><span class=\"brand-mark\" aria-hidden=\"true\">R</span><span>RSpice</span><span class=\"brand-context\">Published circuit</span></div>\n\
+         <div class=\"nav-actions\">\n\
+         <button class=\"button\" type=\"button\" data-theme-toggle data-js-only hidden><span aria-hidden=\"true\">◐</span><span class=\"button-label\" data-theme-label>System</span></button>\n\
+         <button class=\"button primary\" type=\"button\" data-share data-js-only hidden><span aria-hidden=\"true\">↗</span><span class=\"button-label\">Share</span></button>\n\
+         </div></nav>\n<header class=\"publication-header\">\n\
+         <p class=\"eyebrow\">Immutable engineering publication</p>\n<h1>{title}</h1>\n"
     );
-    if !description_plain.is_empty() {
-        let _ = writeln!(
-            html,
-            "<meta property=\"og:description\" content=\"{}\">",
-            escape_html(description_plain)
-        );
-    }
-    let _ = write!(
-        html,
-        "<style>{PAGE_STYLES}</style>\n</head>\n<body>\n<div class=\"page\">\n"
-    );
-
-    // Header.
-    let _ = write!(
-        html,
-        "<header>\n<p class=\"eyebrow\">RSpice publication</p>\n<h1>{title}</h1>\n"
-    );
-    for line in snapshot
-        .metadata
-        .description
-        .split('\n')
-        .filter(|line| !line.trim().is_empty())
-    {
-        let _ = writeln!(html, "<p class=\"description\">{}</p>", escape_html(line));
-    }
-    let license = escape_html(snapshot.metadata.license.display_name());
-    let _ = write!(
-        html,
-        "<p class=\"byline\">{author} · {created} · {license}</p>\n</header>\n<main>\n"
-    );
-
-    // Figures. The canvas and activation control are inert until the loader
-    // reveals them; the static SVG is the figure until then and again on
-    // print or any hydration rejection.
-    for figure in &snapshot.figures {
-        let scene = match &figure.content {
-            FigureContent::SchematicSheet { sheet_index } => {
-                &snapshot
-                    .schematic
-                    .as_ref()
-                    .expect("validated snapshot has a schematic for sheet figures")
-                    .sheets[*sheet_index as usize]
-                    .scene
-            }
-            FigureContent::Plot(plot) => &plot.scene,
-        };
-        let control = match &figure.content {
-            FigureContent::SchematicSheet { .. } => "Interactive schematic",
-            FigureContent::Plot(_) => "Interactive plot",
-        };
+    if !snapshot.metadata.description.trim().is_empty() {
         let _ = write!(
             html,
-            "<figure id=\"figure-{id}\">\n<figcaption>{}</figcaption>\n{}\n<canvas id=\"figure-{id}-canvas\" class=\"viewer\" style=\"aspect-ratio:{} / {}\" hidden></canvas>\n<button class=\"hydrate\" type=\"button\" hidden>{control}</button>\n</figure>\n",
-            escape_html(&figure.title),
-            scene_svg(scene, &figure.title),
-            scene.width_um,
-            scene.height_um,
-            id = figure.id,
+            "<p class=\"description\">{}</p>\n",
+            escape_html(snapshot.metadata.description.trim())
         );
     }
+    let _ = write!(
+        html,
+        "<p class=\"byline\"><span>Published by {author}</span><span>{created}</span><span>{license}</span></p>\n\
+         </header>\n<section class=\"summary-grid\" aria-label=\"Publication summary\">\n\
+         <div class=\"summary-card\"><span class=\"summary-label\">Schematic</span><strong class=\"summary-value\">{}</strong><span class=\"summary-detail\">published sheet{}</span></div>\n\
+         <div class=\"summary-card\"><span class=\"summary-label\">Analyses</span><strong class=\"summary-value\">{analysis_count}</strong><span class=\"summary-detail\">simulation configuration{}</span></div>\n\
+         <div class=\"summary-card\"><span class=\"summary-label\">Measurements</span><strong class=\"summary-value\">{measurement_count}</strong><span class=\"summary-detail\">published result{}</span></div>\n\
+         <div class=\"summary-card\"><span class=\"summary-label\">Data</span><strong class=\"summary-value\">{dataset_count}</strong><span class=\"summary-detail\">downloadable dataset{}</span></div>\n\
+         </section>\n",
+        schematic_figures.len(),
+        if schematic_figures.len() == 1 {
+            ""
+        } else {
+            "s"
+        },
+        if analysis_count == 1 { "" } else { "s" },
+        if measurement_count == 1 { "" } else { "s" },
+        if dataset_count == 1 { "" } else { "s" },
+    );
 
-    // Measurements.
-    if let Some(results) = &snapshot.results
-        && !results.measurements.is_empty()
-    {
-        html.push_str(
-            "<section>\n<h2>Measurements</h2>\n<table>\n<tr><th>Measurement</th><th>Value</th><th>Spec</th><th>Status</th></tr>\n",
+    html.push_str("<div class=\"tabbar-wrap\"><nav class=\"tabbar\" aria-label=\"Circuit publication sections\">\n");
+    render_tab(&mut html, "overview", "Overview", None);
+    if !schematic_figures.is_empty() {
+        render_tab(
+            &mut html,
+            "schematic",
+            "Schematic",
+            Some(schematic_figures.len()),
         );
-        for measurement in &results.measurements {
-            html.push_str(&crate::measurement_row(measurement));
-            html.push('\n');
+    }
+    if !plot_figures.is_empty() || snapshot.results.is_some() {
+        render_tab(&mut html, "results", "Results", Some(plot_figures.len()));
+    }
+    if !assets.is_empty() {
+        render_tab(&mut html, "files", "Files", Some(assets.len()));
+    }
+    render_tab(&mut html, "details", "Details", None);
+    html.push_str("</nav></div>\n<noscript><p class=\"noscript-note\">All published content is available below. Interactive views, tabs, sharing, and theme controls require JavaScript.</p></noscript>\n<main class=\"content\" id=\"publication-content\">\n");
+
+    html.push_str("<section class=\"panel\" id=\"overview\" data-panel tabindex=\"-1\">\n");
+    render_panel_header(
+        &mut html,
+        "Circuit overview",
+        "The published design, simulation evidence, and disclosure summary.",
+    );
+    html.push_str("<div class=\"overview-grid\">\n<div class=\"surface overview-copy\"><h3>About this circuit</h3>");
+    if snapshot.metadata.description.trim().is_empty() {
+        html.push_str("<p>No additional design description was supplied by the publisher.</p>");
+    } else {
+        let _ = write!(
+            html,
+            "<p>{}</p>",
+            escape_html(snapshot.metadata.description.trim())
+        );
+    }
+    let _ = write!(
+        html,
+        "</div><aside class=\"surface side-card\"><h3>Publication facts</h3><dl class=\"facts\">\
+         <div><dt>Publisher</dt><dd>{author}</dd></div>\
+         <div><dt>Published</dt><dd>{created}</dd></div>\
+         <div><dt>License</dt><dd>{license}</dd></div>\
+         <div><dt>RSpice version</dt><dd>{}</dd></div>\
+         </dl></aside></div>\n</section>\n",
+        escape_html(&snapshot.metadata.app_version),
+    );
+
+    if !schematic_figures.is_empty() {
+        html.push_str("<section class=\"panel\" id=\"schematic\" data-panel tabindex=\"-1\">\n");
+        render_panel_header(
+            &mut html,
+            "Schematic",
+            "Static by default and interactive on demand. The drawing is sealed with this publication.",
+        );
+        html.push_str("<div class=\"figure-stack\">\n");
+        for figure in schematic_figures {
+            render_figure(&mut html, snapshot, figure);
         }
-        html.push_str("</table>\n</section>\n");
+        html.push_str("</div></section>\n");
     }
 
-    // Netlist.
+    if !plot_figures.is_empty() || snapshot.results.is_some() {
+        html.push_str("<section class=\"panel\" id=\"results\" data-panel tabindex=\"-1\">\n");
+        render_panel_header(
+            &mut html,
+            "Simulation results",
+            "Published plots, measurements, and analysis controls from the sealed simulation snapshot.",
+        );
+        html.push_str("<div class=\"section-stack\">\n");
+        render_measurements(&mut html, snapshot);
+        if !plot_figures.is_empty() {
+            html.push_str("<section class=\"subsection\" aria-labelledby=\"plots-heading\"><h3 id=\"plots-heading\">Plots</h3><div class=\"figure-stack\">\n");
+            for figure in plot_figures {
+                render_figure(&mut html, snapshot, figure);
+            }
+            html.push_str("</div></section>\n");
+        }
+        if measurement_count == 0
+            && snapshot
+                .figures
+                .iter()
+                .all(|figure| !matches!(figure.content, FigureContent::Plot(_)))
+        {
+            html.push_str("<div class=\"empty-state\"><h3>No plotted results were included</h3><p>The publisher disclosed result metadata without adding a result figure or scalar measurement.</p></div>\n");
+        }
+        html.push_str("</div></section>\n");
+    }
+
+    if !assets.is_empty() {
+        html.push_str("<section class=\"panel\" id=\"files\" data-panel tabindex=\"-1\">\n");
+        render_panel_header(
+            &mut html,
+            "Published files",
+            "Download only the engineering artifacts explicitly disclosed with this publication.",
+        );
+        html.push_str("<ul class=\"asset-list\">\n");
+        for asset in &assets {
+            let _ = writeln!(
+                html,
+                "<li class=\"asset-item\"><div class=\"asset-main\"><strong>{}</strong><span>{} · {}</span></div><a class=\"button asset-download\" href=\"{}\" download>Download</a></li>",
+                escape_html(&asset.label),
+                escape_html(&asset.detail),
+                format_bytes(asset.bytes),
+                escape_html(&asset.path),
+            );
+        }
+        html.push_str("</ul></section>\n");
+    }
+
+    html.push_str("<section class=\"panel\" id=\"details\" data-panel tabindex=\"-1\">\n");
+    render_panel_header(
+        &mut html,
+        "Engineering details",
+        "Analysis controls, disclosed source, and immutable publication provenance.",
+    );
+    html.push_str("<div class=\"section-stack\">\n");
+    render_analyses(&mut html, snapshot);
     if let Some(netlist) = &snapshot.netlist {
         let _ = write!(
             html,
-            "<section>\n<h2>Netlist</h2>\n<pre class=\"deck\">{}</pre>\n</section>\n",
+            "<section class=\"subsection\" aria-labelledby=\"netlist-heading\"><h3 id=\"netlist-heading\">Netlist</h3><details class=\"deck\"><summary>View the published SPICE deck</summary><pre class=\"deck\">{}</pre></details></section>\n",
             escape_html(&netlist.deck)
         );
     }
+    if snapshot.netlist.is_none() && analysis_count == 0 {
+        html.push_str("<div class=\"empty-state\"><h3>No additional engineering details were disclosed</h3><p>The publication still carries immutable authorship and renderer provenance below.</p></div>\n");
+    }
+    html.push_str("</div></section>\n</main>\n");
 
-    // Raw assets.
-    let mut assets: Vec<(String, String)> = Vec::new();
-    if snapshot.netlist.is_some() {
-        assets.push(("netlist.cir".to_string(), "Netlist deck".to_string()));
-    }
-    if let Some(results) = &snapshot.results {
-        for dataset in &results.datasets {
-            let label = match &dataset.variant {
-                Some(variant) => format!("{} · {variant} (CSV)", dataset.name),
-                None => format!("{} (CSV)", dataset.name),
-            };
-            assets.push((dataset_csv_path(dataset), label));
-        }
-    }
-    if snapshot.disclosure.archive {
-        assets.push((
-            "archive.rspice".to_string(),
-            "Project archive · open in RSpice".to_string(),
-        ));
-    }
-    if !assets.is_empty() {
-        html.push_str("<section>\n<h2>Data</h2>\n<ul class=\"assets\">\n");
-        for (path, label) in &assets {
-            debug_assert!(
-                path == "archive.rspice" || bundle.contains_key(path),
-                "asset links must resolve inside the bundle"
-            );
-            let _ = writeln!(
-                html,
-                "<li><a href=\"{}\" download>{}</a> — {}</li>",
-                escape_html(path),
-                escape_html(path),
-                escape_html(label),
-            );
-        }
-        html.push_str("</ul>\n</section>\n");
-    }
-
-    // Hydration handshake: the digests the loader verifies, then the
-    // integrity-pinned loader itself. Both are inert additions — a reader
-    // who never activates a figure downloads neither runtime nor payloads.
     if let Some(hydration) = hydration {
         let _ = write!(
             html,
-            "</main>\n<script type=\"application/json\" id=\"rspice-hydration\">{}</script>\n<script type=\"module\" src=\"{LOADER_PATH}\" integrity=\"{}\"></script>\n",
+            "<script type=\"application/json\" id=\"rspice-hydration\">{}</script>\n\
+             <script type=\"module\" src=\"{LOADER_PATH}\" integrity=\"{}\"></script>\n",
             hydration.island_json, hydration.loader_integrity,
         );
-    } else {
-        html.push_str("</main>\n");
     }
 
-    // Provenance footer.
     let _ = write!(
         html,
-        "<footer>Published with RSpice {} · rendered by rspice-publish {} · sealed snapshot sha256:{} </footer>\n</div>\n</body>\n</html>\n",
+        "<footer class=\"publication-footer\"><div>Published with RSpice {} · rendered by rspice-publish {}</div><div>Snapshot <code>sha256:{}</code></div></footer>\n\
+         <div class=\"toast\" role=\"status\" aria-live=\"polite\" data-toast hidden></div>\n\
+         </div>\n</body>\n</html>\n",
         escape_html(&snapshot.metadata.app_version),
         env!("CARGO_PKG_VERSION"),
         escape_html(snapshot_sha256_hex),

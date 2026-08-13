@@ -231,9 +231,9 @@ fn figure_payload(
 
 fn measurement_row(measurement: &Measurement) -> String {
     let status = match measurement.passed {
-        Some(true) => "<td class=\"status pass\">PASS</td>",
-        Some(false) => "<td class=\"status fail\">FAIL</td>",
-        None => "<td class=\"status\">—</td>",
+        Some(true) => "<td><span class=\"status pass\">PASS</span></td>",
+        Some(false) => "<td><span class=\"status fail\">FAIL</span></td>",
+        None => "<td><span class=\"status neutral\">—</span></td>",
     };
     format!(
         "<tr><td>{}</td><td class=\"num\">{}</td><td class=\"num\">{}</td>{}</tr>",
@@ -260,6 +260,18 @@ pub fn render_bundle(
 ) -> Result<Bundle, RenderError> {
     snapshot.validate()?;
     let mut bundle = Bundle::new();
+
+    // Page chrome is sealed like every other publication resource. Keeping
+    // it external lets the serving policy admit authored styles and behavior
+    // from same-origin manifest entries instead of inline executable text.
+    bundle.insert(
+        page::PAGE_CSS_PATH.to_string(),
+        page::PAGE_STYLES.as_bytes().to_vec(),
+    );
+    bundle.insert(
+        page::PAGE_JS_PATH.to_string(),
+        page::PAGE_SCRIPT.as_bytes().to_vec(),
+    );
 
     if let Some(netlist) = &snapshot.netlist {
         bundle.insert("netlist.cir".to_string(), netlist.deck.clone().into_bytes());

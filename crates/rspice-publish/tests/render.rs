@@ -60,8 +60,17 @@ fn rc_bundle_carries_every_disclosed_surface() {
     assert!(page.contains("2.20 ms"), "measurement value renders");
     assert!(page.contains("PASS"), "measurement status renders");
     assert!(
-        page.contains("archive.rspice"),
-        "disclosed archive is linked"
+        !page.contains("archive.rspice"),
+        "the page must not advertise an archive the bundle does not contain"
+    );
+    assert!(
+        page.contains("class=\"tabbar\"")
+            && page.contains("id=\"overview\"")
+            && page.contains("id=\"schematic\"")
+            && page.contains("id=\"results\"")
+            && page.contains("id=\"files\"")
+            && page.contains("id=\"details\""),
+        "the production shell exposes its semantic publication sections"
     );
 
     assert_eq!(
@@ -143,20 +152,31 @@ fn figure_bundles_seal_the_viewer_runtime_and_its_handshake() {
         "each figure carries an inert canvas"
     );
     assert!(
-        page.contains(">Interactive schematic</button>"),
+        page.contains(">Open interactive schematic</button>"),
         "schematic figures get their activation control"
     );
     assert!(
-        page.contains(">Interactive plot</button>"),
+        page.contains(">Open interactive plot</button>"),
         "plot figures get their activation control"
     );
     assert!(
-        page.contains("<button class=\"hydrate\" type=\"button\" hidden>"),
+        page.contains("<button class=\"button primary hydrate\" type=\"button\" hidden>"),
         "controls stay hidden until the loader proves it can run"
     );
     assert!(
-        page.contains("figure canvas.viewer[hidden],button.hydrate[hidden]{display:none}"),
+        utf8(&bundle["assets/page.css"]).contains(
+            ".figure-stage canvas.viewer[hidden], .figure-actions button.hydrate[hidden]"
+        ),
         "author styles must not override the hidden state and reserve a second figure height"
+    );
+    assert!(
+        page.contains("href=\"assets/page.css\" integrity=\"sha384-")
+            && page.contains("src=\"assets/page.js\" integrity=\"sha384-"),
+        "page chrome is external, sealed, and integrity-pinned"
+    );
+    assert!(
+        utf8(&bundle["assets/page.js"]).contains("root.classList.add(\"js-ready\")"),
+        "the progressive shell behavior ships in the immutable bundle"
     );
 }
 
@@ -266,11 +286,19 @@ fn withheld_sections_yield_no_assets_at_all() {
     let bundle = render_bundle(&value, "0".repeat(64).as_str(), &viewer()).expect("render");
     assert_eq!(
         bundle.keys().collect::<Vec<_>>(),
-        vec!["figure-manifest.json", "index.html"],
-        "a fully withheld publication is a bare document with no runtime"
+        vec![
+            "assets/page.css",
+            "assets/page.js",
+            "figure-manifest.json",
+            "index.html"
+        ],
+        "a fully withheld publication carries only the semantic shell, with no viewer runtime"
     );
     assert!(
-        !utf8(&bundle["index.html"]).contains("<script"),
-        "a figureless page carries no script at all"
+        !utf8(&bundle["index.html"]).contains("rspice-hydration")
+            && !bundle.contains_key("assets/loader.js")
+            && !bundle.contains_key("assets/viewer.js")
+            && !bundle.contains_key("assets/viewer.wasm"),
+        "a figureless page carries no hydration handshake or viewer runtime"
     );
 }

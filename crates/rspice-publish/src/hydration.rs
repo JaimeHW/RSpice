@@ -94,7 +94,7 @@ impl HydrationEmission {
     }
 }
 
-fn sri_sha384(bytes: &[u8]) -> String {
+pub(crate) fn sri_sha384(bytes: &[u8]) -> String {
     format!(
         "sha384-{}",
         base64::engine::general_purpose::STANDARD.encode(Sha384::digest(bytes))
