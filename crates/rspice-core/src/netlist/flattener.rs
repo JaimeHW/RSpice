@@ -3836,6 +3836,51 @@ mod tests {
     }
 
     #[test]
+    fn subcircuit_body_parameter_assignment_spacing_survives_flattening() {
+        let netlist = Netlist::parse(
+            "subcircuit parameter assignment spacing\n\
+             .subckt CELL a b\n\
+             .param A=1 B =2 C= 3 D = 4\n\
+             L1 a n1 A\n\
+             L2 n1 n2 B\n\
+             L3 n2 n3 C\n\
+             L4 n3 b D\n\
+             .ends\n\
+             X1 in 0 CELL\n\
+             .end\n",
+        )
+        .expect("all assignment spacings parse");
+        let cell = netlist
+            .subcircuits
+            .iter()
+            .find(|subcircuit| subcircuit.name.eq_ignore_ascii_case("CELL"))
+            .expect("CELL definition retained");
+        for (name, expected) in [("A", 1.0f64), ("B", 2.0f64), ("C", 3.0f64), ("D", 4.0f64)] {
+            assert!(cell.body_params.iter().any(|(actual_name, actual_value)| {
+                actual_name.eq_ignore_ascii_case(name)
+                    && actual_value.to_bits() == expected.to_bits()
+            }));
+        }
+
+        let flattened = flatten_netlist(&netlist).expect("parameterized inductors flatten");
+        for (name, expected) in [
+            ("X1.L1", 1.0f64),
+            ("X1.L2", 2.0f64),
+            ("X1.L3", 3.0f64),
+            ("X1.L4", 4.0f64),
+        ] {
+            assert!(flattened.iter().any(|element| {
+                element.name.eq_ignore_ascii_case(name)
+                    && matches!(&element.kind, ElementKind::Inductor {
+                        value,
+                        value_expr: None,
+                        ..
+                    } if value.to_bits() == expected.to_bits())
+            }));
+        }
+    }
+
+    #[test]
     fn repeated_formals_are_legal_when_effective_actual_nodes_match() {
         let netlist = Netlist::parse(
             "compatible duplicate formals\n\

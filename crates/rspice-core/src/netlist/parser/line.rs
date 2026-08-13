@@ -770,6 +770,21 @@ fn subckt_body_param_names(fields: &[String]) -> Vec<String> {
             continue;
         }
 
+        // `name =value` is the fourth ordinary assignment spacing. The
+        // token parser already accepts it, but this raw-field pass also has
+        // to retain the definition in a subcircuit's instance-time scope.
+        // Otherwise the local parser can evaluate the declaration while the
+        // stored SubcircuitDef silently drops it and flattening later reports
+        // an undefined parameter.
+        if fields
+            .get(idx + 1)
+            .is_some_and(|next| next.starts_with('=') && next.len() > 1)
+        {
+            names.push(field.clone());
+            idx += 2;
+            continue;
+        }
+
         idx += 1;
     }
     names
@@ -789,6 +804,12 @@ fn upsert_case_insensitive<T>(items: &mut Vec<(String, T)>, name: String, value:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subcircuit_body_parameter_names_cover_every_equals_spacing() {
+        let fields = split_spice_fields(".param A=1 B =2 C= 3 D = 4");
+        assert_eq!(subckt_body_param_names(&fields), ["A", "B", "C", "D"]);
+    }
 
     #[test]
     fn slash_comments_do_not_strip_urls() {
