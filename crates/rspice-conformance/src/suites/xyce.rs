@@ -69,7 +69,7 @@ const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
     "e4cffad64ee0f0b7e47a1589fb9ff25682bc828b9934d27ad77b266b49468e24";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "36c68c4067cfd4c914dc60b55d56d98b3857fa46a55e5f19b6f1a664a4cd8b31";
+    "5d2bf2f8bdfaba6980c90fa0b80cdf8c8ce8bc4184fed855a3acc7e71f3caee8";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
