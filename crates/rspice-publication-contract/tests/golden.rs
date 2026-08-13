@@ -16,7 +16,7 @@
 use rspice_publication_contract::{
     AnalysisRecord, AxisScale, ContentLicense, Dataset, Disclosure, FIGURE_MANIFEST_SCHEMA_VERSION,
     Figure, FigureContent, FigureManifest, GroupTag, ManifestEntry, ManifestFigureKind,
-    Measurement, NetlistSection, PUBLICATION_SNAPSHOT_SCHEMA_VERSION, Paint, PaintRole,
+    Measurement, NetlistSection, PUBLICATION_SNAPSHOT_V2_SCHEMA_VERSION, Paint, PaintRole,
     PathPrimitive, PathSegment, PayloadRef, PlotFigure, PlotHydration, PlotTraceBinding, Point,
     Primitive, PrimitiveGroup, PublicationMetadata, PublicationSnapshot, ResultsSection, Scene,
     SchematicSection, SheetScene, Stroke, StrokePattern, SweepAxis, TextAnchor, TextFont,
@@ -310,7 +310,7 @@ fn plot_scene(x_caption: &str, y_caption: &str, series: u8) -> Scene {
 /// analysis, full disclosure.
 fn rc_lowpass_snapshot() -> PublicationSnapshot {
     PublicationSnapshot {
-        schema_version: PUBLICATION_SNAPSHOT_SCHEMA_VERSION,
+        schema_version: PUBLICATION_SNAPSHOT_V2_SCHEMA_VERSION,
         metadata: PublicationMetadata {
             title: "RC low-pass step response".to_string(),
             description: "First-order RC low-pass driven by a 1 V pulse.\nDemonstrates the 1 ms time constant against the published rise-time spec.".to_string(),
@@ -415,6 +415,8 @@ fn rc_lowpass_snapshot() -> PublicationSnapshot {
                 }),
             },
         ],
+        presentation: None,
+        engineering: None,
     }
 }
 
@@ -423,7 +425,7 @@ fn rc_lowpass_snapshot() -> PublicationSnapshot {
 /// unevaluated measurements, and a static-only figure.
 fn multi_analysis_snapshot() -> PublicationSnapshot {
     PublicationSnapshot {
-        schema_version: PUBLICATION_SNAPSHOT_SCHEMA_VERSION,
+        schema_version: PUBLICATION_SNAPSHOT_V2_SCHEMA_VERSION,
         metadata: PublicationMetadata {
             title: "Two-stage amplifier verification".to_string(),
             description: "AC response, DC transfer at temperature corners, and load-current transient.\nSchematic withheld; netlist and results disclosed.".to_string(),
@@ -648,6 +650,8 @@ fn multi_analysis_snapshot() -> PublicationSnapshot {
                 }),
             },
         ],
+        presentation: None,
+        engineering: None,
     }
 }
 

@@ -177,6 +177,8 @@ pub(crate) fn build_publication_snapshot(
         netlist,
         results,
         figures,
+        presentation: None,
+        engineering: None,
     };
     snapshot
         .validate()

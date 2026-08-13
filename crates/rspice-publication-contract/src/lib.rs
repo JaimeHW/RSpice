@@ -33,9 +33,12 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// Exact schema version a conforming snapshot must declare.
-/// Version 2 added the required [`PublicationMetadata::license`] field.
-pub const PUBLICATION_SNAPSHOT_SCHEMA_VERSION: u32 = 2;
+/// Legacy snapshot schema retained for installed clients and immutable pages.
+pub const PUBLICATION_SNAPSHOT_V2_SCHEMA_VERSION: u32 = 2;
+/// Current snapshot schema. Version 3 adds typed page presentation,
+/// component/net identity, explicit signal bindings, and simulation
+/// provenance while preserving strict v2 decoding.
+pub const PUBLICATION_SNAPSHOT_SCHEMA_VERSION: u32 = 3;
 /// Exact schema version a conforming figure manifest must declare.
 pub const FIGURE_MANIFEST_SCHEMA_VERSION: u32 = 1;
 /// Hard upper bound on canonical snapshot bytes, matching the hardcopy
@@ -90,6 +93,16 @@ pub const MAX_GROUPS_PER_SCENE: usize = 100_000;
 pub const MAX_PRIMITIVES_PER_SCENE: usize = 1_000_000;
 /// Most segments one path primitive may carry.
 pub const MAX_SEGMENTS_PER_PATH: usize = 10_000;
+/// Longest v3 overview narrative or figure accessibility summary.
+pub const MAX_NARRATIVE_CHARS: usize = 16_000;
+/// Bounds for v3 typed engineering metadata.
+pub const MAX_SPECIFICATIONS: usize = 256;
+pub const MAX_COMPONENTS: usize = 10_000;
+pub const MAX_NETS: usize = 10_000;
+pub const MAX_PINS_PER_COMPONENT: usize = 256;
+pub const MAX_NET_CONNECTIONS: usize = 100_000;
+pub const MAX_SIGNAL_IDENTITIES: usize = 8_192;
+pub const MAX_SIMULATION_WARNINGS: usize = 256;
 
 /// Schema violations detected by [`Validate::validate`] or the canonical
 /// byte codecs. Every variant names the offending element so a producer can
@@ -159,6 +172,24 @@ pub enum ContractError {
     NonFiniteMeasurement { name: String },
     #[error("figure payload byte length must be positive and at most {MAX_FIGURE_PAYLOAD_BYTES}")]
     PayloadLengthOutOfRange,
+    #[error("schema v2 snapshot cannot carry the v3 field {field}")]
+    V3FieldInLegacySnapshot { field: &'static str },
+    #[error("publication section {section} is duplicated")]
+    DuplicateSection { section: &'static str },
+    #[error("default publication section is not present in section_order")]
+    DefaultSectionMissing,
+    #[error("v3 {kind} named {value} is duplicated")]
+    DuplicateNamedIdentity { kind: &'static str, value: String },
+    #[error("v3 {kind} references unknown {target_kind} {target}")]
+    DanglingNamedReference {
+        kind: &'static str,
+        target_kind: &'static str,
+        target: String,
+    },
+    #[error("signal identity duplicates dataset {dataset_id} trace {trace_index}")]
+    DuplicateSignalIdentity { dataset_id: u64, trace_index: u32 },
+    #[error("v3 field {field} carries non-finite IEEE-754 bits")]
+    NonFiniteV3Value { field: &'static str },
 }
 
 /// Self-validation implemented by every root type in this contract.
@@ -205,6 +236,17 @@ fn validate_required_text(
     validate_text(value, field, limit, false)
 }
 
+fn validate_required_multiline(
+    value: &str,
+    field: &'static str,
+    limit: usize,
+) -> Result<(), ContractError> {
+    if value.trim().is_empty() {
+        return Err(ContractError::EmptyField { field });
+    }
+    validate_text(value, field, limit, true)
+}
+
 // ---------------------------------------------------------------------------
 // Envelope
 // ---------------------------------------------------------------------------
@@ -213,7 +255,7 @@ fn validate_required_text(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PublicationSnapshot {
-    /// Must equal [`PUBLICATION_SNAPSHOT_SCHEMA_VERSION`] exactly.
+    /// Version 2 and [`PUBLICATION_SNAPSHOT_SCHEMA_VERSION`] are accepted.
     pub schema_version: u32,
     pub metadata: PublicationMetadata,
     pub disclosure: Disclosure,
@@ -225,6 +267,12 @@ pub struct PublicationSnapshot {
     pub results: Option<ResultsSection>,
     /// Author-curated page figures, in page order.
     pub figures: Vec<Figure>,
+    /// Schema-v3 page information architecture and authored summaries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presentation: Option<PublicationPresentation>,
+    /// Schema-v3 typed engineering identity and simulation provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engineering: Option<EngineeringPublication>,
 }
 
 /// Document-level facts rendered into the page head, provenance footer, and
@@ -285,6 +333,177 @@ pub struct Disclosure {
     /// The archive bytes travel as a sibling artifact, never inside the
     /// snapshot.
     pub archive: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Schema v3 presentation and engineering identity
+// ---------------------------------------------------------------------------
+
+/// Semantic page sections. The renderer chooses responsive layout; the
+/// snapshot controls only authored order and the initial section.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PublicationSection {
+    Overview,
+    Schematic,
+    Results,
+    Components,
+    Files,
+    Details,
+}
+
+impl PublicationSection {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Overview => "overview",
+            Self::Schematic => "schematic",
+            Self::Results => "results",
+            Self::Components => "components",
+            Self::Files => "files",
+            Self::Details => "details",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicationPresentation {
+    pub overview: Option<PublicationOverview>,
+    pub section_order: Vec<PublicationSection>,
+    pub default_section: PublicationSection,
+    pub featured_figure_id: Option<u64>,
+    pub figure_details: Vec<FigurePresentation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicationOverview {
+    /// Authored design intent, constraints, and conclusions.
+    pub narrative: String,
+    pub specifications: Vec<Specification>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Specification {
+    pub label: String,
+    pub value: String,
+    pub unit: Option<String>,
+}
+
+/// Optional authored presentation attached to a figure by immutable id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FigurePresentation {
+    pub figure_id: u64,
+    pub caption: Option<String>,
+    /// Plain-text alternative explaining the engineering conclusion.
+    pub accessible_summary: String,
+    pub default_interactive: bool,
+}
+
+/// Typed records used by component tables, inspectors, cross-probing, and
+/// reproducibility details. No local path or model source bytes may appear.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EngineeringPublication {
+    pub components: Vec<ComponentRecord>,
+    pub nets: Vec<NetRecord>,
+    pub signals: Vec<SignalIdentity>,
+    pub simulation: Option<SimulationProvenance>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComponentRecord {
+    pub reference: String,
+    pub value: String,
+    pub device: String,
+    pub model: Option<ModelReference>,
+    pub pins: Vec<ComponentPin>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComponentPin {
+    pub name: String,
+    pub number: Option<String>,
+    pub net: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelReference {
+    pub name: String,
+    pub device_class: String,
+    /// Public library/package label only, never a local filesystem path.
+    pub library: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NetRecord {
+    pub name: String,
+    pub connections: Vec<NetConnection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NetConnection {
+    pub component_reference: String,
+    pub pin_name: String,
+}
+
+/// Explicit identity for one dataset trace. Consumers never infer identity
+/// by parsing display labels such as `V(out)` or `I(R1)`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SignalIdentity {
+    pub dataset_id: u64,
+    pub trace_index: u32,
+    pub target: SignalTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SignalTarget {
+    NetVoltage { net: String },
+    DeviceCurrent { reference: String },
+    Expression { label: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SimulationProvenance {
+    pub engine: String,
+    pub engine_version: String,
+    pub temperature_c_bits: Option<u64>,
+    pub corner: Option<String>,
+    pub settings: Vec<SimulationSetting>,
+    pub warnings: Vec<SimulationWarning>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SimulationSetting {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SimulationWarning {
+    pub severity: WarningSeverity,
+    pub message: String,
+    pub analysis_id: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WarningSeverity {
+    Information,
+    Warning,
+    Error,
 }
 
 // ---------------------------------------------------------------------------
@@ -991,13 +1210,391 @@ fn validate_hydration(
     Ok(())
 }
 
+fn validate_specifications(specifications: &[Specification]) -> Result<(), ContractError> {
+    require_bound(
+        specifications.len(),
+        MAX_SPECIFICATIONS,
+        "overview specifications",
+    )?;
+    for specification in specifications {
+        validate_required_text(&specification.label, "specification label", MAX_LABEL_CHARS)?;
+        validate_required_text(&specification.value, "specification value", MAX_TEXT_CHARS)?;
+        if let Some(unit) = &specification.unit {
+            validate_required_text(unit, "specification unit", MAX_UNIT_CHARS)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_presentation(
+    snapshot: &PublicationSnapshot,
+    presentation: &PublicationPresentation,
+) -> Result<(), ContractError> {
+    if let Some(overview) = &presentation.overview {
+        validate_required_multiline(
+            &overview.narrative,
+            "overview narrative",
+            MAX_NARRATIVE_CHARS,
+        )?;
+        validate_specifications(&overview.specifications)?;
+    }
+    if presentation.section_order.is_empty() {
+        return Err(ContractError::EmptyField {
+            field: "section order",
+        });
+    }
+    require_bound(presentation.section_order.len(), 6, "publication sections")?;
+    for (index, section) in presentation.section_order.iter().enumerate() {
+        if presentation.section_order[..index].contains(section) {
+            return Err(ContractError::DuplicateSection {
+                section: section.name(),
+            });
+        }
+        let available = match section {
+            PublicationSection::Overview | PublicationSection::Details => true,
+            PublicationSection::Schematic => snapshot.disclosure.schematic,
+            PublicationSection::Results => snapshot.disclosure.results,
+            PublicationSection::Components => snapshot
+                .engineering
+                .as_ref()
+                .is_some_and(|engineering| !engineering.components.is_empty()),
+            PublicationSection::Files => {
+                snapshot.disclosure.netlist
+                    || snapshot.disclosure.results
+                    || snapshot.disclosure.archive
+            }
+        };
+        if !available {
+            return Err(ContractError::DanglingNamedReference {
+                kind: "section order",
+                target_kind: "disclosed section",
+                target: section.name().to_string(),
+            });
+        }
+    }
+    if !presentation
+        .section_order
+        .contains(&presentation.default_section)
+    {
+        return Err(ContractError::DefaultSectionMissing);
+    }
+    if let Some(featured) = presentation.featured_figure_id
+        && !snapshot.figures.iter().any(|figure| figure.id == featured)
+    {
+        return Err(ContractError::DanglingReference {
+            figure_id: featured,
+            kind: "featured figure",
+            reference: featured,
+        });
+    }
+    require_bound(
+        presentation.figure_details.len(),
+        MAX_FIGURES,
+        "figure presentation records",
+    )?;
+    require_unique_ids(
+        presentation
+            .figure_details
+            .iter()
+            .map(|detail| &detail.figure_id),
+        "figure presentation",
+    )?;
+    for detail in &presentation.figure_details {
+        if !snapshot
+            .figures
+            .iter()
+            .any(|figure| figure.id == detail.figure_id)
+        {
+            return Err(ContractError::DanglingReference {
+                figure_id: detail.figure_id,
+                kind: "figure presentation",
+                reference: detail.figure_id,
+            });
+        }
+        if let Some(caption) = &detail.caption {
+            validate_required_multiline(caption, "figure caption", MAX_NARRATIVE_CHARS)?;
+        }
+        validate_required_multiline(
+            &detail.accessible_summary,
+            "figure accessible summary",
+            MAX_NARRATIVE_CHARS,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_engineering(
+    snapshot: &PublicationSnapshot,
+    engineering: &EngineeringPublication,
+) -> Result<(), ContractError> {
+    require_bound(engineering.components.len(), MAX_COMPONENTS, "components")?;
+    require_bound(engineering.nets.len(), MAX_NETS, "nets")?;
+    require_bound(
+        engineering.signals.len(),
+        MAX_SIGNAL_IDENTITIES,
+        "signal identities",
+    )?;
+
+    for (index, component) in engineering.components.iter().enumerate() {
+        validate_required_text(&component.reference, "component reference", MAX_LABEL_CHARS)?;
+        if engineering.components[..index]
+            .iter()
+            .any(|seen| seen.reference == component.reference)
+        {
+            return Err(ContractError::DuplicateNamedIdentity {
+                kind: "component",
+                value: component.reference.clone(),
+            });
+        }
+        validate_text(&component.value, "component value", MAX_LABEL_CHARS, false)?;
+        validate_required_text(&component.device, "component device", MAX_LABEL_CHARS)?;
+        require_bound(
+            component.pins.len(),
+            MAX_PINS_PER_COMPONENT,
+            "component pins",
+        )?;
+        for (pin_index, pin) in component.pins.iter().enumerate() {
+            validate_required_text(&pin.name, "component pin name", MAX_LABEL_CHARS)?;
+            if component.pins[..pin_index]
+                .iter()
+                .any(|seen| seen.name == pin.name)
+            {
+                return Err(ContractError::DuplicateNamedIdentity {
+                    kind: "component pin",
+                    value: format!("{}.{}", component.reference, pin.name),
+                });
+            }
+            if let Some(number) = &pin.number {
+                validate_required_text(number, "component pin number", MAX_LABEL_CHARS)?;
+            }
+            if let Some(net) = &pin.net {
+                validate_required_text(net, "component pin net", MAX_LABEL_CHARS)?;
+            }
+        }
+        if let Some(model) = &component.model {
+            validate_required_text(&model.name, "model name", MAX_LABEL_CHARS)?;
+            validate_required_text(&model.device_class, "model device class", MAX_LABEL_CHARS)?;
+            if let Some(library) = &model.library {
+                validate_required_text(library, "model library", MAX_LABEL_CHARS)?;
+                if library.contains('/') || library.contains('\\') || library.contains(':') {
+                    return Err(ContractError::MalformedIdentifier {
+                        field: "model library",
+                    });
+                }
+            }
+        }
+    }
+
+    let mut connection_count = 0usize;
+    for (index, net) in engineering.nets.iter().enumerate() {
+        validate_required_text(&net.name, "net name", MAX_LABEL_CHARS)?;
+        if engineering.nets[..index]
+            .iter()
+            .any(|seen| seen.name == net.name)
+        {
+            return Err(ContractError::DuplicateNamedIdentity {
+                kind: "net",
+                value: net.name.clone(),
+            });
+        }
+        connection_count = connection_count.saturating_add(net.connections.len());
+        for connection in &net.connections {
+            validate_required_text(
+                &connection.component_reference,
+                "net component reference",
+                MAX_LABEL_CHARS,
+            )?;
+            validate_required_text(&connection.pin_name, "net pin name", MAX_LABEL_CHARS)?;
+            let Some(component) = engineering
+                .components
+                .iter()
+                .find(|component| component.reference == connection.component_reference)
+            else {
+                return Err(ContractError::DanglingNamedReference {
+                    kind: "net connection",
+                    target_kind: "component",
+                    target: connection.component_reference.clone(),
+                });
+            };
+            if !component
+                .pins
+                .iter()
+                .any(|pin| pin.name == connection.pin_name)
+            {
+                return Err(ContractError::DanglingNamedReference {
+                    kind: "net connection",
+                    target_kind: "component pin",
+                    target: format!("{}.{}", connection.component_reference, connection.pin_name),
+                });
+            }
+        }
+    }
+    require_bound(connection_count, MAX_NET_CONNECTIONS, "net connections")?;
+    if !engineering.nets.is_empty() {
+        for component in &engineering.components {
+            for pin in &component.pins {
+                if let Some(net) = &pin.net
+                    && !engineering
+                        .nets
+                        .iter()
+                        .any(|candidate| candidate.name == *net)
+                {
+                    return Err(ContractError::DanglingNamedReference {
+                        kind: "component pin",
+                        target_kind: "net",
+                        target: net.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    for (index, signal) in engineering.signals.iter().enumerate() {
+        if engineering.signals[..index].iter().any(|seen| {
+            seen.dataset_id == signal.dataset_id && seen.trace_index == signal.trace_index
+        }) {
+            return Err(ContractError::DuplicateSignalIdentity {
+                dataset_id: signal.dataset_id,
+                trace_index: signal.trace_index,
+            });
+        }
+        let Some(dataset) = snapshot.results.as_ref().and_then(|results| {
+            results
+                .datasets
+                .iter()
+                .find(|dataset| dataset.id == signal.dataset_id)
+        }) else {
+            return Err(ContractError::DanglingReference {
+                figure_id: 0,
+                kind: "signal dataset",
+                reference: signal.dataset_id,
+            });
+        };
+        if usize::try_from(signal.trace_index)
+            .ok()
+            .is_none_or(|trace_index| trace_index >= dataset.traces.len())
+        {
+            return Err(ContractError::DanglingReference {
+                figure_id: 0,
+                kind: "signal trace",
+                reference: u64::from(signal.trace_index),
+            });
+        }
+        match &signal.target {
+            SignalTarget::NetVoltage { net } => {
+                validate_required_text(net, "signal net", MAX_LABEL_CHARS)?;
+                if !engineering
+                    .nets
+                    .iter()
+                    .any(|candidate| candidate.name == *net)
+                {
+                    return Err(ContractError::DanglingNamedReference {
+                        kind: "signal identity",
+                        target_kind: "net",
+                        target: net.clone(),
+                    });
+                }
+            }
+            SignalTarget::DeviceCurrent { reference } => {
+                validate_required_text(reference, "signal component", MAX_LABEL_CHARS)?;
+                if !engineering
+                    .components
+                    .iter()
+                    .any(|component| component.reference == *reference)
+                {
+                    return Err(ContractError::DanglingNamedReference {
+                        kind: "signal identity",
+                        target_kind: "component",
+                        target: reference.clone(),
+                    });
+                }
+            }
+            SignalTarget::Expression { label } => {
+                validate_required_text(label, "signal expression", MAX_LABEL_CHARS)?;
+            }
+        }
+    }
+
+    if let Some(simulation) = &engineering.simulation {
+        validate_required_text(&simulation.engine, "simulation engine", MAX_LABEL_CHARS)?;
+        validate_required_text(
+            &simulation.engine_version,
+            "simulation engine version",
+            MAX_APP_VERSION_CHARS,
+        )?;
+        if let Some(bits) = simulation.temperature_c_bits
+            && !f64::from_bits(bits).is_finite()
+        {
+            return Err(ContractError::NonFiniteV3Value {
+                field: "simulation temperature",
+            });
+        }
+        if let Some(corner) = &simulation.corner {
+            validate_required_text(corner, "simulation corner", MAX_LABEL_CHARS)?;
+        }
+        require_bound(
+            simulation.settings.len(),
+            MAX_SPECIFICATIONS,
+            "simulation settings",
+        )?;
+        for setting in &simulation.settings {
+            validate_required_text(&setting.name, "simulation setting name", MAX_LABEL_CHARS)?;
+            validate_required_text(&setting.value, "simulation setting value", MAX_TEXT_CHARS)?;
+        }
+        require_bound(
+            simulation.warnings.len(),
+            MAX_SIMULATION_WARNINGS,
+            "simulation warnings",
+        )?;
+        for warning in &simulation.warnings {
+            validate_required_multiline(
+                &warning.message,
+                "simulation warning",
+                MAX_NARRATIVE_CHARS,
+            )?;
+            if let Some(analysis_id) = warning.analysis_id
+                && snapshot.results.as_ref().is_none_or(|results| {
+                    !results
+                        .analyses
+                        .iter()
+                        .any(|analysis| analysis.id == analysis_id)
+                })
+            {
+                return Err(ContractError::DanglingReference {
+                    figure_id: 0,
+                    kind: "warning analysis",
+                    reference: analysis_id,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 impl Validate for PublicationSnapshot {
     fn validate(&self) -> Result<(), ContractError> {
-        if self.schema_version != PUBLICATION_SNAPSHOT_SCHEMA_VERSION {
+        if ![
+            PUBLICATION_SNAPSHOT_V2_SCHEMA_VERSION,
+            PUBLICATION_SNAPSHOT_SCHEMA_VERSION,
+        ]
+        .contains(&self.schema_version)
+        {
             return Err(ContractError::UnsupportedSchemaVersion {
                 expected: PUBLICATION_SNAPSHOT_SCHEMA_VERSION,
                 found: self.schema_version,
             });
+        }
+        if self.schema_version == PUBLICATION_SNAPSHOT_V2_SCHEMA_VERSION {
+            if self.presentation.is_some() {
+                return Err(ContractError::V3FieldInLegacySnapshot {
+                    field: "presentation",
+                });
+            }
+            if self.engineering.is_some() {
+                return Err(ContractError::V3FieldInLegacySnapshot {
+                    field: "engineering",
+                });
+            }
         }
 
         validate_required_text(&self.metadata.title, "title", MAX_TITLE_CHARS)?;
@@ -1138,6 +1735,13 @@ impl Validate for PublicationSnapshot {
                     }
                 }
             }
+        }
+
+        if let Some(engineering) = &self.engineering {
+            validate_engineering(self, engineering)?;
+        }
+        if let Some(presentation) = &self.presentation {
+            validate_presentation(self, presentation)?;
         }
 
         Ok(())
@@ -1380,7 +1984,96 @@ mod tests {
                     }),
                 }),
             }],
+            presentation: None,
+            engineering: None,
         }
+    }
+
+    fn add_v3_metadata(snapshot: &mut PublicationSnapshot) {
+        snapshot.presentation = Some(PublicationPresentation {
+            overview: Some(PublicationOverview {
+                narrative: "A published RC filter with explicit design intent.".to_string(),
+                specifications: vec![Specification {
+                    label: "Time constant".to_string(),
+                    value: "1.00".to_string(),
+                    unit: Some("ms".to_string()),
+                }],
+            }),
+            section_order: vec![
+                PublicationSection::Overview,
+                PublicationSection::Results,
+                PublicationSection::Components,
+                PublicationSection::Files,
+                PublicationSection::Details,
+            ],
+            default_section: PublicationSection::Results,
+            featured_figure_id: Some(1),
+            figure_details: vec![FigurePresentation {
+                figure_id: 1,
+                caption: Some("The output approaches its final value exponentially.".to_string()),
+                accessible_summary:
+                    "Transient voltage rises from zero toward the steady-state output.".to_string(),
+                default_interactive: false,
+            }],
+        });
+        snapshot.engineering = Some(EngineeringPublication {
+            components: vec![ComponentRecord {
+                reference: "R1".to_string(),
+                value: "1k".to_string(),
+                device: "Resistor".to_string(),
+                model: None,
+                pins: vec![
+                    ComponentPin {
+                        name: "1".to_string(),
+                        number: Some("1".to_string()),
+                        net: Some("in".to_string()),
+                    },
+                    ComponentPin {
+                        name: "2".to_string(),
+                        number: Some("2".to_string()),
+                        net: Some("out".to_string()),
+                    },
+                ],
+            }],
+            nets: vec![
+                NetRecord {
+                    name: "in".to_string(),
+                    connections: vec![NetConnection {
+                        component_reference: "R1".to_string(),
+                        pin_name: "1".to_string(),
+                    }],
+                },
+                NetRecord {
+                    name: "out".to_string(),
+                    connections: vec![NetConnection {
+                        component_reference: "R1".to_string(),
+                        pin_name: "2".to_string(),
+                    }],
+                },
+            ],
+            signals: vec![SignalIdentity {
+                dataset_id: 1,
+                trace_index: 0,
+                target: SignalTarget::NetVoltage {
+                    net: "out".to_string(),
+                },
+            }],
+            simulation: Some(SimulationProvenance {
+                engine: "RSpice".to_string(),
+                engine_version: "0.1.0".to_string(),
+                temperature_c_bits: Some(27.0f64.to_bits()),
+                corner: Some("typical".to_string()),
+                settings: vec![SimulationSetting {
+                    name: "Relative tolerance".to_string(),
+                    value: "1e-3".to_string(),
+                }],
+                warnings: vec![SimulationWarning {
+                    severity: WarningSeverity::Information,
+                    message: "Operating point converged.".to_string(),
+                    analysis_id: Some(1),
+                }],
+            }),
+        });
     }
 
     #[test]
@@ -1394,7 +2087,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_version_is_enforced_exactly() {
+    fn unsupported_future_schema_versions_are_rejected() {
         let mut snapshot = minimal_snapshot();
         snapshot.schema_version = PUBLICATION_SNAPSHOT_SCHEMA_VERSION + 1;
         assert_eq!(
@@ -1402,6 +2095,74 @@ mod tests {
             Err(ContractError::UnsupportedSchemaVersion {
                 expected: PUBLICATION_SNAPSHOT_SCHEMA_VERSION,
                 found: PUBLICATION_SNAPSHOT_SCHEMA_VERSION + 1,
+            })
+        );
+    }
+
+    #[test]
+    fn legacy_v2_snapshots_remain_byte_compatible_and_cannot_smuggle_v3_fields() {
+        let mut snapshot = minimal_snapshot();
+        snapshot.schema_version = PUBLICATION_SNAPSHOT_V2_SCHEMA_VERSION;
+        snapshot.validate().expect("plain v2 remains supported");
+        let bytes = snapshot.canonical_bytes().expect("v2 canonical bytes");
+        let text = std::str::from_utf8(&bytes).expect("snapshot JSON");
+        assert!(!text.contains("presentation"));
+        assert!(!text.contains("engineering"));
+
+        add_v3_metadata(&mut snapshot);
+        assert_eq!(
+            snapshot.validate(),
+            Err(ContractError::V3FieldInLegacySnapshot {
+                field: "presentation"
+            })
+        );
+    }
+
+    #[test]
+    fn v3_metadata_round_trips_with_explicit_engineering_identity() {
+        let mut snapshot = minimal_snapshot();
+        add_v3_metadata(&mut snapshot);
+        snapshot.validate().expect("complete v3 metadata");
+        let bytes = snapshot.canonical_bytes().expect("canonical v3 bytes");
+        let reparsed = PublicationSnapshot::from_canonical_bytes(&bytes).expect("parse v3");
+        assert_eq!(reparsed, snapshot);
+        assert!(
+            bytes
+                .windows(b"signal".len())
+                .any(|window| window == b"signal")
+        );
+    }
+
+    #[test]
+    fn v3_named_and_numeric_references_fail_closed() {
+        let mut snapshot = minimal_snapshot();
+        add_v3_metadata(&mut snapshot);
+        snapshot.engineering.as_mut().expect("engineering").signals[0].target =
+            SignalTarget::NetVoltage {
+                net: "missing".to_string(),
+            };
+        assert!(matches!(
+            snapshot.validate(),
+            Err(ContractError::DanglingNamedReference {
+                target_kind: "net",
+                ..
+            })
+        ));
+
+        let mut snapshot = minimal_snapshot();
+        add_v3_metadata(&mut snapshot);
+        snapshot
+            .engineering
+            .as_mut()
+            .expect("engineering")
+            .simulation
+            .as_mut()
+            .expect("simulation")
+            .temperature_c_bits = Some(f64::NAN.to_bits());
+        assert_eq!(
+            snapshot.validate(),
+            Err(ContractError::NonFiniteV3Value {
+                field: "simulation temperature"
             })
         );
     }
