@@ -9,7 +9,10 @@ const toast = document.querySelector("[data-toast]");
 
 function panelForHash(hash) {
   const id = decodeURIComponent((hash || "").replace(/^#/, ""));
-  if (!id) return panels[0] || null;
+  if (!id) {
+    const preferred = document.querySelector("[data-default-panel]")?.dataset.defaultPanel;
+    return (preferred && document.getElementById(preferred)) || panels[0] || null;
+  }
   const target = document.getElementById(id);
   return target ? target.closest("[data-panel]") : null;
 }

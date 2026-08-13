@@ -8,7 +8,10 @@
 
 use std::fmt::Write as _;
 
-use rspice_publication_contract::{Figure, FigureContent, PublicationSnapshot, Scene};
+use rspice_publication_contract::{
+    Figure, FigureContent, FigurePresentation, PublicationSection, PublicationSnapshot, Scene,
+    WarningSeverity,
+};
 
 use crate::{
     Bundle, dataset_csv_path, escape_html,
@@ -90,6 +93,17 @@ fn format_bytes(bytes: usize) -> String {
     }
 }
 
+fn section_id(section: PublicationSection) -> &'static str {
+    match section {
+        PublicationSection::Overview => "overview",
+        PublicationSection::Schematic => "schematic",
+        PublicationSection::Results => "results",
+        PublicationSection::Components => "components",
+        PublicationSection::Files => "files",
+        PublicationSection::Details => "details",
+    }
+}
+
 fn render_tab(html: &mut String, id: &str, label: &str, count: Option<usize>) {
     let _ = write!(html, "<a href=\"#{id}\" data-tab=\"{id}\">{label}");
     if let Some(count) = count {
@@ -107,8 +121,25 @@ fn render_panel_header(html: &mut String, title: &str, description: &str) {
     );
 }
 
+fn figure_presentation<'a>(
+    snapshot: &'a PublicationSnapshot,
+    figure: &Figure,
+) -> Option<&'a FigurePresentation> {
+    snapshot.presentation.as_ref().and_then(|presentation| {
+        presentation
+            .figure_details
+            .iter()
+            .find(|detail| detail.figure_id == figure.id)
+    })
+}
+
 fn render_figure(html: &mut String, snapshot: &PublicationSnapshot, figure: &Figure) {
     let scene = figure_scene(snapshot, figure);
+    let presentation = figure_presentation(snapshot, figure);
+    let accessible_label = presentation.map_or(figure.title.as_str(), |detail| {
+        detail.accessible_summary.as_str()
+    });
+    let default_interactive = presentation.is_some_and(|detail| detail.default_interactive);
     let (kind, control, hint) = match &figure.content {
         FigureContent::SchematicSheet { .. } => (
             "Schematic",
@@ -123,16 +154,38 @@ fn render_figure(html: &mut String, snapshot: &PublicationSnapshot, figure: &Fig
     };
     let _ = write!(
         html,
-        "<figure class=\"figure-card\" id=\"figure-{id}\">\n\
+        "<figure class=\"figure-card\" id=\"figure-{id}\"{default_interactive}>\n\
          <div class=\"figure-heading\"><figcaption>{title}</figcaption><span class=\"figure-kind\">{kind}</span></div>\n\
-         <div class=\"figure-stage\">{svg}<canvas id=\"figure-{id}-canvas\" class=\"viewer\" style=\"aspect-ratio:{width} / {height}\" hidden></canvas></div>\n\
-         <div class=\"figure-actions\"><button class=\"button primary hydrate\" type=\"button\" hidden>{control}</button><button class=\"button\" type=\"button\" data-figure-fullscreen data-js-only hidden>Fullscreen</button><button class=\"button\" type=\"button\" data-figure-svg data-js-only hidden>Download SVG</button><span class=\"hint\">{hint}</span></div>\n\
-         </figure>\n",
+         <div class=\"figure-stage\">{svg}<canvas id=\"figure-{id}-canvas\" class=\"viewer\" style=\"aspect-ratio:{width} / {height}\" hidden></canvas></div>\n",
         id = figure.id,
         title = escape_html(&figure.title),
-        svg = scene_svg(scene, &figure.title),
+        svg = scene_svg(scene, accessible_label),
         width = scene.width_um,
         height = scene.height_um,
+        default_interactive = if default_interactive {
+            " data-default-interactive"
+        } else {
+            ""
+        },
+    );
+    if let Some(detail) = presentation {
+        let _ = write!(
+            html,
+            "<div class=\"figure-description\"><p>{}</p>",
+            escape_html(&detail.accessible_summary)
+        );
+        if let Some(caption) = &detail.caption {
+            let _ = write!(
+                html,
+                "<p class=\"figure-caption\">{}</p>",
+                escape_html(caption)
+            );
+        }
+        html.push_str("</div>\n");
+    }
+    let _ = write!(
+        html,
+        "<div class=\"figure-actions\"><button class=\"button primary hydrate\" type=\"button\" hidden>{control}</button><button class=\"button\" type=\"button\" data-figure-fullscreen data-js-only hidden>Fullscreen</button><button class=\"button\" type=\"button\" data-figure-svg data-js-only hidden>Download SVG</button><span class=\"hint\">{hint}</span></div>\n</figure>\n"
     );
 }
 
@@ -206,6 +259,10 @@ pub fn document(
         .iter()
         .filter(|figure| matches!(figure.content, FigureContent::Plot(_)))
         .collect();
+    let schematic_count = snapshot
+        .schematic
+        .as_ref()
+        .map_or(0, |schematic| schematic.sheets.len());
     let (analysis_count, dataset_count, measurement_count) =
         snapshot.results.as_ref().map_or((0, 0, 0), |results| {
             (
@@ -215,6 +272,40 @@ pub fn document(
             )
         });
     let assets = asset_links(snapshot, bundle);
+    let component_count = snapshot
+        .engineering
+        .as_ref()
+        .map_or(0, |engineering| engineering.components.len());
+    let mut fallback_order = vec![PublicationSection::Overview];
+    if snapshot.schematic.is_some() {
+        fallback_order.push(PublicationSection::Schematic);
+    }
+    if !plot_figures.is_empty() || snapshot.results.is_some() {
+        fallback_order.push(PublicationSection::Results);
+    }
+    if component_count > 0 {
+        fallback_order.push(PublicationSection::Components);
+    }
+    if !assets.is_empty() {
+        fallback_order.push(PublicationSection::Files);
+    }
+    fallback_order.push(PublicationSection::Details);
+    let section_order = snapshot
+        .presentation
+        .as_ref()
+        .map_or(fallback_order.as_slice(), |presentation| {
+            presentation.section_order.as_slice()
+        });
+    let default_section = snapshot
+        .presentation
+        .as_ref()
+        .map_or(PublicationSection::Overview, |presentation| {
+            presentation.default_section
+        });
+    let authored_overview = snapshot
+        .presentation
+        .as_ref()
+        .and_then(|presentation| presentation.overview.as_ref());
     let page_css_integrity = sri_sha384(PAGE_STYLES.as_bytes());
     let page_js_integrity = sri_sha384(PAGE_SCRIPT.as_bytes());
 
@@ -269,35 +360,37 @@ pub fn document(
          <div class=\"summary-card\"><span class=\"summary-label\">Measurements</span><strong class=\"summary-value\">{measurement_count}</strong><span class=\"summary-detail\">published result{}</span></div>\n\
          <div class=\"summary-card\"><span class=\"summary-label\">Data</span><strong class=\"summary-value\">{dataset_count}</strong><span class=\"summary-detail\">downloadable dataset{}</span></div>\n\
          </section>\n",
-        schematic_figures.len(),
-        if schematic_figures.len() == 1 {
-            ""
-        } else {
-            "s"
-        },
+        schematic_count,
+        if schematic_count == 1 { "" } else { "s" },
         if analysis_count == 1 { "" } else { "s" },
         if measurement_count == 1 { "" } else { "s" },
         if dataset_count == 1 { "" } else { "s" },
     );
 
     html.push_str("<div class=\"tabbar-wrap\"><nav class=\"tabbar\" aria-label=\"Circuit publication sections\">\n");
-    render_tab(&mut html, "overview", "Overview", None);
-    if !schematic_figures.is_empty() {
-        render_tab(
-            &mut html,
-            "schematic",
-            "Schematic",
-            Some(schematic_figures.len()),
-        );
+    for section in section_order {
+        match section {
+            PublicationSection::Overview => render_tab(&mut html, "overview", "Overview", None),
+            PublicationSection::Schematic => {
+                render_tab(&mut html, "schematic", "Schematic", Some(schematic_count));
+            }
+            PublicationSection::Results => {
+                render_tab(&mut html, "results", "Results", Some(plot_figures.len()));
+            }
+            PublicationSection::Components => {
+                render_tab(&mut html, "components", "Components", Some(component_count));
+            }
+            PublicationSection::Files => {
+                render_tab(&mut html, "files", "Files", Some(assets.len()));
+            }
+            PublicationSection::Details => render_tab(&mut html, "details", "Details", None),
+        }
     }
-    if !plot_figures.is_empty() || snapshot.results.is_some() {
-        render_tab(&mut html, "results", "Results", Some(plot_figures.len()));
-    }
-    if !assets.is_empty() {
-        render_tab(&mut html, "files", "Files", Some(assets.len()));
-    }
-    render_tab(&mut html, "details", "Details", None);
-    html.push_str("</nav></div>\n<noscript><p class=\"noscript-note\">All published content is available below. Interactive views, tabs, sharing, and theme controls require JavaScript.</p></noscript>\n<main class=\"content\" id=\"publication-content\">\n");
+    let _ = write!(
+        html,
+        "</nav></div>\n<noscript><p class=\"noscript-note\">All published content is available below. Interactive views, tabs, sharing, and theme controls require JavaScript.</p></noscript>\n<main class=\"content\" id=\"publication-content\" data-default-panel=\"{}\">\n",
+        section_id(default_section)
+    );
 
     html.push_str("<section class=\"panel\" id=\"overview\" data-panel tabindex=\"-1\">\n");
     render_panel_header(
@@ -306,7 +399,23 @@ pub fn document(
         "The published design, simulation evidence, and disclosure summary.",
     );
     html.push_str("<div class=\"overview-grid\">\n<div class=\"surface overview-copy\"><h3>About this circuit</h3>");
-    if snapshot.metadata.description.trim().is_empty() {
+    if let Some(overview) = authored_overview {
+        let _ = write!(html, "<p>{}</p>", escape_html(overview.narrative.trim()));
+        if !overview.specifications.is_empty() {
+            html.push_str("<dl class=\"spec-grid\">\n");
+            for specification in &overview.specifications {
+                let unit = specification.unit.as_deref().unwrap_or_default();
+                let _ = writeln!(
+                    html,
+                    "<div><dt>{}</dt><dd>{}<span>{}</span></dd></div>",
+                    escape_html(&specification.label),
+                    escape_html(&specification.value),
+                    escape_html(unit),
+                );
+            }
+            html.push_str("</dl>\n");
+        }
+    } else if snapshot.metadata.description.trim().is_empty() {
         html.push_str("<p>No additional design description was supplied by the publisher.</p>");
     } else {
         let _ = write!(
@@ -326,7 +435,7 @@ pub fn document(
         escape_html(&snapshot.metadata.app_version),
     );
 
-    if !schematic_figures.is_empty() {
+    if snapshot.schematic.is_some() {
         html.push_str("<section class=\"panel\" id=\"schematic\" data-panel tabindex=\"-1\">\n");
         render_panel_header(
             &mut html,
@@ -340,8 +449,11 @@ pub fn document(
              </div>\n",
         );
         html.push_str("<div class=\"figure-stack\">\n");
-        for figure in schematic_figures {
+        for figure in &schematic_figures {
             render_figure(&mut html, snapshot, figure);
+        }
+        if schematic_figures.is_empty() {
+            html.push_str("<div class=\"empty-state\"><h3>No schematic figure was selected</h3><p>The snapshot contains disclosed sheets, but the publisher did not add one to the page figure set.</p></div>\n");
         }
         html.push_str("</div></section>\n");
     }
@@ -373,6 +485,44 @@ pub fn document(
         html.push_str("</div></section>\n");
     }
 
+    if let Some(engineering) = &snapshot.engineering
+        && !engineering.components.is_empty()
+    {
+        html.push_str("<section class=\"panel\" id=\"components\" data-panel tabindex=\"-1\">\n");
+        render_panel_header(
+            &mut html,
+            "Components",
+            "Published component identity, model labels, pins, and connected nets.",
+        );
+        html.push_str("<div class=\"table-wrap\"><table><caption>Components disclosed in this publication</caption><thead><tr><th scope=\"col\">Reference</th><th scope=\"col\">Value</th><th scope=\"col\">Device</th><th scope=\"col\">Model</th><th scope=\"col\">Pins and nets</th></tr></thead><tbody>\n");
+        for component in &engineering.components {
+            let model = component
+                .model
+                .as_ref()
+                .map_or("—", |model| model.name.as_str());
+            let pins = component
+                .pins
+                .iter()
+                .map(|pin| match &pin.net {
+                    Some(net) => format!("{} → {net}", pin.name),
+                    None => pin.name.clone(),
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let _ = writeln!(
+                html,
+                "<tr id=\"component-{}\"><td class=\"num\"><strong>{}</strong></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                escape_html(&component.reference),
+                escape_html(&component.reference),
+                escape_html(&component.value),
+                escape_html(&component.device),
+                escape_html(model),
+                escape_html(&pins),
+            );
+        }
+        html.push_str("</tbody></table></div></section>\n");
+    }
+
     if !assets.is_empty() {
         html.push_str("<section class=\"panel\" id=\"files\" data-panel tabindex=\"-1\">\n");
         render_panel_header(
@@ -402,6 +552,51 @@ pub fn document(
     );
     html.push_str("<div class=\"section-stack\">\n");
     render_analyses(&mut html, snapshot);
+    if let Some(simulation) = snapshot
+        .engineering
+        .as_ref()
+        .and_then(|engineering| engineering.simulation.as_ref())
+    {
+        let temperature = simulation.temperature_c_bits.map_or_else(
+            || "—".to_string(),
+            |bits| format!("{} °C", f64::from_bits(bits)),
+        );
+        let corner = simulation.corner.as_deref().unwrap_or("—");
+        let _ = write!(
+            html,
+            "<section class=\"subsection\" aria-labelledby=\"provenance-heading\"><h3 id=\"provenance-heading\">Simulation provenance</h3><div class=\"surface side-card\"><dl class=\"facts\"><div><dt>Engine</dt><dd>{} {}</dd></div><div><dt>Temperature</dt><dd>{}</dd></div><div><dt>Corner</dt><dd>{}</dd></div>",
+            escape_html(&simulation.engine),
+            escape_html(&simulation.engine_version),
+            escape_html(&temperature),
+            escape_html(corner),
+        );
+        for setting in &simulation.settings {
+            let _ = write!(
+                html,
+                "<div><dt>{}</dt><dd>{}</dd></div>",
+                escape_html(&setting.name),
+                escape_html(&setting.value),
+            );
+        }
+        html.push_str("</dl></div>");
+        if !simulation.warnings.is_empty() {
+            html.push_str("<ul class=\"warning-list\">");
+            for warning in &simulation.warnings {
+                let severity = match warning.severity {
+                    WarningSeverity::Information => "Information",
+                    WarningSeverity::Warning => "Warning",
+                    WarningSeverity::Error => "Error",
+                };
+                let _ = write!(
+                    html,
+                    "<li><strong>{severity}</strong><span>{}</span></li>",
+                    escape_html(&warning.message)
+                );
+            }
+            html.push_str("</ul>");
+        }
+        html.push_str("</section>\n");
+    }
     if let Some(netlist) = &snapshot.netlist {
         let _ = writeln!(
             html,

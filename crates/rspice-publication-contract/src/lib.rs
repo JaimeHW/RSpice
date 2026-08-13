@@ -176,6 +176,8 @@ pub enum ContractError {
     V3FieldInLegacySnapshot { field: &'static str },
     #[error("publication section {section} is duplicated")]
     DuplicateSection { section: &'static str },
+    #[error("publication section {section} is missing for disclosed content")]
+    MissingSection { section: &'static str },
     #[error("default publication section is not present in section_order")]
     DefaultSectionMissing,
     #[error("v3 {kind} named {value} is duplicated")]
@@ -1244,31 +1246,45 @@ fn validate_presentation(
         });
     }
     require_bound(presentation.section_order.len(), 6, "publication sections")?;
+    let section_available = |section: PublicationSection| match section {
+        PublicationSection::Overview | PublicationSection::Details => true,
+        PublicationSection::Schematic => snapshot.disclosure.schematic,
+        PublicationSection::Results => snapshot.disclosure.results,
+        PublicationSection::Components => snapshot
+            .engineering
+            .as_ref()
+            .is_some_and(|engineering| !engineering.components.is_empty()),
+        PublicationSection::Files => {
+            snapshot.disclosure.netlist
+                || snapshot.disclosure.results
+                || snapshot.disclosure.archive
+        }
+    };
     for (index, section) in presentation.section_order.iter().enumerate() {
         if presentation.section_order[..index].contains(section) {
             return Err(ContractError::DuplicateSection {
                 section: section.name(),
             });
         }
-        let available = match section {
-            PublicationSection::Overview | PublicationSection::Details => true,
-            PublicationSection::Schematic => snapshot.disclosure.schematic,
-            PublicationSection::Results => snapshot.disclosure.results,
-            PublicationSection::Components => snapshot
-                .engineering
-                .as_ref()
-                .is_some_and(|engineering| !engineering.components.is_empty()),
-            PublicationSection::Files => {
-                snapshot.disclosure.netlist
-                    || snapshot.disclosure.results
-                    || snapshot.disclosure.archive
-            }
-        };
-        if !available {
+        if !section_available(*section) {
             return Err(ContractError::DanglingNamedReference {
                 kind: "section order",
                 target_kind: "disclosed section",
                 target: section.name().to_string(),
+            });
+        }
+    }
+    for section in [
+        PublicationSection::Overview,
+        PublicationSection::Schematic,
+        PublicationSection::Results,
+        PublicationSection::Components,
+        PublicationSection::Files,
+        PublicationSection::Details,
+    ] {
+        if section_available(section) && !presentation.section_order.contains(&section) {
+            return Err(ContractError::MissingSection {
+                section: section.name(),
             });
         }
     }
@@ -2001,6 +2017,7 @@ mod tests {
             }),
             section_order: vec![
                 PublicationSection::Overview,
+                PublicationSection::Schematic,
                 PublicationSection::Results,
                 PublicationSection::Components,
                 PublicationSection::Files,

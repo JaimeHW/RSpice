@@ -106,6 +106,9 @@ function main() {
         button.textContent = "Interactive view unavailable";
       }
     });
+    if (figure.hasAttribute("data-default-interactive")) {
+      button.click();
+    }
   }
 }
 

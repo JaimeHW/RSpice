@@ -192,6 +192,11 @@ h1 { max-width: 1040px; margin: 0; font-size: clamp(2.15rem, 5vw, 4.75rem); line
 .overview-copy { padding: clamp(1.2rem, 3vw, 2rem); }
 .overview-copy h3, .side-card h3 { margin: 0 0 .65rem; font-size: 1rem; }
 .overview-copy p { margin: 0; color: var(--muted); font-size: 1.02rem; white-space: pre-line; }
+.spec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: .55rem; margin: 1.25rem 0 0; }
+.spec-grid div { min-width: 0; padding: .7rem; border: 1px solid var(--border); border-radius: .65rem; background: var(--surface-subtle); }
+.spec-grid dt { color: var(--muted); font-size: .7rem; }
+.spec-grid dd { margin: .3rem 0 0; font-size: 1.05rem; font-weight: 730; overflow-wrap: anywhere; }
+.spec-grid dd span { margin-left: .25rem; color: var(--muted); font-size: .72rem; font-weight: 550; }
 .side-card { padding: 1.2rem; }
 .facts { display: grid; margin: 0; }
 .facts div { display: grid; grid-template-columns: minmax(7rem, .7fr) minmax(0, 1.3fr); gap: 1rem; padding: .7rem 0; border-bottom: 1px solid var(--border); }
@@ -207,6 +212,9 @@ figure.figure-card { min-width: 0; margin: 0; padding: 0; overflow: hidden; bord
 .figure-stage svg { display: block; width: 100%; height: auto; min-height: 140px; }
 .figure-stage canvas.viewer { display: block; width: 100%; min-height: 240px; border-radius: .5rem; }
 .figure-stage canvas.viewer[hidden], .figure-actions button.hydrate[hidden] { display: none; }
+.figure-description { padding: .75rem 1rem; border-top: 1px solid var(--border); background: var(--surface-subtle); color: var(--muted); font-size: .82rem; }
+.figure-description p { margin: 0; }
+.figure-description .figure-caption { margin-top: .35rem; color: var(--text); font-weight: 620; }
 .figure-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; min-height: 54px; padding: .65rem 1rem; border-top: 1px solid var(--border); }
 .figure-actions .hint { color: var(--muted); font-size: .76rem; }
 button.hydrate:disabled { color: var(--muted); cursor: wait; }
@@ -240,6 +248,9 @@ td.num, code, pre { font-family: ui-monospace, "SFMono-Regular", Consolas, monos
 details.deck { overflow: hidden; border: 1px solid var(--border); border-radius: .85rem; background: var(--surface); }
 details.deck summary { padding: .9rem 1rem; cursor: pointer; font-weight: 680; }
 pre.deck { max-height: 70vh; margin: 0; overflow: auto; padding: 1rem; border-top: 1px solid var(--border); background: var(--surface-subtle); color: var(--text); font-size: .78rem; line-height: 1.55; tab-size: 2; }
+.warning-list { display: grid; gap: .45rem; margin: .75rem 0 0; padding: 0; list-style: none; }
+.warning-list li { display: grid; grid-template-columns: minmax(6rem, auto) 1fr; gap: .7rem; padding: .65rem .8rem; border: 1px solid var(--border); border-radius: .6rem; background: var(--surface-subtle); }
+.warning-list li span { color: var(--muted); white-space: pre-line; }
 .asset-list { display: grid; gap: .65rem; margin: 0; padding: 0; list-style: none; }
 .asset-item { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 68px; padding: .8rem 1rem; border: 1px solid var(--border); border-radius: .75rem; background: var(--surface); }
 .asset-main { min-width: 0; }

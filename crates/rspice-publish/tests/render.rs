@@ -3,8 +3,11 @@
 //! against different corpora.
 
 use rspice_publication_contract::{
-    Disclosure, FigureManifest, FigurePayload, PublicationMetadata, PublicationSnapshot,
-    Validate as _,
+    ComponentPin, ComponentRecord, Disclosure, EngineeringPublication, FigureManifest,
+    FigurePayload, FigurePresentation, PublicationMetadata, PublicationOverview,
+    PublicationPresentation, PublicationSection, PublicationSnapshot, SignalIdentity, SignalTarget,
+    SimulationProvenance, SimulationSetting, SimulationWarning, Specification, Validate as _,
+    WarningSeverity,
 };
 use rspice_publish::{ViewerRuntime, render_bundle};
 use sha2::{Digest as _, Sha256};
@@ -283,6 +286,85 @@ fn author_text_cannot_smuggle_markup() {
     assert!(!page.contains("<script>alert"), "title is escaped");
     assert!(!page.contains("<img"), "description is escaped");
     assert!(page.contains("&lt;script&gt;"), "escaped form is present");
+}
+
+#[test]
+fn v3_engineering_metadata_reaches_the_production_page() {
+    let mut value = snapshot(RC_LOWPASS);
+    value.schema_version = rspice_publication_contract::PUBLICATION_SNAPSHOT_SCHEMA_VERSION;
+    value.presentation = Some(PublicationPresentation {
+        overview: Some(PublicationOverview {
+            narrative: "A deliberately documented RC low-pass.".to_string(),
+            specifications: vec![Specification {
+                label: "Time constant".to_string(),
+                value: "1.00".to_string(),
+                unit: Some("ms".to_string()),
+            }],
+        }),
+        section_order: vec![
+            PublicationSection::Overview,
+            PublicationSection::Schematic,
+            PublicationSection::Results,
+            PublicationSection::Components,
+            PublicationSection::Files,
+            PublicationSection::Details,
+        ],
+        default_section: PublicationSection::Results,
+        featured_figure_id: Some(2),
+        figure_details: vec![FigurePresentation {
+            figure_id: 2,
+            caption: Some("Output settles monotonically.".to_string()),
+            accessible_summary: "Output voltage rises toward its final value.".to_string(),
+            default_interactive: true,
+        }],
+    });
+    value.engineering = Some(EngineeringPublication {
+        components: vec![ComponentRecord {
+            reference: "R1".to_string(),
+            value: "1k".to_string(),
+            device: "Resistor".to_string(),
+            model: None,
+            pins: vec![ComponentPin {
+                name: "2".to_string(),
+                number: None,
+                net: None,
+            }],
+        }],
+        nets: vec![],
+        signals: vec![SignalIdentity {
+            dataset_id: 1,
+            trace_index: 0,
+            target: SignalTarget::Expression {
+                label: "input voltage".to_string(),
+            },
+        }],
+        simulation: Some(SimulationProvenance {
+            engine: "RSpice".to_string(),
+            engine_version: "0.1.0".to_string(),
+            temperature_c_bits: Some(27.0f64.to_bits()),
+            corner: Some("typical".to_string()),
+            settings: vec![SimulationSetting {
+                name: "Relative tolerance".to_string(),
+                value: "1e-3".to_string(),
+            }],
+            warnings: vec![SimulationWarning {
+                severity: WarningSeverity::Information,
+                message: "Operating point converged.".to_string(),
+                analysis_id: Some(1),
+            }],
+        }),
+    });
+
+    let bundle = render_bundle(&value, "0".repeat(64).as_str(), &viewer()).expect("render v3");
+    let page = utf8(&bundle["index.html"]);
+    assert!(page.contains("data-default-panel=\"results\""));
+    assert!(page.contains("id=\"components\"") && page.contains("Resistor"));
+    assert!(page.contains("A deliberately documented RC low-pass."));
+    assert!(page.contains("Time constant") && page.contains("1.00"));
+    assert!(page.contains("data-default-interactive"));
+    assert!(page.contains("Output voltage rises toward its final value."));
+    assert!(page.contains("Simulation provenance") && page.contains("Relative tolerance"));
+    assert!(page.contains("Operating point converged."));
 }
 
 #[test]
