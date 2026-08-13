@@ -57,6 +57,12 @@ fn rc_bundle_carries_every_disclosed_surface() {
         page.contains("data-instance=\"R1\""),
         "instance tags survive"
     );
+    assert!(
+        page.contains(
+            "data-instance=\"R1\" tabindex=\"0\" role=\"button\" aria-label=\"Component R1\""
+        ) && page.contains("data-schematic-search"),
+        "tagged schematic objects are keyboard selectable and searchable"
+    );
     assert!(page.contains("2.20 ms"), "measurement value renders");
     assert!(page.contains("PASS"), "measurement status renders");
     assert!(
@@ -177,6 +183,15 @@ fn figure_bundles_seal_the_viewer_runtime_and_its_handshake() {
     assert!(
         utf8(&bundle["assets/page.js"]).contains("root.classList.add(\"js-ready\")"),
         "the progressive shell behavior ships in the immutable bundle"
+    );
+    assert!(
+        page.contains("data-figure-fullscreen") && page.contains("data-figure-svg"),
+        "every figure exposes progressive fullscreen and sealed SVG export actions"
+    );
+    assert!(
+        utf8(&bundle["assets/page.js"]).contains("searchSchematic")
+            && utf8(&bundle["assets/page.js"]).contains("exportSvg"),
+        "search, selection, and export behavior are sealed with the page"
     );
 }
 

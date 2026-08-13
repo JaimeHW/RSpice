@@ -126,7 +126,7 @@ fn render_figure(html: &mut String, snapshot: &PublicationSnapshot, figure: &Fig
         "<figure class=\"figure-card\" id=\"figure-{id}\">\n\
          <div class=\"figure-heading\"><figcaption>{title}</figcaption><span class=\"figure-kind\">{kind}</span></div>\n\
          <div class=\"figure-stage\">{svg}<canvas id=\"figure-{id}-canvas\" class=\"viewer\" style=\"aspect-ratio:{width} / {height}\" hidden></canvas></div>\n\
-         <div class=\"figure-actions\"><button class=\"button primary hydrate\" type=\"button\" hidden>{control}</button><span class=\"hint\">{hint}</span></div>\n\
+         <div class=\"figure-actions\"><button class=\"button primary hydrate\" type=\"button\" hidden>{control}</button><button class=\"button\" type=\"button\" data-figure-fullscreen data-js-only hidden>Fullscreen</button><button class=\"button\" type=\"button\" data-figure-svg data-js-only hidden>Download SVG</button><span class=\"hint\">{hint}</span></div>\n\
          </figure>\n",
         id = figure.id,
         title = escape_html(&figure.title),
@@ -332,6 +332,12 @@ pub fn document(
             &mut html,
             "Schematic",
             "Static by default and interactive on demand. The drawing is sealed with this publication.",
+        );
+        html.push_str(
+            "<div class=\"schematic-tools surface\" data-js-only hidden>\
+             <label class=\"search-field\"><span>Find a component or net</span><input type=\"search\" inputmode=\"search\" placeholder=\"R1, VOUT, ground…\" data-schematic-search></label>\
+             <p class=\"schematic-status\" data-schematic-status role=\"status\" aria-live=\"polite\">Select a tagged component or net to inspect it.</p>\
+             </div>\n",
         );
         html.push_str("<div class=\"figure-stack\">\n");
         for figure in schematic_figures {

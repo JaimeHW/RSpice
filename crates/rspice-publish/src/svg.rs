@@ -263,12 +263,15 @@ fn group_attributes(tag: Option<&GroupTag>) -> String {
         None => String::new(),
         Some(GroupTag::Instance { reference }) => {
             format!(
-                " class=\"instance\" data-instance=\"{}\"",
-                escape_html(reference)
+                " class=\"instance\" data-instance=\"{value}\" tabindex=\"0\" role=\"button\" aria-label=\"Component {value}\"",
+                value = escape_html(reference)
             )
         }
         Some(GroupTag::Net { name }) => {
-            format!(" class=\"net\" data-net=\"{}\"", escape_html(name))
+            format!(
+                " class=\"net\" data-net=\"{value}\" tabindex=\"0\" role=\"button\" aria-label=\"Net {value}\"",
+                value = escape_html(name)
+            )
         }
         Some(GroupTag::SheetFrame) => " class=\"frame\"".to_string(),
         Some(GroupTag::Annotation) => " class=\"note\"".to_string(),

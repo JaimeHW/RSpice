@@ -102,3 +102,115 @@ if (shareButton) {
     }
   });
 }
+
+function tagLabel(element) {
+  if (element.dataset.instance) return `Component ${element.dataset.instance}`;
+  if (element.dataset.net) return `Net ${element.dataset.net}`;
+  return "Schematic object";
+}
+
+const schematicTags = Array.from(document.querySelectorAll("svg g[data-instance], svg g[data-net]"));
+const schematicSearch = document.querySelector("[data-schematic-search]");
+const schematicStatus = document.querySelector("[data-schematic-status]");
+
+function selectSchematicTag(element) {
+  for (const tag of schematicTags) tag.classList.toggle("is-selected", tag === element);
+  if (schematicStatus) schematicStatus.textContent = `${tagLabel(element)} selected`;
+}
+
+for (const tag of schematicTags) {
+  tag.addEventListener("click", () => selectSchematicTag(tag));
+  tag.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    selectSchematicTag(tag);
+  });
+}
+
+function searchSchematic() {
+  const query = (schematicSearch?.value || "").trim().toLocaleLowerCase();
+  let matches = 0;
+  for (const tag of schematicTags) {
+    const match = !query || tagLabel(tag).toLocaleLowerCase().includes(query);
+    tag.classList.toggle("search-match", Boolean(query) && match);
+    tag.classList.toggle("search-dimmed", Boolean(query) && !match);
+    if (query && match) matches += 1;
+  }
+  if (schematicStatus) {
+    schematicStatus.textContent = query
+      ? `${matches} matching tagged object${matches === 1 ? "" : "s"}`
+      : "Select a tagged component or net to inspect it.";
+  }
+  return schematicTags.find((tag) => tag.classList.contains("search-match"));
+}
+
+if (schematicSearch) {
+  schematicSearch.addEventListener("input", searchSchematic);
+  schematicSearch.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      schematicSearch.value = "";
+      searchSchematic();
+      return;
+    }
+    if (event.key !== "Enter") return;
+    const first = searchSchematic();
+    if (first) {
+      selectSchematicTag(first);
+      first.focus({ preventScroll: true });
+      first.closest("figure")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  });
+}
+
+for (const button of document.querySelectorAll("[data-figure-fullscreen]")) {
+  const figure = button.closest("figure");
+  if (!figure || typeof figure.requestFullscreen !== "function") {
+    button.hidden = true;
+    continue;
+  }
+  button.addEventListener("click", async () => {
+    try {
+      if (document.fullscreenElement === figure) await document.exitFullscreen();
+      else await figure.requestFullscreen();
+    } catch {
+      announce("Fullscreen is unavailable");
+    }
+  });
+  document.addEventListener("fullscreenchange", () => {
+    button.textContent = document.fullscreenElement === figure ? "Exit fullscreen" : "Fullscreen";
+  });
+}
+
+function safeFilename(value) {
+  const normalized = value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return normalized || "rspice-figure";
+}
+
+function exportSvg(figure) {
+  const source = figure.querySelector("svg");
+  if (!source) return false;
+  const clone = source.cloneNode(true);
+  const roles = ["foreground", "secondary", "grid", "accent", "warning", "success"];
+  for (let index = 0; index < 8; index += 1) roles.push(`trace-${index}`);
+  const computed = getComputedStyle(root);
+  const variables = roles.map((role) => `--${role}:${computed.getPropertyValue(`--${role}`).trim()}`).join(";");
+  const rules = roles.map((role) => `.s-${role}{stroke:var(--${role})}.f-${role},.t-${role}{fill:var(--${role})}`).join("");
+  const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+  style.textContent = `:root{${variables}}${rules}`;
+  clone.prepend(style);
+  const bytes = new Blob([new XMLSerializer().serializeToString(clone)], { type: "image/svg+xml" });
+  const url = URL.createObjectURL(bytes);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${safeFilename(figure.querySelector("figcaption")?.textContent || "rspice-figure")}.svg`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  return true;
+}
+
+for (const button of document.querySelectorAll("[data-figure-svg]")) {
+  const figure = button.closest("figure");
+  button.addEventListener("click", () => {
+    if (!figure || !exportSvg(figure)) announce("The static SVG is unavailable");
+  });
+}

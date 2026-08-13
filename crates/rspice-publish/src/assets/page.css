@@ -210,6 +210,19 @@ figure.figure-card { min-width: 0; margin: 0; padding: 0; overflow: hidden; bord
 .figure-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; min-height: 54px; padding: .65rem 1rem; border-top: 1px solid var(--border); }
 .figure-actions .hint { color: var(--muted); font-size: .76rem; }
 button.hydrate:disabled { color: var(--muted); cursor: wait; }
+figure.figure-card:fullscreen { display: flex; width: 100vw; height: 100vh; flex-direction: column; border: 0; border-radius: 0; background: var(--surface); }
+figure.figure-card:fullscreen .figure-stage { display: grid; min-height: 0; flex: 1 1 auto; place-items: center; }
+figure.figure-card:fullscreen .figure-stage svg,
+figure.figure-card:fullscreen .figure-stage canvas { width: 100%; max-height: 100%; }
+.schematic-tools { display: grid; grid-template-columns: minmax(240px, .7fr) minmax(260px, 1.3fr); align-items: end; gap: 1rem; margin: 0 0 1rem; padding: .9rem 1rem; box-shadow: none; }
+.search-field { display: grid; gap: .35rem; color: var(--muted); font-size: .75rem; font-weight: 650; }
+.search-field input { width: 100%; min-height: 40px; padding: .55rem .7rem; border: 1px solid var(--border-strong); border-radius: .55rem; background: var(--surface-subtle); color: var(--text); }
+.search-field input::placeholder { color: var(--muted); opacity: .8; }
+.schematic-status { min-width: 0; margin: 0; padding: .55rem .7rem; color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
+svg g.instance, svg g.net { cursor: pointer; transition: opacity 120ms ease, filter 120ms ease; }
+svg g.instance:focus, svg g.net:focus { outline: none; filter: drop-shadow(0 0 7px var(--brand)); }
+svg g.search-dimmed { opacity: .16; }
+svg g.search-match, svg g.is-selected { opacity: 1; filter: drop-shadow(0 0 6px var(--brand)); }
 .table-wrap { min-width: 0; max-width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: .85rem; background: var(--surface); box-shadow: var(--shadow); }
 table { width: 100%; border-collapse: collapse; font-size: .86rem; font-variant-numeric: tabular-nums; }
 caption { padding: 1rem; color: var(--muted); text-align: left; }
@@ -262,6 +275,7 @@ svg .t-foreground { fill: var(--foreground); } svg .t-secondary { fill: var(--se
   .summary-card { min-height: 92px; padding: .8rem; }
   .summary-value { font-size: 1.3rem; }
   .figure-heading { align-items: flex-start; }
+  .schematic-tools { grid-template-columns: 1fr; gap: .35rem; }
   .asset-item { align-items: flex-start; }
   .publication-footer { grid-template-columns: 1fr; }
 }
