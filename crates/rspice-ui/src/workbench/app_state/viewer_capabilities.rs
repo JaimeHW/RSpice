@@ -392,7 +392,8 @@ mod tests {
         state
             .analysis
             .smith_chart_state
-            .load_sparam_data("S11", &[1.0], &[0.25], &[0.0]);
+            .load_sparam_data("S11", &[1.0], &[0.25], &[0.0], None)
+            .expect("load Smith-chart fixture");
 
         let mut pz = PoleZeroData::new("old pz");
         pz.add_real_pole(-1.0);
