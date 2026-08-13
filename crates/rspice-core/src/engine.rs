@@ -105,7 +105,9 @@ pub use pss::{
     PssAnalysisResult, PssContinuationState, PssDcOperatingPointSeed, PssError, PssOperatingPoint,
 };
 pub use pss_noise::OscPnoiseResult;
-pub use result::{TransientDeviceOpTrace, TransientResult, TransientStoreTrace};
+pub use result::{
+    TransientDeviceOpTrace, TransientOutputProjection, TransientResult, TransientStoreTrace,
+};
 pub use stb::StbAnalysisResult;
 pub use step::{MaterializedStepRun, StepPlan, StepPlanLimits};
 pub use transient::{TransientCheckpoint, TransientStartupMode, netlist_fingerprint};

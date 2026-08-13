@@ -512,7 +512,7 @@ pub(super) fn run_transient(
             }
             Err(e) => Err(e),
         }
-    } else if ctx.compress {
+    } else if ctx.compress && ctx.netlist.options.output_time_points.is_empty() {
         let compression_tol = ctx.compress_tol;
         let compression = rspice_core::engine::CompressionConfig {
             enabled: true,
@@ -600,16 +600,32 @@ pub(super) fn run_transient(
             );
 
             if let Some(ref output_path) = ctx.output_path_for("tran") {
-                let signals = crate::commands::run_signals::apply_save_set(
+                let output_start = result
+                    .time
+                    .first()
+                    .copied()
+                    .map_or(tstart, |first| tstart.max(first));
+                let projection = result
+                    .output_projection(&ctx.netlist.options.output_time_points, output_start, tstop)
+                    .map_err(|message| CliError::simulation_error_in(message, "Transient"))?;
+                let output_time = projection
+                    .project(&result.time)
+                    .map_err(|message| CliError::simulation_error_in(message, "Transient"))?;
+                let mut signals = crate::commands::run_signals::apply_save_set(
                     transient_signals(&result),
                     &ctx.netlist.saves,
                 );
+                for signal in &mut signals {
+                    signal.values = projection
+                        .project(&signal.values)
+                        .map_err(|message| CliError::simulation_error_in(message, "Transient"))?;
+                }
                 match ctx.format {
                     OutputFormat::Hdf5 => {
                         let mut data = Hdf5SimulationData::new();
                         data.title = "Transient Analysis".to_string();
 
-                        let mut transient = Hdf5WaveformSection::new("time", result.time.clone());
+                        let mut transient = Hdf5WaveformSection::new("time", output_time.clone());
                         for signal in &signals {
                             transient.add_typed_signal(
                                 signal.display_name.clone(),
@@ -632,7 +648,7 @@ pub(super) fn run_transient(
                             "Transient Analysis",
                             "time",
                             "time",
-                            result.time.clone(),
+                            output_time,
                             &signals,
                         )
                         .write(output_path, ctx.format)?;

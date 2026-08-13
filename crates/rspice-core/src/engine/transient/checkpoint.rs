@@ -528,7 +528,7 @@ fn hash_effective_device_initial_condition_overlay(hasher: &mut blake3::Hasher, 
 /// expanded include/SPEF content and public post-parse AST edits are included.
 pub(crate) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"rspice-transient-elaborated-netlist-v4\0");
+    hasher.update(b"rspice-transient-elaborated-netlist-v5\0");
     hash_field(&mut hasher, "title", &netlist.title);
     hash_field(&mut hasher, "elements", &netlist.elements);
     hash_field(&mut hasher, "analyses", &netlist.analyses);
@@ -568,7 +568,23 @@ pub(crate) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
             })
             .collect::<Vec<_>>(),
     );
-    hash_field(&mut hasher, "options", &netlist.options);
+    let mut checkpoint_options = netlist.options.clone();
+    for schedule in [
+        &mut checkpoint_options.output_time_points,
+        &mut checkpoint_options.timeint_breakpoints,
+    ] {
+        schedule.retain(|time| time.is_finite() && *time >= 0.0);
+        schedule.iter_mut().for_each(|time| {
+            if *time == 0.0 {
+                *time = 0.0;
+            }
+        });
+        schedule.sort_by(Value::total_cmp);
+        schedule.dedup_by(|left, right| {
+            (*left - *right).abs() <= crate::numerics::integration::XYCE_BREAKPOINT_TOLERANCE
+        });
+    }
+    hash_field(&mut hasher, "options", &checkpoint_options);
     hash_field(&mut hasher, "veriloga_includes", &netlist.veriloga_includes);
     hash_field(&mut hasher, "spef_includes", &netlist.spef_includes);
     hash_effective_device_initial_condition_overlay(&mut hasher, netlist);
@@ -2591,6 +2607,57 @@ mod tests {
         checkpoint
             .validate_for(&netlist)
             .expect("programmatic AST identity authorizes its own checkpoint");
+    }
+
+    #[test]
+    fn transient_schedule_checkpoint_identity_is_canonical_and_semantic() {
+        let first = Netlist::parse(
+            "scheduled checkpoint\n\
+             V1 1 0 1\n\
+             .TRAN 1m 5m\n\
+             .OPTIONS OUTPUT OUTPUTTIMEPOINTS=4m,1m,2m,1m\n\
+             .OPTIONS TIMEINT BREAKPOINTS=3m,2m\n\
+             .END\n",
+        )
+        .expect("first scheduled deck parses");
+        let reordered = Netlist::parse(
+            "scheduled checkpoint\n\
+             V1 1 0 1\n\
+             .TRAN 1m 5m\n\
+             .OPTIONS OUTPUT OUTPUTTIMEPOINTS=1m,2m,4m\n\
+             .OPTIONS TIMEINT BREAKPOINTS=2m,3m\n\
+             .END\n",
+        )
+        .expect("reordered scheduled deck parses");
+        let changed = Netlist::parse(
+            "scheduled checkpoint\n\
+             V1 1 0 1\n\
+             .TRAN 1m 5m\n\
+             .OPTIONS OUTPUT OUTPUTTIMEPOINTS=1m,2m,4m\n\
+             .OPTIONS TIMEINT BREAKPOINTS=2m,3.5m\n\
+             .END\n",
+        )
+        .expect("changed scheduled deck parses");
+
+        assert_eq!(
+            netlist_checkpoint_identity(&first),
+            netlist_checkpoint_identity(&reordered),
+            "sorted/deduplicated schedules must have one semantic identity"
+        );
+        assert_ne!(
+            netlist_checkpoint_identity(&first),
+            netlist_checkpoint_identity(&changed),
+            "effective schedule changes must invalidate checkpoint identity"
+        );
+
+        let mut programmatic = reordered.clone();
+        programmatic.options.output_time_points = vec![4.0e-3, 1.0e-3, 1.0e-3, 2.0e-3];
+        programmatic.options.timeint_breakpoints = vec![3.0e-3, 2.0e-3, 2.0e-3];
+        assert_eq!(
+            netlist_checkpoint_identity(&first),
+            netlist_checkpoint_identity(&programmatic),
+            "programmatic AST schedule ordering and duplicates are not semantic"
+        );
     }
 
     #[test]

@@ -61,15 +61,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 223;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 225;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "472c3b82810505516672d93b738fd125990b2c9e6f9a18a7379cb4735cd9beb9";
+    "1a52e84143f1ff753a74f3d2d43ad36db412af08e43ed052a5ead0f85498d5ca";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "e4cffad64ee0f0b7e47a1589fb9ff25682bc828b9934d27ad77b266b49468e24";
+    "b06480cbdb429f34434f4d1004fa18fa4ce7b28d15843f02eefe11cfdd0683b1";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "5d2bf2f8bdfaba6980c90fa0b80cdf8c8ce8bc4184fed855a3acc7e71f3caee8";
+    "705f1e4697f1fa504af191c47a74480dc9db612e357958eb89dfb7f5bab82552";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -1864,6 +1864,122 @@ const XYCE_BUG1797_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 4] = [
         995,
         "a174dc0f6c68d3979407b739a1f97e457f37bb3ee3ea3699ede31733639a025f",
         "aa3e56fb3775d321962cb1b702bea44b85428d8508cb35e326c9fd1540dc1f2f",
+    ),
+];
+
+const XYCE_BUG981_OWNER_CONTRACT: &str =
+    "bug981_outputtimepoints_breakpoints_relational_wrapper_owner";
+const XYCE_BUG981_OUTPUT_CONTRACT: &str =
+    "bug981_outputtimepoints_breakpoints_relational_output_control";
+const XYCE_BUG981_BREAKPOINT_CONTRACT: &str =
+    "bug981_outputtimepoints_breakpoints_relational_breakpoint_control";
+const XYCE_BUG981_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_981_SON/bug981.cir";
+const XYCE_BUG981_OUTPUT_PATH: &str = "Netlists/Certification_Tests/BUG_981_SON/bug981A.cir";
+const XYCE_BUG981_BREAKPOINT_PATH: &str = "Netlists/Certification_Tests/BUG_981_SON/bug981B.cir";
+const XYCE_BUG981_OWNER_RECORD: &str = "netlists/certification_tests/bug_981_son/bug981.cir";
+const XYCE_BUG981_OUTPUT_RECORD: &str = "netlists/certification_tests/bug_981_son/bug981a.cir";
+const XYCE_BUG981_BREAKPOINT_RECORD: &str = "netlists/certification_tests/bug_981_son/bug981b.cir";
+const XYCE_BUG981_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_981_SON/exclude";
+const XYCE_BUG981_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG981_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG981_HISTORICAL_RECORD_COUNT: usize = 9;
+const XYCE_BUG981_HISTORICAL_RECORD_BYTES: usize = 2_172;
+const XYCE_BUG981_HISTORICAL_RECORDS_SHA256: &str =
+    "953ce232f72f982e74d1b38afc7cc81c4a2b88cb8cbe5923055ece14123d235e";
+const XYCE_BUG981_HISTORICAL_RECORDS_BLAKE3: &str =
+    "444122c070972b4828bc78bfe6e5c0183f8b77f0ddf6668ba997bc0a850e905d";
+const XYCE_BUG981_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 9] = [
+    (
+        "Netlists/Certification_Tests/BUG_981_SON/CMakeLists.txt",
+        2_051,
+        "6695f9741b0e4887e57da00b232d9c8611410449f27c1dbe77a9c5f3f4e739ba",
+        "ae7c5165978b5738e016b1b3e81bc81e6da62daa178f3e4ceb592aa6fc23b956",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_981_SON/Manifest.txt",
+        70,
+        "dc0dcd6feb371fc89216251da8280c45db48ca49060a1b93ce4741ca75ed83d0",
+        "56b03dafaa2450c84d1af760ad50ca37da989a509ecd3a2f4c72c412ebbe9cee",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_981_SON/bug981.cir",
+        2,
+        "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070",
+        "5896d7c81fa3a2eee0aa6139c752d40a1408b7e083aa940d1ece11d61d6c0e3e",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_981_SON/bug981.cir.sh",
+        1_449,
+        "c04613a2996e3431f4a996d21069a915a2a765ec9138b8f1955e66016cc8a0b6",
+        "b8c76c05bf416d4f3b814d36ca78fbbdca2428d502565a32b513ea3622e55771",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_981_SON/bug981A.cir",
+        186,
+        "9c5e7b9d0b8fa9f72299c2f01bcb4c014fef0e60d44f3e0e6ab9558cc7bdcf1c",
+        "5eb853d4da315b239b78fdec46cfee5417525c68f46d7473ec8a2519de536661",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_981_SON/bug981B.cir",
+        213,
+        "93fb996bfe71b4843ccfc38ddf6bd10c7cacadc12aef95b80fd589a59ab33808",
+        "4bb4ccbedb28b0bec5649fd1519f9ff7c56ba43b252a939764695f59922f0fc4",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_981_SON/exclude",
+        24,
+        "d79ba3c51570c5736f997e842e596b7dfd5fc479a78c237e1348d69d73fabafc",
+        "00eb676a5a94ea5a3641c53bf2b9f412087f9feb7b38a04c5284225497db920e",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_981_SON/patfile",
+        84,
+        "11a3883c1c30a398347fe4f28735842f0ebf912cf074c268ddd137257ad0b469",
+        "81a1d12cfce1ba83ca9aa3bc678a568daea1e910b50d04a69cbdf2008aaf76d4",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_981_SON/tags",
+        56,
+        "ed3e07cb52c9ad1d8a2b3e7d84c440f376470b5e8fc59951d522c788efa2753c",
+        "59021529f15846003cb16987fb29255dd14a460c1098f4a6159a4e267178437c",
+    ),
+];
+const XYCE_BUG981_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 6] = [
+    (
+        "bug981.cir",
+        2,
+        "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070",
+        "5896d7c81fa3a2eee0aa6139c752d40a1408b7e083aa940d1ece11d61d6c0e3e",
+    ),
+    (
+        "bug981A.cir",
+        186,
+        "9c5e7b9d0b8fa9f72299c2f01bcb4c014fef0e60d44f3e0e6ab9558cc7bdcf1c",
+        "5eb853d4da315b239b78fdec46cfee5417525c68f46d7473ec8a2519de536661",
+    ),
+    (
+        "bug981A.cir.prn",
+        243,
+        "b8dad5d75a96853ea1d61c5d4e544aa0de1abbcb7ac8b838141ddfda7f3f2ae0",
+        "e0e1d1ff14b3d58cbac8eea7838807e3a86ef57e9c2e4bbc2e86060febf3b36a",
+    ),
+    (
+        "bug981B.cir",
+        213,
+        "93fb996bfe71b4843ccfc38ddf6bd10c7cacadc12aef95b80fd589a59ab33808",
+        "4bb4ccbedb28b0bec5649fd1519f9ff7c56ba43b252a939764695f59922f0fc4",
+    ),
+    (
+        "bug981B.cir.prn",
+        2_331,
+        "ebbe32d36ec543db48ce81601d0c9d4bff963d5dd38f6c5ba63d0b5e4f011985",
+        "77b95e8250eb8411c7c36f353870ed46c381c3ffc9ab0e00f821ec2c6b9c245a",
+    ),
+    (
+        "patfile",
+        84,
+        "11a3883c1c30a398347fe4f28735842f0ebf912cf074c268ddd137257ad0b469",
+        "81a1d12cfce1ba83ca9aa3bc678a568daea1e910b50d04a69cbdf2008aaf76d4",
     ),
 ];
 
@@ -11592,6 +11708,7 @@ mod contracts_bug519;
 mod contracts_bug636;
 mod contracts_bug784;
 mod contracts_bug864;
+mod contracts_bug981;
 mod contracts_dc;
 mod contracts_diode_analytic;
 mod contracts_frequency;

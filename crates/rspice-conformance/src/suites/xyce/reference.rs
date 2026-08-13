@@ -1520,7 +1520,7 @@ impl XyceTestRunner {
         result: &TransientResult,
     ) -> Result<XycePrnTable, String> {
         Self::validate_transient_result_time_grid(result)?;
-        let output_times = Self::xyce_verify_transient_output_times(plan, result)?;
+        let output_times = Self::xyce_verify_transient_output_times(plan, netlist, result)?;
         Self::transient_family_result_to_prn_table_at_times(plan, netlist, result, &output_times)
     }
 

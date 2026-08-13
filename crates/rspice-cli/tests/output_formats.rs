@@ -54,6 +54,17 @@ c1 out 0 1u
 .end
 ";
 
+const TRAN_OUTPUT_TIME_POINTS_DECK: &str = "* transient output schedule export test
+voff a 0 2
+vexp 1 a exp(0 5 0 1ms 1s)
+r1 1 2 1
+c1 2 0 1
+.tran 1ms 5ms
+.options output outputtimepoints=1ms,2ms,3ms,4ms
+.print tran v(1)
+.end
+";
+
 const XSPICE_DIGITAL_TRAN_DECK: &str = "* xspice digital export test
 v1 in 0 pulse(0 5 0 1n 1n 5n 10n)
 abridge1 [in] [d] adc
@@ -118,11 +129,22 @@ fn test_dir(tag: &str) -> PathBuf {
 
 /// Run `rspice run <deck> -o <out> -f <format>` and return the output path.
 fn run_export(dir: &Path, tag: &str, deck: &str, format: &str) -> PathBuf {
+    run_export_with_args(dir, tag, deck, format, &[])
+}
+
+fn run_export_with_args(
+    dir: &Path,
+    tag: &str,
+    deck: &str,
+    format: &str,
+    extra_args: &[&str],
+) -> PathBuf {
     let deck_path = dir.join(format!("{tag}.sp"));
     std::fs::write(&deck_path, deck).expect("write deck");
     let out_path = dir.join(format!("{tag}_{format}.out"));
 
-    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_rspice"));
+    command
         .arg("--quiet")
         .arg("run")
         .arg(&deck_path)
@@ -130,8 +152,8 @@ fn run_export(dir: &Path, tag: &str, deck: &str, format: &str) -> PathBuf {
         .arg(&out_path)
         .arg("-f")
         .arg(format)
-        .output()
-        .expect("run rspice");
+        .args(extra_args);
+    let output = command.output().expect("run rspice");
 
     assert!(
         output.status.success(),
@@ -320,6 +342,48 @@ rload out 0 1k
         "CSV should print enough significant digits to expose the 10 ps knot: {text}"
     );
 
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn transient_output_time_points_project_the_export_without_truncating_the_solve() {
+    let dir = test_dir("output_time_points");
+    let path = run_export(
+        &dir,
+        "output_time_points",
+        TRAN_OUTPUT_TIME_POINTS_DECK,
+        "csv",
+    );
+    let text = std::fs::read_to_string(&path).expect("read scheduled csv");
+    let times = text
+        .lines()
+        .skip(1)
+        .map(|line| {
+            line.split(',')
+                .next()
+                .expect("time field")
+                .parse::<f64>()
+                .expect("numeric time")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(times, vec![1.0e-3, 2.0e-3, 3.0e-3, 4.0e-3, 5.0e-3]);
+    assert!(
+        !text.lines().skip(1).any(|line| line.starts_with("0,")),
+        "an absent zero request must not leak the accepted t=0 row: {text}"
+    );
+
+    let compressed = run_export_with_args(
+        &dir,
+        "output_time_points_compressed",
+        TRAN_OUTPUT_TIME_POINTS_DECK,
+        "csv",
+        &["--compress"],
+    );
+    let compressed_text = std::fs::read_to_string(compressed).expect("read compressed csv");
+    assert_eq!(
+        compressed_text, text,
+        "OUTPUTTIMEPOINTS must retain its exact rows when compression is requested"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

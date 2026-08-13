@@ -775,10 +775,19 @@ impl XyceTestRunner {
 
     pub(super) fn xyce_verify_transient_output_times(
         plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
         result: &TransientResult,
     ) -> Result<Vec<Value>, String> {
         let output_start = plan.tran.start.unwrap_or(0.0).max(0.0);
         let time_epsilon = 16.0 * Value::EPSILON * plan.tran.stop.abs().max(1.0);
+        if !netlist.options.output_time_points.is_empty() {
+            let projection = result.output_projection(
+                &netlist.options.output_time_points,
+                output_start,
+                plan.tran.stop,
+            )?;
+            return projection.project(&result.time);
+        }
         if let Some((initial_interval, transitions)) = Self::output_interval_schedule(&plan.source)?
         {
             let mut times = Vec::new();

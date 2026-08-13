@@ -2915,6 +2915,15 @@ pub struct SimulationOptions {
     /// contract parsing, while the transient engine retains the complete
     /// solution-variable set needed by Xyce's snapshot writer.
     pub output_snapshots: Option<bool>,
+    /// Xyce `.OPTIONS OUTPUT OUTPUTTIMEPOINTS` output schedule.
+    ///
+    /// These times are also transient solver breakpoints. The accepted-step
+    /// history remains complete; output writers project it onto this exact
+    /// schedule and the final transient stop time.
+    pub output_time_points: Vec<Value>,
+    /// Xyce `.OPTIONS TIMEINT BREAKPOINTS` user-requested transient solver
+    /// breakpoints. Unlike `output_time_points`, these do not filter output.
+    pub timeint_breakpoints: Vec<Value>,
     /// Xyce `.OPTIONS HBINT NUMFREQ[<n>]=...` harmonic orders.
     /// Each order produces a bilateral `2*N+1` collocation grid.
     pub hb_num_frequencies: Vec<usize>,
@@ -3152,6 +3161,12 @@ impl SimulationOptions {
         }
         if other.output_snapshots.is_some() {
             self.output_snapshots = other.output_snapshots;
+        }
+        if !other.output_time_points.is_empty() {
+            self.output_time_points = other.output_time_points.clone();
+        }
+        if !other.timeint_breakpoints.is_empty() {
+            self.timeint_breakpoints = other.timeint_breakpoints.clone();
         }
         if other.reltol.is_some() {
             self.reltol = other.reltol;

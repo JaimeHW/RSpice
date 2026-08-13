@@ -986,8 +986,10 @@ mod tests {
     #[test]
     fn tia_passive_oracle_rejects_expired_deadline() {
         let root = corpus_root();
-        let mut config = XyceRunnerConfig::default();
-        config.max_time_per_test_ms = 1;
+        let config = XyceRunnerConfig {
+            max_time_per_test_ms: 1,
+            ..XyceRunnerConfig::default()
+        };
         let runner = XyceTestRunner::new(&root, config);
         let deck = canonical_deck(&root, XyceTiaPassiveAnalyticKind::PositionalIc);
         assert!(

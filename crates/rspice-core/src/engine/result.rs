@@ -5,6 +5,34 @@ use crate::xspice::DigitalValue;
 use crate::{NodeId, Value};
 use std::collections::HashMap;
 
+/// Exact sample selection used by transient output writers.
+///
+/// The solver result always retains its complete accepted history. This view
+/// selects output rows without changing integration history, measurements,
+/// Fourier analysis, checkpoint continuation, or compression inputs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransientOutputProjection {
+    source_len: usize,
+    indices: Vec<usize>,
+}
+
+impl TransientOutputProjection {
+    pub fn indices(&self) -> &[usize] {
+        &self.indices
+    }
+
+    pub fn project(&self, values: &[Value]) -> Result<Vec<Value>, String> {
+        if values.len() != self.source_len {
+            return Err(format!(
+                "transient output series has {} samples, expected {}",
+                values.len(),
+                self.source_len
+            ));
+        }
+        Ok(self.indices.iter().map(|index| values[*index]).collect())
+    }
+}
+
 /// One accepted digital event sample for a named XSPICE digital node.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DigitalTracePoint {
@@ -96,6 +124,88 @@ pub struct TransientResult {
 }
 
 impl TransientResult {
+    /// Build the Xyce transient output view for a requested schedule.
+    ///
+    /// With no `OUTPUTTIMEPOINTS`, every accepted sample at or after TSTART
+    /// is selected. With a schedule, only exact accepted requested points in
+    /// the output horizon plus TSTOP are selected. Requested points are solver
+    /// breakpoints, so a missing exact point is a scheduling error rather than
+    /// an invitation to interpolate.
+    pub fn output_projection(
+        &self,
+        output_time_points: &[Value],
+        start_time: Value,
+        stop_time: Value,
+    ) -> Result<TransientOutputProjection, String> {
+        if !start_time.is_finite()
+            || !stop_time.is_finite()
+            || start_time < 0.0
+            || stop_time < start_time
+        {
+            return Err(format!(
+                "invalid transient output window [{start_time}, {stop_time}]"
+            ));
+        }
+        if self.time.is_empty() {
+            return Err("transient result has no accepted samples".to_string());
+        }
+        if let Some(invalid) = output_time_points
+            .iter()
+            .find(|time| !time.is_finite() || **time < 0.0)
+        {
+            return Err(format!(
+                "transient output schedule contains invalid time {invalid}"
+            ));
+        }
+        for (index, &time) in self.time.iter().enumerate() {
+            if !time.is_finite() {
+                return Err(format!("transient result time[{index}] is not finite"));
+            }
+            if index > 0 && time <= self.time[index - 1] {
+                return Err(format!(
+                    "transient result time grid is not strictly increasing at index {index}"
+                ));
+            }
+        }
+
+        let indices = if output_time_points.is_empty() {
+            let first = self.time.partition_point(|time| *time < start_time);
+            let last = self.time.partition_point(|time| *time <= stop_time);
+            (first..last).collect()
+        } else {
+            let mut requested = output_time_points
+                .iter()
+                .copied()
+                .filter(|time| *time >= start_time && *time <= stop_time)
+                .collect::<Vec<_>>();
+            requested.push(stop_time);
+            requested.sort_by(Value::total_cmp);
+            requested.dedup_by(|left, right| left.to_bits() == right.to_bits());
+
+            let mut indices = Vec::with_capacity(requested.len());
+            for requested_time in requested {
+                let index = self
+                    .time
+                    .binary_search_by(|time| time.total_cmp(&requested_time))
+                    .map_err(|_| {
+                        format!(
+                            "transient result did not land on requested output time {requested_time}"
+                        )
+                    })?;
+                indices.push(index);
+            }
+            indices
+        };
+
+        if indices.is_empty() {
+            return Err("transient output projection selected no samples".to_string());
+        }
+        Ok(TransientOutputProjection {
+            source_len: self.time.len(),
+            indices,
+        })
+    }
+
     /// Append one accepted device operating-point snapshot. Missing parameters
     /// are padded with NaN so every stored trace remains aligned with `time`.
     pub(crate) fn record_device_op_sample(
@@ -438,6 +548,78 @@ impl From<TransientResultCompressed> for TransientResult {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: compressed.store_traces,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn result_on_grid(time: Vec<Value>) -> TransientResult {
+        let values = time.iter().map(|time| 2.0 * time).collect::<Vec<_>>();
+        TransientResult {
+            step_sizes: vec![0.0; time.len()],
+            time,
+            voltages: vec![values],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["out".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn transient_output_projection_preserves_full_history_and_selects_schedule() {
+        let result = result_on_grid(vec![0.0, 0.5, 1.0, 1.5, 2.0]);
+
+        let all = result
+            .output_projection(&[], 0.5, 1.5)
+            .expect("ordinary output projection succeeds");
+        assert_eq!(all.indices(), &[1, 2, 3]);
+
+        let scheduled = result
+            .output_projection(&[0.0, 1.0], 0.5, 2.0)
+            .expect("scheduled output projection succeeds");
+        assert_eq!(scheduled.indices(), &[2, 4]);
+        assert_eq!(
+            scheduled
+                .project(&result.voltages[0])
+                .expect("aligned waveform projects"),
+            vec![2.0, 4.0]
+        );
+        assert_eq!(result.time.len(), 5, "projection must not mutate history");
+    }
+
+    #[test]
+    fn transient_output_projection_requires_exact_accepted_schedule_points() {
+        let result = result_on_grid(vec![0.0, 1.0, 2.0]);
+        let error = result
+            .output_projection(&[1.5], 0.0, 2.0)
+            .expect_err("output points are solver stops, not interpolation requests");
+        assert!(error.contains("did not land"));
+
+        let projection = result
+            .output_projection(&[0.0, 2.0], 0.0, 2.0)
+            .expect("explicit zero and deduplicated stop are valid");
+        assert_eq!(projection.indices(), &[0, 2]);
+        assert!(projection.project(&[1.0]).is_err());
+    }
+
+    #[test]
+    fn transient_output_projection_rejects_invalid_result_grids() {
+        for time in [vec![], vec![0.0, 0.0], vec![0.0, Value::NAN]] {
+            let result = result_on_grid(time);
+            assert!(result.output_projection(&[], 0.0, 1.0).is_err());
+        }
+
+        let result = result_on_grid(vec![0.0, 1.0]);
+        for schedule in [vec![-1.0], vec![Value::NAN], vec![Value::INFINITY]] {
+            assert!(result.output_projection(&schedule, 0.0, 1.0).is_err());
         }
     }
 }

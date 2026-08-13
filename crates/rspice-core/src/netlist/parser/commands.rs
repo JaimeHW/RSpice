@@ -29,6 +29,8 @@ pub(super) fn parse_command(
         startup_directives,
         startup_scope,
         options,
+        max_analysis_points,
+        output_initial_interval_seen,
         diagnostics,
         spef_includes,
         origin,
@@ -384,6 +386,8 @@ pub(super) fn parse_command(
             line_num,
             params,
             options,
+            max_analysis_points,
+            output_initial_interval_seen,
             unknown_warned,
             diagnostics,
         )?,
@@ -1320,6 +1324,8 @@ pub(super) fn parse_options_command(
     line_num: usize,
     params: &ParamContext,
     options: &mut super::SimulationOptions,
+    max_analysis_points: usize,
+    output_initial_interval_seen: &mut bool,
     unknown_warned: &mut std::collections::HashSet<String>,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Result<(), ParseError> {
@@ -1672,6 +1678,25 @@ pub(super) fn parse_options_command(
                     line_num,
                 )?);
             }
+            (Some("TIMEINT"), "BREAKPOINTS") => {
+                let values = parse_time_point_vector_option(
+                    stream,
+                    line_num,
+                    params,
+                    "TIMEINT.BREAKPOINTS",
+                    options
+                        .timeint_breakpoints
+                        .len()
+                        .saturating_add(options.output_time_points.len()),
+                    max_analysis_points,
+                )?;
+                append_canonical_time_points(
+                    &mut options.timeint_breakpoints,
+                    values,
+                    &options.output_time_points,
+                    max_analysis_points,
+                )?;
+            }
             // The run's step ceiling is deliberately outside `TIMEINT`: that
             // package's own ceiling is `DELMAX`, and a second key inside it
             // meaning the same thing would make a deck line ambiguous. Being
@@ -1878,9 +1903,41 @@ pub(super) fn parse_options_command(
                 options.matrix_solver = Some(parse_matrix_solver_option(stream, line_num)?);
             }
             (Some("OUTPUT"), "INITIAL_INTERVAL" | "INITIALINTERVAL") => {
+                if !options.output_time_points.is_empty() {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: "Cannot specify both .OPTIONS OUTPUT INITIAL_INTERVAL and OUTPUTTIMEPOINTS".to_string(),
+                    });
+                }
                 let value = expect_value(stream, line_num, params)?;
                 let _ = parse_positive_real_option("OUTPUT.INITIAL_INTERVAL", value, line_num)?;
                 consume_output_initial_interval_schedule(stream, line_num, params)?;
+                *output_initial_interval_seen = true;
+            }
+            (Some("OUTPUT"), "OUTPUTTIMEPOINTS") => {
+                if *output_initial_interval_seen {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: "Cannot specify both .OPTIONS OUTPUT INITIAL_INTERVAL and OUTPUTTIMEPOINTS".to_string(),
+                    });
+                }
+                let values = parse_time_point_vector_option(
+                    stream,
+                    line_num,
+                    params,
+                    "OUTPUT.OUTPUTTIMEPOINTS",
+                    options
+                        .output_time_points
+                        .len()
+                        .saturating_add(options.timeint_breakpoints.len()),
+                    max_analysis_points,
+                )?;
+                append_canonical_time_points(
+                    &mut options.output_time_points,
+                    values,
+                    &options.timeint_breakpoints,
+                    max_analysis_points,
+                )?;
             }
             (Some("OUTPUT"), "SNAPSHOTS") => {
                 options.output_snapshots =
@@ -2017,6 +2074,70 @@ fn consume_output_initial_interval_schedule(
         let value = expect_value(stream, line_num, params)?;
         let _ = parse_positive_real_option("OUTPUT.INITIAL_INTERVAL", value, line_num)?;
     }
+}
+
+fn parse_time_point_vector_option(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    option_name: &str,
+    retained_points: usize,
+    max_analysis_points: usize,
+) -> Result<Vec<Value>, ParseError> {
+    let mut values = Vec::new();
+    loop {
+        let value = expect_value(stream, line_num, params).map_err(|_| ParseError::Syntax {
+            line: line_num,
+            message: format!("{option_name} expects a non-empty comma-separated time list"),
+        })?;
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::AnalysisPoints,
+            retained_points
+                .saturating_add(values.len())
+                .saturating_add(1),
+            max_analysis_points,
+        )
+        .map_err(ParseError::from)?;
+        if !value.is_finite() || value < 0.0 {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "{option_name} time points must be finite and nonnegative, found {value}"
+                ),
+            });
+        }
+        values.push(if value == 0.0 { 0.0 } else { value });
+
+        if !stream.consume(&TokenKind::Comma) {
+            break;
+        }
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("{option_name} has a trailing comma without a time point"),
+            });
+        }
+    }
+    Ok(values)
+}
+
+fn append_canonical_time_points(
+    target: &mut Vec<Value>,
+    mut values: Vec<Value>,
+    other: &[Value],
+    max_analysis_points: usize,
+) -> Result<(), ParseError> {
+    target.append(&mut values);
+    target.sort_by(Value::total_cmp);
+    target.dedup_by(|left, right| {
+        (*left - *right).abs() <= crate::numerics::integration::XYCE_BREAKPOINT_TOLERANCE
+    });
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::AnalysisPoints,
+        target.len().saturating_add(other.len()),
+        max_analysis_points,
+    )
+    .map_err(ParseError::from)
 }
 
 fn parse_boolean_option(
@@ -5822,6 +5943,86 @@ mod tests {
             ".options output initial_interval=.001ms .5ms .01ms",
         ))
         .expect("Xyce OUTPUT INITIAL_INTERVAL schedule syntax parses");
+    }
+
+    #[test]
+    fn xyce_output_and_timeint_time_point_lists_are_typed_and_canonical() {
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options output outputtimepoints=4ms,1ms,1ms,-0\n\
+             .options output outputtimepoints=3ms,2ms\n\
+             .options timeint breakpoints=4ms,2ms,2ms\n\
+             .options timeint breakpoints=3ms,1ms",
+        ))
+        .expect("Xyce transient time-point lists parse");
+
+        assert_eq!(
+            netlist.options.output_time_points,
+            vec![0.0, 1.0e-3, 2.0e-3, 3.0e-3, 4.0e-3]
+        );
+        assert_eq!(
+            netlist.options.timeint_breakpoints,
+            vec![1.0e-3, 2.0e-3, 3.0e-3, 4.0e-3]
+        );
+        assert_eq!(
+            netlist.options.output_time_points[0].to_bits(),
+            0.0f64.to_bits()
+        );
+        assert!(
+            netlist
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "unknown-option")
+        );
+    }
+
+    #[test]
+    fn xyce_time_point_lists_reject_malformed_values_and_interval_conflicts() {
+        for options in [
+            ".options output outputtimepoints=",
+            ".options output outputtimepoints=1ms,",
+            ".options output outputtimepoints=-1ms",
+            ".options timeint breakpoints=1ms,",
+            ".options timeint breakpoints=-1ms",
+        ] {
+            Netlist::parse(&deck_with_options(options))
+                .expect_err("malformed transient time-point list must fail parsing");
+        }
+
+        for options in [
+            ".options output initial_interval=1ms\n.options output outputtimepoints=2ms",
+            ".options output outputtimepoints=2ms\n.options output initial_interval=1ms",
+        ] {
+            let error = Netlist::parse(&deck_with_options(options))
+                .expect_err("OUTPUT interval and point schedules are mutually exclusive");
+            assert!(error.to_string().contains("INITIAL_INTERVAL"));
+            assert!(error.to_string().contains("OUTPUTTIMEPOINTS"));
+        }
+    }
+
+    #[test]
+    fn xyce_time_point_lists_share_the_analysis_point_resource_limit() {
+        let error = Netlist::parse_with_options(
+            &deck_with_options(
+                ".options output outputtimepoints=1ms,2ms\n\
+                 .options timeint breakpoints=3ms,4ms",
+            ),
+            crate::netlist::NetlistParseOptions {
+                resource_limits: crate::resource::ResourceLimits {
+                    max_analysis_points: 3,
+                    ..crate::resource::ResourceLimits::default()
+                },
+                ..crate::netlist::NetlistParseOptions::default()
+            },
+        )
+        .expect_err("combined transient schedules must honor the parser resource limit");
+        assert!(matches!(
+            error,
+            ParseError::ResourceLimit(crate::resource::ResourceLimitError {
+                resource: crate::resource::ResourceKind::AnalysisPoints,
+                requested: 4,
+                limit: 3,
+            })
+        ));
     }
 
     #[test]

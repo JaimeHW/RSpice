@@ -19,6 +19,9 @@ const MIN_STEP_AFTER_BREAKPOINT: Value = 1e-12;
 /// from `CKTminBreak`; this default keeps standalone manager use conservative.
 const DEFAULT_BREAKPOINT_TOLERANCE: Value = 1e-15;
 
+/// Xyce 7.10 `Util::BreakPoint::defaultTolerance_`.
+pub(crate) const XYCE_BREAKPOINT_TOLERANCE: Value = 1.0e-20;
+
 /// Ngspice `dctran.c` factor for equalizing the last two pre-breakpoint steps.
 const BREAKPOINT_EQUALIZATION_FACTOR: Value = 1.9;
 
@@ -98,6 +101,9 @@ pub struct BreakpointManager {
     restart_step_scale: Value,
     /// Whether to equalize the final two steps before a breakpoint.
     equalize_pre_breakpoint_steps: bool,
+    /// Xyce's breakpoint equality includes the exact tolerance boundary;
+    /// ngspice-style scheduling preserves the established strict comparison.
+    inclusive_tolerance: bool,
     /// Tolerance for merging and detecting breakpoint times.
     tolerance: Value,
 }
@@ -118,9 +124,10 @@ impl BreakpointManager {
     }
 
     pub fn new_with_tolerance_and_policy(tolerance: Value, policy: BreakpointStepPolicy) -> Self {
-        let (restart_step_scale, equalize_pre_breakpoint_steps) = match policy {
-            BreakpointStepPolicy::Ngspice => (NGSPICE_BREAKPOINT_RESTART_STEP_SCALE, true),
-            BreakpointStepPolicy::Xyce => (XYCE_BREAKPOINT_RESTART_STEP_SCALE, false),
+        let (restart_step_scale, equalize_pre_breakpoint_steps, inclusive_tolerance) = match policy
+        {
+            BreakpointStepPolicy::Ngspice => (NGSPICE_BREAKPOINT_RESTART_STEP_SCALE, true, false),
+            BreakpointStepPolicy::Xyce => (XYCE_BREAKPOINT_RESTART_STEP_SCALE, false, true),
         };
         Self {
             breakpoints: Vec::new(),
@@ -130,6 +137,7 @@ impl BreakpointManager {
             saved_delta_before_breakpoint: None,
             restart_step_scale,
             equalize_pre_breakpoint_steps,
+            inclusive_tolerance,
             tolerance: if tolerance.is_finite() && tolerance > 0.0 {
                 tolerance
             } else {
@@ -148,7 +156,90 @@ impl BreakpointManager {
 
     /// Add a breakpoint time (deduplicates automatically)
     pub fn add(&mut self, time: Value) -> bool {
-        Self::insert_sorted_unique(&mut self.breakpoints, time, self.tolerance)
+        Self::insert_sorted_unique(
+            &mut self.breakpoints,
+            time,
+            self.tolerance,
+            self.inclusive_tolerance,
+        )
+    }
+
+    /// Merge a sorted or unsorted permanent schedule in linear time after one
+    /// canonical sort. Non-finite values are ignored and points within the
+    /// manager tolerance are coalesced exactly as repeated [`Self::add`]
+    /// calls would be, without their quadratic insertion cost.
+    pub fn extend<I>(&mut self, times: I)
+    where
+        I: IntoIterator<Item = Value>,
+    {
+        let processed_through = self
+            .current_index
+            .checked_sub(1)
+            .and_then(|index| self.breakpoints.get(index))
+            .copied();
+        let mut incoming = times
+            .into_iter()
+            .filter(|time| time.is_finite())
+            .collect::<Vec<_>>();
+        if incoming.is_empty() {
+            return;
+        }
+        incoming.sort_by(Value::total_cmp);
+
+        let mut merged = Vec::with_capacity(self.breakpoints.len().saturating_add(incoming.len()));
+        let mut existing_index = 0usize;
+        let mut incoming_index = 0usize;
+        while existing_index < self.breakpoints.len() || incoming_index < incoming.len() {
+            let value = match (
+                self.breakpoints.get(existing_index).copied(),
+                incoming.get(incoming_index).copied(),
+            ) {
+                (Some(existing), Some(candidate))
+                    if Self::difference_within_tolerance(
+                        (existing - candidate).abs(),
+                        self.tolerance,
+                        self.inclusive_tolerance,
+                    ) =>
+                {
+                    // Repeated `add` calls retain an established breakpoint
+                    // when a new point falls inside its tolerance window.
+                    existing_index += 1;
+                    incoming_index += 1;
+                    existing
+                }
+                (Some(existing), Some(candidate)) if existing.total_cmp(&candidate).is_le() => {
+                    existing_index += 1;
+                    existing
+                }
+                (Some(_), Some(candidate)) => {
+                    incoming_index += 1;
+                    candidate
+                }
+                (Some(existing), None) => {
+                    existing_index += 1;
+                    existing
+                }
+                (None, Some(candidate)) => {
+                    incoming_index += 1;
+                    candidate
+                }
+                (None, None) => break,
+            };
+            if merged.last().is_none_or(|last: &Value| {
+                !Self::difference_within_tolerance(
+                    (value - *last).abs(),
+                    self.tolerance,
+                    self.inclusive_tolerance,
+                )
+            }) {
+                merged.push(value);
+            }
+        }
+        self.breakpoints = merged;
+        self.current_index = processed_through.map_or(0, |time| {
+            self.breakpoints
+                .partition_point(|breakpoint| *breakpoint <= time + self.tolerance)
+        });
     }
 
     /// Replace the dynamic runtime breakpoint schedule.
@@ -170,39 +261,66 @@ impl BreakpointManager {
                 &self.breakpoints[self.current_index..],
                 time,
                 self.tolerance,
+                self.inclusive_tolerance,
             ) {
                 continue;
             }
-            Self::insert_runtime_unique(&mut self.runtime_breakpoints, time, self.tolerance);
+            Self::insert_runtime_unique(
+                &mut self.runtime_breakpoints,
+                time,
+                self.tolerance,
+                self.inclusive_tolerance,
+            );
         }
     }
 
-    fn insert_sorted_unique(values: &mut Vec<Value>, time: Value, tolerance: Value) -> bool {
+    fn difference_within_tolerance(difference: Value, tolerance: Value, inclusive: bool) -> bool {
+        if inclusive {
+            difference <= tolerance
+        } else {
+            difference < tolerance
+        }
+    }
+
+    fn insert_sorted_unique(
+        values: &mut Vec<Value>,
+        time: Value,
+        tolerance: Value,
+        inclusive: bool,
+    ) -> bool {
         if !time.is_finite() {
             return false;
         }
         let pos = Self::sorted_insert_position(values, time);
-        if Self::neighbors_within_tolerance(values, pos, time, tolerance) {
+        if Self::neighbors_within_tolerance(values, pos, time, tolerance, inclusive) {
             return false;
         }
         values.insert(pos, time);
         true
     }
 
-    fn contains_sorted_within_tolerance(values: &[Value], time: Value, tolerance: Value) -> bool {
+    fn contains_sorted_within_tolerance(
+        values: &[Value],
+        time: Value,
+        tolerance: Value,
+        inclusive: bool,
+    ) -> bool {
         if values.is_empty() {
             return false;
         }
         let pos = Self::sorted_insert_position(values, time);
-        Self::neighbors_within_tolerance(values, pos, time, tolerance)
+        Self::neighbors_within_tolerance(values, pos, time, tolerance, inclusive)
     }
 
     fn insert_runtime_unique(
         values: &mut BTreeSet<BreakpointTimeKey>,
         time: Value,
         tolerance: Value,
+        inclusive: bool,
     ) -> bool {
-        if !time.is_finite() || Self::contains_runtime_within_tolerance(values, time, tolerance) {
+        if !time.is_finite()
+            || Self::contains_runtime_within_tolerance(values, time, tolerance, inclusive)
+        {
             return false;
         }
         values.insert(BreakpointTimeKey(time))
@@ -212,12 +330,17 @@ impl BreakpointManager {
         values: &BTreeSet<BreakpointTimeKey>,
         time: Value,
         tolerance: Value,
+        inclusive: bool,
     ) -> bool {
-        let lower = time - tolerance;
-        values
-            .range((Excluded(BreakpointTimeKey(lower)), Unbounded))
-            .next()
-            .is_some_and(|existing| (existing.0 - time).abs() < tolerance)
+        let lower = BreakpointTimeKey(time - tolerance);
+        let candidate = if inclusive {
+            values.range(lower..).next()
+        } else {
+            values.range((Excluded(lower), Unbounded)).next()
+        };
+        candidate.is_some_and(|existing| {
+            Self::difference_within_tolerance((existing.0 - time).abs(), tolerance, inclusive)
+        })
     }
 
     fn sorted_insert_position(values: &[Value], time: Value) -> usize {
@@ -231,14 +354,16 @@ impl BreakpointManager {
         pos: usize,
         time: Value,
         tolerance: Value,
+        inclusive: bool,
     ) -> bool {
-        values
-            .get(pos)
-            .is_some_and(|existing| (*existing - time).abs() < tolerance)
-            || pos
-                .checked_sub(1)
-                .and_then(|prev| values.get(prev))
-                .is_some_and(|existing| (*existing - time).abs() < tolerance)
+        values.get(pos).is_some_and(|existing| {
+            Self::difference_within_tolerance((*existing - time).abs(), tolerance, inclusive)
+        }) || pos
+            .checked_sub(1)
+            .and_then(|prev| values.get(prev))
+            .is_some_and(|existing| {
+                Self::difference_within_tolerance((*existing - time).abs(), tolerance, inclusive)
+            })
     }
 
     /// Get next breakpoint after given time
@@ -290,7 +415,13 @@ impl BreakpointManager {
             .get(first_candidate..position.saturating_add(1).min(remaining.len()))?
             .iter()
             .copied()
-            .find(|breakpoint| (time - breakpoint).abs() < self.tolerance)
+            .find(|breakpoint| {
+                Self::difference_within_tolerance(
+                    (time - breakpoint).abs(),
+                    self.tolerance,
+                    self.inclusive_tolerance,
+                )
+            })
     }
 
     fn runtime_breakpoint_within_tolerance(&self, time: Value) -> Option<Value> {
@@ -302,12 +433,24 @@ impl BreakpointManager {
         self.runtime_breakpoints
             .range(..=key)
             .next_back()
-            .filter(|breakpoint| (time - breakpoint.0).abs() < self.tolerance)
+            .filter(|breakpoint| {
+                Self::difference_within_tolerance(
+                    (time - breakpoint.0).abs(),
+                    self.tolerance,
+                    self.inclusive_tolerance,
+                )
+            })
             .or_else(|| {
                 self.runtime_breakpoints
                     .range((Excluded(key), Unbounded))
                     .next()
-                    .filter(|breakpoint| (time - breakpoint.0).abs() < self.tolerance)
+                    .filter(|breakpoint| {
+                        Self::difference_within_tolerance(
+                            (time - breakpoint.0).abs(),
+                            self.tolerance,
+                            self.inclusive_tolerance,
+                        )
+                    })
             })
             .map(|breakpoint| breakpoint.0)
     }
@@ -589,6 +732,59 @@ mod breakpoint_manager_tests {
             .map(|time| time.0)
             .collect::<Vec<_>>();
         assert_eq!(remaining_runtime_breakpoints, vec![5.0e-9]);
+    }
+
+    #[test]
+    fn bulk_breakpoint_merge_preserves_existing_points_and_cursor() {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0);
+        breakpoints.add(10.0);
+        breakpoints.add(20.0);
+        breakpoints.discard_through(10.0);
+
+        breakpoints.extend([19.5, 15.0, 11.2, 9.5, Value::NAN]);
+
+        assert_eq!(breakpoints.times(), &[10.0, 11.2, 15.0, 20.0]);
+        assert_eq!(breakpoints.next_after(10.0), Some(11.2));
+        assert!(!breakpoints.at_breakpoint(10.0));
+    }
+
+    #[test]
+    fn bulk_breakpoint_merge_matches_sorted_individual_insertions() {
+        let incoming = [8.8, 9.5, 11.2, 12.0, 15.0, 19.5, 21.2];
+        let mut individual = BreakpointManager::new_with_tolerance(1.0);
+        let mut bulk = BreakpointManager::new_with_tolerance(1.0);
+        for manager in [&mut individual, &mut bulk] {
+            manager.add(10.0);
+            manager.add(20.0);
+        }
+        for time in incoming {
+            individual.add(time);
+        }
+        bulk.extend(incoming);
+
+        assert_eq!(bulk.times(), individual.times());
+    }
+
+    #[test]
+    fn xyce_breakpoint_equality_includes_the_exact_tolerance_boundary() {
+        let tolerance = 1.0e-6;
+        let mut xyce =
+            BreakpointManager::new_with_tolerance_and_policy(tolerance, BreakpointStepPolicy::Xyce);
+        let mut ngspice = BreakpointManager::new_with_tolerance_and_policy(
+            tolerance,
+            BreakpointStepPolicy::Ngspice,
+        );
+        for manager in [&mut xyce, &mut ngspice] {
+            assert!(manager.add(0.0));
+        }
+        assert!(!xyce.add(tolerance));
+        assert!(ngspice.add(tolerance));
+        assert!(xyce.at_breakpoint(tolerance));
+
+        let mut bulk =
+            BreakpointManager::new_with_tolerance_and_policy(tolerance, BreakpointStepPolicy::Xyce);
+        bulk.extend([0.0, tolerance]);
+        assert_eq!(bulk.times(), &[0.0]);
     }
 
     #[test]

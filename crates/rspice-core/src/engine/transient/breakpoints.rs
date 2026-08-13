@@ -547,6 +547,162 @@ impl Engine {
         Ok(())
     }
 
+    pub(super) fn add_user_transient_breakpoints(
+        breakpoints: &mut BreakpointManager,
+        netlist: &crate::netlist::Netlist,
+        tstop: Value,
+        abort: &dyn crate::abort_signal::AbortSignal,
+        max_points: usize,
+    ) -> Result<(), crate::engine::SimulationError> {
+        if !netlist.options.output_time_points.is_empty() {
+            let transient_analyses = netlist
+                .analyses
+                .iter()
+                .filter_map(|analysis| match analysis {
+                    crate::netlist::AnalysisCommand::Tran { stop, start, .. } => {
+                        Some((*stop, *start))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if !matches!(transient_analyses.as_slice(), [(stop, None)] if stop.to_bits() == tstop.to_bits())
+            {
+                return Err(crate::engine::SimulationError::Circuit(
+                    "OUTPUTTIMEPOINTS currently requires one selected .TRAN analysis with omitted TSTART"
+                        .to_string(),
+                ));
+            }
+            if let Some(time) = netlist
+                .options
+                .output_time_points
+                .iter()
+                .find(|time| **time > tstop)
+            {
+                return Err(crate::engine::SimulationError::Circuit(format!(
+                    "OUTPUTTIMEPOINTS time {time} exceeds the selected transient stop {tstop}"
+                )));
+            }
+            if netlist.options.output_time_points.windows(2).any(|times| {
+                times[0].to_bits() != times[1].to_bits()
+                    && (times[1] - times[0]).abs()
+                        <= crate::numerics::integration::XYCE_BREAKPOINT_TOLERANCE
+            }) {
+                return Err(crate::engine::SimulationError::Circuit(
+                    "OUTPUTTIMEPOINTS contains distinct times inside the Xyce breakpoint equality tolerance"
+                        .to_string(),
+                ));
+            }
+            let conflicts_with = |time: Value, sorted: &[Value]| {
+                let position = sorted.partition_point(|candidate| *candidate < time);
+                sorted
+                    .get(position.saturating_sub(1)..position.saturating_add(1).min(sorted.len()))
+                    .into_iter()
+                    .flatten()
+                    .any(|candidate| {
+                        candidate.to_bits() != time.to_bits()
+                            && (*candidate - time).abs()
+                                <= crate::numerics::integration::XYCE_BREAKPOINT_TOLERANCE
+                    })
+            };
+            if netlist.options.output_time_points.iter().any(|time| {
+                conflicts_with(*time, breakpoints.times())
+                    || conflicts_with(*time, &netlist.options.timeint_breakpoints)
+            }) {
+                return Err(crate::engine::SimulationError::Circuit(
+                    "OUTPUTTIMEPOINTS is not exactly representable beside an existing Xyce breakpoint"
+                        .to_string(),
+                ));
+            }
+        }
+        let requested = netlist
+            .options
+            .output_time_points
+            .len()
+            .saturating_add(netlist.options.timeint_breakpoints.len());
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::AnalysisPoints,
+            requested,
+            max_points,
+        )?;
+        let mut retained = Vec::with_capacity(requested);
+        for (index, time) in netlist
+            .options
+            .output_time_points
+            .iter()
+            .chain(&netlist.options.timeint_breakpoints)
+            .copied()
+            .enumerate()
+        {
+            if index % 256 == 0 && abort.is_aborted() {
+                return Err(crate::engine::SimulationError::Aborted);
+            }
+            if !time.is_finite() || time < 0.0 {
+                return Err(crate::engine::SimulationError::Circuit(format!(
+                    "transient user-breakpoint schedule contains invalid time {time}"
+                )));
+            }
+            if time <= tstop {
+                retained.push(if time == 0.0 { 0.0 } else { time });
+            }
+        }
+        retained.sort_by(Value::total_cmp);
+        retained.dedup_by(|left, right| {
+            (*left - *right).abs() <= crate::numerics::integration::XYCE_BREAKPOINT_TOLERANCE
+        });
+        let existing = breakpoints.times();
+        let mut existing_index = 0usize;
+        let mut retained_index = 0usize;
+        let mut union_count = 0usize;
+        let mut last: Option<Value> = None;
+        while existing_index < existing.len() || retained_index < retained.len() {
+            let value = match (
+                existing.get(existing_index).copied(),
+                retained.get(retained_index).copied(),
+            ) {
+                (Some(established), Some(candidate))
+                    if (established - candidate).abs()
+                        <= crate::numerics::integration::XYCE_BREAKPOINT_TOLERANCE =>
+                {
+                    existing_index += 1;
+                    retained_index += 1;
+                    established
+                }
+                (Some(established), Some(candidate))
+                    if established.total_cmp(&candidate).is_le() =>
+                {
+                    existing_index += 1;
+                    established
+                }
+                (Some(_), Some(candidate)) => {
+                    retained_index += 1;
+                    candidate
+                }
+                (Some(established), None) => {
+                    existing_index += 1;
+                    established
+                }
+                (None, Some(candidate)) => {
+                    retained_index += 1;
+                    candidate
+                }
+                (None, None) => break,
+            };
+            if last.is_none_or(|last| {
+                (value - last).abs() > crate::numerics::integration::XYCE_BREAKPOINT_TOLERANCE
+            }) {
+                union_count = union_count.saturating_add(1);
+                last = Some(value);
+            }
+        }
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::AnalysisPoints,
+            union_count,
+            max_points,
+        )?;
+        breakpoints.extend(retained);
+        Self::check_source_breakpoint_collection(breakpoints, abort, max_points)
+    }
+
     pub(in crate::engine) fn collect_transient_source_breakpoints(
         circuit: &crate::circuit::CircuitData,
         tstop: Value,
@@ -841,6 +997,42 @@ mod tests {
                 "actual={actual:.17e} expected={expected:.17e} tolerance={tolerance:.17e}"
             );
         }
+    }
+
+    #[test]
+    fn authored_schedule_union_honors_the_engine_resource_limit_before_allocation() {
+        let netlist = crate::netlist::Netlist::parse(
+            "bounded schedule\n\
+             .TRAN 1 3\n\
+             .OPTIONS OUTPUT OUTPUTTIMEPOINTS=1,2\n\
+             .END\n",
+        )
+        .expect("bounded schedule parses");
+        let mut breakpoints = BreakpointManager::new();
+        breakpoints.add(0.0);
+        breakpoints.add(3.0);
+
+        let error = Engine::add_user_transient_breakpoints(
+            &mut breakpoints,
+            &netlist,
+            3.0,
+            &crate::abort_signal::NoAbort,
+            3,
+        )
+        .expect_err("source and authored breakpoint union must share one engine limit");
+        assert!(matches!(
+            error,
+            crate::engine::SimulationError::ResourceLimit(crate::resource::ResourceLimitError {
+                resource: crate::resource::ResourceKind::AnalysisPoints,
+                requested: 4,
+                limit: 3,
+            })
+        ));
+        assert_eq!(
+            breakpoints.times(),
+            &[0.0, 3.0],
+            "failed admission must not mutate the established schedule"
+        );
     }
 
     #[test]

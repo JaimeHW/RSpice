@@ -241,6 +241,15 @@ empty anchor remains the sole wrapper owner, both historical worker exclusions
 are independently qualified by exact role contracts, and no numerical gold is
 invented.
 
+Certification BUG 981 is reconstructed as the Release-7.10 adaptive transient
+schedule relation. RSpice types `OUTPUTTIMEPOINTS` and `TIMEINT BREAKPOINTS`,
+lands both lists as solver breakpoints without replacing normal LTE adaptation,
+and projects only the requested output times for the former. The exact
+historical `grep -f`/`diff` relation is then applied to independently simulated
+workers, with the retained PRNs treated only as documentary corpus members.
+The blank anchor remains the sole wrapper owner, both historical worker
+exclusions are independently qualified, and no numerical gold is invented.
+
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
 and verifier identities. The PARAMS1, PARSER nakedAlgebra, and Certification

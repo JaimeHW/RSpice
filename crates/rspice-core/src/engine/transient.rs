@@ -2248,14 +2248,15 @@ impl Engine {
             AnalysisCommand::Tran { step, .. } if step.is_finite() && *step > 0.0 => Some(*step),
             _ => None,
         });
-        let breakpoint_tolerance = Self::ngspice_breakpoint_tolerance(hinted_max_step);
         let mut breakpoints = if self.config.spice_dialect == SpiceDialect::Xyce {
             BreakpointManager::new_with_tolerance_and_policy(
-                breakpoint_tolerance,
+                crate::numerics::integration::XYCE_BREAKPOINT_TOLERANCE,
                 BreakpointStepPolicy::Xyce,
             )
         } else {
-            BreakpointManager::new_with_tolerance(breakpoint_tolerance)
+            BreakpointManager::new_with_tolerance(Self::ngspice_breakpoint_tolerance(
+                hinted_max_step,
+            ))
         };
         if self.config.spice_dialect != SpiceDialect::Xyce && circuit.has_b3soi_devices() {
             // Native B3SOI charge integration still needs the established
@@ -2281,6 +2282,17 @@ impl Engine {
             tstop,
             &mut breakpoints,
         );
+        // User and output schedules are solver stops, not physical source
+        // edges. Add them only after transmission-line propagation so they
+        // cannot synthesize delayed arrivals.
+        Self::add_user_transient_breakpoints(
+            &mut breakpoints,
+            netlist,
+            tstop,
+            abort,
+            self.config.resource_limits.max_analysis_points,
+        )?;
+        Self::add_breakpoint_if_in_range(&mut breakpoints, tstop, tstop);
         breakpoints.discard_through(resume_time);
         let initial_remaining_breakpoints = breakpoints
             .times()
@@ -7496,6 +7508,127 @@ mod tests {
             Engine::step_trapezoidal_order(IntegrationMethod::Trapezoidal, 2, true),
             1
         );
+    }
+
+    #[test]
+    fn xyce_authored_output_and_timeint_points_land_without_replacing_adaptive_history() {
+        fn run_with_options(options: &str) -> (Netlist, TransientResult) {
+            let source = format!(
+                "Xyce authored transient schedule\n\
+                 VOFF A 0 2.0\n\
+                 VEXP 1 A EXP(0.0 5.0 0 1ms 1s)\n\
+                 R1 1 2 1\n\
+                 C1 2 0 1\n\
+                 .TRAN 1ms 5ms\n\
+                 {options}\n\
+                 .END\n"
+            );
+            let netlist = Netlist::parse(&source).expect("scheduled transient deck parses");
+            let engine =
+                Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+            let result = engine
+                .run_tran(&netlist, 5.0e-3, 1.0e-3)
+                .expect("scheduled transient solves adaptively");
+            (netlist, result)
+        }
+
+        let requested = [1.0e-3, 2.0e-3, 3.0e-3, 4.0e-3];
+        let (output_netlist, output_result) =
+            run_with_options(".OPTIONS OUTPUT OUTPUTTIMEPOINTS=1ms,2ms,3ms,4ms");
+        let (_, breakpoint_result) =
+            run_with_options(".OPTIONS TIMEINT BREAKPOINTS=1ms,2ms,3ms,4ms");
+
+        for result in [&output_result, &breakpoint_result] {
+            assert_eq!(result.time.first().copied(), Some(0.0));
+            assert_eq!(result.time.last().copied(), Some(5.0e-3));
+            assert!(
+                result.time.len() > 6,
+                "authored stops must preserve adaptive accepted history: {:?}",
+                result.time
+            );
+            for requested_time in requested {
+                assert!(
+                    result
+                        .time
+                        .binary_search_by(|time| time.total_cmp(&requested_time))
+                        .is_ok(),
+                    "solver missed authored breakpoint {requested_time}: {:?}",
+                    result.time
+                );
+            }
+
+            let voltage = result
+                .try_voltage_waveform_named("1")
+                .expect("source node waveform exists");
+            for requested_time in requested.into_iter().chain([5.0e-3]) {
+                let index = result
+                    .time
+                    .binary_search_by(|time| time.total_cmp(&requested_time))
+                    .expect("requested time is retained");
+                let expected = 2.0 + 5.0 * (1.0 - (-requested_time / 1.0e-3).exp());
+                assert!(
+                    (voltage[index] - expected).abs() <= 1.0e-9,
+                    "t={requested_time}: got {}, expected {expected}",
+                    voltage[index]
+                );
+            }
+        }
+
+        let output = output_result
+            .output_projection(&output_netlist.options.output_time_points, 0.0, 5.0e-3)
+            .expect("OUTPUTTIMEPOINTS projection succeeds");
+        assert_eq!(output.indices().len(), 5);
+        assert_eq!(output_result.time.len(), breakpoint_result.time.len());
+    }
+
+    #[test]
+    fn xyce_output_schedule_fails_closed_for_unimplemented_time_window_edges() {
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        for analysis in [".TRAN 100u 2ms 500u", ".TRAN 100u 2ms\n.TRAN 100u 3ms"] {
+            let netlist = Netlist::parse(&format!(
+                "Xyce output schedule edge\n\
+                 V1 1 0 1\n\
+                 R1 1 0 1\n\
+                 {analysis}\n\
+                 .OPTIONS OUTPUT OUTPUTTIMEPOINTS=0,1ms\n\
+                 .END\n"
+            ))
+            .expect("scheduled edge deck parses");
+            let error = engine
+                .run_tran(&netlist, 2.0e-3, 100.0e-6)
+                .expect_err("ambiguous output window must fail closed");
+            assert!(error.to_string().contains("OUTPUTTIMEPOINTS"));
+        }
+
+        let future = Netlist::parse(
+            "Xyce future output schedule\n\
+             V1 1 0 1\n\
+             R1 1 0 1\n\
+             .TRAN 100u 2ms\n\
+             .OPTIONS OUTPUT OUTPUTTIMEPOINTS=1ms,3ms\n\
+             .END\n",
+        )
+        .expect("future schedule parses");
+        let error = engine
+            .run_tran(&future, 2.0e-3, 100.0e-6)
+            .expect_err("future output schedule must fail closed");
+        assert!(error.to_string().contains("exceeds"));
+
+        let tolerance_collision = Netlist::parse(
+            "Xyce colliding output schedule\n\
+             V1 1 0 1\n\
+             R1 1 0 1\n\
+             .TRAN 100u 2ms\n\
+             .OPTIONS OUTPUT OUTPUTTIMEPOINTS=1e-21\n\
+             .OPTIONS TIMEINT BREAKPOINTS=5e-21\n\
+             .END\n",
+        )
+        .expect("colliding schedule parses");
+        let error = engine
+            .run_tran(&tolerance_collision, 2.0e-3, 100.0e-6)
+            .expect_err("nonexact tolerance-colliding output stop must fail closed");
+        assert!(error.to_string().contains("exactly representable"));
     }
 
     #[test]

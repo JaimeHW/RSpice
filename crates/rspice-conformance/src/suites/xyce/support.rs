@@ -2287,6 +2287,8 @@ impl XyceTestRunner {
             measure_use_cont_files: _,
             measure_use_lttm: _,
             output_snapshots: _,
+            output_time_points,
+            timeint_breakpoints,
             reltol,
             abstol,
             vntol,
@@ -2353,6 +2355,8 @@ impl XyceTestRunner {
         } = options;
         reltol.is_none()
             && abstol.is_none()
+            && output_time_points.is_empty()
+            && timeint_breakpoints.is_empty()
             && timeint_reltol.map(Value::to_bits) == reltol_bits
             && timeint_abstol.map(Value::to_bits) == abstol_bits
             && timeint_delmax.is_none()

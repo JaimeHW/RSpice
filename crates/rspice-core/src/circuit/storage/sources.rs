@@ -1243,9 +1243,11 @@ impl VoltageSources {
         (td, tr, tf, pw, per)
     }
 
-    /// ngspice's EXP timing defaults (vsrcload.c): TD1, TAU1, and TAU2
-    /// fall back to the transient step when omitted *or zero*, TD2 to
-    /// TD1 + step.
+    /// Resolve dialect-specific EXP timing defaults.
+    ///
+    /// ngspice treats omitted and explicit-zero timing values alike. Xyce
+    /// retains the parser's `given` distinction: an authored `TD1=0` starts
+    /// immediately, while only an omitted TD1 receives the zero default.
     #[inline]
     fn resolve_exp_timing(
         td1: Value,
@@ -1255,6 +1257,13 @@ impl VoltageSources {
         context: Option<TransientSourceContext>,
     ) -> (Value, Value, Value, Value) {
         let step = Self::pulse_step_default(context);
+        if context.is_some_and(|context| context.dialect == crate::config::SpiceDialect::Xyce) {
+            let td1 = if td1.is_finite() { td1 } else { 0.0 };
+            let tau1 = if tau1.is_finite() { tau1 } else { step };
+            let td2 = if td2.is_finite() { td2 } else { td1 + step };
+            let tau2 = if tau2.is_finite() { tau2 } else { step };
+            return (td1, tau1, td2, tau2);
+        }
         let td1 = if td1.is_finite() && td1 != 0.0 {
             td1
         } else {
@@ -2977,6 +2986,24 @@ mod tests {
         let ctx = transient_context(1.0e-9, 10.0e-9);
         let rising = VoltageSources::evaluate_source_at_time_with_context(&spec, 1.5e-9, ctx);
         assert_close(rising, 1.0 - (-0.5f64).exp());
+    }
+
+    #[test]
+    fn xyce_exp_explicit_zero_td1_starts_immediately() {
+        let spec = SourceSpec::Exp {
+            v1: 0.0,
+            v2: 1.0,
+            td1: 0.0,
+            tau1: 1.0e-9,
+            td2: 1.0,
+            tau2: 1.0,
+        };
+        let value = VoltageSources::evaluate_source_at_time_with_context(
+            &spec,
+            0.5e-9,
+            xyce_transient_context(1.0e-9, 10.0e-9),
+        );
+        assert_close(value, 1.0 - (-0.5f64).exp());
     }
 
     #[test]
