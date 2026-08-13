@@ -210,6 +210,23 @@ fn unresolved_subcircuit_parameter_attributes(
     attributes
 }
 
+fn undefined_subcircuit_attributes(
+    error: &rspice_core::netlist::UndefinedSubcircuitError,
+) -> ParseErrorAttributes {
+    let mut attributes = ParseErrorAttributes::new("undefined_subcircuit");
+    attributes.category = Some("subcircuit_resolution");
+    attributes.detail = Some(error.subcircuit_name.clone());
+    attributes.authored_name = Some(error.instance_name.clone());
+    attributes.canonical_name = Some(error.canonical_instance_name.clone());
+    attributes.qualified_name = Some(error.qualified_instance_name.clone());
+    attributes.subcircuit_name = Some(error.subcircuit_name.clone());
+    attributes.canonical_subcircuit_name = Some(error.canonical_subcircuit_name.clone());
+    attributes.instance_name = Some(error.instance_name.clone());
+    attributes.canonical_instance_name = Some(error.canonical_instance_name.clone());
+    attributes.qualified_instance_name = Some(error.qualified_instance_name.clone());
+    attributes
+}
+
 fn undefined_mutual_inductor_reference_attributes(
     error: &rspice_core::netlist::UndefinedMutualInductorReferenceError,
 ) -> ParseErrorAttributes {
@@ -380,6 +397,7 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
         CoreParseError::GlobalSubcircuitPortBinding(error) => {
             global_subcircuit_binding_attributes(error)
         }
+        CoreParseError::UndefinedSubcircuit(error) => undefined_subcircuit_attributes(error),
         CoreParseError::UnresolvedSubcircuitParameter(error) => {
             unresolved_subcircuit_parameter_attributes(error)
         }
@@ -603,7 +621,7 @@ mod tests {
         NetlistSourceLocation, OutputDirectiveKind, OutputExpressionIssue,
         OutputExpressionValidationError, OutputSymbolKind, OutputSymbolValidationError,
         StartupDirectiveConflictError, StartupDirectiveKind, UndefinedMutualInductorReferenceError,
-        UnresolvedOutputSymbol, UnresolvedSubcircuitParameterError,
+        UndefinedSubcircuitError, UnresolvedOutputSymbol, UnresolvedSubcircuitParameterError,
     };
 
     #[test]
@@ -716,6 +734,42 @@ mod tests {
             attributes.reason.as_deref(),
             Some("Undefined parameter: MEH")
         );
+    }
+
+    #[test]
+    fn undefined_subcircuit_exposes_structured_python_attributes() {
+        let attributes = undefined_subcircuit_attributes(&UndefinedSubcircuitError {
+            subcircuit_name: "missing".into(),
+            canonical_subcircuit_name: "MISSING".into(),
+            instance_name: "x1".into(),
+            canonical_instance_name: "X1".into(),
+            qualified_instance_name: "TOP.X1".into(),
+        });
+
+        assert_eq!(attributes.kind, "undefined_subcircuit");
+        assert_eq!(attributes.category, Some("subcircuit_resolution"));
+        assert_eq!(attributes.subcircuit_name.as_deref(), Some("missing"));
+        assert_eq!(
+            attributes.canonical_subcircuit_name.as_deref(),
+            Some("MISSING")
+        );
+        assert_eq!(attributes.instance_name.as_deref(), Some("x1"));
+        assert_eq!(attributes.canonical_instance_name.as_deref(), Some("X1"));
+        assert_eq!(
+            attributes.qualified_instance_name.as_deref(),
+            Some("TOP.X1")
+        );
+    }
+
+    #[test]
+    fn undefined_subcircuit_is_declared_by_the_public_type_stub() {
+        let stub = include_str!("../../rspice.pyi");
+        for declaration in ["\"undefined_subcircuit\"", "\"subcircuit_resolution\""] {
+            assert!(
+                stub.contains(declaration),
+                "public Python type stub is missing {declaration:?}"
+            );
+        }
     }
 
     #[test]

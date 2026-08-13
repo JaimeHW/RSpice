@@ -548,6 +548,16 @@ impl WasmError {
                 structured.reason = Some(error.reason);
                 structured
             }
+            rspice_core::netlist::ParseError::UndefinedSubcircuit(error) => {
+                let mut structured =
+                    Self::new(message, "undefined_subcircuit", "subcircuit_resolution");
+                structured.subcircuit_name = Some(error.subcircuit_name);
+                structured.canonical_subcircuit_name = Some(error.canonical_subcircuit_name);
+                structured.instance_name = Some(error.instance_name);
+                structured.canonical_instance_name = Some(error.canonical_instance_name);
+                structured.qualified_instance_name = Some(error.qualified_instance_name);
+                structured
+            }
             _ => Self::new(message, "parse_error", "netlist_parse"),
         }
     }
@@ -1148,6 +1158,28 @@ mod tests {
         assert_eq!(error.expression.as_deref(), Some("TIME + meh"));
         assert_eq!(error.missing_dependency.as_deref(), Some("MEH"));
         assert_eq!(error.reason.as_deref(), Some("Undefined parameter: MEH"));
+    }
+
+    #[test]
+    fn undefined_subcircuit_error_preserves_typed_hierarchy_identity() {
+        let error =
+            WasmError::from_parse_error(rspice_core::netlist::ParseError::UndefinedSubcircuit(
+                Box::new(rspice_core::netlist::UndefinedSubcircuitError {
+                    subcircuit_name: "missing".into(),
+                    canonical_subcircuit_name: "MISSING".into(),
+                    instance_name: "x1".into(),
+                    canonical_instance_name: "X1".into(),
+                    qualified_instance_name: "TOP.X1".into(),
+                }),
+            ));
+
+        assert_eq!(error.kind, "undefined_subcircuit");
+        assert_eq!(error.category, "subcircuit_resolution");
+        assert_eq!(error.subcircuit_name.as_deref(), Some("missing"));
+        assert_eq!(error.canonical_subcircuit_name.as_deref(), Some("MISSING"));
+        assert_eq!(error.instance_name.as_deref(), Some("x1"));
+        assert_eq!(error.canonical_instance_name.as_deref(), Some("X1"));
+        assert_eq!(error.qualified_instance_name.as_deref(), Some("TOP.X1"));
     }
 
     #[test]

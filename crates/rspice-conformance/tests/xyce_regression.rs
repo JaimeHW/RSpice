@@ -9551,6 +9551,30 @@ fn test_xyce_bug636_incomplete_tran_error_oracle() {
 }
 
 #[test]
+fn test_xyce_bug206_undefined_subcircuit_error_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_206/bug_206.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "BUG206 must retain its active wrapper ownership"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported && !result.upstream_excluded,
+        "BUG206 should reproduce its typed undefined-subcircuit failure, got {result:?}"
+    );
+    assert_eq!(
+        result.contract,
+        "expected_failure_bug206_undefined_subcircuit_build"
+    );
+    assert_eq!(result.upstream_exclusion_source, None);
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_bug784_archived_duplicate_subcircuit_port_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

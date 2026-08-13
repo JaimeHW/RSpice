@@ -30,8 +30,8 @@ use super::{
     InitialCondition, ModelDef, Netlist, NodeSet, ParamContext, ParameterRedefinitionPolicy,
     ParametricValue, ParseError, ParseWithAbortError, RandomState, SourceMultiplicity, SourceSpec,
     StartupDirectiveDisposition, StartupDirectiveRecord, StartupDirectiveScope, SubcircuitDef,
-    ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort,
-    validate_mutual_inductor_references,
+    UndefinedSubcircuitError, ensure_parse_not_aborted, finish_non_aborting_parse,
+    poll_parse_abort, validate_mutual_inductor_references,
 };
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -538,10 +538,16 @@ impl<'a> Flattener<'a> {
                     )?;
                     self.push_flattened_element(output, new_element)?;
                 } else {
-                    return Err(ParseError::Syntax {
-                        line: 0,
-                        message: format!("Undefined subcircuit: {}", subckt_name),
-                    }
+                    return Err(ParseError::UndefinedSubcircuit(Box::new(
+                        UndefinedSubcircuitError {
+                            subcircuit_name: subckt_name.clone(),
+                            canonical_subcircuit_name: subckt_name.to_ascii_uppercase(),
+                            instance_name: element.name.clone(),
+                            canonical_instance_name: element.name.to_ascii_uppercase(),
+                            qualified_instance_name: self
+                                .qualify_hierarchy_name(prefix, &element.name),
+                        },
+                    ))
                     .into());
                 }
             }
@@ -833,12 +839,15 @@ impl<'a> Flattener<'a> {
     ) -> Result<(), ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
         // Look up subcircuit definition
-        let subckt = self
-            .find_subcircuit(subckt_name)
-            .ok_or_else(|| ParseError::Syntax {
-                line: 0,
-                message: format!("Undefined subcircuit: {}", subckt_name),
-            })?;
+        let subckt = self.find_subcircuit(subckt_name).ok_or_else(|| {
+            ParseError::UndefinedSubcircuit(Box::new(UndefinedSubcircuitError {
+                subcircuit_name: subckt_name.to_string(),
+                canonical_subcircuit_name: subckt_name.to_ascii_uppercase(),
+                instance_name: instance.name.clone(),
+                canonical_instance_name: instance.name.to_ascii_uppercase(),
+                qualified_instance_name: self.qualify_hierarchy_name(prefix, &instance.name),
+            }))
+        })?;
 
         // Build new prefix for this instance
         let new_prefix = self.qualify_hierarchy_name(prefix, &instance.name);
@@ -3833,6 +3842,25 @@ mod tests {
             panic!("expected typed duplicate subcircuit-port binding error");
         };
         error
+    }
+
+    #[test]
+    fn undefined_subcircuit_is_a_typed_hierarchy_error() {
+        let netlist = Netlist::parse(
+            "undefined subcircuit\n\
+             X1 in 0 missing\n\
+             .end\n",
+        )
+        .expect("the X-line is syntactically valid");
+        let error = flatten_netlist(&netlist).expect_err("MISSING is undefined");
+        let ParseError::UndefinedSubcircuit(error) = error else {
+            panic!("expected typed undefined-subcircuit error");
+        };
+        assert_eq!(error.subcircuit_name, "missing");
+        assert_eq!(error.canonical_subcircuit_name, "MISSING");
+        assert_eq!(error.instance_name, "X1");
+        assert_eq!(error.canonical_instance_name, "X1");
+        assert_eq!(error.qualified_instance_name, "X1");
     }
 
     #[test]

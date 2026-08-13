@@ -714,6 +714,14 @@ fn parse_error_diagnostic_at(
             error.position,
             error.actual_node,
         )),
+        ParseError::UndefinedSubcircuit(error) => Diagnostic::error(format!(
+            "{}\nSubcircuit: {} (canonical {}) · instance: {} (canonical {})",
+            error,
+            error.subcircuit_name,
+            error.canonical_subcircuit_name,
+            error.qualified_instance_name,
+            error.canonical_instance_name,
+        )),
         ParseError::UndefinedMutualInductorReference(error) => Diagnostic::error(format!(
             "{}\nCoupling: {} (canonical {}) · missing inductor: {} (canonical {}) · scope: {} · reference position {}",
             error,
@@ -1284,6 +1292,28 @@ mod tests {
         );
         assert!(diagnostic.message.contains("TOP.X1"));
         assert!(diagnostic.message.contains("effective node LOCAL"));
+    }
+
+    #[test]
+    fn undefined_subcircuit_diagnostic_preserves_hierarchy_identity() {
+        let diagnostic =
+            parse_error_diagnostic(rspice_core::netlist::ParseError::UndefinedSubcircuit(
+                Box::new(rspice_core::netlist::UndefinedSubcircuitError {
+                    subcircuit_name: "missing".into(),
+                    canonical_subcircuit_name: "MISSING".into(),
+                    instance_name: "x1".into(),
+                    canonical_instance_name: "X1".into(),
+                    qualified_instance_name: "TOP.X1".into(),
+                }),
+            ));
+
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+        assert!(
+            diagnostic
+                .message
+                .contains("Subcircuit: missing (canonical MISSING)")
+        );
+        assert!(diagnostic.message.contains("TOP.X1 (canonical X1)"));
     }
 
     #[test]

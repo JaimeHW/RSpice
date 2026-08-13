@@ -130,6 +130,13 @@ print expression, and requires a finite nontrivial native observation under a
 shared deadline. The historical wrapper did not invoke a comparator, so no
 numerical gold is invented.
 
+Certification BUG 206 preserves an active Release-7.10 hierarchy error
+wrapper. RSpice parses the exact malformed X instance, validates the otherwise
+complete DC/subcircuit envelope, and requires a typed undefined-subcircuit
+failure carrying the authored subcircuit and qualified instance identities.
+The wrapper's source-location and undefined-subcircuit diagnostics remain
+ordered, and no numerical gold or exclusion row is invented.
+
 The serial Certification BUG 307 A/B wrapper is reconstructed as an exact
 subcircuit-model-scope relation. RSpice runs the collision owner followed by
 the active-only control, proves that both select the qualified

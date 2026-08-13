@@ -2740,6 +2740,82 @@ const XYCE_BUG636_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 1] = [(
     "19641c3140f2b965f3e85d1145d84475ccb21b3b75d92f87a625203d632a73a8",
 )];
 
+// BUG_206 is an active Release-7.10 error-exit regression. Its wrapper
+// requires a nonzero simulator exit followed by these two ordered hierarchy
+// diagnostics for the malformed X instance on source line three.
+const XYCE_BUG206_CONTRACT: &str = "expected_failure_bug206_undefined_subcircuit_build";
+const XYCE_BUG206_PATH: &str = "Netlists/Certification_Tests/BUG_206/bug_206.cir";
+const XYCE_BUG206_RECORD: &str = "netlists/certification_tests/bug_206/bug_206.cir";
+const XYCE_BUG206_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG206_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG206_UPSTREAM_DIAGNOSTIC_LOCATION: &str = "in file bug_206.cir at or near line 3";
+const XYCE_BUG206_UPSTREAM_DIAGNOSTIC_UNDEFINED: &str =
+    "Subcircuit 0 has not been defined for instance X1";
+const XYCE_BUG206_HISTORICAL_RECORD_COUNT: usize = 7;
+const XYCE_BUG206_HISTORICAL_RECORD_BYTES: usize = 1_656;
+const XYCE_BUG206_HISTORICAL_RECORDS_SHA256: &str =
+    "9687c32cbd6f3de14bc2bd104a60c702c95b013e6ada2094d30eca147c64966c";
+const XYCE_BUG206_HISTORICAL_RECORDS_BLAKE3: &str =
+    "dad83aa25b5a66edfe93f2485c62a1b7577e2ede066909f6b1a1a49247d31325";
+const XYCE_BUG206_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
+    (
+        "Netlists/Certification_Tests/BUG_206/CMakeLists.txt",
+        1_240,
+        "4cdf84f6768618604e34ff6ee223587d80724517a122b1259ea2024578cd2d1d",
+        "61de767d28ddaf73ab33590ac39b19dadd5a747e9985de691eb8da822926d874",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_206/Manifest.txt",
+        39,
+        "750dc380137bfa3535b2451c20e5f28389434cd2bab8fdeef9d2c785c079f363",
+        "3d2092627588fcd0aff7d3befc1da7f9bf054cd85e9b80a171c75e4fa9c1bfed",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_206/README",
+        505,
+        "93f03e9620a7f61bd13286fd6ef41efa1b0942f12b9dadb3c95417335a4c4d5a",
+        "afb37041e27da69687279655688ccbec94ca006152ea368f9e485c224d16c15d",
+    ),
+    (
+        XYCE_BUG206_PATH,
+        113,
+        "028f5609a9fa41f0de85b029e3fa2c25e248777d97752859ba5b98753e6105c6",
+        "35adbf753e4e0b1d287f4c0fb28380d80bcecb08a66a12c10a7a1bdbf69d1a4c",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_206/bug_206.cir.sh",
+        1_417,
+        "3063b1a2bd51695594aba7cd216a01899df6b67f63653e31f6976380ed2bcf35",
+        "d3335d2aa222d9d8d24992bbe10bfcbde15f09bcfd2987597665aa3a4ec37278",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_206/tags",
+        16,
+        "fb8b1ab6aa8b694212335a76b1b87c077f22be7543f15c12de32a2da40b4f345",
+        "a5f2cee6f41471429bc22c4c40d36881f4c11d2387b20adbdc14efe2509f6589",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG206_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
+    (
+        "README",
+        505,
+        "93f03e9620a7f61bd13286fd6ef41efa1b0942f12b9dadb3c95417335a4c4d5a",
+        "afb37041e27da69687279655688ccbec94ca006152ea368f9e485c224d16c15d",
+    ),
+    (
+        "bug_206.cir",
+        113,
+        "028f5609a9fa41f0de85b029e3fa2c25e248777d97752859ba5b98753e6105c6",
+        "35adbf753e4e0b1d287f4c0fb28380d80bcecb08a66a12c10a7a1bdbf69d1a4c",
+    ),
+];
+
 // BUG_784 is an archived error-exit regression: Release-7.10 retains its
 // wrapper and exact ordered diagnostic, while `tags=exclude` deliberately
 // leaves its generated CMake file without an active CTest registration.
@@ -10888,6 +10964,7 @@ mod contracts_bug1040;
 mod contracts_bug1162;
 mod contracts_bug1398;
 mod contracts_bug159;
+mod contracts_bug206;
 mod contracts_bug267;
 mod contracts_bug271;
 mod contracts_bug28;

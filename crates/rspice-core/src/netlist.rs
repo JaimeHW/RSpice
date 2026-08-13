@@ -200,6 +200,20 @@ pub struct GlobalSubcircuitPortBindingError {
     pub actual_node: String,
 }
 
+/// A subcircuit instance names a definition that is absent from its visible
+/// lexical scope.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error(
+    "Subcircuit {canonical_subcircuit_name} has not been defined for instance {canonical_instance_name}"
+)]
+pub struct UndefinedSubcircuitError {
+    pub subcircuit_name: String,
+    pub canonical_subcircuit_name: String,
+    pub instance_name: String,
+    pub canonical_instance_name: String,
+    pub qualified_instance_name: String,
+}
+
 /// A retained subcircuit-local `.PARAM` definition could not be resolved.
 ///
 /// The canonical definition name and the missing dependency are distinct
@@ -366,6 +380,9 @@ pub enum ParseError {
 
     #[error(transparent)]
     GlobalSubcircuitPortBinding(Box<GlobalSubcircuitPortBindingError>),
+
+    #[error(transparent)]
+    UndefinedSubcircuit(Box<UndefinedSubcircuitError>),
 
     #[error(transparent)]
     UnresolvedSubcircuitParameter(Box<UnresolvedSubcircuitParameterError>),
