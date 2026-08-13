@@ -263,20 +263,15 @@ pub fn document(
         .schematic
         .as_ref()
         .map_or(0, |schematic| schematic.sheets.len());
-    let (analysis_count, dataset_count, measurement_count) =
-        snapshot.results.as_ref().map_or((0, 0, 0), |results| {
-            (
-                results.analyses.len(),
-                results.datasets.len(),
-                results.measurements.len(),
-            )
-        });
+    let (analysis_count, measurement_count) = snapshot.results.as_ref().map_or((0, 0), |results| {
+        (results.analyses.len(), results.measurements.len())
+    });
     let assets = asset_links(snapshot, bundle);
     let component_count = snapshot
         .engineering
         .as_ref()
         .map_or(0, |engineering| engineering.components.len());
-    let mut fallback_order = vec![PublicationSection::Overview];
+    let mut fallback_order = Vec::new();
     if snapshot.schematic.is_some() {
         fallback_order.push(PublicationSection::Schematic);
     }
@@ -296,12 +291,17 @@ pub fn document(
         .map_or(fallback_order.as_slice(), |presentation| {
             presentation.section_order.as_slice()
         });
-    let default_section = snapshot
-        .presentation
-        .as_ref()
-        .map_or(PublicationSection::Overview, |presentation| {
-            presentation.default_section
-        });
+    let default_section = if snapshot.schematic.is_some() {
+        PublicationSection::Schematic
+    } else if !plot_figures.is_empty() || snapshot.results.is_some() {
+        PublicationSection::Results
+    } else if component_count > 0 {
+        PublicationSection::Components
+    } else if !assets.is_empty() {
+        PublicationSection::Files
+    } else {
+        PublicationSection::Details
+    };
     let authored_overview = snapshot
         .presentation
         .as_ref()
@@ -363,26 +363,16 @@ pub fn document(
     let _ = write!(
         html,
         "<p class=\"byline\"><span>Published by {author}</span><span>{created}</span><span>{license}</span></p>\n\
-         </header>\n<section class=\"summary-grid\" aria-label=\"Publication summary\">\n\
-         <div class=\"summary-card\"><span class=\"summary-label\">Schematic</span><strong class=\"summary-value\">{}</strong><span class=\"summary-detail\">published sheet{}</span></div>\n\
-         <div class=\"summary-card\"><span class=\"summary-label\">Analyses</span><strong class=\"summary-value\">{analysis_count}</strong><span class=\"summary-detail\">simulation configuration{}</span></div>\n\
-         <div class=\"summary-card\"><span class=\"summary-label\">Measurements</span><strong class=\"summary-value\">{measurement_count}</strong><span class=\"summary-detail\">published result{}</span></div>\n\
-         <div class=\"summary-card\"><span class=\"summary-label\">Data</span><strong class=\"summary-value\">{dataset_count}</strong><span class=\"summary-detail\">downloadable dataset{}</span></div>\n\
-         </section>\n",
-        schematic_count,
-        if schematic_count == 1 { "" } else { "s" },
-        if analysis_count == 1 { "" } else { "s" },
-        if measurement_count == 1 { "" } else { "s" },
-        if dataset_count == 1 { "" } else { "s" },
+         </header>\n"
     );
 
     html.push_str("<div class=\"tabbar-wrap\"><nav class=\"tabbar\" aria-label=\"Circuit publication sections\">\n");
+    if snapshot.schematic.is_some() {
+        render_tab(&mut html, "schematic", "Circuit", Some(schematic_count));
+    }
     for section in section_order {
         match section {
-            PublicationSection::Overview => render_tab(&mut html, "overview", "Overview", None),
-            PublicationSection::Schematic => {
-                render_tab(&mut html, "schematic", "Schematic", Some(schematic_count));
-            }
+            PublicationSection::Overview | PublicationSection::Schematic => {}
             PublicationSection::Results => {
                 render_tab(&mut html, "results", "Results", Some(plot_figures.len()));
             }
@@ -401,54 +391,11 @@ pub fn document(
         section_id(default_section)
     );
 
-    html.push_str("<section class=\"panel\" id=\"overview\" data-panel tabindex=\"-1\">\n");
-    render_panel_header(
-        &mut html,
-        "Circuit overview",
-        "The published design, simulation evidence, and disclosure summary.",
-    );
-    html.push_str("<div class=\"overview-grid\">\n<div class=\"surface overview-copy\"><h3>About this circuit</h3>");
-    if let Some(overview) = authored_overview {
-        let _ = write!(html, "<p>{}</p>", escape_html(overview.narrative.trim()));
-        if !overview.specifications.is_empty() {
-            html.push_str("<dl class=\"spec-grid\">\n");
-            for specification in &overview.specifications {
-                let unit = specification.unit.as_deref().unwrap_or_default();
-                let _ = writeln!(
-                    html,
-                    "<div><dt>{}</dt><dd>{}<span>{}</span></dd></div>",
-                    escape_html(&specification.label),
-                    escape_html(&specification.value),
-                    escape_html(unit),
-                );
-            }
-            html.push_str("</dl>\n");
-        }
-    } else if snapshot.metadata.description.trim().is_empty() {
-        html.push_str("<p>No additional design description was supplied by the publisher.</p>");
-    } else {
-        let _ = write!(
-            html,
-            "<p>{}</p>",
-            escape_html(snapshot.metadata.description.trim())
-        );
-    }
-    let _ = write!(
-        html,
-        "</div><aside class=\"surface side-card\"><h3>Publication facts</h3><dl class=\"facts\">\
-         <div><dt>Publisher</dt><dd>{author}</dd></div>\
-         <div><dt>Published</dt><dd>{created}</dd></div>\
-         <div><dt>License</dt><dd>{license}</dd></div>\
-         <div><dt>RSpice version</dt><dd>{}</dd></div>\
-         </dl></aside></div>\n</section>\n",
-        escape_html(&snapshot.metadata.app_version),
-    );
-
     if snapshot.schematic.is_some() {
         html.push_str("<section class=\"panel\" id=\"schematic\" data-panel tabindex=\"-1\">\n");
         render_panel_header(
             &mut html,
-            "Schematic",
+            "Circuit schematic",
             "Static by default and interactive on demand. The drawing is sealed with this publication.",
         );
         html.push_str(
@@ -560,6 +507,25 @@ pub fn document(
         "Analysis controls, disclosed source, and immutable publication provenance.",
     );
     html.push_str("<div class=\"section-stack\">\n");
+    if let Some(overview) = authored_overview {
+        html.push_str("<section class=\"subsection design-notes\" aria-labelledby=\"design-notes-heading\"><h3 id=\"design-notes-heading\">Design notes</h3><div class=\"surface overview-copy\">");
+        let _ = write!(html, "<p>{}</p>", escape_html(overview.narrative.trim()));
+        if !overview.specifications.is_empty() {
+            html.push_str("<dl class=\"spec-grid\">\n");
+            for specification in &overview.specifications {
+                let unit = specification.unit.as_deref().unwrap_or_default();
+                let _ = writeln!(
+                    html,
+                    "<div><dt>{}</dt><dd>{}<span>{}</span></dd></div>",
+                    escape_html(&specification.label),
+                    escape_html(&specification.value),
+                    escape_html(unit),
+                );
+            }
+            html.push_str("</dl>\n");
+        }
+        html.push_str("</div></section>\n");
+    }
     render_analyses(&mut html, snapshot);
     if let Some(simulation) = snapshot
         .engineering

@@ -208,11 +208,11 @@ h1 { grid-area: title; max-width: 30ch; margin: .45rem 0 0; font-size: clamp(1.7
 .panel:focus-visible .panel-header h2 { text-decoration: underline 2px var(--brand); text-underline-offset: .22em; }
 .panel-header { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: .85rem; align-items: start; margin: 0 0 14px; }
 .panel-header::before { padding-top: .45rem; color: var(--brand); font: 680 .65rem/1.2 ui-monospace, Consolas, monospace; letter-spacing: .12em; }
-#overview .panel-header::before { content: "01 / SECTION"; }
-#schematic .panel-header::before { content: "02 / SECTION"; }
-#results .panel-header::before { content: "03 / SECTION"; }
-#files .panel-header::before { content: "04 / SECTION"; }
-#details .panel-header::before { content: "05 / SECTION"; }
+#schematic .panel-header::before { content: "CIRCUIT"; }
+#results .panel-header::before { content: "DATA"; }
+#components .panel-header::before { content: "BOM"; }
+#files .panel-header::before { content: "FILES"; }
+#details .panel-header::before { content: "DETAILS"; }
 .panel-header h2 { margin: 0; font-size: clamp(1.35rem, 2.2vw, 1.8rem); line-height: 1.05; letter-spacing: -.035em; }
 .panel-header p { max-width: 68ch; margin: .4rem 0 0; color: var(--muted); font-size: .84rem; }
 

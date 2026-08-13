@@ -78,12 +78,12 @@ fn rc_bundle_carries_every_disclosed_surface() {
     );
     assert!(
         page.contains("class=\"tabbar\"")
-            && page.contains("id=\"overview\"")
+            && !page.contains("id=\"overview\"")
             && page.contains("id=\"schematic\"")
             && page.contains("id=\"results\"")
             && page.contains("id=\"files\"")
             && page.contains("id=\"details\""),
-        "the production shell exposes its semantic publication sections"
+        "the production shell opens on the circuit and exposes its supporting sections"
     );
 
     assert_eq!(
@@ -361,7 +361,8 @@ fn v3_engineering_metadata_reaches_the_production_page() {
 
     let bundle = render_bundle(&value, "0".repeat(64).as_str(), &viewer()).expect("render v3");
     let page = utf8(&bundle["index.html"]);
-    assert!(page.contains("data-default-panel=\"results\""));
+    assert!(page.contains("data-default-panel=\"schematic\""));
+    assert!(!page.contains("href=\"#overview\""));
     assert!(page.contains("id=\"components\"") && page.contains("Resistor"));
     assert!(page.contains("A deliberately documented RC low-pass."));
     assert!(page.contains("Time constant") && page.contains("1.00"));
