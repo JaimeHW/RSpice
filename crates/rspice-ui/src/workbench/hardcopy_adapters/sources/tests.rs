@@ -14,8 +14,9 @@ use crate::results::report_document::{
     ReportReferenceSnapshot, ReportSourceId, TableCell, TableColumn,
 };
 use crate::results::visualization_document::{
-    AxisOrientation, AxisScale, ColumnRole, DocumentEdit, EntityRef, NewAxis, NewTrace,
-    SourceColumn, SourceDataset, SourceRow, TypedValue, ValueType, VisualizationDocument,
+    AnnotationAnchor, AxisOrientation, AxisScale, ColumnRole, DocumentEdit, EntityRef, NewAxis,
+    NewTrace, PlotMarkerKind, PlotMarkerScope, SourceColumn, SourceDataset, SourceRow, TypedValue,
+    ValueType, VisualizationDocument,
 };
 use crate::state::{
     AnalysisResultFamilyMetadata, AnalysisType, Cell, ComplexResultValue, Library,
@@ -939,6 +940,7 @@ fn retained_linked_report_figure_resolves_identically_in_process_and_worker_snap
                 binding,
                 signal_key: "out".to_owned(),
                 coordinate_key: "time".to_owned(),
+                row_predicates: Vec::new(),
                 x_axis_id: x_axis,
                 y_axis_id: y_axis,
                 label: "V(out)".to_owned(),
@@ -1208,7 +1210,7 @@ fn retained_plot_scene_maps_to_platform_independent_integer_geometry() {
         EntityRef::Axis(id) => id,
         _ => unreachable!(),
     };
-    document
+    let trace_receipt = document
         .transact(
             document.revision(),
             vec![DocumentEdit::AddTrace(NewTrace {
@@ -1216,10 +1218,49 @@ fn retained_plot_scene_maps_to_platform_independent_integer_geometry() {
                 binding,
                 signal_key: "out".to_owned(),
                 coordinate_key: "time".to_owned(),
+                row_predicates: Vec::new(),
                 x_axis_id: x_axis,
                 y_axis_id: y_axis,
                 label: "V(out)".to_owned(),
             })],
+        )
+        .unwrap();
+    let trace_id = trace_receipt
+        .created
+        .iter()
+        .find_map(|entity| match entity {
+            EntityRef::Trace(id) => Some(*id),
+            _ => None,
+        })
+        .unwrap();
+    document
+        .transact(
+            document.revision(),
+            vec![
+                DocumentEdit::AddTypedMarker {
+                    pane_id,
+                    trace_id,
+                    coordinate: TypedValue::Real(1.0),
+                    label: "Peak".to_owned(),
+                    kind: PlotMarkerKind::Peak,
+                    scope: PlotMarkerScope::Pane,
+                    source_specification: None,
+                },
+                DocumentEdit::AddAnnotation {
+                    pane_id,
+                    anchor: AnnotationAnchor::Trace {
+                        trace_id,
+                        coordinate: TypedValue::Real(0.0),
+                    },
+                    text: "Settling begins".to_owned(),
+                },
+                DocumentEdit::AddCursor {
+                    pane_id,
+                    axis_id: x_axis,
+                    position: TypedValue::Real(0.5),
+                    label: "A".to_owned(),
+                },
+            ],
         )
         .unwrap();
     let digest = document.content_digest().unwrap();
@@ -1253,6 +1294,19 @@ fn retained_plot_scene_maps_to_platform_independent_integer_geometry() {
     })
     .unwrap();
     assert_eq!(first.semantic_document(), second.semantic_document());
+    let HardcopySemanticDocument::Plot(plot) = first.semantic_document() else {
+        panic!("expected semantic plot")
+    };
+    assert_eq!(plot.markers.len(), 1);
+    assert_eq!(plot.annotations.len(), 1);
+    assert_eq!(plot.cursors.len(), 1);
+    assert_eq!(plot.cursors[0].label, "A");
+    assert_eq!(plot.cursors[0].source_x_bits, 0.5f64.to_bits());
+    assert_ne!(plot.cursors[0].start, plot.cursors[0].end);
+    assert!(first.default_print_mapping().entries().iter().any(|entry| {
+        entry.object().kind() == PrintObjectKind::Marker
+            && entry.object().stable_id().starts_with("cursor:")
+    }));
     assert_eq!(
         first.authority().content_digest(),
         second.authority().content_digest()
@@ -2099,6 +2153,73 @@ fn all_visualization_panes_preserve_retained_pane_order() {
             .collect::<Vec<_>>(),
         ["Page B · WAVES", "Page A · WAVES"]
     );
+}
+
+#[test]
+fn project_visualization_hardcopy_uses_the_selected_pane_not_the_first_pane() {
+    let binding = DatasetBinding::new(DatasetId::new(), ContentDigest::from_bytes([0x7d; 32]));
+    let dataset = SourceDataset::new(
+        binding,
+        vec![
+            SourceColumn::new("x", "X", ValueType::Real, ColumnRole::Coordinate, None).unwrap(),
+            SourceColumn::new("y", "Y", ValueType::Real, ColumnRole::Signal, None).unwrap(),
+        ],
+        vec![SourceRow::new(vec![
+            TypedValue::Real(0.0),
+            TypedValue::Real(1.0),
+        ])],
+    )
+    .unwrap();
+    let mut document = VisualizationDocument::new("Selected pane", vec![dataset]).unwrap();
+    let page_id = document.pages()[0].id;
+    let first_pane = document.panes()[0].id;
+    let pane_binding = crate::results::visualization_document::PaneDataBinding {
+        analysis_id: crate::product::AnalysisInstanceId::new(),
+        dataset: binding,
+    };
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetPaneSource {
+                pane_id: first_pane,
+                viewer_id: "viewer-waveform".to_owned(),
+                binding: Some(pane_binding),
+            }],
+        )
+        .unwrap();
+    let receipt = document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::AddBoundPane(
+                crate::results::visualization_document::NewPane {
+                    page_id,
+                    title: "Selected second pane".to_owned(),
+                    kind: crate::results::visualization_document::PaneKind::Cartesian,
+                    viewer_id: "viewer-waveform".to_owned(),
+                    binding: Some(pane_binding),
+                    placement: crate::results::visualization_document::PanePlacement::Below {
+                        anchor_pane_id: first_pane,
+                    },
+                },
+            )],
+        )
+        .unwrap();
+    let second_pane = receipt
+        .created
+        .iter()
+        .find_map(|entity| match entity {
+            EntityRef::Pane(id) => Some(*id),
+            _ => None,
+        })
+        .unwrap();
+    let document_id = document.id();
+    let mut state = AppState::default();
+    state.workspace.visualization_documents.push(document);
+    state.workbench.visualization_studio.active_pane = Some(second_pane.get());
+
+    let (_, _, selected) = active_visualization_document_pane(&state, document_id).unwrap();
+    assert_eq!(selected.id, second_pane);
+    assert_eq!(selected.title, "Selected second pane");
 }
 
 #[test]

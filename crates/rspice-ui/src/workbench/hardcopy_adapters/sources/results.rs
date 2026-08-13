@@ -506,6 +506,7 @@ pub(crate) fn resolve_active_studio_pane_source(
         page_id: stable_page_id(&pane.page),
         pane_id: pane.id,
         traces,
+        cursors: Vec::new(),
         markers,
         annotations,
     };
@@ -1530,6 +1531,7 @@ pub(super) fn quick_plot_from_series(
         page_id: stable_page_id(page),
         pane_id,
         traces,
+        cursors: Vec::new(),
         markers: Vec::new(),
         annotations: Vec::new(),
     })

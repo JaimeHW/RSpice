@@ -600,16 +600,23 @@ pub(super) fn export_section(ui: &mut Ui, app: &mut RSpiceApp) {
                 );
             });
         ui.add_space(10.0);
+        let exact_export_available = active_studio_exact_export_available(&app.state);
+        let figure_export_available = active_studio_figure_export_available(&app.state);
         ui.horizontal_wrapped(|ui| {
             dock_action(ui, app, "Edit report pages…", VisualizationDock::PageEditor);
             if Button::new("Export exact data…")
                 .accent()
+                .enabled(exact_export_available)
                 .show(ui)
                 .clicked()
             {
                 app.state.ui.export_csv_requested = true;
             }
-            if Button::new("Export viewer figure…").show(ui).clicked() {
+            if Button::new("Export viewer figure…")
+                .enabled(figure_export_available)
+                .show(ui)
+                .clicked()
+            {
                 app.state.ui.export_figure_requested = true;
             }
         });

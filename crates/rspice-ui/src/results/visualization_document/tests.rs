@@ -48,6 +48,144 @@ fn document() -> (VisualizationDocument, DatasetBinding) {
     )
 }
 
+fn long_form_analysis_dataset(
+    binding: DatasetBinding,
+    analysis_id: AnalysisInstanceId,
+    trace_name: &str,
+    value: f64,
+) -> SourceDataset {
+    SourceDataset::new(
+        binding,
+        vec![
+            SourceColumn::new(
+                "trace-index",
+                "Trace index",
+                ValueType::Integer,
+                ColumnRole::Coordinate,
+                None,
+            )
+            .unwrap(),
+            SourceColumn::new(
+                "trace-name",
+                "Trace",
+                ValueType::Text,
+                ColumnRole::Coordinate,
+                None,
+            )
+            .unwrap(),
+            SourceColumn::new(
+                "component",
+                "Component",
+                ValueType::Text,
+                ColumnRole::Coordinate,
+                None,
+            )
+            .unwrap(),
+            SourceColumn::new(
+                "sample",
+                "Sample",
+                ValueType::Integer,
+                ColumnRole::Coordinate,
+                None,
+            )
+            .unwrap(),
+            SourceColumn::new("x", "X", ValueType::Real, ColumnRole::Coordinate, None).unwrap(),
+            SourceColumn::new("y", "Y", ValueType::Real, ColumnRole::Signal, None).unwrap(),
+            SourceColumn::new(
+                "analysis-id",
+                "Analysis identity",
+                ValueType::Text,
+                ColumnRole::Coordinate,
+                None,
+            )
+            .unwrap(),
+        ],
+        vec![SourceRow::new(vec![
+            TypedValue::Integer(0),
+            TypedValue::Text(trace_name.to_owned()),
+            TypedValue::Text("display".to_owned()),
+            TypedValue::Integer(0),
+            TypedValue::Real(0.0),
+            TypedValue::Real(value),
+            TypedValue::Text(analysis_id.to_string()),
+        ])],
+    )
+    .unwrap()
+}
+
+#[test]
+fn same_run_analysis_projections_merge_without_cross_binding_trace_rows() {
+    let source = binding(87);
+    let first_analysis = AnalysisInstanceId::new();
+    let second_analysis = AnalysisInstanceId::new();
+    let mut document = VisualizationDocument::new(
+        "Multi-analysis review",
+        vec![long_form_analysis_dataset(
+            source,
+            first_analysis,
+            "V(first)",
+            1.0,
+        )],
+    )
+    .unwrap();
+    let page_id = document.pages()[0].id;
+    let first_pane = document.panes()[0].id;
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetPaneSource {
+                pane_id: first_pane,
+                viewer_id: "viewer-waveform".to_owned(),
+                binding: Some(PaneDataBinding {
+                    analysis_id: first_analysis,
+                    dataset: source,
+                }),
+            }],
+        )
+        .unwrap();
+
+    document
+        .transact(
+            document.revision(),
+            vec![
+                DocumentEdit::MergeDatasetProjection(long_form_analysis_dataset(
+                    source,
+                    second_analysis,
+                    "V(second)",
+                    2.0,
+                )),
+                DocumentEdit::AddBoundPane(NewPane {
+                    page_id,
+                    title: "Second analysis".to_owned(),
+                    kind: PaneKind::Cartesian,
+                    viewer_id: "viewer-waveform".to_owned(),
+                    binding: Some(PaneDataBinding {
+                        analysis_id: second_analysis,
+                        dataset: source,
+                    }),
+                    placement: PanePlacement::Below {
+                        anchor_pane_id: first_pane,
+                    },
+                }),
+            ],
+        )
+        .unwrap();
+
+    assert_eq!(document.datasets()[0].rows().len(), 2);
+    assert_eq!(document.traces().len(), 2);
+    for (label, analysis_id) in [("V(first)", first_analysis), ("V(second)", second_analysis)] {
+        let trace = document
+            .traces()
+            .iter()
+            .find(|trace| trace.label == label)
+            .unwrap();
+        assert!(trace.row_predicates.iter().any(|predicate| {
+            predicate.column == "analysis-id"
+                && predicate.value == TypedValue::Text(analysis_id.to_string())
+        }));
+    }
+}
+
 #[test]
 fn result_document_tracking_is_revisioned_and_requires_exact_plan_authority() {
     let (mut document, _) = document();
@@ -97,6 +235,42 @@ fn schema_three_migrates_to_pinned_tracking_without_inventing_plan_identity() {
     assert_eq!(
         serde_json::to_value(restored).unwrap()["schema_version"],
         serde_json::json!(VisualizationDocument::SCHEMA_VERSION)
+    );
+}
+
+#[test]
+fn schema_five_traces_migrate_with_their_original_unfiltered_row_meaning() {
+    let (mut document, source) = document();
+    let pane_id = document.panes()[0].id;
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetPaneSource {
+                pane_id,
+                viewer_id: "viewer-waveform".to_owned(),
+                binding: Some(PaneDataBinding {
+                    analysis_id: AnalysisInstanceId::new(),
+                    dataset: source,
+                }),
+            }],
+        )
+        .unwrap();
+    let mut legacy = serde_json::to_value(document).unwrap();
+    legacy["schema_version"] = serde_json::json!(5);
+    for trace in legacy["traces"].as_array_mut().unwrap() {
+        trace.as_object_mut().unwrap().remove("row_predicates");
+    }
+
+    let migrated: VisualizationDocument = serde_json::from_value(legacy).unwrap();
+    assert_eq!(
+        migrated.schema_version,
+        VisualizationDocument::SCHEMA_VERSION
+    );
+    assert!(
+        migrated
+            .traces()
+            .iter()
+            .all(|trace| trace.row_predicates.is_empty())
     );
 }
 
@@ -505,6 +679,8 @@ fn nested_sequences_and_source_strings_are_bounded_during_deserialization() {
         trace_ids: vec![TraceId::allocate(3).unwrap()],
         kind: MeasurementKind::Point,
         label: "Point".to_owned(),
+        expression: None,
+        value: None,
     };
     let mut measurement_json = serde_json::to_value(measurement).unwrap();
     let trace = measurement_json["trace_ids"][0].clone();
@@ -595,6 +771,8 @@ fn document_aggregate_nested_resource_budgets_accept_boundaries_and_reject_overf
         trace_ids: vec![TraceId::allocate(3).unwrap(); MAX_ENTITY_REFERENCES],
         kind: MeasurementKind::Point,
         label: "Aggregate boundary".to_owned(),
+        expression: None,
+        value: None,
     };
     let mut encoded = serde_json::to_value(document().0).unwrap();
     encoded["measurements"] = serde_json::to_value(vec![measurement; 5]).unwrap();
@@ -903,6 +1081,7 @@ fn full_presentation_graph_validates_and_cascade_creates_tombstones() {
                 binding: source,
                 signal_key: "v(out)".to_owned(),
                 coordinate_key: "time".to_owned(),
+                row_predicates: Vec::new(),
                 x_axis_id: x_axis,
                 y_axis_id: y_axis,
                 label: "V(out)".to_owned(),
@@ -1216,6 +1395,163 @@ fn composed_page_and_bound_pane_commit_exact_source_identity() {
     let restored: VisualizationDocument =
         serde_json::from_str(&serde_json::to_string(&document).unwrap()).unwrap();
     assert_eq!(restored, document);
+}
+
+#[test]
+fn report_page_assignment_reorder_and_link_inheritance_are_atomic() {
+    let (mut document, source) = document();
+    let page_id = document.pages()[0].id;
+    let primary = document.panes()[0].id;
+    let binding = PaneDataBinding {
+        analysis_id: AnalysisInstanceId::new(),
+        dataset: source,
+    };
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetPaneSource {
+                pane_id: primary,
+                viewer_id: "viewer-waveform".to_owned(),
+                binding: Some(binding),
+            }],
+        )
+        .unwrap();
+    let second_receipt = document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::AddBoundPane(NewPane {
+                page_id,
+                title: "Second".to_owned(),
+                kind: PaneKind::Cartesian,
+                viewer_id: "viewer-waveform".to_owned(),
+                binding: Some(binding),
+                placement: PanePlacement::Below {
+                    anchor_pane_id: primary,
+                },
+            })],
+        )
+        .unwrap();
+    let second = second_receipt
+        .created
+        .iter()
+        .find_map(|entity| match entity {
+            EntityRef::Pane(id) => Some(*id),
+            _ => None,
+        })
+        .unwrap();
+    let horizontal_axis = |document: &VisualizationDocument, pane_id| {
+        document
+            .axes()
+            .iter()
+            .find(|axis| axis.pane_id == pane_id && axis.orientation == AxisOrientation::Horizontal)
+            .unwrap()
+            .id
+    };
+    let primary_x = horizontal_axis(&document, primary);
+    let second_x = horizontal_axis(&document, second);
+    let link_receipt = document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::AddLinkGroup {
+                label: "Shared X".to_owned(),
+                kind: LinkKind::HorizontalViewport,
+                members: vec![EntityRef::Axis(primary_x), EntityRef::Axis(second_x)],
+            }],
+        )
+        .unwrap();
+    let link_id = link_receipt
+        .created
+        .iter()
+        .find_map(|entity| match entity {
+            EntityRef::LinkGroup(id) => Some(*id),
+            _ => None,
+        })
+        .unwrap();
+
+    let third_receipt = document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::AddBoundPane(NewPane {
+                page_id,
+                title: "Third".to_owned(),
+                kind: PaneKind::Cartesian,
+                viewer_id: "viewer-waveform".to_owned(),
+                binding: Some(binding),
+                placement: PanePlacement::Below {
+                    anchor_pane_id: second,
+                },
+            })],
+        )
+        .unwrap();
+    let third = third_receipt
+        .created
+        .iter()
+        .find_map(|entity| match entity {
+            EntityRef::Pane(id) => Some(*id),
+            _ => None,
+        })
+        .unwrap();
+    let third_x = horizontal_axis(&document, third);
+    assert!(
+        document
+            .link_groups()
+            .iter()
+            .find(|group| group.id == link_id)
+            .unwrap()
+            .members
+            .contains(&EntityRef::Axis(third_x))
+    );
+
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::ReorderPagePanes {
+                page_id,
+                pane_ids: vec![third, primary, second],
+            }],
+        )
+        .unwrap();
+    let mut ordered = document
+        .panes()
+        .iter()
+        .filter(|pane| pane.page_id == page_id)
+        .collect::<Vec<_>>();
+    ordered.sort_by_key(|pane| pane.order);
+    assert_eq!(
+        ordered.iter().map(|pane| pane.id).collect::<Vec<_>>(),
+        vec![third, primary, second]
+    );
+
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::AssignPaneToReportPage {
+                pane_id: primary,
+                page_title: "Publication".to_owned(),
+                template_id: "design-review".to_owned(),
+                update_policy: PageUpdatePolicy::FreezeFigureRevision,
+            }],
+        )
+        .unwrap();
+    let publication = document
+        .pages()
+        .iter()
+        .find(|page| page.title == "Publication")
+        .unwrap();
+    assert_eq!(publication.template_id, "design-review");
+    assert_eq!(
+        publication.update_policy,
+        PageUpdatePolicy::FreezeFigureRevision
+    );
+    assert_eq!(
+        document
+            .panes()
+            .iter()
+            .find(|pane| pane.id == primary)
+            .unwrap()
+            .page_id,
+        publication.id
+    );
 }
 
 #[test]

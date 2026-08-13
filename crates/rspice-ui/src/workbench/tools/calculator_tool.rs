@@ -127,22 +127,49 @@ fn plot_expression(ctx: &Context, app: &mut RSpiceApp) {
     if expression.is_empty() {
         return;
     }
-    let analysis = app.state.simulation.active_analysis_idx.unwrap_or(0);
-    let traces = app.state.ui.results.exprs.entry(analysis).or_default();
-    if !traces.iter().any(|trace| trace.text == expression) {
-        traces.push(crate::workbench::documents::result_document::ExprTrace {
-            text: expression.clone(),
-            visible: true,
-        });
+    let Some(analysis) = app.state.simulation.active_analysis_idx else {
+        app.state
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
+                "Select a retained result analysis before plotting an expression.",
+            ));
+        return;
+    };
+    app.state.calculator_panel.evaluate(&app.state.simulation);
+    if let Some(Err(error)) = app.state.calculator_panel.outcome.as_ref() {
+        app.state
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                "Expression was not plotted: {error}"
+            )));
+        return;
+    }
+    let added = app.state.ui.results.add_expression_trace(
+        &app.state.simulation,
+        analysis,
+        expression.clone(),
+    );
+    let added = match added {
+        Ok(added) => added,
+        Err(error) => {
+            app.state
+                .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+            return;
+        }
+    };
+    if added {
+        app.state.workspace.visualization_documents_dirty = true;
     }
     app.state.ui.results.viewer = crate::workbench::documents::result_document::ResultViewer::Waves;
     app.state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
-    app.state
-        .ui
-        .toasts
-        .info(ctx, format!("Plotted {expression}"));
+    app.state.ui.toasts.info(
+        ctx,
+        if added {
+            format!("Plotted {expression}")
+        } else {
+            format!("{expression} is already plotted")
+        },
+    );
 }
 
 #[cfg(test)]
@@ -153,6 +180,26 @@ mod tests {
     fn plotting_keeps_the_tool_open_and_never_duplicates_a_trace() {
         let mut app = crate::workbench::RSpiceApp::test_instance();
         let ctx = egui::Context::default();
+        let analysis =
+            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
+                .with_waveforms(vec![
+                    crate::state::WaveformData::new(
+                        "V(out)",
+                        vec![0.0, 1.0],
+                        vec![1.0, 2.0],
+                        "#00aaff",
+                    ),
+                    crate::state::WaveformData::new(
+                        "V(in)",
+                        vec![0.0, 1.0],
+                        vec![1.0, 1.0],
+                        "#ffaa00",
+                    ),
+                ]);
+        let mut run = crate::state::SimulationRun::new(1);
+        run.add_analysis(analysis);
+        app.state.simulation.runs = vec![run];
+        assert!(app.state.simulation.select_run(0));
         app.state.dialogs.waveform_calculator_dialog = true;
         app.state.calculator_panel.expression = "V(out)/V(in)".to_owned();
 
@@ -162,6 +209,7 @@ mod tests {
         let traces = app.state.ui.results.exprs.get(&0).expect("trace recorded");
         assert_eq!(traces.len(), 1, "the same expression plotted twice");
         assert_eq!(traces[0].text, "V(out)/V(in)");
+        assert!(app.state.workspace.visualization_documents_dirty);
         assert!(
             app.state.dialogs.waveform_calculator_dialog,
             "plotting must not close a modeless tool"

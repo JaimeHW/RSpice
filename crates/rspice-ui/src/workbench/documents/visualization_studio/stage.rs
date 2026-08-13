@@ -98,7 +98,7 @@ pub(super) fn viewer_stage(ui: &mut Ui, app: &mut RSpiceApp) {
                     app,
                     family_selection.as_ref().ok().cloned().flatten(),
                 );
-                capture_active_link_state(app);
+                capture_active_link_state(ui.ctx(), app);
                 paint_visualization_markers(ui, app);
                 crate::ui::plot::set_interaction_mode(
                     ui.ctx(),
@@ -112,31 +112,31 @@ pub(super) fn viewer_stage(ui: &mut Ui, app: &mut RSpiceApp) {
     exact_data_dock(ui, app);
 }
 
-pub(super) fn paint_visualization_markers(ui: &Ui, app: &RSpiceApp) {
+pub(super) fn paint_visualization_markers(ui: &Ui, app: &mut RSpiceApp) {
     let Some(well) = app.state.ui.results.well_rect else {
-        return;
-    };
-    let Some(run) = app.state.simulation.active_run() else {
         return;
     };
     let Some(analysis_index) = app.state.simulation.active_analysis_idx else {
         return;
     };
-    let Some(analysis) = run.analyses.get(analysis_index) else {
+    let source = app.state.simulation.active_run().and_then(|run| {
+        let analysis = run.analyses.get(analysis_index)?;
+        let waveform = analysis
+            .waveforms
+            .iter()
+            .find(|waveform| waveform.visible)?;
+        let (source_min, source_max) = waveform.x_range();
+        Some((run.dataset_id, analysis.id, source_min, source_max))
+    });
+    let Some((dataset_id, analysis_sequence, source_min, source_max)) = source else {
         return;
     };
-    let Some(waveform) = analysis.waveforms.iter().find(|waveform| waveform.visible) else {
-        return;
-    };
-    let (source_min, source_max) = waveform.x_range();
-    let viewer = app.state.ui.results.viewer;
-    let (x_min, x_max) = app
-        .state
-        .ui
-        .results
-        .plot_view(viewer, analysis_index)
-        .x
-        .unwrap_or((source_min, source_max));
+    let (x_min, x_max) = result_document::active_renderer_axis_range(
+        ui.ctx(),
+        &mut app.state,
+        result_document::PaneAxis::X,
+    )
+    .unwrap_or((source_min, source_max));
     if !x_min.is_finite() || !x_max.is_finite() || x_min >= x_max {
         return;
     }
@@ -149,7 +149,7 @@ pub(super) fn paint_visualization_markers(ui: &Ui, app: &RSpiceApp) {
         .markers
         .iter()
         .filter(|marker| {
-            marker.dataset_id == run.dataset_id && marker.analysis_sequence == analysis.id
+            marker.dataset_id == dataset_id && marker.analysis_sequence == analysis_sequence
         })
     {
         let fraction = ((marker.x - x_min) / (x_max - x_min)).clamp(0.0, 1.0) as f32;
@@ -171,7 +171,7 @@ pub(super) fn paint_visualization_markers(ui: &Ui, app: &RSpiceApp) {
         .annotations
         .iter()
         .filter(|annotation| {
-            annotation.dataset_id == run.dataset_id && annotation.analysis_sequence == analysis.id
+            annotation.dataset_id == dataset_id && annotation.analysis_sequence == analysis_sequence
         })
     {
         let fraction = ((annotation.x - x_min) / (x_max - x_min)).clamp(0.0, 1.0) as f32;

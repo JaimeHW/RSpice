@@ -312,20 +312,14 @@ pub(super) fn expr_editor_row(
                             series: Ok(series),
                         },
                     );
-                    state
+                    let added = state
                         .ui
                         .results
-                        .analysis_exprs
-                        .entry(analysis_key)
-                        .or_default()
-                        .push(ExprTrace {
-                            text,
-                            visible: true,
-                        });
-                    state
-                        .ui
-                        .results
-                        .sync_expression_projection(analysis_key, analysis_index);
+                        .add_expression_trace(&state.simulation, analysis_index, text)
+                        .expect("the expression editor is bound to a retained analysis");
+                    if added {
+                        state.workspace.visualization_documents_dirty = true;
+                    }
                     state.ui.results.expr_editor = None;
                 }
                 Err(error) => {

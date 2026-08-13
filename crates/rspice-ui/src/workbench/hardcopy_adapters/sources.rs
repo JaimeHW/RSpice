@@ -817,19 +817,31 @@ pub(crate) fn active_app_hardcopy_source_available(state: &AppState) -> bool {
             }
             _ => false,
         },
-        SurfaceId::VisualizationStudio => state
-            .workbench
-            .visualization_studio
-            .active_pane
-            .and_then(|pane_id| {
+        SurfaceId::VisualizationStudio => {
+            if let Some(WorkspaceDocumentId::VisualizationDocument(document_id)) =
+                state.workbench.documents.active(Workspace::Results)
+            {
+                active_visualization_document_pane(state, *document_id).is_some_and(
+                    |(document, _, pane)| {
+                        visualization_document_pane_availability(document, pane).is_available()
+                    },
+                )
+            } else {
                 state
                     .workbench
                     .visualization_studio
-                    .panes
-                    .iter()
-                    .find(|pane| pane.id == pane_id)
-            })
-            .is_some_and(|pane| studio_pane_availability(state, pane).is_available()),
+                    .active_pane
+                    .and_then(|pane_id| {
+                        state
+                            .workbench
+                            .visualization_studio
+                            .panes
+                            .iter()
+                            .find(|pane| pane.id == pane_id)
+                    })
+                    .is_some_and(|pane| studio_pane_availability(state, pane).is_available())
+            }
+        }
         SurfaceId::ReportAuthoring => state
             .workbench
             .report_authoring
@@ -1349,6 +1361,21 @@ fn studio_pane_availability(
             pane.analysis_sequence
         ));
     }
+    if is_curve_viewer(pane.viewer)
+        && !matches!(
+            pane.viewer,
+            ResultViewer::Waves
+                | ResultViewer::DcSweep
+                | ResultViewer::NoiseContrib
+                | ResultViewer::HarmonicBalance
+                | ResultViewer::PhaseNoise
+        )
+    {
+        return unavailable(format!(
+            "{} has no faithful semantic Studio figure writer",
+            pane.viewer.label()
+        ));
+    }
     let specialist_evidence_available = match pane.viewer {
         ResultViewer::HarmonicBalance => {
             crate::workbench::documents::result_document::harmonic_balance_analysis_is_renderable(
@@ -1387,6 +1414,20 @@ fn active_visualization_document_pane(
     document_id: crate::product::ResultDocumentId,
 ) -> Option<(&VisualizationDocument, &Page, &Pane)> {
     let document = state.workspace.visualization_document(document_id)?;
+    if let Some(pane) = state
+        .workbench
+        .visualization_studio
+        .active_pane
+        .and_then(|pane_id| {
+            document
+                .panes()
+                .iter()
+                .find(|pane| pane.id.get() == pane_id)
+        })
+        && let Some(page) = document.pages().iter().find(|page| page.id == pane.page_id)
+    {
+        return Some((document, page, pane));
+    }
     let selected_page_id = state
         .ui
         .results
@@ -1415,12 +1456,29 @@ fn visualization_document_pane_availability(
     if pane.binding.is_none() {
         return unavailable("the selected result pane has no immutable dataset binding");
     }
+    if pane.kind != crate::results::visualization_document::PaneKind::Cartesian
+        || pane.viewer_id != "viewer-waveform"
+    {
+        return unavailable("the selected result pane has no semantic figure writer");
+    }
+    if pane.family_policy.is_some() {
+        return unavailable("the selected result pane has an unresolved family presentation");
+    }
+    if document
+        .measurements()
+        .iter()
+        .any(|measurement| measurement.pane_id == pane.id)
+    {
+        return unavailable(
+            "the selected result pane contains a measurement overlay not supported by the semantic figure writer",
+        );
+    }
     if !document
         .traces()
         .iter()
-        .any(|trace| trace.pane_id == pane.id)
+        .any(|trace| trace.pane_id == pane.id && trace.visible)
     {
-        return unavailable("the selected result pane has no retained trace");
+        return unavailable("the selected result pane has no visible retained trace");
     }
     RetainedHardcopySourceAvailability::Available
 }
@@ -2069,6 +2127,21 @@ pub(super) fn default_print_mapping(
                     SCREEN_STYLES[index % SCREEN_STYLES.len()],
                     PrintColor::Black,
                     redundancy,
+                    true,
+                )?);
+            }
+            for cursor in &plot.cursors {
+                entries.push(mapping_entry(
+                    PrintObjectKind::Marker,
+                    format!("cursor:{}", cursor.cursor_id),
+                    format!("Cursor {}", cursor.label),
+                    "viewer cursor color Â· dashed line",
+                    PrintColor::Black,
+                    PrintRedundancy::DashedLine {
+                        width: Length::from_micrometres(200),
+                        dash: Length::from_micrometres(1_250),
+                        gap: Length::from_micrometres(750),
+                    },
                     true,
                 )?);
             }

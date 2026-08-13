@@ -580,6 +580,13 @@ pub enum VisualizationDocumentPersistenceError {
     CatalogFull,
     #[error("the visualization document is invalid: {message}")]
     Invalid { message: String },
+    #[error("the project does not contain visualization document {document_id}")]
+    NotFound { document_id: ResultDocumentId },
+    #[error("visualization document {document_id} transaction failed: {message}")]
+    Transaction {
+        document_id: ResultDocumentId,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -2905,6 +2912,33 @@ impl ProjectWorkspace {
         self.visualization_documents
             .iter()
             .find(|document| document.id() == document_id)
+    }
+
+    /// Apply a revision-checked transaction to one project-owned result
+    /// document and mark the result-document catalog dirty only after the
+    /// document commits successfully.
+    pub fn transact_visualization_document(
+        &mut self,
+        document_id: ResultDocumentId,
+        expected_revision: crate::product::ObjectRevision,
+        edits: Vec<crate::results::visualization_document::DocumentEdit>,
+    ) -> Result<
+        crate::results::visualization_document::VisualizationTransactionReceipt,
+        VisualizationDocumentPersistenceError,
+    > {
+        let document = self
+            .visualization_documents
+            .iter_mut()
+            .find(|document| document.id() == document_id)
+            .ok_or(VisualizationDocumentPersistenceError::NotFound { document_id })?;
+        let receipt = document
+            .transact(expected_revision, edits)
+            .map_err(|error| VisualizationDocumentPersistenceError::Transaction {
+                document_id,
+                message: error.to_string(),
+            })?;
+        self.visualization_documents_dirty = true;
+        Ok(receipt)
     }
 
     /// Validate the persisted simulation configuration without requiring any

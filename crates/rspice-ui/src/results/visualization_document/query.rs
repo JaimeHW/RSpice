@@ -235,10 +235,53 @@ pub(super) fn validate_annotation(
             coordinate,
         } => {
             coordinate.validate("annotation.coordinate")?;
-            document.require_trace_in_pane(*trace_id, pane_id)
+            document.require_trace_in_pane(*trace_id, pane_id)?;
+            if trace_contains_exact_coordinate(document, *trace_id, coordinate)? {
+                Ok(())
+            } else {
+                Err(VisualizationError::InterpolationRequired)
+            }
         }
         _ => Ok(()),
     }
+}
+
+pub(super) fn trace_contains_exact_coordinate(
+    document: &VisualizationDocument,
+    trace_id: TraceId,
+    coordinate: &TypedValue,
+) -> Result<bool, VisualizationError> {
+    coordinate.validate("trace.coordinate")?;
+    let trace = document
+        .traces
+        .iter()
+        .find(|trace| trace.id == trace_id)
+        .ok_or(VisualizationError::EntityNotFound(EntityRef::Trace(
+            trace_id,
+        )))?;
+    let dataset = document.dataset_for_binding(trace.binding)?;
+    validate_trace_row_predicates(dataset, &trace.row_predicates)?;
+    let coordinate_index = column_index(dataset, &trace.coordinate_key)?;
+    if coordinate.value_type() != dataset.columns[coordinate_index].value_type {
+        return Err(VisualizationError::ColumnTypeMismatch {
+            column: trace.coordinate_key.clone(),
+            expected: dataset.columns[coordinate_index].value_type,
+            actual: coordinate.value_type(),
+        });
+    }
+    let predicates = trace
+        .row_predicates
+        .iter()
+        .map(|predicate| {
+            column_index(dataset, &predicate.column).map(|index| (index, &predicate.value))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(dataset.rows.iter().any(|row| {
+        row.values[coordinate_index].exact_eq(coordinate)
+            && predicates
+                .iter()
+                .all(|(index, expected)| row.values[*index].exact_eq(expected))
+    }))
 }
 
 pub(super) fn validate_link_members(
@@ -264,6 +307,53 @@ pub(super) fn validate_link_members(
         if !compatible {
             return Err(VisualizationError::InvalidLinkMembers(kind));
         }
+    }
+    Ok(())
+}
+
+pub(super) fn validate_trace_row_predicates(
+    dataset: &SourceDataset,
+    predicates: &[QueryCoordinate],
+) -> Result<(), VisualizationError> {
+    if predicates.len() > MAX_TRACE_ROW_PREDICATES {
+        return Err(VisualizationError::InvalidValue {
+            field: "trace.row-predicates",
+            message: format!(
+                "a trace supports at most {MAX_TRACE_ROW_PREDICATES} exact row predicates"
+            ),
+        });
+    }
+    let mut resolved = Vec::with_capacity(predicates.len());
+    let mut seen = HashSet::with_capacity(predicates.len());
+    for predicate in predicates {
+        validate_key("trace.row-predicate.column", &predicate.column)?;
+        predicate.value.validate("trace.row-predicate.value")?;
+        let index = column_index(dataset, &predicate.column)?;
+        let column = &dataset.columns[index];
+        if column.role != ColumnRole::Coordinate || !seen.insert(index) {
+            return Err(VisualizationError::InvalidValue {
+                field: "trace.row-predicates",
+                message: "trace row predicates must name distinct coordinate columns".to_owned(),
+            });
+        }
+        if predicate.value.value_type() != column.value_type {
+            return Err(VisualizationError::ColumnTypeMismatch {
+                column: column.key.clone(),
+                expected: column.value_type,
+                actual: predicate.value.value_type(),
+            });
+        }
+        resolved.push((index, &predicate.value));
+    }
+    if !dataset.rows.iter().any(|row| {
+        resolved
+            .iter()
+            .all(|(index, expected)| row.values[*index].exact_eq(expected))
+    }) {
+        return Err(VisualizationError::InvalidValue {
+            field: "trace.row-predicates",
+            message: "trace row predicates select no exact source rows".to_owned(),
+        });
     }
     Ok(())
 }

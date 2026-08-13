@@ -647,6 +647,12 @@ pub fn resolve_plot_source(
         page_id: source.scene.page_id().get(),
         pane_id: source.scene.pane_id().get(),
         traces,
+        cursors: source
+            .scene
+            .cursors()
+            .iter()
+            .filter_map(|cursor| canonical_cursor_semantics(source.scene, cursor))
+            .collect(),
         markers: Vec::new(),
         annotations: Vec::new(),
     };

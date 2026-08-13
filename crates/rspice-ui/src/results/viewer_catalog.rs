@@ -306,10 +306,7 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         art: ViewerArt::Smith,
         analysis_ids: SP_HBSP_PSP,
         external_capability: None,
-        // The complex Γ samples are retained, but the configured reference
-        // impedance is not. Keep the Smith impedance surface out of release
-        // scope until Z₀ is part of the immutable result contract.
-        release: ViewerReleaseClass::ReleasePlanned,
+        release: ViewerReleaseClass::ReleaseTarget,
     },
     ViewerDocumentDefinition {
         id: "viewer-polar",

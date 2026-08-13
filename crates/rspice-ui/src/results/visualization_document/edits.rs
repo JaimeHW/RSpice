@@ -33,6 +33,8 @@ pub struct NewTrace {
     pub signal_key: String,
     #[serde(deserialize_with = "deserialize_key_string")]
     pub coordinate_key: String,
+    #[serde(default, deserialize_with = "deserialize_trace_row_predicates")]
+    pub row_predicates: Vec<QueryCoordinate>,
     pub x_axis_id: AxisId,
     pub y_axis_id: AxisId,
     #[serde(deserialize_with = "deserialize_label_string")]
@@ -74,7 +76,12 @@ pub struct NewPagePane {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DocumentEdit {
     SetTracking(ResultDocumentTracking),
+    SetPresentation(VisualizationPresentationPolicy),
     AttachDataset(SourceDataset),
+    /// Add one exact analysis projection to an already attached immutable
+    /// run. Projections may share a run-level [`DatasetBinding`], but their
+    /// rows remain disjoint through the stable `analysis-id` coordinate.
+    MergeDatasetProjection(SourceDataset),
     /// Attach a newer immutable source snapshot and move presentation
     /// entities that currently consume `previous` to it. The prior snapshot
     /// remains attached so comparison receipts and review evidence stay
@@ -118,6 +125,20 @@ pub enum DocumentEdit {
         page_id: PageId,
         placement: PanePlacement,
     },
+    /// Assign a pane to a named report page, creating the page when needed,
+    /// and update that page's composition policy as one atomic edit.
+    AssignPaneToReportPage {
+        pane_id: PaneId,
+        page_title: String,
+        template_id: String,
+        update_policy: PageUpdatePolicy,
+    },
+    /// Replace one page's complete pane order while retaining stable pane IDs.
+    ReorderPagePanes {
+        page_id: PageId,
+        #[serde(deserialize_with = "deserialize_page_pane_ids")]
+        pane_ids: Vec<PaneId>,
+    },
     AddAxis(NewAxis),
     AddTrace(NewTrace),
     AddCursor {
@@ -146,6 +167,13 @@ pub enum DocumentEdit {
         trace_ids: Vec<TraceId>,
         kind: MeasurementKind,
         label: String,
+    },
+    AddScalarMeasurement {
+        pane_id: PaneId,
+        trace_ids: Vec<TraceId>,
+        #[serde(deserialize_with = "deserialize_source_text_string")]
+        expression: String,
+        value: f64,
     },
     AddAnnotation {
         pane_id: PaneId,
@@ -193,6 +221,10 @@ pub enum DocumentEdit {
     SetLinkMembers {
         link_group_id: LinkGroupId,
         members: Vec<EntityRef>,
+    },
+    /// Remove every marker in the document or in one pane as one atomic edit.
+    ClearMarkers {
+        pane_id: Option<PaneId>,
     },
     Remove(EntityRef),
     RecordComparison(ComparisonReceipt),

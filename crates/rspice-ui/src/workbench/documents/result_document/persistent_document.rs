@@ -312,15 +312,16 @@ fn refresh_latest_binding(
     }
     let next_source =
         super::create_document::source_dataset(run, analysis).map_err(|error| error.to_string())?;
-    let document = state
+    let revision = state
         .workspace
-        .visualization_documents
-        .iter_mut()
-        .find(|document| document.id() == document_id)
-        .ok_or_else(|| "The selected project result document is no longer retained.".to_owned())?;
-    document
-        .transact(
-            document.revision(),
+        .visualization_document(document_id)
+        .ok_or_else(|| "The selected project result document is no longer retained.".to_owned())?
+        .revision();
+    state
+        .workspace
+        .transact_visualization_document(
+            document_id,
+            revision,
             vec![DocumentEdit::RetargetTrackedDataset {
                 previous,
                 next: next_source,
@@ -328,7 +329,6 @@ fn refresh_latest_binding(
             }],
         )
         .map_err(|error| error.to_string())?;
-    state.workspace.visualization_documents_dirty = true;
     Ok(())
 }
 
@@ -779,9 +779,7 @@ pub(super) fn renderer_supports_analysis(id: &str, analysis: &AnalysisResult) ->
                 || super::harmonic_balance_analysis_is_renderable(analysis)
         }
         "viewer-phase-noise" => super::phase_noise_analysis_is_renderable(analysis),
-        // Reference impedance is not yet retained with SP/PSP/HBSP results;
-        // accepting the default 50 Ω would fabricate impedance and VSWR.
-        "viewer-smith" => false,
+        "viewer-smith" => super::smith::analysis_is_renderable(analysis),
         "viewer-table" => !analysis.waveforms.is_empty(),
         "viewer-histogram" => analysis.analysis_type == AnalysisType::MonteCarlo,
         "eye-viewer" => analysis.analysis_type.is_time_domain() && !analysis.waveforms.is_empty(),

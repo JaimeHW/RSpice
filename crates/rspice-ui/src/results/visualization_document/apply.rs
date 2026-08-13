@@ -192,6 +192,254 @@ impl VisualizationDocument {
         Ok(id)
     }
 
+    /// Materialize the canonical axes and display traces for a newly bound
+    /// pane. A bound pane without these entities can be shown by the live
+    /// Results renderer, but cannot participate in deterministic export,
+    /// marker/measurement authoring, trace visibility, or link groups.
+    fn provision_bound_pane(
+        &mut self,
+        pane_id: PaneId,
+        viewer_id: &str,
+        binding: PaneDataBinding,
+        created: &mut Vec<EntityRef>,
+    ) -> Result<(), VisualizationError> {
+        self.require_pane(pane_id)?;
+        let viewer =
+            viewer_document(viewer_id).ok_or_else(|| VisualizationError::InvalidValue {
+                field: "pane.viewer-id",
+                message: format!("unknown viewer document '{viewer_id}'"),
+            })?;
+        let x_label = viewer.x_axis.to_owned();
+        let y_label = viewer.y_axis.to_owned();
+        let x_scale = if viewer.x_axis.to_ascii_lowercase().contains("frequency") {
+            AxisScale::Logarithmic
+        } else {
+            AxisScale::Linear
+        };
+        let y_scale = if viewer.y_axis.to_ascii_lowercase().contains("db") {
+            AxisScale::Decibels
+        } else {
+            AxisScale::Linear
+        };
+
+        let x_axis_id = if let Some(id) = self
+            .axes
+            .iter()
+            .find(|axis| axis.pane_id == pane_id && axis.orientation == AxisOrientation::Horizontal)
+            .map(|axis| axis.id)
+        {
+            id
+        } else {
+            let id = AxisId::allocate(self.allocate_serial()?)?;
+            self.axes.push(Axis {
+                id,
+                pane_id,
+                label: x_label,
+                orientation: AxisOrientation::Horizontal,
+                scale: x_scale,
+                unit: None,
+                range: None,
+            });
+            created.push(EntityRef::Axis(id));
+            id
+        };
+        let y_axis_id = if let Some(id) = self
+            .axes
+            .iter()
+            .find(|axis| {
+                axis.pane_id == pane_id && axis.orientation == AxisOrientation::VerticalLeft
+            })
+            .map(|axis| axis.id)
+        {
+            id
+        } else {
+            let id = AxisId::allocate(self.allocate_serial()?)?;
+            self.axes.push(Axis {
+                id,
+                pane_id,
+                label: y_label,
+                orientation: AxisOrientation::VerticalLeft,
+                scale: y_scale,
+                unit: None,
+                range: None,
+            });
+            created.push(EntityRef::Axis(id));
+            id
+        };
+
+        if self.traces.iter().any(|trace| trace.pane_id == pane_id) {
+            return Ok(());
+        }
+        let (coordinate_key, display_signals) = {
+            let dataset = self.dataset_for_binding(binding.dataset)?;
+            let column_index =
+                |key: &str| dataset.columns.iter().position(|column| column.key == key);
+            let analysis_identity = binding.analysis_id.to_string();
+            let analysis_id = column_index("analysis-id");
+            if let (Some(trace_index), Some(trace_name), Some(component), Some(x), Some(y)) = (
+                column_index("trace-index"),
+                column_index("trace-name"),
+                column_index("component"),
+                column_index("x"),
+                column_index("y"),
+            ) && dataset.columns[trace_index].role == ColumnRole::Coordinate
+                && dataset.columns[trace_name].role == ColumnRole::Coordinate
+                && dataset.columns[component].role == ColumnRole::Coordinate
+                && dataset.columns[x].role == ColumnRole::Coordinate
+                && dataset.columns[y].role == ColumnRole::Signal
+            {
+                let mut signals = Vec::new();
+                let mut seen_trace_indices = HashSet::new();
+                for row in &dataset.rows {
+                    if analysis_id.is_some_and(|analysis_id| {
+                        !matches!(
+                            row.values.get(analysis_id),
+                            Some(TypedValue::Text(value)) if value == &analysis_identity
+                        )
+                    }) {
+                        continue;
+                    }
+                    let (
+                        TypedValue::Integer(index),
+                        TypedValue::Text(name),
+                        TypedValue::Text(component_name),
+                    ) = (
+                        &row.values[trace_index],
+                        &row.values[trace_name],
+                        &row.values[component],
+                    )
+                    else {
+                        continue;
+                    };
+                    if component_name != "display" || !seen_trace_indices.insert(*index) {
+                        continue;
+                    }
+                    let mut row_predicates = vec![
+                        QueryCoordinate {
+                            column: "trace-index".to_owned(),
+                            value: TypedValue::Integer(*index),
+                        },
+                        QueryCoordinate {
+                            column: "trace-name".to_owned(),
+                            value: TypedValue::Text(name.clone()),
+                        },
+                        QueryCoordinate {
+                            column: "component".to_owned(),
+                            value: TypedValue::Text("display".to_owned()),
+                        },
+                    ];
+                    if analysis_id.is_some() {
+                        row_predicates.push(QueryCoordinate {
+                            column: "analysis-id".to_owned(),
+                            value: TypedValue::Text(analysis_identity.clone()),
+                        });
+                    }
+                    signals.push(("y".to_owned(), name.clone(), row_predicates));
+                }
+                ("x".to_owned(), signals)
+            } else {
+                let mut coordinates = dataset
+                    .columns
+                    .iter()
+                    .filter(|column| column.role == ColumnRole::Coordinate);
+                let Some(coordinate) = coordinates.next() else {
+                    return Ok(());
+                };
+                if coordinates.next().is_some()
+                    || !matches!(coordinate.value_type, ValueType::Real | ValueType::Integer)
+                {
+                    // Multi-dimensional family and table sources use their own
+                    // typed renderers. They still receive canonical axes, but do
+                    // not invent a one-dimensional Trace projection.
+                    return Ok(());
+                }
+                let signals = dataset
+                    .columns
+                    .iter()
+                    .filter(|column| {
+                        column.role == ColumnRole::Signal
+                            && !column.key.ends_with(":real")
+                            && !column.key.ends_with(":imag")
+                    })
+                    .map(|column| (column.key.clone(), column.label.clone(), Vec::new()))
+                    .collect::<Vec<_>>();
+                (coordinate.key.clone(), signals)
+            }
+        };
+        if display_signals.is_empty() {
+            return Ok(());
+        }
+        for (signal_key, label, row_predicates) in display_signals {
+            self.add_trace(
+                NewTrace {
+                    pane_id,
+                    binding: binding.dataset,
+                    signal_key,
+                    coordinate_key: coordinate_key.clone(),
+                    row_predicates,
+                    x_axis_id,
+                    y_axis_id,
+                    label,
+                },
+                created,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn inherit_axis_link_groups(
+        &mut self,
+        pane_id: PaneId,
+        placement: PanePlacement,
+    ) -> Result<(), VisualizationError> {
+        let anchor_pane_id = match placement {
+            PanePlacement::Below { anchor_pane_id } | PanePlacement::RightOf { anchor_pane_id } => {
+                anchor_pane_id
+            }
+            PanePlacement::Primary => return Ok(()),
+        };
+        let axis_pairs = self
+            .axes
+            .iter()
+            .filter(|axis| axis.pane_id == anchor_pane_id)
+            .filter_map(|anchor| {
+                self.axes
+                    .iter()
+                    .find(|candidate| {
+                        candidate.pane_id == pane_id && candidate.orientation == anchor.orientation
+                    })
+                    .map(|candidate| (anchor.id, candidate.id, anchor.orientation))
+            })
+            .collect::<Vec<_>>();
+        for (anchor_axis, new_axis, orientation) in axis_pairs {
+            for group in &mut self.link_groups {
+                let compatible = matches!(
+                    (group.kind, orientation),
+                    (LinkKind::HorizontalViewport, AxisOrientation::Horizontal)
+                        | (
+                            LinkKind::VerticalViewport,
+                            AxisOrientation::VerticalLeft | AxisOrientation::VerticalRight
+                        )
+                );
+                if compatible
+                    && group.members.contains(&EntityRef::Axis(anchor_axis))
+                    && !group.members.contains(&EntityRef::Axis(new_axis))
+                {
+                    if group.members.len() >= MAX_ENTITY_REFERENCES {
+                        return Err(VisualizationError::InvalidValue {
+                            field: "link-group.members",
+                            message: format!(
+                                "a link group supports at most {MAX_ENTITY_REFERENCES} members"
+                            ),
+                        });
+                    }
+                    group.members.push(EntityRef::Axis(new_axis));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn default_append_placement(&self, page_id: PageId) -> PanePlacement {
         self.panes
             .iter()
@@ -287,7 +535,13 @@ impl VisualizationDocument {
                 self.tracking = tracking;
                 Ok(())
             }
+            DocumentEdit::SetPresentation(presentation) => {
+                presentation.validate()?;
+                self.presentation = presentation;
+                Ok(())
+            }
             DocumentEdit::AttachDataset(dataset) => self.attach_dataset(dataset),
+            DocumentEdit::MergeDatasetProjection(dataset) => self.merge_dataset_projection(dataset),
             DocumentEdit::RetargetTrackedDataset {
                 previous,
                 next,
@@ -326,13 +580,22 @@ impl VisualizationDocument {
                 Ok(())
             }
             DocumentEdit::AddBoundPane(pane) => {
+                let viewer_id = pane.viewer_id.clone();
+                let binding = pane.binding;
+                let placement = pane.placement;
                 let id = self.create_pane(pane)?;
                 created.push(EntityRef::Pane(id));
+                if let Some(binding) = binding {
+                    self.provision_bound_pane(id, &viewer_id, binding, created)?;
+                }
+                self.inherit_axis_link_groups(id, placement)?;
                 Ok(())
             }
             DocumentEdit::AddPaneOnNewPage { page, pane } => {
                 let page_id = self.create_page(page)?;
                 created.push(EntityRef::Page(page_id));
+                let viewer_id = pane.viewer_id.clone();
+                let binding = pane.binding;
                 let pane_id = self.create_pane(NewPane {
                     page_id,
                     title: pane.title,
@@ -342,6 +605,9 @@ impl VisualizationDocument {
                     placement: PanePlacement::Primary,
                 })?;
                 created.push(EntityRef::Pane(pane_id));
+                if let Some(binding) = binding {
+                    self.provision_bound_pane(pane_id, &viewer_id, binding, created)?;
+                }
                 Ok(())
             }
             DocumentEdit::SetPageComposition {
@@ -375,8 +641,11 @@ impl VisualizationDocument {
                     .ok_or(VisualizationError::EntityNotFound(EntityRef::Pane(pane_id)))?;
                 self.validate_pane_source(kind, &viewer_id, binding)?;
                 let pane = self.pane_mut(pane_id)?;
-                pane.viewer_id = viewer_id;
+                pane.viewer_id = viewer_id.clone();
                 pane.binding = binding;
+                if let Some(binding) = binding {
+                    self.provision_bound_pane(pane_id, &viewer_id, binding, created)?;
+                }
                 Ok(())
             }
             DocumentEdit::SetPaneFamilyPresentation { pane_id, policy } => {
@@ -393,6 +662,109 @@ impl VisualizationDocument {
                 page_id,
                 placement,
             } => self.place_pane(pane_id, page_id, placement),
+            DocumentEdit::AssignPaneToReportPage {
+                pane_id,
+                page_title,
+                template_id,
+                update_policy,
+            } => {
+                validate_label("page.title", &page_title)?;
+                validate_key("page.template-id", &template_id)?;
+                let source_page_id = self
+                    .panes
+                    .iter()
+                    .find(|pane| pane.id == pane_id)
+                    .map(|pane| pane.page_id)
+                    .ok_or(VisualizationError::EntityNotFound(EntityRef::Pane(pane_id)))?;
+                let target_page_id = if let Some(page_id) = self
+                    .pages
+                    .iter()
+                    .find(|page| page.title == page_title)
+                    .map(|page| page.id)
+                {
+                    page_id
+                } else if self
+                    .panes
+                    .iter()
+                    .filter(|pane| pane.page_id == source_page_id)
+                    .count()
+                    == 1
+                {
+                    self.page_mut(source_page_id)?.title = page_title;
+                    source_page_id
+                } else {
+                    let page_id = self.create_page(NewPage {
+                        title: page_title,
+                        layout: PageLayout::Rows,
+                        template_id: template_id.clone(),
+                        update_policy,
+                    })?;
+                    created.push(EntityRef::Page(page_id));
+                    page_id
+                };
+                if target_page_id != source_page_id {
+                    let placement = self.default_append_placement(target_page_id);
+                    self.place_pane(pane_id, target_page_id, placement)?;
+                }
+                let target = self.page_mut(target_page_id)?;
+                target.template_id = template_id;
+                target.update_policy = update_policy;
+                if target_page_id != source_page_id
+                    && !self.panes.iter().any(|pane| pane.page_id == source_page_id)
+                {
+                    self.remove(EntityRef::Page(source_page_id), revision, tombstoned)?;
+                }
+                Ok(())
+            }
+            DocumentEdit::ReorderPagePanes { page_id, pane_ids } => {
+                self.require_page(page_id)?;
+                let current = self
+                    .panes
+                    .iter()
+                    .filter(|pane| pane.page_id == page_id)
+                    .map(|pane| pane.id)
+                    .collect::<HashSet<_>>();
+                let requested = pane_ids.iter().copied().collect::<HashSet<_>>();
+                if pane_ids.is_empty() || requested.len() != pane_ids.len() || requested != current
+                {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "page.pane-order",
+                        message: "pane order must contain every pane on the page exactly once"
+                            .to_owned(),
+                    });
+                }
+                let mut preceding = HashSet::new();
+                let mut previous = None;
+                for (order, pane_id) in pane_ids.into_iter().enumerate() {
+                    let pane = self.pane_mut(pane_id)?;
+                    let placement = if order == 0 {
+                        PanePlacement::Primary
+                    } else {
+                        match pane.placement {
+                            PanePlacement::Below { anchor_pane_id }
+                                if preceding.contains(&anchor_pane_id) =>
+                            {
+                                pane.placement
+                            }
+                            PanePlacement::RightOf { anchor_pane_id }
+                                if preceding.contains(&anchor_pane_id) =>
+                            {
+                                pane.placement
+                            }
+                            _ => PanePlacement::Below {
+                                anchor_pane_id: previous
+                                    .expect("a non-primary pane has a predecessor"),
+                            },
+                        }
+                    };
+                    pane.order = u32::try_from(order)
+                        .map_err(|_| VisualizationError::IdentitySpaceExhausted)?;
+                    pane.placement = placement;
+                    preceding.insert(pane_id);
+                    previous = Some(pane_id);
+                }
+                Ok(())
+            }
             DocumentEdit::AddAxis(axis) => {
                 self.require_pane(axis.pane_id)?;
                 validate_label("axis.label", &axis.label)?;
@@ -440,6 +812,9 @@ impl VisualizationDocument {
                 validate_label("marker.label", &label)?;
                 coordinate.validate("marker.coordinate")?;
                 self.require_trace_in_pane(trace_id, pane_id)?;
+                if !trace_contains_exact_coordinate(self, trace_id, &coordinate)? {
+                    return Err(VisualizationError::InterpolationRequired);
+                }
                 let id = MarkerId::allocate(self.allocate_serial()?)?;
                 self.markers.push(Marker {
                     id,
@@ -469,6 +844,9 @@ impl VisualizationDocument {
                 }
                 coordinate.validate("marker.coordinate")?;
                 self.require_trace_in_pane(trace_id, pane_id)?;
+                if !trace_contains_exact_coordinate(self, trace_id, &coordinate)? {
+                    return Err(VisualizationError::InterpolationRequired);
+                }
                 let id = MarkerId::allocate(self.allocate_serial()?)?;
                 self.markers.push(Marker {
                     id,
@@ -508,6 +886,8 @@ impl VisualizationDocument {
                     trace_ids,
                     kind,
                     label,
+                    expression: None,
+                    value: None,
                 });
                 created.push(EntityRef::Measurement(id));
                 Ok(())
@@ -568,7 +948,53 @@ impl VisualizationDocument {
                 coordinate,
             } => {
                 coordinate.validate("marker.coordinate")?;
+                let trace_id = self.marker_mut(marker_id)?.trace_id;
+                if !trace_contains_exact_coordinate(self, trace_id, &coordinate)? {
+                    return Err(VisualizationError::InterpolationRequired);
+                }
                 self.marker_mut(marker_id)?.coordinate = coordinate;
+                Ok(())
+            }
+            DocumentEdit::AddScalarMeasurement {
+                pane_id,
+                trace_ids,
+                expression,
+                value,
+            } => {
+                if expression.trim().is_empty()
+                    || expression.len() > MAX_SOURCE_TEXT_BYTES
+                    || expression.chars().any(char::is_control)
+                    || !value.is_finite()
+                {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "measurement.expression",
+                        message: format!(
+                            "a scalar measurement requires a finite value and 1 to {MAX_SOURCE_TEXT_BYTES} non-control UTF-8 expression bytes"
+                        ),
+                    });
+                }
+                if trace_ids.is_empty() || trace_ids.len() > MAX_ENTITY_REFERENCES {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "measurement.traces",
+                        message: format!(
+                            "a measurement requires 1 to {MAX_ENTITY_REFERENCES} traces"
+                        ),
+                    });
+                }
+                for trace_id in &trace_ids {
+                    self.require_trace_in_pane(*trace_id, pane_id)?;
+                }
+                let id = MeasurementId::allocate(self.allocate_serial()?)?;
+                self.measurements.push(Measurement {
+                    id,
+                    pane_id,
+                    trace_ids,
+                    kind: MeasurementKind::Point,
+                    label: format!("Measurement {}", id.get()),
+                    expression: Some(expression),
+                    value: Some(value),
+                });
+                created.push(EntityRef::Measurement(id));
                 Ok(())
             }
             DocumentEdit::SetMarker {
@@ -584,6 +1010,10 @@ impl VisualizationDocument {
                     validate_label("marker.source-specification", source)?;
                 }
                 coordinate.validate("marker.coordinate")?;
+                let trace_id = self.marker_mut(marker_id)?.trace_id;
+                if !trace_contains_exact_coordinate(self, trace_id, &coordinate)? {
+                    return Err(VisualizationError::InterpolationRequired);
+                }
                 let marker = self.marker_mut(marker_id)?;
                 marker.coordinate = coordinate;
                 marker.label = label;
@@ -627,6 +1057,21 @@ impl VisualizationDocument {
                 self.link_group_mut(link_group_id)?.members = members;
                 Ok(())
             }
+            DocumentEdit::ClearMarkers { pane_id } => {
+                if let Some(pane_id) = pane_id {
+                    self.require_pane(pane_id)?;
+                }
+                let marker_ids = self
+                    .markers
+                    .iter()
+                    .filter(|marker| pane_id.is_none_or(|pane_id| marker.pane_id == pane_id))
+                    .map(|marker| marker.id)
+                    .collect::<Vec<_>>();
+                for marker_id in marker_ids {
+                    self.remove(EntityRef::Marker(marker_id), revision, tombstoned)?;
+                }
+                Ok(())
+            }
             DocumentEdit::Remove(entity) => self.remove(entity, revision, tombstoned),
             DocumentEdit::RecordComparison(receipt) => {
                 self.validate_comparison_receipt(&receipt)?;
@@ -659,6 +1104,103 @@ impl VisualizationDocument {
         Ok(())
     }
 
+    fn merge_dataset_projection(
+        &mut self,
+        projection: SourceDataset,
+    ) -> Result<(), VisualizationError> {
+        projection.validate()?;
+        let existing = self
+            .datasets
+            .iter_mut()
+            .find(|dataset| dataset.binding.dataset_id == projection.binding.dataset_id)
+            .ok_or(VisualizationError::DatasetNotFound(
+                projection.binding.dataset_id,
+            ))?;
+        if existing.binding.content_digest != projection.binding.content_digest {
+            return Err(VisualizationError::SourceDigestMismatch {
+                dataset_id: projection.binding.dataset_id,
+                bound: existing.binding.content_digest,
+                requested: projection.binding.content_digest,
+            });
+        }
+        if existing.columns != projection.columns {
+            return Err(VisualizationError::InvalidValue {
+                field: "visualization-document.datasets",
+                message: "analysis projections for one immutable dataset must use identical typed columns"
+                    .to_owned(),
+            });
+        }
+        let analysis_index = existing
+            .columns
+            .iter()
+            .position(|column| column.key == "analysis-id")
+            .ok_or_else(|| VisualizationError::InvalidValue {
+                field: "visualization-document.datasets",
+                message: "mergeable analysis projections require an analysis-id coordinate"
+                    .to_owned(),
+            })?;
+        if existing.columns[analysis_index].role != ColumnRole::Coordinate
+            || existing.columns[analysis_index].value_type != ValueType::Text
+        {
+            return Err(VisualizationError::InvalidValue {
+                field: "visualization-document.datasets",
+                message: "analysis-id must be a text coordinate".to_owned(),
+            });
+        }
+        let mut projection_analysis = None::<&str>;
+        for row in &projection.rows {
+            let Some(TypedValue::Text(analysis_id)) = row.values.get(analysis_index) else {
+                return Err(VisualizationError::InvalidValue {
+                    field: "visualization-document.datasets",
+                    message: "every projected source row must retain its analysis identity"
+                        .to_owned(),
+                });
+            };
+            if projection_analysis.is_some_and(|existing| existing != analysis_id) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "visualization-document.datasets",
+                    message: "one merge edit may carry exactly one analysis projection".to_owned(),
+                });
+            }
+            projection_analysis = Some(analysis_id);
+        }
+        let projection_analysis =
+            projection_analysis.ok_or_else(|| VisualizationError::InvalidValue {
+                field: "visualization-document.datasets",
+                message: "an analysis projection must retain at least one exact row".to_owned(),
+            })?;
+        let retained_rows = existing
+            .rows
+            .iter()
+            .filter(|row| {
+                matches!(
+                    row.values.get(analysis_index),
+                    Some(TypedValue::Text(analysis_id)) if analysis_id == projection_analysis
+                )
+            })
+            .collect::<Vec<_>>();
+        if !retained_rows.is_empty() {
+            if retained_rows.len() != projection.rows.len()
+                || retained_rows
+                    .iter()
+                    .zip(&projection.rows)
+                    .any(|(retained, projected)| *retained != projected)
+            {
+                return Err(VisualizationError::InvalidValue {
+                    field: "visualization-document.datasets",
+                    message: "an attached analysis projection cannot be rewritten under the same immutable binding"
+                        .to_owned(),
+                });
+            }
+            return Ok(());
+        }
+        let mut merged = existing.clone();
+        merged.rows.extend(projection.rows);
+        merged.validate()?;
+        *existing = merged;
+        Ok(())
+    }
+
     fn retarget_tracked_dataset(
         &mut self,
         previous: DatasetBinding,
@@ -681,6 +1223,81 @@ impl VisualizationDocument {
         }
         self.attach_dataset(next)?;
 
+        let long_form_trace_predicates = {
+            let dataset = self.dataset_for_binding(next_binding)?;
+            let find = |key: &str| dataset.columns.iter().position(|column| column.key == key);
+            let analysis_identity = analysis_id.to_string();
+            let analysis_identity_column = find("analysis-id");
+            match (
+                find("trace-index"),
+                find("trace-name"),
+                find("component"),
+                find("x"),
+                find("y"),
+            ) {
+                (Some(trace_index), Some(trace_name), Some(component), Some(_), Some(_)) => {
+                    let mut by_name = HashMap::<String, Vec<QueryCoordinate>>::new();
+                    let mut seen_indices = HashSet::new();
+                    for row in &dataset.rows {
+                        if analysis_identity_column.is_some_and(|analysis_id| {
+                            !matches!(
+                                row.values.get(analysis_id),
+                                Some(TypedValue::Text(value)) if value == &analysis_identity
+                            )
+                        }) {
+                            continue;
+                        }
+                        let (
+                            TypedValue::Integer(index),
+                            TypedValue::Text(name),
+                            TypedValue::Text(component_name),
+                        ) = (
+                            &row.values[trace_index],
+                            &row.values[trace_name],
+                            &row.values[component],
+                        )
+                        else {
+                            continue;
+                        };
+                        if component_name != "display" || !seen_indices.insert(*index) {
+                            continue;
+                        }
+                        if by_name.contains_key(name) {
+                            return Err(VisualizationError::InvalidValue {
+                                field: "trace.row-predicates",
+                                message: format!(
+                                    "the newer tracked dataset has more than one display trace named {name:?}"
+                                ),
+                            });
+                        }
+                        let mut row_predicates = vec![
+                            QueryCoordinate {
+                                column: "trace-index".to_owned(),
+                                value: TypedValue::Integer(*index),
+                            },
+                            QueryCoordinate {
+                                column: "trace-name".to_owned(),
+                                value: TypedValue::Text(name.clone()),
+                            },
+                            QueryCoordinate {
+                                column: "component".to_owned(),
+                                value: TypedValue::Text("display".to_owned()),
+                            },
+                        ];
+                        if analysis_identity_column.is_some() {
+                            row_predicates.push(QueryCoordinate {
+                                column: "analysis-id".to_owned(),
+                                value: TypedValue::Text(analysis_identity.clone()),
+                            });
+                        }
+                        by_name.insert(name.clone(), row_predicates);
+                    }
+                    Some(by_name)
+                }
+                _ => None,
+            }
+        };
+
         let mut rebound = 0usize;
         for pane in &mut self.panes {
             if let Some(binding) = pane.binding.as_mut()
@@ -693,6 +1310,19 @@ impl VisualizationDocument {
         }
         for trace in &mut self.traces {
             if trace.binding == previous {
+                if let Some(predicates) = &long_form_trace_predicates {
+                    trace.row_predicates = predicates.get(&trace.label).cloned().ok_or_else(
+                        || VisualizationError::InvalidValue {
+                            field: "trace.row-predicates",
+                            message: format!(
+                                "the newer tracked dataset has no exact display trace named {:?}",
+                                trace.label
+                            ),
+                        },
+                    )?;
+                    trace.signal_key = "y".to_owned();
+                    trace.coordinate_key = "x".to_owned();
+                }
                 trace.binding = next_binding;
                 rebound = rebound.saturating_add(1);
             }
@@ -729,6 +1359,7 @@ impl VisualizationDocument {
                 message: "trace requires one signal column and one coordinate column".to_owned(),
             });
         }
+        validate_trace_row_predicates(dataset, &trace.row_predicates)?;
         let id = TraceId::allocate(self.allocate_serial()?)?;
         self.traces.push(Trace {
             id,
@@ -736,6 +1367,7 @@ impl VisualizationDocument {
             binding: trace.binding,
             signal_key: trace.signal_key,
             coordinate_key: trace.coordinate_key,
+            row_predicates: trace.row_predicates,
             x_axis_id: trace.x_axis_id,
             y_axis_id: trace.y_axis_id,
             label: trace.label,
@@ -956,6 +1588,7 @@ impl VisualizationDocument {
         }
         validate_label("visualization-document.title", &self.title)?;
         self.tracking.validate()?;
+        self.presentation.validate()?;
         validate_dataset_set(&self.datasets)?;
         ensure_maximum_len(
             "visualization-document.pages",
@@ -1125,6 +1758,7 @@ impl VisualizationDocument {
                     message: "invalid signal or coordinate column role".to_owned(),
                 });
             }
+            validate_trace_row_predicates(dataset, &trace.row_predicates)?;
             ensure_identity(&mut identities, EntityRef::Trace(trace.id))?;
         }
         for cursor in &self.cursors {
@@ -1140,10 +1774,29 @@ impl VisualizationDocument {
             }
             marker.coordinate.validate("marker.coordinate")?;
             self.require_trace_in_pane(marker.trace_id, marker.pane_id)?;
+            if !trace_contains_exact_coordinate(self, marker.trace_id, &marker.coordinate)? {
+                return Err(VisualizationError::InterpolationRequired);
+            }
             ensure_identity(&mut identities, EntityRef::Marker(marker.id))?;
         }
         for measurement in &self.measurements {
             validate_label("measurement.label", &measurement.label)?;
+            match (measurement.expression.as_deref(), measurement.value) {
+                (Some(expression), Some(value))
+                    if !expression.trim().is_empty()
+                        && expression.len() <= MAX_SOURCE_TEXT_BYTES
+                        && !expression.chars().any(char::is_control)
+                        && value.is_finite() => {}
+                (None, None) => {}
+                _ => {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "measurement.expression",
+                        message: format!(
+                            "an authored scalar measurement requires both a finite value and 1 to {MAX_SOURCE_TEXT_BYTES} non-control UTF-8 expression bytes"
+                        ),
+                    });
+                }
+            }
             if measurement.trace_ids.is_empty()
                 || measurement.trace_ids.len() > MAX_ENTITY_REFERENCES
             {

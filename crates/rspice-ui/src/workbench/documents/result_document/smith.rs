@@ -10,9 +10,196 @@ use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
+use crate::workbench::app_state::{ActiveViewer, SpecializedViewerCacheProvenance};
 
 use super::strip::{self, LegendChip};
 use super::well_hint;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SParameterTraceIdentity {
+    output_port: usize,
+    input_port: usize,
+    physical_ports: bool,
+}
+
+fn trace_identity(name: &str) -> Option<SParameterTraceIdentity> {
+    let core = name
+        .trim()
+        .trim_matches('|')
+        .split_once('[')
+        .map_or_else(|| name.trim().trim_matches('|'), |(core, _)| core);
+    let suffix = core.strip_prefix('S').or_else(|| core.strip_prefix('s'))?;
+    let (physical_ports, indices) = match suffix.get(..2) {
+        Some(prefix)
+            if matches!(
+                prefix.to_ascii_lowercase().as_str(),
+                "dd" | "dc" | "cd" | "cc"
+            ) =>
+        {
+            (false, &suffix[2..])
+        }
+        _ => (true, suffix),
+    };
+    let (output_port, input_port) = if let Some((output, input)) = indices.split_once('_') {
+        (output.parse().ok()?, input.parse().ok()?)
+    } else if indices.len() == 2 && indices.bytes().all(|byte| byte.is_ascii_digit()) {
+        let bytes = indices.as_bytes();
+        ((bytes[0] - b'0') as usize, (bytes[1] - b'0') as usize)
+    } else {
+        return None;
+    };
+    (output_port > 0 && input_port > 0).then_some(SParameterTraceIdentity {
+        output_port,
+        input_port,
+        physical_ports,
+    })
+}
+
+fn trace_is_well_formed(waveform: &crate::state::WaveformData) -> bool {
+    let Some(complex) = waveform.complex.as_ref() else {
+        return false;
+    };
+    !waveform.x.is_empty()
+        && waveform.x.len() == complex.real.len()
+        && waveform.x.len() == complex.imag.len()
+        && waveform
+            .x
+            .iter()
+            .all(|frequency| frequency.is_finite() && *frequency > 0.0)
+        && waveform.x.windows(2).all(|pair| pair[0] < pair[1])
+        && complex
+            .real
+            .iter()
+            .chain(complex.imag.iter())
+            .all(|value| value.is_finite())
+}
+
+pub(super) fn analysis_is_renderable(analysis: &crate::state::AnalysisResult) -> bool {
+    if !analysis.success
+        || !matches!(
+            analysis.analysis_type,
+            crate::state::AnalysisType::SParameter
+                | crate::state::AnalysisType::Psp
+                | crate::state::AnalysisType::Hbsp
+        )
+    {
+        return false;
+    }
+    let Some(crate::state::AnalysisResultFamilyMetadata::SParameter {
+        reference_impedances_ohm,
+    }) = analysis.family_metadata.as_ref()
+    else {
+        return false;
+    };
+    if analysis.validate_retained_evidence().is_err() {
+        return false;
+    }
+    analysis.waveforms.iter().any(|waveform| {
+        let Some(identity) = trace_identity(&waveform.name) else {
+            return false;
+        };
+        let port_count = if identity.physical_ports {
+            reference_impedances_ohm.len()
+        } else if reference_impedances_ohm.len().is_multiple_of(2) {
+            reference_impedances_ohm.len() / 2
+        } else {
+            return false;
+        };
+        identity.output_port <= port_count
+            && identity.input_port <= port_count
+            && trace_is_well_formed(waveform)
+    })
+}
+
+/// Rebuild the mutable drawing cache solely from the selected immutable
+/// result. Cache provenance makes repeated frames a no-op and prevents a
+/// same-shape result from inheriting another run's RF traces.
+pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
+    if state.viewer_capability(ActiveViewer::SmithChart).available {
+        return true;
+    }
+    let Some(run) = state.simulation.active_run() else {
+        state.analysis.smith_chart_state.clear_traces();
+        state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
+        return false;
+    };
+    let Some(analysis) = state.simulation.active_analysis() else {
+        state.analysis.smith_chart_state.clear_traces();
+        state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
+        return false;
+    };
+    if !analysis_is_renderable(analysis) {
+        state.analysis.smith_chart_state.clear_traces();
+        state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
+        return false;
+    }
+    let provenance = SpecializedViewerCacheProvenance::for_analysis(run.dataset_id, analysis);
+    let crate::state::AnalysisResultFamilyMetadata::SParameter {
+        reference_impedances_ohm,
+    } = analysis
+        .family_metadata
+        .as_ref()
+        .expect("renderable S-parameter metadata")
+    else {
+        unreachable!("renderability checked the S-parameter metadata variant");
+    };
+    let mut waveforms = analysis.waveforms.clone();
+    let reference_impedances_ohm = reference_impedances_ohm.clone();
+    waveforms.sort_by(|left, right| left.name.cmp(&right.name));
+
+    state.analysis.smith_chart_state.clear_traces();
+    for waveform in waveforms {
+        let Some(identity) = trace_identity(&waveform.name) else {
+            continue;
+        };
+        let port_count = if identity.physical_ports {
+            reference_impedances_ohm.len()
+        } else {
+            reference_impedances_ohm.len() / 2
+        };
+        if identity.output_port > port_count || identity.input_port > port_count {
+            continue;
+        }
+        let reference_impedance_ohm = (identity.physical_ports
+            && identity.output_port == identity.input_port)
+            .then(|| reference_impedances_ohm[identity.output_port - 1]);
+        let Some(complex) = waveform.complex.as_ref() else {
+            continue;
+        };
+        if state
+            .analysis
+            .smith_chart_state
+            .load_sparam_data(
+                &waveform.name,
+                &waveform.x,
+                &complex.real,
+                &complex.imag,
+                reference_impedance_ohm,
+            )
+            .is_err()
+        {
+            state.analysis.smith_chart_state.clear_traces();
+            state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
+            return false;
+        }
+    }
+    if state.analysis.smith_chart_state.traces.is_empty() {
+        state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
+        return false;
+    }
+    state.bind_specialized_viewer_cache(ActiveViewer::SmithChart, provenance);
+    true
+}
+
+fn impedance_from_gamma(gamma_re: f64, gamma_im: f64, z0: f64) -> Option<(f64, f64)> {
+    let denominator = (1.0 - gamma_re).powi(2) + gamma_im.powi(2);
+    (denominator > 1.0e-12).then(|| {
+        (
+            z0 * (1.0 - gamma_re * gamma_re - gamma_im * gamma_im) / denominator,
+            z0 * (2.0 * gamma_im) / denominator,
+        )
+    })
+}
 
 // ---------------------------------------------------------------------------
 // center view
@@ -64,16 +251,30 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             on: true,
         })
         .collect();
-    strip::StripHeader::new("SMITH", &format!("Z₀ = {} Ω", smith.z0), &legend).show(ui);
+    let mut retained_references = visible
+        .iter()
+        .filter_map(|index| smith.traces[*index].reference_impedance_ohm)
+        .collect::<Vec<_>>();
+    retained_references.sort_by(f64::total_cmp);
+    retained_references.dedup_by(|left, right| left.to_bits() == right.to_bits());
+    let reference_label = match retained_references.as_slice() {
+        [reference] => format!("Z₀ = {reference} Ω"),
+        [] => "Coefficient loci".to_owned(),
+        _ => "Per-port retained Z₀".to_owned(),
+    };
+    strip::StripHeader::new("SMITH", &reference_label, &legend).show(ui);
 
     let view = state.ui.results.plot_view(super::ResultViewer::Smith, 0);
     let (x0, x1) = view.x.unwrap_or((-1.12, 1.12));
     let (y0, y1) = view.y.unwrap_or((-1.12, 1.12));
     let accessible_detail = format!(
-        "{} visible loci with {} retained samples; reference impedance {} ohms",
+        "{} visible loci with {} retained samples; {} reflection references retained",
         visible.len(),
         arrays.iter().map(|(_, re, _)| re.len()).sum::<usize>(),
-        smith.z0
+        visible
+            .iter()
+            .filter(|index| smith.traces[**index].reference_impedance_ohm.is_some())
+            .count()
     );
     let mut spec = PlotSpec::new(
         Axis::linear(x0, x1, "Re Γ"),
@@ -168,8 +369,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }
 
     // Interactive readout: nearest locus point on hover, click to pin.
-    // The chart space IS the Γ plane, so the conversion to impedance is
-    // z = z0 (1+Γ)/(1−Γ).
+    // The chart space is the complex-coefficient plane. Only a physical
+    // diagonal Sii trace has the retained Z₀ needed for impedance and VSWR.
     let ranges = ((x0, x1), (y0, y1));
     let mut hovered: Option<(usize, usize)> = None;
     if let Some(pointer) = response.response.hover_pos()
@@ -231,22 +432,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         let frequency = trace.points.get(i).map(|p| p.frequency).unwrap_or(0.0);
         let mag = (gamma_re * gamma_re + gamma_im * gamma_im).sqrt();
         let phase = gamma_im.atan2(gamma_re);
-        // z = z0 (1+Γ)/(1−Γ)
-        let denom = (1.0 - gamma_re) * (1.0 - gamma_re) + gamma_im * gamma_im;
-        let (r, x) = if denom > 1e-12 {
-            (
-                smith.z0 * (1.0 - gamma_re * gamma_re - gamma_im * gamma_im) / denom,
-                smith.z0 * (2.0 * gamma_im) / denom,
-            )
-        } else {
-            (f64::INFINITY, 0.0)
-        };
-        let vswr = if mag < 1.0 {
-            format!("{:.2}", (1.0 + mag) / (1.0 - mag))
-        } else {
-            "∞".to_owned()
-        };
-        let rows = [
+        let mut rows = vec![
             (
                 "f".to_owned(),
                 quantity_policy.format_frequency(frequency, 2),
@@ -255,21 +441,35 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 "Γ".to_owned(),
                 format!("{mag:.3} ∠ {}", quantity_policy.format_angle(phase, 1)),
             ),
-            (
+        ];
+        if let Some(reference_impedance_ohm) = trace.reference_impedance_ohm {
+            rows.push(("Z₀".to_owned(), fmt_si(reference_impedance_ohm, "Ω", 2)));
+            rows.push((
                 "Z".to_owned(),
-                if r.is_finite() {
+                if let Some((resistance, reactance)) =
+                    impedance_from_gamma(gamma_re, gamma_im, reference_impedance_ohm)
+                {
                     format!(
                         "{} {} j{}",
-                        fmt_si(r, "Ω", 2),
-                        if x >= 0.0 { "+" } else { "−" },
-                        fmt_si(x.abs(), "Ω", 2)
+                        fmt_si(resistance, "Ω", 2),
+                        if reactance >= 0.0 { "+" } else { "−" },
+                        fmt_si(reactance.abs(), "Ω", 2)
                     )
                 } else {
                     "open".to_owned()
                 },
-            ),
-            ("VSWR".to_owned(), vswr),
-        ];
+            ));
+            rows.push((
+                "VSWR".to_owned(),
+                if mag < 1.0 {
+                    format!("{:.2}", (1.0 + mag) / (1.0 - mag))
+                } else {
+                    "∞".to_owned()
+                },
+            ));
+        } else {
+            rows.push(("Readout".to_owned(), "complex coefficient only".to_owned()));
+        }
         super::point_card(&plot_ui, response.plot_rect, pos, &trace.name, color, &rows);
     }
 }
@@ -301,13 +501,16 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         .map(|point| point.s.norm())
         .filter(|value| value.is_finite())
         .max_by(f64::total_cmp);
-    let maximum_vswr = maximum_gamma.map(|gamma| {
-        if gamma < 1.0 {
-            format!("{:.2} : 1", (1.0 + gamma) / (1.0 - gamma))
-        } else {
-            "∞".to_owned()
-        }
-    });
+    let maximum_vswr = trace
+        .reference_impedance_ohm
+        .and_then(|_| maximum_gamma)
+        .map(|gamma| {
+            if gamma < 1.0 {
+                format!("{:.2} : 1", (1.0 + gamma) / (1.0 - gamma))
+            } else {
+                "∞".to_owned()
+            }
+        });
     let marker = state
         .ui
         .results
@@ -317,24 +520,31 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             let trace = visible_traces.get(*slot)?;
             let sample = trace.points.get(*point)?;
             let gamma = sample.s;
-            let denominator = (1.0 - gamma.re).powi(2) + gamma.im.powi(2);
-            let impedance = if denominator > 1e-12 {
-                let resistance = smith.z0 * (1.0 - gamma.norm_sqr()) / denominator;
-                let reactance = smith.z0 * (2.0 * gamma.im) / denominator;
-                format!(
-                    "{} · {} {} j{}",
-                    quantity_policy.format_frequency(sample.frequency, 2),
-                    fmt_si(resistance, "Ω", 2),
-                    if reactance >= 0.0 { "+" } else { "−" },
-                    fmt_si(reactance.abs(), "Ω", 2)
-                )
+            let readout = if let Some(reference_impedance_ohm) = trace.reference_impedance_ohm {
+                if let Some((resistance, reactance)) =
+                    impedance_from_gamma(gamma.re, gamma.im, reference_impedance_ohm)
+                {
+                    format!(
+                        "{} · {} {} j{}",
+                        quantity_policy.format_frequency(sample.frequency, 2),
+                        fmt_si(resistance, "Ω", 2),
+                        if reactance >= 0.0 { "+" } else { "−" },
+                        fmt_si(reactance.abs(), "Ω", 2)
+                    )
+                } else {
+                    format!(
+                        "{} · open",
+                        quantity_policy.format_frequency(sample.frequency, 2)
+                    )
+                }
             } else {
                 format!(
-                    "{} · open",
-                    quantity_policy.format_frequency(sample.frequency, 2)
+                    "{} · |S| {:.3}",
+                    quantity_policy.format_frequency(sample.frequency, 2),
+                    gamma.norm()
                 )
             };
-            Some(format!("{} · {impedance}", trace.name))
+            Some(format!("{} · {readout}", trace.name))
         })
         .unwrap_or_else(|| "No marker pinned".to_owned());
     let rows = [
@@ -352,7 +562,14 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             },
             false,
         ),
-        ("Z₀", format!("{} Ω", smith.z0), false),
+        (
+            "Z₀",
+            trace.reference_impedance_ohm.map_or_else(
+                || "Not applicable to this locus".to_owned(),
+                |reference| format!("{reference} Ω"),
+            ),
+            false,
+        ),
         ("Marker", marker, false),
         (
             "|Γ| max",
@@ -375,6 +592,44 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn trace_identity_distinguishes_reflection_transmission_and_mixed_mode() {
+        assert_eq!(
+            trace_identity("S22"),
+            Some(SParameterTraceIdentity {
+                output_port: 2,
+                input_port: 2,
+                physical_ports: true,
+            })
+        );
+        assert_eq!(
+            trace_identity("S2_10[k=+0,m=+0]"),
+            Some(SParameterTraceIdentity {
+                output_port: 2,
+                input_port: 10,
+                physical_ports: true,
+            })
+        );
+        assert_eq!(
+            trace_identity("Sdd11"),
+            Some(SParameterTraceIdentity {
+                output_port: 1,
+                input_port: 1,
+                physical_ports: false,
+            })
+        );
+    }
+
+    #[test]
+    fn nondefault_reference_impedance_controls_impedance_conversion() {
+        let (resistance, reactance) =
+            impedance_from_gamma(0.2, 0.0, 75.0).expect("finite impedance");
+        assert!((resistance - 112.5).abs() < 1.0e-12);
+        assert_eq!(reactance, 0.0);
+    }
+
     #[test]
     fn wheel_zoom_keeps_smith_axes_at_equal_scale() {
         let change = super::super::square_xy_view_change(

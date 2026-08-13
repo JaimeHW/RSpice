@@ -24,7 +24,7 @@ use dock::{
     property_row, separator, table_header,
 };
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use egui::{
     Align, Align2, Color32, Frame, Grid, Id, Layout, Margin, Rect, RichText, ScrollArea, Sense,
@@ -34,19 +34,21 @@ use serde::{Deserialize, Serialize};
 
 use crate::analysis::calculator;
 use crate::diagnostics::ConsoleMessage;
-use crate::product::{AnalysisInstanceId, DatasetBinding, DatasetId};
+use crate::product::{AnalysisInstanceId, DatasetBinding, DatasetId, ResultDocumentId};
 use crate::results::viewer_catalog::{
-    VIEWER_DOCUMENTS, ViewerCapabilities, ViewerCompatibility, ViewerDocumentDefinition,
+    VIEWER_DOCUMENTS, ViewerArt, ViewerCapabilities, ViewerCompatibility, ViewerDocumentDefinition,
     ViewerGroup, viewer_compatibility, viewer_document,
 };
 use crate::results::visualization_document::{
-    AccessibleColorPalette, ColumnRole, ComparisonAlignmentMethod, ComparisonExecutionContract,
-    ComparisonExtrapolationPolicy, ComparisonInterpolationPolicy, ComparisonPolicy,
-    ComparisonPrecisionPolicy, ComparisonReceipt, ComparisonRequest, ComparisonResamplingPolicy,
-    FamilyAggregationMethod, FamilyAggregationPolicy, FamilyDimension as DocumentFamilyDimension,
-    FamilyEncodingMap, FamilyPresentationPolicy, FamilyXDimension, FamilyXOrdering,
-    MissingPointPolicy, NumericTolerance, PageUpdatePolicy, RowAlignmentPolicy, SourceColumn,
-    SourceDataset, SourceRow, TypedValue, ValueType, compare_source_datasets,
+    AccessibleColorPalette, AxisOrientation, ColumnRole, ComparisonAlignmentMethod,
+    ComparisonExecutionContract, ComparisonExtrapolationPolicy, ComparisonInterpolationPolicy,
+    ComparisonPolicy, ComparisonPrecisionPolicy, ComparisonReceipt, ComparisonRequest,
+    ComparisonResamplingPolicy, CursorId, DocumentEdit, EntityRef, FamilyAggregationMethod,
+    FamilyAggregationPolicy, FamilyDimension as DocumentFamilyDimension, FamilyEncodingMap,
+    FamilyPresentationPolicy, FamilyXDimension, FamilyXOrdering, LinkKind, MissingPointPolicy,
+    NumericTolerance, PageUpdatePolicy, PaneId, RowAlignmentPolicy, SourceColumn, SourceDataset,
+    SourceRow, TypedValue, ValueType, VisualizationDocument, VisualizationTransactionReceipt,
+    compare_source_datasets,
 };
 use crate::state::{
     AnalysisResult, AnalysisResultPayload, AnalysisType, SensitivityResultMode,
@@ -104,6 +106,17 @@ const NATIVE_VIEWERS: [ResultViewer; 12] = [
     ResultViewer::Smith,
     ResultViewer::PoleZero,
 ];
+
+const fn document_pane_kind(art: ViewerArt) -> crate::results::visualization_document::PaneKind {
+    use crate::results::visualization_document::PaneKind;
+    match art {
+        ViewerArt::Smith => PaneKind::Smith,
+        ViewerArt::Polar => PaneKind::Polar,
+        ViewerArt::Histogram => PaneKind::Histogram,
+        ViewerArt::Table => PaneKind::Table,
+        _ => PaneKind::Cartesian,
+    }
+}
 
 const fn bar_content_height(target_height: f32, vertical_margin: f32) -> f32 {
     target_height - vertical_margin * 2.0
@@ -1143,6 +1156,403 @@ fn commit_visualization_revision(app: &mut RSpiceApp) -> bool {
     report_visualization_commit(app, result)
 }
 
+fn active_project_visualization_document_id(state: &AppState) -> Option<ResultDocumentId> {
+    match state.workbench.documents.active(Workspace::Results) {
+        Some(WorkspaceDocumentId::VisualizationDocument(document_id)) => Some(*document_id),
+        _ => None,
+    }
+}
+
+fn transact_active_project_document(
+    app: &mut RSpiceApp,
+    edits: Vec<DocumentEdit>,
+) -> Result<VisualizationTransactionReceipt, String> {
+    let document_id = active_project_visualization_document_id(&app.state)
+        .ok_or_else(|| "Open a project-owned result document before editing it.".to_owned())?;
+    let revision = app
+        .state
+        .workspace
+        .visualization_document(document_id)
+        .ok_or_else(|| "The active result document is no longer retained.".to_owned())?
+        .revision();
+    app.state
+        .workspace
+        .transact_visualization_document(document_id, revision, edits)
+        .map_err(|error| error.to_string())
+}
+
+fn real_cursor_position(cursor: &crate::results::visualization_document::Cursor) -> Option<f64> {
+    match &cursor.position {
+        TypedValue::Real(position) => Some(*position),
+        _ => None,
+    }
+}
+
+fn same_cursor_position(left: f64, right: f64) -> bool {
+    left.to_bits() == right.to_bits()
+}
+
+fn canonical_cursor_pair(
+    document: &VisualizationDocument,
+    pane_id: PaneId,
+) -> Result<(Option<f64>, Option<f64>), String> {
+    let mut pair = (None, None);
+    for cursor in document
+        .cursors()
+        .iter()
+        .filter(|cursor| cursor.pane_id == pane_id)
+    {
+        let slot = match cursor.label.as_str() {
+            "A" => &mut pair.0,
+            "B" => &mut pair.1,
+            _ => continue,
+        };
+        if slot.is_some() {
+            return Err(format!(
+                "Pane {} contains more than one retained {} cursor.",
+                pane_id.get(),
+                cursor.label
+            ));
+        }
+        *slot = Some(real_cursor_position(cursor).ok_or_else(|| {
+            format!(
+                "Retained {} cursor {} is not a real-valued horizontal cursor.",
+                cursor.label,
+                cursor.id.get()
+            )
+        })?);
+    }
+    Ok(pair)
+}
+
+fn canonical_cursor_pair_edits(
+    document: &VisualizationDocument,
+    pane_id: PaneId,
+    desired: (Option<f64>, Option<f64>),
+) -> Result<Vec<DocumentEdit>, String> {
+    document
+        .panes()
+        .iter()
+        .find(|pane| pane.id == pane_id)
+        .ok_or_else(|| format!("Result-document pane {} no longer exists.", pane_id.get()))?;
+    let axis_id = document
+        .axes()
+        .iter()
+        .find(|axis| axis.pane_id == pane_id && axis.orientation == AxisOrientation::Horizontal)
+        .map(|axis| axis.id)
+        .ok_or_else(|| "The active result pane has no horizontal cursor axis.".to_owned())?;
+    if desired
+        .0
+        .into_iter()
+        .chain(desired.1)
+        .any(|position| !position.is_finite())
+    {
+        return Err("A retained cursor position must be finite.".to_owned());
+    }
+
+    let mut removed_groups = BTreeSet::new();
+    let mut removed_cursors = BTreeSet::new();
+    let mut moves = BTreeMap::<CursorId, f64>::new();
+    let mut additions = Vec::new();
+
+    for (label, target) in [("A", desired.0), ("B", desired.1)] {
+        let existing = document
+            .cursors()
+            .iter()
+            .filter(|cursor| cursor.pane_id == pane_id && cursor.label == label)
+            .collect::<Vec<_>>();
+        if existing.len() > 1 {
+            return Err(format!(
+                "Pane {} contains duplicate retained {label} cursors.",
+                pane_id.get()
+            ));
+        }
+        match (existing.first().copied(), target) {
+            (Some(cursor), Some(position)) => {
+                let mut targets = BTreeSet::from([cursor.id]);
+                for group in document.link_groups().iter().filter(|group| {
+                    group.kind == LinkKind::CursorPosition
+                        && group.members.contains(&EntityRef::Cursor(cursor.id))
+                }) {
+                    for member in &group.members {
+                        if let EntityRef::Cursor(cursor_id) = member {
+                            targets.insert(*cursor_id);
+                        }
+                    }
+                }
+                for cursor_id in targets {
+                    let retained = document
+                        .cursors()
+                        .iter()
+                        .find(|candidate| candidate.id == cursor_id)
+                        .ok_or_else(|| {
+                            format!("Linked cursor {} no longer exists.", cursor_id.get())
+                        })?;
+                    let retained_position = real_cursor_position(retained).ok_or_else(|| {
+                        format!("Linked cursor {} is not real-valued.", cursor_id.get())
+                    })?;
+                    if !same_cursor_position(retained_position, position) {
+                        moves.insert(cursor_id, position);
+                    }
+                }
+            }
+            (Some(cursor), None) => {
+                let linked_groups = document
+                    .link_groups()
+                    .iter()
+                    .filter(|group| {
+                        group.kind == LinkKind::CursorPosition
+                            && group.members.contains(&EntityRef::Cursor(cursor.id))
+                    })
+                    .collect::<Vec<_>>();
+                if linked_groups.is_empty() {
+                    removed_cursors.insert(cursor.id);
+                } else {
+                    for group in linked_groups {
+                        removed_groups.insert(group.id);
+                        for member in &group.members {
+                            if let EntityRef::Cursor(cursor_id) = member {
+                                removed_cursors.insert(*cursor_id);
+                            }
+                        }
+                    }
+                }
+            }
+            (None, Some(position)) => additions.push(DocumentEdit::AddCursor {
+                pane_id,
+                axis_id,
+                position: TypedValue::Real(position),
+                label: label.to_owned(),
+            }),
+            (None, None) => {}
+        }
+    }
+
+    let mut edits = removed_groups
+        .into_iter()
+        .map(|group_id| DocumentEdit::Remove(EntityRef::LinkGroup(group_id)))
+        .collect::<Vec<_>>();
+    edits.extend(
+        moves
+            .into_iter()
+            .filter(|(cursor_id, _)| !removed_cursors.contains(cursor_id))
+            .map(|(cursor_id, position)| DocumentEdit::MoveCursor {
+                cursor_id,
+                position: TypedValue::Real(position),
+            }),
+    );
+    edits.extend(
+        removed_cursors
+            .into_iter()
+            .map(|cursor_id| DocumentEdit::Remove(EntityRef::Cursor(cursor_id))),
+    );
+    edits.extend(additions);
+    Ok(edits)
+}
+
+fn commit_active_project_cursor_pair(
+    app: &mut RSpiceApp,
+    pane_id: u64,
+    desired: (Option<f64>, Option<f64>),
+) -> bool {
+    let Some(document_id) = active_project_visualization_document_id(&app.state) else {
+        return false;
+    };
+    let plan = app
+        .state
+        .workspace
+        .visualization_document(document_id)
+        .ok_or_else(|| "The active result document is no longer retained.".to_owned())
+        .and_then(|document| {
+            let pane_id = document
+                .panes()
+                .iter()
+                .find(|pane| pane.id.get() == pane_id)
+                .map(|pane| pane.id)
+                .ok_or_else(|| "The active result pane no longer exists.".to_owned())?;
+            canonical_cursor_pair_edits(document, pane_id, desired)
+        });
+    let edits = match plan {
+        Ok(edits) => edits,
+        Err(error) => {
+            app.state.push_user_message(ConsoleMessage::error(error));
+            app.state
+                .workbench
+                .visualization_studio
+                .pane_cursor_positions
+                .remove(&pane_id);
+            app.state.workbench.visualization_studio.applied_link_pane = None;
+            reconcile_document(app);
+            return true;
+        }
+    };
+    if edits.is_empty() {
+        return true;
+    }
+    let result = transact_active_project_document(app, edits).map(|_| ());
+    let committed = report_visualization_commit(app, result);
+    if committed {
+        reconcile_document(app);
+    } else {
+        app.state.workbench.visualization_studio.applied_link_pane = None;
+        reconcile_document(app);
+    }
+    true
+}
+
+fn set_active_project_cursor_links(app: &mut RSpiceApp, enabled: bool) -> bool {
+    let Some(document_id) = active_project_visualization_document_id(&app.state) else {
+        return false;
+    };
+    let active_pane_id = app.state.workbench.visualization_studio.active_pane;
+    let plan = app
+        .state
+        .workspace
+        .visualization_document(document_id)
+        .ok_or_else(|| "The active result document is no longer retained.".to_owned())
+        .and_then(|document| {
+            let mut edits = document
+                .link_groups()
+                .iter()
+                .filter(|group| group.kind == LinkKind::CursorPosition)
+                .map(|group| DocumentEdit::Remove(EntityRef::LinkGroup(group.id)))
+                .collect::<Vec<_>>();
+            if enabled {
+                let mut added = 0_usize;
+                for label in ["A", "B"] {
+                    let candidates = document
+                        .cursors()
+                        .iter()
+                        .filter(|cursor| cursor.label == label)
+                        .collect::<Vec<_>>();
+                    let Some(reference) = candidates
+                        .iter()
+                        .copied()
+                        .find(|cursor| Some(cursor.pane_id.get()) == active_pane_id)
+                        .or_else(|| candidates.first().copied())
+                    else {
+                        continue;
+                    };
+                    let reference_axis = document
+                        .axes()
+                        .iter()
+                        .find(|axis| axis.id == reference.axis_id)
+                        .ok_or_else(|| {
+                            format!("Cursor {} has no retained axis.", reference.id.get())
+                        })?;
+                    let compatible = candidates
+                        .into_iter()
+                        .filter(|cursor| {
+                            document
+                                .axes()
+                                .iter()
+                                .find(|axis| axis.id == cursor.axis_id)
+                                .is_some_and(|axis| {
+                                    axis.orientation == AxisOrientation::Horizontal
+                                        && axis.scale == reference_axis.scale
+                                        && axis.unit == reference_axis.unit
+                                })
+                        })
+                        .collect::<Vec<_>>();
+                    if compatible.len() >= 2 {
+                        let reference_position =
+                            real_cursor_position(reference).ok_or_else(|| {
+                                format!("Cursor {} is not real-valued.", reference.id.get())
+                            })?;
+                        for cursor in &compatible {
+                            let position = real_cursor_position(cursor).ok_or_else(|| {
+                                format!("Cursor {} is not real-valued.", cursor.id.get())
+                            })?;
+                            if !same_cursor_position(position, reference_position) {
+                                edits.push(DocumentEdit::MoveCursor {
+                                    cursor_id: cursor.id,
+                                    position: TypedValue::Real(reference_position),
+                                });
+                            }
+                        }
+                        edits.push(DocumentEdit::AddLinkGroup {
+                            label: format!("{label} cursor link"),
+                            kind: LinkKind::CursorPosition,
+                            members: compatible
+                                .into_iter()
+                                .map(|cursor| EntityRef::Cursor(cursor.id))
+                                .collect(),
+                        });
+                        added += 1;
+                    }
+                }
+                if added == 0 {
+                    return Err(
+                        "Place the same A or B cursor on at least two panes before linking it."
+                            .to_owned(),
+                    );
+                }
+            }
+            Ok(edits)
+        });
+    let edits = match plan {
+        Ok(edits) => edits,
+        Err(error) => {
+            app.state.push_user_message(ConsoleMessage::warning(error));
+            return true;
+        }
+    };
+    if edits.is_empty() {
+        return true;
+    }
+    let result = transact_active_project_document(app, edits).map(|_| ());
+    if report_visualization_commit(app, result) {
+        reconcile_document(app);
+    }
+    true
+}
+
+fn active_project_pane_and_trace(
+    state: &AppState,
+    preferred_signal: Option<&str>,
+) -> Result<
+    (
+        crate::results::visualization_document::PaneId,
+        crate::results::visualization_document::TraceId,
+    ),
+    String,
+> {
+    let document_id = active_project_visualization_document_id(state).ok_or_else(|| {
+        "Open a project-owned result document before authoring entities.".to_owned()
+    })?;
+    let document = state
+        .workspace
+        .visualization_document(document_id)
+        .ok_or_else(|| "The active result document is no longer retained.".to_owned())?;
+    let pane_id = state
+        .workbench
+        .visualization_studio
+        .active_pane
+        .and_then(|active| {
+            document
+                .panes()
+                .iter()
+                .find(|pane| pane.id.get() == active)
+                .map(|pane| pane.id)
+        })
+        .or_else(|| document.panes().first().map(|pane| pane.id))
+        .ok_or_else(|| "The active result document has no pane.".to_owned())?;
+    let trace = preferred_signal
+        .and_then(|signal| {
+            document.traces().iter().find(|trace| {
+                trace.pane_id == pane_id && (trace.signal_key == signal || trace.label == signal)
+            })
+        })
+        .or_else(|| {
+            document
+                .traces()
+                .iter()
+                .find(|trace| trace.pane_id == pane_id)
+        })
+        .ok_or_else(|| "The selected result pane has no retained trace.".to_owned())?;
+    Ok((pane_id, trace.id))
+}
+
 pub(crate) fn open(app: &mut RSpiceApp) {
     if let Err(error) = navigate_to_visualization_studio(app) {
         app.state.push_user_message(ConsoleMessage::warning(error));
@@ -1727,6 +2137,366 @@ fn reconcile_document(app: &mut RSpiceApp) {
         || (ResultViewer::Waves, "viewer-waveform".to_owned()),
         |document_id| (requested_viewer, document_id.to_owned()),
     );
+    if let Some(document_id) = active_project_visualization_document_id(&app.state) {
+        let projected = app
+            .state
+            .workspace
+            .visualization_document(document_id)
+            .map(|document| {
+                let analysis_sequence_for =
+                    |dataset_id: DatasetId, analysis_id: AnalysisInstanceId| {
+                        app.state
+                            .simulation
+                            .runs
+                            .iter()
+                            .find(|run| run.dataset_id == dataset_id)
+                            .and_then(|run| retained_document_analysis(run, analysis_id))
+                            .map(|analysis| analysis.id)
+                    };
+                let mut ordered_panes = document.panes().iter().collect::<Vec<_>>();
+                let x_links = document
+                    .link_groups()
+                    .iter()
+                    .filter(|group| group.kind == LinkKind::HorizontalViewport)
+                    .flat_map(|group| {
+                        group.members.iter().filter_map(move |member| {
+                            let crate::results::visualization_document::EntityRef::Axis(axis_id) =
+                                member
+                            else {
+                                return None;
+                            };
+                            document
+                                .axes()
+                                .iter()
+                                .find(|axis| axis.id == *axis_id)
+                                .map(|axis| (axis.pane_id.get(), group.id.get()))
+                        })
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                ordered_panes.sort_by_key(|pane| {
+                    (
+                        document
+                            .pages()
+                            .iter()
+                            .position(|page| page.id == pane.page_id)
+                            .unwrap_or(usize::MAX),
+                        pane.order,
+                        pane.id,
+                    )
+                });
+                let panes = ordered_panes
+                    .into_iter()
+                    .map(|pane| {
+                        let viewer = ResultViewer::from_viewer_document_id(&pane.viewer_id)
+                            .unwrap_or(ResultViewer::Waves);
+                        let dataset_id = pane
+                            .binding
+                            .map(|binding| binding.dataset.dataset_id)
+                            .or_else(|| {
+                                document
+                                    .datasets()
+                                    .first()
+                                    .map(|dataset| dataset.binding().dataset_id)
+                            })
+                            .unwrap_or_else(DatasetId::new);
+                        let analysis_sequence = pane
+                            .binding
+                            .and_then(|binding| {
+                                app.state
+                                    .simulation
+                                    .runs
+                                    .iter()
+                                    .find(|run| run.dataset_id == dataset_id)
+                                    .and_then(|run| {
+                                        retained_document_analysis(run, binding.analysis_id)
+                                    })
+                                    .map(|analysis| analysis.id)
+                            })
+                            .unwrap_or_default();
+                        let page = document
+                            .pages()
+                            .iter()
+                            .find(|page| page.id == pane.page_id)
+                            .map_or_else(|| "Engineering".to_owned(), |page| page.title.clone());
+                        let placement = match pane.placement {
+                            crate::results::visualization_document::PanePlacement::RightOf {
+                                ..
+                            } => VisualizationPanePlacement::RightOfSelected,
+                            crate::results::visualization_document::PanePlacement::Primary
+                            | crate::results::visualization_document::PanePlacement::Below {
+                                ..
+                            } => VisualizationPanePlacement::BelowSelected,
+                        };
+                        VisualizationPane {
+                            id: pane.id.get(),
+                            viewer,
+                            viewer_document_id: pane.viewer_id.clone(),
+                            dataset_id,
+                            analysis_sequence,
+                            x_link: x_links.get(&pane.id.get()).copied(),
+                            cursor_group: None,
+                            page,
+                            placement,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let markers = document
+                    .markers()
+                    .iter()
+                    .filter_map(|marker| {
+                        let trace = document
+                            .traces()
+                            .iter()
+                            .find(|trace| trace.id == marker.trace_id)?;
+                        let pane = document
+                            .panes()
+                            .iter()
+                            .find(|pane| pane.id == marker.pane_id)?;
+                        let binding = pane.binding?;
+                        let dataset_id = trace.binding.dataset_id;
+                        let analysis_sequence =
+                            analysis_sequence_for(dataset_id, binding.analysis_id)?;
+                        let TypedValue::Real(x) = &marker.coordinate else {
+                            return None;
+                        };
+                        let x = *x;
+                        let waveform = app
+                            .state
+                            .simulation
+                            .runs
+                            .iter()
+                            .find(|run| run.dataset_id == dataset_id)?
+                            .analyses
+                            .iter()
+                            .find(|analysis| analysis.id == analysis_sequence)?
+                            .waveforms
+                            .iter()
+                            .find(|waveform| waveform.name == trace.label)?;
+                        let sample_index = waveform
+                            .x
+                            .iter()
+                            .position(|candidate| candidate.to_bits() == x.to_bits())?;
+                        let y = *waveform.y.get(sample_index)?;
+                        Some(VisualizationMarker {
+                            id: marker.id.get(),
+                            dataset_id,
+                            analysis_sequence,
+                            waveform_name: trace.label.clone(),
+                            sample_index,
+                            x,
+                            y,
+                            label: marker.label.clone(),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let measurements = document
+                    .measurements()
+                    .iter()
+                    .filter_map(|measurement| {
+                        let expression = measurement.expression.clone()?;
+                        let value = measurement.value?;
+                        let trace = measurement.trace_ids.first().and_then(|trace_id| {
+                            document.traces().iter().find(|trace| trace.id == *trace_id)
+                        })?;
+                        let pane = document
+                            .panes()
+                            .iter()
+                            .find(|pane| pane.id == measurement.pane_id)?;
+                        let analysis_id = pane.binding?.analysis_id;
+                        let dataset_id = trace.binding.dataset_id;
+                        let analysis_sequence = analysis_sequence_for(dataset_id, analysis_id)?;
+                        Some(VisualizationMeasurement {
+                            id: measurement.id.get(),
+                            dataset_id,
+                            analysis_sequence,
+                            expression,
+                            value,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let annotations = document
+                    .annotations()
+                    .iter()
+                    .filter_map(|annotation| {
+                        let crate::results::visualization_document::AnnotationAnchor::Trace {
+                            trace_id,
+                            coordinate: TypedValue::Real(x),
+                        } = &annotation.anchor
+                        else {
+                            return None;
+                        };
+                        let trace_id = *trace_id;
+                        let x = *x;
+                        let trace = document
+                            .traces()
+                            .iter()
+                            .find(|trace| trace.id == trace_id)?;
+                        let pane = document
+                            .panes()
+                            .iter()
+                            .find(|pane| pane.id == annotation.pane_id)?;
+                        let analysis_id = pane.binding?.analysis_id;
+                        let dataset_id = trace.binding.dataset_id;
+                        let analysis_sequence = analysis_sequence_for(dataset_id, analysis_id)?;
+                        Some(VisualizationAnnotation {
+                            id: annotation.id.get(),
+                            dataset_id,
+                            analysis_sequence,
+                            x,
+                            text: annotation.text.clone(),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let family_policies = document
+                    .panes()
+                    .iter()
+                    .filter_map(|pane| {
+                        pane.family_policy
+                            .clone()
+                            .map(|policy| (pane.id.get(), policy))
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                let report_page_policies = document
+                    .pages()
+                    .iter()
+                    .map(|page| {
+                        (
+                            page.title.clone(),
+                            VisualizationReportPagePolicy {
+                                template: page.template_id.clone(),
+                                update_policy: page.update_policy,
+                                revision: document.revision().get(),
+                            },
+                        )
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                let cursor_pairs = document
+                    .panes()
+                    .iter()
+                    .map(|pane| {
+                        let mut pair = (None, None);
+                        for cursor in document
+                            .cursors()
+                            .iter()
+                            .filter(|cursor| cursor.pane_id == pane.id)
+                        {
+                            let TypedValue::Real(position) = &cursor.position else {
+                                continue;
+                            };
+                            match cursor.label.as_str() {
+                                "A" => pair.0 = Some(*position),
+                                "B" => pair.1 = Some(*position),
+                                _ => {}
+                            }
+                        }
+                        (pane.id.get(), pair)
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                let cursors_linked = document
+                    .link_groups()
+                    .iter()
+                    .any(|group| group.kind == LinkKind::CursorPosition);
+                (
+                    panes,
+                    markers,
+                    measurements,
+                    annotations,
+                    family_policies,
+                    report_page_policies,
+                    document.comparisons().to_vec(),
+                    document.revision().get(),
+                    document.presentation(),
+                    cursor_pairs,
+                    cursors_linked,
+                )
+            });
+        if let Some((
+            panes,
+            markers,
+            measurements,
+            annotations,
+            family_policies,
+            report_page_policies,
+            comparison_receipts,
+            revision,
+            presentation,
+            cursor_pairs,
+            cursors_linked,
+        )) = projected
+        {
+            let studio = &mut app.state.workbench.visualization_studio;
+            let previous_active = studio.active_pane;
+            studio.panes = panes;
+            studio.markers = markers;
+            studio.measurements = measurements;
+            studio.annotations = annotations;
+            studio.family_policies = family_policies;
+            studio.report_page_policies = report_page_policies;
+            studio.comparison_receipts = comparison_receipts;
+            studio.active_pane = previous_active
+                .filter(|active| studio.panes.iter().any(|pane| pane.id == *active))
+                .or_else(|| studio.panes.first().map(|pane| pane.id));
+            studio.next_identity = studio
+                .panes
+                .iter()
+                .map(|pane| pane.id)
+                .max()
+                .unwrap_or_default()
+                .saturating_add(1);
+            studio.revision = revision;
+            studio.significant_digits = presentation.significant_digits;
+            if studio.pane_cursor_positions != cursor_pairs {
+                studio.pane_cursor_positions = cursor_pairs;
+                studio.applied_link_pane = None;
+            }
+            studio.linked_cursor_positions.clear();
+            app.state.ui.results.phase_continuous = presentation.phase_continuous;
+            app.state.ui.results.linked_cursors = cursors_linked;
+        }
+        if let Some(active_pane_id) = app.state.workbench.visualization_studio.active_pane {
+            let visibility = app
+                .state
+                .workspace
+                .visualization_document(document_id)
+                .map(|document| {
+                    document
+                        .traces()
+                        .iter()
+                        .filter(|trace| trace.pane_id.get() == active_pane_id)
+                        .map(|trace| (trace.label.clone(), trace.visible))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if let Some(pane) = app
+                .state
+                .workbench
+                .visualization_studio
+                .panes
+                .iter()
+                .find(|pane| pane.id == active_pane_id)
+                .cloned()
+                && let Some(analysis) = app
+                    .state
+                    .simulation
+                    .runs
+                    .iter_mut()
+                    .find(|run| run.dataset_id == pane.dataset_id)
+                    .and_then(|run| {
+                        run.analyses
+                            .iter_mut()
+                            .find(|analysis| analysis.id == pane.analysis_sequence)
+                    })
+            {
+                for waveform in &mut analysis.waveforms {
+                    if let Some((_, visible)) =
+                        visibility.iter().find(|(label, _)| label == &waveform.name)
+                    {
+                        waveform.visible = *visible;
+                    }
+                }
+            }
+        }
+    }
     let studio = &mut app.state.workbench.visualization_studio;
     studio.normalize();
     if studio.panes.is_empty()
@@ -1833,12 +2603,14 @@ fn apply_active_link_state(app: &mut RSpiceApp) {
             .get(&pane.id)
             .copied()
     });
-    if let Some(analysis_index) = app.state.simulation.active_analysis_idx {
-        app.state
-            .ui
-            .results
-            .plot_view_mut(pane.viewer, analysis_index)
-            .x = x_range;
+    if let Some(x_range) = x_range {
+        result_document::request_view_gesture(
+            &mut app.state,
+            result_document::ViewGesture::SetRanges {
+                x: Some(x_range),
+                y: None,
+            },
+        );
     }
     if let Some((a, b)) = cursors {
         app.state.ui.results.cursors.a = a;
@@ -1849,7 +2621,7 @@ fn apply_active_link_state(app: &mut RSpiceApp) {
     app.state.workbench.visualization_studio.applied_link_pane = Some(pane.id);
 }
 
-fn capture_active_link_state(app: &mut RSpiceApp) {
+fn capture_active_link_state(ctx: &egui::Context, app: &mut RSpiceApp) {
     let Some(pane) = app
         .state
         .workbench
@@ -1859,17 +2631,16 @@ fn capture_active_link_state(app: &mut RSpiceApp) {
     else {
         return;
     };
-    let x_range = app
-        .state
-        .simulation
-        .active_analysis_idx
-        .and_then(|analysis_index| {
-            app.state
-                .ui
-                .results
-                .plot_view(pane.viewer, analysis_index)
-                .x
-        });
+    let x_range = result_document::active_renderer_axis_range(
+        ctx,
+        &mut app.state,
+        result_document::PaneAxis::X,
+    );
+    let requested_cursors = (
+        app.state.ui.results.cursors.a,
+        app.state.ui.results.cursors.b,
+    );
+    commit_active_project_cursor_pair(app, pane.id, requested_cursors);
     let cursors = (
         app.state.ui.results.cursors.a,
         app.state.ui.results.cursors.b,
@@ -2014,7 +2785,7 @@ fn resolved_viewer_availability_for_binding(
             matches!(payload, AnalysisResultPayload::TransferFunction { .. })
                 && payload.validate_for(analysis.analysis_type).is_ok()
         }),
-        ResultViewer::Smith => false,
+        ResultViewer::Smith => result_document::smith_analysis_is_renderable(analysis),
         ResultViewer::Hist
         | ResultViewer::Op
         | ResultViewer::NoiseContrib
@@ -2039,6 +2810,50 @@ fn resolved_viewer_availability_for_binding(
         });
     }
     Ok(viewer)
+}
+
+fn active_studio_exact_export_available(state: &AppState) -> bool {
+    let Some(pane) = state.workbench.visualization_studio.active_pane() else {
+        return false;
+    };
+    let Some(run) = state
+        .simulation
+        .runs
+        .iter()
+        .find(|run| run.dataset_id == pane.dataset_id)
+    else {
+        return false;
+    };
+    if run.lifecycle != crate::state::SimulationRunLifecycle::Completed {
+        return false;
+    }
+    let Some(analysis) = run
+        .analyses
+        .iter()
+        .find(|analysis| analysis.id == pane.analysis_sequence)
+    else {
+        return false;
+    };
+    if !analysis.success {
+        return false;
+    }
+    pane.viewer
+        .viewer_document_id()
+        .and_then(viewer_document)
+        .is_some_and(|definition| {
+            resolved_viewer_availability_for_binding(
+                state,
+                definition,
+                Some(pane.dataset_id),
+                Some(pane.analysis_sequence),
+            )
+            .is_ok()
+        })
+}
+
+fn active_studio_figure_export_available(state: &AppState) -> bool {
+    active_studio_exact_export_available(state)
+        && crate::workbench::hardcopy_adapters::sources::active_app_hardcopy_source_available(state)
 }
 
 fn available_analysis_ids(state: &AppState) -> Vec<&'static str> {
@@ -2180,6 +2995,148 @@ fn add_viewer_pane_bound(
         ));
         return;
     }
+    if active_project_visualization_document_id(&app.state).is_some() {
+        let analysis_id = {
+            let run = &app.state.simulation.runs[run_index];
+            let analysis = &run.analyses[analysis_index];
+            analysis.provenance().map_or_else(
+                || {
+                    let name = format!("legacy-analysis-v1/{}", analysis.id);
+                    AnalysisInstanceId::from_namespace(run.dataset_id.as_uuid(), name.as_bytes())
+                },
+                |provenance| provenance.source_instance_id(),
+            )
+        };
+        let dataset_binding = {
+            let run = &app.state.simulation.runs[run_index];
+            DatasetBinding::new(run.dataset_id, run.dataset_content_digest())
+        };
+        let binding = crate::results::visualization_document::PaneDataBinding {
+            analysis_id,
+            dataset: dataset_binding,
+        };
+        let existing_dataset = active_project_visualization_document_id(&app.state)
+            .and_then(|document_id| app.state.workspace.visualization_document(document_id))
+            .is_some_and(|document| {
+                document
+                    .datasets()
+                    .iter()
+                    .any(|dataset| dataset.binding() == dataset_binding)
+            });
+        let source = {
+            let run = &app.state.simulation.runs[run_index];
+            let analysis = &run.analyses[analysis_index];
+            match result_document::visualization_source_dataset(run, analysis) {
+                Ok(source) => source,
+                Err(error) => {
+                    app.state.push_user_message(ConsoleMessage::error(error));
+                    return;
+                }
+            }
+        };
+        let mut edits = vec![if existing_dataset {
+            DocumentEdit::MergeDatasetProjection(source)
+        } else {
+            DocumentEdit::AttachDataset(source)
+        }];
+        if placement == VisualizationPanePlacement::NewWorksheetPage {
+            edits.push(DocumentEdit::AddPaneOnNewPage {
+                page: crate::results::visualization_document::NewPage {
+                    title: page,
+                    layout: crate::results::visualization_document::PageLayout::Rows,
+                    template_id: "engineering-dark".to_owned(),
+                    update_policy: crate::results::visualization_document::PageUpdatePolicy::RefreshLinkedFigures,
+                },
+                pane: crate::results::visualization_document::NewPagePane {
+                    title: definition.title.to_owned(),
+                    kind: document_pane_kind(definition.art),
+                    viewer_id: document_id.to_owned(),
+                    binding: Some(binding),
+                },
+            });
+        } else {
+            let Some(active) = active_pane.as_ref() else {
+                app.state.push_user_message(ConsoleMessage::warning(
+                    "Select a result-document pane before inserting another pane.",
+                ));
+                return;
+            };
+            let anchor = app
+                .state
+                .workspace
+                .visualization_document(
+                    active_project_visualization_document_id(&app.state)
+                        .expect("canonical branch has active document"),
+                )
+                .and_then(|document| {
+                    document
+                        .panes()
+                        .iter()
+                        .find(|pane| pane.id.get() == active.id)
+                        .map(|pane| pane.id)
+                });
+            let Some(anchor) = anchor else {
+                app.state.push_user_message(ConsoleMessage::error(
+                    "The selected project result pane no longer exists.",
+                ));
+                return;
+            };
+            let placement = match placement {
+                VisualizationPanePlacement::RightOfSelected => {
+                    crate::results::visualization_document::PanePlacement::RightOf {
+                        anchor_pane_id: anchor,
+                    }
+                }
+                VisualizationPanePlacement::BelowSelected => {
+                    crate::results::visualization_document::PanePlacement::Below {
+                        anchor_pane_id: anchor,
+                    }
+                }
+                VisualizationPanePlacement::NewWorksheetPage => unreachable!(),
+            };
+            let page_id = app
+                .state
+                .workspace
+                .visualization_document(
+                    active_project_visualization_document_id(&app.state)
+                        .expect("canonical branch has active document"),
+                )
+                .and_then(|document| {
+                    document
+                        .panes()
+                        .iter()
+                        .find(|pane| pane.id.get() == active.id)
+                        .map(|pane| pane.page_id)
+                })
+                .expect("resolved active pane owns a page");
+            edits.push(DocumentEdit::AddBoundPane(
+                crate::results::visualization_document::NewPane {
+                    page_id,
+                    title: definition.title.to_owned(),
+                    kind: document_pane_kind(definition.art),
+                    viewer_id: document_id.to_owned(),
+                    binding: Some(binding),
+                    placement,
+                },
+            ));
+        }
+        match transact_active_project_document(app, edits) {
+            Ok(receipt) => {
+                if let Some(pane_id) = receipt.created.iter().find_map(|entity| match entity {
+                    crate::results::visualization_document::EntityRef::Pane(id) => Some(id.get()),
+                    _ => None,
+                }) {
+                    app.state.workbench.visualization_studio.active_pane = Some(pane_id);
+                }
+                let _ = app.state.simulation.select_run(run_index);
+                let _ = app.state.simulation.select_analysis(analysis_index);
+                app.state.ui.results.viewer = viewer;
+                reconcile_document(app);
+            }
+            Err(error) => app.state.push_user_message(ConsoleMessage::error(error)),
+        }
+        return;
+    }
     let x_link = if placement == VisualizationPanePlacement::NewWorksheetPage {
         None
     } else {
@@ -2236,11 +3193,15 @@ fn add_viewer_pane_bound(
 #[cfg(test)]
 mod integrity_scan_tests {
     use super::dock::{
-        evaluate_scalar_measurement, execute_comparison_draft,
+        commit_comparison_execution, evaluate_scalar_measurement, execute_comparison_draft,
         execute_comparison_draft_with_differences, retain_difference_trace_sets,
+        save_document_properties,
     };
     use super::*;
     use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry, WaveformData};
+    use crate::workbench::documents::result_document::{
+        AnalysisPresentationKey, WavePanePresentationKey,
+    };
 
     fn app_with_exact_source() -> RSpiceApp {
         let mut app = RSpiceApp::test_instance();
@@ -2259,6 +3220,338 @@ mod integrity_scan_tests {
         app.state.simulation.runs = vec![run];
         assert!(app.state.simulation.select_run(0));
         app
+    }
+
+    fn activate_voltage_wave_pane(app: &mut RSpiceApp) -> AnalysisPresentationKey {
+        let run = app.state.simulation.active_run().expect("active run");
+        let analysis = app
+            .state
+            .simulation
+            .active_analysis()
+            .expect("active analysis");
+        let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
+        app.state.ui.results.active_wave_pane = Some(WavePanePresentationKey {
+            analysis: key,
+            unit: "V".to_owned(),
+        });
+        key
+    }
+
+    fn apply_queued_view_gesture(ctx: &egui::Context, app: &mut RSpiceApp) {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                result_document::apply_pending_view_gesture(ui, &mut app.state);
+            });
+        });
+    }
+
+    fn activate_project_visualization_document(app: &mut RSpiceApp) -> ResultDocumentId {
+        let (source, analysis_id) = {
+            let run = app.state.simulation.active_run().expect("active run");
+            let analysis = app
+                .state
+                .simulation
+                .active_analysis()
+                .expect("active analysis");
+            let source = result_document::visualization_source_dataset(run, analysis)
+                .expect("retained source projects");
+            let analysis_id = analysis.provenance().map_or_else(
+                || {
+                    let name = format!("legacy-analysis-v1/{}", analysis.id);
+                    AnalysisInstanceId::from_namespace(run.dataset_id.as_uuid(), name.as_bytes())
+                },
+                |provenance| provenance.source_instance_id(),
+            );
+            (source, analysis_id)
+        };
+        let binding = crate::results::visualization_document::PaneDataBinding {
+            analysis_id,
+            dataset: source.binding(),
+        };
+        let mut document = crate::results::visualization_document::VisualizationDocument::new(
+            "Engineering review",
+            vec![source],
+        )
+        .expect("visualization document");
+        let pane_id = document.panes()[0].id;
+        document
+            .transact(
+                document.revision(),
+                vec![DocumentEdit::SetPaneSource {
+                    pane_id,
+                    viewer_id: "viewer-waveform".to_owned(),
+                    binding: Some(binding),
+                }],
+            )
+            .expect("pane binding commits");
+        let document_id = app
+            .state
+            .workspace
+            .insert_visualization_document(document)
+            .expect("document inserted");
+        app.state.workbench.activate(Workspace::Results);
+        assert!(
+            crate::workbench::chrome::document_bar::activate_document_by_id(
+                &mut app.state,
+                &WorkspaceDocumentId::VisualizationDocument(document_id),
+            )
+        );
+        document_id
+    }
+
+    #[test]
+    fn document_properties_commit_to_the_active_project_document() {
+        let mut app = app_with_exact_source();
+        let document_id = activate_project_visualization_document(&mut app);
+        let before = app
+            .state
+            .workspace
+            .visualization_document(document_id)
+            .expect("active document")
+            .revision();
+
+        save_document_properties(&mut app, 13, true).expect("properties commit");
+
+        let document = app
+            .state
+            .workspace
+            .visualization_document(document_id)
+            .expect("active document");
+        assert!(document.revision() > before);
+        assert_eq!(document.presentation().significant_digits, 13);
+        assert!(document.presentation().phase_continuous);
+        assert!(app.state.workspace.visualization_documents_dirty);
+    }
+
+    #[test]
+    fn studio_export_requires_the_selected_successful_completed_binding() {
+        let mut app = app_with_exact_source();
+        activate_project_visualization_document(&mut app);
+        reconcile_document(&mut app);
+        assert!(!active_studio_exact_export_available(&app.state));
+
+        app.state.simulation.runs[0].lifecycle = crate::state::SimulationRunLifecycle::Completed;
+        assert!(active_studio_exact_export_available(&app.state));
+        assert!(active_studio_figure_export_available(&app.state));
+
+        app.state.simulation.runs[0].analyses[0].success = false;
+        assert!(!active_studio_exact_export_available(&app.state));
+        assert!(!active_studio_figure_export_available(&app.state));
+    }
+
+    #[test]
+    fn canonical_result_entities_commit_and_project_without_parallel_authority() {
+        let mut app = app_with_exact_source();
+        let document_id = activate_project_visualization_document(&mut app);
+        reconcile_document(&mut app);
+
+        let document = app
+            .state
+            .workspace
+            .visualization_document(document_id)
+            .expect("active document");
+        assert_eq!(document.traces().len(), 2);
+        assert!(document.traces().iter().all(|trace| {
+            trace.coordinate_key == "x"
+                && trace.signal_key == "y"
+                && trace.row_predicates.len() == 4
+        }));
+
+        add_marker_at_midpoint(&mut app);
+        let (pane_id, trace_id) =
+            active_project_pane_and_trace(&app.state, Some("V(out)")).expect("bound trace");
+        transact_active_project_document(
+            &mut app,
+            vec![DocumentEdit::AddScalarMeasurement {
+                pane_id,
+                trace_ids: vec![trace_id],
+                expression: "rms(V(out))".to_owned(),
+                value: 2.75,
+            }],
+        )
+        .expect("measurement commits");
+        transact_active_project_document(
+            &mut app,
+            vec![DocumentEdit::AddAnnotation {
+                pane_id,
+                anchor: crate::results::visualization_document::AnnotationAnchor::Trace {
+                    trace_id,
+                    coordinate: TypedValue::Real(0.5),
+                },
+                text: "Review this exact source point".to_owned(),
+            }],
+        )
+        .expect("annotation commits");
+        reconcile_document(&mut app);
+
+        let document = app
+            .state
+            .workspace
+            .visualization_document(document_id)
+            .expect("active document");
+        assert_eq!(document.markers().len(), 1);
+        assert_eq!(document.measurements().len(), 1);
+        assert_eq!(document.annotations().len(), 1);
+        assert_eq!(app.state.workbench.visualization_studio.markers.len(), 1);
+        assert_eq!(app.state.workbench.visualization_studio.markers[0].x, 0.5);
+        assert_eq!(
+            app.state.workbench.visualization_studio.measurements[0].expression,
+            "rms(V(out))"
+        );
+        assert_eq!(
+            app.state.workbench.visualization_studio.annotations[0].text,
+            "Review this exact source point"
+        );
+
+        transact_active_project_document(
+            &mut app,
+            vec![DocumentEdit::ClearMarkers { pane_id: None }],
+        )
+        .expect("marker clear commits atomically");
+        reconcile_document(&mut app);
+        assert!(
+            app.state
+                .workspace
+                .visualization_document(document_id)
+                .expect("active document")
+                .markers()
+                .is_empty()
+        );
+        assert!(app.state.workbench.visualization_studio.markers.is_empty());
+    }
+
+    #[test]
+    fn canonical_ab_cursors_persist_link_move_and_clear_as_document_entities() {
+        let mut app = app_with_exact_source();
+        let document_id = activate_project_visualization_document(&mut app);
+        reconcile_document(&mut app);
+        let first_pane = app
+            .state
+            .workbench
+            .visualization_studio
+            .active_pane
+            .expect("project pane");
+
+        add_cursor_at_midpoint(&mut app);
+        add_cursor_at_midpoint(&mut app);
+        let document = app
+            .state
+            .workspace
+            .visualization_document(document_id)
+            .expect("active document");
+        assert_eq!(document.cursors().len(), 2);
+        assert_eq!(
+            canonical_cursor_pair(document, document.panes()[0].id).unwrap(),
+            (Some(0.5), Some(0.5))
+        );
+
+        assert!(commit_active_project_cursor_pair(
+            &mut app,
+            first_pane,
+            (None, None)
+        ));
+        assert!(
+            app.state
+                .workspace
+                .visualization_document(document_id)
+                .expect("active document")
+                .cursors()
+                .is_empty()
+        );
+
+        let (page_id, anchor_pane, binding) = {
+            let document = app
+                .state
+                .workspace
+                .visualization_document(document_id)
+                .expect("active document");
+            let pane = &document.panes()[0];
+            (pane.page_id, pane.id, pane.binding)
+        };
+        let receipt = transact_active_project_document(
+            &mut app,
+            vec![DocumentEdit::AddBoundPane(
+                crate::results::visualization_document::NewPane {
+                    page_id,
+                    title: "Linked waveform".to_owned(),
+                    kind: crate::results::visualization_document::PaneKind::Cartesian,
+                    viewer_id: "viewer-waveform".to_owned(),
+                    binding,
+                    placement: crate::results::visualization_document::PanePlacement::Below {
+                        anchor_pane_id: anchor_pane,
+                    },
+                },
+            )],
+        )
+        .expect("second pane commits");
+        let second_pane = receipt
+            .created
+            .iter()
+            .find_map(|entity| match entity {
+                EntityRef::Pane(pane_id) => Some(*pane_id),
+                _ => None,
+            })
+            .expect("second pane id");
+        let cursor_edits = {
+            let document = app
+                .state
+                .workspace
+                .visualization_document(document_id)
+                .expect("active document");
+            [anchor_pane, second_pane]
+                .into_iter()
+                .flat_map(|pane_id| {
+                    let axis_id = document
+                        .axes()
+                        .iter()
+                        .find(|axis| {
+                            axis.pane_id == pane_id
+                                && axis.orientation == AxisOrientation::Horizontal
+                        })
+                        .expect("horizontal axis")
+                        .id;
+                    [("A", 0.1), ("B", 0.2)].map(|(label, position)| DocumentEdit::AddCursor {
+                        pane_id,
+                        axis_id,
+                        position: TypedValue::Real(position),
+                        label: label.to_owned(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        transact_active_project_document(&mut app, cursor_edits).expect("cursors commit");
+        reconcile_document(&mut app);
+        assert!(set_active_project_cursor_links(&mut app, true));
+
+        assert!(commit_active_project_cursor_pair(
+            &mut app,
+            first_pane,
+            (Some(0.25), Some(0.75))
+        ));
+        let document = app
+            .state
+            .workspace
+            .visualization_document(document_id)
+            .expect("active document");
+        assert_eq!(document.link_groups().len(), 2);
+        assert!(document.cursors().iter().all(|cursor| {
+            let expected = if cursor.label == "A" { 0.25 } else { 0.75 };
+            real_cursor_position(cursor)
+                .is_some_and(|position| same_cursor_position(position, expected))
+        }));
+
+        assert!(commit_active_project_cursor_pair(
+            &mut app,
+            first_pane,
+            (None, None)
+        ));
+        let document = app
+            .state
+            .workspace
+            .visualization_document(document_id)
+            .expect("active document");
+        assert!(document.cursors().is_empty());
+        assert!(document.link_groups().is_empty());
     }
 
     #[test]
@@ -2346,6 +3639,7 @@ mod integrity_scan_tests {
     #[test]
     fn specification_bound_autoscale_commits_the_exact_data_and_limit_envelope() {
         let mut app = app_with_exact_source();
+        let analysis_key = activate_voltage_wave_pane(&mut app);
         app.state.workspace.specs.push(SpecEntry {
             measurement: "V(out)".to_owned(),
             expression: String::new(),
@@ -2359,8 +3653,15 @@ mod integrity_scan_tests {
         app.state.workbench.visualization_studio.zoom = 3.0;
 
         fit_active_view(&mut app);
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        apply_queued_view_gesture(&ctx, &mut app);
 
-        let view = app.state.ui.results.plot_view(ResultViewer::Waves, 0);
+        let view =
+            app.state
+                .ui
+                .results
+                .analysis_plot_view_pane(ResultViewer::Waves, analysis_key, 0);
         assert_eq!(view.x, Some((0.0, 20.0)));
         assert_eq!(view.y, Some((-2.0, 5.0)));
         assert_eq!(app.state.workbench.visualization_studio.zoom, 1.0);
@@ -2600,6 +3901,54 @@ mod integrity_scan_tests {
                 .unwrap()
                 .dataset_content_digest(),
             candidate_digest
+        );
+    }
+
+    #[test]
+    fn project_document_owns_comparison_receipts_and_studio_only_projects_them() {
+        let mut app = app_with_exact_source();
+        let document_id = activate_project_visualization_document(&mut app);
+        reconcile_document(&mut app);
+        let mut baseline = SimulationRun::new(2);
+        baseline.add_analysis(
+            AnalysisResult::new(29, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 0.5, 1.0],
+                    vec![-1.20, 2.45, 3.95],
+                    "#00aaff",
+                ),
+                WaveformData::new("I(R1)", vec![10.0, 20.0], vec![0.125, -0.25], "#ffaa00"),
+            ]),
+        );
+        let baseline_id = baseline.dataset_id;
+        app.state.simulation.runs.push(baseline);
+        let studio = &mut app.state.workbench.visualization_studio;
+        studio.draft_comparison_dataset = Some(baseline_id);
+        studio.draft_comparison_absolute_tolerance = 0.1;
+        studio.draft_comparison_alignment = ComparisonAlignmentDraft::AbsoluteXAxis;
+
+        let execution = execute_comparison_draft_with_differences(&app).unwrap();
+        let expected_receipt = execution.receipt.clone();
+        commit_comparison_execution(&mut app, execution).unwrap();
+
+        let document = app
+            .state
+            .workspace
+            .visualization_document(document_id)
+            .unwrap();
+        assert_eq!(document.comparisons(), &[expected_receipt.clone()]);
+        assert_eq!(document.datasets().len(), 2);
+        assert_eq!(
+            app.state.workbench.visualization_studio.comparison_receipts,
+            vec![expected_receipt]
+        );
+        assert!(
+            !app.state
+                .workbench
+                .visualization_studio
+                .difference_trace_sets
+                .is_empty()
         );
     }
 
@@ -3091,6 +4440,7 @@ mod integrity_scan_tests {
     fn link_groups_apply_the_same_exact_x_range_and_cursor_pair() {
         let mut app = app_with_exact_source();
         reconcile_document(&mut app);
+        let analysis_key = activate_voltage_wave_pane(&mut app);
         let first = app
             .state
             .workbench
@@ -3098,10 +4448,16 @@ mod integrity_scan_tests {
             .active_pane()
             .cloned()
             .expect("reconciliation must create the first pane");
-        app.state.ui.results.plot_view_mut(first.viewer, 0).x = Some((0.25, 0.75));
+        app.state
+            .ui
+            .results
+            .analysis_plot_view_pane_mut(first.viewer, analysis_key, 0)
+            .x = Some((0.25, 0.75));
         app.state.ui.results.cursors.a = Some(0.3);
         app.state.ui.results.cursors.b = Some(0.7);
-        capture_active_link_state(&mut app);
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        capture_active_link_state(&ctx, &mut app);
 
         let mut second = first.clone();
         second.id = first.id + 1;
@@ -3113,13 +4469,22 @@ mod integrity_scan_tests {
         app.state.workbench.visualization_studio.next_identity = second.id + 1;
         app.state.workbench.visualization_studio.active_pane = Some(second.id);
         app.state.workbench.visualization_studio.applied_link_pane = None;
-        app.state.ui.results.plot_view_mut(second.viewer, 0).x = None;
+        app.state
+            .ui
+            .results
+            .analysis_plot_view_pane_mut(second.viewer, analysis_key, 0)
+            .x = None;
         app.state.ui.results.cursors.clear();
 
         apply_active_link_state(&mut app);
+        apply_queued_view_gesture(&ctx, &mut app);
 
         assert_eq!(
-            app.state.ui.results.plot_view(second.viewer, 0).x,
+            app.state
+                .ui
+                .results
+                .analysis_plot_view_pane(second.viewer, analysis_key, 0)
+                .x,
             Some((0.25, 0.75))
         );
         assert_eq!(app.state.ui.results.cursors.a, Some(0.3));

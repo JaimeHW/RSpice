@@ -159,6 +159,37 @@ pub(super) fn add_cursor_at_midpoint(app: &mut RSpiceApp) {
             (count > 0).then(|| waveform.x[count / 2])
         });
     if let Some(x) = midpoint {
+        if let Some(document_id) = active_project_visualization_document_id(&app.state) {
+            let desired = app
+                .state
+                .workbench
+                .visualization_studio
+                .active_pane
+                .and_then(|pane_id| {
+                    let document = app.state.workspace.visualization_document(document_id)?;
+                    let canonical_pane = document
+                        .panes()
+                        .iter()
+                        .find(|pane| pane.id.get() == pane_id)?;
+                    let pair = canonical_cursor_pair(document, canonical_pane.id).ok()?;
+                    Some((
+                        pane_id,
+                        match pair {
+                            (None, _) => (Some(x), pair.1),
+                            (Some(_), None) => (pair.0, Some(x)),
+                            (Some(_), Some(_)) => (Some(x), None),
+                        },
+                    ))
+                });
+            if let Some((pane_id, desired)) = desired {
+                commit_active_project_cursor_pair(app, pane_id, desired);
+            } else {
+                app.state.push_user_message(ConsoleMessage::error(
+                    "The active project result pane cannot retain an A/B cursor pair.",
+                ));
+            }
+            return;
+        }
         app.state.ui.results.cursors.place(x);
         app.state.ui.results.cursor_strip = app.state.simulation.active_analysis_idx;
     } else {
@@ -174,25 +205,34 @@ pub(super) fn fit_active_view(app: &mut RSpiceApp) {
         return;
     }
 
-    let viewer = app.state.ui.results.viewer;
-    let strip = app.state.simulation.active_analysis_idx.unwrap_or_default();
     match app.state.workbench.visualization_studio.autoscale {
         VisualizationAutoscale::RobustVisible => {
-            app.state.ui.results.reset_plot_view(viewer, strip);
+            result_document::request_view_gesture(
+                &mut app.state,
+                result_document::ViewGesture::Fit,
+            );
         }
         VisualizationAutoscale::ExactExtrema => {
             let (x, y) = exact_extrema_fit(&app.state)
                 .expect("fit availability guarantees finite exact waveform extrema");
-            let view = app.state.ui.results.plot_view_mut(viewer, strip);
-            view.x = Some(x);
-            view.y = Some(y);
+            result_document::request_view_gesture(
+                &mut app.state,
+                result_document::ViewGesture::SetRanges {
+                    x: Some(x),
+                    y: Some(y),
+                },
+            );
         }
         VisualizationAutoscale::SpecificationBounds => {
             let (x, y) = specification_bound_fit(&app.state)
                 .expect("fit availability guarantees exact specification bounds");
-            let view = app.state.ui.results.plot_view_mut(viewer, strip);
-            view.x = Some(x);
-            view.y = Some(y);
+            result_document::request_view_gesture(
+                &mut app.state,
+                result_document::ViewGesture::SetRanges {
+                    x: Some(x),
+                    y: Some(y),
+                },
+            );
         }
     }
     app.state.workbench.visualization_studio.zoom = 1.0;
@@ -339,31 +379,15 @@ pub(super) fn specification_bound_fit(state: &AppState) -> Option<((f64, f64), (
 
 pub(super) fn zoom_active(app: &mut RSpiceApp, factor: f32) {
     let next_zoom = (app.state.workbench.visualization_studio.zoom * factor).clamp(0.25, 8.0);
-    let Some(analysis) = app.state.simulation.active_analysis() else {
-        return;
-    };
-    let Some(waveform) = analysis.waveforms.iter().find(|waveform| waveform.visible) else {
-        return;
-    };
-    let (x_min, x_max) = waveform.x_range();
-    let (y_min, y_max) = waveform.y_range();
-    if !x_min.is_finite() || !x_max.is_finite() || !y_min.is_finite() || !y_max.is_finite() {
+    if app.state.simulation.active_analysis().is_none() {
         return;
     }
-    let scale = f64::from(1.0 / next_zoom);
-    let x_mid = (x_min + x_max) * 0.5;
-    let y_mid = (y_min + y_max) * 0.5;
-    let viewer = app.state.ui.results.viewer;
-    let strip = app.state.simulation.active_analysis_idx.unwrap_or_default();
-    let view = app.state.ui.results.plot_view_mut(viewer, strip);
-    view.x = Some((
-        x_mid - (x_max - x_min) * 0.5 * scale,
-        x_mid + (x_max - x_min) * 0.5 * scale,
-    ));
-    view.y = Some((
-        y_mid - (y_max - y_min) * 0.5 * scale,
-        y_mid + (y_max - y_min) * 0.5 * scale,
-    ));
+    let gesture = if factor >= 1.0 {
+        result_document::ViewGesture::ZoomIn
+    } else {
+        result_document::ViewGesture::ZoomOut
+    };
+    result_document::request_view_gesture(&mut app.state, gesture);
     app.state.workbench.visualization_studio.zoom = next_zoom;
 }
 
@@ -376,6 +400,40 @@ pub(super) fn add_marker_at_midpoint(app: &mut RSpiceApp) {
         ));
         return;
     };
+    if active_project_visualization_document_id(&app.state).is_some() {
+        let (pane_id, trace_id) =
+            match active_project_pane_and_trace(&app.state, Some(&waveform_name)) {
+                Ok(context) => context,
+                Err(error) => {
+                    app.state.push_user_message(ConsoleMessage::warning(error));
+                    return;
+                }
+            };
+        let next_label = app
+            .state
+            .workspace
+            .visualization_document(
+                active_project_visualization_document_id(&app.state)
+                    .expect("canonical branch has an active document"),
+            )
+            .map_or(1, |document| document.markers().len().saturating_add(1));
+        match transact_active_project_document(
+            app,
+            vec![DocumentEdit::AddTypedMarker {
+                pane_id,
+                trace_id,
+                coordinate: TypedValue::Real(x),
+                label: format!("M{next_label}"),
+                kind: crate::results::visualization_document::PlotMarkerKind::PointNote,
+                scope: crate::results::visualization_document::PlotMarkerScope::Document,
+                source_specification: None,
+            }],
+        ) {
+            Ok(_) => reconcile_document(app),
+            Err(error) => app.state.push_user_message(ConsoleMessage::error(error)),
+        }
+        return;
+    }
     let result = app.state.workbench.visualization_studio.transact(|studio| {
         let id = studio
             .allocate_identity()

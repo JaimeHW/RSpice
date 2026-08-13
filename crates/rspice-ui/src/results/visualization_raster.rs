@@ -38,6 +38,8 @@ pub const MAX_RASTER_PIXELS: usize = 8 * 1_048_576;
 pub const MAX_RASTER_ARTIFACT_BYTES: usize = MAX_FROZEN_ARTIFACT_BYTES;
 /// Maximum visible line traces in one pane.
 pub const MAX_RASTER_TRACES: usize = 256;
+/// Maximum retained A/B or engineering cursors in one pane.
+pub const MAX_RASTER_CURSORS: usize = 256;
 /// Maximum source samples resolved across all visible traces.
 pub const MAX_RASTER_POINTS: usize = 2_000_000;
 /// Maximum Bresenham steps, bounding adversarial zig-zag source data.
@@ -251,6 +253,31 @@ impl ResolvedRasterTrace {
     }
 }
 
+/// One validated horizontal cursor in immutable document order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedRasterCursor {
+    cursor_id: u64,
+    label: String,
+    x: f64,
+}
+
+impl ResolvedRasterCursor {
+    #[must_use]
+    pub const fn cursor_id(&self) -> u64 {
+        self.cursor_id
+    }
+
+    #[must_use]
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    #[must_use]
+    pub const fn x(&self) -> f64 {
+        self.x
+    }
+}
+
 /// Validated Cartesian line scene detached from all mutable application state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedCartesianLineScene {
@@ -263,6 +290,7 @@ pub struct ResolvedCartesianLineScene {
     x_range: AxisRange,
     y_range: AxisRange,
     traces: Vec<ResolvedRasterTrace>,
+    cursors: Vec<ResolvedRasterCursor>,
 }
 
 impl ResolvedCartesianLineScene {
@@ -304,6 +332,11 @@ impl ResolvedCartesianLineScene {
     #[must_use]
     pub fn traces(&self) -> &[ResolvedRasterTrace] {
         &self.traces
+    }
+
+    #[must_use]
+    pub fn cursors(&self) -> &[ResolvedRasterCursor] {
+        &self.cursors
     }
 }
 
@@ -582,18 +615,16 @@ pub fn resolve_cartesian_line_scene(
         }
         let dataset = dataset_for_binding(document, trace.binding)?;
         insert_actual_binding(&mut actual_bindings, trace.binding)?;
-        let coordinate_columns = dataset
-            .columns()
-            .iter()
-            .filter(|column| column.role() == ColumnRole::Coordinate)
-            .count();
-        if coordinate_columns != 1 {
-            return Err(VisualizationRasterError::UnsupportedStyleMode(
-                "multi-dimensional family source",
-            ));
-        }
         let x_index = column_index(dataset, trace.id, &trace.coordinate_key)?;
         let y_index = column_index(dataset, trace.id, &trace.signal_key)?;
+        let predicate_indices = trace
+            .row_predicates
+            .iter()
+            .map(|predicate| {
+                column_index(dataset, trace.id, &predicate.column)
+                    .map(|index| (index, &predicate.value))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let x_column = &dataset.columns()[x_index];
         let y_column = &dataset.columns()[y_index];
         if x_column.role() != ColumnRole::Coordinate || y_column.role() != ColumnRole::Signal {
@@ -606,7 +637,25 @@ pub fn resolve_cartesian_line_scene(
         if dataset.rows().is_empty() {
             return Err(VisualizationRasterError::EmptyTrace(trace.id.get()));
         }
-        total_points = total_points.checked_add(dataset.rows().len()).ok_or(
+        let mut points = Vec::new();
+        points
+            .try_reserve_exact(dataset.rows().len())
+            .map_err(|_| VisualizationRasterError::Allocation("resolved raster points"))?;
+        for row in dataset.rows() {
+            if !predicate_indices
+                .iter()
+                .all(|(index, expected)| row.values()[*index].exact_eq(expected))
+            {
+                continue;
+            }
+            let x = numeric_value(&row.values()[x_index], trace.id, x_column.key())?;
+            let y = numeric_value(&row.values()[y_index], trace.id, y_column.key())?;
+            points.push(ResolvedRasterPoint { x, y });
+        }
+        if points.is_empty() {
+            return Err(VisualizationRasterError::EmptyTrace(trace.id.get()));
+        }
+        total_points = total_points.checked_add(points.len()).ok_or(
             VisualizationRasterError::ArithmeticOverflow("resolved raster point count"),
         )?;
         if total_points > MAX_RASTER_POINTS {
@@ -615,15 +664,6 @@ pub fn resolve_cartesian_line_scene(
                 maximum: MAX_RASTER_POINTS,
                 actual: total_points,
             });
-        }
-        let mut points = Vec::new();
-        points
-            .try_reserve_exact(dataset.rows().len())
-            .map_err(|_| VisualizationRasterError::Allocation("resolved raster points"))?;
-        for row in dataset.rows() {
-            let x = numeric_value(&row.values()[x_index], trace.id, x_column.key())?;
-            let y = numeric_value(&row.values()[y_index], trace.id, y_column.key())?;
-            points.push(ResolvedRasterPoint { x, y });
         }
         traces.push(ResolvedRasterTrace {
             trace_id: trace.id,
@@ -656,6 +696,50 @@ pub fn resolve_cartesian_line_scene(
             .flat_map(|trace| trace.points.iter().map(|point| point.y)),
         "vertical axis",
     )?;
+    let pane_cursors = document
+        .cursors()
+        .iter()
+        .filter(|cursor| cursor.pane_id == pane_id)
+        .collect::<Vec<_>>();
+    if pane_cursors.len() > MAX_RASTER_CURSORS {
+        return Err(VisualizationRasterError::ResourceLimit {
+            resource: "retained raster cursors",
+            maximum: MAX_RASTER_CURSORS,
+            actual: pane_cursors.len(),
+        });
+    }
+    let mut cursors = Vec::with_capacity(pane_cursors.len());
+    for cursor in pane_cursors {
+        if cursor.axis_id != x_axis.id {
+            return Err(VisualizationRasterError::UnsupportedAxisConfiguration(
+                format!(
+                    "cursor {} must use the pane's sole horizontal axis",
+                    cursor.id.get()
+                ),
+            ));
+        }
+        let x = match &cursor.position {
+            TypedValue::Real(value) => *value,
+            TypedValue::Integer(value) if value.abs() <= MAX_EXACT_F64_INTEGER => *value as f64,
+            TypedValue::Integer(_) | TypedValue::Boolean(_) | TypedValue::Text(_) => {
+                return Err(VisualizationRasterError::UnsupportedOverlay(
+                    "non-numeric or inexact cursor",
+                ));
+            }
+        };
+        if !x.is_finite() {
+            return Err(VisualizationRasterError::InvalidNumericRange(
+                "horizontal cursor",
+            ));
+        }
+        if x_range.minimum <= x && x <= x_range.maximum {
+            cursors.push(ResolvedRasterCursor {
+                cursor_id: cursor.id.get(),
+                label: cursor.label.clone(),
+                x,
+            });
+        }
+    }
 
     Ok(ResolvedCartesianLineScene {
         document_id: document.id(),
@@ -667,6 +751,7 @@ pub fn resolve_cartesian_line_scene(
         x_range,
         y_range,
         traces,
+        cursors,
     })
 }
 
@@ -743,6 +828,27 @@ pub fn rasterize_cartesian_line_scene(
             canvas.line(x0, y0, x1, y1, color);
         }
     }
+    for cursor in &scene.cursors {
+        let (x0, y0) = map_point(
+            ResolvedRasterPoint {
+                x: cursor.x,
+                y: scene.y_range.minimum,
+            },
+            scene.x_range,
+            scene.y_range,
+            plot,
+        )?;
+        let (x1, y1) = map_point(
+            ResolvedRasterPoint {
+                x: cursor.x,
+                y: scene.y_range.maximum,
+            },
+            scene.x_range,
+            scene.y_range,
+            plot,
+        )?;
+        canvas.line(x0, y0, x1, y1, profile.palette.axes);
+    }
 
     let png = encode_rgb8_png(profile.pixel_width, profile.pixel_height, canvas.pixels())?;
     let artifact = FrozenReportArtifact::new(VISUALIZATION_RASTER_MEDIA_TYPE, png)
@@ -779,36 +885,13 @@ fn reject_unsupported_overlays(
     document: &VisualizationDocument,
     pane_id: PaneId,
 ) -> Result<(), VisualizationRasterError> {
-    for (kind, present) in [
-        (
-            "cursor",
-            document
-                .cursors()
-                .iter()
-                .any(|item| item.pane_id == pane_id),
-        ),
-        (
-            "marker",
-            document
-                .markers()
-                .iter()
-                .any(|item| item.pane_id == pane_id),
-        ),
-        (
-            "measurement",
-            document
-                .measurements()
-                .iter()
-                .any(|item| item.pane_id == pane_id),
-        ),
-        (
-            "annotation",
-            document
-                .annotations()
-                .iter()
-                .any(|item| item.pane_id == pane_id),
-        ),
-    ] {
+    for (kind, present) in [(
+        "measurement",
+        document
+            .measurements()
+            .iter()
+            .any(|item| item.pane_id == pane_id),
+    )] {
         if present {
             return Err(VisualizationRasterError::UnsupportedOverlay(kind));
         }
@@ -1333,7 +1416,7 @@ mod tests {
     use crate::product::{DatasetBinding, DatasetId};
     use crate::results::report_document::ReportReferenceSnapshot;
     use crate::results::visualization_document::{
-        DocumentEdit, EntityRef, NewAxis, NewTrace, SourceColumn, SourceRow,
+        DocumentEdit, EntityRef, NewAxis, NewTrace, QueryCoordinate, SourceColumn, SourceRow,
     };
 
     struct Fixture {
@@ -1419,6 +1502,7 @@ mod tests {
                     binding,
                     signal_key: "out".to_owned(),
                     coordinate_key: "time".to_owned(),
+                    row_predicates: Vec::new(),
                     x_axis_id,
                     y_axis_id,
                     label: "V(out)".to_owned(),
@@ -1478,6 +1562,184 @@ mod tests {
             reference.content_digest
         );
         assert_eq!(first.metadata().dataset_bindings, vec![fixture.binding]);
+    }
+
+    #[test]
+    fn retained_horizontal_cursor_is_resolved_and_rasterized_deterministically() {
+        let mut fixture = fixture(ValueType::Real, AxisScale::Linear);
+        let without_cursor = render_visualization_report_figure(
+            &fixture.document,
+            &reference(&fixture),
+            fixture.page_id,
+            fixture.pane_id,
+            &VisualizationRasterProfile::default(),
+        )
+        .unwrap();
+        let x_axis_id = fixture
+            .document
+            .axes()
+            .iter()
+            .find(|axis| {
+                axis.pane_id == fixture.pane_id && axis.orientation == AxisOrientation::Horizontal
+            })
+            .unwrap()
+            .id;
+        fixture
+            .document
+            .transact(
+                fixture.document.revision(),
+                vec![DocumentEdit::AddCursor {
+                    pane_id: fixture.pane_id,
+                    axis_id: x_axis_id,
+                    position: TypedValue::Real(1.5),
+                    label: "A".to_owned(),
+                }],
+            )
+            .unwrap();
+        let reference = reference(&fixture);
+        let scene = resolve_cartesian_line_scene(
+            &fixture.document,
+            &reference,
+            fixture.page_id,
+            fixture.pane_id,
+        )
+        .unwrap();
+        assert_eq!(scene.cursors().len(), 1);
+        assert_eq!(scene.cursors()[0].label(), "A");
+        assert_eq!(scene.cursors()[0].x().to_bits(), 1.5f64.to_bits());
+
+        let first =
+            rasterize_cartesian_line_scene(&scene, &VisualizationRasterProfile::default()).unwrap();
+        let second =
+            rasterize_cartesian_line_scene(&scene, &VisualizationRasterProfile::default()).unwrap();
+        assert_eq!(first.artifact().payload(), second.artifact().payload());
+        assert_ne!(
+            first.artifact().payload(),
+            without_cursor.artifact().payload()
+        );
+    }
+
+    #[test]
+    fn long_form_trace_predicates_resolve_only_their_exact_source_rows() {
+        let binding = DatasetBinding::new(DatasetId::new(), ContentDigest::from_bytes([0x91; 32]));
+        let dataset = SourceDataset::new(
+            binding,
+            vec![
+                SourceColumn::new(
+                    "trace-index",
+                    "Trace index",
+                    ValueType::Integer,
+                    ColumnRole::Coordinate,
+                    None,
+                )
+                .unwrap(),
+                SourceColumn::new("x", "X", ValueType::Real, ColumnRole::Coordinate, None).unwrap(),
+                SourceColumn::new("y", "Y", ValueType::Real, ColumnRole::Signal, None).unwrap(),
+            ],
+            vec![
+                SourceRow::new(vec![
+                    TypedValue::Integer(0),
+                    TypedValue::Real(0.0),
+                    TypedValue::Real(1.0),
+                ]),
+                SourceRow::new(vec![
+                    TypedValue::Integer(1),
+                    TypedValue::Real(10.0),
+                    TypedValue::Real(100.0),
+                ]),
+                SourceRow::new(vec![
+                    TypedValue::Integer(0),
+                    TypedValue::Real(1.0),
+                    TypedValue::Real(2.0),
+                ]),
+                SourceRow::new(vec![
+                    TypedValue::Integer(1),
+                    TypedValue::Real(20.0),
+                    TypedValue::Real(200.0),
+                ]),
+            ],
+        )
+        .unwrap();
+        let mut document = VisualizationDocument::new("Long form", vec![dataset]).unwrap();
+        let page_id = document.pages()[0].id;
+        let pane_id = document.panes()[0].id;
+        let axes = document
+            .transact(
+                document.revision(),
+                vec![
+                    DocumentEdit::AddAxis(NewAxis {
+                        pane_id,
+                        label: "X".to_owned(),
+                        orientation: AxisOrientation::Horizontal,
+                        scale: AxisScale::Linear,
+                        unit: None,
+                        range: None,
+                    }),
+                    DocumentEdit::AddAxis(NewAxis {
+                        pane_id,
+                        label: "Y".to_owned(),
+                        orientation: AxisOrientation::VerticalLeft,
+                        scale: AxisScale::Linear,
+                        unit: None,
+                        range: None,
+                    }),
+                ],
+            )
+            .unwrap();
+        let x_axis_id = match axes.created[0] {
+            EntityRef::Axis(id) => id,
+            _ => unreachable!(),
+        };
+        let y_axis_id = match axes.created[1] {
+            EntityRef::Axis(id) => id,
+            _ => unreachable!(),
+        };
+        for (index, label) in [(0, "A"), (1, "B")] {
+            document
+                .transact(
+                    document.revision(),
+                    vec![DocumentEdit::AddTrace(NewTrace {
+                        pane_id,
+                        binding,
+                        signal_key: "y".to_owned(),
+                        coordinate_key: "x".to_owned(),
+                        row_predicates: vec![QueryCoordinate {
+                            column: "trace-index".to_owned(),
+                            value: TypedValue::Integer(index),
+                        }],
+                        x_axis_id,
+                        y_axis_id,
+                        label: label.to_owned(),
+                    })],
+                )
+                .unwrap();
+        }
+        let reference = ReportReferenceSnapshot::new(
+            ReportSourceId::VisualizationDocument {
+                document_id: document.id(),
+            },
+            Some(document.revision()),
+            visualization_document_content_digest(&document).unwrap(),
+            vec![binding],
+        )
+        .unwrap();
+
+        let scene = resolve_cartesian_line_scene(&document, &reference, page_id, pane_id).unwrap();
+        assert_eq!(scene.traces.len(), 2);
+        assert_eq!(
+            scene.traces[0].points,
+            vec![
+                ResolvedRasterPoint { x: 0.0, y: 1.0 },
+                ResolvedRasterPoint { x: 1.0, y: 2.0 },
+            ]
+        );
+        assert_eq!(
+            scene.traces[1].points,
+            vec![
+                ResolvedRasterPoint { x: 10.0, y: 100.0 },
+                ResolvedRasterPoint { x: 20.0, y: 200.0 },
+            ]
+        );
     }
 
     #[test]

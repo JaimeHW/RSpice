@@ -1207,6 +1207,46 @@ fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence
 }
 
 #[test]
+fn project_results_round_trip_sparameter_reference_impedance_authority() {
+    let metadata = AnalysisResultFamilyMetadata::SParameter {
+        reference_impedances_ohm: vec![75.0, 100.0],
+    };
+    let mut run = SimulationRun::new(1);
+    run.mark_running().expect("fixture run starts");
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .expect("fixture run completes");
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::SParameter, "SP")
+            .with_waveforms(vec![
+                WaveformData::new("S11", vec![1.0e6, 1.0e9], vec![0.25, 0.5], "#00aaff")
+                    .with_complex_components("S11", vec![0.25, 0.5], vec![-0.1, -0.2]),
+            ])
+            .with_family_metadata(metadata.clone()),
+    );
+    seal_legacy_unattributed(&mut run);
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run];
+    simulation.active_run_idx = Some(0);
+    simulation.active_analysis_idx = Some(0);
+
+    let persisted = ProjectSimulationResults::from_state(&simulation);
+    let json = serde_json::to_string(&persisted).expect("S-parameter results serialize");
+    let restored: ProjectSimulationResults =
+        serde_json::from_str(&json).expect("S-parameter results deserialize");
+    restored.validate().expect("S-parameter result validates");
+    let restored = restored
+        .into_simulation_state()
+        .expect("S-parameter result restores");
+
+    assert_eq!(
+        restored
+            .active_analysis()
+            .and_then(|analysis| analysis.family_metadata.as_ref()),
+        Some(&metadata)
+    );
+}
+
+#[test]
 fn retained_result_data_digests_round_trip_and_reject_sample_tampering() {
     let mut run = SimulationRun::new(2);
     run.mark_running().expect("fixture run starts");

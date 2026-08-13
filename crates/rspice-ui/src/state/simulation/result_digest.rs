@@ -809,6 +809,12 @@ fn encode_family_metadata(
                 writer.f64(*frequency)
             });
         }
+        AnalysisResultFamilyMetadata::SParameter {
+            reference_impedances_ohm,
+        } => {
+            writer.u8(7);
+            writer.f64_slice(reference_impedances_ohm);
+        }
     }
 }
 

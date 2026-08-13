@@ -457,6 +457,21 @@ pub(super) fn canonical_marker_semantics(
     }
 }
 
+pub(super) fn canonical_cursor_semantics(
+    scene: &ResolvedCartesianLineScene,
+    cursor: &crate::results::visualization_raster::ResolvedRasterCursor,
+) -> Option<SemanticPlotCursor> {
+    let start = semantic_position_in_scene(scene, cursor.x(), scene.y_range().minimum).ok()?;
+    let end = semantic_position_in_scene(scene, cursor.x(), scene.y_range().maximum).ok()?;
+    Some(SemanticPlotCursor {
+        cursor_id: cursor.cursor_id(),
+        label: cursor.label().to_owned(),
+        source_x_bits: cursor.x().to_bits(),
+        start,
+        end,
+    })
+}
+
 pub(super) fn canonical_annotation_semantics(
     scene: &ResolvedCartesianLineScene,
     annotation: &crate::results::visualization_document::Annotation,

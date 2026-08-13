@@ -12,9 +12,6 @@
 
 use num_complex::Complex64;
 
-/// Default reference impedance in ohms.
-pub const Z0_DEFAULT: f64 = 50.0;
-
 /// One S-parameter sample: a frequency and the complex value there.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SParamPoint {
@@ -33,6 +30,9 @@ pub struct SParamTrace {
     pub points: Vec<SParamPoint>,
     /// Whether the viewer draws this trace and lists it in the legend.
     pub visible: bool,
+    /// Reference impedance for a physical reflection trace. Transmission and
+    /// mixed-mode loci deliberately carry none and cannot claim Z or VSWR.
+    pub reference_impedance_ohm: Option<f64>,
 }
 
 impl SParamTrace {
@@ -42,6 +42,7 @@ impl SParamTrace {
             name: name.to_string(),
             points: Vec::new(),
             visible: true,
+            reference_impedance_ohm: None,
         }
     }
 }
@@ -49,18 +50,13 @@ impl SParamTrace {
 /// Smith chart viewer state.
 #[derive(Debug, Clone)]
 pub struct SmithChartState {
-    /// Reference impedance (default 50Ω)
-    pub z0: f64,
     /// S-parameter traces
     pub traces: Vec<SParamTrace>,
 }
 
 impl Default for SmithChartState {
     fn default() -> Self {
-        Self {
-            z0: Z0_DEFAULT,
-            traces: Vec::new(),
-        }
+        Self { traces: Vec::new() }
     }
 }
 
@@ -72,21 +68,51 @@ impl SmithChartState {
 
     /// Append a trace from a run's S-parameter arrays.
     ///
-    /// The three arrays are zipped to the shortest of them rather than
-    /// asserted equal: a truncated result should draw what it has instead of
-    /// panicking inside the viewer.
+    /// Malformed arrays fail closed. A viewer must never turn truncated or
+    /// non-finite retained evidence into a plausible-looking RF locus.
     pub fn load_sparam_data(
         &mut self,
         name: &str,
         frequencies: &[f64],
         s_real: &[f64],
         s_imag: &[f64],
-    ) {
-        let mut trace = SParamTrace::new(name);
-        let n = frequencies.len().min(s_real.len()).min(s_imag.len());
-        trace.points.reserve(n);
+        reference_impedance_ohm: Option<f64>,
+    ) -> Result<(), String> {
+        if name.trim().is_empty() || name.chars().any(char::is_control) {
+            return Err("Smith trace name must be non-empty and printable".to_owned());
+        }
+        if frequencies.is_empty()
+            || frequencies.len() != s_real.len()
+            || frequencies.len() != s_imag.len()
+        {
+            return Err(
+                "Smith frequency, real, and imaginary arrays must be non-empty and equal length"
+                    .to_owned(),
+            );
+        }
+        if frequencies
+            .iter()
+            .any(|frequency| !frequency.is_finite() || *frequency <= 0.0)
+            || !frequencies.windows(2).all(|pair| pair[0] < pair[1])
+        {
+            return Err(
+                "Smith frequencies must be finite, positive, and strictly increasing".to_owned(),
+            );
+        }
+        if s_real.iter().chain(s_imag).any(|value| !value.is_finite()) {
+            return Err("Smith coefficients must be finite".to_owned());
+        }
+        if reference_impedance_ohm
+            .is_some_and(|impedance| !impedance.is_finite() || impedance <= 0.0)
+        {
+            return Err("Smith reference impedance must be finite and positive".to_owned());
+        }
 
-        for i in 0..n {
+        let mut trace = SParamTrace::new(name);
+        trace.reference_impedance_ohm = reference_impedance_ohm;
+        trace.points.reserve(frequencies.len());
+
+        for i in 0..frequencies.len() {
             trace.points.push(SParamPoint {
                 frequency: frequencies[i],
                 s: Complex64::new(s_real[i], s_imag[i]),
@@ -94,5 +120,31 @@ impl SmithChartState {
         }
 
         self.traces.push(trace);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_arrays_are_rejected_without_partial_trace() {
+        let mut state = SmithChartState::default();
+        assert!(
+            state
+                .load_sparam_data("S11", &[1.0, 2.0], &[0.25], &[0.0, 0.1], Some(75.0))
+                .is_err()
+        );
+        assert!(state.traces.is_empty());
+    }
+
+    #[test]
+    fn retained_reference_impedance_belongs_to_the_exact_trace() {
+        let mut state = SmithChartState::default();
+        state
+            .load_sparam_data("S22", &[1.0], &[0.2], &[-0.1], Some(75.0))
+            .expect("valid reflection trace");
+        assert_eq!(state.traces[0].reference_impedance_ohm, Some(75.0));
     }
 }

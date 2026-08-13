@@ -805,6 +805,17 @@ fn family_values_label(family: &AnalysisResultFamilyMetadata) -> String {
                 |carrier| format!("{quantity} / {} carrier", format_frequency(carrier)),
             )
         }
+        AnalysisResultFamilyMetadata::SParameter {
+            reference_impedances_ohm,
+        } => format!(
+            "{}-port S-parameter references ({})",
+            reference_impedances_ohm.len(),
+            reference_impedances_ohm
+                .iter()
+                .map(|value| format!("{value} ohm"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
     }
 }
 

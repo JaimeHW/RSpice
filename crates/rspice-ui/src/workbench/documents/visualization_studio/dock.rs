@@ -409,6 +409,38 @@ fn trace_manager_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
             .visualization_studio
             .draft_trace_visibility
             .clone();
+        if let Some(document_id) = active_project_visualization_document_id(&app.state) {
+            let active_pane = app.state.workbench.visualization_studio.active_pane;
+            let edits = app
+                .state
+                .workspace
+                .visualization_document(document_id)
+                .map(|document| {
+                    document
+                        .traces()
+                        .iter()
+                        .filter(|trace| active_pane == Some(trace.pane_id.get()))
+                        .filter_map(|trace| {
+                            visibility
+                                .iter()
+                                .find(|(name, _)| name == &trace.label)
+                                .filter(|(_, visible)| *visible != trace.visible)
+                                .map(|(_, visible)| DocumentEdit::SetTraceVisibility {
+                                    trace_id: trace.id,
+                                    visible: *visible,
+                                })
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if !edits.is_empty() {
+                match transact_active_project_document(app, edits) {
+                    Ok(_) => reconcile_document(app),
+                    Err(error) => app.state.push_user_message(ConsoleMessage::error(error)),
+                }
+            }
+            return true;
+        }
         if let Some((dataset_id, analysis_id)) = dataset_id.zip(analysis_id)
             && let Some(analysis) = app
                 .state
@@ -441,10 +473,19 @@ fn cursor_manager_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
         "RESULTS · EXACT VALUES",
         "Manage linked cursors, source-sample markers, and exact-value behavior.",
     );
-    ui.checkbox(
-        &mut app.state.ui.results.linked_cursors,
+    let canonical = active_project_visualization_document_id(&app.state).is_some();
+    let mut linked_cursors = app.state.ui.results.linked_cursors;
+    let link_response = ui.checkbox(
+        &mut linked_cursors,
         "Link A/B cursors across compatible panes",
     );
+    if link_response.changed() {
+        if canonical {
+            set_active_project_cursor_links(app, linked_cursors);
+        } else {
+            app.state.ui.results.linked_cursors = linked_cursors;
+        }
+    }
     property_row(
         ui,
         "Cursor A",
@@ -473,14 +514,39 @@ fn cursor_manager_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
             add_marker_at_midpoint(app);
         }
         if Button::new("Clear cursors").show(ui).clicked() {
-            app.state.ui.results.clear_cursors();
+            if canonical {
+                if let Some(pane_id) = app.state.workbench.visualization_studio.active_pane {
+                    commit_active_project_cursor_pair(app, pane_id, (None, None));
+                }
+            } else {
+                app.state.ui.results.clear_cursors();
+            }
         }
         if Button::new("Clear markers").show(ui).clicked() {
-            let result = app.state.workbench.visualization_studio.transact(|studio| {
-                studio.markers.clear();
-                Ok(())
-            });
-            report_visualization_commit(app, result);
+            if let Some(document_id) = active_project_visualization_document_id(&app.state) {
+                let has_markers = app
+                    .state
+                    .workspace
+                    .visualization_document(document_id)
+                    .is_some_and(|document| !document.markers().is_empty());
+                if has_markers {
+                    match transact_active_project_document(
+                        app,
+                        vec![DocumentEdit::ClearMarkers { pane_id: None }],
+                    ) {
+                        Ok(_) => reconcile_document(app),
+                        Err(error) => {
+                            app.state.push_user_message(ConsoleMessage::error(error));
+                        }
+                    }
+                }
+            } else {
+                let result = app.state.workbench.visualization_studio.transact(|studio| {
+                    studio.markers.clear();
+                    Ok(())
+                });
+                report_visualization_commit(app, result);
+            }
         }
     });
     Button::new("Done").show(ui).clicked()
@@ -492,7 +558,17 @@ fn properties_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
         "RESULT DOCUMENT · PRESENTATION POLICY",
         "Edit the current worksheet's retained display properties.",
     );
-    let current_significant_digits = app.state.workbench.visualization_studio.significant_digits;
+    let active_document = active_project_visualization_document_id(&app.state);
+    let document_policy = active_document.and_then(|document_id| {
+        app.state
+            .workspace
+            .visualization_document(document_id)
+            .map(|document| document.presentation())
+    });
+    let current_significant_digits = document_policy.map_or(
+        app.state.workbench.visualization_studio.significant_digits,
+        |policy| policy.significant_digits,
+    );
     let significant_digits = app
         .state
         .workbench
@@ -502,7 +578,10 @@ fn properties_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
     ui.add(egui::Slider::new(significant_digits, 3..=17).text("Significant digits"));
     property_row(ui, "Engineering grid", "Renderer-managed major grid");
     property_row(ui, "Legend placement", "Inside plot · compact");
-    let current_phase_continuous = app.state.ui.results.phase_continuous;
+    let current_phase_continuous = document_policy
+        .map_or(app.state.ui.results.phase_continuous, |policy| {
+            policy.phase_continuous
+        });
     let phase_continuous = app
         .state
         .workbench
@@ -522,19 +601,41 @@ fn properties_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
             .workbench
             .visualization_studio
             .draft_phase_continuous;
-        let result = app.state.workbench.visualization_studio.transact(|studio| {
-            if let Some(significant_digits) = significant_digits {
-                studio.significant_digits = significant_digits;
-            }
-            Ok(())
-        });
-        if report_visualization_commit(app, result)
-            && let Some(phase_continuous) = phase_continuous
-        {
-            app.state.ui.results.phase_continuous = phase_continuous;
-        }
+        let significant_digits = significant_digits.unwrap_or(current_significant_digits);
+        let phase_continuous = phase_continuous.unwrap_or(current_phase_continuous);
+        let result = save_document_properties(app, significant_digits, phase_continuous);
+        report_visualization_commit(app, result);
     }
     save
+}
+
+pub(super) fn save_document_properties(
+    app: &mut RSpiceApp,
+    significant_digits: u8,
+    phase_continuous: bool,
+) -> Result<(), String> {
+    if active_project_visualization_document_id(&app.state).is_some() {
+        transact_active_project_document(
+            app,
+            vec![DocumentEdit::SetPresentation(
+                crate::results::visualization_document::VisualizationPresentationPolicy {
+                    significant_digits,
+                    phase_continuous,
+                },
+            )],
+        )?;
+    } else {
+        app.state
+            .workbench
+            .visualization_studio
+            .transact(|studio| {
+                studio.significant_digits = significant_digits;
+                Ok(())
+            })?;
+    }
+    app.state.ui.results.phase_continuous = phase_continuous;
+    app.state.workbench.visualization_studio.significant_digits = significant_digits;
+    Ok(())
 }
 
 fn reorder_panes_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
@@ -603,6 +704,51 @@ fn reorder_panes_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
             .visualization_studio
             .draft_pane_order
             .clone();
+        if let Some(document_id) = active_project_visualization_document_id(&app.state) {
+            let edits = app
+                .state
+                .workspace
+                .visualization_document(document_id)
+                .map(|document| {
+                    document
+                        .pages()
+                        .iter()
+                        .filter_map(|page| {
+                            let mut current = document
+                                .panes()
+                                .iter()
+                                .filter(|pane| pane.page_id == page.id)
+                                .collect::<Vec<_>>();
+                            current.sort_by_key(|pane| (pane.order, pane.id));
+                            let current = current.iter().map(|pane| pane.id).collect::<Vec<_>>();
+                            let desired = order
+                                .iter()
+                                .filter_map(|pane_id| {
+                                    document
+                                        .panes()
+                                        .iter()
+                                        .find(|pane| {
+                                            pane.id.get() == *pane_id && pane.page_id == page.id
+                                        })
+                                        .map(|pane| pane.id)
+                                })
+                                .collect::<Vec<_>>();
+                            (desired != current).then_some(DocumentEdit::ReorderPagePanes {
+                                page_id: page.id,
+                                pane_ids: desired,
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if !edits.is_empty() {
+                match transact_active_project_document(app, edits) {
+                    Ok(_) => reconcile_document(app),
+                    Err(error) => app.state.push_user_message(ConsoleMessage::error(error)),
+                }
+            }
+            return true;
+        }
         let result = app.state.workbench.visualization_studio.transact(|studio| {
             studio.panes.sort_by_key(|pane| {
                 order
@@ -655,17 +801,142 @@ fn link_groups_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
                 .range(0..=999),
         );
     });
-    ui.horizontal(|ui| {
-        ui.label("Cursor group");
-        ui.add(
-            egui::DragValue::new(&mut app.state.workbench.visualization_studio.draft_cursor_group)
-                .range(0..=999),
+    let canonical = active_project_visualization_document_id(&app.state).is_some();
+    if canonical {
+        property_row(
+            ui,
+            "Retained A/B links",
+            if app.state.ui.results.linked_cursors {
+                "linked"
+            } else {
+                "independent"
+            },
         );
-    });
+        let (link, unlink) = ui
+            .horizontal_wrapped(|ui| {
+                (
+                    Button::new("Link matching A/B cursors").show(ui).clicked(),
+                    Button::new("Unlink A/B cursors").show(ui).clicked(),
+                )
+            })
+            .inner;
+        if link {
+            set_active_project_cursor_links(app, true);
+        } else if unlink {
+            set_active_project_cursor_links(app, false);
+        }
+    } else {
+        ui.horizontal(|ui| {
+            ui.label("Cursor group");
+            ui.add(
+                egui::DragValue::new(
+                    &mut app.state.workbench.visualization_studio.draft_cursor_group,
+                )
+                .range(0..=999),
+            );
+        });
+    }
     let apply = Button::new("Save link groups").accent().show(ui).clicked();
     if apply {
         let x_link = app.state.workbench.visualization_studio.draft_x_link;
         let cursor_group = app.state.workbench.visualization_studio.draft_cursor_group;
+        if let Some(document_id) = active_project_visualization_document_id(&app.state) {
+            let result = (|| {
+                let document = app
+                    .state
+                    .workspace
+                    .visualization_document(document_id)
+                    .ok_or_else(|| {
+                        "The active result document is no longer retained.".to_owned()
+                    })?;
+                let canonical_pane = document
+                    .panes()
+                    .iter()
+                    .find(|pane| pane.id.get() == pane_id)
+                    .ok_or_else(|| {
+                        "The selected project result pane no longer exists.".to_owned()
+                    })?;
+                let axis = document
+                    .axes()
+                    .iter()
+                    .find(|axis| {
+                        axis.pane_id == canonical_pane.id
+                            && axis.orientation
+                                == crate::results::visualization_document::AxisOrientation::Horizontal
+                    })
+                    .ok_or_else(|| "The selected pane has no horizontal axis to link.".to_owned())?;
+                let target_group = if x_link == 0 {
+                    None
+                } else {
+                    Some(
+                        document
+                            .link_groups()
+                            .iter()
+                            .find(|group| {
+                                group.id.get() == x_link
+                                    && group.kind
+                                        == crate::results::visualization_document::LinkKind::HorizontalViewport
+                            })
+                            .ok_or_else(|| {
+                                format!(
+                                    "Horizontal viewport group {x_link} does not exist. Use an existing group ID shown by another pane."
+                                )
+                            })?,
+                    )
+                };
+                let mut edits = Vec::new();
+                for group in document.link_groups().iter().filter(|group| {
+                    group.kind
+                        == crate::results::visualization_document::LinkKind::HorizontalViewport
+                        && group.members.contains(
+                            &crate::results::visualization_document::EntityRef::Axis(axis.id),
+                        )
+                        && target_group.is_none_or(|target| target.id != group.id)
+                }) {
+                    let members = group
+                        .members
+                        .iter()
+                        .copied()
+                        .filter(|member| {
+                            *member
+                                != crate::results::visualization_document::EntityRef::Axis(axis.id)
+                        })
+                        .collect::<Vec<_>>();
+                    if members.len() < 2 {
+                        edits.push(DocumentEdit::Remove(
+                            crate::results::visualization_document::EntityRef::LinkGroup(group.id),
+                        ));
+                    } else {
+                        edits.push(DocumentEdit::SetLinkMembers {
+                            link_group_id: group.id,
+                            members,
+                        });
+                    }
+                }
+                if let Some(group) = target_group
+                    && !group.members.contains(
+                        &crate::results::visualization_document::EntityRef::Axis(axis.id),
+                    )
+                {
+                    let mut members = group.members.clone();
+                    members.push(crate::results::visualization_document::EntityRef::Axis(
+                        axis.id,
+                    ));
+                    edits.push(DocumentEdit::SetLinkMembers {
+                        link_group_id: group.id,
+                        members,
+                    });
+                }
+                if edits.is_empty() {
+                    return Ok(());
+                }
+                transact_active_project_document(app, edits).map(|_| ())
+            })();
+            if report_visualization_commit(app, result) {
+                reconcile_document(app);
+            }
+            return true;
+        }
         let result = app.state.workbench.visualization_studio.transact(|studio| {
             let pane = studio
                 .panes
@@ -762,6 +1033,41 @@ fn page_editor_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
         .add_enabled(valid, egui::Button::new("Save report document"))
         .clicked();
     if apply {
+        if let Some(document_id) = active_project_visualization_document_id(&app.state) {
+            let canonical_pane = app
+                .state
+                .workspace
+                .visualization_document(document_id)
+                .and_then(|document| {
+                    document
+                        .panes()
+                        .iter()
+                        .find(|pane| pane.id.get() == pane_id)
+                        .map(|pane| pane.id)
+                });
+            let result = canonical_pane
+                .ok_or_else(|| "The selected project result pane no longer exists.".to_owned())
+                .and_then(|pane_id| {
+                    transact_active_project_document(
+                        app,
+                        vec![DocumentEdit::AssignPaneToReportPage {
+                            pane_id,
+                            page_title: page.clone(),
+                            template_id: template.clone(),
+                            update_policy: if freeze {
+                                PageUpdatePolicy::FreezeFigureRevision
+                            } else {
+                                PageUpdatePolicy::RefreshLinkedFigures
+                            },
+                        }],
+                    )
+                    .map(|_| ())
+                });
+            if report_visualization_commit(app, result) {
+                reconcile_document(app);
+            }
+            return true;
+        }
         let result = app.state.workbench.visualization_studio.transact(|studio| {
             let pane = studio
                 .panes
@@ -843,6 +1149,31 @@ fn measurement_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
         let (dataset_id, analysis_sequence, value) =
             evaluation.expect("enabled measurement has a validated scalar result");
         let expression = definition;
+        if active_project_visualization_document_id(&app.state).is_some() {
+            let context = canonical_measurement_trace_ids(&app.state, &expression);
+            match context.and_then(|(pane_id, trace_ids)| {
+                transact_active_project_document(
+                    app,
+                    vec![DocumentEdit::AddScalarMeasurement {
+                        pane_id,
+                        trace_ids,
+                        expression,
+                        value,
+                    }],
+                )
+            }) {
+                Ok(_) => {
+                    app.state
+                        .workbench
+                        .visualization_studio
+                        .draft_measurement
+                        .clear();
+                    reconcile_document(app);
+                }
+                Err(error) => app.state.push_user_message(ConsoleMessage::error(error)),
+            }
+            return true;
+        }
         let result = app.state.workbench.visualization_studio.transact(|studio| {
             let id = studio.allocate_identity().ok_or_else(|| {
                 "Visualization measurement identity space is exhausted".to_owned()
@@ -865,6 +1196,75 @@ fn measurement_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
         }
     }
     add
+}
+
+fn collect_measurement_waveforms(
+    expression: &calculator::ast::CalculatorExpr,
+    signals: &mut Vec<String>,
+) {
+    use calculator::ast::CalculatorExpr;
+    match expression {
+        CalculatorExpr::WaveformRef { signal, .. } => {
+            if !signals.contains(signal) {
+                signals.push(signal.clone());
+            }
+        }
+        CalculatorExpr::BinaryOp { left, right, .. } => {
+            collect_measurement_waveforms(left, signals);
+            collect_measurement_waveforms(right, signals);
+        }
+        CalculatorExpr::UnaryOp { operand, .. } => {
+            collect_measurement_waveforms(operand, signals);
+        }
+        CalculatorExpr::FunctionCall { args, .. } => {
+            for argument in args {
+                collect_measurement_waveforms(argument, signals);
+            }
+        }
+        CalculatorExpr::Number(_) | CalculatorExpr::Constant(_) => {}
+    }
+}
+
+fn canonical_measurement_trace_ids(
+    state: &AppState,
+    expression: &str,
+) -> Result<
+    (
+        crate::results::visualization_document::PaneId,
+        Vec<crate::results::visualization_document::TraceId>,
+    ),
+    String,
+> {
+    let (pane_id, fallback_trace) = active_project_pane_and_trace(state, None)?;
+    let parsed = calculator::parser::try_parse(expression)
+        .map_err(|error| format!("Parse error: {error}"))?;
+    let mut signal_names = Vec::new();
+    collect_measurement_waveforms(&parsed, &mut signal_names);
+    if signal_names.is_empty() {
+        return Ok((pane_id, vec![fallback_trace]));
+    }
+    let document_id = active_project_visualization_document_id(state)
+        .ok_or_else(|| "Open a project-owned result document before measuring it.".to_owned())?;
+    let document = state
+        .workspace
+        .visualization_document(document_id)
+        .ok_or_else(|| "The active result document is no longer retained.".to_owned())?;
+    let trace_ids = signal_names
+        .iter()
+        .map(|signal| {
+            document
+                .traces()
+                .iter()
+                .find(|trace| trace.pane_id == pane_id && trace.label == *signal)
+                .map(|trace| trace.id)
+                .ok_or_else(|| {
+                    format!(
+                        "The active result pane has no canonical trace for expression signal {signal:?}."
+                    )
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((pane_id, trace_ids))
 }
 
 pub(super) fn evaluate_scalar_measurement(
@@ -940,7 +1340,7 @@ fn annotation_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
         .add_enabled(valid, egui::Button::new("Create annotation"))
         .clicked();
     if add {
-        let (dataset_id, analysis_sequence, _, _, x, _) =
+        let (dataset_id, analysis_sequence, waveform_name, _, x, _) =
             anchor.expect("enabled annotation has an exact anchor");
         let text = app
             .state
@@ -949,6 +1349,33 @@ fn annotation_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
             .draft_annotation
             .trim()
             .to_owned();
+        if active_project_visualization_document_id(&app.state).is_some() {
+            let context = active_project_pane_and_trace(&app.state, Some(&waveform_name));
+            match context.and_then(|(pane_id, trace_id)| {
+                transact_active_project_document(
+                    app,
+                    vec![DocumentEdit::AddAnnotation {
+                        pane_id,
+                        anchor: crate::results::visualization_document::AnnotationAnchor::Trace {
+                            trace_id,
+                            coordinate: TypedValue::Real(x),
+                        },
+                        text,
+                    }],
+                )
+            }) {
+                Ok(_) => {
+                    app.state
+                        .workbench
+                        .visualization_studio
+                        .draft_annotation
+                        .clear();
+                    reconcile_document(app);
+                }
+                Err(error) => app.state.push_user_message(ConsoleMessage::error(error)),
+            }
+            return true;
+        }
         let result = app.state.workbench.visualization_studio.transact(|studio| {
             let id = studio
                 .allocate_identity()
@@ -1245,15 +1672,7 @@ fn comparison_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
             let rows = execution.receipt.rows_compared;
             let disposition = execution.receipt.disposition;
             let difference_count = execution.difference_traces.len();
-            let result = app
-                .state
-                .workbench
-                .visualization_studio
-                .transact(move |studio| {
-                    studio.comparison_receipts.push(execution.receipt);
-                    retain_difference_trace_sets(studio, execution.difference_traces)?;
-                    Ok(())
-                });
+            let result = commit_comparison_execution(app, execution);
             if report_visualization_commit(app, result) {
                 app.state.push_user_message(ConsoleMessage::info(format!(
                     "Recorded comparison receipt for {rows} row(s) and {difference_count} retained difference trace set(s): {disposition:?}."
@@ -1267,6 +1686,85 @@ fn comparison_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
             false
         }
     }
+}
+
+pub(super) fn commit_comparison_execution(
+    app: &mut RSpiceApp,
+    execution: ComparisonDraftExecution,
+) -> Result<(), String> {
+    let mut projected_studio = app.state.workbench.visualization_studio.clone();
+    projected_studio.transact(|studio| {
+        retain_difference_trace_sets(studio, execution.difference_traces.clone())
+    })?;
+
+    if active_project_visualization_document_id(&app.state).is_some() {
+        let mut edits = comparison_source_projection_edits(app, &execution.receipt)?;
+        edits.push(DocumentEdit::RecordComparison(execution.receipt));
+        transact_active_project_document(app, edits)?;
+        reconcile_document(app);
+        let studio = &mut app.state.workbench.visualization_studio;
+        studio.difference_trace_sets = projected_studio.difference_trace_sets;
+        studio.next_identity = studio.next_identity.max(projected_studio.next_identity);
+        studio.normalize();
+        return Ok(());
+    }
+
+    app.state
+        .workbench
+        .visualization_studio
+        .transact(move |studio| {
+            studio.comparison_receipts.push(execution.receipt);
+            retain_difference_trace_sets(studio, execution.difference_traces)
+        })
+}
+
+fn comparison_source_projection_edits(
+    app: &RSpiceApp,
+    receipt: &ComparisonReceipt,
+) -> Result<Vec<DocumentEdit>, String> {
+    let document_id = active_project_visualization_document_id(&app.state).ok_or_else(|| {
+        "Open a project-owned result document before recording a comparison.".to_owned()
+    })?;
+    let document = app
+        .state
+        .workspace
+        .visualization_document(document_id)
+        .ok_or_else(|| "The active result document is no longer retained.".to_owned())?;
+    let candidate_analysis = app
+        .state
+        .simulation
+        .active_analysis()
+        .ok_or_else(|| "No candidate analysis is selected.".to_owned())?;
+    let mut edits = Vec::new();
+    let mut seen = HashSet::new();
+    for binding in [receipt.baseline, receipt.candidate] {
+        if !seen.insert(binding.dataset_id) {
+            continue;
+        }
+        let run = app
+            .state
+            .simulation
+            .runs
+            .iter()
+            .find(|run| run.dataset_id == binding.dataset_id)
+            .ok_or_else(|| "A comparison source dataset is no longer retained.".to_owned())?;
+        if run.dataset_content_digest() != binding.content_digest {
+            return Err("A comparison source changed after the receipt was calculated.".to_owned());
+        }
+        let analysis = matching_comparison_analysis(candidate_analysis, run)
+            .ok_or_else(|| "A comparison source analysis is no longer retained.".to_owned())?;
+        let source = result_document::visualization_source_dataset(run, analysis)?;
+        let already_attached = document
+            .datasets()
+            .iter()
+            .any(|dataset| dataset.binding().dataset_id == binding.dataset_id);
+        edits.push(if already_attached {
+            DocumentEdit::MergeDatasetProjection(source)
+        } else {
+            DocumentEdit::AttachDataset(source)
+        });
+    }
+    Ok(edits)
 }
 
 fn matching_comparison_analysis<'a>(
@@ -2791,13 +3289,39 @@ fn apply_family_policy_draft(app: &mut RSpiceApp) {
                     .to_owned(),
             );
         }
-        app.state
-            .workbench
-            .visualization_studio
-            .transact(move |studio| {
-                studio.family_policies.insert(pane_id, policy);
-                Ok(())
-            })?;
+        if active_project_visualization_document_id(&app.state).is_some() {
+            let canonical_pane = app
+                .state
+                .workspace
+                .visualization_document(
+                    active_project_visualization_document_id(&app.state)
+                        .expect("canonical branch has an active document"),
+                )
+                .and_then(|document| {
+                    document
+                        .panes()
+                        .iter()
+                        .find(|pane| pane.id.get() == pane_id)
+                        .map(|pane| pane.id)
+                })
+                .ok_or_else(|| "The active project result pane no longer exists.".to_owned())?;
+            transact_active_project_document(
+                app,
+                vec![DocumentEdit::SetPaneFamilyPresentation {
+                    pane_id: canonical_pane,
+                    policy: Some(policy),
+                }],
+            )?;
+            reconcile_document(app);
+        } else {
+            app.state
+                .workbench
+                .visualization_studio
+                .transact(move |studio| {
+                    studio.family_policies.insert(pane_id, policy);
+                    Ok(())
+                })?;
+        }
         Ok::<_, String>(indices.len())
     })();
     match result {
@@ -2814,26 +3338,38 @@ fn export_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
         "RESULTS · EXACT DATA OR RENDERED VIEW",
         "Choose a writer backed by the active immutable result dataset or viewer crop.",
     );
-    let enabled = app.state.simulation.has_results();
+    let exact_enabled = active_studio_exact_export_available(&app.state);
+    let figure_enabled = active_studio_figure_export_available(&app.state);
     let mut close = false;
     if ui
-        .add_enabled(enabled, egui::Button::new("Export exact engineering data…"))
+        .add_enabled(
+            exact_enabled,
+            egui::Button::new("Export exact engineering data…"),
+        )
         .clicked()
     {
         app.state.ui.export_csv_requested = true;
         close = true;
     }
     if ui
-        .add_enabled(enabled, egui::Button::new("Export active viewer figure…"))
+        .add_enabled(
+            figure_enabled,
+            egui::Button::new("Export active viewer figure…"),
+        )
         .clicked()
     {
         app.state.ui.export_figure_requested = true;
         close = true;
     }
-    if !enabled {
+    if !exact_enabled {
         empty_note(
             ui,
             "A completed immutable result is required before export.",
+        );
+    } else if !figure_enabled {
+        empty_note(
+            ui,
+            "Exact data export is available. This viewer has no semantic figure writer yet.",
         );
     }
     close

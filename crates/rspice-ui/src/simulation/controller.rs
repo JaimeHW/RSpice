@@ -1727,6 +1727,7 @@ impl SimulationController {
                             format!("{} \u{00b7} {}", analysis_result.label, point.label());
                     }
                     self.retain_periodic_noise_result_metadata(&mut analysis_result);
+                    self.retain_sparameter_result_metadata(&mut analysis_result);
                     if let Some(AnalysisResultPayload::OperatingPoint {
                         effective_source_content_digest,
                         ..

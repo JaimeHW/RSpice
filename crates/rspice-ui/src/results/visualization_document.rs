@@ -54,6 +54,8 @@ pub const MAX_VISUALIZATION_PANES: usize = 256;
 pub const MAX_VISUALIZATION_AXES: usize = 512;
 /// Maximum number of traces in one visualization document.
 pub const MAX_VISUALIZATION_TRACES: usize = 4_096;
+/// Maximum exact source-row predicates carried by one trace.
+pub const MAX_TRACE_ROW_PREDICATES: usize = 16;
 /// Maximum number of cursors in one visualization document.
 pub const MAX_VISUALIZATION_CURSORS: usize = 4_096;
 /// Maximum number of markers in one visualization document.
@@ -556,7 +558,7 @@ impl TypedValue {
         }
     }
 
-    fn exact_eq(&self, other: &Self) -> bool {
+    pub(crate) fn exact_eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Real(left), Self::Real(right)) => left.to_bits() == right.to_bits(),
             (Self::Integer(left), Self::Integer(right)) => left == right,
@@ -1343,6 +1345,10 @@ pub struct Trace {
     pub signal_key: String,
     #[serde(deserialize_with = "deserialize_key_string")]
     pub coordinate_key: String,
+    /// Exact coordinate-column predicates selecting this trace's rows from a
+    /// lossless long-form source dataset.
+    #[serde(default, deserialize_with = "deserialize_trace_row_predicates")]
+    pub row_predicates: Vec<QueryCoordinate>,
     pub x_axis_id: AxisId,
     pub y_axis_id: AxisId,
     #[serde(deserialize_with = "deserialize_label_string")]
@@ -1456,6 +1462,38 @@ pub struct Measurement {
     pub kind: MeasurementKind,
     #[serde(deserialize_with = "deserialize_label_string")]
     pub label: String,
+    /// Authored scalar expression for a retained Studio measurement.
+    #[serde(default, deserialize_with = "deserialize_optional_source_text_string")]
+    pub expression: Option<String>,
+    /// Exact finite result evaluated when the measurement was committed.
+    #[serde(default)]
+    pub value: Option<f64>,
+}
+
+fn deserialize_trace_row_predicates<'de, D>(
+    deserializer: D,
+) -> Result<Vec<QueryCoordinate>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, _, MAX_TRACE_ROW_PREDICATES>(deserializer)
+}
+
+fn deserialize_page_pane_ids<'de, D>(deserializer: D) -> Result<Vec<PaneId>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, _, MAX_VISUALIZATION_PANES>(deserializer)
+}
+
+fn deserialize_optional_source_text_string<'de, D>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<BoundedString<MAX_SOURCE_TEXT_BYTES>>::deserialize(deserializer)
+        .map(|value| value.map(|value| value.0))
 }
 
 impl NestedResourceCount for Measurement {
@@ -1555,6 +1593,42 @@ impl ResultDocumentTracking {
                 field: "visualization-document.tracking",
                 message: "latest tracking requires exact simulation-plan and analysis identities"
                     .to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Project-owned formatting policy shared by interactive rendering and
+/// document export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VisualizationPresentationPolicy {
+    #[serde(default = "default_visualization_significant_digits")]
+    pub significant_digits: u8,
+    #[serde(default)]
+    pub phase_continuous: bool,
+}
+
+const fn default_visualization_significant_digits() -> u8 {
+    7
+}
+
+impl Default for VisualizationPresentationPolicy {
+    fn default() -> Self {
+        Self {
+            significant_digits: default_visualization_significant_digits(),
+            phase_continuous: false,
+        }
+    }
+}
+
+impl VisualizationPresentationPolicy {
+    fn validate(self) -> Result<(), VisualizationError> {
+        if !(3..=17).contains(&self.significant_digits) {
+            return Err(VisualizationError::InvalidValue {
+                field: "visualization-document.presentation.significant-digits",
+                message: "significant digits must be between 3 and 17".to_owned(),
             });
         }
         Ok(())
@@ -1689,6 +1763,7 @@ pub struct VisualizationDocument {
     revision: ObjectRevision,
     title: String,
     tracking: ResultDocumentTracking,
+    presentation: VisualizationPresentationPolicy,
     next_serial: u64,
     datasets: Vec<SourceDataset>,
     pages: Vec<Page>,
@@ -1714,6 +1789,8 @@ struct VisualizationDocumentWire {
     title: String,
     #[serde(default)]
     tracking: ResultDocumentTracking,
+    #[serde(default)]
+    presentation: VisualizationPresentationPolicy,
     next_serial: u64,
     datasets: BoundedSourceDatasets,
     pages: BoundedVec<Page, MAX_VISUALIZATION_PAGES>,
@@ -1757,6 +1834,7 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             revision: wire.revision,
             title: wire.title,
             tracking: wire.tracking,
+            presentation: wire.presentation,
             next_serial: wire.next_serial,
             datasets: wire.datasets.0,
             pages: wire.pages.into_inner(),
@@ -1776,12 +1854,33 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
                 document.migrate_v1_to_v2();
                 document.migrate_v2_to_v3();
                 document.migrate_v3_to_v4();
+                document.migrate_v4_to_v5();
+                document.migrate_v5_to_v6();
+                document.migrate_v6_to_v7();
             }
             2 => {
                 document.migrate_v2_to_v3();
                 document.migrate_v3_to_v4();
+                document.migrate_v4_to_v5();
+                document.migrate_v5_to_v6();
+                document.migrate_v6_to_v7();
             }
-            3 => document.migrate_v3_to_v4(),
+            3 => {
+                document.migrate_v3_to_v4();
+                document.migrate_v4_to_v5();
+                document.migrate_v5_to_v6();
+                document.migrate_v6_to_v7();
+            }
+            4 => {
+                document.migrate_v4_to_v5();
+                document.migrate_v5_to_v6();
+                document.migrate_v6_to_v7();
+            }
+            5 => {
+                document.migrate_v5_to_v6();
+                document.migrate_v6_to_v7();
+            }
+            6 => document.migrate_v6_to_v7(),
             Self::SCHEMA_VERSION => {}
             version => {
                 return Err(serde::de::Error::custom(format!(
@@ -1795,16 +1894,17 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
 }
 
 impl VisualizationDocument {
-    /// Resource hardening does not change the schema-v4 wire vocabulary.
+    /// Schema 7 makes exact long-form sources safely composable when panes
+    /// consume different analyses from the same immutable simulation run.
     ///
-    /// V1 through V4 documents within the published resource limits retain
+    /// V1 through V6 documents within the published resource limits retain
     /// their prior deterministic interpretation. Inputs above those limits
     /// are rejected as unsafe containers; the limits do not reinterpret or
     /// migrate any accepted source value, identity, or presentation entity.
-    /// Unknown extension fields remain ignored for schema-v4 forward
+    /// Unknown extension fields remain ignored for schema-v7 forward
     /// compatibility; introducing required semantics still requires a schema
     /// revision.
-    pub const SCHEMA_VERSION: u16 = 4;
+    pub const SCHEMA_VERSION: u16 = 7;
 
     pub fn new(
         title: impl Into<String>,
@@ -1827,6 +1927,7 @@ impl VisualizationDocument {
             revision: ObjectRevision::INITIAL,
             title,
             tracking: ResultDocumentTracking::pinned(),
+            presentation: VisualizationPresentationPolicy::default(),
             next_serial: 3,
             datasets,
             pages: vec![Page {
@@ -1887,6 +1988,11 @@ impl VisualizationDocument {
     }
 
     #[must_use]
+    pub const fn presentation(&self) -> VisualizationPresentationPolicy {
+        self.presentation
+    }
+
+    #[must_use]
     pub fn datasets(&self) -> &[SourceDataset] {
         &self.datasets
     }
@@ -1929,6 +2035,16 @@ impl VisualizationDocument {
     #[must_use]
     pub fn annotations(&self) -> &[Annotation] {
         &self.annotations
+    }
+
+    #[must_use]
+    pub fn link_groups(&self) -> &[LinkGroup] {
+        &self.link_groups
+    }
+
+    #[must_use]
+    pub fn comparisons(&self) -> &[ComparisonReceipt] {
+        &self.comparisons
     }
 
     #[must_use]
@@ -2118,6 +2234,91 @@ impl VisualizationDocument {
         // therefore had pinned semantics. Migration must not invent plan
         // ownership or silently follow a newer run.
         self.tracking = ResultDocumentTracking::pinned();
+        self.schema_version = 4;
+    }
+
+    fn migrate_v4_to_v5(&mut self) {
+        // Schema 4 had no project-owned document formatting policy. Ignore a
+        // forward field injected into a relabeled older envelope so migration
+        // has one deterministic interpretation.
+        self.presentation = VisualizationPresentationPolicy::default();
+        self.schema_version = 5;
+    }
+
+    fn migrate_v5_to_v6(&mut self) {
+        // Trace row predicates are additive and deserialize to an empty set
+        // for v5 traces, preserving their original column-oriented meaning.
+        self.schema_version = 6;
+    }
+
+    fn migrate_v6_to_v7(&mut self) {
+        for dataset in &mut self.datasets {
+            let is_long_form = ["trace-index", "trace-name", "component", "sample", "x", "y"]
+                .iter()
+                .all(|key| dataset.columns.iter().any(|column| column.key == *key));
+            if !is_long_form
+                || dataset
+                    .columns
+                    .iter()
+                    .any(|column| column.key == "analysis-id")
+            {
+                continue;
+            }
+            let analysis_ids = self
+                .panes
+                .iter()
+                .filter_map(|pane| pane.binding)
+                .filter(|binding| binding.dataset == dataset.binding)
+                .map(|binding| binding.analysis_id)
+                .collect::<HashSet<_>>();
+            if analysis_ids.len() != 1 {
+                // A legacy document that already bound one source table to
+                // multiple analysis identities cannot be disambiguated by a
+                // migration. Preserve its exact old interpretation instead of
+                // inventing row ownership.
+                continue;
+            }
+            if self.traces.iter().any(|trace| {
+                trace.binding == dataset.binding
+                    && trace.row_predicates.len() >= MAX_TRACE_ROW_PREDICATES
+            }) {
+                continue;
+            }
+            let Some(analysis_id) = analysis_ids.into_iter().next() else {
+                continue;
+            };
+            let analysis_id = analysis_id.to_string();
+            let added_text_bytes = dataset.rows.len().checked_mul(analysis_id.len());
+            let retained_text_bytes = dataset.retained_text_bytes().ok();
+            if added_text_bytes
+                .zip(retained_text_bytes)
+                .and_then(|(added, retained)| retained.checked_add(added))
+                .is_none_or(|total| total > MAX_SOURCE_TEXT_BYTES_PER_DATASET)
+            {
+                continue;
+            }
+            dataset.columns.push(SourceColumn {
+                key: "analysis-id".to_owned(),
+                label: "Analysis identity".to_owned(),
+                value_type: ValueType::Text,
+                role: ColumnRole::Coordinate,
+                unit: None,
+            });
+            let analysis_id = TypedValue::Text(analysis_id);
+            for row in &mut dataset.rows {
+                row.values.push(analysis_id.clone());
+            }
+            for trace in self
+                .traces
+                .iter_mut()
+                .filter(|trace| trace.binding == dataset.binding)
+            {
+                trace.row_predicates.push(QueryCoordinate {
+                    column: "analysis-id".to_owned(),
+                    value: analysis_id.clone(),
+                });
+            }
+        }
         self.schema_version = Self::SCHEMA_VERSION;
     }
 }

@@ -910,7 +910,8 @@ impl FamilyManifest {
                 );
                 (indexed_numeric_points("time", time), 0)
             }
-            AnalysisResultFamilyMetadata::PeriodicNoise { .. } => return Ok(None),
+            AnalysisResultFamilyMetadata::PeriodicNoise { .. }
+            | AnalysisResultFamilyMetadata::SParameter { .. } => return Ok(None),
         };
 
         dimensions.push(dimension("status", "Status", None, FamilyValueKind::Status));

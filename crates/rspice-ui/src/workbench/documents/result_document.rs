@@ -56,6 +56,10 @@ pub(crate) fn phase_noise_analysis_is_renderable(analysis: &AnalysisResult) -> b
     phase_noise::phase_noise_is_renderable(analysis)
 }
 
+pub(crate) fn smith_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
+    smith::analysis_is_renderable(analysis)
+}
+
 pub(crate) fn phase_noise_waveform_is_renderable(waveform: &WaveformData) -> bool {
     phase_noise::phase_noise_waveform_is_renderable(waveform)
 }
@@ -92,6 +96,13 @@ pub(crate) fn open_dataset_browser(app: &mut RSpiceApp) {
 /// Open a fresh immutable-dataset-bound result-document transaction.
 pub(crate) fn open_create_document(app: &mut RSpiceApp) {
     create_document::open(app);
+}
+
+pub(crate) fn visualization_source_dataset(
+    run: &crate::state::SimulationRun,
+    analysis: &crate::state::AnalysisResult,
+) -> Result<crate::results::visualization_document::SourceDataset, String> {
+    create_document::source_dataset(run, analysis).map_err(|error| error.to_string())
 }
 
 mod strip;
@@ -483,7 +494,7 @@ impl ResultPlotTool {
 }
 
 /// A viewport gesture on the active sheet, as asked for by a command.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum ViewGesture {
     /// Drop every pinned viewport on the active plot.
     Fit,
@@ -491,6 +502,15 @@ pub(crate) enum ViewGesture {
     ZoomIn,
     /// Double the visible interval about its centre.
     ZoomOut,
+    /// Pin one or both axes to exact data-space intervals.
+    ///
+    /// `None` leaves that axis unchanged. This is queued instead of writing a
+    /// viewport directly so the waveform stack can resolve the active stable
+    /// analysis and unit-pane identity inside its drawing pass.
+    SetRanges {
+        x: Option<(f64, f64)>,
+        y: Option<(f64, f64)>,
+    },
 }
 
 /// Whether a viewer draws through the shared unit-pane waveform stack.
@@ -548,7 +568,7 @@ pub(crate) fn zoom_gesture_available(state: &AppState) -> bool {
 
 /// Apply any queued viewport gesture, now that the sheet's models and theme
 /// tokens exist.
-fn apply_pending_view_gesture(ui: &Ui, state: &mut AppState) {
+pub(crate) fn apply_pending_view_gesture(ui: &Ui, state: &mut AppState) {
     let Some(gesture) = state.ui.results.pending_view_gesture.take() else {
         return;
     };
@@ -556,8 +576,22 @@ fn apply_pending_view_gesture(ui: &Ui, state: &mut AppState) {
     if !viewer_uses_wave_stack(viewer) {
         // Single-canvas viewers keep their views under plot ordinals, and
         // only fit is expressible without their renderer's own extents.
-        if gesture == ViewGesture::Fit {
-            state.ui.results.reset_viewer_plot_views(viewer);
+        match gesture {
+            ViewGesture::Fit => state.ui.results.reset_viewer_plot_views(viewer),
+            ViewGesture::SetRanges { x, y } => {
+                let view = state.ui.results.plot_view_pane_mut_for(
+                    viewer,
+                    PlotPresentationKey::Global(0),
+                    0,
+                );
+                if let Some(x) = x {
+                    view.x = Some(x);
+                }
+                if let Some(y) = y {
+                    view.y = Some(y);
+                }
+            }
+            ViewGesture::ZoomIn | ViewGesture::ZoomOut => {}
         }
         return;
     }
@@ -565,7 +599,28 @@ fn apply_pending_view_gesture(ui: &Ui, state: &mut AppState) {
         ViewGesture::Fit => waves::fit_active_strip(state),
         ViewGesture::ZoomIn => waves::zoom_active_pane(state, &Tokens::get(ui.ctx()), 0.5),
         ViewGesture::ZoomOut => waves::zoom_active_pane(state, &Tokens::get(ui.ctx()), 2.0),
+        ViewGesture::SetRanges { x, y } => {
+            let tokens = Tokens::get(ui.ctx());
+            if let Some(x) = x {
+                waves::set_active_pane_axis_range(&tokens, state, PaneAxis::X, Some(x));
+            }
+            if let Some(y) = y {
+                waves::set_active_pane_axis_range(&tokens, state, PaneAxis::Y, Some(y));
+            }
+        }
     }
+}
+
+fn analysis_presentation_order_key(key: AnalysisPresentationKey) -> (uuid::Uuid, u8, [u8; 16]) {
+    let (kind, source) = match key.source {
+        AnalysisPresentationSource::Prepared(id) => (0, *id.as_uuid().as_bytes()),
+        AnalysisPresentationSource::Legacy(id) => {
+            let mut bytes = [0_u8; 16];
+            bytes[8..].copy_from_slice(&id.to_be_bytes());
+            (1, bytes)
+        }
+    };
+    (key.dataset_id.as_uuid(), kind, source)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -746,6 +801,38 @@ pub(crate) fn restore_log_y_panes(state: &mut AppState, panes: Vec<WavePanePrese
                 .any(|run| pane.analysis.resolve(run).is_some())
         })
         .collect();
+}
+
+/// Restore project-owned expression definitions after their immutable result
+/// datasets have been loaded. Stale groups fail closed instead of attaching
+/// their text to whichever analysis happens to occupy an old ordinal.
+pub(crate) fn restore_expression_groups(
+    state: &mut AppState,
+    groups: Vec<crate::io::ProjectResultExpressionGroup>,
+) {
+    state.ui.results.analysis_exprs.clear();
+    state.ui.results.exprs.clear();
+    state.ui.results.expr_projection_keys.clear();
+    state.ui.results.analysis_expr_cache.clear();
+    state.ui.results.expr_cache.clear();
+    for group in groups {
+        let retained = state
+            .simulation
+            .runs
+            .iter()
+            .any(|run| group.analysis.resolve(run).is_some());
+        if retained && !group.traces.is_empty() {
+            state
+                .ui
+                .results
+                .analysis_exprs
+                .insert(group.analysis, group.traces);
+        }
+    }
+    state
+        .ui
+        .results
+        .reconcile_expression_projection(&state.simulation);
 }
 
 /// A user-placed marker on a waveform strip.
@@ -1182,7 +1269,7 @@ impl SelectedResultTrace {
 }
 
 /// One user expression trace on a waves strip.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExprTrace {
     /// The calculator expression as typed ("V(out)/V(in)").
     pub text: String,
@@ -1422,6 +1509,93 @@ impl ResultsState {
             }
         }
         self.expr_projection_keys.insert(analysis_index, analysis);
+    }
+
+    pub(crate) fn add_expression_trace(
+        &mut self,
+        simulation: &crate::state::SimulationState,
+        analysis_index: usize,
+        text: String,
+    ) -> Result<bool, String> {
+        self.reconcile_expression_projection(simulation);
+        let run = simulation.active_run().ok_or_else(|| {
+            "Select a retained result dataset before plotting an expression.".to_owned()
+        })?;
+        let analysis = run
+            .analyses
+            .get(analysis_index)
+            .ok_or_else(|| "The selected result analysis is no longer retained.".to_owned())?;
+        let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
+        let traces = self.analysis_exprs.entry(key).or_default();
+        if traces.iter().any(|trace| trace.text == text) {
+            self.sync_expression_projection(key, analysis_index);
+            return Ok(false);
+        }
+        traces.push(ExprTrace {
+            text,
+            visible: true,
+        });
+        self.sync_expression_projection(key, analysis_index);
+        Ok(true)
+    }
+
+    pub(crate) fn toggle_expression_visibility(
+        &mut self,
+        simulation: &crate::state::SimulationState,
+        analysis_index: usize,
+        expression_index: usize,
+    ) -> Result<(), String> {
+        self.reconcile_expression_projection(simulation);
+        let run = simulation.active_run().ok_or_else(|| {
+            "The expression's retained dataset is no longer available.".to_owned()
+        })?;
+        let analysis = run.analyses.get(analysis_index).ok_or_else(|| {
+            "The expression's retained analysis is no longer available.".to_owned()
+        })?;
+        let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
+        let trace = self
+            .analysis_exprs
+            .get_mut(&key)
+            .and_then(|traces| traces.get_mut(expression_index))
+            .ok_or_else(|| "The selected expression no longer exists.".to_owned())?;
+        trace.visible = !trace.visible;
+        self.sync_expression_projection(key, analysis_index);
+        Ok(())
+    }
+
+    /// Deterministic project projection of every stable expression trace.
+    pub(crate) fn project_expression_groups(
+        &self,
+        simulation: &crate::state::SimulationState,
+    ) -> Vec<crate::io::ProjectResultExpressionGroup> {
+        let mut stable = self.analysis_exprs.clone();
+        if let Some(run) = simulation.active_run() {
+            for (analysis_index, analysis) in run.analyses.iter().enumerate() {
+                let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
+                let may_import = self
+                    .expr_projection_keys
+                    .get(&analysis_index)
+                    .is_none_or(|projected| *projected == key);
+                if may_import && let Some(projected) = self.exprs.get(&analysis_index) {
+                    stable.insert(key, projected.clone());
+                }
+            }
+        }
+        let mut groups = stable
+            .iter()
+            .filter(|(_, traces)| !traces.is_empty())
+            .map(
+                |(analysis, traces)| crate::io::ProjectResultExpressionGroup {
+                    analysis: *analysis,
+                    traces: traces.clone(),
+                },
+            )
+            .collect::<Vec<_>>();
+        groups.sort_by(|left, right| {
+            analysis_presentation_order_key(left.analysis)
+                .cmp(&analysis_presentation_order_key(right.analysis))
+        });
+        groups
     }
 
     /// Clear result UI state that is tied to the active project/design data.
@@ -2156,6 +2330,7 @@ fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
         let permitted = match gesture {
             ViewGesture::Fit => fit_gesture_available(&app.state),
             ViewGesture::ZoomIn | ViewGesture::ZoomOut => zoom_gesture_available(&app.state),
+            ViewGesture::SetRanges { .. } => false,
         };
         if permitted && consume_command_key(ctx, &app.state, command) {
             request_view_gesture(&mut app.state, gesture);
@@ -2496,6 +2671,7 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
     results.cache.ensure_version(data_version);
     results.derived.ensure_version(data_version);
 
+    smith::synchronize_active_analysis(&mut app.state);
     reconcile_active_viewer(&mut app.state);
 }
 
@@ -2531,6 +2707,30 @@ pub(crate) fn active_axis_range(
             PaneAxis::Y => facts.y_extent,
         };
     }
+    let drawn = state.ui.results.drawn_axes.get(&viewer).copied();
+    let pinned = state.ui.results.plot_view(viewer, 0);
+    match axis {
+        PaneAxis::X => pinned.x.or_else(|| drawn.map(|(x, _)| x)),
+        PaneAxis::Y => pinned.y.or_else(|| drawn.map(|(_, y)| y)),
+    }
+}
+
+/// Resolve the interval currently consumed by the active renderer.
+///
+/// Callers outside the result-document drawing code must use this adapter
+/// rather than reading the legacy ordinal plot store. The waveform stack is
+/// keyed by stable analysis and unit-pane identity, while single-canvas
+/// viewers remain keyed by their global plot slot.
+pub(crate) fn active_renderer_axis_range(
+    ctx: &egui::Context,
+    state: &mut AppState,
+    axis: PaneAxis,
+) -> Option<(f64, f64)> {
+    if viewer_uses_wave_stack(state.ui.results.viewer) {
+        let facts = active_pane_facts(&Tokens::get(ctx), state);
+        return active_axis_range(state, &facts, axis);
+    }
+    let viewer = state.ui.results.viewer;
     let drawn = state.ui.results.drawn_axes.get(&viewer).copied();
     let pinned = state.ui.results.plot_view(viewer, 0);
     match axis {
@@ -3741,13 +3941,21 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
             }
         }
         ResultViewer::Nyquist => specialized_availability(state, ActiveViewer::Nyquist),
-        // Smith impedance/admittance readout requires the exact configured
-        // reference impedance. Current SP/PSP/HBSP retained results preserve
-        // complex Γ but not Z₀, so the viewer must stay unavailable instead
-        // of asserting its mutable cache's 50 Ω default.
-        ResultViewer::Smith => ViewerAvailability::unavailable(
-            "Smith requires retained reference-impedance metadata; use Nyquist for the exact complex locus",
-        ),
+        ResultViewer::Smith => {
+            if state
+                .simulation
+                .active_analysis()
+                .is_some_and(smith::analysis_is_renderable)
+            {
+                ViewerAvailability::available(
+                    "Retained S-parameter coefficients and per-port reference impedances are available",
+                )
+            } else {
+                ViewerAvailability::unavailable(
+                    "Requires SP, PSP, or HBSP with exact complex traces and retained port impedances",
+                )
+            }
+        }
         ResultViewer::PoleZero => specialized_availability(state, ActiveViewer::PoleZero),
         ResultViewer::Events => {
             if events::active_analysis_is_renderable(state) {
@@ -4357,14 +4565,16 @@ mod availability_tests {
             AnalysisType::Hbsp,
         ] {
             let state = state_with_analysis(
-                AnalysisResult::new(1, analysis_type, analysis_type.short_label()).with_waveforms(
-                    vec![
+                AnalysisResult::new(1, analysis_type, analysis_type.short_label())
+                    .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::SParameter {
+                        reference_impedances_ohm: vec![75.0, 100.0],
+                    })
+                    .with_waveforms(vec![
                         WaveformData::new("|S11|", vec![1.0e6, 2.0e6], vec![0.5, 0.25], "#00aaff")
                             .with_complex_components("S11", vec![0.5, 0.25], vec![0.0, -0.1]),
-                    ],
-                ),
+                    ]),
             );
-            assert!(!viewer_availability(&state, ResultViewer::Smith).available);
+            assert!(viewer_availability(&state, ResultViewer::Smith).available);
             assert!(viewer_availability(&state, ResultViewer::Table).available);
         }
     }
@@ -5052,13 +5262,6 @@ mod availability_tests {
     fn every_available_sheet_draws_the_evidence_it_claims() {
         for viewer in ResultViewer::every() {
             let mut app = app_showing(viewer);
-            if viewer == ResultViewer::Smith {
-                assert!(
-                    !viewer_availability(&app.state, viewer).available,
-                    "Smith must remain unavailable until retained results carry reference impedance"
-                );
-                continue;
-            }
             assert!(
                 viewer_availability(&app.state, viewer).available,
                 "the {viewer:?} fixture does not satisfy the sheet's own contract: {}",
@@ -5087,7 +5290,8 @@ mod availability_tests {
                     vec![0.0, 0.4, 0.9, 1.2],
                     "#00aaff",
                 )]),
-            ResultViewer::Bode | ResultViewer::Nyquist | ResultViewer::Smith => ac_analysis(),
+            ResultViewer::Bode | ResultViewer::Nyquist => ac_analysis(),
+            ResultViewer::Smith => sparameter_analysis(),
             ResultViewer::HarmonicBalance => {
                 AnalysisResult::new(1, AnalysisType::HarmonicBalance, "HB").with_waveforms(vec![
                     WaveformData::new(
@@ -5191,7 +5395,9 @@ mod availability_tests {
         // capability the data would not actually produce.
         match viewer {
             ResultViewer::Nyquist => derive_nyquist(&mut app),
-            ResultViewer::Smith => derive_smith(&mut app),
+            ResultViewer::Smith => {
+                assert!(smith::synchronize_active_analysis(&mut app.state));
+            }
             ResultViewer::Hist => derive_histogram(&mut app),
             _ => {}
         }
@@ -5260,6 +5466,22 @@ mod availability_tests {
                 .with_complex_components("V(out)", real, imaginary),
             WaveformData::new("phase(V(out))", frequency, phase, "#ffaa00"),
         ])
+    }
+
+    fn sparameter_analysis() -> AnalysisResult {
+        let mut analysis = ac_analysis();
+        analysis.analysis_type = AnalysisType::SParameter;
+        analysis.label = "SP".to_owned();
+        analysis.waveforms.truncate(1);
+        analysis.waveforms[0].name = "|S11|".to_owned();
+        analysis.waveforms[0]
+            .complex
+            .as_mut()
+            .expect("AC fixture complex components")
+            .source_name = "S11".to_owned();
+        analysis.with_family_metadata(crate::state::AnalysisResultFamilyMetadata::SParameter {
+            reference_impedances_ohm: vec![75.0, 100.0],
+        })
     }
 
     fn monte_carlo_analysis() -> AnalysisResult {
@@ -5344,17 +5566,6 @@ mod availability_tests {
         );
         app.state
             .bind_specialized_viewer_cache(ActiveViewer::Nyquist, provenance);
-    }
-
-    fn derive_smith(app: &mut RSpiceApp) {
-        let (frequency, real, imaginary) = ac_complex_trace(app);
-        let provenance = in_flight_cache_provenance(app);
-        app.state
-            .analysis
-            .smith_chart_state
-            .load_sparam_data("S11", &frequency, &real, &imaginary);
-        app.state
-            .bind_specialized_viewer_cache(ActiveViewer::SmithChart, provenance);
     }
 
     fn derive_histogram(app: &mut RSpiceApp) {

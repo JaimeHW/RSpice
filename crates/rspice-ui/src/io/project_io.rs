@@ -240,6 +240,10 @@ pub struct ProjectFile {
     /// document rather than inside it so it cannot alter a provenance digest.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub result_log_y_panes: Vec<ProjectResultLogYPane>,
+    /// Stable, project-owned calculated waveform traces grouped by immutable
+    /// dataset and analysis identity.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) result_expression_groups: Vec<ProjectResultExpressionGroup>,
     /// Authoritative execution inputs. Absent only in projects written before
     /// project-owned simulation plans were introduced.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -258,6 +262,17 @@ pub type ProjectResultMarker = crate::workbench::documents::result_document::Res
 pub type ProjectResultLogYPane =
     crate::workbench::documents::result_document::WavePanePresentationKey;
 
+const MAX_PROJECT_RESULT_EXPRESSION_GROUPS: usize = 4_096;
+const MAX_PROJECT_RESULT_EXPRESSIONS_TOTAL: usize = 16_384;
+const MAX_PROJECT_RESULT_EXPRESSIONS_PER_ANALYSIS: usize = 512;
+const MAX_PROJECT_RESULT_EXPRESSION_BYTES: usize = 4_096;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ProjectResultExpressionGroup {
+    pub analysis: crate::workbench::documents::result_document::AnalysisPresentationKey,
+    pub traces: Vec<crate::workbench::documents::result_document::ExprTrace>,
+}
+
 impl ProjectFile {
     #[cfg(test)]
     pub fn new(workspace: ProjectWorkspace, libraries: LibraryManager) -> Self {
@@ -268,6 +283,7 @@ impl ProjectFile {
             simulation_results: ProjectSimulationResults::default(),
             result_markers: Vec::new(),
             result_log_y_panes: Vec::new(),
+            result_expression_groups: Vec::new(),
             execution_context: None,
             simulation_results_warning: None,
         }
@@ -286,6 +302,7 @@ impl ProjectFile {
             simulation_results,
             result_markers: Vec::new(),
             result_log_y_panes: Vec::new(),
+            result_expression_groups: Vec::new(),
             execution_context: None,
             simulation_results_warning: None,
         }
@@ -310,6 +327,7 @@ impl ProjectFile {
             simulation_results,
             result_markers: Vec::new(),
             result_log_y_panes: Vec::new(),
+            result_expression_groups: Vec::new(),
             execution_context: Some(execution_context),
             simulation_results_warning: None,
         }
@@ -329,6 +347,16 @@ impl ProjectFile {
         self
     }
 
+    /// Attach stable calculated waveform traces to a project snapshot.
+    #[must_use]
+    pub(crate) fn with_result_expression_groups(
+        mut self,
+        groups: Vec<ProjectResultExpressionGroup>,
+    ) -> Self {
+        self.result_expression_groups = groups;
+        self
+    }
+
     pub fn validate(&self) -> Result<(), ProjectIoError> {
         if !self.version.is_compatible() {
             return Err(ProjectIoError::IncompatibleVersion {
@@ -343,6 +371,7 @@ impl ProjectFile {
         self.workspace
             .validate_simulation_configuration()
             .map_err(|error| ProjectIoError::InvalidData(error.to_string()))?;
+        self.validate_result_expression_groups()?;
         let view_index = self.validate_library_tree()?;
         self.validate_project_source_owners(&view_index)?;
         self.validate_workspace_references(&view_index)?;
@@ -367,6 +396,55 @@ impl ProjectFile {
                 })?;
         }
         self.validate_simulation_configuration_references()?;
+        Ok(())
+    }
+
+    fn validate_result_expression_groups(&self) -> Result<(), ProjectIoError> {
+        if self.result_expression_groups.len() > MAX_PROJECT_RESULT_EXPRESSION_GROUPS {
+            return Err(ProjectIoError::InvalidData(format!(
+                "result expression group count {} exceeds the supported limit of {MAX_PROJECT_RESULT_EXPRESSION_GROUPS}",
+                self.result_expression_groups.len()
+            )));
+        }
+        let mut analyses = HashSet::new();
+        let mut total = 0_usize;
+        for group in &self.result_expression_groups {
+            if !analyses.insert(group.analysis) {
+                return Err(ProjectIoError::InvalidData(
+                    "result expression groups contain a duplicate stable analysis identity"
+                        .to_owned(),
+                ));
+            }
+            if group.traces.is_empty()
+                || group.traces.len() > MAX_PROJECT_RESULT_EXPRESSIONS_PER_ANALYSIS
+            {
+                return Err(ProjectIoError::InvalidData(format!(
+                    "each result expression group must contain 1 to {MAX_PROJECT_RESULT_EXPRESSIONS_PER_ANALYSIS} traces"
+                )));
+            }
+            total = total.saturating_add(group.traces.len());
+            if total > MAX_PROJECT_RESULT_EXPRESSIONS_TOTAL {
+                return Err(ProjectIoError::InvalidData(format!(
+                    "result expression count exceeds the supported limit of {MAX_PROJECT_RESULT_EXPRESSIONS_TOTAL}"
+                )));
+            }
+            let mut expressions = HashSet::new();
+            for trace in &group.traces {
+                if trace.text.is_empty()
+                    || trace.text.len() > MAX_PROJECT_RESULT_EXPRESSION_BYTES
+                    || trace.text.chars().any(char::is_control)
+                {
+                    return Err(ProjectIoError::InvalidData(format!(
+                        "result expressions must contain 1 to {MAX_PROJECT_RESULT_EXPRESSION_BYTES} non-control UTF-8 bytes"
+                    )));
+                }
+                if !expressions.insert(trace.text.as_str()) {
+                    return Err(ProjectIoError::InvalidData(
+                        "a result expression group contains duplicate expression text".to_owned(),
+                    ));
+                }
+            }
+        }
         Ok(())
     }
 

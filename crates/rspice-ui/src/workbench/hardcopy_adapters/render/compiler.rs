@@ -1902,6 +1902,36 @@ impl<'a> SemanticSceneCompiler<'a> {
                     .push(LegendEntry::try_new(&trace.label, stroke)?);
             }
         }
+        for cursor in &plot.cursors {
+            let start = self.semantic_point(cursor.start)?;
+            let end = self.semantic_point(cursor.end)?;
+            let stable_id = format!("cursor:{}", cursor.cursor_id);
+            let stroke = self.mapped_stroke(
+                PrintObjectKind::Marker,
+                &stable_id,
+                StrokeStyle::try_new(
+                    SemanticColor::Accent,
+                    Length::from_micrometres(200),
+                    StrokePattern::Dashed,
+                    None,
+                )?,
+            );
+            self.primitives.push(ScenePrimitive::Polyline {
+                points: vec![start, end],
+                closed: false,
+                stroke,
+                fill: None,
+            });
+            let label = self.offset_scene_point(end, 600, 2_400)?;
+            self.add_text(
+                label,
+                &cursor.label,
+                SceneFont::Monospace,
+                2_300,
+                stroke.color,
+            )?;
+            self.add_mapping_legend(PrintObjectKind::Marker, &stable_id, stroke)?;
+        }
         for marker in &plot.markers {
             let position = marker.position.ok_or_else(|| {
                 conversion_error(format!(

@@ -15,11 +15,10 @@ use crate::results::viewer_catalog::{
     ViewerGroup, viewer_compatibility, viewer_document,
 };
 use crate::results::visualization_document::{
-    AxisOrientation, AxisScale, ColumnRole, DocumentEdit, EntityRef, LinkKind,
-    MAX_SOURCE_CELLS_PER_DATASET, MAX_SOURCE_ROWS, NewAxis, NewPane, PageLayout, PageUpdatePolicy,
-    PaneDataBinding, PaneKind, PanePlacement, ResultDocumentTracking, ResultDocumentTrackingMode,
-    SourceColumn, SourceDataset, SourceRow, TypedValue, ValueType, VisualizationDocument,
-    VisualizationError,
+    AxisOrientation, ColumnRole, DocumentEdit, EntityRef, LinkKind, MAX_SOURCE_CELLS_PER_DATASET,
+    MAX_SOURCE_ROWS, NewPane, PageLayout, PageUpdatePolicy, PaneDataBinding, PaneKind,
+    PanePlacement, ResultDocumentTracking, ResultDocumentTrackingMode, SourceColumn, SourceDataset,
+    SourceRow, TypedValue, ValueType, VisualizationDocument, VisualizationError,
 };
 use crate::state::workspace::VisualizationDocumentPersistenceError;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationRunLifecycle};
@@ -896,6 +895,7 @@ pub(super) fn source_dataset(
     analysis: &AnalysisResult,
 ) -> Result<SourceDataset, VisualizationError> {
     let binding = DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
+    let analysis_id = source_analysis_identity(run, analysis).to_string();
     if analysis.waveforms.is_empty() {
         return SourceDataset::new(
             binding,
@@ -926,6 +926,10 @@ pub(super) fn source_dataset(
         );
     }
 
+    // Each trace keeps its own exact coordinate grid. Row predicates on the
+    // canonical Trace entity select one waveform/component from this lossless
+    // long-form source without assuming that every signal shares a sample
+    // count or X grid.
     let columns = vec![
         SourceColumn::new(
             "trace-index",
@@ -955,28 +959,44 @@ pub(super) fn source_dataset(
             ColumnRole::Coordinate,
             None,
         )?,
-        SourceColumn::new("x", "X", ValueType::Real, ColumnRole::Signal, None)?,
+        SourceColumn::new("x", "X", ValueType::Real, ColumnRole::Coordinate, None)?,
         SourceColumn::new("y", "Y", ValueType::Real, ColumnRole::Signal, None)?,
+        SourceColumn::new(
+            "analysis-id",
+            "Analysis identity",
+            ValueType::Text,
+            ColumnRole::Coordinate,
+            None,
+        )?,
     ];
-    let maximum_rows = MAX_SOURCE_ROWS.min(MAX_SOURCE_CELLS_PER_DATASET / columns.len());
     let projected_rows = analysis
         .waveforms
         .iter()
         .try_fold(0_usize, |total, waveform| {
-            let display = waveform.x.len().min(waveform.y.len());
-            let complex = waveform.complex.as_ref().map_or(0, |components| {
+            if waveform.x.len() != waveform.y.len()
+                || waveform.complex.as_ref().is_some_and(|components| {
+                    components.real.len() != waveform.x.len()
+                        || components.imag.len() != waveform.x.len()
+                })
+            {
+                return None;
+            }
+            total.checked_add(waveform.x.len())?.checked_add(
                 waveform
-                    .x
-                    .len()
-                    .min(components.real.len())
-                    .saturating_add(waveform.x.len().min(components.imag.len()))
-            });
-            total.checked_add(display)?.checked_add(complex)
+                    .complex
+                    .as_ref()
+                    .map_or(0, |_| waveform.x.len().saturating_mul(2)),
+            )
         });
-    let projected_rows = projected_rows.ok_or_else(|| VisualizationError::InvalidValue {
-        field: "source-dataset.rows",
-        message: "retained source row count overflowed the supported address space".to_owned(),
-    })?;
+    let Some(projected_rows) = projected_rows else {
+        return Err(VisualizationError::InvalidValue {
+            field: "source-dataset.samples",
+            message:
+                "a retained trace has mismatched coordinate, display, or complex sample counts"
+                    .to_owned(),
+        });
+    };
+    let maximum_rows = MAX_SOURCE_ROWS.min(MAX_SOURCE_CELLS_PER_DATASET / columns.len());
     if projected_rows > maximum_rows {
         return Err(VisualizationError::InvalidValue {
             field: "source-dataset.rows",
@@ -995,6 +1015,7 @@ pub(super) fn source_dataset(
             "display",
             &waveform.x,
             &waveform.y,
+            &analysis_id,
         )?;
         if let Some(complex) = &waveform.complex {
             append_component_rows(
@@ -1004,14 +1025,16 @@ pub(super) fn source_dataset(
                 "real",
                 &waveform.x,
                 &complex.real,
+                &analysis_id,
             )?;
             append_component_rows(
                 &mut rows,
                 trace_index,
                 &waveform.name,
-                "imaginary",
+                "imag",
                 &waveform.x,
                 &complex.imag,
+                &analysis_id,
             )?;
         }
     }
@@ -1025,20 +1048,13 @@ fn append_component_rows(
     component: &str,
     x: &[f64],
     y: &[f64],
+    analysis_id: &str,
 ) -> Result<(), VisualizationError> {
     let trace_index = i64::try_from(trace_index).map_err(|_| VisualizationError::InvalidValue {
         field: "source-dataset.trace-index",
         message: "trace index exceeds the supported signed integer range".to_owned(),
     })?;
     for (sample, (&x, &y)) in x.iter().zip(y).enumerate() {
-        if !x.is_finite() || !y.is_finite() {
-            return Err(VisualizationError::InvalidValue {
-                field: "source-dataset.samples",
-                message: format!(
-                    "trace {trace_name:?} contains a non-finite {component} sample at index {sample}"
-                ),
-            });
-        }
         rows.push(SourceRow::new(vec![
             TypedValue::Integer(trace_index),
             TypedValue::Text(trace_name.to_owned()),
@@ -1051,6 +1067,7 @@ fn append_component_rows(
             })?),
             TypedValue::Real(x),
             TypedValue::Real(y),
+            TypedValue::Text(analysis_id.to_owned()),
         ]));
     }
     Ok(())
@@ -1157,51 +1174,18 @@ fn build_document(
         pane_ids.push(pane_id);
     }
 
-    let mut horizontal_axes = Vec::with_capacity(pane_ids.len());
-    for pane_id in pane_ids {
-        let x_scale = if resolved
-            .viewer
-            .x_axis
-            .to_ascii_lowercase()
-            .contains("frequency")
-        {
-            AxisScale::Logarithmic
-        } else {
-            AxisScale::Linear
-        };
-        let y_scale = if resolved.viewer.y_axis.to_ascii_lowercase().contains("db") {
-            AxisScale::Decibels
-        } else {
-            AxisScale::Linear
-        };
-        let receipt = document.transact(
-            document.revision(),
-            vec![
-                DocumentEdit::AddAxis(NewAxis {
-                    pane_id,
-                    label: resolved.viewer.x_axis.to_owned(),
-                    orientation: AxisOrientation::Horizontal,
-                    scale: x_scale,
-                    unit: None,
-                    range: None,
-                }),
-                DocumentEdit::AddAxis(NewAxis {
-                    pane_id,
-                    label: resolved.viewer.y_axis.to_owned(),
-                    orientation: AxisOrientation::VerticalLeft,
-                    scale: y_scale,
-                    unit: None,
-                    range: None,
-                }),
-            ],
-        )?;
-        if let Some(axis_id) = receipt.created.into_iter().find_map(|entity| match entity {
-            EntityRef::Axis(id) => Some(id),
-            _ => None,
-        }) {
-            horizontal_axes.push(EntityRef::Axis(axis_id));
-        }
-    }
+    let horizontal_axes = pane_ids
+        .iter()
+        .filter_map(|pane_id| {
+            document
+                .axes()
+                .iter()
+                .find(|axis| {
+                    axis.pane_id == *pane_id && axis.orientation == AxisOrientation::Horizontal
+                })
+                .map(|axis| EntityRef::Axis(axis.id))
+        })
+        .collect::<Vec<_>>();
     if resolved.layout == ResultDocumentLayout::TwoLinkedPanes {
         document.transact(
             document.revision(),
@@ -1255,6 +1239,8 @@ pub(crate) fn commit(app: &mut RSpiceApp) -> Result<ResultDocumentId, CreateResu
     let resolved = resolve_draft(&app.state, &app.state.workbench.create_result_document)?;
     let tracking = document_tracking(&app.state.simulation.runs, resolved.run, resolved.analysis);
     let document = build_document(resolved, tracking)?;
+    let previous_documents_dirty = app.state.workspace.visualization_documents_dirty;
+    let previous_workspace = app.state.workbench.workspace;
     let document_id = app
         .state
         .workspace
@@ -1268,6 +1254,17 @@ pub(crate) fn commit(app: &mut RSpiceApp) -> Result<ResultDocumentId, CreateResu
         &mut app.state,
         &workspace_document,
     ) {
+        if let Some(index) = app
+            .state
+            .workspace
+            .visualization_documents
+            .iter()
+            .position(|document| document.id() == document_id)
+        {
+            app.state.workspace.visualization_documents.remove(index);
+        }
+        app.state.workspace.visualization_documents_dirty = previous_documents_dirty;
+        app.state.workbench.activate(previous_workspace);
         return Err(CreateResultDocumentError::InvalidDraft(
             "The created result document could not resolve its retained dataset binding."
                 .to_owned(),
@@ -1408,6 +1405,14 @@ mod tests {
             .expect("project owns created document");
         assert_eq!(document.title(), "Transient review");
         assert_eq!(document.panes().len(), 2);
+        assert_eq!(document.axes().len(), 4);
+        assert_eq!(document.traces().len(), 2);
+        assert!(document.traces().iter().all(|trace| {
+            trace.label == "V(out)"
+                && trace.coordinate_key == "x"
+                && trace.signal_key == "y"
+                && trace.row_predicates.len() == 4
+        }));
         assert_eq!(document.tracking(), ResultDocumentTracking::pinned());
         assert_eq!(
             app.state.workbench.documents.active(Workspace::Results),
@@ -1446,5 +1451,41 @@ mod tests {
 
         assert!(commit(&mut app).is_err());
         assert_eq!(app.state.workspace.visualization_documents.len(), before);
+    }
+
+    #[test]
+    fn source_projection_preserves_independent_waveform_grids_without_truncation() {
+        let analysis =
+            AnalysisResult::new(11, AnalysisType::Transient, "analysis").with_waveforms(vec![
+                WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 0.5, 1.0],
+                    vec![1.0, 2.0, 3.0],
+                    "#55aaff",
+                ),
+                WaveformData::new("I(R1)", vec![10.0, 20.0], vec![0.25, -0.5], "#ffaa55"),
+            ]);
+        let mut run = SimulationRun::new(7);
+        run.add_analysis(analysis);
+        let source = source_dataset(&run, &run.analyses[0]).expect("lossless source projection");
+
+        assert_eq!(source.rows().len(), 5);
+        assert_eq!(source.columns().len(), 7);
+        assert_eq!(source.columns()[4].key(), "x");
+        assert_eq!(source.columns()[4].role(), ColumnRole::Coordinate);
+        assert_eq!(source.columns()[5].key(), "y");
+        assert_eq!(source.columns()[5].role(), ColumnRole::Signal);
+        assert_eq!(
+            source.rows()[4].values(),
+            &[
+                TypedValue::Integer(1),
+                TypedValue::Text("I(R1)".to_owned()),
+                TypedValue::Text("display".to_owned()),
+                TypedValue::Integer(1),
+                TypedValue::Real(20.0),
+                TypedValue::Real(-0.5),
+                TypedValue::Text(source_analysis_identity(&run, &run.analyses[0]).to_string()),
+            ]
+        );
     }
 }

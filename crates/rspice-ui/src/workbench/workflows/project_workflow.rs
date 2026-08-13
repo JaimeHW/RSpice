@@ -1030,6 +1030,7 @@ fn apply_loaded_project_authorized(
     let simulation_results = project.simulation_results;
     let result_markers = project.result_markers;
     let result_log_y_panes = project.result_log_y_panes;
+    let result_expression_groups = project.result_expression_groups;
     let mut simulation_results_warning = project.simulation_results_warning;
     state.clear_design_execution_context();
     state.library_manager = project.libraries;
@@ -1056,6 +1057,10 @@ fn apply_loaded_project_authorized(
     // project no longer retains would draw on nothing.
     crate::workbench::documents::result_document::restore_markers(state, result_markers);
     crate::workbench::documents::result_document::restore_log_y_panes(state, result_log_y_panes);
+    crate::workbench::documents::result_document::restore_expression_groups(
+        state,
+        result_expression_groups,
+    );
     if let Some(path) = origin.recent_path() {
         state.remember_recent_file(crate::workbench::app_state::RecentKind::Project, path);
     }
@@ -1810,7 +1815,8 @@ mod tests {
         state
             .analysis
             .smith_chart_state
-            .load_sparam_data("S11", &[1.0], &[0.25], &[0.0]);
+            .load_sparam_data("S11", &[1.0], &[0.25], &[0.0], Some(50.0))
+            .expect("valid Smith fixture");
 
         let mut pz = PoleZeroData::new("old pz");
         pz.add_real_pole(-1.0);
@@ -2590,6 +2596,222 @@ mod tests {
             reopened.ui.results.log_y_panes.iter().collect::<Vec<_>>(),
             vec![&pane],
             "only the pane whose analysis is still retained comes back"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn save_project_to_path_round_trips_stable_expression_traces() {
+        let mut state = AppState::default();
+        let mut run = crate::state::SimulationRun::new(13);
+        run.add_analysis(
+            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
+                .with_waveforms(vec![crate::state::WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 1.0, 2.0],
+                    vec![0.0, 0.5, 1.0],
+                    "#00aaff",
+                )]),
+        );
+        seal_legacy_unattributed(&mut run);
+        state.simulation.runs = vec![run];
+        state.simulation.next_run_id = 13;
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+        assert!(
+            state
+                .ui
+                .results
+                .add_expression_trace(&state.simulation, 0, "V(out) * 2".to_owned(),)
+                .expect("retained expression owner")
+        );
+        state.workspace.visualization_documents_dirty = true;
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "rspice-save-project-expressions-{}-{unique}.rspiceproj",
+            std::process::id()
+        ));
+
+        let saved = save_project_to_path(&mut state, &path);
+        let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(saved);
+        assert_eq!(loaded.result_expression_groups.len(), 1);
+        assert_eq!(
+            loaded.result_expression_groups[0].traces,
+            vec![crate::workbench::documents::result_document::ExprTrace {
+                text: "V(out) * 2".to_owned(),
+                visible: true,
+            }]
+        );
+
+        let mut reopened = AppState::default();
+        reopened.simulation = state.simulation.clone();
+        crate::workbench::documents::result_document::restore_expression_groups(
+            &mut reopened,
+            loaded.result_expression_groups,
+        );
+        assert_eq!(
+            reopened
+                .ui
+                .results
+                .project_expression_groups(&reopened.simulation)[0]
+                .traces[0]
+                .text,
+            "V(out) * 2"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn save_project_to_path_round_trips_canonical_result_document_entities() {
+        use crate::results::visualization_document::{
+            AnnotationAnchor, DocumentEdit, PaneDataBinding, TypedValue, VisualizationDocument,
+            VisualizationPresentationPolicy,
+        };
+
+        let mut state = AppState::default();
+        let mut run = crate::state::SimulationRun::new(21);
+        run.add_analysis(
+            crate::state::AnalysisResult::new(4, crate::state::AnalysisType::Transient, "TRAN")
+                .with_waveforms(vec![crate::state::WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 1.0, 2.0],
+                    vec![0.0, 0.5, 1.0],
+                    "#00aaff",
+                )]),
+        );
+        seal_legacy_unattributed(&mut run);
+        state.simulation.runs = vec![run];
+        state.simulation.next_run_id = 21;
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+        let run = &state.simulation.runs[0];
+        let analysis = &run.analyses[0];
+        let source = crate::workbench::documents::result_document::visualization_source_dataset(
+            run, analysis,
+        )
+        .expect("source projection");
+        let analysis_id = analysis.provenance().map_or_else(
+            || {
+                let name = format!("legacy-analysis-v1/{}", analysis.id);
+                crate::product::AnalysisInstanceId::from_namespace(
+                    run.dataset_id.as_uuid(),
+                    name.as_bytes(),
+                )
+            },
+            |provenance| provenance.source_instance_id(),
+        );
+        let mut document = VisualizationDocument::new("Saved review", vec![source.clone()])
+            .expect("result document");
+        let pane_id = document.panes()[0].id;
+        let receipt = document
+            .transact(
+                document.revision(),
+                vec![
+                    DocumentEdit::SetPaneSource {
+                        pane_id,
+                        viewer_id: "viewer-waveform".to_owned(),
+                        binding: Some(PaneDataBinding {
+                            analysis_id,
+                            dataset: source.binding(),
+                        }),
+                    },
+                    DocumentEdit::SetPresentation(VisualizationPresentationPolicy {
+                        significant_digits: 13,
+                        phase_continuous: true,
+                    }),
+                ],
+            )
+            .expect("pane and presentation commit");
+        let trace_id = receipt
+            .created
+            .iter()
+            .find_map(|entity| match entity {
+                crate::results::visualization_document::EntityRef::Trace(id) => Some(*id),
+                _ => None,
+            })
+            .expect("bound pane provisions a trace");
+        let cursor_axis_id = document
+            .traces()
+            .iter()
+            .find(|trace| trace.id == trace_id)
+            .expect("bound trace")
+            .x_axis_id;
+        document
+            .transact(
+                document.revision(),
+                vec![
+                    DocumentEdit::AddTypedMarker {
+                        pane_id,
+                        trace_id,
+                        coordinate: TypedValue::Real(1.0),
+                        label: "M1".to_owned(),
+                        kind: crate::results::visualization_document::PlotMarkerKind::PointNote,
+                        scope: crate::results::visualization_document::PlotMarkerScope::Document,
+                        source_specification: None,
+                    },
+                    DocumentEdit::AddScalarMeasurement {
+                        pane_id,
+                        trace_ids: vec![trace_id],
+                        expression: "rms(V(out))".to_owned(),
+                        value: 0.6454972243679028,
+                    },
+                    DocumentEdit::AddAnnotation {
+                        pane_id,
+                        anchor: AnnotationAnchor::Trace {
+                            trace_id,
+                            coordinate: TypedValue::Real(1.0),
+                        },
+                        text: "Retained review note".to_owned(),
+                    },
+                    DocumentEdit::AddCursor {
+                        pane_id,
+                        axis_id: cursor_axis_id,
+                        position: TypedValue::Real(1.0),
+                        label: "A".to_owned(),
+                    },
+                ],
+            )
+            .expect("authored entities commit");
+        let document_id = state
+            .workspace
+            .insert_visualization_document(document)
+            .expect("workspace owns result document");
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "rspice-save-project-result-document-{}-{unique}.rspiceproj",
+            std::process::id()
+        ));
+        let saved = save_project_to_path(&mut state, &path);
+        let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(saved);
+        let restored = loaded
+            .workspace
+            .visualization_document(document_id)
+            .expect("result document round trips");
+        assert_eq!(restored.presentation().significant_digits, 13);
+        assert!(restored.presentation().phase_continuous);
+        assert_eq!(restored.traces().len(), 1);
+        assert_eq!(restored.markers().len(), 1);
+        assert_eq!(restored.measurements().len(), 1);
+        assert_eq!(restored.annotations().len(), 1);
+        assert_eq!(restored.cursors().len(), 1);
+        assert_eq!(restored.cursors()[0].label, "A");
+        assert_eq!(
+            restored.measurements()[0].expression.as_deref(),
+            Some("rms(V(out))")
         );
     }
 

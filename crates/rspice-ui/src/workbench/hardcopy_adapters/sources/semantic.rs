@@ -173,6 +173,18 @@ pub struct SemanticPlotTrace {
     pub source_samples: Vec<(u64, u64)>,
 }
 
+/// One retained horizontal-axis cursor, represented by its exact source X
+/// coordinate and the authenticated physical line endpoints it occupies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SemanticPlotCursor {
+    pub cursor_id: u64,
+    pub label: String,
+    pub source_x_bits: u64,
+    pub start: SemanticPoint,
+    pub end: SemanticPoint,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SemanticPlotMarker {
@@ -205,6 +217,8 @@ pub struct SemanticPlot {
     pub page_id: u64,
     pub pane_id: u64,
     pub traces: Vec<SemanticPlotTrace>,
+    #[serde(default)]
+    pub cursors: Vec<SemanticPlotCursor>,
     pub markers: Vec<SemanticPlotMarker>,
     pub annotations: Vec<SemanticPlotAnnotation>,
 }

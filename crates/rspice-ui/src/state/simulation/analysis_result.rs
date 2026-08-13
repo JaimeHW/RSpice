@@ -1477,6 +1477,11 @@ pub enum AnalysisResultFamilyMetadata {
         output_quantity: PeriodicNoiseOutputQuantity,
         carrier_frequency_hz: Option<f64>,
     },
+    /// Per-port power-wave reference impedances in physical port-number order.
+    /// Smith impedance and VSWR readouts are invalid without this authority.
+    SParameter {
+        reference_impedances_ohm: Vec<f64>,
+    },
 }
 
 impl AnalysisResultFamilyMetadata {
@@ -1493,6 +1498,10 @@ impl AnalysisResultFamilyMetadata {
                 | (
                     Self::PeriodicNoise { .. },
                     AnalysisType::Pnoise | AnalysisType::Qpnoise
+                )
+                | (
+                    Self::SParameter { .. },
+                    AnalysisType::SParameter | AnalysisType::Psp | AnalysisType::Hbsp
                 )
         );
         if !compatible {
@@ -1638,6 +1647,23 @@ impl AnalysisResultFamilyMetadata {
                 {
                     return Err(
                         "phase-noise evidence is missing its retained carrier frequency".to_owned(),
+                    );
+                }
+            }
+            Self::SParameter {
+                reference_impedances_ohm,
+            } => {
+                if reference_impedances_ohm.len() < 2 {
+                    return Err(
+                        "S-parameter metadata requires at least two port impedances".to_owned()
+                    );
+                }
+                if reference_impedances_ohm
+                    .iter()
+                    .any(|impedance| !impedance.is_finite() || *impedance <= 0.0)
+                {
+                    return Err(
+                        "S-parameter reference impedances must be finite and positive".to_owned(),
                     );
                 }
             }

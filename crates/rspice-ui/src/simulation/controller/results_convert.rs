@@ -119,6 +119,49 @@ impl SimulationController {
         });
     }
 
+    /// Retain the exact power-wave reference impedances that qualify an
+    /// SP/PSP/HBSP result. Declared RF ports win for the same reason they win
+    /// in execution; a plain SP setup falls back to its explicitly configured
+    /// ports and default impedance only when the deck declares none.
+    pub(super) fn retain_sparameter_result_metadata(&self, result: &mut AnalysisResult) {
+        if !matches!(
+            result.analysis_type,
+            AnalysisType::SParameter | AnalysisType::Psp | AnalysisType::Hbsp
+        ) {
+            return;
+        }
+        let Some(reference_impedances_ohm) = self.sparameter_reference_impedances() else {
+            return;
+        };
+        let metadata = AnalysisResultFamilyMetadata::SParameter {
+            reference_impedances_ohm,
+        };
+        if metadata.validate_for(result.analysis_type).is_ok() {
+            result.family_metadata = Some(metadata);
+        }
+    }
+
+    fn sparameter_reference_impedances(&self) -> Option<Vec<f64>> {
+        if let Some(netlist_text) = self.cached_netlist.as_deref()
+            && let Ok(netlist) = rspice_core::Netlist::parse(netlist_text)
+            && let Ok(ports) = rspice_core::analysis::s_param::collect_ports(&netlist)
+        {
+            return Some(ports.into_iter().map(|port| port.z0).collect());
+        }
+
+        match self.current_spec.as_ref()? {
+            AnalysisSpec::SParameter { z0, ports, .. } if ports.len() >= 2 => {
+                Some(ports.iter().map(|port| port.z0.unwrap_or(*z0)).collect())
+            }
+            AnalysisSpec::Psp { ports, .. } | AnalysisSpec::Hbsp { ports, .. }
+                if ports.len() >= 2 && ports.iter().all(|port| port.z0.is_some()) =>
+            {
+                Some(ports.iter().filter_map(|port| port.z0).collect())
+            }
+            _ => None,
+        }
+    }
+
     pub(super) fn convert_to_analysis_result_owned(
         &self,
         sim_result: crate::simulation::SimulationResult,
@@ -1537,5 +1580,32 @@ mod noise_conversion_tests {
                 carrier_frequency_hz: Some(2.4e9),
             })
         );
+    }
+
+    #[test]
+    fn sparameter_result_retains_declared_nondefault_port_impedances() {
+        let mut controller = SimulationController::new();
+        controller.cached_netlist = Some(
+            "P1 IN 0 PORT=1 Z0=75 AC 1\nR1 IN OUT 50\nP2 OUT 0 PORT=2 Z0=100\n.end\n".to_owned(),
+        );
+        controller.current_spec = Some(AnalysisSpec::SParameter {
+            start_freq: 1.0e6,
+            stop_freq: 1.0e9,
+            points_per_unit: 10,
+            sweep: crate::simulation::multi_run::FrequencySweep::Decade,
+            z0: 50.0,
+            ports: Vec::new(),
+        });
+        let mut result = AnalysisResult::new(1, AnalysisType::SParameter, "SP");
+
+        controller.retain_sparameter_result_metadata(&mut result);
+
+        assert_eq!(
+            result.family_metadata,
+            Some(AnalysisResultFamilyMetadata::SParameter {
+                reference_impedances_ohm: vec![75.0, 100.0],
+            })
+        );
+        assert!(result.validate_retained_evidence().is_ok());
     }
 }

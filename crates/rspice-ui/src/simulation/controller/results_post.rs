@@ -108,15 +108,6 @@ impl SimulationController {
                 state.analysis.nyquist_state.load_data(nyquist_curve);
                 loaded_nyquist = true;
             }
-
-            if Self::is_sparameter_trace_name(&name) {
-                state.analysis.smith_chart_state.load_sparam_data(
-                    &name,
-                    frequencies,
-                    &waveform.y_values,
-                    imag,
-                );
-            }
         }
 
         let has_bode = bode_data.response_count() > 0;
@@ -135,9 +126,6 @@ impl SimulationController {
             }
             if loaded_nyquist {
                 state.bind_specialized_viewer_cache(ActiveViewer::Nyquist, provenance);
-            }
-            if !state.analysis.smith_chart_state.traces.is_empty() {
-                state.bind_specialized_viewer_cache(ActiveViewer::SmithChart, provenance);
             }
         }
     }
@@ -366,18 +354,6 @@ impl SimulationController {
         intervals.sort_by(|a, b| a.total_cmp(b));
         let median = intervals[intervals.len() / 2];
         (median.is_finite() && median > 0.0).then_some(median)
-    }
-
-    fn is_sparameter_trace_name(name: &str) -> bool {
-        let normalized = name.trim_matches('|').to_ascii_uppercase();
-        if !normalized.starts_with('S') {
-            return false;
-        }
-        normalized[1..]
-            .chars()
-            .filter(|ch| ch.is_ascii_digit())
-            .count()
-            >= 2
     }
 }
 
