@@ -343,9 +343,10 @@ pub struct Disclosure {
 
 /// Semantic page sections. The renderer chooses responsive layout; the
 /// snapshot controls only authored order and the initial section.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PublicationSection {
+    #[default]
     Overview,
     Schematic,
     Results,
@@ -2181,6 +2182,22 @@ mod tests {
             Err(ContractError::NonFiniteV3Value {
                 field: "simulation temperature"
             })
+        );
+    }
+
+    #[test]
+    fn v3_section_order_cannot_hide_available_content() {
+        let mut snapshot = minimal_snapshot();
+        add_v3_metadata(&mut snapshot);
+        snapshot
+            .presentation
+            .as_mut()
+            .expect("presentation")
+            .section_order
+            .retain(|section| *section != PublicationSection::Results);
+        assert_eq!(
+            snapshot.validate(),
+            Err(ContractError::MissingSection { section: "results" })
         );
     }
 

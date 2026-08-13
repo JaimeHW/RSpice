@@ -483,6 +483,7 @@ pub(super) fn action_export_publication_snapshot_with_io(
         author_display: "Local export".to_string(),
         created_utc: crate::workbench::publication_snapshot::publication_timestamp_utc(),
         license: rspice_publication_contract::ContentLicense::AllRightsReserved,
+        ..Default::default()
     };
     let built = crate::workbench::publication_snapshot::build_publication_snapshot(state, &draft)
         .map_err(|error| error.to_string())

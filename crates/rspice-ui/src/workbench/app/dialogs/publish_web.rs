@@ -51,6 +51,18 @@ pub(crate) struct PublishWebDialogState {
     pub public_visibility: bool,
     /// Content license sealed into this version's snapshot.
     pub license: rspice_publication_contract::ContentLicense,
+    /// Fixed when the composer opens so the reviewed canonical bytes do not
+    /// change underneath the user while they edit page fields.
+    pub created_utc: String,
+    pub overview_narrative: String,
+    pub specification_label: String,
+    pub specification_value: String,
+    pub specification_unit: String,
+    pub include_schematic: bool,
+    pub include_results: bool,
+    pub include_netlist: bool,
+    pub default_section: rspice_publication_contract::PublicationSection,
+    pub activate_featured: bool,
     /// Selected workspace for a first publish (index into the session list).
     pub workspace_index: usize,
     pub scope: Option<Result<PublishScope, String>>,
@@ -89,14 +101,18 @@ impl RSpiceApp {
         } else {
             project_name
         };
-        let scope = build_scope(&self.state, &title, &author);
-        self.state.dialogs.publish_web = PublishWebDialogState {
+        let mut dialog = PublishWebDialogState {
             open: true,
             title,
             author_credit: author,
-            scope: Some(scope),
+            created_utc: publication_timestamp_utc(),
+            include_schematic: true,
+            include_results: true,
+            include_netlist: true,
             ..Default::default()
         };
+        dialog.scope = Some(build_scope(&self.state, &publication_draft(&dialog)));
+        self.state.dialogs.publish_web = dialog;
         if let Some(binding) = self.state.workspace.project.cloud_publication() {
             self.cloud_account
                 .refresh_publications(binding.circuit_id().to_owned());
@@ -106,6 +122,12 @@ impl RSpiceApp {
     pub(in crate::workbench) fn render_publish_web_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.publish_web.open {
             return;
+        }
+        if !self.state.dialogs.publish_web.submitted
+            && self.state.dialogs.publish_web.scope.is_none()
+        {
+            let draft = publication_draft(&self.state.dialogs.publish_web);
+            self.state.dialogs.publish_web.scope = Some(build_scope(&self.state, &draft));
         }
 
         // Server-side facts, cloned before the body borrows app state.
@@ -224,7 +246,21 @@ impl RSpiceApp {
 
             match dialog_state.scope.clone() {
                 Some(Err(reason)) => {
-                    note(ui, &format!("Nothing can be published: {reason}"), c.err);
+                    ui.columns(2, |columns| {
+                        section_head(&mut columns[0], "Scope");
+                        note(
+                            &mut columns[0],
+                            &format!("Nothing can be published: {reason}"),
+                            c.err,
+                        );
+                        render_page_column(
+                            &mut columns[1],
+                            dialog_state,
+                            binding.is_some(),
+                            &workspaces,
+                            live_publication.as_ref().map(|live| live.url_path.as_str()),
+                        );
+                    });
                 }
                 Some(Ok(scope)) => {
                     ui.columns(2, |columns| {
@@ -325,14 +361,6 @@ impl RSpiceApp {
         let dialog = &self.state.dialogs.publish_web;
         let title = dialog.title.trim().to_owned();
         let description = dialog.description.trim().to_owned();
-        let author = {
-            let credit = dialog.author_credit.trim();
-            if credit.is_empty() {
-                "Anonymous".to_owned()
-            } else {
-                credit.to_owned()
-            }
-        };
         let public = dialog.public_visibility;
         let workspace_index = dialog.workspace_index;
 
@@ -343,13 +371,7 @@ impl RSpiceApp {
                 return;
             }
         };
-        let draft = PublicationDraft {
-            title: title.clone(),
-            description: description.clone(),
-            author_display: author,
-            created_utc: publication_timestamp_utc(),
-            license: dialog.license,
-        };
+        let draft = publication_draft(dialog);
         let built = build_publication_snapshot(&self.state, &draft)
             .map_err(|error| error.to_string())
             .and_then(|snapshot| {
@@ -408,20 +430,32 @@ fn resolve_target(
     })
 }
 
-/// Build the reviewed scope: a real snapshot with the current defaults.
-fn build_scope(state: &AppState, title: &str, author: &str) -> Result<PublishScope, String> {
-    let draft = PublicationDraft {
-        title: title.to_owned(),
-        description: String::new(),
-        author_display: if author.is_empty() {
+fn publication_draft(dialog: &PublishWebDialogState) -> PublicationDraft {
+    PublicationDraft {
+        title: dialog.title.trim().to_owned(),
+        description: dialog.description.trim().to_owned(),
+        author_display: if dialog.author_credit.trim().is_empty() {
             "Anonymous".to_owned()
         } else {
-            author.to_owned()
+            dialog.author_credit.trim().to_owned()
         },
-        created_utc: publication_timestamp_utc(),
-        license: rspice_publication_contract::ContentLicense::default(),
-    };
-    let snapshot = build_publication_snapshot(state, &draft).map_err(|error| error.to_string())?;
+        created_utc: dialog.created_utc.clone(),
+        license: dialog.license,
+        overview_narrative: dialog.overview_narrative.trim().to_owned(),
+        specification_label: dialog.specification_label.trim().to_owned(),
+        specification_value: dialog.specification_value.trim().to_owned(),
+        specification_unit: dialog.specification_unit.trim().to_owned(),
+        include_schematic: dialog.include_schematic,
+        include_results: dialog.include_results,
+        include_netlist: dialog.include_netlist,
+        default_section: dialog.default_section,
+        activate_featured: dialog.activate_featured,
+    }
+}
+
+/// Build the reviewed scope from the same draft the final submission uses.
+fn build_scope(state: &AppState, draft: &PublicationDraft) -> Result<PublishScope, String> {
+    let snapshot = build_publication_snapshot(state, draft).map_err(|error| error.to_string())?;
     let payload_bytes = snapshot
         .canonical_bytes()
         .map_err(|error| error.to_string())?
@@ -517,6 +551,7 @@ fn render_page_column(
 ) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
+    let reviewed_draft = publication_draft(dialog);
     section_head(ui, "Page");
 
     field_label(ui, "Title");
@@ -538,6 +573,71 @@ fn render_page_column(
             .font(theme::sans(tokens::FS_1, FontWeight::Regular))
             .desired_rows(2)
             .desired_width(f32::INFINITY),
+    );
+
+    field_label(ui, "Published content");
+    ui.horizontal_wrapped(|ui| {
+        ui.checkbox(&mut dialog.include_schematic, "Schematic");
+        ui.checkbox(&mut dialog.include_results, "Results and plots");
+        ui.checkbox(&mut dialog.include_netlist, "Netlist");
+    });
+
+    field_label(ui, "Overview narrative");
+    ui.add(
+        egui::TextEdit::multiline(&mut dialog.overview_narrative)
+            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+            .desired_rows(3)
+            .desired_width(f32::INFINITY)
+            .hint_text("What this circuit does, its design intent, and key conclusions"),
+    );
+
+    field_label(ui, "Featured specification");
+    ui.columns(3, |columns| {
+        columns[0].add(
+            egui::TextEdit::singleline(&mut dialog.specification_label)
+                .desired_width(f32::INFINITY)
+                .hint_text("Label"),
+        );
+        columns[1].add(
+            egui::TextEdit::singleline(&mut dialog.specification_value)
+                .desired_width(f32::INFINITY)
+                .hint_text("Value"),
+        );
+        columns[2].add(
+            egui::TextEdit::singleline(&mut dialog.specification_unit)
+                .desired_width(f32::INFINITY)
+                .hint_text("Unit"),
+        );
+    });
+
+    field_label(ui, "Opening section");
+    egui::ComboBox::from_id_salt("publish-web-default-section")
+        .width(ui.available_width())
+        .selected_text(publication_section_label(dialog.default_section))
+        .show_ui(ui, |ui| {
+            use rspice_publication_contract::PublicationSection;
+            let mut sections = vec![PublicationSection::Overview];
+            if dialog.include_schematic {
+                sections.push(PublicationSection::Schematic);
+            }
+            if dialog.include_results {
+                sections.push(PublicationSection::Results);
+            }
+            if dialog.include_results || dialog.include_netlist {
+                sections.push(PublicationSection::Files);
+            }
+            sections.push(PublicationSection::Details);
+            for section in sections {
+                ui.selectable_value(
+                    &mut dialog.default_section,
+                    section,
+                    publication_section_label(section),
+                );
+            }
+        });
+    ui.checkbox(
+        &mut dialog.activate_featured,
+        "Open the featured figure in interactive mode",
     );
 
     field_label(ui, "Content license");
@@ -603,6 +703,24 @@ fn render_page_column(
                 c.text_faint
             }),
     );
+
+    if publication_draft(dialog) != reviewed_draft {
+        dialog.scope = None;
+    }
+}
+
+const fn publication_section_label(
+    section: rspice_publication_contract::PublicationSection,
+) -> &'static str {
+    use rspice_publication_contract::PublicationSection;
+    match section {
+        PublicationSection::Overview => "Overview",
+        PublicationSection::Schematic => "Schematic",
+        PublicationSection::Results => "Results",
+        PublicationSection::Components => "Components",
+        PublicationSection::Files => "Files",
+        PublicationSection::Details => "Details",
+    }
 }
 
 fn render_leaves_machine(ui: &mut egui::Ui, scope: &PublishScope) {
@@ -625,7 +743,7 @@ fn render_leaves_machine(ui: &mut egui::Ui, scope: &PublishScope) {
     );
     kv_row(
         ui,
-        "Page title, description, author credit",
+        "Page copy, specification, author credit, and presentation choices",
         "included",
         c.text,
     );
@@ -827,7 +945,15 @@ mod tests {
     #[test]
     fn empty_project_scope_reports_the_builder_refusal() {
         let state = AppState::default();
-        let scope = build_scope(&state, "Untitled project", "");
+        let scope = build_scope(
+            &state,
+            &PublicationDraft {
+                title: "Untitled project".to_owned(),
+                author_display: "Anonymous".to_owned(),
+                created_utc: "2026-08-06T00:00:00Z".to_owned(),
+                ..Default::default()
+            },
+        );
         let reason = scope.expect_err("empty project cannot publish");
         assert!(reason.contains("no schematic"), "{reason}");
     }

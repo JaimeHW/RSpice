@@ -11,9 +11,11 @@
 use rspice_publication_contract::{
     AnalysisRecord, AxisScale, Dataset, Disclosure, Figure, FigureContent, Measurement,
     NetlistSection, Paint, PaintRole, PathPrimitive, PathSegment, PlotFigure, PlotHydration,
-    PlotTraceBinding, Point, Primitive, PrimitiveGroup, PublicationMetadata, PublicationSnapshot,
-    ResultsSection, Scene, SchematicSection, SheetScene, Stroke, StrokePattern, SweepAxis,
-    TextAnchor, TextFont, TextPrimitive, Trace, TraceTransform, TraceValues, Validate as _,
+    PlotTraceBinding, Point, Primitive, PrimitiveGroup, PublicationMetadata, PublicationOverview,
+    PublicationPresentation, PublicationSection, PublicationSnapshot, ResultsSection, Scene,
+    SchematicSection, SheetScene, SimulationProvenance, Specification, Stroke, StrokePattern,
+    SweepAxis, TextAnchor, TextFont, TextPrimitive, Trace, TraceTransform, TraceValues,
+    Validate as _,
 };
 
 use crate::hardcopy::HardcopyScope;
@@ -33,13 +35,43 @@ use crate::workbench::hardcopy_adapters::sources::{
 /// Everything the caller decides about the publication; the builder derives
 /// the rest from project state. `created_utc` is supplied here so the
 /// builder itself stays clock-free and deterministic.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PublicationDraft {
     pub title: String,
     pub description: String,
     pub author_display: String,
     pub created_utc: String,
     pub license: rspice_publication_contract::ContentLicense,
+    pub overview_narrative: String,
+    pub specification_label: String,
+    pub specification_value: String,
+    pub specification_unit: String,
+    pub include_schematic: bool,
+    pub include_results: bool,
+    pub include_netlist: bool,
+    pub default_section: PublicationSection,
+    pub activate_featured: bool,
+}
+
+impl Default for PublicationDraft {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            description: String::new(),
+            author_display: String::new(),
+            created_utc: String::new(),
+            license: rspice_publication_contract::ContentLicense::default(),
+            overview_narrative: String::new(),
+            specification_label: String::new(),
+            specification_value: String::new(),
+            specification_unit: String::new(),
+            include_schematic: true,
+            include_results: true,
+            include_netlist: true,
+            default_section: PublicationSection::Overview,
+            activate_featured: false,
+        }
+    }
 }
 
 /// UTC RFC 3339 stamp for snapshot provenance, from the wasm-safe clock and
@@ -120,9 +152,22 @@ pub(crate) fn build_publication_snapshot(
     state: &AppState,
     draft: &PublicationDraft,
 ) -> Result<PublicationSnapshot, PublicationBuildError> {
-    let (sheets, plot_figures) = collect_scenes(state)?;
-    let netlist = effective_deck(state);
-    let results = results_section(state.simulation.active_run(), active_specs(state))?;
+    let (mut sheets, mut plot_figures) = collect_scenes(state)?;
+    if !draft.include_schematic {
+        sheets.clear();
+    }
+    if !draft.include_results {
+        plot_figures.clear();
+    }
+    let netlist = draft
+        .include_netlist
+        .then(|| effective_deck(state))
+        .flatten();
+    let results = if draft.include_results {
+        results_section(state.simulation.active_run(), active_specs(state))?
+    } else {
+        None
+    };
 
     if sheets.is_empty() && plot_figures.is_empty() && netlist.is_none() && results.is_none() {
         return Err(PublicationBuildError::NothingToPublish);
@@ -153,6 +198,66 @@ pub(crate) fn build_publication_snapshot(
         next_figure_id += 1;
     }
 
+    let mut section_order = vec![PublicationSection::Overview];
+    if !sheets.is_empty() {
+        section_order.push(PublicationSection::Schematic);
+    }
+    if results.is_some() {
+        section_order.push(PublicationSection::Results);
+    }
+    if netlist.is_some() || results.is_some() {
+        section_order.push(PublicationSection::Files);
+    }
+    section_order.push(PublicationSection::Details);
+    let default_section = if section_order.contains(&draft.default_section) {
+        draft.default_section
+    } else {
+        PublicationSection::Overview
+    };
+    let narrative = if draft.overview_narrative.trim().is_empty() {
+        draft.description.trim()
+    } else {
+        draft.overview_narrative.trim()
+    };
+    let specifications = if draft.specification_label.trim().is_empty()
+        || draft.specification_value.trim().is_empty()
+    {
+        Vec::new()
+    } else {
+        vec![Specification {
+            label: draft.specification_label.trim().to_string(),
+            value: draft.specification_value.trim().to_string(),
+            unit: (!draft.specification_unit.trim().is_empty())
+                .then(|| draft.specification_unit.trim().to_string()),
+        }]
+    };
+    let featured_figure_id = figures
+        .iter()
+        .find(|figure| matches!(figure.content, FigureContent::Plot(_)))
+        .or_else(|| figures.first())
+        .map(|figure| figure.id);
+    let figure_details = figures
+        .iter()
+        .map(|figure| rspice_publication_contract::FigurePresentation {
+            figure_id: figure.id,
+            caption: None,
+            accessible_summary: match &figure.content {
+                FigureContent::SchematicSheet { .. } => {
+                    format!("Published schematic sheet: {}.", figure.title)
+                }
+                FigureContent::Plot(_) => format!("Published simulation plot: {}.", figure.title),
+            },
+            default_interactive: draft.activate_featured && featured_figure_id == Some(figure.id),
+        })
+        .collect();
+    let simulation_provenance = results.as_ref().map(|_| SimulationProvenance {
+        engine: "RSpice".to_string(),
+        engine_version: env!("CARGO_PKG_VERSION").to_string(),
+        temperature_c_bits: None,
+        corner: None,
+        settings: Vec::new(),
+        warnings: Vec::new(),
+    });
     let snapshot = PublicationSnapshot {
         schema_version: rspice_publication_contract::PUBLICATION_SNAPSHOT_SCHEMA_VERSION,
         metadata: PublicationMetadata {
@@ -177,8 +282,28 @@ pub(crate) fn build_publication_snapshot(
         netlist,
         results,
         figures,
-        presentation: None,
-        engineering: None,
+        presentation: Some(PublicationPresentation {
+            overview: (!narrative.is_empty() || !specifications.is_empty()).then(|| {
+                PublicationOverview {
+                    narrative: if narrative.is_empty() {
+                        "Engineering publication".to_string()
+                    } else {
+                        narrative.to_string()
+                    },
+                    specifications,
+                }
+            }),
+            section_order,
+            default_section,
+            featured_figure_id,
+            figure_details,
+        }),
+        engineering: Some(rspice_publication_contract::EngineeringPublication {
+            components: Vec::new(),
+            nets: Vec::new(),
+            signals: Vec::new(),
+            simulation: simulation_provenance,
+        }),
     };
     snapshot
         .validate()
@@ -1143,6 +1268,60 @@ mod tests {
     }
 
     #[test]
+    fn authored_presentation_and_disclosure_choices_are_sealed() {
+        let mut state = AppState::default();
+        state.simulation.netlist_content = "* Filter\nR1 in out 1k\n.end".to_string();
+        let snapshot = build_publication_snapshot(
+            &state,
+            &PublicationDraft {
+                title: "Filter".to_string(),
+                description: "Short page description".to_string(),
+                author_display: "Test".to_string(),
+                created_utc: "2026-08-06T00:00:00Z".to_string(),
+                overview_narrative: "A low-pass filter used at the converter input.".to_string(),
+                specification_label: "Cutoff".to_string(),
+                specification_value: "1.59".to_string(),
+                specification_unit: "kHz".to_string(),
+                default_section: PublicationSection::Results,
+                ..Default::default()
+            },
+        )
+        .expect("netlist publication builds");
+
+        let presentation = snapshot.presentation.expect("v3 presentation");
+        assert_eq!(
+            presentation.section_order,
+            vec![
+                PublicationSection::Overview,
+                PublicationSection::Files,
+                PublicationSection::Details,
+            ]
+        );
+        assert_eq!(presentation.default_section, PublicationSection::Overview);
+        let overview = presentation.overview.expect("authored overview");
+        assert_eq!(
+            overview.narrative,
+            "A low-pass filter used at the converter input."
+        );
+        assert_eq!(overview.specifications[0].label, "Cutoff");
+        assert_eq!(overview.specifications[0].unit.as_deref(), Some("kHz"));
+
+        assert!(matches!(
+            build_publication_snapshot(
+                &state,
+                &PublicationDraft {
+                    title: "Withheld".to_string(),
+                    author_display: "Test".to_string(),
+                    created_utc: "2026-08-06T00:00:00Z".to_string(),
+                    include_netlist: false,
+                    ..Default::default()
+                }
+            ),
+            Err(PublicationBuildError::NothingToPublish)
+        ));
+    }
+
+    #[test]
     fn empty_projects_report_nothing_to_publish() {
         let state = AppState::default();
         assert!(matches!(
@@ -1154,6 +1333,7 @@ mod tests {
                     author_display: "Test".to_string(),
                     created_utc: "2026-08-06T00:00:00Z".to_string(),
                     license: rspice_publication_contract::ContentLicense::AllRightsReserved,
+                    ..Default::default()
                 }
             ),
             Err(PublicationBuildError::NothingToPublish)
@@ -1330,6 +1510,7 @@ mod tests {
                 author_display: "Test".to_string(),
                 created_utc: "2026-08-06T00:00:00Z".to_string(),
                 license: rspice_publication_contract::ContentLicense::CcBy40,
+                ..Default::default()
             },
         )
         .expect("snapshot builds");
