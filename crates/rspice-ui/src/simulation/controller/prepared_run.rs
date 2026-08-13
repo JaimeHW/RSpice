@@ -123,8 +123,9 @@ impl SimulationController {
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         let model_cards = if has_project_technology {
             sealed_models
-                .reference_process_model_cards(state.sim_setup.reference_pvt.process)
+                .reference_model_execution_plan(state.sim_setup.reference_pvt.process)
                 .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?
+                .model_cards()
         } else {
             Vec::new()
         };
@@ -248,9 +249,10 @@ impl SimulationController {
         Ok(())
     }
 
-    /// Resolve a fresh internal preflight when Run was invoked directly, or
-    /// validate an explicitly retained preflight snapshot. Only the retained
-    /// immutable snapshot is returned for execution.
+    /// Validate and consume an explicitly retained preflight snapshot. Run,
+    /// collaborative approval, Automation, and tuning all prepare through an
+    /// owning workflow before they request dispatch; the controller never
+    /// manufactures hidden authorization at this final boundary.
     pub(super) fn consume_snapshot_for_dispatch(
         &mut self,
         state: &mut AppState,
@@ -265,15 +267,18 @@ impl SimulationController {
         }
 
         if self.pending_prepared_run.is_none() {
-            if intent == SimulationRunIntent::ManualDeck {
-                return Err(PreparationError::new(
-                    PreparationStage::Authorization,
-                    "Validate the exact current netlist before running; manual decks are never auto-authorized",
-                ));
-            }
-            crate::workbench::menu_bar::run_design_rule_check(state);
-            let snapshot = self.build_prepared_snapshot(state, intent)?;
-            self.authorize_snapshot(snapshot)?;
+            let message = match intent {
+                SimulationRunIntent::ManualDeck => {
+                    "Validate the exact current netlist before running; manual decks are never auto-authorized"
+                }
+                SimulationRunIntent::SimulateRunSet => {
+                    "Run Simulation preflight before dispatch; Studio runs are never auto-authorized"
+                }
+            };
+            return Err(PreparationError::new(
+                PreparationStage::Authorization,
+                message,
+            ));
         }
 
         let pending = self.pending_prepared_run.take().ok_or_else(|| {
@@ -435,6 +440,33 @@ impl SimulationController {
         }
         reject_deferred_corner_model_sources(tasks.iter().map(PreparedTask::queued_analysis))?;
 
+        let run_set_config = state
+            .sim_setup
+            .run_set
+            .to_corner_config(
+                crate::simulation::dialog::corner::CornerBaseAnalysis::Op,
+                state.sim_setup.reference_pvt,
+            )
+            .map_err(|error| {
+                PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    format!("Run Set is invalid: {error}"),
+                )
+            })?;
+        let run_set_contract =
+            Self::corner_run_config_from_dialog(state, &run_set_config, &sealed_models).map_err(
+                |error| {
+                    PreparationError::new(
+                        PreparationStage::ModelBindings,
+                        format!("Run Set model binding failed: {error}"),
+                    )
+                },
+            )?;
+        let prepared_run_set = crate::simulation::execution::PreparedRunSet::new(
+            state.sim_setup.run_set.clone(),
+            run_set_contract,
+        );
+
         let analysis_lines = tasks
             .iter()
             .map(|task| task.queued_analysis().analysis_line.clone())
@@ -468,9 +500,10 @@ impl SimulationController {
             ));
         }
 
-        let model_cards = sealed_models
-            .reference_process_model_cards(state.sim_setup.reference_pvt.process)
+        let model_execution_plan = sealed_models
+            .reference_model_execution_plan(state.sim_setup.reference_pvt.process)
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+        let model_cards = model_execution_plan.model_cards();
         let generated_source = state
             .workspace
             .bind_generated_netlist_provenance(generated.netlist);
@@ -515,6 +548,7 @@ impl SimulationController {
                 )
             })
             .collect::<Vec<_>>();
+        append_model_execution_plan_identity(&model_execution_plan, &mut model_identities);
         append_signed_pdk_model_identity(&sealed_models, &mut model_identities);
         append_corner_model_identities(
             tasks.iter().map(PreparedTask::queued_analysis),
@@ -541,6 +575,7 @@ impl SimulationController {
             source_digest,
             reference_process: state.sim_setup.reference_pvt.process,
             reference_temperature_celsius: state.sim_setup.reference_pvt.temperature_celsius,
+            run_set: Some(prepared_run_set),
             tasks,
             executable_netlist: netlist,
             save_policy: SavePolicy::RetainEngineProducedResults,
@@ -612,13 +647,21 @@ impl SimulationController {
             state.model_library_manager.seal_execution_sources()
         }
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-        let model_cards = if has_project_technology {
-            sealed_models
-                .reference_process_model_cards(state.sim_setup.reference_pvt.process)
-                .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?
+        let model_execution_plan = if has_project_technology {
+            Some(
+                sealed_models
+                    .reference_model_execution_plan(state.sim_setup.reference_pvt.process)
+                    .map_err(|error| {
+                        PreparationError::new(PreparationStage::ModelBindings, error)
+                    })?,
+            )
         } else {
-            Vec::new()
+            None
         };
+        let model_cards = model_execution_plan.as_ref().map_or_else(
+            Vec::new,
+            crate::state::model_library::ModelExecutionPlan::model_cards,
+        );
         let composed = manual_deck::compose_manual_deck_source(&owned_materialized);
         let mut composed = Self::apply_reference_model_bindings_to_netlist(&composed, &model_cards);
         let pdk_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?;
@@ -688,6 +731,9 @@ impl SimulationController {
                 )
             })
             .collect::<Vec<_>>();
+        if let Some(plan) = model_execution_plan.as_ref() {
+            append_model_execution_plan_identity(plan, &mut model_identities);
+        }
         append_signed_pdk_model_identity(&sealed_models, &mut model_identities);
         append_corner_model_identities(
             tasks.iter().map(PreparedTask::queued_analysis),
@@ -707,6 +753,7 @@ impl SimulationController {
             source_digest,
             reference_process: state.sim_setup.reference_pvt.process,
             reference_temperature_celsius: state.sim_setup.reference_pvt.temperature_celsius,
+            run_set: None,
             tasks,
             executable_netlist: expanded,
             save_policy: SavePolicy::RetainEngineProducedResults,
@@ -1746,6 +1793,26 @@ fn append_signed_pdk_model_identity(
     if let Some((label, archive_digest)) = sealed_sources.pdk_model_identity() {
         identities.push(ModelSourceIdentity::new(label, archive_digest));
     }
+}
+
+fn append_model_execution_plan_identity(
+    plan: &crate::state::model_library::ModelExecutionPlan,
+    identities: &mut Vec<ModelSourceIdentity>,
+) {
+    let selections = plan
+        .selected_library_corners()
+        .iter()
+        .map(|(library, corner)| format!("{library}={}", corner.as_deref().unwrap_or("top-level")))
+        .collect::<Vec<_>>()
+        .join(",");
+    identities.push(ModelSourceIdentity::new(
+        format!(
+            "model-execution-plan/{}/{}-bindings/{selections}",
+            plan.reference_process().short_name(),
+            plan.bindings().len()
+        ),
+        plan.digest(),
+    ));
 }
 
 fn prepared_project_model_sources(

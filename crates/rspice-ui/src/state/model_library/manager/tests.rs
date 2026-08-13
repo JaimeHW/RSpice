@@ -135,15 +135,15 @@ fn loaded_sections_resolve_to_exact_reference_and_corner_bindings() {
         .expect("load sectioned model library");
 
     let reference = manager
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::FF)
-        .expect("FF binding exists");
+        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .expect("selected TT binding exists");
     let bindings = manager
         .corner_model_bindings(&[CornerProcess::TT, CornerProcess::FF])
         .expect("TT and FF bindings exist");
 
     assert_eq!(reference.len(), 1);
     assert!(reference[0].contains("RSpice sealed model source"));
-    assert!(reference[0].contains("KP=2e-3"));
+    assert!(reference[0].contains("KP=1e-3"));
     assert!(reference[0].lines().all(|line| {
         rspice_core::netlist::parse_lib_directive(line).is_none()
             && rspice_core::netlist::parse_include_directive(line).is_none()
@@ -161,6 +161,80 @@ fn loaded_sections_resolve_to_exact_reference_and_corner_bindings() {
         .expect_err("undefined SS section must fail closed");
     assert!(error.contains("does not define the SS process section"));
     fs::remove_dir_all(directory).expect("remove model fixture directory");
+}
+
+#[test]
+fn nominal_execution_plan_honors_the_published_library_corner() {
+    let (directory, path) = model_fixture();
+    let mut manager = ModelLibraryManager::new();
+    let name = manager
+        .load_library_file(&path, None)
+        .expect("load sectioned model library");
+
+    let tt_plan = manager
+        .seal_execution_sources()
+        .expect("seal TT selection")
+        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .expect("build exact TT execution plan");
+    assert_eq!(
+        tt_plan.selected_library_corners(),
+        &[(name.clone(), Some("TT".to_owned()))]
+    );
+    assert!(tt_plan.model_cards()[0].contains("KP=1e-3"));
+
+    assert!(
+        manager
+            .get_library_mut(&name)
+            .expect("library remains loaded")
+            .select_corner("FF")
+    );
+    let ff_plan = manager
+        .seal_execution_sources()
+        .expect("seal FF selection")
+        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .expect("build exact FF execution plan for the nominal run");
+
+    assert_eq!(
+        ff_plan.selected_library_corners(),
+        &[(name, Some("FF".to_owned()))]
+    );
+    assert!(ff_plan.model_cards()[0].contains("KP=2e-3"));
+    assert_ne!(tt_plan.digest(), ff_plan.digest());
+
+    fs::remove_dir_all(directory).expect("remove model fixture directory");
+}
+
+#[test]
+fn contested_materialized_model_names_fail_closed() {
+    let (directory, first) = model_fixture();
+    let second = directory.join("alternate.lib");
+    fs::write(&first, ".model contested NMOS (LEVEL=1 KP=1e-3)\n")
+        .expect("write first duplicate provider");
+    fs::write(&second, ".model contested NMOS (LEVEL=1 KP=2e-3)\n")
+        .expect("write second duplicate provider");
+    let mut manager = ModelLibraryManager::new();
+    manager
+        .load_library_file(&first, None)
+        .expect("load first duplicate provider");
+    manager
+        .load_library_file(&second, None)
+        .expect("load second duplicate provider");
+
+    let error = manager
+        .seal_execution_sources()
+        .expect("seal both authenticated sources")
+        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .expect_err("a contested executable namespace must fail closed");
+
+    assert!(
+        error.contains("Executable model namespace is contested"),
+        "{error}"
+    );
+    assert!(error.contains("'contested'"), "{error}");
+    assert!(error.contains("foundry.lib"), "{error}");
+    assert!(error.contains("alternate.lib"), "{error}");
+
+    fs::remove_dir_all(directory).expect("remove duplicate-provider fixture");
 }
 
 #[test]

@@ -390,6 +390,69 @@ impl SimulationRun {
         self.analyses.push(analysis);
     }
 
+    /// Publish or refresh the single provisional result for an in-flight
+    /// prepared task. This does not change run success: the task has not
+    /// reached a terminal outcome yet.
+    pub(crate) fn upsert_live_analysis(
+        &mut self,
+        mut analysis: AnalysisResult,
+    ) -> Result<(), String> {
+        if !analysis.is_live_partial() {
+            return Err("only a live partial analysis can use provisional retention".to_owned());
+        }
+        let instance = analysis
+            .provenance()
+            .map(AnalysisResultProvenance::source_instance_id)
+            .ok_or_else(|| "live partial analysis has no prepared-task provenance".to_owned())?;
+        if let Some(index) = self.analyses.iter().position(|existing| {
+            existing
+                .provenance()
+                .is_some_and(|provenance| provenance.source_instance_id() == instance)
+        }) {
+            if !self.analyses[index].is_live_partial() {
+                return Err(format!(
+                    "prepared task {instance} already has a terminal retained result"
+                ));
+            }
+            analysis.id = self.analyses[index].id;
+            self.analyses[index] = analysis;
+        } else {
+            if analysis.id == 0
+                || self
+                    .analyses
+                    .iter()
+                    .any(|existing| existing.id == analysis.id)
+            {
+                analysis.id = self.next_available_analysis_id();
+            }
+            self.analyses.push(analysis);
+        }
+        self.validate_provenance()
+    }
+
+    /// Replace the provisional prefix for this exact task, or append the
+    /// terminal result when no live presentation was published.
+    pub(crate) fn replace_live_or_add_analysis(&mut self, mut analysis: AnalysisResult) {
+        let matching_live = analysis.provenance().and_then(|provenance| {
+            let instance = provenance.source_instance_id();
+            self.analyses.iter().position(|existing| {
+                existing.is_live_partial()
+                    && existing
+                        .provenance()
+                        .is_some_and(|provenance| provenance.source_instance_id() == instance)
+            })
+        });
+        if let Some(index) = matching_live {
+            analysis.id = self.analyses[index].id;
+            if !analysis.success {
+                self.success = false;
+            }
+            self.analyses[index] = analysis;
+        } else {
+            self.add_analysis(analysis);
+        }
+    }
+
     fn next_available_analysis_id(&self) -> u64 {
         let mut next_id = self
             .analyses

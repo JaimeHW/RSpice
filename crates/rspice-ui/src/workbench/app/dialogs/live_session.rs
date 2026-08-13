@@ -267,9 +267,11 @@ impl RSpiceApp {
                     .cloud_account
                     .remove_live_session_participant(principal_id),
                 LiveDialogAction::RequestHostRun => self.live_session.request_run(),
-                LiveDialogAction::ApproveHostRun(sender) => self
-                    .live_session
-                    .approve_run_request(&mut self.state, sender),
+                LiveDialogAction::ApproveHostRun(sender) => {
+                    if self.live_session.approve_run_request(sender) {
+                        crate::workbench::preflight::run_and_queue(self);
+                    }
+                }
                 LiveDialogAction::DenyHostRun(sender) => {
                     self.live_session.deny_run_request(sender);
                 }

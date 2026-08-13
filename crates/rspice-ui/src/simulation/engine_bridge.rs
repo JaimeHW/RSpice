@@ -63,6 +63,7 @@ struct SimulationInput<'a> {
     netlist_str: &'a str,
     source_path: Option<&'a Path>,
     supply_corner: Option<SupplyCornerScale>,
+    environment: Option<crate::simulation::runner::AnalysisExecutionEnvironment>,
 }
 
 impl Default for EngineBridge {
@@ -109,6 +110,7 @@ impl EngineBridge {
                 netlist_str,
                 source_path: None,
                 supply_corner: None,
+                environment: None,
             },
             &NoAbort,
         )
@@ -128,6 +130,7 @@ impl EngineBridge {
                 netlist_str,
                 source_path: None,
                 supply_corner: None,
+                environment: None,
             },
             abort_flag,
         )
@@ -153,6 +156,29 @@ impl EngineBridge {
                 netlist_str,
                 source_path,
                 supply_corner,
+                environment: None,
+            },
+            abort_flag,
+        )
+    }
+
+    /// Run one prepared analysis under the exact temperature and supply point
+    /// selected by the Studio Run Set.
+    pub(crate) fn run_with_abort_and_source_path_and_environment(
+        &self,
+        config: &AnalysisConfig,
+        netlist_str: &str,
+        source_path: Option<&Path>,
+        environment: Option<crate::simulation::runner::AnalysisExecutionEnvironment>,
+        abort_flag: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
+        self.run_request(
+            SimulationInput {
+                config,
+                netlist_str,
+                source_path,
+                supply_corner: None,
+                environment,
             },
             abort_flag,
         )
@@ -180,7 +206,44 @@ impl EngineBridge {
             input.source_path,
             abort_flag,
         )?;
-        if let Some(corner) = input.supply_corner {
+        if let Some(environment) = input.environment {
+            if !environment.temperature_celsius.is_finite()
+                || environment.temperature_celsius <= -273.15
+            {
+                return Err(SimulationError::InvalidConfig(
+                    "Run Set temperature must be finite and above absolute zero".to_owned(),
+                ));
+            }
+            netlist.options.temp = Some(environment.temperature_celsius);
+            match (
+                environment.supply_voltage,
+                environment.nominal_supply_voltage,
+            ) {
+                (Some(supply), Some(nominal)) => {
+                    crate::services::simulation_runner::apply_voltage_corner(
+                        &mut netlist,
+                        supply,
+                        nominal,
+                        abort_flag,
+                    )
+                    .map_err(|error| {
+                        if error.is_aborted() {
+                            SimulationError::Aborted
+                        } else {
+                            SimulationError::InvalidConfig(format!(
+                                "Run Set supply application failed: {error}"
+                            ))
+                        }
+                    })?;
+                }
+                (None, None) => {}
+                _ => {
+                    return Err(SimulationError::InvalidConfig(
+                        "Run Set supply and nominal voltage must be provided together".to_owned(),
+                    ));
+                }
+            }
+        } else if let Some(corner) = input.supply_corner {
             crate::services::simulation_runner::apply_voltage_corner(
                 &mut netlist,
                 corner.corner_voltage,

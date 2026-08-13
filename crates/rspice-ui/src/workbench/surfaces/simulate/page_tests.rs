@@ -218,7 +218,11 @@ fn the_solver_page_states_both_acceptance_criteria_and_the_whole_ladder() {
 /// the strip without the forecast would be showing a space with no stated cost.
 #[test]
 fn the_run_space_page_states_every_axis_and_what_they_resolve_to() {
-    let rendered = render(SimulationPage::RunSet, 1200.0);
+    let rendered = render_with(SimulationPage::RunSet, 1200.0, |app| {
+        for dimension in &mut app.state.sim_setup.run_set.dimensions {
+            dimension.enabled = true;
+        }
+    });
 
     for fragment in [
         "Run space",
@@ -249,9 +253,10 @@ fn the_run_space_page_states_every_axis_and_what_they_resolve_to() {
 #[test]
 fn an_unresolvable_run_space_shows_its_refusal_and_keeps_the_invalid_value() {
     let rendered = render_with(SimulationPage::RunSet, 1200.0, |app| {
-        let id = app.state.sim_setup.corner.run_set.dimensions[2].id.clone();
+        app.state.sim_setup.run_set.dimensions[2].enabled = true;
+        let id = app.state.sim_setup.run_set.dimensions[2].id.clone();
         crate::simulation::run_set::dispatch(
-            &mut app.state.sim_setup.corner.run_set,
+            &mut app.state.sim_setup.run_set,
             crate::simulation::run_set::RunSetAction::SetValues {
                 id,
                 text: "-40\nwarm\n125".to_owned(),
@@ -283,9 +288,12 @@ fn an_unresolvable_run_space_shows_its_refusal_and_keeps_the_invalid_value() {
 #[test]
 fn disabling_an_axis_moves_the_forecast_and_the_point_table_together() {
     let rendered = render_with(SimulationPage::RunSet, 1200.0, |app| {
-        let id = app.state.sim_setup.corner.run_set.dimensions[1].id.clone();
+        for dimension in &mut app.state.sim_setup.run_set.dimensions {
+            dimension.enabled = true;
+        }
+        let id = app.state.sim_setup.run_set.dimensions[1].id.clone();
         crate::simulation::run_set::dispatch(
-            &mut app.state.sim_setup.corner.run_set,
+            &mut app.state.sim_setup.run_set,
             crate::simulation::run_set::RunSetAction::SetEnabled { id, enabled: false },
             1,
         );
@@ -906,9 +914,9 @@ fn a_run_space_change_moves_the_plan_revision() {
         .stable_analysis_plan()
         .expect("stable plan")
         .revision();
-    let id = app.state.sim_setup.corner.run_set.dimensions[2].id.clone();
+    let id = app.state.sim_setup.run_set.dimensions[2].id.clone();
     let transaction = crate::simulation::run_set::dispatch(
-        &mut app.state.sim_setup.corner.run_set,
+        &mut app.state.sim_setup.run_set,
         crate::simulation::run_set::RunSetAction::SetValues {
             id,
             text: "-40\n0\n25\n85\n125".to_owned(),
@@ -1289,7 +1297,7 @@ fn the_applies_to_control_is_built_from_the_declared_run_set() {
 
     let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
         let id = plan_id(app);
-        app.state.sim_setup.corner.run_set = six_point_run_set();
+        app.state.sim_setup.run_set = six_point_run_set();
         app.state.workbench.selected_specification = Some("gain".to_owned());
         app.state
             .workspace
@@ -1308,7 +1316,7 @@ fn the_applies_to_control_is_built_from_the_declared_run_set() {
     // every frame, so it belongs in the registry's own status line.
     let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
         let id = plan_id(app);
-        app.state.sim_setup.corner.run_set = six_point_run_set();
+        app.state.sim_setup.run_set = six_point_run_set();
         app.state.workbench.selected_specification = Some("gain".to_owned());
         app.state.workspace.replace_active_specs(
             id,
@@ -1330,7 +1338,7 @@ fn the_applies_to_control_is_built_from_the_declared_run_set() {
     // more than a limit still awaiting evidence.
     let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
         let id = plan_id(app);
-        app.state.sim_setup.corner.run_set = six_point_run_set();
+        app.state.sim_setup.run_set = six_point_run_set();
         app.state.workbench.selected_specification = Some("gain".to_owned());
         app.state.workspace.replace_active_specs(
             id,

@@ -1,10 +1,9 @@
 //! Whether a simulation may start, as a rule rather than a method.
 //!
-//! This is the single answer behind every Run affordance: the toolbar, the run
-//! bar, the menu entry, and F5 all gate on it, so it must not drift between
-//! them. It used to live as a method on `AppState`, which meant reading it
-//! required an entire application and hid which five things it actually
-//! consults.
+//! This is the single static eligibility answer used by governed workflows and
+//! availability explanations. User-facing Run affordances remain actionable
+//! so they can execute the complete preflight and show ordered remediation;
+//! they never dispatch merely because this cheaper predicate passes.
 //!
 //! Taking those five explicitly makes the rule testable on its own and makes
 //! the inputs auditable: a change to the plan, the configured root, the

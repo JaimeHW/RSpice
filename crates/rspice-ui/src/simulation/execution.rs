@@ -24,8 +24,8 @@ pub(in crate::simulation) use canonical::{
 pub(in crate::simulation) use permit::{ExecutionPermit, ExecutionPermitIssuer};
 pub(in crate::simulation) use snapshot::{
     AuthorizedRunDispatch, AuthorizedTaskDispatch, CrossProbeSnapshot, ExecutionTargetCapabilities,
-    ModelSourceIdentity, PreparedRunSnapshot, PreparedTask, ResolvedTaskDispatch, RunSourceReceipt,
-    SavePolicy, SnapshotParts, TouchstoneExportPolicy,
+    ModelSourceIdentity, PreparedRunSet, PreparedRunSnapshot, PreparedTask, ResolvedTaskDispatch,
+    RunSourceReceipt, SavePolicy, SnapshotParts, TouchstoneExportPolicy,
 };
 pub(crate) use snapshot::{
     PreparationError, PreparationStage, PreparedRunMetadata, execution_target_supports_cancellation,

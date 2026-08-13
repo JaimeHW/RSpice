@@ -318,11 +318,8 @@ impl RSpiceApp {
                     if self.manual_deck_run_block_reason().is_none() {
                         self.state.request_netlist_manual_deck_run();
                     }
-                } else if self.state.can_run_simulation() {
-                    self.state.request_run_set_simulation();
-                    self.state
-                        .workbench
-                        .activate(crate::workbench::state::Workspace::Simulate);
+                } else {
+                    crate::workbench::preflight::run_and_queue(self);
                 }
             }
             ShortcutCommand::StopSimulation => {

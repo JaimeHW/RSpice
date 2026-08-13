@@ -1844,13 +1844,15 @@ fn request_analysis_run(
         app.state.workbench.active_analysis = kind.legacy_index();
         app.state.workbench.active_analysis_instance = Some(id);
     }
-    if let Some(reason) = app.state.simulation_run_preflight_block_reason() {
-        return Err(format!(
-            "Execution was not started: {reason}. Open the selected analysis in Simulation Studio to use its prerequisite repair action."
-        ));
+    crate::workbench::preflight::run_and_queue(app);
+    if app.state.simulation.trigger_simulation {
+        Ok(())
+    } else {
+        Err(
+            "Execution was not started; review the Simulation preflight report and use its prerequisite repair action."
+                .to_owned(),
+        )
     }
-    app.state.request_run_set_simulation();
-    Ok(())
 }
 
 fn open_analysis_configuration(

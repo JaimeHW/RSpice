@@ -61,11 +61,61 @@ pub struct SealedModelExecutionSources {
     )>,
 }
 
+/// Immutable, content-addressed model namespace used by one nominal run.
+///
+/// This is the semantic boundary shared by preflight, save validation, and
+/// prepared-run construction.  It records the exact per-library corner that
+/// was selected when sources were sealed and rejects a contested executable
+/// namespace before the engine can fall back to first-definition lookup.
+#[derive(Debug, Clone)]
+pub struct ModelExecutionPlan {
+    reference_process: crate::simulation::dialog::corner::ProcessCorner,
+    selected_library_corners: Vec<(String, Option<String>)>,
+    bindings: Vec<CornerModelBinding>,
+    digest: ContentDigest,
+}
+
+impl ModelExecutionPlan {
+    #[must_use]
+    pub const fn reference_process(&self) -> crate::simulation::dialog::corner::ProcessCorner {
+        self.reference_process
+    }
+
+    #[must_use]
+    pub fn selected_library_corners(&self) -> &[(String, Option<String>)] {
+        &self.selected_library_corners
+    }
+
+    #[must_use]
+    pub fn bindings(&self) -> &[CornerModelBinding] {
+        &self.bindings
+    }
+
+    #[must_use]
+    pub const fn digest(&self) -> ContentDigest {
+        self.digest
+    }
+
+    #[must_use]
+    pub fn model_cards(&self) -> Vec<String> {
+        self.bindings
+            .iter()
+            .map(|binding| {
+                format!(
+                    "* RSpice sealed model source: {}\n{}",
+                    binding.source_label, binding.materialized_model_cards
+                )
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone)]
 struct SealedExecutionLibrary {
     name: String,
     root_path: PathBuf,
     corners: Vec<ProcessCorner>,
+    selected_corner: Option<String>,
 }
 
 /// One corner section materialized out of the sealed bundle, with the identity
@@ -83,6 +133,105 @@ const fn pdk_model_process(process: CornerProcess) -> crate::state::pdk_config::
         CornerProcess::FF => crate::state::pdk_config::PdkModelProcess::Ff,
         CornerProcess::SF => crate::state::pdk_config::PdkModelProcess::Sf,
         CornerProcess::FS => crate::state::pdk_config::PdkModelProcess::Fs,
+    }
+}
+
+const fn simulation_corner_process(
+    process: crate::simulation::dialog::corner::ProcessCorner,
+) -> CornerProcess {
+    match process {
+        crate::simulation::dialog::corner::ProcessCorner::TT => CornerProcess::TT,
+        crate::simulation::dialog::corner::ProcessCorner::SS => CornerProcess::SS,
+        crate::simulation::dialog::corner::ProcessCorner::FF => CornerProcess::FF,
+        crate::simulation::dialog::corner::ProcessCorner::SF => CornerProcess::SF,
+        crate::simulation::dialog::corner::ProcessCorner::FS => CornerProcess::FS,
+    }
+}
+
+fn hash_plan_field(hasher: &mut Sha256, value: &[u8]) {
+    hasher.update((value.len() as u64).to_le_bytes());
+    hasher.update(value);
+}
+
+fn validate_materialized_definition_namespace_by_process(
+    bindings: &[CornerModelBinding],
+) -> Result<(), String> {
+    for process in [
+        CornerProcess::TT,
+        CornerProcess::SS,
+        CornerProcess::FF,
+        CornerProcess::SF,
+        CornerProcess::FS,
+    ] {
+        let process_bindings = bindings
+            .iter()
+            .filter(|binding| binding.process == process)
+            .cloned()
+            .collect::<Vec<_>>();
+        if !process_bindings.is_empty() {
+            validate_materialized_definition_namespace(&process_bindings)?;
+        }
+    }
+    Ok(())
+}
+
+/// Reject a materialized namespace whose result would otherwise depend on the
+/// first definition returned by the core engine.  SPICE model and subcircuit
+/// names intentionally share this conservative top-level conflict index: an
+/// explicit, persisted resolution record is required before such a contested
+/// name can ever become executable.
+fn validate_materialized_definition_namespace(
+    bindings: &[CornerModelBinding],
+) -> Result<(), String> {
+    let mut providers = BTreeMap::<String, (String, Vec<String>)>::new();
+    for binding in bindings {
+        let source = format!(
+            "{}{}",
+            binding.source_label,
+            binding
+                .section
+                .as_deref()
+                .map(|section| format!(" [{section}]"))
+                .unwrap_or_default()
+        );
+        let wrapped = format!(
+            "RSpice sealed model namespace\n{}\n.end\n",
+            binding.materialized_model_cards
+        );
+        let parsed = rspice_core::netlist::parse_netlist(&wrapped).map_err(|error| {
+            format!("Cannot validate executable model namespace from '{source}': {error}")
+        })?;
+        for (name, kind) in parsed
+            .models
+            .iter()
+            .map(|definition| (definition.name.as_str(), "model"))
+            .chain(
+                parsed
+                    .subcircuits
+                    .iter()
+                    .map(|definition| (definition.name.as_str(), "subcircuit")),
+            )
+        {
+            let entry = providers
+                .entry(name.to_ascii_lowercase())
+                .or_insert_with(|| (name.to_owned(), Vec::new()));
+            entry.1.push(format!("{kind} in {source}"));
+        }
+    }
+
+    let conflicts = providers
+        .into_values()
+        .filter(|(_, providers)| providers.len() > 1)
+        .take(8)
+        .map(|(name, providers)| format!("'{name}' from {}", providers.join(", ")))
+        .collect::<Vec<_>>();
+    if conflicts.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Executable model namespace is contested and fails closed: {}. Remove or rename the duplicate definition before simulation.",
+            conflicts.join("; ")
+        ))
     }
 }
 
@@ -336,29 +485,72 @@ impl SealedModelExecutionSources {
         Ok((expanded, processor.resolved_dependencies().to_vec()))
     }
 
+    /// Freeze the exact model namespace for the nominal/reference run.
+    ///
+    /// An explicit per-library selection is authoritative for that library.
+    /// The reference process supplies the conventional fallback and the signed
+    /// PDK process contract. Process sweeps deliberately use
+    /// [`Self::corner_model_bindings`] instead, because every sweep point owns
+    /// its explicit process independently of the nominal selection.
+    pub fn reference_model_execution_plan(
+        &self,
+        process: crate::simulation::dialog::corner::ProcessCorner,
+    ) -> Result<ModelExecutionPlan, String> {
+        let corner_process = simulation_corner_process(process);
+        let bindings = self.bindings_for_processes(&[corner_process], true)?;
+        validate_materialized_definition_namespace(&bindings)?;
+
+        let selected_library_corners = self
+            .libraries
+            .iter()
+            .map(|library| {
+                let selected = library.selected_corner.clone().or_else(|| {
+                    library
+                        .corners
+                        .iter()
+                        .find(|corner| {
+                            corner
+                                .name
+                                .eq_ignore_ascii_case(corner_process.as_keyword())
+                        })
+                        .map(|corner| corner.name.clone())
+                });
+                (library.name.clone(), selected)
+            })
+            .collect::<Vec<_>>();
+
+        let mut hasher = Sha256::new();
+        hasher.update(b"rspice.model-execution-plan/v1\0");
+        hasher.update(corner_process.as_keyword().as_bytes());
+        for (library, corner) in &selected_library_corners {
+            hash_plan_field(&mut hasher, library.as_bytes());
+            hash_plan_field(&mut hasher, corner.as_deref().unwrap_or("").as_bytes());
+        }
+        for binding in &bindings {
+            hash_plan_field(&mut hasher, binding.source_label.as_bytes());
+            hash_plan_field(
+                &mut hasher,
+                binding.section.as_deref().unwrap_or("").as_bytes(),
+            );
+            hash_plan_field(&mut hasher, binding.materialized_model_cards.as_bytes());
+        }
+        let digest = ContentDigest::from_bytes(hasher.finalize().into());
+
+        Ok(ModelExecutionPlan {
+            reference_process: process,
+            selected_library_corners,
+            bindings,
+            digest,
+        })
+    }
+
     /// Materialize the exact model cards for the nominal/reference process.
     pub fn reference_process_model_cards(
         &self,
         process: crate::simulation::dialog::corner::ProcessCorner,
     ) -> Result<Vec<String>, String> {
-        let process = match process {
-            crate::simulation::dialog::corner::ProcessCorner::TT => CornerProcess::TT,
-            crate::simulation::dialog::corner::ProcessCorner::SS => CornerProcess::SS,
-            crate::simulation::dialog::corner::ProcessCorner::FF => CornerProcess::FF,
-            crate::simulation::dialog::corner::ProcessCorner::SF => CornerProcess::SF,
-            crate::simulation::dialog::corner::ProcessCorner::FS => CornerProcess::FS,
-        };
-        self.bindings_for_processes(&[process]).map(|bindings| {
-            bindings
-                .into_iter()
-                .map(|binding| {
-                    format!(
-                        "* RSpice sealed model source: {}\n{}",
-                        binding.source_label, binding.materialized_model_cards
-                    )
-                })
-                .collect()
-        })
+        self.reference_model_execution_plan(process)
+            .map(|plan| plan.model_cards())
     }
 
     /// Materialize every model section required by a process-corner run from
@@ -367,12 +559,15 @@ impl SealedModelExecutionSources {
         &self,
         processes: &[CornerProcess],
     ) -> Result<Vec<CornerModelBinding>, String> {
-        self.bindings_for_processes(processes)
+        let bindings = self.bindings_for_processes(processes, false)?;
+        validate_materialized_definition_namespace_by_process(&bindings)?;
+        Ok(bindings)
     }
 
     fn bindings_for_processes(
         &self,
         processes: &[CornerProcess],
+        honor_nominal_selection: bool,
     ) -> Result<Vec<CornerModelBinding>, String> {
         if self.libraries.is_empty() && self.pdk_process_bindings.is_empty() {
             if let Some(process) = processes
@@ -391,17 +586,23 @@ impl SealedModelExecutionSources {
         for process in processes {
             for library in &self.libraries {
                 let keyword = process.as_keyword();
+                let requested_corner = honor_nominal_selection
+                    .then_some(library.selected_corner.as_deref())
+                    .flatten()
+                    .unwrap_or(keyword);
                 let corner = library
                     .corners
                     .iter()
-                    .find(|corner| corner.name.eq_ignore_ascii_case(keyword))
+                    .find(|corner| corner.name.eq_ignore_ascii_case(requested_corner))
                     .cloned();
                 if corner.is_none()
-                    && (*process != CornerProcess::TT || !library.corners.is_empty())
+                    && (library.selected_corner.is_some()
+                        || *process != CornerProcess::TT
+                        || !library.corners.is_empty())
                 {
                     return Err(format!(
-                        "Model library '{}' does not define the {} process section",
-                        library.name, keyword
+                        "Model library '{}' does not define selected corner '{}' for the {} reference process",
+                        library.name, requested_corner, keyword
                     ));
                 }
                 match corner.as_ref() {

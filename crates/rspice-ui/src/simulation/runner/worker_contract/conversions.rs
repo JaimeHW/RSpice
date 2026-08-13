@@ -855,6 +855,8 @@ pub(super) fn worker_response_from_request_with_progress(
             progress,
             abort_flag,
             progress_observer,
+            None,
+            None,
         ),
     )
 }
@@ -902,6 +904,41 @@ pub(super) fn emit_worker_progress_snapshot(progress: &SimulationProgress) {
 }
 
 #[cfg(target_arch = "wasm32")]
+pub(super) fn emit_worker_transient_sample(sample: &super::super::TransientSampleDelta) {
+    use wasm_bindgen::JsCast as _;
+    use wasm_bindgen::JsValue;
+
+    let id = ACTIVE_WORKER_PROGRESS_ID.with(|active| active.get());
+    let Some(id) = id else {
+        return;
+    };
+    let message = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &message,
+        &JsValue::from_str("type"),
+        &JsValue::from_str("transientSample"),
+    );
+    let _ = js_sys::Reflect::set(
+        &message,
+        &JsValue::from_str("id"),
+        &JsValue::from_f64(id as f64),
+    );
+    if let Ok(sample) = serde_wasm_bindgen::to_value(sample) {
+        let _ = js_sys::Reflect::set(&message, &JsValue::from_str("sample"), &sample);
+    } else {
+        return;
+    }
+
+    let global = js_sys::global();
+    let Ok(post_message) = js_sys::Reflect::get(&global, &JsValue::from_str("postMessage"))
+        .and_then(|value| value.dyn_into::<js_sys::Function>())
+    else {
+        return;
+    };
+    let _ = post_message.call1(&global, &JsValue::from(message));
+}
+
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn run_worker_request_value(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
@@ -915,8 +952,22 @@ fn run_decoded_worker_request(
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
     let id = request.id;
     ACTIVE_WORKER_PROGRESS_ID.with(|active| active.set(Some(id)));
-    let response =
-        worker_response_from_request_with_progress(request, Some(emit_worker_progress_snapshot));
+    let stream_transient_samples = request.stream_transient_samples;
+    let (request, input) = request.into_runner_parts();
+    let progress = Arc::new(Mutex::new(SimulationProgress::default()));
+    let abort_flag = Arc::new(AtomicBool::new(false));
+    let response = WorkerResponse::from_result_for_transfer(
+        id,
+        super::super::run_simulation_thread_with_progress_observer(
+            request,
+            input,
+            progress,
+            abort_flag,
+            Some(emit_worker_progress_snapshot),
+            None,
+            stream_transient_samples.then_some(emit_worker_transient_sample),
+        ),
+    );
     ACTIVE_WORKER_PROGRESS_ID.with(|active| active.set(None));
     worker_response_transport_value(response)
 }

@@ -63,6 +63,14 @@ pub trait AbortSignal: Send + Sync {
     /// implementations may update UI state directly. The default ignores
     /// progress, keeping existing implementors unchanged.
     fn observe_progress(&self, _fraction: f64) {}
+
+    /// Observe one fully accepted transient sample.
+    ///
+    /// This hook runs only after the sample has been committed to the
+    /// analysis result. Rejected Newton or timestep attempts never cross this
+    /// boundary. The default is intentionally inert so non-interactive
+    /// engine users pay no allocation or transport cost.
+    fn observe_transient_sample(&self, _result: &crate::engine::TransientResult) {}
 }
 
 //=============================================================================
@@ -187,6 +195,14 @@ impl<T: AbortSignal + ?Sized> AbortSignal for &T {
     fn is_aborted(&self) -> bool {
         (*self).is_aborted()
     }
+
+    fn observe_progress(&self, fraction: f64) {
+        (*self).observe_progress(fraction);
+    }
+
+    fn observe_transient_sample(&self, result: &crate::engine::TransientResult) {
+        (*self).observe_transient_sample(result);
+    }
 }
 
 /// Accept an owned, type-erased signal.
@@ -195,6 +211,14 @@ impl AbortSignal for Box<dyn AbortSignal> {
     fn is_aborted(&self) -> bool {
         self.as_ref().is_aborted()
     }
+
+    fn observe_progress(&self, fraction: f64) {
+        self.as_ref().observe_progress(fraction);
+    }
+
+    fn observe_transient_sample(&self, result: &crate::engine::TransientResult) {
+        self.as_ref().observe_transient_sample(result);
+    }
 }
 
 /// Accept a shared, type-erased signal.
@@ -202,6 +226,14 @@ impl AbortSignal for Arc<dyn AbortSignal> {
     #[inline(always)]
     fn is_aborted(&self) -> bool {
         self.as_ref().is_aborted()
+    }
+
+    fn observe_progress(&self, fraction: f64) {
+        self.as_ref().observe_progress(fraction);
+    }
+
+    fn observe_transient_sample(&self, result: &crate::engine::TransientResult) {
+        self.as_ref().observe_transient_sample(result);
     }
 }
 

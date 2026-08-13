@@ -52,7 +52,7 @@ fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
 fn declared_process_corners(app: &RSpiceApp) -> Vec<String> {
     use crate::simulation::run_set::RunSetDimensionKind;
 
-    let run_set = &app.state.sim_setup.corner.run_set;
+    let run_set = &app.state.sim_setup.run_set;
     match run_set.enabled_dimension_of(RunSetDimensionKind::ProcessSection) {
         Some(dimension) if !dimension.values.is_empty() => dimension
             .values
@@ -444,7 +444,7 @@ fn margin_label(spec: &SpecEntry, evidence: &Evidence) -> String {
 /// or a corner the run set has since dropped — is appended so that opening the
 /// record and picking nothing cannot quietly rewrite the requirement.
 fn scope_options(app: &RSpiceApp, current: &SpecPointScope) -> Vec<(String, SpecPointScope)> {
-    let points = app.state.sim_setup.corner.run_set.point_count();
+    let points = app.state.sim_setup.run_set.point_count();
     let mut options = vec![
         (
             format!("All {points} PVT points"),

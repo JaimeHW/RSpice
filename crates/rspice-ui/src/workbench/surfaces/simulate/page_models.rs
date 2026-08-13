@@ -12,6 +12,7 @@ use egui::Ui;
 use crate::state::model_library::ModelSourceAuthority;
 use crate::ui::widgets::{Button, select};
 use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::design_history::publish_model_library_candidate;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::ModelsPage;
 
@@ -206,19 +207,51 @@ fn corner_options(app: &RSpiceApp, library: &str) -> Vec<String> {
 }
 
 fn set_corner(app: &mut RSpiceApp, library: &str, corner: &str) {
-    let Some(entry) = app.state.model_library_manager.get_library_mut(library) else {
+    let mut candidate = app.state.model_library_manager.clone();
+    let Some(entry) = candidate.get_library_mut(library) else {
         app.state
             .workbench
             .analysis_lifecycle_status
             .record_refusal(format!("Library {library} is no longer loaded."));
         return;
     };
+    if !entry
+        .corners
+        .values()
+        .any(|candidate| candidate.name.eq_ignore_ascii_case(corner))
+    {
+        app.state
+            .workbench
+            .analysis_lifecycle_status
+            .record_refusal(format!(
+                "Corner {corner} is no longer defined by {library}."
+            ));
+        return;
+    }
     entry.selected_corner = Some(corner.to_owned());
-    app.invalidate_simulation_preflight();
-    app.state
-        .workbench
-        .analysis_lifecycle_status
-        .record_receipt(format!("{library} now resolves its {corner} section."));
+    match publish_model_library_candidate(
+        &mut app.state,
+        candidate,
+        library,
+        format!("select nominal model corner {corner}"),
+    ) {
+        Ok(revision) => {
+            app.invalidate_simulation_preflight();
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .record_receipt(format!(
+                    "{library} now resolves its {corner} section at project revision {}.",
+                    revision.get()
+                ));
+        }
+        Err(error) => {
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .record_refusal(error);
+        }
+    }
 }
 
 /// One model's contribution to the release gate.

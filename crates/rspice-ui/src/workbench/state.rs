@@ -9,7 +9,6 @@ mod session_views;
 pub use session_views::*;
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -1182,28 +1181,6 @@ pub struct WorkbenchState {
     pub verification: VerificationSessionState,
     #[serde(default)]
     pub models_page: ModelsPage,
-    /// Native confirmation owner for detaching every executable source from a
-    /// shipped pack. This is never restored across an application session.
-    #[serde(skip)]
-    pub model_catalog_detach_pack: Option<String>,
-    /// Session-local project catalog pins. They are navigation preferences,
-    /// not project evidence or release state.
-    #[serde(default)]
-    pub model_catalog_pinned: HashSet<String>,
-    /// Device-local Include Graph depth control. This changes only the graph
-    /// projection; the complete authenticated closure remains authoritative.
-    #[serde(default)]
-    pub model_include_direct_only: bool,
-    /// Stable source selection shown by the Include Graph inspector.
-    #[serde(default)]
-    pub model_include_selected_library: Option<String>,
-    #[serde(default)]
-    pub model_include_selected_source: Option<PathBuf>,
-    /// Presentation-only definition table controls for the Include Graph.
-    #[serde(default)]
-    pub model_include_definition_query: String,
-    #[serde(default)]
-    pub model_include_exceptions_only: bool,
     /// Models & PDKs catalog filters and stable presentation selections.
     /// Model, source, symbol, and PDK records remain in their owning domains.
     #[serde(default)]
@@ -1461,13 +1438,6 @@ impl Default for WorkbenchState {
             simulation_page: SimulationPage::Analyses,
             verification: VerificationSessionState::default(),
             models_page: ModelsPage::Models,
-            model_catalog_detach_pack: None,
-            model_catalog_pinned: HashSet::new(),
-            model_include_direct_only: false,
-            model_include_selected_library: None,
-            model_include_selected_source: None,
-            model_include_definition_query: String::new(),
-            model_include_exceptions_only: false,
             models_view: ModelsWorkbenchViewState::default(),
             active_analysis: default_analysis_index(),
             active_analysis_instance: None,
@@ -1525,7 +1495,7 @@ impl WorkbenchState {
             || self.notification_center_open
             || self.model_correlation.dialog_open()
             || self.create_result_document.open
-            || self.model_catalog_detach_pack.is_some()
+            || self.models_view.dialog.is_some()
             || self.simulation_workflow.is_some()
             || self.verification.regression_baseline_picker_open
             || self.verification.tuning_review_open

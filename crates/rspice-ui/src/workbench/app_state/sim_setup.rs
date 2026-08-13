@@ -149,6 +149,14 @@ impl Default for NoiseSetup {
 pub struct SimSetupState {
     /// Authoritative reference PVT point used by nominal analyses.
     pub reference_pvt: ReferencePvtPoint,
+    /// Global process, supply, and temperature space applied to every
+    /// executable analysis in the active plan.
+    ///
+    /// This is deliberately independent of the legacy Corner analysis draft:
+    /// the Run Set page configures where the whole plan executes, while a
+    /// Corner analysis remains an analysis instance with its own base mode.
+    #[serde(default = "default_global_run_set")]
+    pub run_set: crate::simulation::run_set::RunSetState,
     /// Validated project-unique name of the active simulation plan.
     #[serde(default)]
     pub active_plan_name: crate::workbench::app_state::SimulationPlanName,
@@ -293,6 +301,7 @@ impl SimSetupState {
     pub fn new() -> Self {
         let mut setup = Self {
             analysis_plan: Some(crate::simulation::plan::SimulationPlan::new()),
+            run_set: default_global_run_set(),
             ..Self::default()
         };
         setup
@@ -396,13 +405,14 @@ impl SimSetupState {
     /// configuration that does not parse contributes no points rather than a
     /// guessed count.
     pub fn run_set_point_count(&self) -> Option<usize> {
-        if !self.has_enabled_analysis_kind(crate::simulation::plan::AnalysisKind::Corner) {
-            return Some(1);
-        }
-        self.corner
-            .to_config(self.reference_pvt)
-            .ok()
-            .map(|config| config.num_corners())
+        let validation = crate::simulation::run_set::validate(
+            &self.run_set,
+            self.enabled_analysis_instance_count(),
+        );
+        validation
+            .errors
+            .is_empty()
+            .then_some(validation.forecast.point_count)
     }
 
     /// Commit globally validated options while keeping the workbench reference
@@ -727,6 +737,13 @@ impl SimSetupState {
     }
 }
 
+/// Missing global Run Set data belongs to a project from before the Studio
+/// owned this declaration. Migrating it to a one-point reference run avoids
+/// inventing 27 PVT tasks and new technology requirements on first open.
+fn default_global_run_set() -> crate::simulation::run_set::RunSetState {
+    crate::simulation::run_set::RunSetState::reference_only()
+}
+
 fn format_temperature(value: f64) -> String {
     if value.fract().abs() < f64::EPSILON {
         format!("{value:.0}")
@@ -786,5 +803,21 @@ mod tests {
         assert!(error.contains("absolute zero"));
         assert_eq!(setup.reference_pvt, before);
         assert_eq!(setup.options.temp, before.temperature_celsius);
+    }
+
+    #[test]
+    fn missing_global_run_set_migrates_to_one_reference_point() {
+        let setup = SimSetupState::new();
+        let mut persisted = serde_json::to_value(&setup).expect("setup serializes");
+        persisted
+            .as_object_mut()
+            .expect("setup is an object")
+            .remove("run_set");
+
+        let migrated: SimSetupState =
+            serde_json::from_value(persisted).expect("legacy setup migrates");
+
+        assert_eq!(migrated.run_set.point_count(), 1);
+        assert!(migrated.run_set.enabled_dimensions().next().is_none());
     }
 }

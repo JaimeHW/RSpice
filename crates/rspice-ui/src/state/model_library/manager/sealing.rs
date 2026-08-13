@@ -291,7 +291,7 @@ impl ModelLibraryManager {
             let mut corners = library
                 .corners
                 .values()
-                .filter(|corner| corner.file_path.is_some())
+                .filter(|corner| corner.file_path.is_some() || !corner.section_bindings.is_empty())
                 .cloned()
                 .collect::<Vec<_>>();
             corners.sort_by_key(|corner| corner.name.to_ascii_lowercase());
@@ -321,6 +321,7 @@ impl ModelLibraryManager {
                 name: library.name.clone(),
                 root_path: root_path.clone(),
                 corners,
+                selected_corner: library.selected_corner.clone(),
             });
         }
 

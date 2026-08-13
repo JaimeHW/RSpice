@@ -13,6 +13,7 @@ mod authoring;
 mod corner;
 mod correlation;
 mod definition_metadata;
+mod facts;
 mod library;
 mod manager;
 mod model;
@@ -21,11 +22,9 @@ mod qualification;
 mod types;
 
 pub use authoring::ProjectModelDefinition;
-pub use corner::{CornerSectionDomain, ProcessCorner};
+pub use corner::{CornerSectionBinding, CornerSectionDomain, ProcessCorner};
 // Test-only aliases: the submodule is private, so this path is the only
 // way the tests can name these.
-#[cfg(test)]
-pub use corner::CornerSectionBinding;
 pub use correlation::{
     CorrelationAggregation, CorrelationAlignmentEvidence, CorrelationAlignmentPolicy,
     CorrelationCalculation, CorrelationDatasetClass, CorrelationDatasetRevision,
@@ -48,6 +47,10 @@ pub use definition_metadata::{
 pub use definition_metadata::{
     MODEL_DEFINITION_METADATA_SCHEMA_VERSION, StatisticalDefinition, StatisticalVariableDefinition,
 };
+pub use facts::{
+    ClosureFacts, GeometryEnvelope, bin_family_name, closure_facts, envelope_is_invalid,
+    short_digest,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use library::is_foreign_platform_absolute_path;
 pub use library::{
@@ -59,7 +62,8 @@ pub(crate) use library::{
     subcircuit_interface_key,
 };
 pub use manager::{
-    ModelLibraryManager, PackModelHit, ProjectModelCommit, SealedModelExecutionSources,
+    ModelExecutionPlan, ModelLibraryManager, PackModelHit, ProjectModelCommit,
+    SealedModelExecutionSources,
 };
 pub use model::DeviceModel;
 pub use project_revision::ProjectModelRevisionDefinition;

@@ -45,7 +45,7 @@ const FORECAST_TILE_W: f32 = 232.0;
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let analyses = app.state.sim_setup.enabled_analysis_instance_count();
-    let validation = run_set::validate(&app.state.sim_setup.corner.run_set, analyses);
+    let validation = run_set::validate(&app.state.sim_setup.run_set, analyses);
 
     toolbar(ui, app, &validation);
     if !validation.errors.is_empty() || !validation.warnings.is_empty() {
@@ -62,10 +62,10 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 /// The transaction commands, above the space they act on.
 fn toolbar(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
     let t = Tokens::get(ui.ctx());
-    let addable = app.state.sim_setup.corner.run_set.addable_kinds();
-    let can_undo = !app.state.sim_setup.corner.run_set.history.is_empty();
-    let can_redo = !app.state.sim_setup.corner.run_set.future.is_empty();
-    let revision = app.state.sim_setup.corner.run_set.revision;
+    let addable = app.state.sim_setup.run_set.addable_kinds();
+    let can_undo = !app.state.sim_setup.run_set.history.is_empty();
+    let can_redo = !app.state.sim_setup.run_set.future.is_empty();
+    let revision = app.state.sim_setup.run_set.revision;
     let mut action: Option<RunSetAction> = None;
 
     let width = ui.available_width();
@@ -220,7 +220,7 @@ fn issue_summary(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation
 /// The composed space: one card per axis, the operator between them, and the
 /// forecast they resolve to.
 fn run_space(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
-    let mode = app.state.sim_setup.corner.run_set.composition.mode;
+    let mode = app.state.sim_setup.run_set.composition.mode;
     let status = format!("{} composition", mode.as_str());
     let tone = match validation.status {
         run_set::RunSetStatus::Ready => Tone::Ok,
@@ -236,7 +236,7 @@ fn run_space(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
         |ui| {
             card_body(ui, |ui| {
                 let selected = app.state.workbench.selected_run_set_dimension.clone();
-                let dimensions = app.state.sim_setup.corner.run_set.dimensions.clone();
+                let dimensions = app.state.sim_setup.run_set.dimensions.clone();
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
                     for (index, dimension) in dimensions.iter().enumerate() {
@@ -592,11 +592,10 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
         .workbench
         .selected_run_set_dimension
         .clone()
-        .filter(|id| app.state.sim_setup.corner.run_set.dimension(id).is_some())
+        .filter(|id| app.state.sim_setup.run_set.dimension(id).is_some())
         .or_else(|| {
             app.state
                 .sim_setup
-                .corner
                 .run_set
                 .dimensions
                 .first()
@@ -620,7 +619,6 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
     let dimension = app
         .state
         .sim_setup
-        .corner
         .run_set
         .dimension(&id)
         .expect("the selected identity was just resolved")
@@ -628,11 +626,10 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
     let index = app
         .state
         .sim_setup
-        .corner
         .run_set
         .index_of(&id)
         .unwrap_or_default();
-    let last = app.state.sim_setup.corner.run_set.dimensions.len() - 1;
+    let last = app.state.sim_setup.run_set.dimensions.len() - 1;
     let title = format!("Selected dimension · {}", dimension.name);
     let status = if dimension.enabled {
         ("enabled", Tone::Ok)
@@ -815,7 +812,7 @@ fn policy_label(policy: InvalidValuePolicy) -> &'static str {
 // ------------------------------------------------------------- composition
 
 fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
-    let current_composition = app.state.sim_setup.corner.run_set.composition.clone();
+    let current_composition = app.state.sim_setup.run_set.composition.clone();
     let mode = current_composition.mode;
     let excluded = current_composition.excluded_points.len();
     let variation = app
@@ -904,9 +901,9 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
 // ----------------------------------------------------------------- budgets
 
 fn budgets(ui: &mut Ui, app: &mut RSpiceApp) {
-    let current = app.state.sim_setup.corner.run_set.budgets;
+    let current = app.state.sim_setup.run_set.budgets;
     let analyses = app.state.sim_setup.enabled_analysis_instance_count();
-    let validation = run_set::validate(&app.state.sim_setup.corner.run_set, analyses);
+    let validation = run_set::validate(&app.state.sim_setup.run_set, analyses);
     let exceeded = validation
         .errors
         .iter()
@@ -1031,7 +1028,7 @@ const RECEIPT_COLUMNS: [f32; 4] = [0.10, 0.34, 0.20, 0.36];
 const RECEIPT_LIMIT: usize = 6;
 
 fn receipts(ui: &mut Ui, app: &mut RSpiceApp) {
-    let receipts = &app.state.sim_setup.corner.run_set.receipts;
+    let receipts = &app.state.sim_setup.run_set.receipts;
     let total = receipts.len();
     let status = if total == 0 {
         "no transaction".to_owned()
@@ -1086,7 +1083,7 @@ fn receipts(ui: &mut Ui, app: &mut RSpiceApp) {
 // ---------------------------------------------------------- resolved points
 
 fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
-    let state: &RunSetState = &app.state.sim_setup.corner.run_set;
+    let state: &RunSetState = &app.state.sim_setup.run_set;
     let Some(points) = run_set::compose(state) else {
         card(
             ui,
@@ -1356,11 +1353,7 @@ fn point_table_note(composed: usize, drawn: usize, excludable: bool) -> String {
 fn commit(app: &mut RSpiceApp, action: RunSetAction) {
     let analyses = app.state.sim_setup.enabled_analysis_instance_count();
     let previewing = matches!(action, RunSetAction::Preview);
-    let transaction = run_set::dispatch(
-        &mut app.state.sim_setup.corner.run_set,
-        action,
-        analyses.max(1),
-    );
+    let transaction = run_set::dispatch(&mut app.state.sim_setup.run_set, action, analyses.max(1));
 
     if !transaction.was_adopted() {
         // `was_adopted` is exactly `status == Completed`, so a transaction that

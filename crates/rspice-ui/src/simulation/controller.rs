@@ -29,10 +29,12 @@ use crate::simulation::multi_run::{
     AnalysisRunType, AnalysisSpec, FrequencySweep, HbToneSpec, OptimizationAlgorithm,
     OptimizationGoal, OptimizationVariable, PssMethod, SpPort,
 };
-use crate::simulation::output_contract::{PreparedSavedOutput, materialize_saved_outputs};
+use crate::simulation::output_contract::{
+    PreparedSavedOutput, materialize_live_saved_outputs, materialize_saved_outputs,
+};
 use crate::simulation::plan::AnalysisNumericOverride;
-use crate::simulation::runner::SimulationError;
 use crate::simulation::runner::SpecExecutionOptions;
+use crate::simulation::runner::{SimulationError, TransientSampleDelta};
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
@@ -41,7 +43,7 @@ use crate::state::{
     ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence, ReliabilityShiftEvidence,
     ReliabilityStressEvidence, SensitivityResultMode, SensitivityResultRow, SimulationRunIntent,
     SimulationRunLifecycle, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
-    SoaViolationEvidence, SoaViolationSeverityEvidence,
+    SoaViolationEvidence, SoaViolationSeverityEvidence, WaveformData,
 };
 use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCacheProvenance};
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
@@ -77,6 +79,83 @@ pub(super) struct QueuedAnalysis {
     /// deck; a manual deck states its options in the deck itself and therefore
     /// never carries one.
     pub(super) numeric_override: Option<AnalysisNumericOverride>,
+}
+
+#[derive(Debug, Default)]
+struct LiveTransientAccumulator {
+    waveforms: Vec<LiveTransientWaveform>,
+}
+
+#[derive(Debug)]
+struct LiveTransientWaveform {
+    name: String,
+    x: Vec<f64>,
+    y: Vec<f64>,
+}
+
+impl LiveTransientAccumulator {
+    fn clear(&mut self) {
+        self.waveforms.clear();
+    }
+
+    fn is_empty(&self) -> bool {
+        self.waveforms.is_empty()
+    }
+
+    fn ingest(&mut self, deltas: Vec<TransientSampleDelta>) {
+        for delta in deltas {
+            if !delta.time.is_finite() {
+                continue;
+            }
+            for sample in delta.waveforms {
+                if !sample.value.is_finite() {
+                    continue;
+                }
+                let index = self
+                    .waveforms
+                    .iter()
+                    .position(|waveform| waveform.name == sample.name)
+                    .unwrap_or_else(|| {
+                        let index = self.waveforms.len();
+                        self.waveforms.push(LiveTransientWaveform {
+                            name: sample.name.clone(),
+                            x: Vec::new(),
+                            y: Vec::new(),
+                        });
+                        index
+                    });
+                let waveform = &mut self.waveforms[index];
+                if waveform
+                    .x
+                    .last()
+                    .is_some_and(|previous| *previous >= delta.time)
+                {
+                    // Worker messages are ordered, but a superseded or
+                    // duplicated point must never corrupt the visible axis.
+                    continue;
+                }
+                waveform.x.push(delta.time);
+                waveform.y.push(sample.value);
+            }
+        }
+    }
+
+    fn source_analysis(&self, analysis_type: AnalysisType, label: &str) -> AnalysisResult {
+        let waveforms = self
+            .waveforms
+            .iter()
+            .enumerate()
+            .map(|(index, waveform)| {
+                WaveformData::new(
+                    waveform.name.clone(),
+                    waveform.x.clone(),
+                    waveform.y.clone(),
+                    SimulationController::color_for_index(index),
+                )
+            })
+            .collect();
+        AnalysisResult::live_transient_partial(1, analysis_type, label).with_waveforms(waveforms)
+    }
 }
 
 //=============================================================================
@@ -120,6 +199,10 @@ pub struct SimulationController {
     current_source_domain: AnalysisResultSourceDomain,
     /// Stable run ID that owns the in-flight batch.
     current_run_id: Option<u64>,
+    /// Exact accepted samples observed for the current transient task. These
+    /// back both adaptive live presentation and a truthful partial result if
+    /// the task terminates before returning a full engine result.
+    live_transient: LiveTransientAccumulator,
 
     // =========================================================================
     // Multi-Analysis Queue
@@ -176,6 +259,7 @@ impl SimulationController {
             current_saved_output_contracts: Vec::new(),
             current_source_domain: AnalysisResultSourceDomain::SimulationPlan,
             current_run_id: None,
+            live_transient: LiveTransientAccumulator::default(),
             pending_analyses: VecDeque::new(),
             successful_analysis_instances: HashSet::new(),
             execution_artifacts: HashMap::new(),
@@ -260,6 +344,7 @@ impl SimulationController {
         }
 
         // Poll for completion
+        self.publish_live_transient_samples(state);
         self.poll_completion(state, export_io);
 
         // Apply/cancel background transient post-processing work after any
@@ -300,11 +385,20 @@ impl SimulationController {
         let mut dispatch = match self.consume_snapshot_for_dispatch(state) {
             Ok(dispatch) => dispatch,
             Err(error) => {
+                if state.simulation.run_intent == SimulationRunIntent::SimulateRunSet {
+                    state.workbench.preflight.invalidate();
+                }
                 state.push_sim_message(ConsoleMessage::warning(error.to_string()));
                 state.simulation.status = "Run blocked".to_owned();
                 return;
             }
         };
+        if dispatch.intent() == SimulationRunIntent::SimulateRunSet {
+            // The retained report describes a one-shot authorization. Once its
+            // permit has been consumed, leaving that report reusable would
+            // advertise authority the controller no longer owns.
+            state.workbench.preflight.invalidate();
+        }
         let source_domain = match dispatch.intent() {
             SimulationRunIntent::SimulateRunSet => AnalysisResultSourceDomain::SimulationPlan,
             SimulationRunIntent::ManualDeck => AnalysisResultSourceDomain::ManualDeck,
@@ -445,6 +539,7 @@ impl SimulationController {
         self.current_effective_source_content_digest = None;
         self.current_op_effective_source_content_digest = None;
         self.current_saved_output_contracts.clear();
+        self.live_transient.clear();
         self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
         self.current_run_id = None;
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
@@ -478,6 +573,7 @@ impl SimulationController {
         self.current_effective_source_content_digest = None;
         self.current_op_effective_source_content_digest = None;
         self.current_saved_output_contracts.clear();
+        self.live_transient.clear();
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
 
         let mut skipped_blocked_task = false;
@@ -700,7 +796,17 @@ impl SimulationController {
         let start_result = next_analysis
             .resolve_dependency_artifacts(&self.execution_artifacts)
             .map_err(|error| SimulationError::InvalidConfig(error.to_string()))
-            .and_then(|dispatch| self.runner.start_prepared(dispatch));
+            .and_then(|dispatch| {
+                let stream_transient_samples =
+                    self.current_saved_output_contracts.iter().any(|contract| {
+                        contract.streaming()
+                            == crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
+                            || contract.policy()
+                                == crate::state::SavedOutputPolicy::FailureDiagnosticsOnly
+                    });
+                self.runner
+                    .start_prepared(dispatch, stream_transient_samples)
+            });
         match start_result {
             Ok(()) => {
                 if let Some(run_id) = self.target_run_id(state)
@@ -839,7 +945,7 @@ impl SimulationController {
             .simulation
             .run_by_sequence_mut(run_id)
             .ok_or_else(|| format!("completed analysis target run {run_id} does not exist"))?;
-        run.add_analysis(analysis.with_provenance(provenance));
+        run.replace_live_or_add_analysis(analysis.with_provenance(provenance));
         if succeeded {
             self.successful_analysis_instances
                 .insert(completed_instance);
@@ -852,6 +958,87 @@ impl SimulationController {
         Ok(succeeded)
     }
 
+    fn publish_live_transient_samples(&mut self, state: &mut AppState) {
+        let deltas = self.runner.drain_transient_samples();
+        if deltas.is_empty() {
+            return;
+        }
+        self.live_transient.ingest(deltas);
+        if !self.current_saved_output_contracts.iter().any(|contract| {
+            contract.streaming()
+                == crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
+        }) {
+            return;
+        }
+        let Some(provenance) = self.current_provenance.clone() else {
+            log::error!("Accepted transient samples have no prepared-task provenance");
+            return;
+        };
+        let analysis_type = self
+            .current_spec
+            .as_ref()
+            .map(|spec| self.spec_to_analysis_type(spec))
+            .or_else(|| {
+                self.current_config
+                    .as_ref()
+                    .map(|config| self.config_to_analysis_type(config))
+            })
+            .unwrap_or(AnalysisType::Transient);
+        let label = self
+            .current_spec
+            .as_ref()
+            .map(|spec| self.analysis_name_for_spec(spec))
+            .or_else(|| {
+                self.current_config
+                    .as_ref()
+                    .map(|config| self.analysis_name(config))
+            })
+            .unwrap_or("Transient");
+        let source = self.live_transient.source_analysis(analysis_type, label);
+        let waveforms =
+            materialize_live_saved_outputs(&source, &self.current_saved_output_contracts);
+        if waveforms.is_empty() {
+            return;
+        }
+        let partial = AnalysisResult::live_transient_partial(1, analysis_type, label)
+            .with_waveforms(waveforms)
+            .with_provenance(provenance);
+        let Some(run_id) = self.target_run_id(state) else {
+            log::error!("Accepted transient samples have no target simulation run");
+            return;
+        };
+        let retained = state
+            .simulation
+            .run_by_sequence_mut(run_id)
+            .ok_or_else(|| format!("live transient target run {run_id} does not exist"))
+            .and_then(|run| run.upsert_live_analysis(partial));
+        if let Err(error) = retained {
+            log::error!("Could not publish live transient samples: {error}");
+            return;
+        }
+        state
+            .simulation
+            .select_latest_analysis_in_run_sequence(run_id);
+    }
+
+    fn partial_failure_analysis(
+        &self,
+        analysis_type: AnalysisType,
+        label: &str,
+        error: impl Into<String>,
+        provenance: AnalysisResultProvenance,
+    ) -> AnalysisResult {
+        let mut analysis = if self.live_transient.is_empty() {
+            AnalysisResult::failed(1, analysis_type, label, error.into())
+        } else {
+            let mut analysis = self.live_transient.source_analysis(analysis_type, label);
+            analysis.error_message = Some(error.into());
+            analysis
+        };
+        analysis.provenance = Some(provenance);
+        analysis
+    }
+
     /// Finish the simulation batch and clean up state
     fn finish_simulation_batch(&mut self, state: &mut AppState) {
         let completed_analysis_count = self.total_analyses;
@@ -862,6 +1049,7 @@ impl SimulationController {
             .map(|run| run.success)
             .or_else(|| state.simulation.active_run().map(|run| run.success))
             .unwrap_or(true);
+        self.live_transient.clear();
 
         if let Some(run_id) = completed_run_id
             && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
@@ -1521,10 +1709,50 @@ impl SimulationController {
                     }
                 }
                 Err(SimulationError::Aborted) => {
-                    log::info!("Analysis aborted; discarding cancellation completion result");
+                    log::info!("Analysis aborted; retaining any accepted transient prefix");
+                    let partial = if self.live_transient.is_empty() {
+                        None
+                    } else {
+                        let analysis_type = self
+                            .current_spec
+                            .as_ref()
+                            .map(|spec| self.spec_to_analysis_type(spec))
+                            .or_else(|| {
+                                self.current_config
+                                    .as_ref()
+                                    .map(|config| self.config_to_analysis_type(config))
+                            })
+                            .unwrap_or(AnalysisType::Transient);
+                        let label = self
+                            .current_spec
+                            .as_ref()
+                            .map(|spec| self.analysis_name_for_spec(spec))
+                            .or_else(|| {
+                                self.current_config
+                                    .as_ref()
+                                    .map(|config| self.analysis_name(config))
+                            })
+                            .unwrap_or("Transient")
+                            .to_owned();
+                        self.current_provenance.take().map(|provenance| {
+                            self.partial_failure_analysis(
+                                analysis_type,
+                                &label,
+                                "Simulation aborted by user",
+                                provenance,
+                            )
+                        })
+                    };
+                    let mut partial = partial.map(|mut analysis| {
+                        self.materialize_current_saved_outputs(&mut analysis);
+                        analysis
+                    });
                     if let Some(run_sequence) = self.current_run_id
                         && let Some(run) = state.simulation.run_by_sequence_mut(run_sequence)
                     {
+                        if let Some(partial) = partial.take() {
+                            run.replace_live_or_add_analysis(partial);
+                        }
                         run.success = false;
                         if let Err(error) = run.finish_lifecycle(SimulationRunLifecycle::Aborted) {
                             log::error!("Failed to seal aborted run lifecycle: {error}");
@@ -1544,6 +1772,7 @@ impl SimulationController {
                     self.current_effective_source_content_digest = None;
                     self.current_op_effective_source_content_digest = None;
                     self.current_saved_output_contracts.clear();
+                    self.live_transient.clear();
                     self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
                     self.current_run_id = None;
                     self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
@@ -1584,9 +1813,12 @@ impl SimulationController {
                         .unwrap_or(AnalysisType::DcOp);
                     let target_run_id = self.target_run_id(state);
                     let failed_analysis = if let Some(provenance) = self.current_provenance.take() {
-                        let mut analysis =
-                            AnalysisResult::failed(1, failed_type, failed_label, e.to_string())
-                                .with_provenance(provenance);
+                        let mut analysis = self.partial_failure_analysis(
+                            failed_type,
+                            &failed_label,
+                            e.to_string(),
+                            provenance,
+                        );
                         self.materialize_current_saved_outputs(&mut analysis);
                         Some(analysis)
                     } else {
@@ -1600,7 +1832,7 @@ impl SimulationController {
                         && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
                     {
                         if let Some(failed_analysis) = failed_analysis {
-                            run.add_analysis(failed_analysis);
+                            run.replace_live_or_add_analysis(failed_analysis);
                         }
                         run.success = false;
                     }

@@ -9,6 +9,9 @@ use super::*;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use std::collections::{BTreeMap, HashSet};
 
+const LIVE_TRANSIENT_PARTIAL_MESSAGE: &str =
+    "Transient analysis is running; displayed samples are provisional";
+
 /// Durable source domain for a prepared analysis identity.
 ///
 /// Simulation-plan IDs are owned by the project's stable plan/tombstones.
@@ -1727,6 +1730,23 @@ pub struct AnalysisResult {
 }
 
 impl AnalysisResult {
+    /// Construct a presentation-only transient result from accepted solver
+    /// points. It is deliberately unsuccessful until the engine returns its
+    /// terminal result, which keeps measurement, export, and qualification
+    /// paths from mistaking an in-flight prefix for complete evidence.
+    pub(crate) fn live_transient_partial(
+        id: u64,
+        analysis_type: AnalysisType,
+        label: impl Into<String>,
+    ) -> Self {
+        Self::failed(id, analysis_type, label, LIVE_TRANSIENT_PARTIAL_MESSAGE)
+    }
+
+    #[must_use]
+    pub fn is_live_partial(&self) -> bool {
+        !self.success && self.error_message.as_deref() == Some(LIVE_TRANSIENT_PARTIAL_MESSAGE)
+    }
+
     /// Exact prepared-task provenance for current retained results.
     #[must_use]
     pub fn provenance(&self) -> Option<&AnalysisResultProvenance> {

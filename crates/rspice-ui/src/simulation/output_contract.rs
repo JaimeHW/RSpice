@@ -753,11 +753,38 @@ pub(in crate::simulation) fn materialize_saved_outputs(
     analysis.saved_output_receipts.extend(receipts);
 }
 
+/// Resolve only outputs explicitly authored for live adaptive plotting. The
+/// returned waveforms contain the bounded extrema-preserving display cache,
+/// not the engine's authoritative full-precision arrays; the terminal result
+/// replaces them atomically when execution completes.
+pub(in crate::simulation) fn materialize_live_saved_outputs(
+    source_analysis: &AnalysisResult,
+    contracts: &[PreparedSavedOutput],
+) -> Vec<WaveformData> {
+    let mut outputs = Vec::new();
+    for contract in contracts.iter().filter(|contract| {
+        contract.streaming() == SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
+    }) {
+        let Ok(mut waveform) =
+            resolve_contract_waveform(contract, source_analysis, &source_analysis.waveforms)
+        else {
+            continue;
+        };
+        waveform.rebuild_display_cache(DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
+        if let Some(cache) = waveform.display_cache.take() {
+            waveform.x = Arc::new(cache.x.iter().map(|value| f64::from(*value)).collect());
+            waveform.y = Arc::new(cache.y.iter().map(|value| f64::from(*value)).collect());
+            waveform.rebuild_display_cache(DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
+        }
+        outputs.push(waveform);
+    }
+    outputs
+}
+
 /// Materialize one deferred receipt against its retained source analysis.
 /// The receipt's immutable digest and source text are reused; live project
 /// rows are never consulted.
-#[cfg(test)]
-pub fn materialize_deferred_saved_output(
+pub(crate) fn materialize_deferred_saved_output(
     analysis: &mut AnalysisResult,
     receipt_index: usize,
 ) -> Result<(), String> {
@@ -782,8 +809,9 @@ pub fn materialize_deferred_saved_output(
         selection_grid: None,
         digest: receipt.contract_digest,
     };
-    let source_waveforms = analysis.waveforms.clone();
-    let mut waveform = resolve_contract_waveform(&contract, analysis, &source_waveforms)?;
+    let mut candidate = analysis.clone();
+    let source_waveforms = candidate.waveforms.clone();
+    let mut waveform = resolve_contract_waveform(&contract, &candidate, &source_waveforms)?;
     if contract.precision == SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
         || contract.streaming == SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
     {
@@ -791,12 +819,30 @@ pub fn materialize_deferred_saved_output(
     }
     let sample_count = u64::try_from(waveform.x.len()).unwrap_or(u64::MAX);
     let waveform_name = waveform.name.clone();
-    analysis.waveforms.push(waveform);
-    analysis.saved_output_receipts[receipt_index].status =
+    if let Some(existing) = candidate
+        .waveforms
+        .iter_mut()
+        .find(|existing| existing.name == waveform_name)
+    {
+        if existing.x != waveform.x
+            || existing.y != waveform.y
+            || existing.complex != waveform.complex
+        {
+            return Err(format!(
+                "saved-output name '{waveform_name}' collides with a different retained waveform"
+            ));
+        }
+        existing.display_cache = waveform.display_cache;
+    } else {
+        candidate.waveforms.push(waveform);
+    }
+    candidate.saved_output_receipts[receipt_index].status =
         SavedOutputMaterializationStatus::Materialized {
             waveform_name,
             sample_count,
         };
+    candidate.validate_retained_evidence()?;
+    *analysis = candidate;
     Ok(())
 }
 
@@ -1349,6 +1395,74 @@ mod tests {
         materialize_deferred_saved_output(&mut analysis, 0).expect("deferred materializes");
         assert_eq!(analysis.waveforms.len(), 2);
         assert!(analysis.waveforms[1].display_cache.is_some());
+    }
+
+    #[test]
+    fn deferred_materialization_is_atomic_when_the_output_name_collides() {
+        let contract = PreparedSavedOutput::prepare(
+            &output(
+                SavedOutputPolicy::OnDemandFromRetainedState,
+                SavedOutputPrecision::FullSourcePrecision,
+            ),
+            AnalysisInstanceId::new(),
+            &transient_spec(),
+        )
+        .expect("prepare")
+        .expect("applies");
+        let mut analysis =
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
+                WaveformData::new("output_voltage", vec![0.0, 1.0], vec![9.0, 9.0], "#f00"),
+            ]);
+        materialize_saved_outputs(&mut analysis, &[contract]);
+        let before_waveforms = analysis.waveforms.clone();
+
+        let error = materialize_deferred_saved_output(&mut analysis, 0)
+            .expect_err("different retained waveform must block materialization");
+
+        assert!(error.contains("collides"));
+        assert_eq!(analysis.waveforms, before_waveforms);
+        assert_eq!(
+            analysis.saved_output_receipts[0].status,
+            SavedOutputMaterializationStatus::Deferred
+        );
+    }
+
+    #[test]
+    fn live_output_projection_is_bounded_and_does_not_mutate_source_precision() {
+        let live_output = SavedOutput::new(
+            SavedOutputKind::RawVoltageOrCurrent,
+            "output_voltage",
+            "V(out)",
+            SavedOutputCompatibility::AllCompatibleAnalyses,
+            SavedOutputPolicy::EveryAcceptedPoint,
+            SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
+            SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
+        )
+        .expect("valid live output");
+        let contract = PreparedSavedOutput::prepare(
+            &live_output,
+            AnalysisInstanceId::new(),
+            &transient_spec(),
+        )
+        .expect("prepare")
+        .expect("applies");
+        let x = (0..10_000).map(|index| index as f64).collect::<Vec<_>>();
+        let y = x
+            .iter()
+            .map(|value| (value / 17.0).sin())
+            .collect::<Vec<_>>();
+        let source = AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![WaveformData::new("out", x.clone(), y, "#fff")]);
+
+        let projected = materialize_live_saved_outputs(&source, &[contract]);
+
+        assert_eq!(source.waveforms[0].x.len(), 10_000);
+        assert_eq!(projected.len(), 1);
+        assert_eq!(projected[0].name, "output_voltage");
+        assert!(projected[0].x.len() <= DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
+        assert!(projected[0].display_cache.is_some());
+        assert!(source.saved_output_receipts.is_empty());
     }
 
     #[test]

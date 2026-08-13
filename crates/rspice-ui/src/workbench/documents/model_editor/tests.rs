@@ -1473,3 +1473,127 @@ fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
         candidate.definition_metadata
     );
 }
+
+/// Resolving several models from one library must authenticate it once.
+///
+/// Authentication digests every byte of every retained source in the closure
+/// and depends on the library alone. Doing it per model made the Models & PDKs
+/// qualification page — which rebuilds every summary on each repaint — cost
+/// work quadratic in the library's model count, every frame.
+///
+/// What keeps the page honest is the signature rather than this test:
+/// `qualification_model_summary` now takes an already-authenticated closure, so
+/// it cannot reach for the combined entry point per model. This pins the
+/// mechanism that makes that possible.
+#[test]
+fn resolving_many_models_authenticates_the_closure_once() {
+    let (manager, _root, _child, _first, _second) = multi_model_include_library();
+    let library = manager.get_library("multi-owned").expect("fixture library");
+    let names = ["nch_owned", "pch_owned"];
+    assert_eq!(library.models.len(), names.len());
+
+    CLOSURE_AUTHENTICATIONS.with(|count| count.set(0));
+    let closure =
+        verify_project_library_closure(library, "multi-owned").expect("authenticate closure");
+    for name in names {
+        resolve_project_model_in_closure(library, "multi-owned", name, &closure)
+            .unwrap_or_else(|error| panic!("resolve {name}: {error}"));
+    }
+    assert_eq!(
+        CLOSURE_AUTHENTICATIONS.with(std::cell::Cell::get),
+        1,
+        "the split path must authenticate once however many models it resolves"
+    );
+
+    CLOSURE_AUTHENTICATIONS.with(|count| count.set(0));
+    for name in names {
+        resolve_project_model_for_editor(&manager, "multi-owned", name)
+            .unwrap_or_else(|error| panic!("resolve {name}: {error}"));
+    }
+    assert_eq!(
+        CLOSURE_AUTHENTICATIONS.with(std::cell::Cell::get),
+        names.len(),
+        "the combined entry point authenticates per call, which is why callers \
+         that resolve many models must not use it in a loop"
+    );
+}
+
+/// The two paths must resolve identically; only the repeated work differs.
+#[test]
+fn the_split_and_combined_paths_resolve_the_same_model() {
+    let (manager, _root, child, _first, _second) = multi_model_include_library();
+    let library = manager.get_library("multi-owned").expect("fixture library");
+    let closure =
+        verify_project_library_closure(library, "multi-owned").expect("authenticate closure");
+
+    let split = resolve_project_model_in_closure(library, "multi-owned", "pch_owned", &closure)
+        .expect("split resolve");
+    let combined =
+        resolve_project_model_for_editor(&manager, "multi-owned", "pch_owned").expect("combined");
+
+    assert_eq!(split.source_path, child);
+    assert_eq!(split.source_path, combined.source_path);
+    assert_eq!(split.model_digest, combined.model_digest);
+    assert_eq!(split.model_revision, combined.model_revision);
+    assert_eq!(split.source_id, combined.source_id);
+}
+
+/// Authenticating once must not weaken the gate.
+#[test]
+fn a_tampered_retained_source_still_fails_authentication() {
+    let (mut manager, root, _child, _first, _second) = multi_model_include_library();
+    let library = manager
+        .get_library_mut("multi-owned")
+        .expect("fixture library");
+    let content = library
+        .source_contents
+        .iter_mut()
+        .find(|content| content.path == root)
+        .expect("retained root bytes");
+    content.bytes.extend_from_slice(b"\n* tampered\n");
+
+    let library = manager.get_library("multi-owned").expect("fixture library");
+    let error = verify_project_library_closure(library, "multi-owned")
+        .expect_err("a source that fails its pin must not authenticate");
+    assert!(
+        error.contains("fails its retained content digest"),
+        "unexpected failure: {error}"
+    );
+}
+
+/// The exactly-once canonical check must survive the switch to a linear search.
+#[test]
+fn a_canonical_card_repeated_in_its_source_is_still_rejected() {
+    let (mut manager, root, _child, first_source, _second) = multi_model_include_library();
+    let library = manager
+        .get_library_mut("multi-owned")
+        .expect("fixture library");
+    let mut duplicated = first_source.clone();
+    duplicated.extend_from_slice(&first_source);
+    let digest = ContentDigest::from_bytes(Sha256::digest(&duplicated).into());
+    for content in &mut library.source_contents {
+        if content.path == root {
+            content.bytes = duplicated.clone();
+        }
+    }
+    for pin in &mut library.source_closure {
+        if pin.path == root {
+            pin.digest = digest;
+        }
+    }
+    let ModelSourceAuthority::ProjectOwned { digest: root, .. } = &mut library.source_authority
+    else {
+        panic!("fixture library is project-owned");
+    };
+    *root = digest;
+
+    let library = manager.get_library("multi-owned").expect("fixture library");
+    let closure =
+        verify_project_library_closure(library, "multi-owned").expect("authenticate closure");
+    let error = resolve_project_model_in_closure(library, "multi-owned", "nch_owned", &closure)
+        .expect_err("a card occurring twice is ambiguous and must not resolve");
+    assert!(
+        error.contains("must occur exactly once"),
+        "unexpected failure: {error}"
+    );
+}

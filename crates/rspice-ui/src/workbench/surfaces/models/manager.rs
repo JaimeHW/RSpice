@@ -7,12 +7,14 @@
 mod specialist_pages;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use egui::{Align, Color32, Layout, RichText, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::state::model_library::{
-    DeviceModel, ModelLibrary, ModelSourceAuthority, PackModelHit, ProcessCorner,
+    ClosureFacts, CornerSectionBinding, CornerSectionDomain, DeviceModel, GeometryEnvelope,
+    ModelLibrary, ModelSourceAuthority, PackModelHit, ProcessCorner, bin_family_name,
+    closure_facts, envelope_is_invalid, short_digest,
 };
 use crate::state::{
     CellViewRef, Component, ComponentType, ModelBoundSymbolDefinition, SymbolDocument, ViewType,
@@ -31,6 +33,10 @@ const ROW_H: f32 = 24.0;
 const HEADER_H: f32 = 27.0;
 const CATALOG_FOOT_H: f32 = 26.0;
 const CATALOG_LIMIT: usize = 160;
+/// Parameter rows a detail column lists before reporting the remainder.
+const PARAMETER_ROWS: usize = 24;
+/// Consumers the "where used" column lists before reporting the remainder.
+const USAGE_ROWS: usize = 12;
 const PAGE_TABS_H: f32 = 38.0;
 const CATALOG_BAR_H: f32 = 34.0;
 
@@ -80,8 +86,8 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 
     let page = app.state.workbench.models_page;
-    let include_diagnostics =
-        (page == ModelsPage::Include).then(|| super::include_diagnostics(app));
+    let include_diagnostics = (page == ModelsPage::Include)
+        .then(|| closure_facts(app.state.model_library_manager.libraries_sorted()));
     if page == ModelsPage::Qualification {
         qualification_page(ui, app);
     } else {
@@ -385,7 +391,7 @@ fn qualification_gate_banner(ui: &mut Ui, selected: Option<&super::Qualification
     let color = gate.map_or(t.color.text_faint, |gate| {
         qualification_gate_color(gate, &t)
     });
-    let label = gate.map_or("NO SELECTION", qualification_gate_label);
+    let label = gate.map_or("NO SELECTION", super::QualificationGate::label);
     ui.painter().text(
         egui::pos2(rect.right() - 12.0, rect.center().y),
         egui::Align2::RIGHT_CENTER,
@@ -409,15 +415,18 @@ fn qualification_suite_rail(
         Some(&format!("{} source revisions", summaries.len())),
         |ui| {
             let list_height = (ui.available_height() - 154.0).max(130.0);
+            // The rail lists every model in every loaded library, which on a
+            // foundry corpus is thousands of fixed-height rows.
+            const RAIL_ROW_H: f32 = 38.0;
             ScrollArea::vertical()
                 .id_salt("models-qualification-suite-rail")
                 .max_height(list_height)
-                .show(ui, |ui| {
-                    for summary in summaries {
+                .show_rows(ui, RAIL_ROW_H, summaries.len(), |ui, range| {
+                    for summary in &summaries[range] {
                         let t = Tokens::get(ui.ctx());
                         let selected = selected_key == Some(summary.key.as_str());
                         let (rect, response) = ui.allocate_exact_size(
-                            egui::vec2(ui.available_width(), 38.0),
+                            egui::vec2(ui.available_width(), RAIL_ROW_H),
                             Sense::click(),
                         );
                         if selected {
@@ -456,7 +465,7 @@ fn qualification_suite_rail(
                         ui.painter().text(
                             egui::pos2(rect.right() - 8.0, rect.center().y),
                             egui::Align2::RIGHT_CENTER,
-                            qualification_gate_label(summary.gate),
+                            summary.gate.label(),
                             theme::mono(tokens::FS_0, FontWeight::SemiBold),
                             qualification_gate_color(summary.gate, &t),
                         );
@@ -465,7 +474,7 @@ fn qualification_suite_rail(
                             summary.model,
                             summary.library,
                             summary.vectors,
-                            qualification_gate_label(summary.gate)
+                            summary.gate.label()
                         );
                         response.widget_info(|| {
                             egui::WidgetInfo::selected(
@@ -581,7 +590,7 @@ fn qualification_selected_contract(
             detail_pane(
                 ui,
                 "QUALIFICATION CONTRACT",
-                Some(qualification_gate_label(selected.gate)),
+                Some(selected.gate.label()),
                 |ui| {
                     property(
                         ui,
@@ -628,15 +637,6 @@ fn qualification_selected_contract(
                 },
             );
         });
-}
-
-fn qualification_gate_label(gate: super::QualificationGate) -> &'static str {
-    match gate {
-        super::QualificationGate::Qualified => "qualified",
-        super::QualificationGate::Review => "review",
-        super::QualificationGate::Unqualified => "unqualified",
-        super::QualificationGate::Blocked => "blocked",
-    }
 }
 
 fn qualification_gate_color(gate: super::QualificationGate, t: &Tokens) -> Color32 {
@@ -702,15 +702,26 @@ fn page_tabs(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
 }
 
 fn catalog_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
-    catalog_bar(ui, app);
+    // The project scope is the only one derived from the loaded corpus, so it
+    // is the only one that scans; the pack scopes ask the pack index. Deriving
+    // it here means the facet chips above the table and the table itself are
+    // one pass over the corpus, not six.
+    let scan = matches!(
+        app.state.workbench.models_view.catalog_scope,
+        ModelsCatalogScope::Project
+    )
+    .then(|| project_catalog_scan(app, &ConsumerIndex::build(app)));
+    catalog_bar(ui, app, scan.as_ref());
     match app.state.workbench.models_view.catalog_scope {
-        ModelsCatalogScope::Project => project_catalog(ui, app),
+        ModelsCatalogScope::Project => {
+            project_catalog(ui, app, scan.as_ref().expect("the project scope scans"));
+        }
         ModelsCatalogScope::InstalledPacks => pack_catalog(ui, app),
         ModelsCatalogScope::RSpiceLibrary => parts_catalog(ui, app),
     }
 }
 
-fn catalog_bar(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
+fn catalog_bar(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, scan: Option<&ProjectCatalogScan>) {
     let loaded = app.state.model_library_manager.total_model_count();
     let pack_rows = app
         .state
@@ -780,8 +791,11 @@ fn catalog_bar(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                                 ModelsCatalogScope::Project => {
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing.x = 4.0;
-                                        for facet in ProjectModelFacet::ALL {
-                                            let count = project_facet_count(app, facet);
+                                        for (index, facet) in
+                                            ProjectModelFacet::ALL.into_iter().enumerate()
+                                        {
+                                            let count =
+                                                scan.map(|scan| scan.facets[index]).unwrap_or(0);
                                             if facet_button(
                                                 ui,
                                                 app.state.workbench.models_view.project_facet
@@ -912,18 +926,76 @@ fn facet_button(ui: &mut Ui, selected: bool, label: &str, count: Option<usize>) 
     )
 }
 
-#[derive(Clone)]
 struct ProjectModelRow {
     library: String,
-    model: DeviceModel,
+    model: String,
+    family: &'static str,
     source: String,
     pinned: bool,
     review: bool,
-    usages: Vec<String>,
+    /// The first consumer, which is all the row column shows.
+    usage: Option<String>,
     vectors: usize,
 }
 
-fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
+/// Which schematic instances name which model.
+///
+/// One pass over the placed components per frame instead of one per model.
+/// Deriving it per model made the catalog cost the product of the corpus and
+/// the schematic, and the facet chips paid it again for every facet.
+struct ConsumerIndex {
+    by_model: BTreeMap<String, Vec<String>>,
+}
+
+impl ConsumerIndex {
+    fn build(app: &ManagerRenderContext<'_>) -> Self {
+        let mut by_model = BTreeMap::<String, Vec<String>>::new();
+        let Some(schematic) = app.state.workspace.active_schematic() else {
+            return Self { by_model };
+        };
+        for component in &schematic.components {
+            let label = format!(
+                "{} · {} · ({}, {})",
+                component.name,
+                component.kind.display_name(),
+                component.pos.x,
+                component.pos.y
+            );
+            for model in component_model_bindings(component) {
+                by_model
+                    .entry(model.to_ascii_lowercase())
+                    .or_default()
+                    .push(label.clone());
+            }
+        }
+        for consumers in by_model.values_mut() {
+            consumers.sort();
+        }
+        Self { by_model }
+    }
+
+    fn of(&self, model_name: &str) -> &[String] {
+        self.by_model
+            .get(&model_name.to_ascii_lowercase())
+            .map_or(&[], Vec::as_slice)
+    }
+}
+
+/// Everything the catalog page derives from the corpus, derived once.
+///
+/// The facet chips and the table used to walk the corpus separately, which is
+/// how a chip could count rows the table did not show. They read this instead,
+/// so the count and the rows are the same pass.
+struct ProjectCatalogScan {
+    rows: Vec<ProjectModelRow>,
+    facets: [usize; ProjectModelFacet::ALL.len()],
+    review: usize,
+}
+
+fn project_catalog_scan(
+    app: &ManagerRenderContext<'_>,
+    consumers: &ConsumerIndex,
+) -> ProjectCatalogScan {
     let query = app
         .state
         .workbench
@@ -933,85 +1005,119 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         .to_ascii_lowercase();
     let facet = app.state.workbench.models_view.project_facet;
     let mut rows = Vec::new();
+    let mut facets = [0usize; ProjectModelFacet::ALL.len()];
+    let mut review_shown = 0usize;
     for library in app.state.model_library_manager.libraries_sorted() {
+        let pinned = model_is_pinned(library);
+        let protected = matches!(library.source_authority, ModelSourceAuthority::BuiltIn);
+        let library_source = library.root_path.as_deref().map(path_label);
         for model in library.models.values() {
-            let usages = model_consumers(app, &model.name);
-            let pinned =
-                !library.source_closure.is_empty() || library.source_authority.is_project_owned();
-            let review = model_geometry_invalid(model)
-                || (library.root_path.is_some() && library.source_closure.is_empty())
-                || model.description.trim().is_empty();
-            let protected = matches!(library.source_authority, ModelSourceAuthority::BuiltIn);
-            let vectors = library
-                .model_qualification
-                .get(&model.name)
-                .map_or(0, |qualification| {
-                    qualification
-                        .suites
-                        .iter()
-                        .map(|suite| suite.vectors.len())
-                        .sum()
-                });
-            let source = model
-                .file_path
-                .as_deref()
-                .or(library.root_path.as_deref())
-                .map(path_label)
-                .unwrap_or_else(|| match library.source_authority {
-                    ModelSourceAuthority::BuiltIn => "RSpice built-in".to_owned(),
-                    ModelSourceAuthority::External => "external source".to_owned(),
-                    ModelSourceAuthority::RetainedImport { .. } => "retained import".to_owned(),
-                    ModelSourceAuthority::ProjectOwned { .. } => "project source".to_owned(),
-                });
-            let haystack = format!(
-                "{} {} {} {} {}",
-                model.name,
-                model.description,
-                model.model_type.display_name(),
-                library.name,
-                model
-                    .parameters
-                    .iter()
-                    .map(|(name, value)| format!("{name}={value}"))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            )
-            .to_ascii_lowercase();
-            let facet_match = match facet {
+            let usages = consumers.of(&model.name);
+            let review = model_needs_review(library, model);
+            let matches = |facet: ProjectModelFacet| match facet {
                 ProjectModelFacet::All => true,
                 ProjectModelFacet::Bound => !usages.is_empty(),
                 ProjectModelFacet::Pinned => pinned,
                 ProjectModelFacet::Review => review,
                 ProjectModelFacet::Protected => protected,
             };
-            if facet_match && (query.is_empty() || haystack.contains(&query)) {
-                rows.push(ProjectModelRow {
-                    library: library.name.clone(),
-                    model: model.clone(),
-                    source,
-                    pinned,
-                    review,
-                    usages,
-                    vectors,
-                });
+            for (index, candidate) in ProjectModelFacet::ALL.into_iter().enumerate() {
+                facets[index] += usize::from(matches(candidate));
             }
+            if !matches(facet) {
+                continue;
+            }
+            if !query.is_empty() && !model_matches_query(library, model, &query) {
+                continue;
+            }
+            if review {
+                review_shown += 1;
+            }
+            rows.push(ProjectModelRow {
+                library: library.name.clone(),
+                model: model.name.clone(),
+                family: model.model_type.display_name(),
+                source: model
+                    .file_path
+                    .as_deref()
+                    .map(path_label)
+                    .or_else(|| library_source.clone())
+                    .unwrap_or_else(|| match library.source_authority {
+                        ModelSourceAuthority::BuiltIn => "RSpice built-in".to_owned(),
+                        ModelSourceAuthority::External => "external source".to_owned(),
+                        ModelSourceAuthority::RetainedImport { .. } => "retained import".to_owned(),
+                        ModelSourceAuthority::ProjectOwned { .. } => "project source".to_owned(),
+                    }),
+                pinned,
+                review,
+                usage: usages.first().cloned(),
+                vectors: library
+                    .model_qualification
+                    .get(&model.name)
+                    .map_or(0, |qualification| {
+                        qualification
+                            .suites
+                            .iter()
+                            .map(|suite| suite.vectors.len())
+                            .sum()
+                    }),
+            });
         }
     }
     rows.sort_by(|left, right| {
-        left.model
-            .name
-            .to_ascii_lowercase()
-            .cmp(&right.model.name.to_ascii_lowercase())
-            .then_with(|| left.library.cmp(&right.library))
+        case_folded_cmp(&left.model, &right.model).then_with(|| left.library.cmp(&right.library))
     });
+    ProjectCatalogScan {
+        rows,
+        facets,
+        review: review_shown,
+    }
+}
 
+/// Order two names exactly as comparing their `to_ascii_lowercase` would,
+/// without allocating either one.
+///
+/// The catalog lower-cased both sides inside the comparator, which allocates
+/// two strings per comparison — well over a hundred thousand allocations to
+/// order one frame of a corpus-sized catalog. Folding ASCII per byte, rather
+/// than reaching for `char::to_lowercase`, keeps the ordering identical to the
+/// one this replaces; full Unicode folding would be both slower and a
+/// different order.
+fn case_folded_cmp(left: &str, right: &str) -> std::cmp::Ordering {
+    left.bytes()
+        .map(|byte| byte.to_ascii_lowercase())
+        .cmp(right.bytes().map(|byte| byte.to_ascii_lowercase()))
+}
+
+/// Whether a search term appears anywhere a catalog row reports.
+///
+/// Matched field by field rather than by joining the card into one haystack:
+/// the join allocated a string per model per frame, including the whole
+/// parameter map, and was thrown away immediately.
+fn model_matches_query(library: &ModelLibrary, model: &DeviceModel, query: &str) -> bool {
+    let contains = |field: &str| {
+        field.len() >= query.len()
+            && field
+                .as_bytes()
+                .windows(query.len())
+                .any(|window| window.eq_ignore_ascii_case(query.as_bytes()))
+    };
+    contains(&model.name)
+        || contains(&model.description)
+        || contains(model.model_type.display_name())
+        || contains(&library.name)
+        || model.parameters.keys().any(|parameter| contains(parameter))
+}
+
+fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, scan: &ProjectCatalogScan) {
+    let rows = &scan.rows;
     let selected_visible = rows.iter().any(|row| {
         app.state.model_library_manager.selected_library.as_deref() == Some(row.library.as_str())
-            && app.state.workbench.selected_model.as_deref() == Some(row.model.name.as_str())
+            && app.state.workbench.selected_model.as_deref() == Some(row.model.as_str())
     });
     if !selected_visible && let Some(row) = rows.first() {
         app.state.model_library_manager.select_library(&row.library);
-        app.state.workbench.selected_model = Some(row.model.name.clone());
+        app.state.workbench.selected_model = Some(row.model.clone());
     }
 
     let table_h = (ui.available_height() * 0.36).max(120.0);
@@ -1029,69 +1135,64 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 ("STATUS", 0.15),
             ],
         );
-        ScrollArea::vertical()
+        let table = ScrollArea::vertical()
             .id_salt("models-project-table")
-            .max_height(table_h)
-            .show(ui, |ui| {
-                if rows.is_empty() {
-                    empty_state(
-                        ui,
-                        "No models match the current catalog filter.",
-                        "Search covers names, families, sources, libraries, consumers and resolved parameters.",
-                    );
-                    if ui.button("Clear filter").clicked() {
-                        app.state.workbench.models_view.catalog_query.clear();
-                        app.state.workbench.models_view.project_facet = ProjectModelFacet::All;
-                    }
-                } else {
-                    for row in &rows {
-                        project_model_row(ui, app, row);
-                    }
+            .max_height(table_h);
+        if rows.is_empty() {
+            table.show(ui, |ui| {
+                empty_state(
+                    ui,
+                    "No models match the current catalog filter.",
+                    "Search covers names, families, sources, libraries, consumers and resolved parameters.",
+                );
+                if ui.button("Clear filter").clicked() {
+                    app.state.workbench.models_view.catalog_query.clear();
+                    app.state.workbench.models_view.project_facet = ProjectModelFacet::All;
                 }
             });
+        } else {
+            // A corpus-sized catalog builds a widget per row otherwise, and a
+            // foundry PDK has thousands. Rows here are a fixed height, which
+            // is what lets the scroll area place the scrollbar correctly while
+            // building only the rows on screen.
+            table.show_rows(ui, ROW_H, rows.len(), |ui, range| {
+                for row in &rows[range] {
+                    project_model_row(ui, app, row);
+                }
+            });
+        }
         });
     catalog_footer(
         ui,
         rows.len(),
         app.state.model_library_manager.total_model_count(),
-        rows.iter().filter(|row| row.review).count(),
+        scan.review,
         "project models",
     );
 
     selected_model_detail(ui, app);
 }
 
-fn project_facet_count(app: &ManagerRenderContext<'_>, facet: ProjectModelFacet) -> usize {
-    app.state
-        .model_library_manager
-        .libraries_sorted()
-        .into_iter()
-        .flat_map(|library| {
-            library.models.values().map(move |model| {
-                let bound = !model_consumers(app, &model.name).is_empty();
-                let pinned = !library.source_closure.is_empty()
-                    || library.source_authority.is_project_owned();
-                let review = model_geometry_invalid(model)
-                    || (library.root_path.is_some() && library.source_closure.is_empty())
-                    || model.description.trim().is_empty();
-                let protected = matches!(library.source_authority, ModelSourceAuthority::BuiltIn);
-                match facet {
-                    ProjectModelFacet::All => true,
-                    ProjectModelFacet::Bound => bound,
-                    ProjectModelFacet::Pinned => pinned,
-                    ProjectModelFacet::Review => review,
-                    ProjectModelFacet::Protected => protected,
-                }
-            })
-        })
-        .filter(|matches| *matches)
-        .count()
+/// Whether a model's source is retained well enough to reproduce a run.
+fn model_is_pinned(library: &ModelLibrary) -> bool {
+    !library.source_closure.is_empty() || library.source_authority.is_project_owned()
+}
+
+/// Whether a model has something an engineer must actually look at.
+///
+/// Both the catalog rows and the facet counts read this, because when they
+/// each carried their own copy the chip could count rows the table did not
+/// show. A missing `description` is deliberately *not* a finding: prose is
+/// optional on a `.model` card, nearly every real PDK card omits it, and
+/// flagging it turned the whole catalog amber and made the flag mean nothing.
+fn model_needs_review(library: &ModelLibrary, model: &DeviceModel) -> bool {
+    envelope_is_invalid(model) || (library.root_path.is_some() && library.source_closure.is_empty())
 }
 
 fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &ProjectModelRow) {
     let selected = app.state.model_library_manager.selected_library.as_deref()
         == Some(row.library.as_str())
-        && app.state.workbench.selected_model.as_deref() == Some(row.model.name.as_str());
+        && app.state.workbench.selected_model.as_deref() == Some(row.model.as_str());
     let t = Tokens::get(ui.ctx());
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_H), Sense::click());
@@ -1106,7 +1207,7 @@ fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &Proj
     } else if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
-    let row_label = format!("{} in {}", row.model.name, row.library);
+    let row_label = format!("{} in {}", row.model, row.library);
     response.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,
@@ -1118,7 +1219,7 @@ fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &Proj
     theme::paint_focus_ring(ui, &response, rect);
     if response.clicked() {
         app.state.model_library_manager.select_library(&row.library);
-        app.state.workbench.selected_model = Some(row.model.name.clone());
+        app.state.workbench.selected_model = Some(row.model.clone());
     }
     let status = if row.review {
         "review"
@@ -1131,18 +1232,10 @@ fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &Proj
         ui,
         rect,
         &[
-            (&row.model.name, 0.20, true),
-            (row.model.model_type.display_name(), 0.17, false),
+            (&row.model, 0.20, true),
+            (row.family, 0.17, false),
             (&row.source, 0.22, false),
-            (
-                if row.usages.is_empty() {
-                    ""
-                } else {
-                    row.usages[0].as_str()
-                },
-                0.16,
-                false,
-            ),
+            (row.usage.as_deref().unwrap_or(""), 0.16, false),
             (&row.vectors.to_string(), 0.10, true),
             (status, 0.15, true),
         ],
@@ -1150,6 +1243,22 @@ fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &Proj
 }
 
 fn catalog_footer(ui: &mut Ui, shown: usize, total: usize, review: usize, noun: &str) {
+    catalog_footer_capped(ui, shown, total, review, noun, false);
+}
+
+/// The catalog footer, told whether the result set was cut off.
+///
+/// "160 shown · 260000 parts" reads as a filter that matched 160. When the
+/// number is a search cap instead, a reader has no way to tell whether the
+/// part they want is one of the ones dropped, so the cap says so.
+fn catalog_footer_capped(
+    ui: &mut Ui,
+    shown: usize,
+    total: usize,
+    review: usize,
+    noun: &str,
+    capped: bool,
+) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), CATALOG_FOOT_H),
@@ -1164,9 +1273,17 @@ fn catalog_footer(ui: &mut Ui, shown: usize, total: usize, review: usize, noun: 
     ui.painter().text(
         egui::pos2(rect.left() + 12.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        format!("{shown} shown · {total} {noun}"),
+        if capped {
+            format!("first {shown} of {total} {noun} · narrow the search to see the rest")
+        } else {
+            format!("{shown} shown · {total} {noun}")
+        },
         theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_faint,
+        if capped {
+            t.color.warn
+        } else {
+            t.color.text_faint
+        },
     );
     let state = if review == 0 {
         "No open review"
@@ -1356,7 +1473,10 @@ fn parameter_card(ui: &mut Ui, library: &ModelLibrary, model: &DeviceModel) {
     detail_pane(
         ui,
         "RESOLVED PARAMETERS",
-        Some(&format!("{} values", model.parameters.len())),
+        Some(&format!(
+            "{} values",
+            model.parameters.len() + model.string_parameters.len()
+        )),
         |ui| {
             let mut values = model
                 .parameters
@@ -1377,8 +1497,20 @@ fn parameter_card(ui: &mut Ui, library: &ModelLibrary, model: &DeviceModel) {
                     "Built-in equation defaults remain owned by the engine.",
                 );
             } else {
-                for (name, value, origin) in values.into_iter().take(24) {
+                // A BSIM4 card carries several hundred parameters and this is
+                // a column in a four-pane row. What is not listed is counted;
+                // a list that stops silently reads as the whole card.
+                let hidden = values.len().saturating_sub(PARAMETER_ROWS);
+                for (name, value, origin) in values.into_iter().take(PARAMETER_ROWS) {
                     property(ui, &name, &value, origin);
+                }
+                if hidden > 0 {
+                    property(
+                        ui,
+                        "…",
+                        &format!("{hidden} more"),
+                        "open source for the full card",
+                    );
                 }
             }
             if let Some(metadata) = library.model_definition_metadata.get(&model.name) {
@@ -1394,56 +1526,63 @@ fn parameter_card(ui: &mut Ui, library: &ModelLibrary, model: &DeviceModel) {
     );
 }
 
+/// What the card declares about the device's operating envelope.
+///
+/// This pane used to draw a curve: a square-law `(V − VTH0)²` sketch, plotted
+/// for any card carrying a `vth0` — which every BSIM4, BSIM-CMG and PSP card
+/// does, and for none of which is the square law the model. Normalised, with no
+/// axis units and a hard-coded 1.8 V supply, it looked like an I-V
+/// characteristic and was an unrelated equation. A plot that a reader can
+/// mistake for the device's behaviour has to come from the engine evaluating
+/// the actual model; until it does, this states only what the card itself
+/// declares.
 fn characteristic_card(ui: &mut Ui, model: &DeviceModel) {
-    detail_pane(ui, "CHARACTERISTIC", Some("analytic preview"), |ui| {
-        let Some(vth) = model.vth0.or_else(|| model.parameters.get("vth0").copied()) else {
+    detail_pane(ui, "DECLARED ENVELOPE", Some("from the card"), |ui| {
+        let mut declared = false;
+        if let Some(vth) = model.vth0.or_else(|| model.parameters.get("vth0").copied()) {
+            property(ui, "VTH0", &format!("{vth:.6} V"), "source card");
+            declared = true;
+        }
+        if let Some(vdd) = model.vdd {
+            property(ui, "Supply", &format!("{vdd:.6} V"), "source card");
+            declared = true;
+        }
+        for (label, low, high) in [
+            ("Length", model.l_min, model.l_max),
+            ("Width", model.w_min, model.w_max),
+        ] {
+            match (low, high) {
+                (Some(low), Some(high)) => {
+                    property(ui, label, &format!("{low:.4e} … {high:.4e} m"), "bin range");
+                    declared = true;
+                }
+                (Some(low), None) => {
+                    property(ui, label, &format!("≥ {low:.4e} m"), "bin range");
+                    declared = true;
+                }
+                (None, Some(high)) => {
+                    property(ui, label, &format!("≤ {high:.4e} m"), "bin range");
+                    declared = true;
+                }
+                (None, None) => {}
+            }
+        }
+        if let (Some(low), Some(high)) = (model.spice_level, model.model_version) {
+            property(
+                ui,
+                "Level",
+                &format!("{low} · version {high}"),
+                "source card",
+            );
+            declared = true;
+        }
+        if !declared {
             empty_state(
                 ui,
-                "No function-defined characteristic is available.",
-                "Open Model Editor or attach qualification vectors to add an evidence-backed plot.",
+                "This card declares no operating envelope.",
+                "Bin ranges, threshold and supply are read from the card; nothing is inferred.",
             );
-            return;
-        };
-        let vmax = model.vdd.unwrap_or(1.8).max(vth + 0.2);
-        let desired = egui::vec2(ui.available_width().max(120.0), 112.0);
-        let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
-        let t = Tokens::get(ui.ctx());
-        ui.painter().rect(
-            rect,
-            2.0,
-            t.color.bg_inset,
-            Stroke::new(1.0, t.color.border),
-            egui::StrokeKind::Inside,
-        );
-        let plot = rect.shrink2(egui::vec2(10.0, 9.0));
-        ui.painter().line_segment(
-            [plot.left_bottom(), plot.right_bottom()],
-            Stroke::new(1.0, t.color.border_strong),
-        );
-        ui.painter().line_segment(
-            [plot.left_bottom(), plot.left_top()],
-            Stroke::new(1.0, t.color.border_strong),
-        );
-        let points = (0..=48)
-            .map(|index| {
-                let voltage = vmax * f64::from(index) / 48.0;
-                let current = (voltage - vth).max(0.0).powi(2);
-                let max_current = (vmax - vth).max(0.01).powi(2);
-                egui::pos2(
-                    plot.left() + plot.width() * index as f32 / 48.0,
-                    plot.bottom() - plot.height() * (current / max_current) as f32,
-                )
-            })
-            .collect::<Vec<_>>();
-        ui.painter()
-            .add(egui::Shape::line(points, Stroke::new(1.8, t.color.accent)));
-        ui.label(
-            RichText::new(format!(
-                "Square-law preview from retained VTH0={vth:.4} V · range 0…{vmax:.3} V"
-            ))
-            .small()
-            .color(t.color.text_dim),
-        );
+        }
     });
 }
 
@@ -1517,8 +1656,21 @@ fn usage_card(
                     "Place an instance or select one and use Bind to selection.",
                 );
             } else {
-                for usage in usages.iter().take(12) {
+                for usage in usages.iter().take(USAGE_ROWS) {
                     if ui.link(usage).clicked() {
+                        app.state.workbench.models_view.dialog =
+                            Some(ModelsWorkbenchDialog::BindingTrace {
+                                model: model.name.clone(),
+                                consumers: usages.to_vec(),
+                            });
+                    }
+                }
+                if usages.len() > USAGE_ROWS {
+                    // The trace dialog lists all of them; only this column stops.
+                    if ui
+                        .link(format!("{} more…", usages.len() - USAGE_ROWS))
+                        .clicked()
+                    {
                         app.state.workbench.models_view.dialog =
                             Some(ModelsWorkbenchDialog::BindingTrace {
                                 model: model.name.clone(),
@@ -1806,6 +1958,9 @@ fn parts_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             receipt(app, Err(error));
             Vec::new()
         });
+    // The search stops at the limit rather than reading a quarter of a million
+    // parts, so a full page of results is a cap and has to be reported as one.
+    let capped = hits.len() >= CATALOG_LIMIT;
     if let Some(pack_id) = app.state.workbench.models_view.selected_pack.as_deref() {
         hits.retain(|hit| hit.pack == pack_id);
     }
@@ -1870,7 +2025,7 @@ fn parts_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 }
             });
         });
-    catalog_footer(
+    catalog_footer_capped(
         ui,
         hits.len(),
         app.state.model_library_manager.pack_definition_count(),
@@ -1878,6 +2033,7 @@ fn parts_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             .filter(|hit| hit.restricted || !hit.redistributable)
             .count(),
         "addressable parts",
+        capped,
     );
     selected_part_detail(ui, app, &hits);
 }
@@ -1945,7 +2101,7 @@ fn selected_part_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hits: &
                                 hit.line
                             ),
                             source: body,
-                            read_only: true,
+                            editable: false,
                         });
                 }
                 Err(error) => receipt(
@@ -1992,9 +2148,10 @@ fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             title,
             subtitle,
             source,
-            read_only,
+            editable,
         } => {
             let mut open = true;
+            let mut edit = false;
             egui::Window::new(title)
                 .open(&mut open)
                 .collapsible(false)
@@ -2003,49 +2160,93 @@ fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 .show(ui.ctx(), |ui| {
                     ui.label(RichText::new(subtitle).monospace().small());
                     ui.separator();
-                    let mut body = source;
+                    // A preview, always. The text stays selectable and
+                    // copyable, but it is never a writable buffer: this
+                    // dialog holds a per-frame clone of the retained bytes and
+                    // has nowhere to write an edit back to, so an interactive
+                    // field here accepted keystrokes and dropped every one of
+                    // them. Authoring goes through Model Editor, which owns
+                    // validation and revision history.
+                    let mut body = source.as_str();
                     ScrollArea::both().show(ui, |ui| {
                         ui.add(
                             egui::TextEdit::multiline(&mut body)
                                 .font(egui::TextStyle::Monospace)
-                                .interactive(!read_only)
                                 .desired_width(f32::INFINITY)
                                 .desired_rows(26),
                         );
                     });
-                    if !read_only {
-                        ui.label(
-                            "Editable project definitions must be saved through Model Editor so validation and revision history remain atomic.",
-                        );
-                    }
+                    ui.horizontal(|ui| {
+                        if editable {
+                            edit = ui.button("Edit in Model Editor…").clicked();
+                            ui.label(
+                                RichText::new("Editing publishes one validated project revision.")
+                                    .small()
+                                    .color(Tokens::get(ui.ctx()).color.text_faint),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new(
+                                    "Read-only: this source is not owned by the project.",
+                                )
+                                .small()
+                                .color(Tokens::get(ui.ctx()).color.text_faint),
+                            );
+                        }
+                    });
                 });
-            if !open {
+            if edit {
+                app.queue_command(Command::ModelEditor);
+                app.state.workbench.models_view.dialog = None;
+            } else if !open {
                 app.state.workbench.models_view.dialog = None;
             }
         }
         ModelsWorkbenchDialog::CompareModels {
             left_library,
             left_model,
-            right_library,
-            right_model,
+            right,
         } => {
             let mut open = true;
+            let mut chosen = right.clone();
             egui::Window::new("Compare model definitions")
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(true)
                 .default_size(egui::vec2(760.0, 500.0))
                 .show(ui.ctx(), |ui| {
-                    compare_models(
+                    comparison_counterpart_picker(
                         ui,
                         app,
                         &left_library,
                         &left_model,
-                        &right_library,
-                        &right_model,
+                        &mut chosen,
                     );
+                    ui.separator();
+                    match chosen.as_ref() {
+                        Some((right_library, right_model)) => compare_models(
+                            ui,
+                            app,
+                            &left_library,
+                            &left_model,
+                            right_library,
+                            right_model,
+                        ),
+                        None => empty_state(
+                            ui,
+                            "Choose a definition to compare against.",
+                            "There is no meaningful default beyond the same card in another library.",
+                        ),
+                    }
                 });
-            if !open {
+            if chosen != right {
+                app.state.workbench.models_view.dialog =
+                    Some(ModelsWorkbenchDialog::CompareModels {
+                        left_library,
+                        left_model,
+                        right: chosen,
+                    });
+            } else if !open {
                 app.state.workbench.models_view.dialog = None;
             }
         }
@@ -2230,6 +2431,95 @@ fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 });
             }
         }
+        ModelsWorkbenchDialog::BindCornerSection {
+            library,
+            corner,
+            mut domain,
+            mut section,
+        } => {
+            let sections = app
+                .state
+                .model_library_manager
+                .get_library(&library)
+                .map(ModelLibrary::section_index)
+                .unwrap_or_default()
+                .into_iter()
+                .collect::<Vec<_>>();
+            let mut open = true;
+            let mut decision = None;
+            egui::Window::new("Bind corner section")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ui.ctx(), |ui| {
+                    ui.label(
+                        "Choose an explicit functional domain and one section from the authenticated source catalog. No name inference is used.",
+                    );
+                    ui.label(
+                        RichText::new(format!("{library} / {corner}"))
+                            .monospace()
+                            .strong(),
+                    );
+                    egui::ComboBox::from_label("Domain")
+                        .selected_text(domain.label())
+                        .show_ui(ui, |ui| {
+                            for candidate in CornerSectionDomain::ALL {
+                                ui.selectable_value(&mut domain, candidate, candidate.label());
+                            }
+                        });
+                    egui::ComboBox::from_label("Authenticated section")
+                        .selected_text(if section.is_empty() {
+                            "Select section"
+                        } else {
+                            section.as_str()
+                        })
+                        .show_ui(ui, |ui| {
+                            for candidate in &sections {
+                                ui.selectable_value(
+                                    &mut section,
+                                    candidate.clone(),
+                                    candidate.to_uppercase(),
+                                );
+                            }
+                        });
+                    if sections.is_empty() {
+                        ui.colored_label(
+                            Tokens::get(ui.ctx()).color.err,
+                            "The authenticated source catalog defines no non-empty sections.",
+                        );
+                    }
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            decision = Some(false);
+                        }
+                        if ui
+                            .add_enabled(
+                                !section.is_empty() && !sections.is_empty(),
+                                egui::Button::new("Bind section"),
+                            )
+                            .clicked()
+                        {
+                            decision = Some(true);
+                        }
+                    });
+                });
+            if decision == Some(true) {
+                bind_corner_section(app, &library, &corner, domain, &section);
+                app.state.workbench.models_view.dialog = None;
+            } else if decision == Some(false) || !open {
+                app.state.workbench.models_view.dialog = None;
+                app.state.workbench.models_view.operational_state =
+                    ModelsOperationalState::Cancelled;
+            } else {
+                app.state.workbench.models_view.dialog =
+                    Some(ModelsWorkbenchDialog::BindCornerSection {
+                        library,
+                        corner,
+                        domain,
+                        section,
+                    });
+            }
+        }
     }
 }
 
@@ -2265,46 +2555,107 @@ fn compare_models(
         ))
         .monospace(),
     );
-    let keys = left
+    // Numeric and string parameters both, because a comparison that reads only
+    // the numeric map calls two cards identical when they differ on a string —
+    // and the detail pane beside it lists strings, so the two disagreed.
+    let rows = model_comparison_rows(left, right);
+    let differences = rows.iter().filter(|row| row.state != "same").count();
+    ui.label(
+        RichText::new(if differences == 0 {
+            "No parameter differs.".to_owned()
+        } else {
+            format!("{differences} of {} parameters differ.", rows.len())
+        })
+        .small()
+        .color(if differences == 0 {
+            Tokens::get(ui.ctx()).color.ok
+        } else {
+            Tokens::get(ui.ctx()).color.warn
+        }),
+    );
+    table_header(
+        ui,
+        &[
+            ("PARAMETER", 0.26),
+            ("LEFT", 0.25),
+            ("RIGHT", 0.25),
+            ("KIND", 0.10),
+            ("STATE", 0.14),
+        ],
+    );
+    ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+        for row in &rows {
+            selectable_data_row(
+                ui,
+                false,
+                &[
+                    (&row.key, 0.26, true),
+                    (row.left.as_deref().unwrap_or("not set"), 0.25, true),
+                    (row.right.as_deref().unwrap_or("not set"), 0.25, true),
+                    (row.kind, 0.10, false),
+                    (row.state, 0.14, true),
+                ],
+            );
+        }
+    });
+}
+
+struct ModelComparisonRow {
+    key: String,
+    left: Option<String>,
+    right: Option<String>,
+    kind: &'static str,
+    state: &'static str,
+}
+
+fn model_comparison_rows(left: &DeviceModel, right: &DeviceModel) -> Vec<ModelComparisonRow> {
+    let mut rows = Vec::new();
+    let numeric = left
         .parameters
         .keys()
         .chain(right.parameters.keys())
         .cloned()
         .collect::<BTreeSet<_>>();
-    table_header(
-        ui,
-        &[
-            ("PARAMETER", 0.30),
-            ("LEFT", 0.27),
-            ("RIGHT", 0.27),
-            ("STATE", 0.16),
-        ],
-    );
-    ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-        for key in keys {
-            let left_value = left.parameters.get(&key).map(ToString::to_string);
-            let right_value = right.parameters.get(&key).map(ToString::to_string);
-            let state = if left_value == right_value {
-                "same"
-            } else if left_value.is_none() {
-                "right only"
-            } else if right_value.is_none() {
-                "left only"
-            } else {
-                "changed"
-            };
-            selectable_data_row(
-                ui,
-                false,
-                &[
-                    (&key, 0.30, true),
-                    (left_value.as_deref().unwrap_or("not set"), 0.27, true),
-                    (right_value.as_deref().unwrap_or("not set"), 0.27, true),
-                    (state, 0.16, true),
-                ],
-            );
-        }
-    });
+    for key in numeric {
+        let left_value = left.parameters.get(&key).map(ToString::to_string);
+        let right_value = right.parameters.get(&key).map(ToString::to_string);
+        rows.push(ModelComparisonRow {
+            state: comparison_state(left_value.as_ref(), right_value.as_ref()),
+            key,
+            left: left_value,
+            right: right_value,
+            kind: "value",
+        });
+    }
+    let strings = left
+        .string_parameters
+        .keys()
+        .chain(right.string_parameters.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for key in strings {
+        let left_value = left.string_parameters.get(&key).cloned();
+        let right_value = right.string_parameters.get(&key).cloned();
+        rows.push(ModelComparisonRow {
+            state: comparison_state(left_value.as_ref(), right_value.as_ref()),
+            key,
+            left: left_value,
+            right: right_value,
+            kind: "string",
+        });
+    }
+    rows.sort_by(|left, right| left.key.cmp(&right.key));
+    rows
+}
+
+fn comparison_state(left: Option<&String>, right: Option<&String>) -> &'static str {
+    match (left, right) {
+        (None, None) => "same",
+        (None, Some(_)) => "right only",
+        (Some(_), None) => "left only",
+        (Some(left), Some(right)) if left == right => "same",
+        (Some(_), Some(_)) => "changed",
+    }
 }
 
 fn open_model_compare(app: &mut ManagerRenderContext<'_>, left_library: &str, left_model: &str) {
@@ -2320,19 +2671,92 @@ fn open_model_compare(app: &mut ManagerRenderContext<'_>, left_library: &str, le
                 .map(move |model| (library.name.clone(), model.name.clone()))
         })
         .find(|(library, model)| library != left_library || model != left_model);
-    if let Some((right_library, right_model)) = right {
-        app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::CompareModels {
-            left_library: left_library.to_owned(),
-            left_model: left_model.to_owned(),
-            right_library,
-            right_model,
-        });
-    } else {
+    if right.is_none() {
         receipt(
             app,
             Err("A comparison requires at least two loaded model definitions.".to_owned()),
         );
+        return;
     }
+    // Opened on a chosen counterpart, never on whichever definition the
+    // catalog happens to iterate first: comparing a MOS card against an
+    // unrelated BJT because it sorted first is not a comparison.
+    app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::CompareModels {
+        left_library: left_library.to_owned(),
+        left_model: left_model.to_owned(),
+        right: default_comparison_counterpart(app, left_library, left_model),
+    });
+}
+
+/// The counterpart a comparison opens on, or `None` to make the user choose.
+///
+/// A model of the same name in another library is the comparison an engineer
+/// almost always wants — the same card across two PDK revisions or corners.
+/// Anything less specific is a guess, and the picker asks instead.
+fn default_comparison_counterpart(
+    app: &ManagerRenderContext<'_>,
+    left_library: &str,
+    left_model: &str,
+) -> Option<(String, String)> {
+    app.state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .filter(|library| !library.name.eq_ignore_ascii_case(left_library))
+        .find_map(|library| {
+            library
+                .models
+                .values()
+                .find(|model| model.name.eq_ignore_ascii_case(left_model))
+                .map(|model| (library.name.clone(), model.name.clone()))
+        })
+}
+
+/// Choose the right-hand definition of a comparison.
+fn comparison_counterpart_picker(
+    ui: &mut Ui,
+    app: &ManagerRenderContext<'_>,
+    left_library: &str,
+    left_model: &str,
+    selected: &mut Option<(String, String)>,
+) {
+    let candidates = app
+        .state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .flat_map(|library| {
+            let mut models = library.models.values().collect::<Vec<_>>();
+            models.sort_by(|left, right| left.name.cmp(&right.name));
+            models
+                .into_iter()
+                .map(move |model| (library.name.clone(), model.name.clone()))
+        })
+        .filter(|(library, model)| {
+            !(library.eq_ignore_ascii_case(left_library) && model.eq_ignore_ascii_case(left_model))
+        })
+        .collect::<Vec<_>>();
+    ui.horizontal(|ui| {
+        ui.label("Compare against");
+        let label = selected.as_ref().map_or_else(
+            || "Choose a definition…".to_owned(),
+            |(library, model)| format!("{library} / {model}"),
+        );
+        egui::ComboBox::from_id_salt("models-compare-counterpart")
+            .selected_text(label)
+            .width(320.0)
+            .show_ui(ui, |ui| {
+                for (library, model) in &candidates {
+                    let chosen = selected.as_ref() == Some(&(library.clone(), model.clone()));
+                    if ui
+                        .selectable_label(chosen, format!("{library} / {model}"))
+                        .clicked()
+                    {
+                        *selected = Some((library.clone(), model.clone()));
+                    }
+                }
+            });
+    });
 }
 
 fn open_model_source(
@@ -2364,7 +2788,7 @@ fn open_model_source(
                 }
             ),
             source: String::from_utf8_lossy(&content.bytes).into_owned(),
-            read_only: !library.source_authority.is_project_owned(),
+            editable: library.source_authority.is_project_owned(),
         });
     } else if let Some(path) = model.file_path.as_ref().or(library.root_path.as_ref()) {
         match std::fs::read_to_string(path) {
@@ -2374,7 +2798,7 @@ fn open_model_source(
                         title: model.name.clone(),
                         subtitle: format!("{} · live unpinned source", path.display()),
                         source,
-                        read_only: true,
+                        editable: false,
                     });
             }
             Err(error) => receipt(
@@ -2556,6 +2980,15 @@ fn add_corner(
         );
         return;
     };
+    let Some(root_path) = source.root_path.clone() else {
+        receipt(
+            app,
+            Err(format!(
+                "Library '{library_name}' has no authenticated source root to bind a corner to."
+            )),
+        );
+        return;
+    };
     if source
         .corners
         .keys()
@@ -2579,6 +3012,12 @@ fn add_corner(
     corner.pmos_corner = name.to_owned();
     corner.temperature = temperature;
     corner.vdd_factor = supply;
+    corner.file_path = Some(root_path);
+    corner.section_bindings = vec![CornerSectionBinding::new(
+        CornerSectionDomain::Composite,
+        name,
+    )];
+    corner.required_domains = vec![CornerSectionDomain::Composite];
     library.corners.insert(name.to_owned(), corner);
     let result = publish_model_library_candidate(
         app.state,
@@ -2589,6 +3028,86 @@ fn add_corner(
     .map(|revision| {
         format!(
             "Added corner '{name}' to '{library_name}' at project revision {}.",
+            revision.get()
+        )
+    });
+    receipt(app, result);
+}
+
+fn bind_corner_section(
+    app: &mut ManagerRenderContext<'_>,
+    library_name: &str,
+    corner_name: &str,
+    domain: CornerSectionDomain,
+    section: &str,
+) {
+    let section = section.trim();
+    let mut candidate = app.state.model_library_manager.clone();
+    let Some(library) = candidate.get_library_mut(library_name) else {
+        receipt(
+            app,
+            Err(format!("Library '{library_name}' no longer exists.")),
+        );
+        return;
+    };
+    if !library.defines_section(section) {
+        receipt(
+            app,
+            Err(format!(
+                "Authenticated library '{library_name}' defines no non-empty section named '{section}'."
+            )),
+        );
+        return;
+    }
+    let source_path = library.root_path.clone();
+    let Some(corner) = library
+        .corners
+        .values_mut()
+        .find(|candidate| candidate.name.eq_ignore_ascii_case(corner_name))
+    else {
+        receipt(
+            app,
+            Err(format!(
+                "Corner '{corner_name}' no longer exists in '{library_name}'."
+            )),
+        );
+        return;
+    };
+    corner.file_path = source_path;
+    if let Some(binding) = corner
+        .section_bindings
+        .iter_mut()
+        .find(|binding| binding.domain == domain)
+    {
+        binding.section = section.to_owned();
+    } else {
+        corner
+            .section_bindings
+            .push(CornerSectionBinding::new(domain, section));
+    }
+    if !corner.required_domains.contains(&domain) {
+        corner.required_domains.push(domain);
+    }
+    if let Err(errors) = corner.validate_contract() {
+        receipt(
+            app,
+            Err(format!(
+                "Corner section binding is invalid: {}",
+                errors.join("; ")
+            )),
+        );
+        return;
+    }
+    let result = publish_model_library_candidate(
+        app.state,
+        candidate,
+        library_name,
+        format!("bind {domain:?} section {section} for corner {corner_name}"),
+    )
+    .map(|revision| {
+        format!(
+            "Bound {} to section '{section}' for '{library_name}/{corner_name}' at project revision {}.",
+            domain.label(),
             revision.get()
         )
     });
@@ -2697,13 +3216,23 @@ fn model_consumers(app: &ManagerRenderContext<'_>, model_name: &str) -> Vec<Stri
 }
 
 fn component_uses_model(component: &Component, model_name: &str) -> bool {
+    component_model_bindings(component)
+        .iter()
+        .any(|model| model.eq_ignore_ascii_case(model_name))
+}
+
+/// Every model name an instance binds to.
+///
+/// The one place that says what "this component uses that model" means, so the
+/// per-model question and the index that answers it in bulk cannot drift.
+fn component_model_bindings(component: &Component) -> Vec<String> {
     component
         .library_cell
         .as_ref()
-        .and_then(|binding| binding.module_name.as_deref())
-        .is_some_and(|model| model.eq_ignore_ascii_case(model_name))
-        || explicit_component_model(component)
-            .is_some_and(|model| model.eq_ignore_ascii_case(model_name))
+        .and_then(|binding| binding.module_name.clone())
+        .into_iter()
+        .chain(explicit_component_model(component))
+        .collect()
 }
 
 fn explicit_component_model(component: &Component) -> Option<String> {
@@ -2751,26 +3280,11 @@ fn exactly_one_selected_component(app: &ManagerRenderContext<'_>) -> Option<u64>
     (selection.len() == 1).then(|| *selection.iter().next().expect("one selected component"))
 }
 
-fn model_geometry_invalid(model: &DeviceModel) -> bool {
-    model
-        .l_min
-        .zip(model.l_max)
-        .is_some_and(|(min, max)| min > max)
-        || model
-            .w_min
-            .zip(model.w_max)
-            .is_some_and(|(min, max)| min > max)
-}
-
 fn path_label(path: &Path) -> String {
     path.file_name()
         .and_then(|name| name.to_str())
         .map(str::to_owned)
         .unwrap_or_else(|| path.display().to_string())
-}
-
-fn short_digest(digest: &str) -> String {
-    digest.chars().take(12).collect()
 }
 
 fn part_key(hit: &PackModelHit) -> String {
@@ -3062,34 +3576,18 @@ fn paint_columns(ui: &Ui, rect: egui::Rect, columns: &[(&str, f32, bool)]) {
     }
 }
 
+/// Clip a cell's text to its column.
+///
+/// This module carried its own copy that dropped one character at a time and
+/// laid the whole string out again after each, so a name that had to lose
+/// thirty characters cost thirty text layouts — paid per cell, per row, on a
+/// table the size of the corpus. The design system's owner bisects instead,
+/// and cuts on grapheme boundaries rather than `char`s.
 fn elide(ui: &Ui, value: &str, max_width: f32, mono: bool) -> String {
     let font = if mono {
         theme::mono(tokens::FS_0, FontWeight::Regular)
     } else {
         theme::sans(tokens::FS_0, FontWeight::Regular)
     };
-    if ui
-        .painter()
-        .layout_no_wrap(value.to_owned(), font.clone(), Color32::WHITE)
-        .size()
-        .x
-        <= max_width
-    {
-        return value.to_owned();
-    }
-    let mut output = value.to_owned();
-    while output.chars().count() > 1 {
-        output.pop();
-        let candidate = format!("{output}…");
-        if ui
-            .painter()
-            .layout_no_wrap(candidate.clone(), font.clone(), Color32::WHITE)
-            .size()
-            .x
-            <= max_width
-        {
-            return candidate;
-        }
-    }
-    "…".to_owned()
+    crate::workbench::design_system::elide_text(ui, value, &font, max_width)
 }

@@ -8,7 +8,8 @@ use egui::{Ui, WidgetInfo, WidgetType};
 
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload,
-    AnalysisResultSourceDomain, AnalysisType, SimulationRun, SimulationRunLifecycle,
+    AnalysisResultSourceDomain, AnalysisType, SavedOutputMaterializationStatus, SavedOutputReceipt,
+    SimulationRun, SimulationRunLifecycle,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -109,7 +110,9 @@ impl ManifestViewModel {
                         eligibility: result.map_or_else(
                             || format!("{} · non-sign-off", missing_result_status(run.lifecycle)),
                             |analysis| {
-                                if analysis.success {
+                                if analysis.is_live_partial() {
+                                    "running · accepted samples · non-sign-off".to_owned()
+                                } else if analysis.success {
                                     "retained · receipt matched · sign-off unavailable".to_owned()
                                 } else {
                                     "failed · non-sign-off".to_owned()
@@ -148,7 +151,9 @@ impl ManifestViewModel {
                     domain_axis: domain_meta(analysis.analysis_type).axis.to_owned(),
                     stored_values: stored_values_label(analysis),
                     precision: precision_label(analysis),
-                    eligibility: if analysis.success {
+                    eligibility: if analysis.is_live_partial() {
+                        "running · accepted samples · non-sign-off".to_owned()
+                    } else if analysis.success {
                         "legacy · no prepared receipt · sign-off unavailable".to_owned()
                     } else {
                         "failed · no prepared receipt · non-sign-off".to_owned()
@@ -335,11 +340,21 @@ pub(crate) fn show(ui: &mut Ui, state: &AppState) {
     );
 }
 
-pub(crate) fn right_panel(ui: &mut Ui, state: &AppState) {
-    let Some(run) = state.simulation.active_run() else {
+pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
+    let Some((manifest, saved_outputs)) = state.simulation.active_run().map(|run| {
+        let saved_outputs = state.simulation.active_analysis().map(|analysis| {
+            (
+                run.run_id,
+                analysis.id,
+                analysis.label.clone(),
+                analysis.saved_output_receipts.clone(),
+            )
+        });
+        (ManifestViewModel::from_run(run), saved_outputs)
+    }) else {
         return;
     };
-    let manifest = ManifestViewModel::from_run(run);
+    let t = Tokens::get(ui.ctx());
 
     section_header(ui, "Dataset identity", None);
     let identity = [
@@ -392,6 +407,67 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &AppState) {
                 .map(|(name, digest)| (name.as_str(), digest.as_str()))
                 .collect();
             measurement_table(ui, &rows);
+        }
+    }
+
+    if let Some((run_id, analysis_id, analysis_label, receipts)) = saved_outputs
+        && !receipts.is_empty()
+    {
+        section_header(ui, "Saved outputs", Some(&analysis_label));
+        let mut requested = None;
+        for (receipt_index, receipt) in receipts.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(&receipt.name);
+                    ui.label(
+                        egui::RichText::new(saved_output_status_label(receipt))
+                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_dim),
+                    );
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if receipt.status == SavedOutputMaterializationStatus::Deferred
+                        && ui.button("Materialize").clicked()
+                    {
+                        requested = Some(receipt_index);
+                    }
+                });
+            });
+            ui.add_space(tokens::SP_2);
+        }
+        if let Some(receipt_index) = requested {
+            match state.simulation.materialize_deferred_saved_output(
+                run_id,
+                analysis_id,
+                receipt_index,
+            ) {
+                Ok(()) => {
+                    state.synchronize_specialized_viewer_cache_authority();
+                    state.push_sim_message(crate::diagnostics::ConsoleMessage::info(
+                        "Deferred saved output materialized from retained source data".to_owned(),
+                    ));
+                }
+                Err(error) => state.push_sim_message(crate::diagnostics::ConsoleMessage::error(
+                    format!("Saved output could not be materialized: {error}"),
+                )),
+            }
+        }
+    }
+}
+
+fn saved_output_status_label(receipt: &SavedOutputReceipt) -> String {
+    match &receipt.status {
+        SavedOutputMaterializationStatus::Materialized { sample_count, .. } => {
+            format!("materialized · {sample_count} samples")
+        }
+        SavedOutputMaterializationStatus::Deferred => {
+            "deferred · retained source available".to_owned()
+        }
+        SavedOutputMaterializationStatus::SuppressedOnSuccess => {
+            "suppressed on successful analysis".to_owned()
+        }
+        SavedOutputMaterializationStatus::Unavailable { reason } => {
+            format!("unavailable · {reason}")
         }
     }
 }

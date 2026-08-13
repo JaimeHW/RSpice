@@ -327,10 +327,12 @@ impl LiveSessionEngine {
             .collect()
     }
 
-    /// Approve exactly one authenticated request and dispatch on the host.
-    pub(crate) fn approve_run_request(&mut self, state: &mut AppState, sender: PeerIdentity) {
+    /// Approve exactly one authenticated request on the host. The workbench
+    /// owns preflight and dispatch, so this domain action returns whether an
+    /// authenticated request was consumed instead of bypassing that gate.
+    pub(crate) fn approve_run_request(&mut self, sender: PeerIdentity) -> bool {
         if !matches!(self.role, Role::Host(_)) {
-            return;
+            return false;
         }
         if let Some(index) = self
             .pending_run_requests
@@ -338,8 +340,9 @@ impl LiveSessionEngine {
             .position(|request| request.sender == sender)
         {
             self.pending_run_requests.remove(index);
-            state.request_run_set_simulation();
+            return true;
         }
+        false
     }
 
     pub(crate) fn deny_run_request(&mut self, sender: PeerIdentity) {
@@ -1836,10 +1839,11 @@ mod tests {
         assert_eq!(engine.pending_run_requests.len(), 1);
         assert!(!state.simulation.trigger_simulation);
 
-        engine.approve_run_request(&mut state, editor);
+        let approved = engine.approve_run_request(editor);
 
+        assert!(approved);
         assert!(engine.pending_run_requests.is_empty());
-        assert!(state.simulation.trigger_simulation);
+        assert!(!state.simulation.trigger_simulation);
     }
 
     #[test]

@@ -136,6 +136,8 @@ fn worker_request_round_trips_through_json() {
         source_path: None,
         project_veriloga_runtimes: Default::default(),
         dependencies: Default::default(),
+        environment: None,
+        stream_transient_samples: false,
     };
 
     let encoded = serde_json::to_string(&request).expect("request serializes");
@@ -305,6 +307,8 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
         source_path: None,
         project_veriloga_runtimes: Default::default(),
         dependencies,
+        environment: None,
+        stream_transient_samples: false,
     };
     let transfer = WorkerRequestTransport::from_request(request.clone()).unwrap();
     assert_eq!(transfer.protocol, WORKER_REQUEST_TRANSPORT_PROTOCOL);
@@ -378,6 +382,8 @@ fn worker_request_round_trips_project_veriloga_runtime_artifacts() {
         project_veriloga_runtimes:
             crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime]).unwrap(),
         dependencies: Default::default(),
+        environment: None,
+        stream_transient_samples: false,
     };
 
     let encoded = serde_json::to_vec(&request).unwrap();
@@ -404,6 +410,8 @@ fn worker_request_detaches_and_authenticates_op_previous_state() {
         source_path: None,
         project_veriloga_runtimes: Default::default(),
         dependencies: Default::default(),
+        environment: None,
+        stream_transient_samples: false,
     };
 
     let transport = WorkerRequestTransport::from_request(request.clone()).unwrap();
@@ -1477,6 +1485,8 @@ fn worker_spec_request_preserves_monte_carlo() {
         source_path: None,
         project_veriloga_runtimes: Default::default(),
         dependencies: Default::default(),
+        environment: None,
+        stream_transient_samples: false,
     };
 
     let worker =
@@ -1509,6 +1519,8 @@ fn worker_spec_request_preserves_structured_tf_contract() {
         source_path: None,
         project_veriloga_runtimes: Default::default(),
         dependencies: Default::default(),
+        environment: None,
+        stream_transient_samples: false,
     };
 
     let worker = WorkerRequest::from_runner_parts(51, &request, &input).expect("request converts");
@@ -1584,6 +1596,8 @@ fn worker_spec_request_preserves_pac_pxf_execution_options() {
         source_path: None,
         project_veriloga_runtimes: Default::default(),
         dependencies: Default::default(),
+        environment: None,
+        stream_transient_samples: false,
     };
 
     let pac_worker =
@@ -1666,6 +1680,8 @@ fn worker_spec_request_preserves_pnoise_pstb_execution_options() {
         source_path: None,
         project_veriloga_runtimes: Default::default(),
         dependencies: Default::default(),
+        environment: None,
+        stream_transient_samples: false,
     };
 
     let pnoise_worker =
@@ -1722,6 +1738,8 @@ fn worker_spec_request_preserves_parametric_temp_execution_options() {
         source_path: None,
         project_veriloga_runtimes: Default::default(),
         dependencies: Default::default(),
+        environment: None,
+        stream_transient_samples: false,
     };
 
     let worker =
@@ -1799,6 +1817,8 @@ fn worker_spec_request_preserves_corner_execution_options() {
         source_path: None,
         project_veriloga_runtimes: Default::default(),
         dependencies: Default::default(),
+        environment: None,
+        stream_transient_samples: false,
     };
 
     let worker = WorkerRequest::from_runner_parts(91, &request, &input).expect("Corner converts");
@@ -2181,6 +2201,8 @@ fn worker_request_from_runner_parts_preserves_payload() {
         source_path: Some(std::path::PathBuf::from("deck.cir")),
         project_veriloga_runtimes: Default::default(),
         dependencies: Default::default(),
+        environment: None,
+        stream_transient_samples: true,
     };
 
     let worker = WorkerRequest::from_runner_parts(41, &request, &input).expect("request converts");
@@ -2189,6 +2211,7 @@ fn worker_request_from_runner_parts_preserves_payload() {
     assert!(matches!(worker.request, WorkerSimulationRequest::Config(_)));
     assert_eq!(worker.netlist, input.netlist);
     assert_eq!(worker.source_path.as_deref(), Some("deck.cir"));
+    assert!(worker.stream_transient_samples);
 }
 
 #[test]
@@ -2227,6 +2250,8 @@ fn worker_request_runs_dc_op() {
         source_path: None,
         project_veriloga_runtimes: Default::default(),
         dependencies: Default::default(),
+        environment: None,
+        stream_transient_samples: false,
     };
 
     let response = worker_response_from_request(request);
@@ -2257,6 +2282,8 @@ fn worker_request_runs_structured_tf_spec() {
         source_path: None,
         project_veriloga_runtimes: Default::default(),
         dependencies: Default::default(),
+        environment: None,
+        stream_transient_samples: false,
     };
     let worker = WorkerRequest::from_runner_parts(13, &request, &input).expect("request converts");
     let encoded_request = serde_json::to_vec(&worker).expect("TF request serializes");

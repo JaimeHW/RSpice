@@ -692,7 +692,7 @@ impl Command {
                 if state.workbench.workspace == Workspace::Netlist {
                     app.manual_deck_run_block_reason().is_none()
                 } else {
-                    state.can_run_simulation()
+                    !state.simulation.is_running && !state.simulation.trigger_simulation
                 }
             }
             // Each of these opens a window that only the netlist page draws.
@@ -1625,9 +1625,8 @@ impl Command {
                     if app.manual_deck_run_block_reason().is_none() {
                         app.state.request_netlist_manual_deck_run();
                     }
-                } else if app.state.can_run_simulation() {
-                    app.state.request_run_set_simulation();
-                    activate_workspace(app, Workspace::Simulate);
+                } else {
+                    super::preflight::run_and_queue(app);
                 }
             }
             Self::StopSimulation => {

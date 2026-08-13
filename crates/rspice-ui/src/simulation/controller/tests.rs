@@ -752,6 +752,7 @@ fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
         source_digest: ContentDigest::from_bytes([0x71; 32]),
         reference_process: ProcessCorner::TT,
         reference_temperature_celsius: 27.0,
+        run_set: None,
         tasks: vec![prerequisite, dependent],
         executable_netlist: "deck\n.op\n.end\n".to_owned(),
         save_policy: SavePolicy::RetainEngineProducedResults,

@@ -1253,7 +1253,7 @@ impl ProjectSimulationRun {
         let dataset_id = self
             .dataset_id
             .ok_or_else(|| format!("simulation run sequence {} has no dataset id", self.id))?;
-        let analyses = self
+        let mut analyses = self
             .analyses
             .into_iter()
             .map(ProjectAnalysisResult::into_analysis)
@@ -1321,6 +1321,21 @@ impl ProjectSimulationRun {
         let restored_lifecycle = self
             .lifecycle
             .unwrap_or(SimulationRunLifecycle::LegacyUnknown);
+        if matches!(
+            restored_lifecycle,
+            SimulationRunLifecycle::Preparing
+                | SimulationRunLifecycle::Running
+                | SimulationRunLifecycle::Cancelling
+        ) {
+            for analysis in &mut analyses {
+                if analysis.is_live_partial() {
+                    analysis.error_message = Some(
+                        "Simulation was interrupted before completion; retained waveforms are accepted partial samples"
+                            .to_owned(),
+                    );
+                }
+            }
+        }
         run.lifecycle = match restored_lifecycle {
             SimulationRunLifecycle::Preparing
             | SimulationRunLifecycle::Running

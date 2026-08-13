@@ -29,6 +29,8 @@ use crate::simulation::run_set::RunSetDimensionKind;
 pub(crate) enum TechnologyDemandReason {
     /// The plan's reference point selects a non-typical process section.
     NonTtReference(ProcessCorner),
+    /// The global Simulation Studio Run Set resolves non-typical sections.
+    GlobalRunSetSections { sections: Vec<ProcessCorner> },
     /// An enabled corner analysis resolves to non-typical process sections.
     CornerSections {
         instance: AnalysisInstanceId,
@@ -56,6 +58,11 @@ impl TechnologyDemandReason {
                 "An attached project technology defining the {} process section",
                 process.short_name()
             ),
+            Self::GlobalRunSetSections { sections } => format!(
+                "An attached project technology defining the {} process {}",
+                section_list(sections),
+                section_noun(sections.len())
+            ),
             Self::CornerSections { sections, .. } => format!(
                 "An attached project technology defining the {} process {}",
                 section_list(sections),
@@ -74,6 +81,11 @@ impl TechnologyDemandReason {
             Self::NonTtReference(process) => {
                 format!("reference process is {}", process.short_name())
             }
+            Self::GlobalRunSetSections { sections } => format!(
+                "global Run Set requests {} process {}",
+                section_list(sections),
+                section_noun(sections.len())
+            ),
             Self::CornerSections { instance, sections } => format!(
                 "Corner analysis '{instance}' requests {} process {}",
                 section_list(sections),
@@ -133,6 +145,9 @@ pub(crate) fn technology_demand(
     if reference != ProcessCorner::TT {
         reasons.push(TechnologyDemandReason::NonTtReference(reference));
     }
+    if let Some(reason) = global_run_set_section_reason(sim_setup) {
+        reasons.push(reason);
+    }
     reasons.extend(corner_section_reasons(sim_setup));
     let documents: Vec<String> = workspace
         .physical_layout_documents()
@@ -143,6 +158,32 @@ pub(crate) fn technology_demand(
         reasons.push(TechnologyDemandReason::PhysicalLayout { documents });
     }
     TechnologyDemand { reasons }
+}
+
+/// The non-typical process sections the global Run Set applies to every plan
+/// analysis. Invalid declarations are reported by Run Set validation and do
+/// not manufacture a second technology blocker here.
+fn global_run_set_section_reason(sim_setup: &SimSetupState) -> Option<TechnologyDemandReason> {
+    if sim_setup
+        .run_set
+        .enabled_dimension_of(RunSetDimensionKind::ProcessSection)
+        .is_none()
+    {
+        return None;
+    }
+    let config = sim_setup
+        .run_set
+        .to_corner_config(
+            crate::simulation::dialog::corner::CornerBaseAnalysis::Op,
+            sim_setup.reference_pvt,
+        )
+        .ok()?;
+    let sections = config
+        .process_corners
+        .into_iter()
+        .filter(|section| *section != ProcessCorner::TT)
+        .collect::<Vec<_>>();
+    (!sections.is_empty()).then_some(TechnologyDemandReason::GlobalRunSetSections { sections })
 }
 
 /// The non-typical process sections each enabled corner analysis resolves to.
@@ -266,9 +307,18 @@ mod tests {
         &demand.reasons()[0]
     }
 
+    fn disable_global_process_axis(state: &mut AppState) {
+        for dimension in &mut state.sim_setup.run_set.dimensions {
+            if dimension.kind == RunSetDimensionKind::ProcessSection {
+                dimension.enabled = false;
+            }
+        }
+    }
+
     #[test]
-    fn a_typical_plan_demands_no_technology() {
-        let state = AppState::default();
+    fn a_nominal_global_run_set_demands_no_technology() {
+        let mut state = AppState::default();
+        disable_global_process_axis(&mut state);
         let demand = state.technology_demand();
         assert!(demand.is_empty(), "{:?}", demand.reasons());
         assert_eq!(demand.block_reason(), None);
@@ -276,8 +326,28 @@ mod tests {
     }
 
     #[test]
+    fn the_default_global_pvt_run_set_demands_its_non_typical_sections() {
+        let mut state = AppState::default();
+        for dimension in &mut state.sim_setup.run_set.dimensions {
+            dimension.enabled = true;
+        }
+        let demand = state.technology_demand();
+        assert_eq!(
+            sole_reason(&demand),
+            &TechnologyDemandReason::GlobalRunSetSections {
+                sections: vec![ProcessCorner::SS, ProcessCorner::FF],
+            }
+        );
+        assert_eq!(
+            sole_reason(&demand).observed(),
+            "Global Run Set requests SS, FF process sections"
+        );
+    }
+
+    #[test]
     fn a_non_typical_reference_process_demands_its_section() {
         let mut state = AppState::default();
+        disable_global_process_axis(&mut state);
         state
             .sim_setup
             .set_reference_pvt(ProcessCorner::SS, 27.0)
@@ -302,6 +372,7 @@ mod tests {
     #[test]
     fn an_enabled_corner_analysis_demands_its_non_typical_sections() {
         let mut state = AppState::default();
+        disable_global_process_axis(&mut state);
         let id = insert_corner(&mut state, CornerDialogState::default());
         let demand = state.technology_demand();
         let TechnologyDemandReason::CornerSections { instance, sections } = sole_reason(&demand)
@@ -329,6 +400,7 @@ mod tests {
     #[test]
     fn a_corner_without_a_process_axis_demands_nothing_at_a_typical_reference() {
         let mut state = AppState::default();
+        disable_global_process_axis(&mut state);
         insert_corner(&mut state, corner_without_a_process_axis());
         let demand = state.technology_demand();
         assert!(demand.is_empty(), "{:?}", demand.reasons());
@@ -338,6 +410,7 @@ mod tests {
     #[test]
     fn a_corner_without_a_process_axis_does_not_restate_the_reference_section() {
         let mut state = AppState::default();
+        disable_global_process_axis(&mut state);
         state
             .sim_setup
             .set_reference_pvt(ProcessCorner::SS, 27.0)

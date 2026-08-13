@@ -236,21 +236,20 @@ fn convert_transient_result(
         } else {
             format!("I({branch})")
         };
-        waveforms.insert(
-            name.clone(),
-            WaveformData::new_time_domain(
-                &name,
-                filtered_time.clone(),
-                filtered_transient_values(
-                    &tran_result.time,
-                    currents,
-                    start_idx,
-                    sample_count,
-                    start_time,
-                    interpolate_start,
-                )?,
-            ),
+        let mut waveform = WaveformData::new_time_domain(
+            &name,
+            filtered_time.clone(),
+            filtered_transient_values(
+                &tran_result.time,
+                currents,
+                start_idx,
+                sample_count,
+                start_time,
+                interpolate_start,
+            )?,
         );
+        waveform.y_unit = "A".to_owned();
+        waveforms.insert(name, waveform);
     }
 
     let measurements =
@@ -487,6 +486,8 @@ mod tests {
             panic!("expected transient result");
         };
         assert_eq!(waveforms["I(V1)"].y_values, vec![0.0, -1.0e-3, -1.0e-3]);
+        assert_eq!(waveforms["I(V1)"].y_unit, "A");
+        assert_eq!(waveforms["out"].y_unit, "V");
     }
 
     #[test]

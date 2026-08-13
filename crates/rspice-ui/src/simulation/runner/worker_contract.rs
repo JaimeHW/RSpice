@@ -55,10 +55,14 @@ pub(crate) struct WorkerRequest {
     #[serde(default)]
     pub(in crate::simulation) dependencies:
         crate::simulation::execution::ResolvedExecutionDependencies,
+    #[serde(default)]
+    pub(in crate::simulation) environment: Option<super::AnalysisExecutionEnvironment>,
+    #[serde(default)]
+    pub(in crate::simulation) stream_transient_samples: bool,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 5;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 7;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -268,6 +272,8 @@ impl WorkerRequest {
                 .map(|path| path.to_string_lossy().into_owned()),
             project_veriloga_runtimes: input.project_veriloga_runtimes.clone(),
             dependencies: input.dependencies.clone(),
+            environment: input.environment,
+            stream_transient_samples: input.stream_transient_samples,
         })
     }
 
@@ -279,6 +285,8 @@ impl WorkerRequest {
                 source_path: self.source_path.map(PathBuf::from),
                 project_veriloga_runtimes: self.project_veriloga_runtimes,
                 dependencies: self.dependencies,
+                environment: self.environment,
+                stream_transient_samples: self.stream_transient_samples,
             },
         )
     }

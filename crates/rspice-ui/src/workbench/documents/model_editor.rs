@@ -21,17 +21,18 @@ use crate::state::model_library::{
     ApprovalDecision, CompatibilityAssessment, CompatibilityDisposition, ConsumerChange,
     ConsumerImpactAssessment, CorrelationMatrix, DocumentReference, DocumentationDeclaration,
     DocumentationSet, FiniteBounds, FiniteF64, FiniteValue, LicenseDeclaration, LicenseScope,
-    ModelCorrelationState, ModelDefinitionMetadata, ModelFileIdentity, ModelLibraryManager,
-    ModelQualificationState, ModelReleaseCandidate, ModelReleaseIdentity, ModelSectionDefinition,
-    ModelSectionQualification, ModelSourceAuthority, ModelSourceEvidenceBinding, ParameterDataType,
-    ParameterDefinition, ParameterSource, ParameterValue, PlatformCompatibilityEvidence,
-    ProjectModelDefinition, ProjectModelRevisionDefinition, PromotionApproval,
-    PromotionApprovalRole, QualificationAnalysis, QualificationErrorCode,
-    QualificationExecutionProgress, QualificationExecutionSession, QualificationExecutionStep,
-    QualificationOutputDefinition, QualificationPlatform, QualificationProbe,
-    QualificationReference, QualificationSample, QualificationSuite, QualificationVector,
-    QualificationVectorDisposition, QualificationVectorDispositionCause,
-    QualificationVectorRequiredAction, ReleaseCandidateIdentity, RequiredDocumentation,
+    ModelCorrelationState, ModelDefinitionMetadata, ModelFileIdentity, ModelLibrary,
+    ModelLibraryManager, ModelQualificationState, ModelReleaseCandidate, ModelReleaseIdentity,
+    ModelSectionDefinition, ModelSectionQualification, ModelSourceAuthority,
+    ModelSourceEvidenceBinding, ParameterDataType, ParameterDefinition, ParameterSource,
+    ParameterValue, PlatformCompatibilityEvidence, ProjectModelDefinition,
+    ProjectModelRevisionDefinition, PromotionApproval, PromotionApprovalRole,
+    QualificationAnalysis, QualificationErrorCode, QualificationExecutionProgress,
+    QualificationExecutionSession, QualificationExecutionStep, QualificationOutputDefinition,
+    QualificationPlatform, QualificationProbe, QualificationReference, QualificationSample,
+    QualificationSuite, QualificationVector, QualificationVectorDisposition,
+    QualificationVectorDispositionCause, QualificationVectorRequiredAction,
+    ReleaseCandidateIdentity, RequiredDocumentation,
 };
 use crate::workbench::RSpiceApp;
 use sha2::{Digest as _, Sha256};
@@ -414,29 +415,62 @@ pub(crate) struct ResolvedEditableProjectModel {
     pub(crate) qualification: ModelQualificationState,
 }
 
-/// Resolve one selected model from an authenticated project-owned source
-/// closure. A library may contain many models and include members, but the
-/// selected canonical revision must occur exactly once in the source file
-/// recorded by that model's projection. This is the shared fail-closed gate
-/// used by command availability, editor open, and stale-candidate validation.
-pub(crate) fn resolve_project_model_for_editor(
-    manager: &ModelLibraryManager,
+#[cfg(test)]
+thread_local! {
+    /// How many closures have been authenticated on this thread.
+    ///
+    /// Authentication is the expensive half of resolving a model and depends
+    /// only on the library, so a caller that resolves many models from one
+    /// library must not repeat it per model. Counting is the only way to state
+    /// that as a test: the work is invisible in the result, and a timing check
+    /// on a fixture small enough to build is noise.
+    pub(crate) static CLOSURE_AUTHENTICATIONS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
+/// A project-owned library whose retained closure has been authenticated.
+///
+/// Holding one is the proof that every retained source matched its pin, that
+/// pins and bytes describe the same set, and that the include graph is rooted
+/// and acyclic. Resolving a model then costs only that model's own work, which
+/// is what makes it affordable to resolve every model in a library.
+#[derive(Debug)]
+pub(crate) struct VerifiedProjectClosure<'a> {
+    source_id: ModelSourceId,
+    library_revision: ObjectRevision,
+    contents: BTreeMap<PathBuf, &'a Vec<u8>>,
+}
+
+/// Authenticate a project-owned library's retained source closure.
+///
+/// This is the expensive half of resolving a model — it digests every byte of
+/// every retained source — and it depends only on the library. Callers that
+/// resolve more than one model from the same library must call this once and
+/// pass the result to [`resolve_project_model_in_closure`]; calling the
+/// combined [`resolve_project_model_for_editor`] in a loop re-digests the whole
+/// closure per model, which is how the qualification page came to hash a
+/// library once per model per frame.
+pub(crate) fn verify_project_library_closure<'a>(
+    library: &'a ModelLibrary,
     library_name: &str,
-    model_name: &str,
-) -> Result<ResolvedEditableProjectModel, String> {
-    let library = manager
-        .get_library(library_name)
-        .ok_or_else(|| format!("Model library '{library_name}' does not exist"))?;
+) -> Result<VerifiedProjectClosure<'a>, String> {
     let ModelSourceAuthority::ProjectOwned {
         source_id,
         revision: library_revision,
         digest: root_digest,
     } = library.source_authority
     else {
+        // Counted below the authority match on purpose: a library that is not
+        // project-owned has no retained closure to digest, so asking about one
+        // costs nothing and is not what the counter is watching for.
         return Err(format!(
-            "Model '{model_name}' is not project-owned; create an editable project copy before opening the model editor"
+            "Library '{library_name}' is not project-owned; create an editable project copy before opening the model editor"
         ));
     };
+
+    #[cfg(test)]
+    CLOSURE_AUTHENTICATIONS.with(|count| count.set(count.get() + 1));
+
     let root_path = library.root_path.as_ref().ok_or_else(|| {
         format!("Project-owned model library '{library_name}' has no retained root identity")
     })?;
@@ -507,6 +541,50 @@ pub(crate) fn resolve_project_model_for_editor(
         ));
     }
 
+    Ok(VerifiedProjectClosure {
+        source_id,
+        library_revision,
+        contents,
+    })
+}
+
+/// How many times `needle` occurs in `haystack`, counting no further than two.
+///
+/// The caller only needs to distinguish "never", "once" and "more than once".
+/// Text sources take `str::find`'s linear search; a source that is not UTF-8
+/// falls back to the naive scan so the invariant still holds for it.
+fn occurrences_up_to_two(haystack: &[u8], needle: &str) -> usize {
+    if needle.is_empty() {
+        return 0;
+    }
+    match std::str::from_utf8(haystack) {
+        Ok(text) => text.match_indices(needle).take(2).count(),
+        Err(_) => haystack
+            .windows(needle.len())
+            .filter(|candidate| *candidate == needle.as_bytes())
+            .take(2)
+            .count(),
+    }
+}
+
+/// Resolve one selected model from an already-authenticated closure.
+///
+/// A library may contain many models and include members, but the selected
+/// canonical revision must occur exactly once in the source file recorded by
+/// that model's projection.
+pub(crate) fn resolve_project_model_in_closure(
+    library: &ModelLibrary,
+    library_name: &str,
+    model_name: &str,
+    closure: &VerifiedProjectClosure<'_>,
+) -> Result<ResolvedEditableProjectModel, String> {
+    let VerifiedProjectClosure {
+        source_id,
+        library_revision,
+        contents,
+    } = closure;
+    let (source_id, library_revision) = (*source_id, *library_revision);
+
     let model = library.models.get(model_name).ok_or_else(|| {
         format!("Model '{model_name}' does not exist in library '{library_name}'")
     })?;
@@ -534,14 +612,16 @@ pub(crate) fn resolve_project_model_for_editor(
     let canonical = definition
         .canonical_source()
         .map_err(|error| format!("Retained model revision is invalid: {error}"))?;
-    let occurrences = source_bytes
-        .windows(canonical.len())
-        .filter(|candidate| *candidate == canonical.as_bytes())
-        .count();
+    let occurrences = occurrences_up_to_two(source_bytes, &canonical);
     if occurrences != 1 {
         return Err(format!(
-            "Model '{model_name}' canonical revision must occur exactly once in retained source '{}' (found {occurrences})",
-            source_path.display()
+            "Model '{model_name}' canonical revision must occur exactly once in retained source '{}' (found {})",
+            source_path.display(),
+            if occurrences < 2 {
+                occurrences.to_string()
+            } else {
+                "more than 1".to_owned()
+            }
         ));
     }
     let model_digest = ContentDigest::from_bytes(Sha256::digest(canonical.as_bytes()).into());
@@ -570,6 +650,24 @@ pub(crate) fn resolve_project_model_for_editor(
             .cloned()
             .unwrap_or_default(),
     })
+}
+
+/// Authenticate a library's closure and resolve one model from it.
+///
+/// The shared fail-closed gate used by command availability, editor open, and
+/// stale-candidate validation — each of which wants exactly one model. Anything
+/// resolving several models from one library should verify the closure once
+/// instead; see [`verify_project_library_closure`].
+pub(crate) fn resolve_project_model_for_editor(
+    manager: &ModelLibraryManager,
+    library_name: &str,
+    model_name: &str,
+) -> Result<ResolvedEditableProjectModel, String> {
+    let library = manager
+        .get_library(library_name)
+        .ok_or_else(|| format!("Model library '{library_name}' does not exist"))?;
+    let closure = verify_project_library_closure(library, library_name)?;
+    resolve_project_model_in_closure(library, library_name, model_name, &closure)
 }
 
 #[derive(Debug, Clone)]

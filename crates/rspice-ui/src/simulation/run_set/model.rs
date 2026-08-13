@@ -515,6 +515,18 @@ impl Default for RunSetState {
 }
 
 impl RunSetState {
+    /// A fresh plan's runnable reference point. The conventional PVT values
+    /// remain authored as ready-to-enable templates, but no process, supply,
+    /// or temperature sweep is activated implicitly.
+    #[must_use]
+    pub fn reference_only() -> Self {
+        let mut state = Self::default();
+        for dimension in &mut state.dimensions {
+            dimension.enabled = false;
+        }
+        state
+    }
+
     /// Dimensions that contribute to the space.
     pub fn enabled_dimensions(&self) -> impl Iterator<Item = &RunSetDimension> {
         self.dimensions.iter().filter(|dimension| dimension.enabled)

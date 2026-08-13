@@ -148,6 +148,7 @@ fn parts() -> SnapshotParts {
         source_digest: ContentDigest::from_bytes([1; 32]),
         reference_process: ProcessCorner::TT,
         reference_temperature_celsius: 27.0,
+        run_set: None,
         tasks: vec![prepared("op", "DC Operating Point", task())],
         executable_netlist: "deck\n.op\n.end\n".to_owned(),
         save_policy: SavePolicy::RetainEngineProducedResults,
@@ -162,6 +163,83 @@ fn parts() -> SnapshotParts {
         touchstone_export: TouchstoneExportPolicy::disabled(),
         sealed_source_dependencies: Vec::new(),
     }
+}
+
+fn global_temperature_run_set(temperatures: &[&str]) -> PreparedRunSet {
+    use crate::simulation::run_set::RunSetDimensionKind;
+
+    let mut state = crate::simulation::run_set::RunSetState::default();
+    for dimension in &mut state.dimensions {
+        match dimension.kind {
+            RunSetDimensionKind::ProcessSection | RunSetDimensionKind::Supply => {
+                dimension.enabled = false;
+            }
+            RunSetDimensionKind::Temperature => {
+                dimension.set_values_from_lines(&temperatures.join("\n"), 2);
+            }
+        }
+    }
+    let mut contract = crate::services::simulation_runner::CornerRunConfig::default();
+    contract.temperatures_c = temperatures
+        .iter()
+        .map(|temperature| temperature.parse::<f64>().unwrap())
+        .collect();
+    PreparedRunSet::new(state, contract)
+}
+
+#[test]
+fn global_run_set_expands_every_core_analysis_at_every_point() {
+    let mut run = parts();
+    run.tasks = vec![
+        prepared("op", "DC Operating Point", task()),
+        prepared("tran", "Transient", transient_task()),
+    ];
+    run.run_set = Some(global_temperature_run_set(&["-40", "125"]));
+
+    let snapshot = PreparedRunSnapshot::new(run).expect("global Run Set prepares");
+    assert_eq!(snapshot.pvt_points.len(), 2);
+    assert_eq!(snapshot.tasks.len(), 4);
+    assert_eq!(
+        snapshot
+            .tasks
+            .iter()
+            .filter_map(PreparedTask::pvt_point)
+            .map(|point| point.temperature_celsius())
+            .collect::<Vec<_>>(),
+        vec![-40.0, 125.0, -40.0, 125.0],
+    );
+
+    let transient = snapshot
+        .tasks
+        .iter()
+        .filter(|task| matches!(task.task.spec, AnalysisSpec::Transient { .. }))
+        .collect::<Vec<_>>();
+    assert_eq!(transient.len(), 2);
+    assert_eq!(
+        transient
+            .iter()
+            .map(|task| task.execution_environment.unwrap().temperature_celsius)
+            .collect::<Vec<_>>(),
+        vec![-40.0, 125.0],
+    );
+    assert_ne!(transient[0].instance_id, transient[1].instance_id);
+    assert_ne!(transient[0].config_digest, transient[1].config_digest);
+}
+
+#[test]
+fn global_run_set_refuses_an_analysis_that_cannot_receive_a_point_environment() {
+    let mut run = parts();
+    run.tasks = vec![prepared(
+        "temperature",
+        "Temperature",
+        temperature_task(vec![-40.0, 125.0]),
+    )];
+    run.run_set = Some(global_temperature_run_set(&["-40", "125"]));
+
+    let error =
+        PreparedRunSnapshot::new(run).expect_err("nested spec-driven sweep must fail closed");
+    assert!(error.message().contains("cannot yet execute"));
+    assert!(error.message().contains("Temperature"));
 }
 
 fn project_runtime() -> crate::simulation::veriloga::PreparedVerilogARuntime {
@@ -949,7 +1027,7 @@ fn process_and_voltage_axes_change_the_authorized_op_execution_contract() {
         let resolved = task
             .resolve_dependency_artifacts(&HashMap::new())
             .expect("OP has no typed dependencies");
-        let (queued, source, _, _) = resolved.into_runner_parts();
+        let (queued, source, _, _, _) = resolved.into_runner_parts();
         let Some(AnalysisConfig::DcOp(config)) = queued.config else {
             panic!("OP config")
         };
@@ -1098,7 +1176,7 @@ fn authorized_tasks_own_the_exact_snapshot_netlist_after_permit_consumption() {
     let resolved = authorized
         .resolve_dependency_artifacts(&HashMap::new())
         .expect("artifact-free task resolves");
-    let (_, netlist, runtimes, dependencies) = resolved.into_runner_parts();
+    let (_, netlist, runtimes, dependencies, _) = resolved.into_runner_parts();
     assert_eq!(&*netlist, "deck\n.op\n.end\n");
     assert!(runtimes.is_empty());
     dependencies

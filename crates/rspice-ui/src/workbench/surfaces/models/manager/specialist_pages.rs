@@ -67,8 +67,8 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 ScrollArea::vertical()
                     .id_salt("models-symbol-registry")
                     .max_height((available.y - HEADER_H - CATALOG_FOOT_H).max(120.0))
-                    .show(ui, |ui| {
-                        for row in &rows {
+                    .show_rows(ui, SYMBOL_ROW_H, rows.len(), |ui, range| {
+                        for row in &rows[range] {
                             let key = symbol_key(&row.reference);
                             let selected =
                                 app.state.workbench.models_view.selected_symbol.as_deref()
@@ -103,10 +103,28 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     });
 }
 
+/// Height of a symbol registry row, which the scroll area needs up front to
+/// place the scrollbar while building only the rows on screen.
+const SYMBOL_ROW_H: f32 = 36.0;
+
+/// The height one [`egui::Ui::selectable_label`] takes at the current style.
+///
+/// A virtualized list is told its row height up front, and every table on this
+/// workspace allocates its rows at a height it names. The bin family list uses
+/// the plain selectable label instead, whose height belongs to egui, so it is
+/// derived the same way egui derives it rather than guessed. A guess that runs
+/// short leaves the last families unreachable below the fold.
+fn selectable_label_height(ui: &Ui) -> f32 {
+    (ui.text_style_height(&egui::TextStyle::Button) + ui.spacing().button_padding.y * 2.0)
+        .max(ui.spacing().interact_size.y)
+}
+
 fn symbol_registry_row(ui: &mut Ui, selected: bool, row: &SymbolRow) -> egui::Response {
     let t = Tokens::get(ui.ctx());
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 36.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), SYMBOL_ROW_H),
+        Sense::click(),
+    );
     if selected {
         ui.painter()
             .rect_filled(rect, 0.0, t.color.accent.linear_multiply(0.14));
@@ -230,6 +248,7 @@ fn paint_symbol_glyph(ui: &Ui, rect: egui::Rect, family: &str, pins: usize) {
 }
 
 fn symbol_rows(app: &ManagerRenderContext<'_>) -> Vec<SymbolRow> {
+    let models_by_cell = model_names_by_cell(app);
     let mut rows = Vec::new();
     for library in app.state.library_manager.libraries_sorted() {
         for cell in library.cells_sorted() {
@@ -255,7 +274,7 @@ fn symbol_rows(app: &ManagerRenderContext<'_>) -> Vec<SymbolRow> {
                     .as_ref()
                     .and_then(|definition| definition.netlist.model.as_ref())
                     .map(|model| format!("{}/{}", model.library, model.model))
-                    .unwrap_or_else(|| symbol_model_family(app, cell));
+                    .unwrap_or_else(|| symbol_model_family(&models_by_cell, cell));
                 let form = definition
                     .as_ref()
                     .map(super::super::symbol_parameter_form_label)
@@ -338,20 +357,38 @@ fn symbol_rows(app: &ManagerRenderContext<'_>) -> Vec<SymbolRow> {
     rows
 }
 
-fn symbol_model_family(app: &ManagerRenderContext<'_>, cell: &crate::state::Cell) -> String {
+/// Every model name in the corpus, folded for lookup by a symbol's cell name.
+///
+/// A symbol with no declared binding falls back to a model that shares its
+/// cell name, which used to mean walking the whole corpus per symbol — the
+/// product of the symbol registry and the model corpus, on every frame.
+/// Insertion follows library order, so the model that wins a duplicated name
+/// is the same one the linear search found.
+fn model_names_by_cell(app: &ManagerRenderContext<'_>) -> BTreeMap<String, String> {
+    let mut names = BTreeMap::new();
+    for library in app.state.model_library_manager.libraries_sorted() {
+        for model in library.models.values() {
+            names
+                .entry(model.name.to_ascii_lowercase())
+                .or_insert_with(|| model.name.clone());
+        }
+    }
+    names
+}
+
+fn symbol_model_family(
+    models_by_cell: &BTreeMap<String, String>,
+    cell: &crate::state::Cell,
+) -> String {
     if let Some(value) = super::super::metadata_value(
         [&cell.metadata],
         &["model.family", "model_family", "model", "model.name"],
     ) {
         return value;
     }
-    app.state
-        .model_library_manager
-        .libraries_sorted()
-        .into_iter()
-        .flat_map(|library| library.models.values())
-        .find(|model| model.name.eq_ignore_ascii_case(&cell.name))
-        .map(|model| model.name.clone())
+    models_by_cell
+        .get(&cell.name.to_ascii_lowercase())
+        .cloned()
         .unwrap_or_else(|| "unbound".to_owned())
 }
 
@@ -534,7 +571,7 @@ fn symbol_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Symbol
 
 pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     let rows = corner_rows(app);
-    let unresolved = rows.iter().filter(|row| !row.resolved).count();
+    let unresolved = rows.iter().filter(|row| !row.resolved()).count();
     section_title(
         ui,
         "Corners & sections",
@@ -576,32 +613,11 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 }
             }
             if ui.button("Validate bindings").clicked() {
-                receipt(
-                    app,
-                    if unresolved == 0 {
-                        Ok(format!(
-                            "Validated all {} process-corner bindings.",
-                            rows.len()
-                        ))
-                    } else {
-                        Err(format!(
-                            "Corner validation found {unresolved} bindings without an exact source section."
-                        ))
-                    },
-                );
+                let result = validate_current_model_execution_plan(app, unresolved);
+                receipt(app, result);
             }
         },
     );
-    card(ui, |ui| {
-        card_title(ui, "PACKAGE CANDIDATE", Some("migration review"));
-        ui.label(
-            RichText::new(
-                "No unreviewed technology-package candidate is retained. Importing a new section map creates a transactional review before bindings change.",
-            )
-            .small()
-            .color(Tokens::get(ui.ctx()).color.text_dim),
-        );
-    });
     if rows.is_empty() {
         page_empty_state(
             ui,
@@ -642,13 +658,13 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                                 0.13,
                                 true,
                             ),
-                            (if row.resolved { "section" } else { "" }, 0.11, true),
-                            (if row.resolved { "section" } else { "" }, 0.13, true),
+                            (if row.resolved() { "section" } else { "" }, 0.11, true),
+                            (if row.resolved() { "section" } else { "" }, 0.13, true),
                             (if row.has_statistics { "bound" } else { "" }, 0.10, true),
                             (if row.has_aging { "evidence" } else { "" }, 0.10, true),
                             (&format!("{:.1} °C", row.corner.temperature), 0.13, true),
                             (
-                                if row.resolved {
+                                if row.resolved() {
                                     "resolved"
                                 } else {
                                     "unresolved"
@@ -669,15 +685,88 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     corner_detail(ui, app, &rows);
 }
 
+fn validate_current_model_execution_plan(
+    app: &ManagerRenderContext<'_>,
+    unresolved: usize,
+) -> Result<String, String> {
+    if unresolved > 0 {
+        return Err(format!(
+            "Corner validation found {unresolved} bindings without an exact source section."
+        ));
+    }
+    let sealed = if app.state.project_technology_in_effect() {
+        app.state.seal_project_execution_model_sources()?
+    } else {
+        app.state.model_library_manager.seal_execution_sources()?
+    };
+    let plan = sealed.reference_model_execution_plan(app.state.sim_setup.reference_pvt.process)?;
+    Ok(format!(
+        "Validated exact model execution plan {} with {} authenticated bindings.",
+        plan.digest(),
+        plan.bindings().len()
+    ))
+}
+
 #[derive(Clone)]
 struct CornerRow {
     key: String,
     library: String,
     corner: ProcessCorner,
-    resolved: bool,
+    /// Why a run cannot expand this corner, in the words the run itself uses.
+    /// `None` means the corner resolves.
+    blocker: Option<String>,
     has_statistics: bool,
     has_aging: bool,
     source: Option<String>,
+}
+
+impl CornerRow {
+    const fn resolved(&self) -> bool {
+        self.blocker.is_none()
+    }
+}
+
+/// Why a corner cannot be expanded into a run, or `None` if it can.
+///
+/// This restates the rule the run itself applies — every declared section
+/// binding must name a section the retained closure defines — instead of
+/// searching the retained bytes for a `.lib` line. The text search this
+/// replaced reported a section missing whenever the file spelled the directive
+/// with a tab, and reported one present when the name appeared in a comment,
+/// so the page's "run expansion blocked" and the run's own verdict were
+/// independent guesses. See `io::project_execution`'s
+/// `persisted_active_model_section_names`.
+fn corner_blocker(library: &ModelLibrary, corner: &ProcessCorner) -> Option<String> {
+    let bindings = corner.effective_section_bindings();
+    if bindings.is_empty() {
+        // A corner that names no section and has no retained source is not
+        // bound to a file at all; there is nothing for a run to resolve and
+        // nothing to report.
+        return (corner.file_path.is_some() || !library.source_closure.is_empty()).then(|| {
+            format!(
+                "corner '{}' has no executable section bindings",
+                corner.name
+            )
+        });
+    }
+    let mut missing = bindings
+        .iter()
+        .filter(|binding| !library.defines_section(&binding.section))
+        .map(|binding| binding.section.clone())
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        return None;
+    }
+    missing.sort();
+    missing.dedup();
+    Some(format!(
+        "the retained closure defines no section named {}",
+        missing
+            .iter()
+            .map(|section| format!("'{section}'"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
 }
 
 fn corner_rows(app: &ManagerRenderContext<'_>) -> Vec<CornerRow> {
@@ -713,19 +802,19 @@ fn corner_rows(app: &ManagerRenderContext<'_>) -> Vec<CornerRow> {
                 .as_deref()
                 .or(library.root_path.as_deref())
                 .map(|path| path.display().to_string());
-            let retained_section = library.source_contents.iter().any(|content| {
-                String::from_utf8_lossy(&content.bytes)
-                    .to_ascii_lowercase()
-                    .contains(&format!(".lib {}", corner.name.to_ascii_lowercase()))
-            });
-            let resolved = source.is_some()
-                && (retained_section
-                    || (corner.name.eq_ignore_ascii_case("tt") && library.corners.len() == 1));
+            let blocker = if source.is_none() {
+                Some(format!(
+                    "corner '{}' is not bound to a retained source",
+                    corner.name
+                ))
+            } else {
+                corner_blocker(library, corner)
+            };
             rows.push(CornerRow {
                 key: format!("{}\u{1f}{}", library.name, corner.name),
                 library: library.name.clone(),
                 corner: corner.clone(),
-                resolved,
+                blocker,
                 has_statistics,
                 has_aging,
                 source,
@@ -767,24 +856,52 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
             .monospace()
             .strong(),
         );
-        if !row.resolved {
+        if let Some(blocker) = row.blocker.as_deref() {
             ui.label(
-                RichText::new("unresolved · run expansion blocked")
+                RichText::new(format!("run expansion blocked · {blocker}"))
                     .small()
                     .color(Tokens::get(ui.ctx()).color.err),
             );
+            if ui.button("Bind section…").clicked() {
+                let section = app
+                    .state
+                    .model_library_manager
+                    .get_library(&row.library)
+                    .and_then(|library| library.section_index().into_iter().next())
+                    .unwrap_or_default();
+                let domain = row
+                    .corner
+                    .effective_required_domains()
+                    .into_iter()
+                    .find(|required| {
+                        !row.corner
+                            .effective_section_bindings()
+                            .iter()
+                            .any(|binding| binding.domain == *required)
+                    })
+                    .or_else(|| {
+                        row.corner
+                            .effective_section_bindings()
+                            .first()
+                            .map(|binding| binding.domain)
+                    })
+                    .unwrap_or(CornerSectionDomain::Composite);
+                app.state.workbench.models_view.dialog =
+                    Some(ModelsWorkbenchDialog::BindCornerSection {
+                        library: row.library.clone(),
+                        corner: row.corner.name.clone(),
+                        domain,
+                        section,
+                    });
+            }
         }
+        // The corner's own retained file, not whichever model the library
+        // happens to iterate first.
         if ui
             .add_enabled(row.source.is_some(), egui::Button::new("Open source"))
             .clicked()
-            && let Some(library) = app
-                .state
-                .model_library_manager
-                .get_library(&row.library)
-                .cloned()
-            && let Some(model) = library.models.values().next().cloned()
         {
-            open_model_source(app, &library, &model);
+            open_corner_source(app, &row);
         }
         if ui.button("View include graph").clicked() {
             app.state.workbench.models_page = ModelsPage::Include;
@@ -804,7 +921,7 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
                 ui,
                 "Source",
                 row.source.as_deref().unwrap_or("not bound"),
-                if row.resolved {
+                if row.resolved() {
                     "retained"
                 } else {
                     "unresolved"
@@ -842,7 +959,7 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
             property(
                 ui,
                 "Binding policy",
-                if row.resolved {
+                if row.resolved() {
                     "executable"
                 } else {
                     "fail closed"
@@ -851,6 +968,69 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
             );
         },
     );
+}
+
+/// Show the retained bytes of the file this corner is bound to.
+fn open_corner_source(app: &mut ManagerRenderContext<'_>, row: &CornerRow) {
+    let Some(library) = app
+        .state
+        .model_library_manager
+        .get_library(&row.library)
+        .cloned()
+    else {
+        receipt(
+            app,
+            Err(format!("Library '{}' no longer exists.", row.library)),
+        );
+        return;
+    };
+    let path = row
+        .corner
+        .file_path
+        .as_deref()
+        .or(library.root_path.as_deref());
+    let Some(path) = path else {
+        receipt(
+            app,
+            Err(format!(
+                "Corner '{}' is not bound to a retained source.",
+                row.corner.name
+            )),
+        );
+        return;
+    };
+    let retained = library
+        .source_contents
+        .iter()
+        .find(|content| content.path == path);
+    match retained {
+        Some(content) => {
+            app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::SourcePreview {
+                title: format!("{} / {}", library.name, row.corner.name.to_uppercase()),
+                subtitle: format!("{} · retained closure member", content.path.display()),
+                source: String::from_utf8_lossy(&content.bytes).into_owned(),
+                editable: false,
+            });
+        }
+        None => match std::fs::read_to_string(path) {
+            Ok(source) => {
+                app.state.workbench.models_view.dialog =
+                    Some(ModelsWorkbenchDialog::SourcePreview {
+                        title: format!("{} / {}", library.name, row.corner.name.to_uppercase()),
+                        subtitle: format!("{} · live unpinned source", path.display()),
+                        source,
+                        editable: false,
+                    });
+            }
+            Err(error) => receipt(
+                app,
+                Err(format!(
+                    "Could not read corner source '{}': {error}",
+                    path.display()
+                )),
+            ),
+        },
+    }
 }
 
 fn select_corner(app: &mut ManagerRenderContext<'_>, library_name: &str, corner_name: &str) {
@@ -907,22 +1087,63 @@ fn symbol_key(reference: &CellViewRef) -> String {
     )
 }
 
-pub(super) fn bins_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
-    let mut families = BTreeMap::<String, Vec<(String, DeviceModel)>>::new();
+/// One card's place in a bin family, without the card.
+struct BinCard {
+    model: String,
+    envelope: GeometryEnvelope,
+}
+
+/// The set of cards the engine would consider for one instance reference.
+///
+/// Keyed by library and by the family base name — `nch` for `nch.1`, `nch.2` —
+/// because that is the set core's `resolve_binned_model_def` collects
+/// candidates from. Grouping by device type instead, which this page used to
+/// do, put every NMOS card in every attached foundry library into one family
+/// and reported them as overlapping each other.
+struct BinFamily {
+    library: String,
+    family: String,
+    cards: Vec<BinCard>,
+}
+
+impl BinFamily {
+    fn key(&self) -> String {
+        format!("{} · {}", self.library, self.family)
+    }
+}
+
+fn bin_families(app: &ManagerRenderContext<'_>) -> Vec<BinFamily> {
+    let mut families = BTreeMap::<(&str, &str), Vec<BinCard>>::new();
     for library in app.state.model_library_manager.libraries_sorted() {
         for model in library.models.values() {
-            if model.l_min.is_some()
-                || model.l_max.is_some()
-                || model.w_min.is_some()
-                || model.w_max.is_some()
-            {
-                families
-                    .entry(model.model_type.display_name().to_owned())
-                    .or_default()
-                    .push((library.name.clone(), model.clone()));
+            let envelope = GeometryEnvelope::of(model);
+            if !envelope.is_declared() {
+                continue;
             }
+            families
+                .entry((library.name.as_str(), bin_family_name(&model.name)))
+                .or_default()
+                .push(BinCard {
+                    model: model.name.clone(),
+                    envelope,
+                });
         }
     }
+    families
+        .into_iter()
+        .map(|((library, family), mut cards)| {
+            cards.sort_by(|left, right| left.model.cmp(&right.model));
+            BinFamily {
+                library: library.to_owned(),
+                family: family.to_owned(),
+                cards,
+            }
+        })
+        .collect()
+}
+
+pub(super) fn bins_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
+    let families = bin_families(app);
     let findings = geometry_findings(&families);
     section_title(
         ui,
@@ -930,7 +1151,10 @@ pub(super) fn bins_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         &format!(
             "{} binned families · {} cards · {} findings",
             families.len(),
-            families.values().map(Vec::len).sum::<usize>(),
+            families
+                .iter()
+                .map(|family| family.cards.len())
+                .sum::<usize>(),
             findings.len()
         ),
         |ui| {
@@ -956,19 +1180,15 @@ pub(super) fn bins_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                     },
                 );
             }
+            // Gated on the fact it traces — the selected model — rather than
+            // on a schematic selection it never reads, and it says which.
+            let traced = app.state.workbench.selected_model.clone();
             if ui
-                .add_enabled(
-                    exactly_one_selected_component(app).is_some(),
-                    egui::Button::new("Trace schematic"),
-                )
+                .add_enabled(traced.is_some(), egui::Button::new("Trace schematic"))
+                .on_disabled_hover_text("Select a model in the catalog first.")
                 .clicked()
+                && let Some(model) = traced
             {
-                let model = app
-                    .state
-                    .workbench
-                    .selected_model
-                    .clone()
-                    .unwrap_or_else(|| "selected geometry family".to_owned());
                 app.state.workbench.models_view.dialog =
                     Some(ModelsWorkbenchDialog::BindingTrace {
                         consumers: model_consumers(app, &model),
@@ -987,37 +1207,68 @@ pub(super) fn bins_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     }
     ui.columns(2, |columns| {
         card(&mut columns[0], |ui| {
-            card_title(ui, "BIN FAMILIES", Some("live loaded models"));
-            for (family, cards) in &families {
-                if ui
-                    .selectable_label(
-                        app.state
-                            .workbench
-                            .models_view
-                            .selected_bin_family
-                            .as_deref()
-                            == Some(family.as_str()),
-                        format!("{family}  ·  {} cards", cards.len()),
-                    )
-                    .clicked()
-                {
-                    app.state.workbench.models_view.selected_bin_family = Some(family.clone());
-                }
+            card_title(
+                ui,
+                "BIN FAMILIES",
+                Some(&format!("{} · library · family", families.len())),
+            );
+            let selected = app
+                .state
+                .workbench
+                .models_view
+                .selected_bin_family
+                .clone()
+                .unwrap_or_default();
+            let mut picked = None;
+            let row_height = selectable_label_height(ui);
+            ScrollArea::vertical()
+                .id_salt("models-bin-families")
+                .max_height(ui.available_height().max(120.0))
+                .show_rows(ui, row_height, families.len(), |ui, range| {
+                    for family in &families[range] {
+                        let key = family.key();
+                        if ui
+                            .selectable_label(
+                                selected == key,
+                                format!("{key}  ·  {} cards", family.cards.len()),
+                            )
+                            .clicked()
+                        {
+                            picked = Some(key);
+                        }
+                    }
+                });
+            if let Some(picked) = picked {
+                app.state.workbench.models_view.selected_bin_family = Some(picked);
             }
         });
         card(&mut columns[1], |ui| {
-            card_title(ui, "AUDIT FINDINGS", Some("fail closed on overlap"));
+            card_title(
+                ui,
+                "AUDIT FINDINGS",
+                Some(&format!("{} · fail closed on overlap", findings.len())),
+            );
             if findings.is_empty() {
                 ui.label(
                     RichText::new("Every declared envelope is non-overlapping.")
                         .color(Tokens::get(ui.ctx()).color.ok),
                 );
             } else {
-                for finding in findings.iter().take(10) {
+                for finding in findings.iter().take(FINDING_ROWS) {
                     ui.label(
                         RichText::new(format!("Review: {finding}"))
                             .small()
                             .color(Tokens::get(ui.ctx()).color.err),
+                    );
+                }
+                if findings.len() > FINDING_ROWS {
+                    ui.label(
+                        RichText::new(format!(
+                            "…and {} more, all counted above",
+                            findings.len() - FINDING_ROWS
+                        ))
+                        .small()
+                        .color(Tokens::get(ui.ctx()).color.text_faint),
                     );
                 }
             }
@@ -1029,29 +1280,38 @@ pub(super) fn bins_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         .models_view
         .selected_bin_family
         .clone()
-        .or_else(|| families.keys().next().cloned());
+        .filter(|selected| families.iter().any(|family| family.key() == *selected))
+        .or_else(|| families.first().map(BinFamily::key));
     if let Some(selected) = selected {
         app.state.workbench.models_view.selected_bin_family = Some(selected.clone());
-        if let Some(cards) = families.get(&selected) {
-            geometry_map(ui, &selected, cards);
-            geometry_instance_table(ui, app, cards);
+        if let Some(family) = families.iter().find(|family| family.key() == selected) {
+            geometry_map(ui, &selected, &family.cards);
+            geometry_instance_table(ui, app, &family.cards);
         }
     }
 }
 
-fn geometry_findings(families: &BTreeMap<String, Vec<(String, DeviceModel)>>) -> Vec<String> {
+/// Findings the audit reports, comparing only cards the engine would compare.
+///
+/// The pairwise sweep is quadratic in a family, which is why the family has to
+/// be the engine's — a few dozen bins of one device — and not every card of one
+/// device type in the whole corpus.
+fn geometry_findings(families: &[BinFamily]) -> Vec<String> {
     let mut findings = Vec::new();
-    for (family, cards) in families {
-        for (index, (_, left)) in cards.iter().enumerate() {
-            if model_geometry_invalid(left) {
+    for family in families {
+        for (index, left) in family.cards.iter().enumerate() {
+            if left.envelope.is_invalid() {
                 findings.push(format!(
-                    "{family}/{} has an inverted L/W envelope",
-                    left.name
+                    "{}/{} has an inverted L/W envelope",
+                    family.family, left.model
                 ));
             }
-            for (_, right) in cards.iter().skip(index + 1) {
-                if envelopes_overlap(left, right) {
-                    findings.push(format!("{family}/{} overlaps {}", left.name, right.name));
+            for right in family.cards.iter().skip(index + 1) {
+                if left.envelope.overlaps(right.envelope) {
+                    findings.push(format!(
+                        "{}/{} overlaps {}",
+                        family.family, left.model, right.model
+                    ));
                 }
             }
         }
@@ -1059,20 +1319,7 @@ fn geometry_findings(families: &BTreeMap<String, Vec<(String, DeviceModel)>>) ->
     findings
 }
 
-fn envelopes_overlap(left: &DeviceModel, right: &DeviceModel) -> bool {
-    let (Some(ll), Some(lh), Some(lw), Some(wh)) = (left.l_min, left.l_max, left.w_min, left.w_max)
-    else {
-        return false;
-    };
-    let (Some(rl), Some(rh), Some(rw), Some(rwh)) =
-        (right.l_min, right.l_max, right.w_min, right.w_max)
-    else {
-        return false;
-    };
-    ll < rh && rl < lh && lw < rwh && rw < wh
-}
-
-fn geometry_map(ui: &mut Ui, family: &str, cards: &[(String, DeviceModel)]) {
+fn geometry_map(ui: &mut Ui, family: &str, cards: &[BinCard]) {
     card(ui, |ui| {
         card_title(ui, "LOG L/W MAP", Some(family));
         let (rect, _) =
@@ -1096,13 +1343,13 @@ fn geometry_map(ui: &mut Ui, family: &str, cards: &[(String, DeviceModel)]) {
         );
         let finite = cards
             .iter()
-            .filter_map(|(_, model)| {
+            .filter_map(|card| {
                 Some((
-                    model.l_min?.max(f64::MIN_POSITIVE).log10(),
-                    model.l_max?.max(f64::MIN_POSITIVE).log10(),
-                    model.w_min?.max(f64::MIN_POSITIVE).log10(),
-                    model.w_max?.max(f64::MIN_POSITIVE).log10(),
-                    model.name.as_str(),
+                    card.envelope.l_min?.max(f64::MIN_POSITIVE).log10(),
+                    card.envelope.l_max?.max(f64::MIN_POSITIVE).log10(),
+                    card.envelope.w_min?.max(f64::MIN_POSITIVE).log10(),
+                    card.envelope.w_max?.max(f64::MIN_POSITIVE).log10(),
+                    card.model.as_str(),
                 ))
             })
             .collect::<Vec<_>>();
@@ -1162,11 +1409,7 @@ fn geometry_map(ui: &mut Ui, family: &str, cards: &[(String, DeviceModel)]) {
     });
 }
 
-fn geometry_instance_table(
-    ui: &mut Ui,
-    app: &ManagerRenderContext<'_>,
-    cards: &[(String, DeviceModel)],
-) {
+fn geometry_instance_table(ui: &mut Ui, app: &ManagerRenderContext<'_>, cards: &[BinCard]) {
     card(ui, |ui| {
         card_title(ui, "INSTANCE RESOLUTION", Some("active schematic"));
         let Some(schematic) = app.state.workspace.active_schematic() else {
@@ -1179,14 +1422,16 @@ fn geometry_instance_table(
         };
         let names = cards
             .iter()
-            .map(|(_, model)| model.name.to_ascii_lowercase())
+            .map(|card| card.model.to_ascii_lowercase())
             .collect::<BTreeSet<_>>();
         let matches = schematic
             .components
             .iter()
-            .filter(|component| {
-                explicit_component_model(component)
-                    .is_some_and(|model| names.contains(&model.to_ascii_lowercase()))
+            .filter_map(|component| {
+                let model = explicit_component_model(component)?;
+                names
+                    .contains(&model.to_ascii_lowercase())
+                    .then_some((component, model))
             })
             .collect::<Vec<_>>();
         if matches.is_empty() {
@@ -1195,24 +1440,24 @@ fn geometry_instance_table(
                 "No placed instance resolves to this family.",
                 "Binding resolution is derived from the active schematic, not fixture counts.",
             );
+            return;
         }
-        for component in matches {
-            property(
-                ui,
-                &component.name,
-                explicit_component_model(component)
-                    .as_deref()
-                    .unwrap_or("unbound"),
-                &component.params,
-            );
-        }
+        let row_height = ui.spacing().interact_size.y;
+        ScrollArea::vertical()
+            .id_salt("models-bin-instances")
+            .max_height(ui.available_height().max(120.0))
+            .show_rows(ui, row_height, matches.len(), |ui, range| {
+                for (component, model) in &matches[range] {
+                    property(ui, &component.name, model, &component.params);
+                }
+            });
     });
 }
 
 pub(super) fn include_page(
     ui: &mut Ui,
     app: &mut ManagerRenderContext<'_>,
-    diagnostics: &super::super::IncludeDiagnostics,
+    diagnostics: &ClosureFacts,
 ) {
     section_title(
         ui,
@@ -1221,7 +1466,7 @@ pub(super) fn include_page(
             "{} files · {} edges · {} diagnostics",
             diagnostics.files,
             diagnostics.edges,
-            diagnostics.unpinned_roots + diagnostics.cyclic_nodes
+            diagnostics.diagnostics()
         ),
         |ui| {
             if ui.button("Resolve drift…").clicked() {
@@ -1253,14 +1498,12 @@ pub(super) fn include_page(
             .desired_width(260.0),
         );
     });
-    let libraries = app
-        .state
-        .model_library_manager
-        .libraries_sorted()
-        .into_iter()
-        .cloned()
-        .collect::<Vec<_>>();
-    if libraries.is_empty() {
+    // Both panes below read the libraries while the page also writes selection
+    // state, so what crosses that line is the projection each pane paints — a
+    // handful of nodes and a name index. Cloning the libraries themselves to
+    // dodge the borrow, which is what this did, copied the whole model corpus
+    // and its retained source bytes on every frame.
+    if app.state.model_library_manager.library_count() == 0 {
         page_empty_state(
             ui,
             "No model-source closure is loaded",
@@ -1268,20 +1511,106 @@ pub(super) fn include_page(
         );
         return;
     }
-    include_closure_graph(ui, app, &libraries, diagnostics);
-    include_definition_table(ui, app, &libraries);
+    let nodes = closure_nodes(app);
+    let definitions = definition_index(app);
+    include_closure_graph(ui, app, &nodes, diagnostics);
+    include_definition_table(ui, app, &definitions);
+}
+
+/// Nodes the closure graph draws before it stops.
+///
+/// A closure can hold hundreds of sources and this pane is a few hundred
+/// pixels tall. What is dropped is always reported as a count — a graph that
+/// silently stops at twelve reads as a complete graph of twelve.
+const GRAPH_NODE_LIMIT: usize = 12;
+
+/// Geometry findings the audit column lists before reporting the remainder.
+const FINDING_ROWS: usize = 10;
+
+/// Whether a source is the library's root or something the root includes
+/// itself, as opposed to a transitive member reached through another file.
+fn is_direct_closure_member(library: &ModelLibrary, path: &Path) -> bool {
+    let Some(root) = library.root_path.as_deref() else {
+        return false;
+    };
+    root == path
+        || library
+            .source_edges
+            .iter()
+            .any(|edge| edge.owner == root && edge.target == path)
+}
+
+/// One retained source the closure graph draws.
+struct ClosureNode {
+    path: PathBuf,
+    library: String,
+    digest: String,
+}
+
+/// The nodes and edges the graph pane draws, and what it left out.
+struct ClosureGraph {
+    nodes: Vec<ClosureNode>,
+    /// Sources that passed the filter, drawn or not.
+    matching: usize,
+    /// Edges between two drawn nodes.
+    edges: Vec<(PathBuf, PathBuf)>,
+}
+
+fn closure_nodes(app: &ManagerRenderContext<'_>) -> ClosureGraph {
+    // "Direct dependencies only" means the root of each library plus whatever
+    // the root itself includes; anything reached through another file is a
+    // transitive member and folds away.
+    let direct_only = app.state.workbench.models_view.include_direct_only;
+    let libraries = app.state.model_library_manager.libraries_sorted();
+    let mut nodes = Vec::new();
+    let mut matching = 0usize;
+    for library in &libraries {
+        for source in &library.source_closure {
+            if direct_only && !is_direct_closure_member(library, &source.path) {
+                continue;
+            }
+            matching += 1;
+            if nodes.len() < GRAPH_NODE_LIMIT {
+                nodes.push(ClosureNode {
+                    path: source.path.clone(),
+                    library: library.name.clone(),
+                    digest: short_digest(&source.digest.to_string()),
+                });
+            }
+        }
+    }
+    let drawn = nodes
+        .iter()
+        .map(|node| node.path.clone())
+        .collect::<BTreeSet<_>>();
+    let edges = libraries
+        .iter()
+        .flat_map(|library| &library.source_edges)
+        .filter(|edge| drawn.contains(&edge.owner) && drawn.contains(&edge.target))
+        .map(|edge| (edge.owner.clone(), edge.target.clone()))
+        .collect();
+    ClosureGraph {
+        nodes,
+        matching,
+        edges,
+    }
 }
 
 fn include_closure_graph(
     ui: &mut Ui,
     app: &mut ManagerRenderContext<'_>,
-    libraries: &[ModelLibrary],
-    diagnostics: &super::super::IncludeDiagnostics,
+    graph: &ClosureGraph,
+    diagnostics: &ClosureFacts,
 ) {
+    let direct_only = app.state.workbench.models_view.include_direct_only;
     detail_pane(
         ui,
         "RESOLVED CLOSURE",
-        Some("root plus authenticated dependencies"),
+        Some(if direct_only {
+            "root plus direct dependencies"
+        } else {
+            "root plus authenticated dependencies"
+        }),
         |ui| {
             let graph_height = (ui.available_height() * 0.42).clamp(150.0, 230.0);
             let (rect, _) = ui.allocate_exact_size(
@@ -1297,16 +1626,9 @@ fn include_closure_graph(
                 egui::StrokeKind::Inside,
             );
 
-            let sources = libraries
-                .iter()
-                .flat_map(|library| {
-                    library
-                        .source_closure
-                        .iter()
-                        .map(move |source| (library, source))
-                })
-                .take(12)
-                .collect::<Vec<_>>();
+            let sources = &graph.nodes;
+            let matching = graph.matching;
+            let hidden = matching.saturating_sub(GRAPH_NODE_LIMIT);
             if sources.is_empty() {
                 ui.painter().text(
                     egui::pos2(rect.center().x, rect.center().y - 10.0),
@@ -1336,7 +1658,7 @@ fn include_closure_graph(
                 };
                 let x_gap = ((rect.width() - node_width * columns as f32) / 4.0).max(8.0);
                 let mut node_rects = BTreeMap::new();
-                for (index, (library, source)) in sources.iter().enumerate() {
+                for (index, source) in sources.iter().enumerate() {
                     let column = index % columns;
                     let row = index / columns;
                     let x = rect.left() + x_gap + column as f32 * (node_width + x_gap);
@@ -1383,11 +1705,7 @@ fn include_closure_graph(
                         egui::Align2::LEFT_CENTER,
                         elide(
                             ui,
-                            &format!(
-                                "{} · {}",
-                                library.name,
-                                short_digest(&source.digest.to_string())
-                            ),
+                            &format!("{} · {}", source.library, source.digest),
                             node.width() - 16.0,
                             false,
                         ),
@@ -1403,8 +1721,8 @@ fn include_closure_graph(
                     let node_label = format!(
                         "{} · {} · {}",
                         path_label(&source.path),
-                        library.name,
-                        short_digest(&source.digest.to_string())
+                        source.library,
+                        source.digest
                     );
                     response.widget_info(|| {
                         egui::WidgetInfo::selected(
@@ -1421,9 +1739,9 @@ fn include_closure_graph(
                     }
                 }
 
-                for edge in libraries.iter().flat_map(|library| &library.source_edges) {
+                for (edge_owner, edge_target) in &graph.edges {
                     if let (Some(owner), Some(target)) =
-                        (node_rects.get(&edge.owner), node_rects.get(&edge.target))
+                        (node_rects.get(edge_owner), node_rects.get(edge_target))
                     {
                         ui.painter().arrow(
                             owner.center_bottom(),
@@ -1441,6 +1759,16 @@ fn include_closure_graph(
                         .small()
                         .color(t.color.text_dim),
                 );
+                if hidden > 0 {
+                    ui.label(
+                        RichText::new(format!(
+                            "showing {} of {matching} · {hidden} not drawn",
+                            GRAPH_NODE_LIMIT
+                        ))
+                        .small()
+                        .color(t.color.warn),
+                    );
+                }
                 ui.label(
                     RichText::new(format!("{} dependency edges", diagnostics.edges))
                         .small()
@@ -1452,23 +1780,71 @@ fn include_closure_graph(
                         diagnostics.unpinned_roots, diagnostics.cyclic_nodes
                     ))
                     .small()
-                    .color(
-                        if diagnostics.unpinned_roots + diagnostics.cyclic_nodes == 0 {
-                            t.color.ok
-                        } else {
-                            t.color.err
-                        },
-                    ),
+                    .color(if diagnostics.diagnostics() == 0 {
+                        t.color.ok
+                    } else {
+                        t.color.err
+                    }),
                 );
             });
         },
     );
 }
 
+/// One name an instance could reference, and everything that defines it.
+struct DefinitionRow {
+    definition: String,
+    kind: &'static str,
+    providers: Vec<String>,
+    provider_list: String,
+}
+
+impl DefinitionRow {
+    /// A contested name has no winner: the duplicate has to be removed or
+    /// renamed before an instance can bind at all.
+    fn contested(&self) -> bool {
+        self.providers.len() > 1
+    }
+}
+
+/// Every definition name across the loaded libraries, with its providers.
+///
+/// Model names and subcircuit names share one namespace as far as an instance
+/// reference is concerned, so both are here for "contested" to mean anything.
+fn definition_index(app: &ManagerRenderContext<'_>) -> Vec<DefinitionRow> {
+    let mut providers = BTreeMap::<String, (BTreeSet<String>, &'static str)>::new();
+    for library in app.state.model_library_manager.libraries_sorted() {
+        for model in library.models.values() {
+            let entry = providers
+                .entry(model.name.to_ascii_lowercase())
+                .or_insert_with(|| (BTreeSet::new(), "model"));
+            entry.0.insert(library.name.clone());
+        }
+        for subcircuit in library.subcircuits.values() {
+            let entry = providers
+                .entry(subcircuit.name.to_ascii_lowercase())
+                .or_insert_with(|| (BTreeSet::new(), "subckt"));
+            entry.0.insert(library.name.clone());
+            if entry.1 == "model" {
+                entry.1 = "model · subckt";
+            }
+        }
+    }
+    providers
+        .into_iter()
+        .map(|(definition, (candidates, kind))| DefinitionRow {
+            definition,
+            kind,
+            provider_list: candidates.iter().cloned().collect::<Vec<_>>().join(", "),
+            providers: candidates.into_iter().collect(),
+        })
+        .collect()
+}
+
 fn include_definition_table(
     ui: &mut Ui,
     app: &mut ManagerRenderContext<'_>,
-    libraries: &[ModelLibrary],
+    definitions: &[DefinitionRow],
 ) {
     let query = app
         .state
@@ -1477,78 +1853,287 @@ fn include_definition_table(
         .include_definition_query
         .trim()
         .to_ascii_lowercase();
-    let mut providers = BTreeMap::<String, Vec<String>>::new();
-    for library in libraries {
-        for model in library.models.values() {
-            providers
-                .entry(model.name.to_ascii_lowercase())
-                .or_default()
-                .push(library.name.clone());
-        }
-    }
+    let matching = definitions
+        .iter()
+        .filter(|row| {
+            query.is_empty()
+                || row.definition.contains(&query)
+                || row
+                    .providers
+                    .iter()
+                    .any(|provider| provider.to_ascii_lowercase().contains(&query))
+        })
+        .collect::<Vec<_>>();
+    let contested_count = definitions.iter().filter(|row| row.contested()).count();
+    let mut conflict = None;
     card(ui, |ui| {
         card_title(
             ui,
             "DEFINITION RESOLUTION",
-            Some(&format!("{} unique names", providers.len())),
+            Some(&format!(
+                "{} unique names · {contested_count} contested",
+                definitions.len()
+            )),
         );
         table_header(
             ui,
             &[
                 ("DEFINITION", 0.25),
                 ("KIND", 0.13),
-                ("WINNING PROVIDER", 0.25),
-                ("OTHER CANDIDATES", 0.20),
-                ("RESOLUTION", 0.17),
+                ("PROVIDERS", 0.37),
+                ("RESOLUTION", 0.25),
             ],
         );
+        if matching.is_empty() {
+            empty_state(
+                ui,
+                "No definitions match.",
+                "The filter searches definition names and every retained provider.",
+            );
+            return;
+        }
         ScrollArea::vertical()
             .id_salt("models-include-definitions")
             .max_height(ui.available_height().max(140.0))
-            .show(ui, |ui| {
-                let mut shown = 0;
-                for (definition, candidates) in &providers {
-                    if !query.is_empty()
-                        && !definition.contains(&query)
-                        && !candidates
-                            .iter()
-                            .any(|provider| provider.to_ascii_lowercase().contains(&query))
-                    {
-                        continue;
-                    }
-                    shown += 1;
-                    let contested = candidates.len() > 1;
-                    let other_candidates = if contested {
-                        (candidates.len() - 1).to_string()
-                    } else {
-                        "not bound".to_owned()
-                    };
+            .show_rows(ui, ROW_H, matching.len(), |ui, range| {
+                for row in &matching[range] {
+                    // This column used to print the first provider under the
+                    // heading "WINNING PROVIDER", which asserted a resolution
+                    // policy that does not exist.
                     let response = selectable_data_row(
                         ui,
                         false,
                         &[
-                            (definition, 0.25, true),
-                            ("model", 0.13, true),
-                            (&candidates[0], 0.25, false),
-                            (&other_candidates, 0.20, true),
-                            (if contested { "contested" } else { "unique" }, 0.17, true),
+                            (&row.definition, 0.25, true),
+                            (row.kind, 0.13, false),
+                            (&row.provider_list, 0.37, false),
+                            (
+                                if row.contested() {
+                                    "contested · fails closed"
+                                } else {
+                                    "unique"
+                                },
+                                0.25,
+                                true,
+                            ),
                         ],
                     );
-                    if contested && response.clicked() {
-                        app.state.workbench.models_view.dialog =
-                            Some(ModelsWorkbenchDialog::DefinitionConflict {
-                                definition: definition.clone(),
-                                providers: candidates.clone(),
-                            });
+                    if row.contested() && response.clicked() {
+                        conflict = Some((row.definition.clone(), row.providers.clone()));
                     }
-                }
-                if shown == 0 {
-                    empty_state(
-                        ui,
-                        "No definitions match.",
-                        "The filter searches definition names and every retained provider.",
-                    );
                 }
             });
     });
+    if let Some((definition, providers)) = conflict {
+        app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::DefinitionConflict {
+            definition,
+            providers,
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::state::model_library::{
+        CornerSectionBinding, CornerSectionDomain, DeviceModel, ModelSourceContent, ModelSourcePin,
+        ModelType,
+    };
+
+    /// A library whose parsed models declare `sections`, and whose retained
+    /// bytes deliberately disagree with them.
+    fn library_with_sections(sections: &[&str], retained_bytes: &str) -> ModelLibrary {
+        let mut library = ModelLibrary::new("pdk");
+        library.root_path = Some(PathBuf::from("pdk.lib"));
+        for section in sections {
+            let mut model = DeviceModel::new(format!("nch_{section}"), ModelType::Nmos);
+            model.section = Some((*section).to_owned());
+            library.add_model(model);
+        }
+        library.source_closure = vec![ModelSourcePin {
+            path: PathBuf::from("pdk.lib"),
+            digest: crate::product::ContentDigest::from_bytes([0x11; 32]),
+        }];
+        library.source_contents = vec![ModelSourceContent {
+            path: PathBuf::from("pdk.lib"),
+            bytes: retained_bytes.as_bytes().to_vec(),
+        }];
+        library
+    }
+
+    fn corner_bound_to(name: &str, section: &str) -> ProcessCorner {
+        let mut corner = ProcessCorner::new(name);
+        corner.file_path = Some(PathBuf::from("pdk.lib"));
+        corner.section_bindings = vec![CornerSectionBinding::new(
+            CornerSectionDomain::Composite,
+            section,
+        )];
+        corner
+    }
+
+    #[test]
+    fn a_section_spelled_with_a_tab_still_resolves() {
+        // The byte search this replaced looked for the literal `.lib tt`, so a
+        // file writing `.LIB\ttt` reported the corner unresolved and told the
+        // engineer a run was blocked when it was not.
+        let library = library_with_sections(&["tt"], ".LIB\ttt\n.model nch_tt nmos\n.ENDL\n");
+        assert_eq!(corner_blocker(&library, &corner_bound_to("tt", "tt")), None);
+    }
+
+    #[test]
+    fn a_section_name_appearing_only_in_a_comment_does_not_resolve() {
+        // And the same search reported a section present whenever its name
+        // appeared anywhere in the retained bytes, including a comment.
+        let library = library_with_sections(&["tt"], "* see .lib ff for the fast corner\n");
+        let blocker = corner_blocker(&library, &corner_bound_to("ff", "ff"))
+            .expect("a section nothing defines must block run expansion");
+        assert!(
+            blocker.contains("'ff'"),
+            "the blocker must name the missing section: {blocker}"
+        );
+    }
+
+    #[test]
+    fn a_corner_binding_several_domains_needs_every_section() {
+        let library = library_with_sections(&["tt", "res_tt"], "");
+        let mut corner = ProcessCorner::new("tt");
+        corner.file_path = Some(PathBuf::from("pdk.lib"));
+        corner.section_bindings = vec![
+            CornerSectionBinding::new(CornerSectionDomain::Mos, "tt"),
+            CornerSectionBinding::new(CornerSectionDomain::Passives, "res_tt"),
+        ];
+        assert_eq!(corner_blocker(&library, &corner), None);
+
+        corner.section_bindings = vec![
+            CornerSectionBinding::new(CornerSectionDomain::Mos, "tt"),
+            CornerSectionBinding::new(CornerSectionDomain::Passives, "res_ss"),
+        ];
+        let blocker = corner_blocker(&library, &corner).expect("one missing section blocks");
+        assert!(blocker.contains("'res_ss'"), "{blocker}");
+        assert!(
+            !blocker.contains("'tt'"),
+            "a resolved axis must not be reported as missing: {blocker}"
+        );
+    }
+
+    #[test]
+    fn a_legacy_corner_with_no_declared_binding_resolves_through_its_own_name() {
+        // `effective_section_bindings` synthesises a composite binding named
+        // for the corner when a source-backed corner declares none. The page
+        // must follow that, not special-case `tt`.
+        let library = library_with_sections(&["ss"], "");
+        let mut corner = ProcessCorner::new("ss");
+        corner.file_path = Some(PathBuf::from("pdk.lib"));
+        assert_eq!(corner_blocker(&library, &corner), None);
+
+        let mut absent = ProcessCorner::new("ff");
+        absent.file_path = Some(PathBuf::from("pdk.lib"));
+        assert!(corner_blocker(&library, &absent).is_some());
+    }
+
+    #[test]
+    fn the_lone_typical_corner_is_no_longer_privileged() {
+        // The rule this replaced resolved any single corner named `tt`
+        // regardless of whether the closure defined it.
+        let library = library_with_sections(&["ss"], "");
+        let mut typical = ProcessCorner::new("tt");
+        typical.file_path = Some(PathBuf::from("pdk.lib"));
+        assert!(
+            corner_blocker(&library, &typical).is_some(),
+            "a lone 'tt' with no matching section must not resolve"
+        );
+    }
+
+    #[test]
+    fn a_corner_bound_to_nothing_at_all_reports_no_executable_bindings() {
+        let library = library_with_sections(&["tt"], "");
+        let unbound = ProcessCorner::new("floating");
+        let blocker = corner_blocker(&library, &unbound)
+            .expect("a retained closure with no binding is not executable");
+        assert!(
+            blocker.contains("no executable section bindings"),
+            "the page must use the run's own wording: {blocker}"
+        );
+
+        // With no retained closure and no file there is nothing to resolve, so
+        // there is nothing to report either.
+        let bare = ModelLibrary::new("in-memory");
+        assert_eq!(corner_blocker(&bare, &ProcessCorner::new("floating")), None);
+    }
+
+    #[test]
+    fn the_family_list_declares_the_height_a_row_really_takes() {
+        // `show_rows` places rows from the height it is given. If that height
+        // is short, every row after the first drifts up under the one above
+        // and the last families fall off the end of the list.
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut declared = 0.0;
+        let mut measured = 0.0;
+        for _ in 0..2 {
+            ctx.run_ui(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    declared = selectable_label_height(ui);
+                    measured = ui
+                        .selectable_label(false, "pdk7 · nch7  ·  25 cards")
+                        .rect
+                        .height();
+                });
+            });
+        }
+        assert!(
+            (declared - measured).abs() < 0.01,
+            "the family list declares {declared} per row but a row takes {measured}"
+        );
+    }
+
+    #[test]
+    fn a_family_is_one_library_s_cards_sharing_a_base_name() {
+        use crate::workbench::surfaces::models::scale;
+
+        let mut app = scale::large_corpus_app();
+        let mut pending = Vec::new();
+        let render = ManagerRenderContext {
+            state: &mut app.state,
+            pending_actions: &mut pending,
+        };
+        let families = bin_families(&render);
+        assert_eq!(
+            families.len(),
+            (scale::LIBRARIES - scale::PROJECT_LIBRARIES) * scale::FAMILIES.len(),
+            "cards group by library and by the name before their last dot"
+        );
+        assert!(
+            families
+                .iter()
+                .all(|family| family.cards.len()
+                    == scale::MODELS_PER_LIBRARY / scale::FAMILIES.len()),
+            "every family in the fixture holds the same number of bins"
+        );
+    }
+
+    #[test]
+    fn a_correctly_binned_pdk_produces_no_geometry_findings() {
+        // Every PDK library in the fixture tiles its L axis, sharing a
+        // boundary between adjacent bins, which is what a real binned library
+        // does. Grouping cards by device type instead of by bin family
+        // reported all 4,500 of them as overlapping one another.
+        use crate::workbench::surfaces::models::scale;
+
+        let mut app = scale::large_corpus_app();
+        let mut pending = Vec::new();
+        let render = ManagerRenderContext {
+            state: &mut app.state,
+            pending_actions: &mut pending,
+        };
+        let findings = geometry_findings(&bin_families(&render));
+        assert!(
+            findings.is_empty(),
+            "a correctly binned corpus has no findings, got {}: {:?}",
+            findings.len(),
+            &findings[..findings.len().min(5)]
+        );
+    }
 }

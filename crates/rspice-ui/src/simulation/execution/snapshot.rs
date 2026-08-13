@@ -17,6 +17,7 @@ use crate::simulation::output_contract::{
     PreparedSavedOutput, output_kind_tag, policy_tag, precision_tag, streaming_tag,
 };
 use crate::simulation::plan::AnalysisNumericOverride;
+use crate::simulation::run_set::{RunSetDimensionKind, RunSetState};
 use crate::state::{
     AnalysisResultSourceDomain, Point, PreparedModelSourceIdentity, PreparedRunReceipt,
     PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRunIntent,
@@ -366,6 +367,9 @@ pub(in crate::simulation) struct PreparedTask {
     /// never dispatched, so this is the only record of which base analysis it
     /// ran and where this point sits in the space it declared.
     declared_point: Option<crate::simulation::point_family::DeclaredRunPoint>,
+    /// Temperature and supply overrides applied to the parsed task deck.
+    /// Process selection is already present in `executable_netlist_override`.
+    execution_environment: Option<crate::simulation::runner::AnalysisExecutionEnvironment>,
 }
 
 impl PreparedTask {
@@ -397,6 +401,7 @@ impl PreparedTask {
             executable_netlist_override: None,
             pvt_point: None,
             declared_point: None,
+            execution_environment: None,
         }
     }
 
@@ -465,13 +470,27 @@ impl PreparedTask {
     }
 
     fn payload_digest(&self) -> ContentDigest {
-        analysis_config_digest(
+        let analysis_digest = analysis_config_digest(
             &self.task.analysis_line,
             &self.task.spec,
             self.task.config.as_ref(),
             &self.task.spec_options,
             self.task.numeric_override.as_ref(),
-        )
+        );
+        let Some(environment) = self.execution_environment else {
+            return analysis_digest;
+        };
+        let mut writer = CanonicalWriter::new("rspice.analysis-run-set-environment/v1");
+        writer.digest(analysis_digest);
+        writer.f64(environment.temperature_celsius);
+        writer.option(environment.supply_voltage.as_ref(), |writer, voltage| {
+            writer.f64(*voltage);
+        });
+        writer.option(
+            environment.nominal_supply_voltage.as_ref(),
+            |writer, voltage| writer.f64(*voltage),
+        );
+        writer.finish()
     }
 }
 
@@ -589,6 +608,7 @@ pub(in crate::simulation) struct AuthorizedTaskDispatch {
     touchstone_export: TouchstoneExportPolicy,
     pvt_point: Option<crate::state::AnalysisResultPvtPoint>,
     declared_point: Option<crate::simulation::point_family::DeclaredRunPoint>,
+    execution_environment: Option<crate::simulation::runner::AnalysisExecutionEnvironment>,
 }
 
 /// A prepared task paired with the exact batch-local artifacts required by
@@ -769,12 +789,14 @@ impl ResolvedTaskDispatch {
         Arc<str>,
         crate::simulation::veriloga::PreparedVerilogARuntimeSet,
         ResolvedExecutionDependencies,
+        Option<crate::simulation::runner::AnalysisExecutionEnvironment>,
     ) {
         (
             self.dispatch.task,
             self.dispatch.executable_netlist,
             self.dispatch.project_veriloga_runtimes,
             self.dependencies,
+            self.dispatch.execution_environment,
         )
     }
 }
@@ -789,6 +811,9 @@ pub(in crate::simulation) struct SnapshotParts {
     pub(in crate::simulation) source_digest: ContentDigest,
     pub(in crate::simulation) reference_process: ProcessCorner,
     pub(in crate::simulation) reference_temperature_celsius: f64,
+    /// Global Studio Run Set. Manual decks retain their authored `.step`,
+    /// `.temp`, and corner directives and therefore leave this absent.
+    pub(in crate::simulation) run_set: Option<PreparedRunSet>,
     pub(in crate::simulation) tasks: Vec<PreparedTask>,
     pub(in crate::simulation) executable_netlist: String,
     pub(in crate::simulation) save_policy: SavePolicy,
@@ -804,6 +829,28 @@ pub(in crate::simulation) struct SnapshotParts {
     pub(in crate::simulation) touchstone_export: TouchstoneExportPolicy,
     pub(in crate::simulation) sealed_source_dependencies:
         Vec<rspice_core::netlist::ResolvedIncludeDependency>,
+}
+
+/// Validated inputs needed to turn the Studio's global Run Set into exact
+/// point-specific tasks. The authored state preserves disabled axes and
+/// filtered point identities; the runner configuration supplies sealed model
+/// bindings and nominal-voltage behavior.
+#[derive(Debug, Clone)]
+pub(in crate::simulation) struct PreparedRunSet {
+    state: RunSetState,
+    corner_contract: crate::services::simulation_runner::CornerRunConfig,
+}
+
+impl PreparedRunSet {
+    pub(in crate::simulation) fn new(
+        state: RunSetState,
+        corner_contract: crate::services::simulation_runner::CornerRunConfig,
+    ) -> Self {
+        Self {
+            state,
+            corner_contract,
+        }
+    }
 }
 
 /// Complete immutable execution tuple produced by preflight.
@@ -913,14 +960,25 @@ impl PreparedRunSnapshot {
             &parts.tasks,
             parts.reference_process,
             parts.reference_temperature_celsius,
+            parts.run_set.as_ref(),
         )?;
-        parts.tasks = expand_pvt_point_tasks(
-            parts.tasks,
-            &pvt_points,
-            &parts.executable_netlist,
-            parts.reference_process,
-            parts.reference_temperature_celsius,
-        )?;
+        parts.tasks = if parts.run_set.is_some() {
+            expand_global_run_set_tasks(
+                parts.tasks,
+                &pvt_points,
+                &parts.executable_netlist,
+                parts.reference_process,
+                parts.reference_temperature_celsius,
+            )?
+        } else {
+            expand_pvt_point_tasks(
+                parts.tasks,
+                &pvt_points,
+                &parts.executable_netlist,
+                parts.reference_process,
+                parts.reference_temperature_celsius,
+            )?
+        };
 
         // A per-analysis solver override reaches the engine exactly the way the
         // plan's own policy does: as an `.OPTIONS` card in the deck. Splicing
@@ -1367,6 +1425,7 @@ impl PreparedRunSnapshot {
                     touchstone_export,
                     pvt_point: prepared.pvt_point,
                     declared_point: prepared.declared_point,
+                    execution_environment: prepared.execution_environment,
                 }
             })
             .collect();
@@ -1476,6 +1535,232 @@ fn point_is_nominal(
         (Some(voltage), Some(nominal)) => voltage == nominal,
         (Some(_), None) => false,
     }
+}
+
+/// Expand every ordinary plan analysis across the Studio's global Run Set.
+///
+/// The point identity is part of the task identity, configuration digest,
+/// prepared source, result attribution, and dependency mapping. This keeps the
+/// forecasted matrix and the authorized worker queue as one actual expansion
+/// instead of a nominal task accompanied by descriptive PVT metadata.
+fn expand_global_run_set_tasks(
+    tasks: Vec<PreparedTask>,
+    pvt_points: &[PreparedPvtPoint],
+    executable_netlist: &str,
+    reference_process: ProcessCorner,
+    reference_temperature_celsius: f64,
+) -> Result<Vec<PreparedTask>, PreparationError> {
+    if pvt_points.is_empty() {
+        return Err(PreparationError::new(
+            PreparationStage::AnalysisPlan,
+            "Global Run Set did not produce any execution points",
+        ));
+    }
+    let requested = tasks.len().checked_mul(pvt_points.len()).ok_or_else(|| {
+        PreparationError::new(
+            PreparationStage::AnalysisPlan,
+            "Global Run Set task count overflowed the platform task capacity",
+        )
+    })?;
+    ensure_pvt_point_capacity(
+        0,
+        requested,
+        rspice_core::ResourceLimits::default().max_batch_runs,
+    )?;
+
+    // The remaining spec-driven analysis families still own internal sweep
+    // services that do not accept a single prepared environment. Refuse them
+    // here instead of running them once at nominal while the Studio reports a
+    // point matrix. Config-backed DC/AC/transient/noise/PZ/sensitivity tasks
+    // all use the shared EngineBridge environment path below.
+    if let Some(task) = tasks.iter().find(|task| task.task.config.is_none()) {
+        return Err(PreparationError::new(
+            PreparationStage::AnalysisPlan,
+            format!(
+                "{} cannot yet execute inside the global multi-point Run Set; disable its Run Set axes or remove the analysis",
+                task.label
+            ),
+        ));
+    }
+
+    let mut prepared_sources = Vec::with_capacity(pvt_points.len());
+    for point in pvt_points {
+        prepared_sources.push(prepare_pvt_point_source(executable_netlist, point)?);
+    }
+
+    let mut identities = HashMap::with_capacity(requested);
+    for task in &tasks {
+        for (point_index, point) in pvt_points.iter().enumerate() {
+            let identity = if pvt_points.len() == 1 {
+                task.instance_id
+            } else {
+                let corner_digest = point
+                    .corner_contract
+                    .as_ref()
+                    .map(corner_contract_digest)
+                    .map_or_else(|| "none".to_owned(), |digest| digest.to_string());
+                AnalysisInstanceId::from_namespace(
+                    task.instance_id.as_uuid(),
+                    format!(
+                        "rspice-global-run-set/v1/{point_index}/{}/{:016x}/{:016x}/{corner_digest}",
+                        process_tag(point.process),
+                        point.voltage.map(f64::to_bits).unwrap_or_default(),
+                        point.temperature_celsius.to_bits(),
+                    )
+                    .as_bytes(),
+                )
+            };
+            identities.insert((task.instance_id, point_index), identity);
+        }
+    }
+
+    let mut expanded = Vec::with_capacity(requested);
+    let mut task_points = Vec::with_capacity(requested);
+    for task in tasks {
+        let original_identity = task.instance_id;
+        let original_label = task.label.clone();
+        for (point_index, point) in pvt_points.iter().enumerate() {
+            let instance_id = identities[&(original_identity, point_index)];
+            let mut point_task = task.clone();
+            point_task.instance_id = instance_id;
+            point_task.dependencies = task
+                .dependencies
+                .iter()
+                .map(|dependency| {
+                    identities
+                        .get(&(*dependency, point_index))
+                        .copied()
+                        .ok_or_else(|| {
+                            PreparationError::new(
+                                PreparationStage::AnalysisPlan,
+                                format!(
+                                    "Run Set task {} references missing dependency {} at point {}",
+                                    original_identity,
+                                    dependency,
+                                    point_index + 1
+                                ),
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let (source_override, nominal_supply_voltage) = &prepared_sources[point_index];
+            point_task.executable_netlist_override = source_override.clone();
+            point_task.pvt_point = Some(
+                crate::state::AnalysisResultPvtPoint::new(
+                    point.process.short_name(),
+                    point.voltage,
+                    point.temperature_celsius,
+                    point.corner_contract.as_ref().map(corner_contract_digest),
+                    point_is_nominal(
+                        point,
+                        *nominal_supply_voltage,
+                        reference_process,
+                        reference_temperature_celsius,
+                    ),
+                )
+                .map_err(|error| {
+                    PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!(
+                            "Run Set point {}/{} cannot be attributed: {error}",
+                            point_index + 1,
+                            pvt_points.len()
+                        ),
+                    )
+                })?,
+            );
+
+            if let Some(mut config) = operating_point_config(&point_task.task.spec) {
+                use crate::simulation::dialog::OpRunPointContext;
+                config.temperature_celsius = point.temperature_celsius;
+                config.run_point = OpRunPointContext {
+                    index: point_index,
+                    count: pvt_points.len(),
+                    process: point.process,
+                    supply_voltage: point.voltage,
+                    nominal_supply_voltage: *nominal_supply_voltage,
+                };
+                point_task.task.spec = operating_point_spec(&config);
+                point_task.task.config = Some(crate::simulation::AnalysisConfig::DcOp(config));
+                point_task.execution_environment = None;
+            } else {
+                if let Some(crate::simulation::AnalysisConfig::Noise(config)) =
+                    point_task.task.config.as_mut()
+                {
+                    config.temperature_kelvin =
+                        rspice_core::constants::celsius_to_kelvin(point.temperature_celsius);
+                }
+                if let AnalysisSpec::Noise { temperature, .. } = &mut point_task.task.spec {
+                    *temperature =
+                        rspice_core::constants::celsius_to_kelvin(point.temperature_celsius);
+                }
+                point_task.execution_environment =
+                    Some(crate::simulation::runner::AnalysisExecutionEnvironment {
+                        temperature_celsius: point.temperature_celsius,
+                        supply_voltage: point.voltage,
+                        nominal_supply_voltage: *nominal_supply_voltage,
+                    });
+            }
+
+            if pvt_points.len() > 1 {
+                point_task.label = format!(
+                    "{original_label} · point {}/{} · {} · {} °C",
+                    point_index + 1,
+                    pvt_points.len(),
+                    point.process.short_name(),
+                    point.temperature_celsius,
+                );
+            }
+            point_task.saved_output_contracts = task
+                .saved_output_contracts
+                .iter()
+                .map(|contract| {
+                    contract
+                        .rebind_analysis(instance_id, &point_task.task.spec)
+                        .map_err(|error| {
+                            PreparationError::new(
+                                PreparationStage::AnalysisPlan,
+                                format!(
+                                    "Failed to bind saved output to Run Set point {}/{}: {error}",
+                                    point_index + 1,
+                                    pvt_points.len()
+                                ),
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            point_task.config_digest = point_task.payload_digest();
+            task_points.push((original_identity, point_index));
+            expanded.push(point_task);
+        }
+    }
+
+    let producer_details = expanded
+        .iter()
+        .map(|task| (task.instance_id, (task.source_revision, task.config_digest)))
+        .collect::<HashMap<_, _>>();
+    for (task, (_, point_index)) in expanded.iter_mut().zip(task_points) {
+        for binding in &mut task.dependency_bindings {
+            let producer = identities
+                .get(&(binding.producer_instance_id(), point_index))
+                .copied()
+                .ok_or_else(|| {
+                    PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!(
+                            "Run Set dependency binding references missing producer {} at point {}",
+                            binding.producer_instance_id(),
+                            point_index + 1
+                        ),
+                    )
+                })?;
+            let (revision, digest) = producer_details[&producer];
+            binding.rebind_producer(producer, revision, digest);
+        }
+    }
+
+    Ok(expanded)
 }
 
 /// Expand every task that is declared over the run set's PVT points into one
@@ -1976,6 +2261,7 @@ fn derive_pvt_points(
     tasks: &[PreparedTask],
     reference_process: ProcessCorner,
     reference_temperature_celsius: f64,
+    run_set: Option<&PreparedRunSet>,
 ) -> Result<Vec<PreparedPvtPoint>, PreparationError> {
     if !reference_temperature_celsius.is_finite() {
         return Err(PreparationError::new(
@@ -1985,6 +2271,73 @@ fn derive_pvt_points(
     }
 
     let max_pvt_points = rspice_core::ResourceLimits::default().max_batch_runs;
+    if let Some(run_set) = run_set {
+        let validation = crate::simulation::run_set::validate(&run_set.state, tasks.len());
+        if let Some(error) = validation.errors.first() {
+            return Err(PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!("Run Set is not executable: {}", error.message),
+            ));
+        }
+        let points = crate::simulation::run_set::resolve(&run_set.state).ok_or_else(|| {
+            PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                "Run Set could not be expanded into exact execution points",
+            )
+        })?;
+        ensure_pvt_point_capacity(0, points.len(), max_pvt_points)?;
+
+        let mut prepared = Vec::with_capacity(points.len());
+        for point in points {
+            let mut process = reference_process;
+            let mut voltage = None;
+            let mut temperature_celsius = reference_temperature_celsius;
+            for (dimension, value) in point.coordinates {
+                let canonical = value.canonical.ok_or_else(|| {
+                    PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!("Run Set value {:?} is not executable", value.lexical),
+                    )
+                })?;
+                match dimension.kind {
+                    RunSetDimensionKind::ProcessSection => {
+                        process = match canonical as usize {
+                            0 => ProcessCorner::TT,
+                            1 => ProcessCorner::SS,
+                            2 => ProcessCorner::FF,
+                            3 => ProcessCorner::SF,
+                            4 => ProcessCorner::FS,
+                            _ => {
+                                return Err(PreparationError::new(
+                                    PreparationStage::AnalysisPlan,
+                                    format!(
+                                        "Run Set process section {:?} is not supported",
+                                        value.lexical
+                                    ),
+                                ));
+                            }
+                        };
+                    }
+                    RunSetDimensionKind::Supply => voltage = Some(canonical),
+                    RunSetDimensionKind::Temperature => temperature_celsius = canonical,
+                }
+            }
+            prepared.push(PreparedPvtPoint {
+                process,
+                voltage,
+                temperature_celsius,
+                corner_contract: Some(run_set.corner_contract.clone()),
+            });
+        }
+        if prepared.is_empty() {
+            return Err(PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                "Run Set did not produce any execution points",
+            ));
+        }
+        return Ok(prepared);
+    }
+
     let mut expanded = Vec::new();
     let mut found_explicit_axis = false;
     for prepared in tasks {

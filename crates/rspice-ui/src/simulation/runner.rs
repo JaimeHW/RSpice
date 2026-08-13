@@ -6,6 +6,7 @@
 //! - Abort capability
 //! - Result caching
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::{
     Arc, Mutex, MutexGuard,
@@ -43,6 +44,37 @@ pub struct SpecExecutionOptions {
     pub pstb: Option<crate::services::simulation_runner::PstbRunConfig>,
 }
 
+/// Per-task operating environment selected by the Studio Run Set.
+/// Process-model selection is already materialized into the prepared source;
+/// these values cover the two inputs that must be applied to the parsed deck
+/// immediately before any analysis is dispatched.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AnalysisExecutionEnvironment {
+    pub temperature_celsius: f64,
+    pub supply_voltage: Option<f64>,
+    pub nominal_supply_voltage: Option<f64>,
+}
+
+/// One fully accepted transient point published by the engine while the
+/// producing analysis is still running. Only retained analog traces are
+/// included, so the message is compact and has the same names as the final
+/// result conversion.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TransientSampleDelta {
+    pub time: f64,
+    pub waveforms: Vec<TransientWaveformSample>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TransientWaveformSample {
+    pub name: String,
+    pub value: f64,
+    pub y_unit: String,
+}
+
 //=============================================================================
 // Simulation Runner
 //=============================================================================
@@ -62,6 +94,8 @@ pub(crate) struct NetlistInput {
     source_path: Option<PathBuf>,
     project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     dependencies: ResolvedExecutionDependencies,
+    environment: Option<AnalysisExecutionEnvironment>,
+    stream_transient_samples: bool,
 }
 
 /// Thread-safe simulation runner
@@ -74,6 +108,11 @@ pub struct SimulationRunner {
 
     /// Abort flag
     abort_flag: Arc<AtomicBool>,
+
+    /// Accepted transient points waiting for the UI controller. This is
+    /// deliberately separate from progress: progress may be coalesced, while
+    /// waveform samples must remain lossless and ordered.
+    transient_samples: Arc<Mutex<VecDeque<TransientSampleDelta>>>,
 
     /// Current simulation thread handle
     thread_handle: Option<JoinHandle<Result<SimulationResult, SimulationError>>>,
@@ -98,6 +137,7 @@ impl SimulationRunner {
         Self {
             progress: Arc::new(Mutex::new(SimulationProgress::default())),
             abort_flag: Arc::new(AtomicBool::new(false)),
+            transient_samples: Arc::new(Mutex::new(VecDeque::new())),
             thread_handle: None,
             pending_result: None,
             #[cfg(target_arch = "wasm32")]
@@ -140,6 +180,20 @@ impl SimulationRunner {
         self.worker_handle.abort();
     }
 
+    /// Drain every accepted transient point published since the previous UI
+    /// update. The engine has already retained the authoritative full result;
+    /// this queue exists only for responsive live presentation.
+    pub(in crate::simulation) fn drain_transient_samples(&self) -> Vec<TransientSampleDelta> {
+        let mut samples = match self.transient_samples.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                log::warn!("Recovered poisoned live-transient queue in runner");
+                poisoned.into_inner()
+            }
+        };
+        samples.drain(..).collect()
+    }
+
     /// Abort and discard all runner-local completion/progress state.
     ///
     /// Native worker threads cannot be force-killed, but setting the shared
@@ -151,6 +205,7 @@ impl SimulationRunner {
         self.pending_result = None;
         self.abort_flag = Arc::new(AtomicBool::new(false));
         self.progress = Arc::new(Mutex::new(SimulationProgress::default()));
+        self.transient_samples = Arc::new(Mutex::new(VecDeque::new()));
 
         #[cfg(target_arch = "wasm32")]
         {
@@ -254,8 +309,9 @@ impl SimulationRunner {
     pub(in crate::simulation) fn start_prepared(
         &mut self,
         dispatch: ResolvedTaskDispatch,
+        stream_transient_samples: bool,
     ) -> Result<(), SimulationError> {
-        let (task, executable_netlist, project_veriloga_runtimes, dependencies) =
+        let (task, executable_netlist, project_veriloga_runtimes, dependencies, environment) =
             dispatch.into_runner_parts();
         let request = match task.config {
             Some(config) => SimulationRequest::Config(Box::new(config)),
@@ -271,6 +327,8 @@ impl SimulationRunner {
                 source_path: None,
                 project_veriloga_runtimes,
                 dependencies,
+                environment,
+                stream_transient_samples,
             },
         )
     }
@@ -298,6 +356,8 @@ impl SimulationRunner {
                 source_path,
                 project_veriloga_runtimes: Default::default(),
                 dependencies: Default::default(),
+                environment: None,
+                stream_transient_samples: false,
             },
         )
     }
@@ -313,6 +373,10 @@ impl SimulationRunner {
 
         // Reset state
         self.abort_flag.store(false, Ordering::SeqCst);
+        match self.transient_samples.lock() {
+            Ok(mut samples) => samples.clear(),
+            Err(poisoned) => poisoned.into_inner().clear(),
+        }
         {
             let mut progress = lock_progress(&self.progress, "SimulationRunner::start_request");
             *progress = SimulationProgress::new();
@@ -321,6 +385,9 @@ impl SimulationRunner {
         // Clone Arcs for the thread
         let progress = Arc::clone(&self.progress);
         let abort_flag = Arc::clone(&self.abort_flag);
+        let transient_samples = input
+            .stream_transient_samples
+            .then(|| Arc::clone(&self.transient_samples));
 
         // Spawn simulation thread with real engine. Browser builds route
         // through the module worker so the egui UI thread stays responsive.
@@ -328,7 +395,7 @@ impl SimulationRunner {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let handle = std::thread::spawn(move || {
-                run_simulation_thread(request, input, progress, abort_flag)
+                run_simulation_thread(request, input, progress, abort_flag, transient_samples)
             });
             self.thread_handle = Some(handle);
         }
@@ -340,6 +407,7 @@ impl SimulationRunner {
                 input,
                 progress,
                 abort_flag,
+                transient_samples,
             )?;
         }
         Ok(())
@@ -363,6 +431,7 @@ fn lock_progress<'a>(
 }
 
 pub(in crate::simulation::runner) type ProgressObserver = fn(&SimulationProgress);
+pub(in crate::simulation::runner) type TransientSampleObserver = fn(&TransientSampleDelta);
 
 fn notify_progress(progress: &SimulationProgress, observer: Option<ProgressObserver>) {
     if let Some(observer) = observer {
@@ -377,6 +446,8 @@ struct RunnerSignal {
     abort_flag: Arc<AtomicBool>,
     progress: Arc<Mutex<SimulationProgress>>,
     progress_observer: Option<ProgressObserver>,
+    transient_samples: Option<Arc<Mutex<VecDeque<TransientSampleDelta>>>>,
+    transient_sample_observer: Option<TransientSampleObserver>,
 }
 
 impl rspice_core::abort_signal::AbortSignal for RunnerSignal {
@@ -388,6 +459,66 @@ impl rspice_core::abort_signal::AbortSignal for RunnerSignal {
         let mut p = lock_progress(&self.progress, "observe_progress");
         p.observe_engine_fraction(fraction);
         notify_progress(&p, self.progress_observer);
+    }
+
+    fn observe_transient_sample(&self, result: &rspice_core::engine::TransientResult) {
+        let Some(&time) = result.time.last() else {
+            return;
+        };
+        let mut waveforms = Vec::with_capacity(
+            result
+                .voltages
+                .len()
+                .saturating_add(result.branch_currents.len()),
+        );
+        for (index, values) in result.voltages.iter().enumerate() {
+            let Some(&value) = values.last() else {
+                continue;
+            };
+            let name = result
+                .node_names
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| (index + 1).to_string());
+            waveforms.push(TransientWaveformSample {
+                name,
+                value,
+                y_unit: "V".to_owned(),
+            });
+        }
+        for (index, values) in result.branch_currents.iter().enumerate() {
+            let Some(&value) = values.last() else {
+                continue;
+            };
+            let branch = result
+                .branch_names
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| format!("branch{}", index + 1));
+            let name = if branch.len() >= 3
+                && (branch.starts_with("I(") || branch.starts_with("i("))
+                && branch.ends_with(')')
+            {
+                branch
+            } else {
+                format!("I({branch})")
+            };
+            waveforms.push(TransientWaveformSample {
+                name,
+                value,
+                y_unit: "A".to_owned(),
+            });
+        }
+        let delta = TransientSampleDelta { time, waveforms };
+        if let Some(samples) = &self.transient_samples {
+            match samples.lock() {
+                Ok(mut samples) => samples.push_back(delta.clone()),
+                Err(poisoned) => poisoned.into_inner().push_back(delta.clone()),
+            }
+        }
+        if let Some(observer) = self.transient_sample_observer {
+            observer(&delta);
+        }
     }
 }
 
@@ -628,8 +759,17 @@ fn run_simulation_thread(
     input: NetlistInput,
     progress: Arc<Mutex<SimulationProgress>>,
     abort_flag: Arc<AtomicBool>,
+    transient_samples: Option<Arc<Mutex<VecDeque<TransientSampleDelta>>>>,
 ) -> Result<SimulationResult, SimulationError> {
-    run_simulation_thread_with_progress_observer(request, input, progress, abort_flag, None)
+    run_simulation_thread_with_progress_observer(
+        request,
+        input,
+        progress,
+        abort_flag,
+        None,
+        transient_samples,
+        None,
+    )
 }
 
 pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observer(
@@ -638,6 +778,8 @@ pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observe
     progress: Arc<Mutex<SimulationProgress>>,
     abort_flag: Arc<AtomicBool>,
     progress_observer: Option<ProgressObserver>,
+    transient_samples: Option<Arc<Mutex<VecDeque<TransientSampleDelta>>>>,
+    transient_sample_observer: Option<TransientSampleObserver>,
 ) -> Result<SimulationResult, SimulationError> {
     use super::engine_bridge::EngineBridge;
 
@@ -701,6 +843,8 @@ pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observe
         abort_flag: abort_flag.clone(),
         progress: progress.clone(),
         progress_observer,
+        transient_samples,
+        transient_sample_observer,
     };
 
     let result = match request {
@@ -711,14 +855,11 @@ pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observe
                 .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
             // Run simulation via engine bridge with abort support
             log::info!("Running simulation via engine bridge: {:?}", config);
-            match bridge.run_with_abort_and_source_path(
+            match bridge.run_with_abort_and_source_path_and_environment(
                 &config,
                 &input.netlist,
                 input.source_path.as_deref(),
-                // A configuration-backed request states its own conditions:
-                // an operating point carries its typed run point, and every
-                // other deck stands exactly as written.
-                None,
+                input.environment,
                 &signal,
             ) {
                 Ok(r) => {
@@ -732,6 +873,12 @@ pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observe
             }
         }
         SimulationRequest::Spec { spec, options } => {
+            if input.environment.is_some() {
+                return Err(SimulationError::InvalidConfig(format!(
+                    "{} cannot yet execute inside a multi-point Studio Run Set",
+                    spec.run_type().display_name()
+                )));
+            }
             log::info!("Running simulation via spec path: {:?}", spec.run_type());
             spec::run_spec_request(
                 &bridge,
@@ -929,6 +1076,43 @@ mod tests {
         );
         assert!(!Arc::ptr_eq(&old_abort, &runner.abort_flag));
         assert!(!Arc::ptr_eq(&old_progress, &runner.progress));
+    }
+
+    #[test]
+    fn runner_signal_publishes_only_the_latest_committed_transient_point() {
+        let samples = Arc::new(Mutex::new(VecDeque::new()));
+        let signal = RunnerSignal {
+            abort_flag: Arc::new(AtomicBool::new(false)),
+            progress: Arc::new(Mutex::new(SimulationProgress::default())),
+            progress_observer: None,
+            transient_samples: Some(Arc::clone(&samples)),
+            transient_sample_observer: None,
+        };
+        let result = rspice_core::engine::TransientResult {
+            time: vec![0.0, 2.5e-9],
+            step_sizes: vec![0.0, 2.5e-9],
+            voltages: vec![vec![0.0, 1.25], Vec::new()],
+            branch_currents: vec![vec![0.0, -2.0e-3]],
+            num_nodes: 2,
+            node_names: vec!["out".to_owned(), "discarded".to_owned()],
+            branch_names: vec!["V1".to_owned()],
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+
+        rspice_core::abort_signal::AbortSignal::observe_transient_sample(&signal, &result);
+
+        let sample = samples.lock().unwrap().pop_front().expect("sample queued");
+        assert_eq!(sample.time, 2.5e-9);
+        assert_eq!(sample.waveforms.len(), 2);
+        assert_eq!(sample.waveforms[0].name, "out");
+        assert_eq!(sample.waveforms[0].value, 1.25);
+        assert_eq!(sample.waveforms[0].y_unit, "V");
+        assert_eq!(sample.waveforms[1].name, "I(V1)");
+        assert_eq!(sample.waveforms[1].value, -2.0e-3);
+        assert_eq!(sample.waveforms[1].y_unit, "A");
     }
 
     #[test]

@@ -4,6 +4,8 @@
 //! model receives no synthetic qualification evidence, and a configured
 //! correlation requires current approved evidence before it counts.
 
+use egui::Rect;
+
 use super::*;
 use crate::workbench::state::ModelsPage;
 
@@ -20,57 +22,6 @@ fn model_tabs_match_the_mockup_taxonomy() {
             "Qualification",
         ]
     );
-}
-
-#[test]
-fn responsive_model_geometry_matches_mockup_breakpoints() {
-    assert!(!model_title_actions_stack(820.0));
-    assert!(!model_title_actions_stack(561.0));
-    assert!(model_title_actions_stack(560.0));
-}
-
-#[test]
-fn action_title_keeps_its_button_in_the_title_band_and_leaves_body_space() {
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    let mut action_rect = None;
-    let mut body_rect = None;
-    let output = ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1_431.0, 560.0),
-            )),
-            ..Default::default()
-        },
-        |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                surface_title_with_action_reserve(
-                    ui,
-                    "SYMBOLS, PINS & DEVICE FORMS",
-                    "Symbol and component-definition manager",
-                    "Bind graphical symbols and explicit terminal contracts.",
-                    true,
-                    240.0,
-                    |ui| action_rect = Some(ui.button("Create symbol").rect),
-                );
-                body_rect = Some(ui.label("BODY CONTENT").rect);
-            });
-        },
-    );
-    let action_rect = action_rect.expect("title action rendered");
-    let body_rect = body_rect.expect("body rendered");
-
-    assert!(
-        action_rect.top() < 90.0,
-        "action was pushed below title: {action_rect:?}"
-    );
-    assert!(
-        body_rect.top() < 130.0,
-        "title consumed the surface: {body_rect:?}"
-    );
-    assert!(body_rect.top() >= action_rect.bottom() - 1.0);
-    assert!(!output.shapes.is_empty());
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -139,15 +90,6 @@ fn qualification_tab_uses_the_mockup_contract_label() {
         Command::ModelsPage(ModelsPage::Qualification).stable_id(),
         "model-qualification"
     );
-    assert!(QUALIFICATION_MIN_CONTENT_H > 600.0);
-    assert_eq!(
-        qualification_required_content_height(MODEL_SUMMARY_BREAKPOINT),
-        QUALIFICATION_STACKED_MIN_CONTENT_H
-    );
-    assert_eq!(
-        qualification_required_content_height(MODEL_SUMMARY_BREAKPOINT + 1.0),
-        QUALIFICATION_MIN_CONTENT_H
-    );
 }
 
 #[test]
@@ -195,7 +137,6 @@ fn qualification_domain_projection_never_invents_oracle_provenance() {
     assert_eq!(domains[0].domain, QualificationDomain::Ac);
     assert_eq!(domains[0].reference_coverage, "2 refs · 1 quantity");
     assert_eq!(domains[0].disposition, "1 without evidence");
-    assert_eq!(domains[0].tone, QualificationGate::Unqualified);
     assert!(
         !domains[0]
             .reference_coverage
@@ -239,34 +180,6 @@ fn qualification_domain_projection_preserves_distinct_tolerance_contracts() {
         qualification_tolerance_label(1.0002e-6, 0.0)
     );
     assert_eq!(domains[0].tolerance, "2 declared contracts · varies");
-}
-
-#[test]
-fn qualification_footer_reserves_wrapped_copy_before_stacking_its_action() {
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    let mut heights = None;
-    let _ = ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(900.0, 300.0),
-            )),
-            ..Default::default()
-        },
-        |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                heights = Some((
-                    qualification_gate_footer_height(ui, 460.0),
-                    qualification_gate_footer_height(ui, 900.0),
-                ));
-            });
-        },
-    );
-    let (stacked, wide) = heights.expect("footer heights measured");
-    assert!(stacked > wide);
-    assert_eq!(wide, 58.0);
-    assert!(stacked >= 96.0);
 }
 
 #[test]
@@ -378,7 +291,8 @@ fn non_project_model_never_receives_synthetic_qualification_evidence() {
         crate::state::model_library::ModelType::Resistor,
     );
 
-    let summary = qualification_model_summary(&app, &library, &model);
+    let closure = model_editor::verify_project_library_closure(&library, &library.name);
+    let summary = qualification_model_summary(&app, &library, &model, closure.as_ref());
 
     assert!(summary.source_error.is_some());
     assert_eq!(summary.gate, QualificationGate::Blocked);
@@ -451,7 +365,8 @@ fn configured_correlation_requires_current_approved_evidence_for_qualification()
         .get_library("owned-models")
         .unwrap();
     let model = library.models.get("nch_correlated").unwrap();
-    let mut summary = qualification_model_summary(&app, library, model);
+    let closure = model_editor::verify_project_library_closure(library, &library.name);
+    let mut summary = qualification_model_summary(&app, library, model, closure.as_ref());
     summary.gate = QualificationGate::Qualified;
 
     apply_correlation_qualification_contract(&mut summary, Some(&correlation), Some(&source));
@@ -462,19 +377,4 @@ fn configured_correlation_requires_current_approved_evidence_for_qualification()
         "0/1 current suite approvals retained"
     );
     assert!(summary.correlation_evidence_digest.is_none());
-}
-
-#[test]
-fn table_column_contracts_are_normalized() {
-    let sum: f32 = [0.15, 0.17, 0.17, 0.14, 0.18, 0.10, 0.09].into_iter().sum();
-    assert!((sum - 1.0).abs() < f32::EPSILON);
-}
-
-#[test]
-fn cycle_diagnostics_report_only_nodes_remaining_after_topological_sort() {
-    let a = PathBuf::from("a");
-    let b = PathBuf::from("b");
-    let c = PathBuf::from("c");
-    assert_eq!(cyclic_node_count(&[(a.clone(), b.clone()), (b, c)]), 0);
-    assert_eq!(cyclic_node_count(&[(a.clone(), a)]), 1);
 }

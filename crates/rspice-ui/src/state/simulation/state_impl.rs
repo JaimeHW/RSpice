@@ -4,6 +4,41 @@ use super::*;
 use crate::product::{DatasetId, RunId};
 
 impl SimulationState {
+    /// Materialize one authenticated deferred output from the immutable
+    /// retained source analysis. Stable identities are used so a UI action
+    /// cannot target a different row after history reorder or pruning.
+    pub fn materialize_deferred_saved_output(
+        &mut self,
+        run_id: RunId,
+        analysis_id: u64,
+        receipt_index: usize,
+    ) -> Result<(), String> {
+        let run_index = self
+            .runs
+            .iter()
+            .position(|run| run.run_id == run_id)
+            .ok_or_else(|| "saved-output dataset is no longer retained".to_owned())?;
+        let analysis_index = self.runs[run_index]
+            .analyses
+            .iter()
+            .position(|analysis| analysis.id == analysis_id)
+            .ok_or_else(|| "saved-output analysis is no longer retained".to_owned())?;
+        crate::simulation::output_contract::materialize_deferred_saved_output(
+            &mut self.runs[run_index].analyses[analysis_index],
+            receipt_index,
+        )?;
+        self.runs[run_index].validate_provenance()?;
+
+        if self.active_run_idx == Some(run_index)
+            && self.active_analysis_idx == Some(analysis_index)
+        {
+            self.sync_selected_analysis_waveforms();
+        } else {
+            self.data_version = self.data_version.wrapping_add(1);
+        }
+        Ok(())
+    }
+
     /// Atomically replace yield evidence and its stable dataset authority.
     /// Empty result sets cannot retain stale provenance from a prior run.
     pub fn replace_yield_evidence(
@@ -691,6 +726,54 @@ impl SimulationState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deferred_saved_output_materializes_by_stable_identity_and_refreshes_selection() {
+        let mut analysis =
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
+            ]);
+        analysis.saved_output_receipts.push(SavedOutputReceipt {
+            output_id: crate::product::SavedOutputId::new(),
+            output_revision: crate::product::ObjectRevision::INITIAL,
+            analysis_id: crate::product::AnalysisInstanceId::new(),
+            contract_digest: crate::product::ContentDigest::from_bytes([0x7a; 32]),
+            name: "output_voltage".to_owned(),
+            source_expression: "V(out)".to_owned(),
+            output_kind: crate::state::SavedOutputKind::RawVoltageOrCurrent,
+            save_policy: crate::state::SavedOutputPolicy::OnDemandFromRetainedState,
+            stored_precision: crate::state::SavedOutputPrecision::FullSourcePrecision,
+            streaming: crate::state::SavedOutputStreaming::StoreOnly,
+            status: SavedOutputMaterializationStatus::Deferred,
+        });
+        let mut run = SimulationRun::new(1);
+        let run_id = run.run_id;
+        run.add_analysis(analysis);
+        run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
+            .expect("legacy fixture is explicitly classified");
+        let mut state = SimulationState {
+            runs: vec![run],
+            active_run_idx: Some(0),
+            active_analysis_idx: Some(0),
+            ..SimulationState::default()
+        };
+        let version = state.data_version;
+
+        state
+            .materialize_deferred_saved_output(run_id, 1, 0)
+            .expect("retained source materializes");
+
+        assert_eq!(state.runs[0].analyses[0].waveforms.len(), 2);
+        assert_eq!(state.waveforms.len(), 2);
+        assert!(state.data_version > version);
+        assert!(matches!(
+            state.runs[0].analyses[0].saved_output_receipts[0].status,
+            SavedOutputMaterializationStatus::Materialized {
+                sample_count: 2,
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn the_built_in_retention_limit_applies_until_the_project_states_one() {

@@ -2,8 +2,12 @@
 //!
 //! Configuration for pole-zero analysis (.pz).
 //! Computes poles and zeros of a network transfer function.
+//!
+//! The extraction is a generalized eigenvalue solve, not an iteration, so
+//! there is no iteration count or convergence tolerance to configure — the
+//! ports and which roots to report are the whole contract.
 
-use super::options::parse_si_value;
+use serde::{Deserialize, Deserializer};
 
 /// Pole-Zero analysis type
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -37,10 +41,6 @@ pub struct PzConfig {
     pub transfer_type: PzTransferType,
     /// Analysis type
     pub analysis_type: PzAnalysisType,
-    /// Maximum iterations
-    pub max_iter: u32,
-    /// Tolerance
-    pub tolerance: f64,
 }
 
 impl Default for PzConfig {
@@ -52,8 +52,6 @@ impl Default for PzConfig {
             output_neg: "0".into(),
             transfer_type: PzTransferType::Voltage,
             analysis_type: PzAnalysisType::PolesAndZeros,
-            max_iter: 100,
-            tolerance: 1e-6,
         }
     }
 }
@@ -66,18 +64,11 @@ impl PzConfig {
         if self.output_pos.is_empty() {
             return Err("Output positive node required".into());
         }
-        if self.tolerance <= 0.0 {
-            return Err("Tolerance must be positive".into());
-        }
-        if self.max_iter == 0 {
-            return Err("Max iterations must be at least 1".into());
-        }
         Ok(())
     }
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PzDialogState {
     pub input_pos: String,
     pub input_neg: String,
@@ -85,9 +76,49 @@ pub struct PzDialogState {
     pub output_neg: String,
     pub transfer_idx: usize,
     pub analysis_idx: usize,
-    pub tolerance: String,
     #[serde(skip)]
     pub initialized: bool,
+}
+
+/// Persisted editor state. New fields serialize; retired fields only decode.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedPzDialogState {
+    #[serde(default)]
+    input_pos: String,
+    #[serde(default)]
+    input_neg: String,
+    #[serde(default)]
+    output_pos: String,
+    #[serde(default)]
+    output_neg: String,
+    #[serde(default)]
+    transfer_idx: usize,
+    #[serde(default)]
+    analysis_idx: usize,
+    /// Retired. The eigenvalue extraction has no tolerance to accept, so this
+    /// never reached it. Accepted so earlier projects still open.
+    #[serde(default)]
+    #[allow(dead_code)]
+    tolerance: serde::de::IgnoredAny,
+}
+
+impl<'de> Deserialize<'de> for PzDialogState {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let persisted = PersistedPzDialogState::deserialize(deserializer)?;
+        Ok(Self {
+            input_pos: persisted.input_pos,
+            input_neg: persisted.input_neg,
+            output_pos: persisted.output_pos,
+            output_neg: persisted.output_neg,
+            transfer_idx: persisted.transfer_idx,
+            analysis_idx: persisted.analysis_idx,
+            initialized: false,
+        })
+    }
 }
 
 impl PzDialogState {
@@ -106,13 +137,11 @@ impl PzDialogState {
                 PzAnalysisType::PolesOnly => 1,
                 PzAnalysisType::ZerosOnly => 2,
             },
-            tolerance: format!("{:.0e}", config.tolerance),
             initialized: true,
         }
     }
 
     pub fn to_config(&self) -> Result<PzConfig, String> {
-        let tol = parse_si_value(&self.tolerance).map_err(|e| format!("Bad tolerance: {}", e))?;
         let transfer = match self.transfer_idx {
             0 => PzTransferType::Voltage,
             _ => PzTransferType::Current,
@@ -129,8 +158,6 @@ impl PzDialogState {
             output_neg: self.output_neg.clone(),
             transfer_type: transfer,
             analysis_type: analysis,
-            max_iter: 100,
-            tolerance: tol,
         };
         config.validate()?;
         Ok(config)

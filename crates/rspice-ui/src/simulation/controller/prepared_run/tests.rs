@@ -122,6 +122,11 @@ fn fixture_dir(label: &str) -> PathBuf {
 /// demands one.
 fn technology_free_runnable_state() -> AppState {
     let mut state = AppState::default();
+    for dimension in &mut state.sim_setup.run_set.dimensions {
+        if dimension.kind == crate::simulation::run_set::RunSetDimensionKind::ProcessSection {
+            dimension.enabled = false;
+        }
+    }
     crate::workbench::examples::load_example("Voltage Divider", &mut state.schematic);
     let mut drc = DrcResult::new();
     drc.completed = true;

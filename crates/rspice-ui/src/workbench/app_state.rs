@@ -937,8 +937,9 @@ impl AppState {
             || browser_file_operation_open
     }
 
-    /// Whether a run can start. Every Run affordance (toolbar, run bar, menu,
-    /// F5) gates on this so schematic preflight is consistent everywhere.
+    /// Whether static authored state permits a run. Interactive Run commands
+    /// intentionally remain available while this is false so the complete
+    /// preflight can explain every blocker and offer its remediation route.
     pub fn can_run_simulation(&self) -> bool {
         self.simulation_run_block_reason().is_none()
     }

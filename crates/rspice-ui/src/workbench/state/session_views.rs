@@ -544,13 +544,19 @@ pub enum ModelsWorkbenchDialog {
         title: String,
         subtitle: String,
         source: String,
-        read_only: bool,
+        /// Whether this source can be authored, which offers a route into
+        /// Model Editor. The preview itself is never a writable buffer — it
+        /// holds a copy of the retained bytes with nowhere to write back to.
+        editable: bool,
     },
     CompareModels {
         left_library: String,
         left_model: String,
-        right_library: String,
-        right_model: String,
+        /// The chosen counterpart as `(library, model)`. `None` means the
+        /// dialog is still asking: a comparison against an arbitrary
+        /// definition is not a comparison, so there is no default beyond the
+        /// same card in another library.
+        right: Option<(String, String)>,
     },
     ConfirmPack {
         pack_id: String,
@@ -573,6 +579,12 @@ pub enum ModelsWorkbenchDialog {
         name: String,
         temperature_c: String,
         supply_factor: String,
+    },
+    BindCornerSection {
+        library: String,
+        corner: String,
+        domain: crate::state::model_library::CornerSectionDomain,
+        section: String,
     },
 }
 

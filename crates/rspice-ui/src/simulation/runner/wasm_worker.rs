@@ -37,6 +37,7 @@ fn stale_worker_epoch(current: Option<u64>, incoming: u64) -> bool {
 #[cfg(target_arch = "wasm32")]
 mod browser {
     use std::cell::RefCell;
+    use std::collections::VecDeque;
     use std::rc::Rc;
     use std::sync::{
         Arc, Mutex,
@@ -55,7 +56,9 @@ mod browser {
         validate_worker_request_transfer_buffer_lengths, validate_worker_response_id,
         worker_response_from_value,
     };
-    use crate::simulation::runner::{NetlistInput, SimulationError, SimulationRequest};
+    use crate::simulation::runner::{
+        NetlistInput, SimulationError, SimulationRequest, TransientSampleDelta,
+    };
     use crate::simulation::status::{SimulationProgress, SimulationStatus};
 
     #[derive(Default)]
@@ -63,6 +66,7 @@ mod browser {
         current_worker_epoch: Option<u64>,
         active_request_id: Option<u64>,
         active_progress: Option<Arc<Mutex<SimulationProgress>>>,
+        active_transient_samples: Option<Arc<Mutex<VecDeque<TransientSampleDelta>>>>,
         pending_result: Option<Result<SimulationResult, SimulationError>>,
     }
 
@@ -104,6 +108,7 @@ mod browser {
             if result.is_some() {
                 state.active_request_id = None;
                 state.active_progress = None;
+                state.active_transient_samples = None;
             }
             result
         }
@@ -118,6 +123,7 @@ mod browser {
             state.current_worker_epoch = None;
             state.active_request_id = None;
             state.active_progress = None;
+            state.active_transient_samples = None;
             state.pending_result = Some(Err(SimulationError::Aborted));
             drop(state);
             drop_cached_worker(&self.worker);
@@ -192,6 +198,7 @@ mod browser {
                     if state.active_request_id.is_some() {
                         state.active_request_id = None;
                         state.active_progress = None;
+                        state.active_transient_samples = None;
                         state.pending_result = Some(Err(SimulationError::InvalidConfig(message)));
                     }
                     drop_cached_worker(&worker_cell);
@@ -213,6 +220,7 @@ mod browser {
                     if state.active_request_id.is_some() {
                         state.active_request_id = None;
                         state.active_progress = None;
+                        state.active_transient_samples = None;
                         state.pending_result = Some(Err(SimulationError::InvalidConfig(
                             "browser simulation worker returned an unreadable message".to_string(),
                         )));
@@ -242,6 +250,7 @@ mod browser {
         input: NetlistInput,
         progress: Arc<Mutex<SimulationProgress>>,
         abort_flag: Arc<AtomicBool>,
+        transient_samples: Option<Arc<Mutex<VecDeque<TransientSampleDelta>>>>,
     ) -> Result<(), SimulationError> {
         if handle.is_running() || handle.has_unpolled_result() {
             return Err(SimulationError::AlreadyRunning);
@@ -257,6 +266,7 @@ mod browser {
             let mut state = handle.state.borrow_mut();
             state.active_request_id = Some(id);
             state.active_progress = Some(Arc::clone(&progress));
+            state.active_transient_samples = transient_samples;
             state.pending_result = None;
         }
 
@@ -266,6 +276,7 @@ mod browser {
                 let mut state = handle.state.borrow_mut();
                 state.active_request_id = None;
                 state.active_progress = None;
+                state.active_transient_samples = None;
                 return Err(error);
             }
         };
@@ -274,6 +285,7 @@ mod browser {
             let mut state = handle.state.borrow_mut();
             state.active_request_id = None;
             state.active_progress = None;
+            state.active_transient_samples = None;
             return Err(SimulationError::InvalidConfig(format!(
                 "failed to post simulation request to worker: {}",
                 js_error_message(error)
@@ -288,6 +300,7 @@ mod browser {
         match message_type.as_str() {
             "ready" => handle_ready_message(&data),
             "progress" => handle_progress_message(state, &data),
+            "transientSample" => handle_transient_sample_message(state, &data),
             "result" => handle_result_message(state, &data),
             "error" => handle_error_message(state, &data),
             _ => {}
@@ -377,7 +390,41 @@ mod browser {
         let mut state = state.borrow_mut();
         state.active_request_id = None;
         state.active_progress = None;
+        state.active_transient_samples = None;
         state.pending_result = Some(result);
+    }
+
+    fn handle_transient_sample_message(state: &Rc<RefCell<WorkerState>>, data: &JsValue) {
+        let id = numeric_property(data, "id").unwrap_or(0);
+        let samples = {
+            let state = state.borrow();
+            if stale_result(state.active_request_id, id) {
+                web_sys::console::warn_1(&JsValue::from_str(&format!(
+                    "Ignoring stale simulation worker transient sample id {id}"
+                )));
+                return;
+            }
+            state.active_transient_samples.as_ref().cloned()
+        };
+        let Some(samples) = samples else {
+            return;
+        };
+        let sample = Reflect::get(data, &JsValue::from_str("sample"))
+            .map_err(js_error_message)
+            .and_then(|value| {
+                serde_wasm_bindgen::from_value::<TransientSampleDelta>(value)
+                    .map_err(|error| error.to_string())
+            });
+        let Ok(sample) = sample else {
+            web_sys::console::warn_1(&JsValue::from_str(
+                "Ignoring malformed simulation worker transient sample message",
+            ));
+            return;
+        };
+        match samples.lock() {
+            Ok(mut samples) => samples.push_back(sample),
+            Err(poisoned) => poisoned.into_inner().push_back(sample),
+        }
     }
 
     fn handle_error_message(state: &Rc<RefCell<WorkerState>>, data: &JsValue) {
@@ -396,6 +443,7 @@ mod browser {
 
         state.active_request_id = None;
         state.active_progress = None;
+        state.active_transient_samples = None;
         state.pending_result = Some(Err(SimulationError::InvalidConfig(message)));
     }
 

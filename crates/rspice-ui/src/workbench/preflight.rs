@@ -205,6 +205,59 @@ pub(crate) fn run(app: &mut RSpiceApp) {
     }
 }
 
+/// Run the same governed preflight used by the explicit Preflight command and
+/// queue only the exact immutable snapshot it authorizes. A retained current
+/// report is reusable; the controller still rebuilds and digest-compares the
+/// live contract when it consumes the one-shot permit.
+pub(crate) fn run_and_queue(app: &mut RSpiceApp) {
+    if app.state.simulation.is_running || app.state.simulation.trigger_simulation {
+        app.state.push_user_message(ConsoleMessage::warning(
+            "A simulation is already running or waiting to start".to_owned(),
+        ));
+        return;
+    }
+
+    if queue_retained_run(app) {
+        return;
+    }
+
+    run(app);
+    let _ = queue_retained_run(app);
+}
+
+/// Queue a retained authorized report only while every revision it names is
+/// still current. This is also the dialog's primary action, avoiding a second
+/// preflight pass between review and dispatch.
+fn queue_retained_run(app: &mut RSpiceApp) -> bool {
+    let project_revision = app.state.workspace.project.revision().get();
+    let (topology_root, topology_revision, topology_closure) =
+        configured_topology_revision(&app.state);
+    let current_plan = active_plan_revision(&app.state);
+    let runnable = app
+        .state
+        .workbench
+        .preflight
+        .report
+        .as_ref()
+        .is_some_and(|report| {
+            report.is_runnable_for(
+                project_revision,
+                &topology_root,
+                topology_revision,
+                &topology_closure,
+                current_plan,
+            )
+        });
+    if !runnable {
+        return false;
+    }
+
+    app.state.workbench.preflight.open = false;
+    app.state.request_run_set_simulation();
+    app.state.workbench.activate(Workspace::Simulate);
+    true
+}
+
 fn collect_report(state: &AppState) -> PreflightReport {
     let mut blockers = Vec::new();
     let mut advisories = Vec::new();
@@ -676,8 +729,14 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
 
     match choice {
         DialogChoice::Primary if runnable => {
-            app.state.workbench.preflight.open = false;
-            Command::RunSimulation.execute(app);
+            if !queue_retained_run(app) {
+                app.invalidate_simulation_preflight();
+                app.state.ui.toasts.warn_with_title(
+                    ctx,
+                    "Preflight report expired",
+                    "Run inputs changed before the validated snapshot could be queued",
+                );
+            }
         }
         DialogChoice::Primary | DialogChoice::Cancelled => {
             app.state.workbench.preflight.open = false;
@@ -1420,6 +1479,57 @@ mod tests {
         }
     }
 
+    fn disable_global_process_axis(state: &mut AppState) {
+        for dimension in &mut state.sim_setup.run_set.dimensions {
+            if dimension.kind == crate::simulation::run_set::RunSetDimensionKind::ProcessSection {
+                dimension.enabled = false;
+            }
+        }
+    }
+
+    #[test]
+    fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.schematic = crate::state::SchematicState::default();
+
+        assert!(Command::RunSimulation.is_enabled(&app));
+        Command::RunSimulation.execute(&mut app);
+
+        assert!(!app.state.simulation.trigger_simulation);
+        let report = app
+            .state
+            .workbench
+            .preflight
+            .report
+            .as_ref()
+            .expect("Run retains the same blocked report as explicit preflight");
+        assert!(!report.blockers.is_empty());
+        assert!(app.state.workbench.preflight.open);
+    }
+
+    #[test]
+    fn a_current_retained_report_queues_without_reauthoring_preflight() {
+        let mut app = RSpiceApp::test_instance();
+        let (topology_root, topology_revision, topology_closure) =
+            configured_topology_revision(&app.state);
+        let current_plan = active_plan_revision(&app.state);
+        app.state.workbench.preflight.report = Some(PreflightReport {
+            project_revision: app.state.workspace.project.revision().get(),
+            topology_root,
+            topology_revision,
+            topology_closure,
+            simulation_plan_id: current_plan.map(|(id, _)| id),
+            simulation_plan_revision: current_plan.map(|(_, revision)| revision),
+            blockers: Vec::new(),
+            advisories: Vec::new(),
+            prepared: Some(prepared_contract()),
+        });
+
+        assert!(queue_retained_run(&mut app));
+        assert!(app.state.simulation.trigger_simulation);
+        assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
+    }
+
     #[test]
     fn preflight_uses_the_mockup_workflow_geometry_and_local_breakpoints() {
         assert_eq!(PREFLIGHT_DIALOG_SIZE, DialogSize::SimulationWorkflow);
@@ -1521,6 +1631,7 @@ mod tests {
     #[test]
     fn report_collects_all_independent_blocker_classes() {
         let mut state = AppState::default();
+        disable_global_process_axis(&mut state);
         state.schematic = crate::state::SchematicState::default();
         let plan = state
             .sim_setup
@@ -1575,6 +1686,7 @@ mod tests {
     #[test]
     fn a_non_typical_reference_process_is_the_only_row_that_owns_the_missing_section() {
         let mut state = AppState::default();
+        disable_global_process_axis(&mut state);
         state
             .sim_setup
             .set_reference_pvt(crate::simulation::dialog::corner::ProcessCorner::SS, 27.0)
@@ -1606,6 +1718,7 @@ mod tests {
     #[test]
     fn an_enabled_corner_analysis_names_its_instance_and_sections_in_its_own_row() {
         let mut state = AppState::default();
+        disable_global_process_axis(&mut state);
         let plan = state
             .sim_setup
             .stable_analysis_plan_mut()

@@ -1,0 +1,247 @@
+//! Every control this workspace authors must declare where its effect lands.
+//!
+//! This workspace shipped a "Direct dependencies only" checkbox that was
+//! written to session state and read by nothing, a source preview that took
+//! keystrokes into a per-frame clone and dropped every one, and a card of fixed
+//! prose that could never say anything else. Each was found by reading, one at
+//! a time, long after it landed.
+//!
+//! The check here is mechanical instead. It reads the workspace's own shipped
+//! source, takes every control label authored there, and requires each to
+//! appear in [`CONTROL_EFFECTS`] naming the state or command it moves. That
+//! does not prove the wiring works — only a test per control can do that — but
+//! it makes a control with nowhere to land impossible to add silently, which is
+//! how all three arrived.
+//!
+//! Scanning the source rather than the rendered accessibility tree is
+//! deliberate. egui reports a painted table row and a real button with the same
+//! role and no selection state, so the tree cannot tell a control from a row of
+//! data — an earlier attempt at this drowned in model names. The source can: a
+//! control's label is a literal at its call site.
+//!
+//! ## Adding a line to [`CONTROL_EFFECTS`]
+//!
+//! An entry is a claim that the control has somewhere for its effect to land,
+//! named so a reader can check it against the code. It is not a place to park a
+//! control that does nothing. Prefer wiring the control, or deleting it.
+
+use crate::source_guard::production_source;
+
+#[test]
+fn every_authored_control_declares_its_effect() {
+    const SOURCES: &[(&str, &str)] = &[
+        ("manager.rs", include_str!("manager.rs")),
+        (
+            "manager/specialist_pages.rs",
+            include_str!("manager/specialist_pages.rs"),
+        ),
+    ];
+
+    let mut authored = std::collections::BTreeMap::<String, &str>::new();
+    for (file, source) in SOURCES {
+        for label in authored_control_labels(production_source(source)) {
+            authored.entry(label).or_insert(file);
+        }
+    }
+
+    let undeclared = authored
+        .iter()
+        .filter(|(label, _)| {
+            !CONTROL_EFFECTS
+                .iter()
+                .any(|(control, _)| *control == label.as_str())
+        })
+        .map(|(label, file)| format!("{file}: \"{label}\""))
+        .collect::<Vec<_>>();
+    assert!(
+        undeclared.is_empty(),
+        "controls with no declared effect — wire them, delete them, or add a \
+         line to CONTROL_EFFECTS saying what they move:\n  {}",
+        undeclared.join("\n  ")
+    );
+
+    // The other direction, which is what stops the table rotting: a declared
+    // effect whose control no longer exists is a claim about nothing, and a
+    // table full of those would let the scan quietly stop matching anything.
+    //
+    // This half looks for the label anywhere in the source rather than at a
+    // recognised constructor, because a label can legitimately sit inside the
+    // constructor's argument — `compact_button(if pinned { "Refresh pin" }
+    // else { "Pin source" })`. Catching those in the first direction would
+    // mean parsing Rust; what matters there is the plain form, which is how a
+    // new control is almost always written.
+    let stale = CONTROL_EFFECTS
+        .iter()
+        .filter(|(control, _)| {
+            let literal = format!("\"{control}\"");
+            !SOURCES
+                .iter()
+                .any(|(_, source)| production_source(source).contains(&literal))
+        })
+        .map(|(control, effect)| format!("\"{control}\" ({effect})"))
+        .collect::<Vec<_>>();
+    assert!(
+        stale.is_empty(),
+        "declared effects for controls this workspace no longer authors — \
+         delete the lines:\n  {}",
+        stale.join("\n  ")
+    );
+
+    // A guard that finds nothing passes forever.
+    assert!(
+        authored.len() >= 40,
+        "the scan found only {} authored controls; the label patterns have \
+         stopped matching the source",
+        authored.len()
+    );
+}
+
+/// Control labels authored in a source file, as literals at their call site.
+///
+/// Only the constructors this workspace uses are recognised. A new one has to
+/// be added here, and the count floor in the caller is what makes forgetting
+/// that a red test rather than a silent gap.
+fn authored_control_labels(source: &str) -> Vec<String> {
+    /// `(pattern, whether the label is the pattern's own next literal)`.
+    ///
+    /// `checkbox` and `selectable_label` take the bound value first, so their
+    /// label is the *following* string literal rather than the first argument.
+    const CONSTRUCTORS: &[(&str, bool)] = &[
+        ("ui.button(\"", true),
+        ("compact_button(\"", true),
+        ("egui::Button::new(\"", true),
+        ("ui.link(\"", true),
+        (".hint_text(\"", true),
+        ("ui.checkbox(", false),
+        ("ui.selectable_label(", false),
+    ];
+    let mut labels = Vec::new();
+    for (constructor, immediate) in CONSTRUCTORS {
+        for (index, _) in source.match_indices(constructor) {
+            let rest = &source[index + constructor.len()..];
+            let start = if *immediate {
+                0
+            } else {
+                match rest.find('"') {
+                    Some(at) => at + 1,
+                    None => continue,
+                }
+            };
+            let body = &rest[start..];
+            let Some(end) = body.find('"') else { continue };
+            let label = &body[..end];
+            // A format string is a computed label, not an authored one: its
+            // content belongs to whatever produced it.
+            if label.is_empty() || label.contains('{') || label.contains('\\') {
+                continue;
+            }
+            labels.push(label.to_owned());
+        }
+    }
+    labels.sort();
+    labels.dedup();
+    labels
+}
+
+/// `(control label, the state or command it moves)`.
+const CONTROL_EFFECTS: &[(&str, &str)] = &[
+    // Catalog
+    ("Clear filter", "models_view.catalog_query + project_facet"),
+    ("Clear search", "models_view.catalog_query + part_facet"),
+    (
+        "Search models, parameters or consumers…",
+        "models_view.catalog_query",
+    ),
+    ("Search installed packs…", "models_view.catalog_query"),
+    // Selected model detail
+    ("Pin source", "refresh_library publishes a revision"),
+    ("Refresh pin", "refresh_library publishes a revision"),
+    ("Open source", "models_view.dialog = SourcePreview"),
+    ("Compare…", "models_view.dialog = CompareModels"),
+    ("Model editor…", "Command::ModelEditor"),
+    ("Author project copy…", "Command::ModelCreateProjectCopy"),
+    ("Qualification", "workbench.models_page"),
+    ("Bind to selection…", "bind_component_model_from_catalog"),
+    // Packs and shipped parts
+    ("Browse parts", "models_view.catalog_scope + selected_pack"),
+    ("Refresh snapshot", "refresh_library publishes a revision"),
+    ("Detach…", "models_view.dialog = ConfirmPack"),
+    ("Attach…", "models_view.dialog = ConfirmPack"),
+    ("Show pack", "models_view.catalog_scope + selected_pack"),
+    ("Add to project…", "models_view.dialog = ConfirmPart"),
+    ("Open qualification", "workbench.models_page"),
+    ("Open card", "models_view.dialog = SourcePreview"),
+    // Dialogs
+    ("Cancel", "clears models_view.dialog"),
+    ("Attach pack", "attach_pack publishes a revision"),
+    ("Detach pack", "detach_pack publishes a revision"),
+    ("Add to project", "add_part publishes a revision"),
+    ("Add corner", "add_corner publishes a revision"),
+    ("Open Model Editor", "Command::ModelEditor"),
+    ("Edit in Model Editor…", "Command::ModelEditor"),
+    // Symbols & CDF
+    ("Library manager", "SurfaceId::LibraryCellviewManager"),
+    ("Import symbol", "symbol import dialog"),
+    ("Form designer", "symbol parameter form dialog"),
+    ("Create symbol", "model-bound symbol dialog"),
+    ("Author a variant…", "model-bound symbol dialog"),
+    ("Open symbol editor", "opens the symbol view in Design"),
+    ("Edit form…", "symbol parameter form dialog"),
+    // Corners & sections
+    ("Import section map", "Command::PdkSettings"),
+    ("Add corner…", "models_view.dialog = AddCorner"),
+    ("Bind section…", "models_view.dialog = BindCornerSection"),
+    (
+        "Bind section",
+        "bind_corner_section publishes an authenticated revision",
+    ),
+    (
+        "Validate bindings",
+        "seals and validates the exact model execution plan",
+    ),
+    ("View include graph", "workbench.models_page"),
+    // Bins & geometry
+    ("Import bin map", "Command::PdkSettings"),
+    ("Edit cards…", "Command::ModelEditor"),
+    (
+        "Audit all families",
+        "console receipt from geometry_findings",
+    ),
+    ("Trace schematic", "models_view.dialog = BindingTrace"),
+    // Include graph
+    ("Resolve drift…", "refresh_library publishes a revision"),
+    (
+        "Export manifest",
+        "export_workflow writes the closure manifest",
+    ),
+    (
+        "Direct dependencies only",
+        "models_view.include_direct_only, read by is_direct_closure_member",
+    ),
+    (
+        "Filter definitions or providers…",
+        "models_view.include_definition_query",
+    ),
+    // Qualification
+    (
+        "Compare approved",
+        "QualificationPageAction::CompareRelease",
+    ),
+    (
+        "Release closure",
+        "QualificationPageAction::ReviewReleaseBinding",
+    ),
+    ("Run suite", "QualificationPageAction::RunSuite"),
+    (
+        "Review qualification",
+        "QualificationPageAction::ReviewVectors",
+    ),
+    (
+        "Measurement correlation",
+        "QualificationPageAction::OpenCorrelation",
+    ),
+    (
+        "Review dispositions",
+        "QualificationPageAction::ReviewVectors",
+    ),
+];
