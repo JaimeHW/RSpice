@@ -327,12 +327,20 @@ pub fn document(
             html,
             "<meta property=\"og:description\" content=\"{description}\">"
         );
+        let _ = writeln!(
+            html,
+            "<meta name=\"twitter:description\" content=\"{description}\">"
+        );
     }
     let _ = write!(
         html,
         "<meta property=\"og:title\" content=\"{title}\">\n\
          <meta property=\"og:type\" content=\"article\">\n\
          <meta property=\"og:site_name\" content=\"RSpice\">\n\
+         <meta name=\"twitter:card\" content=\"summary\">\n\
+         <meta name=\"twitter:title\" content=\"{title}\">\n\
+         <link rel=\"rspice-publication-context\" href=\"context.json\">\n\
+         <!--rspice-cloud-head-->\n\
          <link rel=\"stylesheet\" href=\"{PAGE_CSS_PATH}\" integrity=\"{page_css_integrity}\">\n\
          <script type=\"module\" src=\"{PAGE_JS_PATH}\" integrity=\"{page_js_integrity}\"></script>\n\
          </head>\n<body>\n<a class=\"skip-link\" href=\"#publication-content\">Skip to publication content</a>\n\
@@ -340,6 +348,7 @@ pub fn document(
          <div class=\"brand\"><span class=\"brand-mark\" aria-hidden=\"true\">R</span><span>RSpice</span><span class=\"brand-context\">Published circuit</span></div>\n\
          <div class=\"nav-actions\">\n\
          <button class=\"button\" type=\"button\" data-theme-toggle data-js-only hidden><span aria-hidden=\"true\">◐</span><span class=\"button-label\" data-theme-label>System</span></button>\n\
+         <button class=\"button\" type=\"button\" data-embed-copy data-js-only hidden><span aria-hidden=\"true\">&lt;/&gt;</span><span class=\"button-label\">Embed</span></button>\n\
          <button class=\"button primary\" type=\"button\" data-share data-js-only hidden><span aria-hidden=\"true\">↗</span><span class=\"button-label\">Share</span></button>\n\
          </div></nav>\n<header class=\"publication-header\">\n\
          <p class=\"eyebrow\">Immutable engineering publication</p>\n<h1>{title}</h1>\n"
@@ -607,6 +616,14 @@ pub fn document(
     if snapshot.netlist.is_none() && analysis_count == 0 {
         html.push_str("<div class=\"empty-state\"><h3>No additional engineering details were disclosed</h3><p>The publication still carries immutable authorship and renderer provenance below.</p></div>\n");
     }
+    html.push_str(
+        "<section class=\"subsection cloud-context\" data-cloud-context hidden aria-labelledby=\"cloud-context-heading\">\n\
+         <h3 id=\"cloud-context-heading\">Publication history and original artifacts</h3>\n\
+         <div class=\"cloud-context-grid\">\n\
+         <div class=\"surface side-card\"><span class=\"summary-label\">Version</span><strong class=\"cloud-version\" data-cloud-version></strong><nav class=\"version-actions\" data-version-actions aria-label=\"Publication versions\"></nav></div>\n\
+         <div class=\"surface side-card\" data-cloud-artifacts-wrap hidden><span class=\"summary-label\">Original cloud artifacts</span><ul class=\"cloud-artifact-list\" data-cloud-artifacts></ul></div>\n\
+         </div></section>\n",
+    );
     html.push_str("</div></section>\n</main>\n");
 
     if let Some(hydration) = hydration {

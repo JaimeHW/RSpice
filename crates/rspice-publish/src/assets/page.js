@@ -59,7 +59,10 @@ function applyTheme(theme) {
 
 root.classList.add("js-ready");
 for (const element of document.querySelectorAll("[data-js-only]")) element.hidden = false;
-activate(panelForHash(location.hash));
+const embeddedFigurePanel = root.hasAttribute("data-rspice-embed") && !location.hash
+  ? panels.find((panel) => panel.querySelector("figure"))
+  : null;
+activate(embeddedFigurePanel || panelForHash(location.hash));
 applyTheme(storedTheme());
 
 for (const tab of tabs) {
@@ -91,13 +94,14 @@ if (themeButton) {
 const shareButton = document.querySelector("[data-share]");
 if (shareButton) {
   shareButton.addEventListener("click", async () => {
-    const data = { title: document.title, url: location.href };
+    const canonical = document.querySelector('link[rel="canonical"]')?.href || location.href;
+    const data = { title: document.title, url: canonical };
     try {
       if (navigator.share) {
         await navigator.share(data);
         return;
       }
-      await navigator.clipboard.writeText(location.href);
+      await navigator.clipboard.writeText(canonical);
       announce("Publication link copied");
     } catch (error) {
       if (error && error.name === "AbortError") return;
@@ -105,6 +109,100 @@ if (shareButton) {
     }
   });
 }
+
+function escapeAttribute(value) {
+  return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
+const contextLink = document.querySelector('link[rel="rspice-publication-context"]');
+const embedButton = document.querySelector("[data-embed-copy]");
+if (embedButton && contextLink) {
+  embedButton.addEventListener("click", async () => {
+    const base = new URL(".", contextLink.href);
+    const embedUrl = new URL("embed", base).href;
+    const title = (document.querySelector("h1")?.textContent || "RSpice circuit").trim();
+    const markup = `<iframe src="${escapeAttribute(embedUrl)}" title="${escapeAttribute(title)}" loading="lazy" width="100%" height="720" style="border:0" allowfullscreen></iframe>`;
+    try {
+      await navigator.clipboard.writeText(markup);
+      announce("Embed code copied");
+    } catch {
+      announce("Could not copy the embed code");
+    }
+  });
+}
+
+function safeSameOriginUrl(value, prefix) {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value, location.origin);
+    return url.origin === location.origin && url.pathname.startsWith(prefix) ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+function versionLink(label, value) {
+  const url = safeSameOriginUrl(value, "/c/");
+  if (!url) return null;
+  const link = document.createElement("a");
+  link.className = "button";
+  link.href = url.href;
+  link.textContent = label;
+  return link;
+}
+
+async function loadCloudContext() {
+  if (!contextLink) return;
+  try {
+    const response = await fetch(contextLink.href, {
+      cache: "no-cache",
+      credentials: "omit",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return;
+    const context = await response.json();
+    if (!context || typeof context !== "object" || !context.version) return;
+    const number = Number(context.version.number);
+    const total = Number(context.version.total);
+    if (!Number.isSafeInteger(number) || !Number.isSafeInteger(total) || number < 1 || total < number) return;
+
+    const section = document.querySelector("[data-cloud-context]");
+    const version = document.querySelector("[data-cloud-version]");
+    const actions = document.querySelector("[data-version-actions]");
+    if (!section || !version || !actions) return;
+    version.textContent = `Version ${number} of ${total}`;
+    for (const [label, value] of [["Previous", context.version.previous_url], ["Next", context.version.next_url]]) {
+      const link = versionLink(label, value);
+      if (link) actions.append(link);
+    }
+
+    const list = document.querySelector("[data-cloud-artifacts]");
+    const wrap = document.querySelector("[data-cloud-artifacts-wrap]");
+    if (list && wrap && Array.isArray(context.artifacts)) {
+      for (const artifact of context.artifacts) {
+        const download = safeSameOriginUrl(artifact?.download_url, "/api/v1/publications/");
+        if (!download || typeof artifact?.label !== "string" || typeof artifact?.detail !== "string") continue;
+        const item = document.createElement("li");
+        const copy = document.createElement("div");
+        const label = document.createElement("strong");
+        const detail = document.createElement("span");
+        const link = document.createElement("a");
+        label.textContent = artifact.label;
+        detail.textContent = artifact.detail;
+        copy.append(label, detail);
+        link.className = "button";
+        link.href = download.href;
+        link.textContent = "Download";
+        item.append(copy, link);
+        list.append(item);
+      }
+      wrap.hidden = list.childElementCount === 0;
+    }
+    section.hidden = false;
+  } catch {}
+}
+
+void loadCloudContext();
 
 function tagLabel(element) {
   if (element.dataset.instance) return `Component ${element.dataset.instance}`;

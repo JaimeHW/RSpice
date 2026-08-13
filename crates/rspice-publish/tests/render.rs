@@ -52,6 +52,10 @@ fn rc_bundle_carries_every_disclosed_surface() {
     let bundle = render_bundle(&value, "0".repeat(64).as_str(), &viewer()).expect("render");
 
     let page = utf8(&bundle["index.html"]);
+    assert!(page.contains("<!--rspice-cloud-head-->"));
+    assert!(page.contains("rel=\"rspice-publication-context\" href=\"context.json\""));
+    assert!(page.contains("data-embed-copy"));
+    assert!(page.contains("data-cloud-context"));
     assert!(page.contains("RC low-pass step response"));
     assert!(page.contains("id=\"figure-1\""), "schematic figure mounts");
     assert!(page.contains("id=\"figure-2\""), "plot figure mounts");
