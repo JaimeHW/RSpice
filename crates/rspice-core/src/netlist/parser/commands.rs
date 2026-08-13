@@ -1284,9 +1284,38 @@ pub(super) fn parse_options_command(
             break;
         }
 
-        let key = expect_option_key(stream, line_num)?;
+        let (key, key_end) = expect_option_key(stream, line_num)?;
         let key_upper = key.to_uppercase();
         let has_equals = stream.consume(&TokenKind::Equals);
+
+        // A value accepted without `=` must still be separated from its key.
+        // Xyce treats a fused spelling such as `ABSTOL-1e-6` as one unknown
+        // option token; it does not reinterpret the adjacent minus sign as an
+        // assigned negative tolerance. Preserve that lexical boundary so a
+        // malformed key is diagnosed and ignored instead of becoming a fatal
+        // value error for an otherwise valid deck.
+        if !has_equals
+            && stream.peek().span.start == key_end
+            && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
+        {
+            let fused_key = format!("{key_upper}{}", stream.peek().lexeme.to_uppercase());
+            stream.advance();
+            let warning_key = option_package
+                .as_deref()
+                .map_or(fused_key.clone(), |package| {
+                    format!("{package}.{fused_key}")
+                });
+            ignore_unknown_option(
+                stream,
+                line_num,
+                params,
+                false,
+                &warning_key,
+                unknown_warned,
+                diagnostics,
+            );
+            continue;
+        }
 
         if !has_equals && option_package_key_is_known(&key_upper) {
             option_package = Some(key_upper);
@@ -1863,7 +1892,10 @@ fn ignore_unknown_option(
     }
 }
 
-fn expect_option_key(stream: &mut TokenStream, line_num: usize) -> Result<String, ParseError> {
+fn expect_option_key(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<(String, usize), ParseError> {
     skip_commas(stream);
 
     let TokenKind::Ident(first) = &stream.peek().kind else {
@@ -1873,6 +1905,7 @@ fn expect_option_key(stream: &mut TokenStream, line_num: usize) -> Result<String
         });
     };
     let mut key = first.clone();
+    let mut end = stream.peek().span.end;
     stream.advance();
 
     while matches!(stream.peek().kind, TokenKind::Minus)
@@ -1884,10 +1917,11 @@ fn expect_option_key(stream: &mut TokenStream, line_num: usize) -> Result<String
         };
         key.push('-');
         key.push_str(part);
+        end = stream.peek().span.end;
         stream.advance();
     }
 
-    Ok(key)
+    Ok((key, end))
 }
 
 pub(super) fn option_package_key_is_known(key_upper: &str) -> bool {
@@ -5459,6 +5493,21 @@ mod tests {
         assert_eq!(netlist.options.timeint_min_timestep, Some(3.0e-18));
         assert_eq!(netlist.options.reltol, None);
         assert_eq!(netlist.options.abstol, None);
+    }
+
+    #[test]
+    fn fused_option_suffix_is_unknown_instead_of_an_implicit_negative_value() {
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options TIMEINT RELTOL=1e-6 ABSTOL-1e-6",
+        ))
+        .expect("a fused malformed option is nonfatal like Xyce");
+
+        assert_eq!(netlist.options.timeint_reltol, Some(1.0e-6));
+        assert_eq!(netlist.options.timeint_abstol, None);
+        assert!(netlist.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "unknown-option"
+                && diagnostic.message.contains("TIMEINT.ABSTOL-1E-6")
+        }));
     }
 
     #[test]
