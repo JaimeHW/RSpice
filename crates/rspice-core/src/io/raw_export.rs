@@ -175,19 +175,7 @@ impl RawExporter {
     /// Write to any writer
     pub fn write<W: Write>(&self, writer: &mut W, format: RawFormat) -> io::Result<()> {
         self.validate_data_shape()?;
-
-        // Write header
-        writeln!(writer, "Title: {}", self.title)?;
-        writeln!(writer, "Date: {}", chrono_date())?;
-        writeln!(writer, "Plotname: {}", self.plot_name)?;
-        writeln!(writer, "Flags: real")?;
-        writeln!(writer, "No. Variables: {}", self.variables.len())?;
-        writeln!(writer, "No. Points: {}", self.data.len())?;
-        writeln!(writer, "Variables:")?;
-
-        for (i, var) in self.variables.iter().enumerate() {
-            writeln!(writer, "\t{}\t{}\t{}", i, var.name, var.var_type.as_str())?;
-        }
+        self.write_header(writer)?;
 
         match format {
             RawFormat::Binary => {
@@ -210,6 +198,52 @@ impl RawExporter {
             }
         }
 
+        Ok(())
+    }
+
+    /// Write Xyce-compatible ASCII RAW data.
+    ///
+    /// Xyce writes one variable value per physical line: the first line of a
+    /// point contains its index and axis value, followed by one line for each
+    /// dependent variable. This is distinct from the row-oriented ASCII
+    /// layout emitted by [`RawFormat::Ascii`], while sharing the same header
+    /// and typed variable schema.
+    pub fn write_xyce_ascii<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        self.validate_data_shape()?;
+        self.write_header(writer)?;
+        writeln!(writer, "Values:")?;
+        for (index, point) in self.data.iter().enumerate() {
+            let Some((axis, signals)) = point.split_first() else {
+                return Err(invalid_data(format!(
+                    "raw point {index} contains no axis value"
+                )));
+            };
+            writeln!(writer, "{index}\t{axis:.8e}")?;
+            for value in signals {
+                writeln!(writer, "\t{value:.8e}")?;
+            }
+            writeln!(writer)?;
+        }
+        Ok(())
+    }
+
+    fn write_header<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        writeln!(writer, "Title: {}", self.title)?;
+        writeln!(writer, "Date: {}", chrono_date())?;
+        writeln!(writer, "Plotname: {}", self.plot_name)?;
+        writeln!(writer, "Flags: real")?;
+        writeln!(writer, "No. Variables: {}", self.variables.len())?;
+        writeln!(writer, "No. Points: {}", self.data.len())?;
+        writeln!(writer, "Variables:")?;
+        for (index, variable) in self.variables.iter().enumerate() {
+            writeln!(
+                writer,
+                "\t{}\t{}\t{}",
+                index,
+                variable.name,
+                variable.var_type.as_str()
+            )?;
+        }
         Ok(())
     }
 
@@ -416,6 +450,44 @@ mod date_tests {
 #[cfg(test)]
 mod export_tests {
     use super::*;
+    use crate::io::parse_raw_reader;
+    use std::io::Cursor;
+
+    #[test]
+    fn xyce_ascii_export_uses_vertical_layout_and_roundtrips() {
+        let mut exporter = RawExporter::new_transient("Xyce ASCII regression");
+        exporter.add_voltage("1");
+        exporter.add_current("R1");
+        exporter
+            .add_transient_data(&[0.0, 1.0], &[vec![0.0, 1.0], vec![-0.0, 1.0]])
+            .expect("add shaped transient data");
+
+        let mut bytes = Vec::new();
+        exporter
+            .write_xyce_ascii(&mut bytes)
+            .expect("write Xyce-layout ASCII RAW");
+        let text = std::str::from_utf8(&bytes).expect("ASCII RAW is UTF-8");
+        assert!(text.contains(
+            "Values:\n0\t0.00000000e0\n\t0.00000000e0\n\t-0.00000000e0\n\n1\t1.00000000e0"
+        ));
+
+        let parsed = parse_raw_reader(&mut Cursor::new(bytes))
+            .expect("parse exported Xyce-layout ASCII RAW");
+        assert!(!parsed.header.is_binary);
+        assert_eq!(parsed.header.no_variables, 3);
+        assert_eq!(parsed.header.no_points, 2);
+        assert_eq!(
+            parsed
+                .variables
+                .iter()
+                .map(|variable| variable.name.as_str())
+                .collect::<Vec<_>>(),
+            ["time", "V(1)", "I(R1)"]
+        );
+        assert_eq!(parsed.waveforms[0].y, [0.0, 1.0]);
+        assert_eq!(parsed.waveforms[1].y, [0.0, 1.0]);
+        assert_eq!(parsed.waveforms[2].y, [-0.0, 1.0]);
+    }
 
     #[test]
     fn transient_export_rejects_waveform_length_mismatch() {
