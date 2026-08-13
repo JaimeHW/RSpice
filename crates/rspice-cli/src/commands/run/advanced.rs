@@ -944,10 +944,7 @@ fn run_corner_job(
         None => setup.source.clone(),
     };
 
-    let parse_options = rspice_core::netlist::NetlistParseOptions {
-        resource_limits: setup.config.resource_limits,
-        ..rspice_core::netlist::NetlistParseOptions::default()
-    };
+    let parse_options = super::parse_options_for_run(setup.args, setup.config.resource_limits);
     let corner_netlist = match rspice_core::Netlist::parse_with_path_and_options_and_abort(
         &corner_source,
         &setup.base,
@@ -1118,10 +1115,7 @@ fn run_corner_serial_source(
     base: &std::path::Path,
     corner: &str,
 ) -> Result<(bool, bool), CliError> {
-    let parse_options = rspice_core::netlist::NetlistParseOptions {
-        resource_limits: ctx.engine.config().resource_limits,
-        ..rspice_core::netlist::NetlistParseOptions::default()
-    };
+    let parse_options = super::parse_options_for_run(ctx.args, ctx.engine.config().resource_limits);
     let corner_netlist = rspice_core::Netlist::parse_with_path_and_options_and_abort(
         source,
         base,
@@ -1492,10 +1486,8 @@ pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Res
             excited.push_str(line);
             excited.push('\n');
         }
-        let parse_options = rspice_core::netlist::NetlistParseOptions {
-            resource_limits: ctx.engine.config().resource_limits,
-            ..rspice_core::netlist::NetlistParseOptions::default()
-        };
+        let parse_options =
+            super::parse_options_for_run(ctx.args, ctx.engine.config().resource_limits);
         let netlist = rspice_core::Netlist::parse_with_path_and_options_and_abort(
             &excited,
             &base,

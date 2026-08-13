@@ -337,6 +337,19 @@ fn startup_directive_conflict_attributes(
     attributes
 }
 
+fn parameter_redefinition_attributes(
+    error: &rspice_core::netlist::ParameterRedefinitionError,
+) -> ParseErrorAttributes {
+    let mut attributes = ParseErrorAttributes::new("parameter_redefinition");
+    attributes.category = Some("parameter_resolution");
+    attributes.set_primary(&error.duplicate_origin);
+    attributes.set_related(&error.first_origin);
+    attributes.authored_name = Some(error.duplicate_name.clone());
+    attributes.canonical_name = Some(error.canonical_name.clone());
+    attributes.detail = Some(error.kind.to_string());
+    attributes
+}
+
 /// Convert a parse error to PyErr
 pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
     use rspice_core::netlist::{
@@ -381,6 +394,7 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
             attributes.detail = Some(canonical_name.clone());
             attributes
         }
+        CoreParseError::ParameterRedefinition(error) => parameter_redefinition_attributes(error),
         CoreParseError::MissingSubcircuitEnds(error) => {
             let mut attributes = ParseErrorAttributes::new("missing_subcircuit_ends");
             attributes.set_primary(&error.opened_at);
@@ -635,9 +649,38 @@ mod tests {
         DuplicateSubcircuitPortBindingError, GlobalSubcircuitPortBindingError,
         MissingDeviceModelError, NetlistSourceLocation, OutputDirectiveKind, OutputExpressionIssue,
         OutputExpressionValidationError, OutputSymbolKind, OutputSymbolValidationError,
-        StartupDirectiveConflictError, StartupDirectiveKind, UndefinedMutualInductorReferenceError,
-        UndefinedSubcircuitError, UnresolvedOutputSymbol, UnresolvedSubcircuitParameterError,
+        ParameterDefinitionKind, ParameterRedefinitionError, StartupDirectiveConflictError,
+        StartupDirectiveKind, UndefinedMutualInductorReferenceError, UndefinedSubcircuitError,
+        UnresolvedOutputSymbol, UnresolvedSubcircuitParameterError,
     };
+
+    #[test]
+    fn parameter_redefinition_exposes_both_origins_and_public_tags() {
+        let attributes = parameter_redefinition_attributes(&ParameterRedefinitionError {
+            duplicate_name: "fOo".into(),
+            canonical_name: "FOO".into(),
+            kind: ParameterDefinitionKind::Parameter,
+            first_origin: NetlistSourceLocation {
+                path: Some("first.cir".into()),
+                line: 2,
+            },
+            duplicate_origin: NetlistSourceLocation {
+                path: Some("duplicate.cir".into()),
+                line: 7,
+            },
+        });
+        assert_eq!(attributes.kind, "parameter_redefinition");
+        assert_eq!(attributes.category, Some("parameter_resolution"));
+        assert_eq!(attributes.line, Some(7));
+        assert_eq!(attributes.related_line, Some(2));
+        assert_eq!(attributes.authored_name.as_deref(), Some("fOo"));
+        assert_eq!(attributes.canonical_name.as_deref(), Some("FOO"));
+        assert_eq!(attributes.detail.as_deref(), Some(".PARAM"));
+
+        let stub = include_str!("../../rspice.pyi");
+        assert!(stub.contains("\"parameter_redefinition\""));
+        assert!(stub.contains("\"parameter_resolution\""));
+    }
 
     #[test]
     fn duplicate_subcircuit_binding_exposes_structured_python_attributes() {

@@ -29,6 +29,22 @@ use rspice_core::{
 use std::path::PathBuf;
 use std::time::Instant;
 
+fn parse_options_for_run(
+    args: &RunArgs,
+    resource_limits: rspice_core::ResourceLimits,
+) -> rspice_core::netlist::NetlistParseOptions {
+    let mut options = rspice_core::netlist::NetlistParseOptions {
+        resource_limits,
+        ..rspice_core::netlist::NetlistParseOptions::default()
+    };
+    if let Some(mode) = args.redefined_params {
+        let (selection, diagnostic) = mode.parse_policies();
+        options.parameter_redefinition_policy = selection;
+        options.parameter_redefinition_diagnostic_policy = diagnostic;
+    }
+    options
+}
+
 struct RunContext<'a> {
     engine: &'a Engine,
     netlist: &'a Netlist,
@@ -417,10 +433,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     }
 
     let resource_limits = config.resources.limits();
-    let parse_options = rspice_core::netlist::NetlistParseOptions {
-        resource_limits,
-        ..rspice_core::netlist::NetlistParseOptions::default()
-    };
+    let parse_options = parse_options_for_run(&args, resource_limits);
     log::info!("Loading netlist: {}", args.input.display());
     let source = if from_stdin {
         crate::commands::read_stdin_source_with_limits_and_abort(
@@ -1293,10 +1306,7 @@ fn load_netlist_from_source(
     let mut search_paths: Vec<PathBuf> = args.includes.clone();
     search_paths.extend(config.paths.include_paths.iter().cloned());
     search_paths.extend(config.paths.library_paths.iter().cloned());
-    let parse_options = rspice_core::netlist::NetlistParseOptions {
-        resource_limits: config.resources.limits(),
-        ..rspice_core::netlist::NetlistParseOptions::default()
-    };
+    let parse_options = parse_options_for_run(args, config.resources.limits());
 
     let parsed = if search_paths.is_empty() {
         Netlist::parse_with_path_and_options_and_abort(

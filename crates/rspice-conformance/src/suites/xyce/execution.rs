@@ -11,6 +11,7 @@ use super::contracts_bug981::Bug981Role;
 use super::contracts_bug1162::Bug1162Role;
 use super::contracts_bug1398::Bug1398Role;
 use super::contracts_bug1797::Bug1797Role;
+use super::contracts_issue202::Issue202Role;
 use super::*;
 
 impl XyceTestRunner {
@@ -546,6 +547,23 @@ impl XyceTestRunner {
         if let Some(role) = Bug981Role::for_record(&deck.relative_path) {
             let contract = role.contract();
             let result = match self.validate_bug981_oracle(deck, role, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(role) = Issue202Role::for_record(&deck.relative_path) {
+            let contract = role.contract();
+            let result = match self.validate_issue202_oracle(deck, role, start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
@@ -5862,11 +5880,12 @@ impl XyceTestRunner {
         plan: &XyceStaticDcPlan,
         start: Instant,
     ) -> Result<(Netlist, Vec<XyceStepRun>, Vec<XyceDcResultBatch>), SimulationError> {
-        let netlist = Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
+        let netlist = Self::parse_netlist_with_expression_dialect_policies_and_execution_dir(
             &plan.source,
             &plan.deck_path,
             plan.expression_dialect,
             plan.parameter_redefinition_policy,
+            plan.parameter_redefinition_diagnostic_policy,
             plan.execution_dir.as_deref(),
         )
         .map_err(|err| SimulationError::Netlist(format!("{err}")))?;
@@ -13309,11 +13328,12 @@ impl XyceTestRunner {
                 ".STEP static DC execution requires the stepped .prn contract".to_string(),
             ));
         }
-        let netlist = Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
+        let netlist = Self::parse_netlist_with_expression_dialect_policies_and_execution_dir(
             &plan.source,
             &plan.deck_path,
             plan.expression_dialect,
             plan.parameter_redefinition_policy,
+            plan.parameter_redefinition_diagnostic_policy,
             plan.execution_dir.as_deref(),
         )
         .map_err(|err| SimulationError::Netlist(format!("{err}")))?;

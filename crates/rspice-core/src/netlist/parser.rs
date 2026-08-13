@@ -25,7 +25,8 @@ use super::{
     InitialCondition, JfetType, LinAnalysis, MesfetType, MissingSubcircuitEndsBoundary,
     MissingSubcircuitEndsError, ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType,
     Netlist, NetlistSourceLocation, NodeSet, OutputAnalysisKind, OutputDirectiveKind,
-    OutputRequest, ParamContext, ParameterRedefinitionPolicy, ParametricValue, ParseDiagnostic,
+    OutputRequest, ParamContext, ParameterDefinitionKind, ParameterRedefinitionDiagnosticPolicy,
+    ParameterRedefinitionError, ParameterRedefinitionPolicy, ParametricValue, ParseDiagnostic,
     ParseError, ParseWithAbortError, PoleZeroAnalysisType, PoleZeroTransferType, PrintDelimiter,
     PspiceChebyshevKind, PspiceUTiming, PspiceUTimingMode, RemoveUnusedDeviceType,
     RemoveUnusedPolicy, SaveSet, SaveSignal, SensitivityAcSweep, SimulationOptions,
@@ -82,6 +83,7 @@ pub struct NetlistParseOptions {
     pub statistical_mode: StatisticalParamMode,
     pub expression_dialect: ExpressionDialect,
     pub parameter_redefinition_policy: ParameterRedefinitionPolicy,
+    pub parameter_redefinition_diagnostic_policy: ParameterRedefinitionDiagnosticPolicy,
     /// Limits applied before parser-owned collections are materialized.
     pub resource_limits: crate::resource::ResourceLimits,
 }
@@ -92,6 +94,7 @@ impl Default for NetlistParseOptions {
             statistical_mode: StatisticalParamMode::Sample,
             expression_dialect: ExpressionDialect::Ngspice,
             parameter_redefinition_policy: ParameterRedefinitionPolicy::UseLast,
+            parameter_redefinition_diagnostic_policy: ParameterRedefinitionDiagnosticPolicy::Silent,
             resource_limits: crate::resource::ResourceLimits::default(),
         }
     }
@@ -465,6 +468,9 @@ fn parse_netlist_impl(
     state
         .params
         .set_parameter_redefinition_policy(options.parameter_redefinition_policy);
+    state.params.set_parameter_redefinition_diagnostic_policy(
+        options.parameter_redefinition_diagnostic_policy,
+    );
     state.options.replace_ground = preprocess.replace_ground;
     state.options.remove_unused = preprocess.remove_unused;
     state.options.add_resistors = preprocess.add_resistors;

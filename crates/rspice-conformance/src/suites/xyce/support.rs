@@ -1694,13 +1694,30 @@ impl XyceTestRunner {
         expression_dialect: ExpressionDialect,
         parameter_redefinition_policy: ParameterRedefinitionPolicy,
     ) -> Result<XyceStaticDcPlan, String> {
+        self.static_dc_plan_for_path_with_redefinition_policies(
+            deck_path,
+            expression_dialect,
+            parameter_redefinition_policy,
+            rspice_core::netlist::ParameterRedefinitionDiagnosticPolicy::Silent,
+        )
+    }
+
+    pub(super) fn static_dc_plan_for_path_with_redefinition_policies(
+        &self,
+        deck_path: &Path,
+        expression_dialect: ExpressionDialect,
+        parameter_redefinition_policy: ParameterRedefinitionPolicy,
+        parameter_redefinition_diagnostic_policy:
+            rspice_core::netlist::ParameterRedefinitionDiagnosticPolicy,
+    ) -> Result<XyceStaticDcPlan, String> {
         let source =
             fs::read_to_string(deck_path).map_err(|err| format!("failed to read deck: {err}"))?;
-        self.static_dc_plan_for_source_with_execution_dir_and_redefinition_policy(
+        self.static_dc_plan_for_source_with_execution_dir_and_redefinition_policies(
             deck_path,
             source,
             expression_dialect,
             parameter_redefinition_policy,
+            parameter_redefinition_diagnostic_policy,
             None,
         )
     }

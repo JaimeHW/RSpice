@@ -178,6 +178,92 @@ fn malformed_define_is_a_usage_error() {
 }
 
 #[test]
+fn redefined_parameter_modes_select_warn_and_error_at_the_cli_boundary() {
+    let dir = test_dir("redefined_params");
+    let deck = dir.join("duplicate.sp");
+    std::fs::write(
+        &deck,
+        "* duplicate parameter policy\n\
+         .param rbot=1k\n\
+         .param rbot=3k\n\
+         v1 in 0 dc 10\n\
+         r1 in out 1k\n\
+         r2 out 0 {rbot}\n\
+         .op\n\
+         .end\n",
+    )
+    .expect("write duplicate deck");
+
+    let first = dir.join("first.csv");
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--redefined-params",
+        "usefirst",
+        "-o",
+        first.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        output.status.success(),
+        "usefirst failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!((read_op_voltage(&first, "V(OUT)") - 5.0).abs() < 1.0e-9);
+
+    let last = dir.join("last.csv");
+    let output = run_rspice(&[
+        "run",
+        deck.to_str().unwrap(),
+        "--redefined-params",
+        "uselastwarn",
+        "-o",
+        last.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        output.status.success(),
+        "uselastwarn failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!((read_op_voltage(&last, "V(OUT)") - 7.5).abs() < 1.0e-9);
+    let diagnostics = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        diagnostics.contains("Parameter RBOT defined more than once. Using last one."),
+        "warning policy should project the typed diagnostic: {diagnostics}"
+    );
+
+    let rejected = dir.join("rejected.csv");
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--redefined-params",
+        "error",
+        "-o",
+        rejected.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert_eq!(output.status.code(), Some(65));
+    assert!(!rejected.exists(), "error policy must not export a result");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Parameter RBOT defined more than once"),
+        "typed duplicate failure should reach the CLI: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn invalid_solver_controls_are_usage_errors() {
     let dir = test_dir("invalid_solver_controls");
     let deck = dir.join("trivial.sp");

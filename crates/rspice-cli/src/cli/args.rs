@@ -41,6 +41,52 @@ pub enum HealthMode {
     Readiness,
 }
 
+/// Xyce-compatible behavior for a parameter defined more than once in one
+/// lexical scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum RedefinedParamsMode {
+    /// Keep the first definition without a warning.
+    Ignore,
+    /// Keep the first definition and warn for every later definition.
+    #[value(name = "warning", alias = "warn")]
+    Warning,
+    /// Keep the first definition without a warning.
+    #[value(name = "usefirst", alias = "use-first")]
+    UseFirst,
+    /// Keep the first definition and warn for every later definition.
+    #[value(name = "usefirstwarn", alias = "use-first-warn")]
+    UseFirstWarn,
+    /// Keep the last definition without a warning.
+    #[value(name = "uselast", alias = "use-last")]
+    UseLast,
+    /// Keep the last definition and warn for every later definition.
+    #[value(name = "uselastwarn", alias = "use-last-warn")]
+    UseLastWarn,
+    /// Reject the first repeated definition.
+    Error,
+}
+
+impl RedefinedParamsMode {
+    pub fn parse_policies(
+        self,
+    ) -> (
+        rspice_core::netlist::ParameterRedefinitionPolicy,
+        rspice_core::netlist::ParameterRedefinitionDiagnosticPolicy,
+    ) {
+        use rspice_core::netlist::{
+            ParameterRedefinitionDiagnosticPolicy as Diagnostic,
+            ParameterRedefinitionPolicy as Selection,
+        };
+        match self {
+            Self::Ignore | Self::UseFirst => (Selection::UseFirst, Diagnostic::Silent),
+            Self::Warning | Self::UseFirstWarn => (Selection::UseFirst, Diagnostic::Warning),
+            Self::UseLast => (Selection::UseLast, Diagnostic::Silent),
+            Self::UseLastWarn => (Selection::UseLast, Diagnostic::Warning),
+            Self::Error => (Selection::UseFirst, Diagnostic::Error),
+        }
+    }
+}
+
 impl HealthMode {
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -295,6 +341,10 @@ pub struct RunArgs {
     /// Override or define a netlist parameter (repeatable)
     #[arg(short = 'D', long = "define", value_name = "NAME=VALUE")]
     pub defines: Vec<String>,
+
+    /// Xyce-compatible policy for repeated .PARAM definitions
+    #[arg(long = "redefined-params", value_enum, value_name = "MODE")]
+    pub redefined_params: Option<RedefinedParamsMode>,
 
     /// Number of Monte Carlo iterations (enables Monte Carlo mode)
     #[arg(long, value_name = "N")]
@@ -651,4 +701,75 @@ pub enum OutputFormat {
     Tsv,
     /// HDF5 format
     Hdf5,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redefined_parameter_modes_accept_release_spellings_and_map_independently() {
+        use rspice_core::netlist::{
+            ParameterRedefinitionDiagnosticPolicy as Diagnostic,
+            ParameterRedefinitionPolicy as Selection,
+        };
+
+        for (spelling, expected_mode, expected_policies) in [
+            (
+                "ignore",
+                RedefinedParamsMode::Ignore,
+                (Selection::UseFirst, Diagnostic::Silent),
+            ),
+            (
+                "warning",
+                RedefinedParamsMode::Warning,
+                (Selection::UseFirst, Diagnostic::Warning),
+            ),
+            (
+                "warn",
+                RedefinedParamsMode::Warning,
+                (Selection::UseFirst, Diagnostic::Warning),
+            ),
+            (
+                "usefirst",
+                RedefinedParamsMode::UseFirst,
+                (Selection::UseFirst, Diagnostic::Silent),
+            ),
+            (
+                "usefirstwarn",
+                RedefinedParamsMode::UseFirstWarn,
+                (Selection::UseFirst, Diagnostic::Warning),
+            ),
+            (
+                "uselast",
+                RedefinedParamsMode::UseLast,
+                (Selection::UseLast, Diagnostic::Silent),
+            ),
+            (
+                "uselastwarn",
+                RedefinedParamsMode::UseLastWarn,
+                (Selection::UseLast, Diagnostic::Warning),
+            ),
+            (
+                "error",
+                RedefinedParamsMode::Error,
+                (Selection::UseFirst, Diagnostic::Error),
+            ),
+        ] {
+            let cli = Cli::try_parse_from([
+                "rspice",
+                "run",
+                "duplicate.cir",
+                "--redefined-params",
+                spelling,
+            ])
+            .unwrap_or_else(|error| panic!("failed to parse {spelling}: {error}"));
+            let Commands::Run(args) = cli.command else {
+                panic!("run command changed")
+            };
+            let actual = args.redefined_params.expect("mode retained");
+            assert_eq!(actual, expected_mode);
+            assert_eq!(actual.parse_policies(), expected_policies);
+        }
+    }
 }

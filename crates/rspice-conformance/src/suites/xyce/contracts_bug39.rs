@@ -686,6 +686,8 @@ impl XyceTestRunner {
             statistical_mode: StatisticalParamMode::Sample,
             expression_dialect: ExpressionDialect::Xyce,
             parameter_redefinition_policy: ParameterRedefinitionPolicy::UseLast,
+            parameter_redefinition_diagnostic_policy:
+                rspice_core::netlist::ParameterRedefinitionDiagnosticPolicy::Silent,
             ..NetlistParseOptions::default()
         };
         let netlist = Netlist::parse_with_path_and_options(&source, &generated_path, options)
@@ -705,6 +707,8 @@ impl XyceTestRunner {
             source,
             expression_dialect: ExpressionDialect::Xyce,
             parameter_redefinition_policy: ParameterRedefinitionPolicy::UseLast,
+            parameter_redefinition_diagnostic_policy:
+                rspice_core::netlist::ParameterRedefinitionDiagnosticPolicy::Silent,
             print,
             print_format: Some("NOINDEX".to_string()),
             dc,

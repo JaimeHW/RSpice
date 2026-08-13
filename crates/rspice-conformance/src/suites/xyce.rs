@@ -61,15 +61,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 225;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 227;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "1a52e84143f1ff753a74f3d2d43ad36db412af08e43ed052a5ead0f85498d5ca";
+    "4ca16f96eac088adce6db100273d9a7c3a4806bc263c9e10363d3e6af6f958be";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "b06480cbdb429f34434f4d1004fa18fa4ce7b28d15843f02eefe11cfdd0683b1";
+    "6d9849bae63f1ec322a504b9bc6bf8018b71848402263d444abe3e914bc60b73";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "1ceb0cf279ede38db770bfc214326568cdb55b49d84cc3cc4c9b9bbfed41c495";
+    "50b1d5981d59604fc74a395f256dfa7d9465ed0f5c00e35529f53c598747c768";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -1980,6 +1980,135 @@ const XYCE_BUG981_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 6] = [
         84,
         "11a3883c1c30a398347fe4f28735842f0ebf912cf074c268ddd137257ad0b469",
         "81a1d12cfce1ba83ca9aa3bc678a568daea1e910b50d04a69cbdf2008aaf76d4",
+    ),
+];
+
+// ISSUE_202's Release-7.10 wrapper exercises every supported
+// `-redefined_params` mode against first- and last-definition controls.  Bind
+// the complete family, wrapper runtime, and xyce_verify's eagerly loaded DC
+// modules before reproducing that mode matrix natively.
+const XYCE_ISSUE202_OWNER_CONTRACT: &str = "issue202_redefined_params_wrapper_owner";
+const XYCE_ISSUE202_FIRST_CONTRACT: &str = "issue202_redefined_params_first_control";
+const XYCE_ISSUE202_LAST_CONTRACT: &str = "issue202_redefined_params_last_control";
+const XYCE_ISSUE202_OWNER_PATH: &str = "Netlists/Certification_Tests/ISSUE_202/first_last.cir";
+const XYCE_ISSUE202_FIRST_PATH: &str = "Netlists/Certification_Tests/ISSUE_202/first.cir";
+const XYCE_ISSUE202_LAST_PATH: &str = "Netlists/Certification_Tests/ISSUE_202/last.cir";
+const XYCE_ISSUE202_OWNER_RECORD: &str = "netlists/certification_tests/issue_202/first_last.cir";
+const XYCE_ISSUE202_FIRST_RECORD: &str = "netlists/certification_tests/issue_202/first.cir";
+const XYCE_ISSUE202_LAST_RECORD: &str = "netlists/certification_tests/issue_202/last.cir";
+const XYCE_ISSUE202_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/ISSUE_202/exclude";
+const XYCE_ISSUE202_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_ISSUE202_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_ISSUE202_HISTORICAL_RECORD_COUNT: usize = 13;
+const XYCE_ISSUE202_HISTORICAL_RECORD_BYTES: usize = 3_048;
+const XYCE_ISSUE202_HISTORICAL_RECORDS_SHA256: &str =
+    "7cd2e0b8775344deca4dda55d597b2fc64a65918d94d1a881f250e0df79571e9";
+const XYCE_ISSUE202_HISTORICAL_RECORDS_BLAKE3: &str =
+    "fce3a673e02ac5f6e7d1123f1594ff83ed96e751440fa9ecd51b889819341873";
+const XYCE_ISSUE202_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 13] = [
+    (
+        "Netlists/Certification_Tests/ISSUE_202/CMakeLists.txt",
+        1_512,
+        "f4dd1b1d9f598c891a22121e10273485a9fb366fa3d8314bf272191c20090599",
+        "0abed9b61aa2bce200dca4778e91bad5ffbc75370eb95a90c93b70fe71b32c25",
+    ),
+    (
+        "Netlists/Certification_Tests/ISSUE_202/Manifest.txt",
+        65,
+        "2f887f96153566add8ddd266664922da9c36e89d57c72f7226de8e271e2ac91d",
+        "340b7438d1df64406d988b814c1693f48e99690cde79f9115520aecdb7161ed4",
+    ),
+    (
+        XYCE_ISSUE202_EXCLUSION_SOURCE,
+        19,
+        "003b5acc32c8ddf2353b8e7e6001aebc9ef253377f8adb4abbe2eef514ec7cb5",
+        "d1e35da56beb81c847c502a3df57b013ae1010a5effb15b3aca4e2f93ca759e3",
+    ),
+    (
+        XYCE_ISSUE202_FIRST_PATH,
+        91,
+        "37475640dc78f903fd4b16d43258108758d3ea65f76ab979f3e240a7b72e2acc",
+        "1c0e209be6c743c852f01f285f97f527f4093b7f9163c4a305ef00ffc64ac56e",
+    ),
+    (
+        XYCE_ISSUE202_OWNER_PATH,
+        180,
+        "6b7936972f661334bf7eeec05cd97f5a182976c297f87960df7fb622c36382da",
+        "fcfe81d1bfb4c48be978dc2ee045912d56d490b504be9076efabb34bafb7c5d7",
+    ),
+    (
+        "Netlists/Certification_Tests/ISSUE_202/first_last.cir.sh",
+        11_995,
+        "fe79a8c90fc50637f18dfa45d15596ed2edc3cfa376b66f3b0a9aacadb740e62",
+        "1a46572d34ba7d177b3d2e5d095acebd64efc77044a31f4b3be240149ed785a9",
+    ),
+    (
+        XYCE_ISSUE202_LAST_PATH,
+        88,
+        "65e351a4ac5983ebb5545ace148a1d5f866023e55c57299aba626fcc9c84e16e",
+        "2e7a4013cb2cb17c701b01fe620fe45e81d0b7af58b09b9401f9b54e7d57f546",
+    ),
+    (
+        "Netlists/Certification_Tests/ISSUE_202/tags",
+        35,
+        "4aa425839be44d5beb2c5f7f17dc4137e484cb67b24530c2b77634095fa1fda7",
+        "b3a3b88d04b7b20053c7e3eb738a2f2dfa337f0b23fdf8f7a58e4680a6315728",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+    (
+        "TestScripts/XyceVerify/DCSources.pm",
+        2_739,
+        "b2ddcab5ad5a89c428b9b4430190fa27ef7106da7e7afeb31452c81890a9a006",
+        "0905f9dc79d7c5bdbe17e3c2360cd063d6fcbf41823a410f98b236783d109ad7",
+    ),
+    (
+        "TestScripts/XyceVerify/DCSweep.pm",
+        9_301,
+        "2246da2374e6cce3ea516a50e472fb07f7481e8b0effb20d4a650e6b6cb1eda0",
+        "b9cc7d905d001ebe2ace44936b9631e4bdcbf42bca4d4b34c5866262cd11d9a3",
+    ),
+    (
+        "TestScripts/XyceVerify/StepSweep.pm",
+        8_731,
+        "84b2d485c1848f2e456463de8a5015205d87c3db8a6d070547d6f9464618fed6",
+        "db1b142ab3ae9163bbe02bd68b5b3a6311436adbf27c06d71a5c05df9b6973e7",
+    ),
+    (
+        XYCE_RELEASE_710_XYCE_VERIFY_PATH,
+        XYCE_RELEASE_710_XYCE_VERIFY_BYTES,
+        XYCE_RELEASE_710_XYCE_VERIFY_SHA256,
+        XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3,
+    ),
+];
+const XYCE_ISSUE202_RETAINED_RECORD_COUNT: usize = 3;
+const XYCE_ISSUE202_RETAINED_RECORD_BYTES: usize = 433;
+const XYCE_ISSUE202_RETAINED_RECORDS_SHA256: &str =
+    "5899e31d37dd6ee5ae5cfb777be97bca22b477ba885cf141db108c725cc92dbc";
+const XYCE_ISSUE202_RETAINED_RECORDS_BLAKE3: &str =
+    "233f3696fdb059e0a1399667605e323e3c6da4d9575efeeeab35bf7445888283";
+const XYCE_ISSUE202_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
+    (
+        "first.cir",
+        91,
+        "37475640dc78f903fd4b16d43258108758d3ea65f76ab979f3e240a7b72e2acc",
+        "1c0e209be6c743c852f01f285f97f527f4093b7f9163c4a305ef00ffc64ac56e",
+    ),
+    (
+        "first_last.cir",
+        180,
+        "6b7936972f661334bf7eeec05cd97f5a182976c297f87960df7fb622c36382da",
+        "fcfe81d1bfb4c48be978dc2ee045912d56d490b504be9076efabb34bafb7c5d7",
+    ),
+    (
+        "last.cir",
+        88,
+        "65e351a4ac5983ebb5545ace148a1d5f866023e55c57299aba626fcc9c84e16e",
+        "2e7a4013cb2cb17c701b01fe620fe45e81d0b7af58b09b9401f9b54e7d57f546",
     ),
 ];
 
@@ -6770,6 +6899,8 @@ struct XyceStaticDcPlan {
     source: String,
     expression_dialect: ExpressionDialect,
     parameter_redefinition_policy: ParameterRedefinitionPolicy,
+    parameter_redefinition_diagnostic_policy:
+        rspice_core::netlist::ParameterRedefinitionDiagnosticPolicy,
     print: XycePrintRequest,
     print_format: Option<String>,
     dc: XyceDcSweep,
@@ -11712,6 +11843,7 @@ mod contracts_bug981;
 mod contracts_dc;
 mod contracts_diode_analytic;
 mod contracts_frequency;
+mod contracts_issue202;
 mod contracts_issue61;
 mod contracts_legacy_device_analytic;
 mod contracts_sources;

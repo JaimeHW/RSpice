@@ -241,10 +241,26 @@ pub(super) fn parse_command(
         // `.PARAMS` is the plural spelling ngspice accepts for `.PARAM`; IHP's
         // SG13G2 device subcircuits are written with it.
         ".PARAM" | ".PARAMS" | ".CSPARAM" => {
-            parse_param_statement(stream, line_num, params, deferred_body_params, false)?;
+            parse_param_statement(
+                stream,
+                line_num,
+                params,
+                deferred_body_params,
+                false,
+                diagnostics,
+                origin,
+            )?;
         }
         ".GLOBAL_PARAM" => {
-            parse_param_statement(stream, line_num, params, deferred_body_params, true)?;
+            parse_param_statement(
+                stream,
+                line_num,
+                params,
+                deferred_body_params,
+                true,
+                diagnostics,
+                origin,
+            )?;
         }
         ".STEP" => {
             let step_cmd = parse_step_command(stream, line_num, params)?;
@@ -4494,6 +4510,8 @@ pub(super) fn parse_param_statement(
     params: &mut ParamContext,
     mut deferred_params: Option<&mut Vec<(String, String)>>,
     retain_global_expression: bool,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+    origin: &NetlistSourceLocation,
 ) -> Result<(), ParseError> {
     if retain_global_expression && deferred_params.is_some() {
         return Err(ParseError::Syntax {
@@ -4524,12 +4542,23 @@ pub(super) fn parse_param_statement(
         }
 
         if matches!(stream.peek().kind, TokenKind::LParen) {
-            if params.accepts_parameter_function_definition(&name) {
-                parse_param_function_definition(stream, line_num, params, name)?;
+            let acceptance = params.accepts_parameter_function_definition(&name, origin);
+            let error_policy = params.parameter_redefinition_diagnostic_policy()
+                == ParameterRedefinitionDiagnosticPolicy::Error;
+            if acceptance.authoritative && (acceptance.first_origin.is_none() || !error_policy) {
+                parse_param_function_definition(stream, line_num, params, name.clone())?;
             } else {
                 let mut ignored = params.clone();
-                parse_param_function_definition(stream, line_num, &mut ignored, name)?;
+                parse_param_function_definition(stream, line_num, &mut ignored, name.clone())?;
             }
+            handle_parameter_redefinition(
+                params,
+                diagnostics,
+                origin,
+                name.clone(),
+                ParameterDefinitionKind::ParameterFunction,
+                acceptance.first_origin,
+            )?;
             continue;
         }
 
@@ -4541,14 +4570,18 @@ pub(super) fn parse_param_statement(
             });
         }
 
-        if params.accepts_parameter_definition(&name, retain_global_expression) {
+        let acceptance =
+            params.accepts_parameter_definition(&name, retain_global_expression, origin);
+        let error_policy = params.parameter_redefinition_diagnostic_policy()
+            == ParameterRedefinitionDiagnosticPolicy::Error;
+        if acceptance.authoritative && (acceptance.first_origin.is_none() || !error_policy) {
             parse_param_assignment_value(
                 stream,
                 line_num,
                 params,
                 deferred_params.as_deref_mut(),
                 retain_global_expression,
-                name,
+                name.clone(),
             )?;
         } else {
             // The ignored definition is still tokenized and syntax-checked,
@@ -4565,12 +4598,62 @@ pub(super) fn parse_param_statement(
                 &mut ignored_params,
                 ignored_deferred,
                 retain_global_expression,
-                name,
+                name.clone(),
             )?;
         }
+        handle_parameter_redefinition(
+            params,
+            diagnostics,
+            origin,
+            name,
+            if retain_global_expression {
+                ParameterDefinitionKind::GlobalParameter
+            } else {
+                ParameterDefinitionKind::Parameter
+            },
+            acceptance.first_origin,
+        )?;
     }
 
     Ok(())
+}
+
+fn handle_parameter_redefinition(
+    params: &ParamContext,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+    origin: &NetlistSourceLocation,
+    duplicate_name: String,
+    kind: ParameterDefinitionKind,
+    first_origin: Option<NetlistSourceLocation>,
+) -> Result<(), ParseError> {
+    let Some(first_origin) = first_origin else {
+        return Ok(());
+    };
+    let canonical_name = duplicate_name.to_ascii_uppercase();
+    match params.parameter_redefinition_diagnostic_policy() {
+        ParameterRedefinitionDiagnosticPolicy::Silent => Ok(()),
+        ParameterRedefinitionDiagnosticPolicy::Warning => {
+            let selected = match params.parameter_redefinition_policy() {
+                ParameterRedefinitionPolicy::UseFirst => "first",
+                ParameterRedefinitionPolicy::UseLast => "last",
+            };
+            diagnostics.push(ParseDiagnostic::warning_at(
+                origin.clone(),
+                "parameter-redefinition",
+                format!("Parameter {canonical_name} defined more than once. Using {selected} one."),
+            ));
+            Ok(())
+        }
+        ParameterRedefinitionDiagnosticPolicy::Error => Err(ParseError::ParameterRedefinition(
+            Box::new(ParameterRedefinitionError {
+                duplicate_name,
+                canonical_name,
+                kind,
+                first_origin,
+                duplicate_origin: origin.clone(),
+            }),
+        )),
+    }
 }
 
 fn parse_param_assignment_value(

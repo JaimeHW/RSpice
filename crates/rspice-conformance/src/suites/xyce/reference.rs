@@ -191,6 +191,25 @@ impl XyceTestRunner {
         parameter_redefinition_policy: ParameterRedefinitionPolicy,
         execution_dir: Option<&Path>,
     ) -> Result<Netlist, rspice_core::netlist::ParseError> {
+        Self::parse_netlist_with_expression_dialect_policies_and_execution_dir(
+            source,
+            deck_path,
+            expression_dialect,
+            parameter_redefinition_policy,
+            rspice_core::netlist::ParameterRedefinitionDiagnosticPolicy::Silent,
+            execution_dir,
+        )
+    }
+
+    pub(super) fn parse_netlist_with_expression_dialect_policies_and_execution_dir(
+        source: &str,
+        deck_path: &Path,
+        expression_dialect: ExpressionDialect,
+        parameter_redefinition_policy: ParameterRedefinitionPolicy,
+        parameter_redefinition_diagnostic_policy:
+            rspice_core::netlist::ParameterRedefinitionDiagnosticPolicy,
+        execution_dir: Option<&Path>,
+    ) -> Result<Netlist, rspice_core::netlist::ParseError> {
         let options = NetlistParseOptions {
             statistical_mode: StatisticalParamMode::Nominal,
             expression_dialect,
@@ -199,6 +218,7 @@ impl XyceTestRunner {
             // `-redefined_params` modes select their policy explicitly in
             // their execution plan.
             parameter_redefinition_policy,
+            parameter_redefinition_diagnostic_policy,
             ..NetlistParseOptions::default()
         };
         if let Some(execution_dir) = execution_dir {

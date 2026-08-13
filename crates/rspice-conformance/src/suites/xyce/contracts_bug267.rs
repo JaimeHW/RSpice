@@ -208,6 +208,8 @@ impl XyceTestRunner {
             source,
             expression_dialect: ExpressionDialect::Xyce,
             parameter_redefinition_policy: ParameterRedefinitionPolicy::UseLast,
+            parameter_redefinition_diagnostic_policy:
+                rspice_core::netlist::ParameterRedefinitionDiagnosticPolicy::Silent,
             print,
             print_format: None,
             dc,

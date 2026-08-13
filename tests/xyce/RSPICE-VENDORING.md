@@ -250,6 +250,15 @@ workers, with the retained PRNs treated only as documentary corpus members.
 The blank anchor remains the sole wrapper owner, both historical worker
 exclusions are independently qualified, and no numerical gold is invented.
 
+Certification ISSUE 202 reconstructs the Release-7.10 repeated-parameter
+mode matrix. Selection (`usefirst`/`uselast`) and diagnostics
+(`ignore`/`warning`/`error`) are independent typed parser policies. The owner
+is run through all eight successful modes and the typed error mode, then each
+successful DC table is checked against an independently simulated first- or
+last-definition control with the historical verifier semantics. The two
+historical control exclusions are independently qualified; no output gold is
+invented.
+
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
 and verifier identities. The PARAMS1, PARSER nakedAlgebra, and Certification

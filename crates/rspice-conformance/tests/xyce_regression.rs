@@ -10127,6 +10127,44 @@ fn test_xyce_bug981_output_schedule_relational_oracle() {
 }
 
 #[test]
+fn test_xyce_issue202_redefined_parameter_mode_matrix() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, contract, wrapper, exclusion) in [
+        (
+            "Netlists/Certification_Tests/ISSUE_202/first_last.cir",
+            "issue202_redefined_params_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/ISSUE_202/first.cir",
+            "issue202_redefined_params_first_control",
+            false,
+            Some("Netlists/Certification_Tests/ISSUE_202/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/ISSUE_202/last.cir",
+            "issue202_redefined_params_last_control",
+            false,
+            Some("Netlists/Certification_Tests/ISSUE_202/exclude"),
+        ),
+    ] {
+        assert_eq!(runner.requires_upstream_wrapper(relative), wrapper);
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should reproduce the complete repeated-parameter mode matrix, got {result:?}"
+        );
+        assert_eq!(result.contract, contract);
+        assert_eq!(result.upstream_exclusion_source.as_deref(), exclusion);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_bug352_diode_model_expression_equivalence_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

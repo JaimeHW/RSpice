@@ -374,6 +374,9 @@ impl Engine {
             statistical_mode: netlist.params.statistical_mode(),
             expression_dialect: netlist.params.expression_dialect(),
             parameter_redefinition_policy: netlist.params.parameter_redefinition_policy(),
+            parameter_redefinition_diagnostic_policy: netlist
+                .params
+                .parameter_redefinition_diagnostic_policy(),
             resource_limits,
         };
         let mut reparsed = if let Some(source_path) = netlist.source_path.as_deref() {

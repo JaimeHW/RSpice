@@ -569,6 +569,26 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         parameter_redefinition_policy: ParameterRedefinitionPolicy,
         execution_dir: Option<&Path>,
     ) -> Result<XyceStaticDcPlan, String> {
+        self.static_dc_plan_for_source_with_execution_dir_and_redefinition_policies(
+            deck_path,
+            source,
+            expression_dialect,
+            parameter_redefinition_policy,
+            rspice_core::netlist::ParameterRedefinitionDiagnosticPolicy::Silent,
+            execution_dir,
+        )
+    }
+
+    pub(super) fn static_dc_plan_for_source_with_execution_dir_and_redefinition_policies(
+        &self,
+        deck_path: &Path,
+        source: String,
+        expression_dialect: ExpressionDialect,
+        parameter_redefinition_policy: ParameterRedefinitionPolicy,
+        parameter_redefinition_diagnostic_policy:
+            rspice_core::netlist::ParameterRedefinitionDiagnosticPolicy,
+        execution_dir: Option<&Path>,
+    ) -> Result<XyceStaticDcPlan, String> {
         if Self::contains_control_block(&source) {
             return Err(
                 "deck uses a .control block; Xyce adapter does not interpret simulator scripting"
@@ -591,11 +611,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let print = XycePrintRequest {
             probes: print_output.probes,
         };
-        let netlist = Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
+        let netlist = Self::parse_netlist_with_expression_dialect_policies_and_execution_dir(
             &source,
             deck_path,
             expression_dialect,
             parameter_redefinition_policy,
+            parameter_redefinition_diagnostic_policy,
             execution_dir,
         )
         .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
@@ -618,6 +639,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             source,
             expression_dialect,
             parameter_redefinition_policy,
+            parameter_redefinition_diagnostic_policy,
             print,
             print_format: print_output.format,
             dc,

@@ -3,7 +3,9 @@
 //! [`ParamContext`] resolves parameter names, holds user-defined
 //! [`FunctionDef`]s, and carries the settings that change how expressions
 //! evaluate: the [`crate::config::ExpressionDialect`], the
-//! [`ParameterRedefinitionPolicy`] applied when a name is defined twice, and
+//! [`ParameterRedefinitionPolicy`] applied when a name is defined twice,
+//! [`ParameterRedefinitionDiagnosticPolicy`] controlling whether that event is
+//! silent, warned, or fatal, and
 //! the [`StatisticalParamMode`] governing `GAUSS`/`UNIF`/`RAND`.
 //!
 //! Those generators draw from a seeded [`RandomState`] rather than thread
@@ -12,7 +14,6 @@
 
 use super::*;
 use crate::config::ExpressionDialect;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -156,6 +157,34 @@ pub enum ParameterRedefinitionPolicy {
     UseLast,
 }
 
+/// Diagnostic behavior for repeated parameter definitions within one scope.
+///
+/// This is deliberately independent from [`ParameterRedefinitionPolicy`]:
+/// Xyce exposes modes that select either the first or last value while also
+/// choosing whether the duplicate is silent, warned, or fatal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParameterRedefinitionDiagnosticPolicy {
+    /// Accept the configured value-selection behavior without a diagnostic.
+    Silent,
+    /// Accept the configured value-selection behavior and emit a warning for
+    /// every definition after the first.
+    Warning,
+    /// Reject the duplicate with a structured parse error.
+    Error,
+}
+
+impl Default for ParameterRedefinitionDiagnosticPolicy {
+    fn default() -> Self {
+        Self::Silent
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ParameterDefinitionAcceptance {
+    pub(crate) authoritative: bool,
+    pub(crate) first_origin: Option<crate::netlist::NetlistSourceLocation>,
+}
+
 impl Default for ParameterRedefinitionPolicy {
     fn default() -> Self {
         Self::UseLast
@@ -216,12 +245,17 @@ pub struct ParamContext {
     expression_dialect: ExpressionDialect,
     /// Repeated-definition behavior selected for this parse/elaboration.
     parameter_redefinition_policy: ParameterRedefinitionPolicy,
-    /// Names defined by `.PARAM`/`.CSPARAM` in the current parser scope.
-    scope_parameter_definitions: HashSet<String>,
-    /// Names defined by `.GLOBAL_PARAM` in the current parser scope.
-    scope_global_parameter_definitions: HashSet<String>,
-    /// Function names defined in the current parser scope.
-    scope_function_definitions: HashSet<String>,
+    /// Diagnostic behavior for a repeated definition in this parse scope.
+    parameter_redefinition_diagnostic_policy: ParameterRedefinitionDiagnosticPolicy,
+    /// First source location of each `.PARAM`/`.CSPARAM` definition in the
+    /// current parser scope.
+    scope_parameter_definitions: HashMap<String, crate::netlist::NetlistSourceLocation>,
+    /// First source location of each `.GLOBAL_PARAM` definition in the current
+    /// parser scope.
+    scope_global_parameter_definitions: HashMap<String, crate::netlist::NetlistSourceLocation>,
+    /// First source location of each parameter-function definition in the
+    /// current parser scope.
+    scope_function_definitions: HashMap<String, crate::netlist::NetlistSourceLocation>,
 }
 
 impl ParamContext {
@@ -552,26 +586,62 @@ impl ParamContext {
         self.parameter_redefinition_policy
     }
 
+    /// Select duplicate-definition diagnostic behavior for subsequent parsing.
+    pub fn set_parameter_redefinition_diagnostic_policy(
+        &mut self,
+        policy: ParameterRedefinitionDiagnosticPolicy,
+    ) {
+        self.parameter_redefinition_diagnostic_policy = policy;
+    }
+
+    /// Duplicate-definition diagnostic behavior retained by this context.
+    pub fn parameter_redefinition_diagnostic_policy(
+        &self,
+    ) -> ParameterRedefinitionDiagnosticPolicy {
+        self.parameter_redefinition_diagnostic_policy
+    }
+
     /// Begin a `.PARAM`/`.CSPARAM` or `.GLOBAL_PARAM` definition.
     ///
     /// Returns whether this definition is authoritative under the configured
     /// policy. The parser still consumes and validates ignored definitions.
-    pub(crate) fn accepts_parameter_definition(&mut self, name: &str, global: bool) -> bool {
+    pub(crate) fn accepts_parameter_definition(
+        &mut self,
+        name: &str,
+        global: bool,
+        origin: &crate::netlist::NetlistSourceLocation,
+    ) -> ParameterDefinitionAcceptance {
         let definitions = if global {
             &mut self.scope_global_parameter_definitions
         } else {
             &mut self.scope_parameter_definitions
         };
-        let first = definitions.insert(name.to_ascii_uppercase());
-        first || self.parameter_redefinition_policy == ParameterRedefinitionPolicy::UseLast
+        let key = name.to_ascii_uppercase();
+        let first_origin = definitions.get(&key).cloned();
+        definitions.entry(key).or_insert_with(|| origin.clone());
+        ParameterDefinitionAcceptance {
+            authoritative: first_origin.is_none()
+                || self.parameter_redefinition_policy == ParameterRedefinitionPolicy::UseLast,
+            first_origin,
+        }
     }
 
     /// Begin a parameter-function definition in the current parser scope.
-    pub(crate) fn accepts_parameter_function_definition(&mut self, name: &str) -> bool {
-        let first = self
-            .scope_function_definitions
-            .insert(name.to_ascii_uppercase());
-        first || self.parameter_redefinition_policy == ParameterRedefinitionPolicy::UseLast
+    pub(crate) fn accepts_parameter_function_definition(
+        &mut self,
+        name: &str,
+        origin: &crate::netlist::NetlistSourceLocation,
+    ) -> ParameterDefinitionAcceptance {
+        let key = name.to_ascii_uppercase();
+        let first_origin = self.scope_function_definitions.get(&key).cloned();
+        self.scope_function_definitions
+            .entry(key)
+            .or_insert_with(|| origin.clone());
+        ParameterDefinitionAcceptance {
+            authoritative: first_origin.is_none()
+                || self.parameter_redefinition_policy == ParameterRedefinitionPolicy::UseLast,
+            first_origin,
+        }
     }
 
     /// Reset parse-time definition tracking when entering a child scope.

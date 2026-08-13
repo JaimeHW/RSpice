@@ -12337,6 +12337,8 @@ VMON 1 2 0V\n\
         source: res_source.to_string(),
         expression_dialect: ExpressionDialect::Xyce,
         parameter_redefinition_policy: ParameterRedefinitionPolicy::UseLast,
+        parameter_redefinition_diagnostic_policy:
+            rspice_core::netlist::ParameterRedefinitionDiagnosticPolicy::Silent,
         print: XycePrintRequest {
             probes: vec!["V(1)".to_string(), "I(VMON)".to_string()],
         },

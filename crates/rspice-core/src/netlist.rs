@@ -39,7 +39,10 @@ mod xspice_parser;
 pub use add_resistors::*;
 pub use ast::*;
 pub use data_table::{FrequencyDataPoint, FrequencyDataTableError};
-pub use expr::{ParamContext, ParameterRedefinitionPolicy, RandomState, StatisticalParamMode};
+pub use expr::{
+    ParamContext, ParameterRedefinitionDiagnosticPolicy, ParameterRedefinitionPolicy, RandomState,
+    StatisticalParamMode,
+};
 pub(crate) use flattener::flatten_netlist_with_models_config_with_abort;
 pub use flattener::{
     FlattenedNetlist, Flattener, FlattenerConfig, InstanceMetadata, XspiceAutoBridgeNodeHint,
@@ -198,6 +201,38 @@ pub struct GlobalSubcircuitPortBindingError {
     pub formal_port: String,
     pub position: usize,
     pub actual_node: String,
+}
+
+/// Kind of parameter declaration involved in a same-scope redefinition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParameterDefinitionKind {
+    Parameter,
+    GlobalParameter,
+    ParameterFunction,
+}
+
+impl std::fmt::Display for ParameterDefinitionKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Parameter => ".PARAM",
+            Self::GlobalParameter => ".GLOBAL_PARAM",
+            Self::ParameterFunction => ".PARAM function",
+        })
+    }
+}
+
+/// Structured failure for a parameter name defined more than once in one
+/// lexical scope while duplicate definitions are configured as errors.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error(
+    "Parameter {canonical_name} defined more than once in {kind} scope (first at {first_origin}; redefined at {duplicate_origin})"
+)]
+pub struct ParameterRedefinitionError {
+    pub duplicate_name: String,
+    pub canonical_name: String,
+    pub kind: ParameterDefinitionKind,
+    pub first_origin: NetlistSourceLocation,
+    pub duplicate_origin: NetlistSourceLocation,
 }
 
 /// A subcircuit instance names a definition that is absent from its visible
@@ -381,6 +416,9 @@ pub enum ParseError {
         first_line: usize,
         duplicate_line: usize,
     },
+
+    #[error(transparent)]
+    ParameterRedefinition(Box<ParameterRedefinitionError>),
 
     #[error(transparent)]
     MissingSubcircuitEnds(Box<MissingSubcircuitEndsError>),
@@ -11384,6 +11422,130 @@ mod tests {
                 .expect("resistor exists");
             assert_eq!(resistance, expected);
         }
+    }
+
+    #[test]
+    fn parameter_redefinition_diagnostics_are_typed_and_independent_from_selection() {
+        let source = "parameter redefinition diagnostics\n\
+             .param Foo=10\n\
+             .param fOO=20\n\
+             R1 1 0 {foo}\n\
+             .end\n";
+
+        for (selection, expected, selected_word) in [
+            (ParameterRedefinitionPolicy::UseFirst, 10.0, "first"),
+            (ParameterRedefinitionPolicy::UseLast, 20.0, "last"),
+        ] {
+            let netlist = Netlist::parse_with_options(
+                source,
+                NetlistParseOptions {
+                    parameter_redefinition_policy: selection,
+                    parameter_redefinition_diagnostic_policy:
+                        ParameterRedefinitionDiagnosticPolicy::Warning,
+                    ..NetlistParseOptions::default()
+                },
+            )
+            .expect("warning-mode redefinition parses");
+            assert_eq!(netlist.params.get("foo"), Some(expected));
+            assert_eq!(netlist.diagnostics.len(), 1);
+            let diagnostic = &netlist.diagnostics[0];
+            assert_eq!(diagnostic.code, "parameter-redefinition");
+            assert_eq!(diagnostic.line, 3);
+            assert_eq!(diagnostic.origin, Some(NetlistSourceLocation::in_memory(3)));
+            assert_eq!(
+                diagnostic.message,
+                format!("Parameter FOO defined more than once. Using {selected_word} one.")
+            );
+        }
+
+        let error = Netlist::parse_with_options(
+            source,
+            NetlistParseOptions {
+                parameter_redefinition_policy: ParameterRedefinitionPolicy::UseFirst,
+                parameter_redefinition_diagnostic_policy:
+                    ParameterRedefinitionDiagnosticPolicy::Error,
+                ..NetlistParseOptions::default()
+            },
+        )
+        .expect_err("error-mode duplicate is rejected");
+        let ParseError::ParameterRedefinition(error) = error else {
+            panic!("expected typed parameter-redefinition error");
+        };
+        assert_eq!(error.duplicate_name, "FOO");
+        assert_eq!(error.canonical_name, "FOO");
+        assert_eq!(error.kind, ParameterDefinitionKind::Parameter);
+        assert_eq!(error.first_origin, NetlistSourceLocation::in_memory(2));
+        assert_eq!(error.duplicate_origin, NetlistSourceLocation::in_memory(3));
+        assert!(
+            error
+                .to_string()
+                .contains("Parameter FOO defined more than once")
+        );
+    }
+
+    #[test]
+    fn parameter_redefinition_diagnostics_cover_same_line_globals_functions_and_scopes() {
+        let warning_options = NetlistParseOptions {
+            expression_dialect: ExpressionDialect::Xyce,
+            parameter_redefinition_policy: ParameterRedefinitionPolicy::UseLast,
+            parameter_redefinition_diagnostic_policy:
+                ParameterRedefinitionDiagnosticPolicy::Warning,
+            ..NetlistParseOptions::default()
+        };
+        let netlist = Netlist::parse_with_options(
+            "redefinition classes\n\
+             .param A=1 a=2\n\
+             .global_param G=3\n\
+             .global_param g=4\n\
+             .param F(x)={x+1}\n\
+             .param f(y)={y+2}\n\
+             .subckt child in out params: local=5\n\
+             .param LOCAL=6\n\
+             R1 in out {local}\n\
+             .ends\n\
+             .end\n",
+            warning_options,
+        )
+        .expect("all redefinition classes parse in warning mode");
+        let messages = netlist
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "parameter-redefinition")
+            .map(|diagnostic| (diagnostic.line, diagnostic.message.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(messages.len(), 4);
+        assert!(messages.iter().any(|(line, message)| {
+            *line == 2 && message.starts_with("Parameter A defined more than once")
+        }));
+        assert!(messages.iter().any(|(line, message)| {
+            *line == 4 && message.starts_with("Parameter G defined more than once")
+        }));
+        assert!(messages.iter().any(|(line, message)| {
+            *line == 6 && message.starts_with("Parameter F defined more than once")
+        }));
+        assert!(messages.iter().any(|(line, message)| {
+            *line == 8 && message.starts_with("Parameter LOCAL defined more than once")
+        }));
+        assert_eq!(netlist.params.get("A"), Some(2.0));
+        assert_eq!(netlist.params.get("G"), Some(4.0));
+
+        let independent_scopes = Netlist::parse_with_options(
+            "independent scopes\n\
+             .param VALUE=1\n\
+             .subckt child in out\n\
+             .param value=2\n\
+             R1 in out {value}\n\
+             .ends\n\
+             .end\n",
+            warning_options,
+        )
+        .expect("child scope may shadow its parent without a warning");
+        assert!(
+            independent_scopes
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "parameter-redefinition")
+        );
     }
 
     #[test]
