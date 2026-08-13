@@ -61,15 +61,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 229;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 230;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "1414989e46b533351e824cb32856d618d18443c6c09f11873be50e1a3f7388d5";
+    "9819f798b217475716453a29883771be904b1f25b570099553ee3c3ed6a89966";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "2ff0e56762c1dc40466a4fbf44b9a057ffe6cae24e79a240fde6a2f44437a1a5";
+    "df44a0f587a3cd009a262e5515bd4930b730d69c3cf76b173636ee5f5972fa47";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "dfa6532f15149e911570fe712494936f92a224bba3ec146ddb3899f015da9543";
+    "71406437b31a30dc7fd9630d8c84050a03428f4ae7d1d56afa6e89a441194a47";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -2220,6 +2220,110 @@ const XYCE_ISSUE451_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
         421,
         "b4b817871d79dc3f61fe0837159ec9b07eb689564d3b652cfb0f157074404b24",
         "45fd5785ec0a81ebebd5996aa2fc85d93157119da277cada6e5640f1d46a781c",
+    ),
+];
+
+// BUG_1455 proves that SPICE model parameters separated by whitespace parse
+// identically to their `name=value` spellings. The Release wrapper executes
+// both MOS1 decks and applies a case-insensitive byte diff, with no numerical
+// gold. Bind its complete executable dependency set and add a closed-form
+// MOS/load-line check so shared parser or device failures cannot false-pass.
+const XYCE_BUG1455_OWNER_CONTRACT: &str = "bug1455_model_equals_wrapper_owner";
+const XYCE_BUG1455_REFERENCE_CONTRACT: &str = "bug1455_model_whitespace_reference";
+const XYCE_BUG1455_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_1455/bug_1455.cir";
+const XYCE_BUG1455_REFERENCE_PATH: &str = "Netlists/Certification_Tests/BUG_1455/bug_1455_neq.cir";
+const XYCE_BUG1455_OWNER_RECORD: &str = "netlists/certification_tests/bug_1455/bug_1455.cir";
+const XYCE_BUG1455_REFERENCE_RECORD: &str =
+    "netlists/certification_tests/bug_1455/bug_1455_neq.cir";
+const XYCE_BUG1455_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_1455/exclude";
+const XYCE_BUG1455_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG1455_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG1455_HISTORICAL_RECORD_COUNT: usize = 9;
+const XYCE_BUG1455_HISTORICAL_RECORD_BYTES: usize = 2_144;
+const XYCE_BUG1455_HISTORICAL_RECORDS_SHA256: &str =
+    "5253c602c7b6a70953242a2be887a4af2a8438b485273b61e1b3da71e9932eed";
+const XYCE_BUG1455_HISTORICAL_RECORDS_BLAKE3: &str =
+    "96863ac53c17e363161d55c114ca5edc1c33ff7d0b5f5f764f2c1bd84ab3e18c";
+const XYCE_BUG1455_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 9] = [
+    (
+        "Netlists/Certification_Tests/BUG_1455/CMakeLists.txt",
+        1_483,
+        "b3c67bb736e612786945c69afb795a85dcb30f5ec1947fb9e4bf836ae7752e7c",
+        "a2067cc30ffd5d01d892961619b630ab669f4b11f41a033a9719478001fc1f49",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1455/Manifest.txt",
+        66,
+        "8a52259798c6a2fd06a4d90244704c04dcfcff7bdbab49790ff19faf8d1c5d18",
+        "61bb11bdab295840d1a38eb0ba427a54b3284140ce9abcec053216d3069926ee",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1455/README",
+        555,
+        "7de04060151ebaf5c957088f82ac18c7b89e123ae89d8ca77f7df88c66e22369",
+        "82c372c31d18700c21fd7fb429f0f233b20a593affbf83b38f2dfa9de7e2b284",
+    ),
+    (
+        XYCE_BUG1455_OWNER_PATH,
+        265,
+        "707bb73a5bcadbe622fb5b7572dd5d35c12ed39601de9b3b175470a6e3a870fa",
+        "ff8b02c75adde9925c7b5a8d4941bcc3658162cf42f96854d64413e82a999c3b",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1455/bug_1455.cir.sh",
+        1_446,
+        "3c1c2cf4d6f8faef706bcc246deddc76438d48c792425d6d438f984d4f6063ed",
+        "901e4ec23df4dd39a4a563646b8f47e8ca35174ee744c5180a422b2257d8fd28",
+    ),
+    (
+        XYCE_BUG1455_REFERENCE_PATH,
+        260,
+        "242be3e5853e4ece1925a8fa895edd9ccf847262312883b3828e737bff8ff6e4",
+        "8d394468e092320b35f2dd68e0091f83076250bc11cae62f4bd8e72babfa6337",
+    ),
+    (
+        XYCE_BUG1455_EXCLUSION_SOURCE,
+        17,
+        "51d9adb6f4c188f65ca5494af397bfb5f7694786a3843f52e38dcad665b237b9",
+        "01157bf60692659ecd8bb468195f9de1352f82835b6060f658c6f5fbebc8b6da",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1455/tags",
+        16,
+        "fb8b1ab6aa8b694212335a76b1b87c077f22be7543f15c12de32a2da40b4f345",
+        "a5f2cee6f41471429bc22c4c40d36881f4c11d2387b20adbdc14efe2509f6589",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG1455_RETAINED_RECORD_COUNT: usize = 3;
+const XYCE_BUG1455_RETAINED_RECORD_BYTES: usize = 438;
+const XYCE_BUG1455_RETAINED_RECORDS_SHA256: &str =
+    "ebf0d1a684c5aa4ad162d7a5927679f7642b9b92e0a014081b70170224d9fb25";
+const XYCE_BUG1455_RETAINED_RECORDS_BLAKE3: &str =
+    "084be4e08167ae713f4b2ce164f80f078a81917a3c440c041bd68f2073a9876d";
+const XYCE_BUG1455_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
+    (
+        "bug_1455.cir",
+        265,
+        "707bb73a5bcadbe622fb5b7572dd5d35c12ed39601de9b3b175470a6e3a870fa",
+        "ff8b02c75adde9925c7b5a8d4941bcc3658162cf42f96854d64413e82a999c3b",
+    ),
+    (
+        "bug_1455_neq.cir",
+        260,
+        "242be3e5853e4ece1925a8fa895edd9ccf847262312883b3828e737bff8ff6e4",
+        "8d394468e092320b35f2dd68e0091f83076250bc11cae62f4bd8e72babfa6337",
+    ),
+    (
+        "README",
+        555,
+        "7de04060151ebaf5c957088f82ac18c7b89e123ae89d8ca77f7df88c66e22369",
+        "82c372c31d18700c21fd7fb429f0f233b20a593affbf83b38f2dfa9de7e2b284",
     ),
 ];
 
@@ -11931,6 +12035,7 @@ mod contracts_bug1040;
 mod contracts_bug1116;
 mod contracts_bug1162;
 mod contracts_bug1398;
+mod contracts_bug1455;
 mod contracts_bug159;
 mod contracts_bug1661;
 mod contracts_bug1797;

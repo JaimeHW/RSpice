@@ -277,6 +277,14 @@ historical control exclusion is independently qualified; the wrapper fallback
 verifier and its loaded modules are provenance-bound, but no numerical gold is
 invented.
 
+Certification BUG 1455 reconstructs the Release-7.10 relation between equal-
+sign and whitespace-separated MOS model parameters. RSpice independently
+executes both DC sweeps, requires their case-insensitive default-PRN relation,
+and checks every row against the native level-1 PMOS load-line solution. The
+historical whitespace control exclusion is independently qualified; the
+wrapper, family census, and imported harness utility are provenance-bound, and
+no numerical gold is invented.
+
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
 and verifier identities. The PARAMS1, PARSER nakedAlgebra, and Certification
