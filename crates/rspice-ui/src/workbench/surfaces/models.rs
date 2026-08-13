@@ -9,16 +9,6 @@ use qualification::*;
 /// above is this module's own working vocabulary and stays private to it.
 pub(super) use qualification::{ModelGateFact, QualificationGate, model_gate_facts};
 
-/// The gate, readable by sibling surfaces.
-///
-/// Reaching the qualification record itself still means coming through this
-/// module, so the numbers keep one author. What leaves is the finished
-/// summary: the Simulation Studio's Models page reports the gate and cannot
-/// recompute it.
-pub(super) use qualification::{
-    QualificationGate, QualificationModelSummary, qualification_summaries,
-};
-
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use egui::Ui;
