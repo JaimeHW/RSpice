@@ -156,20 +156,6 @@ impl LanguageToolView {
         Self::WorkspaceSymbols,
         Self::CodeActions,
     ];
-
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::DocumentSymbols => "Document symbols",
-            Self::Completion => "Completion",
-            Self::Hover => "Hover",
-            Self::SignatureHelp => "Signature help",
-            Self::Definitions => "Definitions",
-            Self::Declarations => "Declarations",
-            Self::References => "References",
-            Self::WorkspaceSymbols => "Workspace symbols",
-            Self::CodeActions => "Code actions",
-        }
-    }
 }
 
 #[derive(Debug, Clone)]

@@ -25,29 +25,43 @@ use crate::workbench::design_system::{
 use crate::workbench::documents::code_workspace::{
     self, CodeSourceSearchResults, CodeSourceSearchScope, SOURCE_SEARCH_RESULT_LIMIT,
 };
-
-const TITLE: &str = "Find in source";
+use crate::workbench::{MessageCatalog, MessageId};
 
 /// The scopes a bundle search can run in, in the order the dialog offers them.
 ///
 /// `Selection` is offered only when the editor actually captured one; the
 /// search refuses it otherwise, and an option that always fails is worse than
 /// no option.
-const SCOPES: [(CodeSourceSearchScope, &str); 4] = [
-    (CodeSourceSearchScope::Selection, "Selection"),
-    (CodeSourceSearchScope::CurrentDocument, "Current document"),
-    (CodeSourceSearchScope::OpenDocuments, "Open documents"),
+///
+/// A scope names itself through the catalog rather than through the state
+/// type: the picker writes back by matching the label it displayed, so a
+/// translated label has to be the one the round-trip is built on.
+const SCOPES: [(CodeSourceSearchScope, MessageId); 4] = [
+    (
+        CodeSourceSearchScope::Selection,
+        MessageId::CodeSearchSelection,
+    ),
+    (
+        CodeSourceSearchScope::CurrentDocument,
+        MessageId::CodeSearchCurrentDocument,
+    ),
+    (
+        CodeSourceSearchScope::OpenDocuments,
+        MessageId::CodeSearchOpenDocuments,
+    ),
     (
         CodeSourceSearchScope::ActiveLanguageProject,
-        "Active language project",
+        MessageId::CodeSearchActiveLanguage,
     ),
 ];
 
-fn scope_label(scope: CodeSourceSearchScope) -> &'static str {
-    SCOPES
-        .iter()
-        .find(|(candidate, _)| *candidate == scope)
-        .map_or("Active language project", |(_, label)| *label)
+fn scope_label(messages: MessageCatalog, scope: CodeSourceSearchScope) -> String {
+    messages.text(
+        SCOPES
+            .iter()
+            .find(|(candidate, _)| *candidate == scope)
+            .map_or(MessageId::CodeSearchActiveLanguage, |(_, id)| *id),
+    )
 }
 
 /// What the body asked for, applied after rendering.
@@ -77,17 +91,16 @@ impl RSpiceApp {
                 &search.active_path,
             );
 
+        let messages = self.state.ui.messages();
         let mut dialog = Dialog::new(
-            format!(
-                "{} \u{00b7} BUNDLE-SCOPED SEARCH",
-                search.language.label().to_uppercase()
+            messages.format(
+                MessageId::CodeSearchEyebrow,
+                &[("language", &search.language.label().to_uppercase())],
             ),
-            TITLE,
-            "Close",
+            messages.text(MessageId::CodeSearchTitle),
+            messages.text(MessageId::CommonClose),
         )
-        .description(
-            "Search the project-owned source closure. Finding changes nothing; replacement is one atomic bundle revision that skips every ineligible source.",
-        )
+        .description(messages.text(MessageId::CodeSearchDescription))
         .size(DialogSize::SimulationWorkflow)
         .initial_height(580.0)
         .primary_on_enter(false)
@@ -99,13 +112,13 @@ impl RSpiceApp {
         if let Some(error) = failure.as_deref() {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
-                "This search cannot run",
+                messages.text(MessageId::CodeSearchCannotRun),
                 error,
             );
         } else if let Some(reason) = blocked {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Progress,
-                "Replacement held",
+                messages.text(MessageId::CodeSearchReplacementHeld),
                 reason,
             );
         }
@@ -177,6 +190,7 @@ fn find_body(
     replaceable: bool,
 ) -> FindAction {
     let t = Tokens::get(ui.ctx());
+    let messages = state.ui.messages();
     let mut action = FindAction::None;
     ScrollArea::vertical()
         .id_salt("source-find")
@@ -186,27 +200,32 @@ fn find_body(
                 return;
             };
             let has_selection = search.selection_char_range.is_some();
-            code_inspector_section(ui, "Query", None, |ui| {
+            code_inspector_section(ui, &messages.text(MessageId::CodeSearchQuery), None, |ui| {
                 code_inspector_property_list(ui, |ui| {
-                    property_row(ui, "Active document", &search.active_path);
+                    property_row(
+                        ui,
+                        &messages.text(MessageId::CodeSearchActiveDocument),
+                        &search.active_path,
+                    );
                     crate::workbench::design_system::property_row_input(
                         ui,
-                        "Find",
+                        &messages.text(MessageId::CommonFind),
                         &mut search.query,
                         false,
                     );
+                    let replace_with = messages.text(MessageId::CodeSearchReplaceWith);
                     if replaceable {
                         crate::workbench::design_system::property_row_input(
                             ui,
-                            "Replace with",
+                            &replace_with,
                             &mut search.replacement,
                             false,
                         );
                     } else {
                         property_row(
                             ui,
-                            "Replace with",
-                            "unavailable \u{00b7} this document is read-only",
+                            &replace_with,
+                            &messages.text(MessageId::CodeSearchReplaceUnavailable),
                         );
                     }
                     let options = SCOPES
@@ -217,17 +236,18 @@ fn find_body(
                         .filter(|(scope, _)| {
                             has_selection || *scope != CodeSourceSearchScope::Selection
                         })
-                        .map(|(_, label)| ((*label).to_owned(), (*label).to_owned()))
+                        .map(|(_, id)| (messages.text(*id), messages.text(*id)))
                         .collect::<Vec<_>>();
-                    let mut chosen = scope_label(search.scope).to_owned();
+                    let mut chosen = scope_label(messages, search.scope);
                     if property_row_combo(
                         ui,
-                        "Scope",
+                        &messages.text(MessageId::CommonScope),
                         "source-find-scope",
                         &mut chosen,
                         &options,
                         true,
-                    ) && let Some((scope, _)) = SCOPES.iter().find(|(_, label)| *label == chosen)
+                    ) && let Some((scope, _)) =
+                        SCOPES.iter().find(|(_, id)| messages.text(*id) == chosen)
                     {
                         search.scope = *scope;
                     }
@@ -235,19 +255,31 @@ fn find_body(
                 ui.add_space(6.0);
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(12.0, 4.0);
-                    ui.checkbox(&mut search.match_case, "Match case");
-                    ui.checkbox(&mut search.whole_symbol, "Whole symbol");
-                    ui.checkbox(&mut search.regular_expression, "Regular expression");
-                    ui.checkbox(&mut search.include_comments, "Include comments");
+                    ui.checkbox(
+                        &mut search.match_case,
+                        messages.text(MessageId::CodeSearchMatchCase),
+                    );
+                    ui.checkbox(
+                        &mut search.whole_symbol,
+                        messages.text(MessageId::CodeSearchWholeSymbol),
+                    );
+                    ui.checkbox(
+                        &mut search.regular_expression,
+                        messages.text(MessageId::CodeSearchRegularExpression),
+                    );
+                    ui.checkbox(
+                        &mut search.include_comments,
+                        messages.text(MessageId::CodeSearchIncludeComments),
+                    );
                     ui.add_enabled(
                         search.scope == CodeSourceSearchScope::ActiveLanguageProject,
                         egui::Checkbox::new(
                             &mut search.include_generated_references,
-                            "Include generated deck \u{00b7} find only",
+                            messages.text(MessageId::CodeSearchIncludeGenerated),
                         ),
                     )
                     .on_disabled_hover_text(
-                        "The generated deck is only searched alongside the whole language project.",
+                        messages.text(MessageId::CodeSearchIncludeGeneratedHint),
                     );
                 });
                 ui.add_space(6.0);
@@ -257,7 +289,7 @@ fn find_body(
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-                    if Button::new("Replace all eligible")
+                    if Button::new(&messages.text(MessageId::CodeSearchReplaceAllEligible))
                         .accent()
                         .enabled(!search.query.is_empty() && found.editable_matches > 0)
                         .show(ui)
@@ -267,14 +299,13 @@ fn find_body(
                     }
                     if found.read_only_matches > 0 {
                         ui.label(
-                            RichText::new(format!(
-                                "{} match{} sit in read-only sources and stay unchanged.",
-                                found.read_only_matches,
+                            RichText::new(messages.format(
                                 if found.read_only_matches == 1 {
-                                    ""
+                                    MessageId::CodeSearchReadOnlyMatchSingular
                                 } else {
-                                    "es"
-                                }
+                                    MessageId::CodeSearchReadOnlyMatches
+                                },
+                                &[("count", &found.read_only_matches.to_string())],
                             ))
                             .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                             .color(t.color.warn),
@@ -284,7 +315,7 @@ fn find_body(
                 ui.add_space(4.0);
             }
 
-            if let Some(reveal) = results_table(ui, found, &t) {
+            if let Some(reveal) = results_table(ui, found, &t, messages) {
                 action = FindAction::Reveal(reveal.0, reveal.1);
             }
         });
@@ -295,16 +326,20 @@ fn results_table(
     ui: &mut Ui,
     found: &CodeSourceSearchResults,
     t: &Tokens,
+    messages: MessageCatalog,
 ) -> Option<(String, usize)> {
-    let summary = format!(
-        "{} match{}",
-        found.total_matches,
-        if found.total_matches == 1 { "" } else { "es" }
+    let summary = messages.format(
+        if found.total_matches == 1 {
+            MessageId::CodeSearchMatchSingular
+        } else {
+            MessageId::CodeSearchMatches
+        },
+        &[("count", &found.total_matches.to_string())],
     );
     let mut reveal = None;
     code_inspector_section(
         ui,
-        "Matches",
+        &messages.text(MessageId::CodeSearchMatchesHeading),
         Some((
             &summary,
             if found.total_matches == 0 {
@@ -317,7 +352,7 @@ fn results_table(
             if found.matches.is_empty() {
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new("No match in the selected scope.")
+                    RichText::new(messages.text(MessageId::CodeSearchNoMatches))
                         .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                         .color(t.color.text_dim),
                 );
@@ -330,14 +365,35 @@ fn results_table(
                 .striped(true)
                 .show(ui, |ui| {
                     for row in &found.matches {
-                        if ui
-                            .selectable_label(
-                                false,
-                                RichText::new(&row.logical_path)
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                        // Only the path cell is focusable, and a match is its
+                        // path, its position, and the line it sits on. Announce
+                        // the row rather than the one cell that takes focus.
+                        let response = ui.selectable_label(
+                            false,
+                            RichText::new(&row.logical_path)
+                                .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                        );
+                        let announced = messages.format(
+                            if row.editable {
+                                MessageId::CodeSearchResultAccessible
+                            } else {
+                                MessageId::CodeSearchResultAccessibleReadOnly
+                            },
+                            &[
+                                ("path", &row.logical_path),
+                                ("line", &row.line.to_string()),
+                                ("column", &row.column.to_string()),
+                                ("preview", row.line_preview.trim()),
+                            ],
+                        );
+                        response.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::SelectableLabel,
+                                true,
+                                &announced,
                             )
-                            .clicked()
-                        {
+                        });
+                        if response.clicked() {
                             reveal = Some((row.logical_path.clone(), row.line));
                         }
                         ui.label(
@@ -362,14 +418,16 @@ fn results_table(
             if found.display_truncated {
                 ui.add_space(4.0);
                 ui.label(
-                    RichText::new(format!(
-                        "Showing the first {SOURCE_SEARCH_RESULT_LIMIT} of {} matches{}. Narrow the query to see the rest.",
-                        found.total_matches,
+                    RichText::new(messages.format(
                         if found.truncated {
-                            ", and the search stopped at its streaming limit"
+                            MessageId::CodeSearchShowingFirstStreamStopped
                         } else {
-                            ""
-                        }
+                            MessageId::CodeSearchShowingFirst
+                        },
+                        &[
+                            ("limit", &SOURCE_SEARCH_RESULT_LIMIT.to_string()),
+                            ("count", &found.total_matches.to_string()),
+                        ],
                     ))
                     .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                     .color(t.color.warn),
@@ -402,18 +460,81 @@ mod tests {
 
     /// Every scope the picker offers must round-trip through its own label, or
     /// choosing one would silently leave the search in the previous scope.
+    ///
+    /// The picker writes back by matching the label it drew, so the round-trip
+    /// has to hold in whichever locale drew it — a scope that only resolves in
+    /// English is a control that stops working when the text is translated.
     #[test]
-    fn every_offered_scope_round_trips_through_its_label() {
-        for (scope, label) in SCOPES {
-            assert_eq!(scope_label(scope), label);
-            assert_eq!(
-                SCOPES
-                    .iter()
-                    .find(|(_, name)| *name == label)
-                    .map(|(s, _)| *s),
-                Some(scope)
-            );
+    fn every_offered_scope_round_trips_through_its_label_in_every_locale() {
+        for locale in crate::workbench::UiTextLocale::ALL {
+            let messages = MessageCatalog::new(locale);
+            let mut drawn = std::collections::BTreeSet::new();
+            for (scope, id) in SCOPES {
+                let label = messages.text(id);
+                assert_eq!(scope_label(messages, scope), label);
+                assert!(
+                    drawn.insert(label.clone()),
+                    "two scopes share the label {label:?} in {locale:?}"
+                );
+                assert_eq!(
+                    SCOPES
+                        .iter()
+                        .find(|(_, name)| messages.text(*name) == label)
+                        .map(|(candidate, _)| *candidate),
+                    Some(scope)
+                );
+            }
         }
+    }
+
+    /// A result row is a path, a position, and the line it sits on, spread
+    /// across three cells of which only the first can take focus. Assistive
+    /// technology therefore heard a bare filename and nothing that identified
+    /// which of its matches this was.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_result_row_announces_its_whole_match_and_not_just_the_focusable_cell() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        app.state.ui.code_workspace.page = CodeWorkspacePage::Automation;
+        code_workspace::open_active_source_search(&mut app)
+            .expect("the Automation page owns a searchable bundle");
+        let Some(search) = app.state.ui.code_workspace.source_search.as_mut() else {
+            panic!("the search opened");
+        };
+        search.query = "import".to_owned();
+        let path = search.active_path.clone();
+
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_100.0, 800.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| app.render_source_find_dialog(ctx),
+        );
+        let Some(update) = output.platform_output.accesskit_update else {
+            panic!("the find dialog publishes an accessibility tree");
+        };
+        let labels = update
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.label())
+            .collect::<Vec<_>>();
+        let Some(row) = labels
+            .iter()
+            .find(|label| label.starts_with(&path) && label.contains("line "))
+        else {
+            panic!("no result row announced its position; labels: {labels:?}");
+        };
+        assert!(
+            row.contains("column ") && row.contains("import"),
+            "a row announced its path and line but not its column or its source line: {row:?}"
+        );
     }
 
     /// The defect: search, its results, and its atomic replacement were all

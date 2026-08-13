@@ -337,8 +337,62 @@ define_messages! {
     CodeNavigatorStateVariables => "State variables",
     CodeNavigatorBuildProfile => "Build profile",
     CodeNavigatorCompileForContract => "Compile the exact current bundle to inspect its model contract.",
+    CodeSourceLifecycleEyebrow => "{document} · FILE LIFECYCLE",
+    CodeSourceLifecycleTitle => "Manage source document",
+    CodeSourceLifecycleDescription => "Review ownership, persistence, includes, and revision history for {document}, and run the file operations this project source graph allows.",
+    CodeSourceOperationsHeld => "File operations are held",
+    CodeSourceReadOnlyDocument => "Read-only document",
+    CodeSourceReadOnlyDocumentDetail => "This document is not editable in the active project, so operations that rewrite it are unavailable.",
+    CodeSourceCurrentDocument => "Current document",
+    CodeSourceOwnedEditable => "project-owned · editable",
+    CodeSourceOwnedReadOnly => "project-owned · read-only",
+    CodeSourcePath => "Path",
+    CodeSourceIdentity => "Identity",
+    CodeSourceIdentityNotRetained => "not retained",
+    CodeSourceContent => "Content",
+    CodeSourceContentShape => "{lines} lines · {bytes} bytes",
+    CodeSourceLineEndings => "Line endings",
+    CodeSourceLineEndingsNone => "none · single line",
+    CodeSourceLineEndingsLf => "LF",
+    CodeSourceLineEndingsCrLf => "CRLF",
+    CodeSourceLineEndingsMixed => "mixed LF and CRLF",
+    CodeSourceBundle => "Bundle",
+    CodeSourceValidation => "Validation",
+    CodeSourceValidationCurrent => "current for this closure",
+    CodeSourceValidationStale => "stale · revalidate before use",
+    CodeSourceRecordedRole => "Recorded role",
+    CodeSourceRoleOrdinary => "ordinary source",
+    CodeSourceRoleBuildProfile => "Verilog-A build profile",
+    CodeSourceRoleAutomationEntry => "Automation entry",
+    CodeSourceRoleRunPlan => "Automation run plan",
+    CodeSourceRoleEnvironmentLock => "Automation environment lock",
+    CodeSourceRolePermissionManifest => "Automation permission manifest",
+    CodeSourceFileOperations => "File operations",
+    CodeSourceNewFile => "New source…",
+    CodeSourceRename => "Rename…",
+    CodeSourceMove => "Move…",
+    CodeSourceDuplicate => "Duplicate…",
+    CodeSourceDelete => "Delete…",
+    CodeSourceRevisionHistory => "Revision history…",
+    CodeSourceImportDependency => "Import dependency…",
+    CodeSourceRootDeleteBlocked => "The bundle root cannot be deleted; rename or replace it instead.",
+    CodeSourceEnvironmentLockMutationBlocked => "The managed Automation environment lock is read-only. Reassign its role above, or duplicate it, before changing the source graph.",
     CodeSourceCreateWorkspace => "Create source workspace…",
     CodeSourceImportRoot => "Import root source…",
+    CodeSourceWorkspaceEyebrow => "{language} · PROJECT SOURCES",
+    VerilogAActiveSourceUnavailable => "Selected source unavailable",
+    VerilogAActiveSourceUnavailableDescription => "The selected Verilog-A file is no longer in the authenticated project closure. Choose a current source from the navigator.",
+    CodeSourceWorkspaceTitle => "Create source workspace",
+    CodeSourceWorkspacePrimary => "Create workspace",
+    CodeSourceWorkspaceDescription => "Create the project-owned {language} source closure. Every path is portable and logical; none of these names carries semantic authority on its own.",
+    CodeSourceWorkspaceRefused => "The source workspace cannot be created",
+    CodeSourceWorkspaceClosure => "Closure",
+    CodeSourceWorkspaceRootPath => "Root document",
+    CodeSourceWorkspaceBuildProfilePath => "Build profile",
+    CodeSourceWorkspaceRunPlanPath => "Run plan",
+    CodeSourceWorkspaceEnvironmentLockPath => "Environment lock",
+    CodeSourceWorkspacePermissionPath => "Permission manifest",
+    CodeSourceWorkspaceBoundDeck => "Bound deck",
     CodeInspectorNetlistTitle => "Diagnostics & tuner",
     CodeInspectorVerilogATitle => "Model source context",
     CodeInspectorAutomationTitle => "Automation source context",
@@ -363,38 +417,116 @@ define_messages! {
     CodeInspectorCompare => "Compare revisions",
     CodeInspectorAvailable => "available",
     CodeInspectorUnavailable => "unavailable",
-    CodeToolsGovernedReadOnly => "This governed source is read-only. Create an editable project copy first.",
-    CodeToolsEnterRename => "Enter an indexed symbol and a replacement identifier.",
-    CodeToolsEyebrow => "PROJECT SOURCE · REVISION-BOUND INDEX",
+    CodeSourceOpenTransaction => "open transaction",
+    CodeSourceCreateTitle => "New source document",
+    CodeSourceRenameTitle => "Rename document",
+    CodeSourceMoveTitle => "Move document",
+    CodeSourceDuplicateTitle => "Duplicate document",
+    CodeSourceDeleteTitle => "Delete document",
+    CodeSourceCreatePrimary => "Create",
+    CodeSourceRenamePrimary => "Rename",
+    CodeSourceMovePrimary => "Move",
+    CodeSourceDuplicatePrimary => "Duplicate",
+    CodeSourceDeletePrimary => "Delete",
+    CodeSourceRemoving => "Removing",
+    CodeSourceLogicalPath => "Logical path",
+    CodeSourceAgainst => "Against",
+    CodeSourceAgainstRevision => "revision {revision} · {digest}",
+    CodeSourceDeleteWarning => "Removing a document rewrites the source graph as a new bundle revision.",
+    CodeSourceRecordedIncludes => "Recorded includes",
+    CodeSourceNoIncludes => "This document has no recorded include edge in either direction.",
+    CodeSourceImports => "Imports",
+    CodeSourceImportedBy => "Imported by",
+    CodeSourceRetainedRevisions => "Retained bundle revisions",
+    CodeSourceNoRetainedRevision => "This bundle has no retained revision to restore yet.",
+    CodeSourceRetainedClosures => "Retained closures",
+    CodeSourceNewestLast => "newest last",
+    CodeSourceRevision => "revision {revision}",
+    CodeSourceDocumentSingular => "{count} document",
+    CodeSourceDocuments => "{count} documents",
+    CodeSourceCurrentClosure => "current closure",
+    CodeSourceRevisionAccessible => "Revision {revision}, {digest}, {documents}.",
+    CodeSourceRevisionAccessibleCurrent => "Revision {revision}, {digest}, {documents}. This is the current closure.",
+    CodeSourceRestoreAsNewRevision => "Restore as new revision",
+    CodeSourceCloseHistory => "Close history",
+    CodeSearchEyebrow => "{language} · BUNDLE-SCOPED SEARCH",
+    CodeSearchTitle => "Find in source",
+    CodeSearchDescription => "Search the project-owned source closure. Finding changes nothing; replacement is one atomic bundle revision that skips every ineligible source.",
+    CodeSearchCannotRun => "This search cannot run",
+    CodeSearchReplacementHeld => "Replacement held",
+    CodeSearchQuery => "Query",
+    CodeSearchActiveDocument => "Active document",
+    CodeSearchReplaceWith => "Replace with",
+    CodeSearchReplaceUnavailable => "unavailable · this document is read-only",
+    CodeSearchSelection => "Selection",
+    CodeSearchCurrentDocument => "Current document",
+    CodeSearchOpenDocuments => "Open documents",
+    CodeSearchActiveLanguage => "Active language project",
+    CodeSearchMatchCase => "Match case",
+    CodeSearchWholeSymbol => "Whole symbol",
+    CodeSearchRegularExpression => "Regular expression",
+    CodeSearchIncludeComments => "Include comments",
+    CodeSearchIncludeGenerated => "Include generated deck · find only",
+    CodeSearchIncludeGeneratedHint => "The generated deck is only searched alongside the whole language project.",
+    CodeSearchReplaceAllEligible => "Replace all eligible",
+    CodeSearchReadOnlyMatchSingular => "{count} match sits in a read-only source and stays unchanged.",
+    CodeSearchReadOnlyMatches => "{count} matches sit in read-only sources and stay unchanged.",
+    CodeSearchMatchesHeading => "Matches",
+    CodeSearchMatchSingular => "{count} match",
+    CodeSearchMatches => "{count} matches",
+    CodeSearchNoMatches => "No match in the selected scope.",
+    CodeSearchResultAccessible => "{path}, line {line}, column {column}. {preview}",
+    CodeSearchResultAccessibleReadOnly => "{path}, line {line}, column {column}, in a read-only source. {preview}",
+    CodeSearchShowingFirst => "Showing the first {limit} of {count} matches. Narrow the query to see the rest.",
+    CodeSearchShowingFirstStreamStopped => "Showing the first {limit} of {count} matches, and the search stopped at its streaming limit. Narrow the query to see the rest.",
+    CodeToolsEyebrow => "{language} · {path}",
     CodeToolsTitle => "Source navigation and language tools",
-    CodeToolsDescription => "Use completion, semantic information, navigation, refactoring, and code actions from the exact current source closure. Every source mutation is revision-checked before it commits.",
-    CodeToolsStaleIndex => "The source closure changed after this index was built. Navigation and edits are blocked until the current revision is reindexed.",
-    CodeToolsReindex => "Reindex current source closure",
+    CodeToolsDescription => "Navigate symbols, references, and diagnostics over the exact indexed source closure. Every answer names the revision it was computed from.",
+    CodeToolsTransactionRefused => "The language transaction was refused",
+    CodeToolsIndexBehind => "Index is behind the project",
+    CodeToolsStaleIndex => "The source bundle changed after this index was built. Navigation still answers from the indexed revision; reopen the tools to write against the current one.",
+    CodeToolsApplied => "Applied",
+    CodeToolsIndexedClosure => "Indexed closure",
+    CodeToolsIndexRevision => "revision {revision}",
+    CodeToolsDocument => "Document",
+    CodeToolsIndexedSymbols => "Indexed symbols",
     CodeToolsSymbol => "Symbol",
-    CodeToolsSymbolHint => "Symbol under caret or indexed name",
+    CodeToolsDocumentSymbols => "Document symbols",
     CodeToolsCompletion => "Completion",
     CodeToolsHover => "Hover",
     CodeToolsSignatureHelp => "Signature help",
-    CodeToolsDocumentSymbols => "Document symbols",
-    CodeToolsGoDefinition => "Go to definition",
-    CodeToolsGoDeclaration => "Go to declaration",
-    CodeToolsFindReferences => "Find references",
-    CodeToolsWorkspaceSymbols => "Workspace symbols",
-    CodeToolsQuickFixes => "Quick fixes & code actions",
-    CodeToolsRenameTo => "Rename to",
-    CodeToolsRenameOccurrenceSingular => "Rename {count} occurrence",
-    CodeToolsRenameOccurrences => "Rename {count} occurrences",
-    CodeToolsReviewRename => "Review rename",
-    CodeToolsReviewOccurrenceSingular => "Review {count} exact identifier occurrence before committing.",
-    CodeToolsReviewOccurrences => "Review {count} exact identifier occurrences before committing.",
-    CodeToolsHoverInformation => "Hover information",
     CodeToolsDefinitions => "Definitions",
     CodeToolsDeclarations => "Declarations",
     CodeToolsReferences => "References",
-    CodeToolsQuickFixesHeading => "Quick fixes and code actions",
-    CodeToolsMutationUnavailable => "Source mutation is unavailable.",
+    CodeToolsWorkspaceSymbols => "Workspace symbols",
+    CodeToolsCodeActions => "Code actions",
+    CodeToolsResultAccessible => "{name}, {kind}, {path} line {line}. {detail}",
+    CodeToolsNoAnswer => "The indexed closure answers nothing for this name.",
+    CodeToolsHoverNoSymbol => "No indexed symbol matches this name.",
+    CodeToolsSignatureNoCall => "The caret is not inside a call this index can resolve.",
+    CodeToolsNoCompletion => "Nothing completes the identifier at the captured caret.",
+    CodeToolsNoCodeActions => "This document already satisfies every available action.",
+    CodeToolsApply => "Apply",
+    CodeToolsRenameSymbol => "Rename symbol",
+    CodeToolsRenaming => "Renaming",
+    CodeToolsRenameTo => "New name",
+    CodeToolsRenameOccurrenceSingular => "Rename {count} occurrence",
+    CodeToolsRenameOccurrences => "Rename {count} occurrences",
+    CodeToolsRenameNotAllowed => "Rename rewrites project source, which this document or this index revision does not allow.",
+    CodeToolsRenameAtomic => "Rename is atomic: it refuses outright if any occurrence sits in a governed read-only source.",
     CodeToolsDefinitionSuffix => "definition",
-    CodeToolsNoResults => "No indexed results.",
+    CodeToolsReferenceSuffix => "reference",
+    CodeSymbolKindModule => "module",
+    CodeSymbolKindFunction => "function",
+    CodeSymbolKindClass => "class",
+    CodeSymbolKindParameter => "parameter",
+    CodeSymbolKindPort => "port",
+    CodeSymbolKindNet => "net",
+    CodeSymbolKindVariable => "variable",
+    CodeSymbolKindImport => "import",
+    CodeSymbolKindConfiguration => "configuration",
+    CodeSymbolKindDiscipline => "discipline",
+    CodeSymbolKindNature => "nature",
     CodeNavigatorNetlistTitle => "Netlist outline",
     CodeNavigatorVerilogATitle => "Verilog-A models",
     CodeNavigatorAutomationTitle => "Automation files",
@@ -783,6 +915,70 @@ mod tests {
         }
     }
 
+    /// Message families whose every entry must be reached by shipped code.
+    ///
+    /// An unused entry is not harmless. The catalog is what a translator is
+    /// given, so an entry nothing paints is either a string that will be
+    /// translated and never shown, or — worse, and what this wave found — an
+    /// entry whose wording has drifted from the literal the surface actually
+    /// paints, quietly disagreeing with the screen.
+    ///
+    /// Families join this list as their surface is wired. The netlist and
+    /// code-workspace navigators are the remaining holdouts.
+    const WIRED_FAMILIES: [&str; 4] = ["CodeSearch", "CodeSource", "CodeSymbolKind", "CodeTools"];
+
+    #[test]
+    fn every_message_in_a_wired_family_is_painted_by_something() {
+        let mut referenced = std::collections::HashSet::new();
+        let mut pending = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
+        while let Some(directory) = pending.pop() {
+            let Ok(entries) = std::fs::read_dir(&directory) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else if path.extension().is_some_and(|extension| extension == "rs")
+                    && path
+                        .file_name()
+                        .is_some_and(|name| name != "localization.rs")
+                    && let Ok(source) = std::fs::read_to_string(&path)
+                {
+                    for (index, _) in source.match_indices("MessageId::") {
+                        let name = source[index + "MessageId::".len()..]
+                            .split(|character: char| {
+                                !character.is_ascii_alphanumeric() && character != '_'
+                            })
+                            .next()
+                            .unwrap_or_default();
+                        if !name.is_empty() {
+                            referenced.insert(name.to_owned());
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            referenced.len() > 100,
+            "the scan found almost nothing, so it is not reading the crate"
+        );
+
+        let orphaned = MessageId::ALL
+            .iter()
+            .map(|id| id.stable_key())
+            .filter(|key| {
+                WIRED_FAMILIES
+                    .iter()
+                    .any(|family| key.starts_with(family) && !referenced.contains(*key))
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            orphaned.is_empty(),
+            "these catalog entries are in a wired family but nothing paints them: {orphaned:?}"
+        );
+    }
+
     #[test]
     fn formatter_rejects_missing_and_malformed_placeholders() {
         assert!(format_template("{count} files", &[]).is_err());
@@ -791,26 +987,64 @@ mod tests {
         assert!(format_template("close}", &[]).is_err());
     }
 
+    /// Every module that paints a code-workspace surface, found rather than
+    /// listed.
+    ///
+    /// This guard used to name four files. Splitting those files moved most of
+    /// the drawing into submodules the guard had never heard of, so it went on
+    /// passing while covering a fraction of what it was written for. A walk
+    /// cannot fall behind a split.
+    fn code_workspace_surface_sources() -> Vec<(String, String)> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/workbench");
+        let roots = [
+            "surfaces/netlist.rs",
+            "surfaces/veriloga.rs",
+            "surfaces/automation.rs",
+            "docks/navigator/netlist.rs",
+            "docks/navigator/source_bundle.rs",
+            "app/dialogs/source_find.rs",
+            "app/dialogs/source_document.rs",
+            "app/dialogs/source_language_tools.rs",
+        ];
+        let mut found = Vec::new();
+        for relative in roots {
+            let path = root.join(relative);
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{relative} is no longer readable: {error}"));
+            found.push((relative.to_owned(), source));
+
+            // A module's submodule directory sits beside it under the same
+            // stem, and everything in it draws the same surface.
+            let Some(directory) = path.parent().map(|parent| {
+                parent.join(
+                    path.file_stem()
+                        .map(std::ffi::OsStr::to_os_string)
+                        .unwrap_or_default(),
+                )
+            }) else {
+                continue;
+            };
+            let Ok(entries) = std::fs::read_dir(&directory) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let child = entry.path();
+                if child.extension().is_some_and(|extension| extension == "rs")
+                    && let Ok(source) = std::fs::read_to_string(&child)
+                {
+                    found.push((child.display().to_string(), source));
+                }
+            }
+        }
+        assert!(
+            found.len() > roots.len(),
+            "the walk found no submodules at all, so it is scanning less than it claims"
+        );
+        found
+    }
+
     #[test]
     fn code_workspace_surfaces_do_not_reintroduce_literal_widget_copy() {
-        let files = [
-            (
-                "netlist surface",
-                include_str!("surfaces/netlist.rs") as &str,
-            ),
-            (
-                "Verilog-A surface",
-                include_str!("surfaces/veriloga.rs") as &str,
-            ),
-            (
-                "Automation surface",
-                include_str!("surfaces/automation.rs") as &str,
-            ),
-            (
-                "Netlist navigator",
-                include_str!("docks/navigator/netlist.rs") as &str,
-            ),
-        ];
         let forbidden = [
             "Dialog::new(\"",
             ".description(\"",
@@ -818,10 +1052,11 @@ mod tests {
             "egui::Button::new(\"",
             ".hint_text(\"",
         ];
-        for (name, source) in files {
+        for (name, source) in code_workspace_surface_sources() {
+            let production = crate::source_guard::production_source(&source);
             for pattern in forbidden {
                 assert!(
-                    !source.contains(pattern),
+                    !production.contains(pattern),
                     "{name} bypasses the message catalog with {pattern:?}"
                 );
             }

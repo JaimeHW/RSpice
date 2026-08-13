@@ -36,8 +36,8 @@ pub use editor::{
 };
 pub(crate) use language_services::{
     CodeLanguageToolsState, LanguageToolView, SourceCodeAction, SourceIndexCache, SourceOutlineRow,
-    SourceSymbol, commit_language_code_action, commit_language_completion, commit_language_rename,
-    document_outline, open_language_tools,
+    SourceSymbol, SourceSymbolKind, commit_language_code_action, commit_language_completion,
+    commit_language_rename, document_outline, open_language_tools,
 };
 pub use page::{
     AutomationArtifactStore, AutomationBreakpointKind, AutomationDebugPhase,

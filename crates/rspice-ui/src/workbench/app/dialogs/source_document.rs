@@ -27,9 +27,7 @@ use crate::workbench::design_system::{
     property_row_input, property_row_status, section_header,
 };
 use crate::workbench::documents::code_workspace::{self, CodeSourceFileAction};
-
-const TITLE: &str = "Manage source document";
-const WORKSPACE_TITLE: &str = "Create source workspace";
+use crate::workbench::{MessageCatalog, MessageId};
 
 /// Bring the lifecycle dialog up for the page that is showing.
 ///
@@ -84,7 +82,7 @@ struct DocumentFacts {
     editable: bool,
     is_root: bool,
     shape: String,
-    line_endings: &'static str,
+    line_endings: MessageId,
     bundle: String,
     validation_current: bool,
     imports: Vec<String>,
@@ -116,18 +114,18 @@ fn leaf_name(logical_path: &str) -> String {
 /// Line endings as they actually are in the retained bytes, not as a policy
 /// the writer intends to apply. A mixed document is worth saying out loud
 /// because a whole-file rewrite silently normalizes it.
-fn line_ending_summary(content: &str) -> &'static str {
+fn line_ending_summary(content: &str) -> MessageId {
     let carriage_return_line_feed = content.matches("\r\n").count();
     let line_feed = content.matches('\n').count() - carriage_return_line_feed;
     match (carriage_return_line_feed, line_feed) {
-        (0, 0) => "none \u{00b7} single line",
-        (0, _) => "LF",
-        (_, 0) => "CRLF",
-        _ => "mixed LF and CRLF",
+        (0, 0) => MessageId::CodeSourceLineEndingsNone,
+        (0, _) => MessageId::CodeSourceLineEndingsLf,
+        (_, 0) => MessageId::CodeSourceLineEndingsCrLf,
+        _ => MessageId::CodeSourceLineEndingsMixed,
     }
 }
 
-fn document_facts(app: &RSpiceApp) -> Option<DocumentFacts> {
+fn document_facts(app: &RSpiceApp, messages: MessageCatalog) -> Option<DocumentFacts> {
     let language = code_workspace::page_source_language(app.state.ui.code_workspace.page)?;
     let logical_path = code_workspace::active_bundle_path(
         &app.state.workspace,
@@ -142,7 +140,7 @@ fn document_facts(app: &RSpiceApp) -> Option<DocumentFacts> {
         .bundle_for_owner(&owner)?;
     let content = bundle.file_content(&logical_path).unwrap_or_default();
     let identity = bundle.document_id(&logical_path).map_or_else(
-        || "not retained".to_owned(),
+        || messages.text(MessageId::CodeSourceIdentityNotRetained),
         |id| {
             let revision = bundle
                 .document_revision(&logical_path)
@@ -174,7 +172,7 @@ fn document_facts(app: &RSpiceApp) -> Option<DocumentFacts> {
         language,
         leaf: leaf_name(&logical_path),
         identity,
-        role: role_label(bundle.role_for_path(&logical_path)).to_owned(),
+        role: role_label(messages, bundle.role_for_path(&logical_path)),
         is_entry: bundle.role_for_path(&logical_path)
             == Some(crate::state::ProjectSourceRole::AutomationEntry),
         is_environment_lock: bundle.role_for_path(&logical_path)
@@ -189,16 +187,20 @@ fn document_facts(app: &RSpiceApp) -> Option<DocumentFacts> {
             &logical_path,
             bundle.root().logical_path(),
         ),
-        shape: format!(
-            "{} lines \u{00b7} {} bytes",
-            content.lines().count(),
-            content.len()
+        shape: messages.format(
+            MessageId::CodeSourceContentShape,
+            &[
+                ("lines", &content.lines().count().to_string()),
+                ("bytes", &content.len().to_string()),
+            ],
         ),
         line_endings: line_ending_summary(content),
-        bundle: format!(
-            "revision {} \u{00b7} {}",
-            bundle.revision().get(),
-            short_digest(bundle.closure_digest())
+        bundle: messages.format(
+            MessageId::CodeSourceAgainstRevision,
+            &[
+                ("revision", &bundle.revision().get().to_string()),
+                ("digest", &short_digest(bundle.closure_digest())),
+            ],
         ),
         validation_current: bundle.validation_is_current(),
         imports: dependency_paths(bundle, &logical_path, true),
@@ -269,8 +271,27 @@ const ASSIGNABLE_AUTOMATION_ROLES: [Option<crate::state::ProjectSourceRole>; 4] 
 
 /// One spelling of a document's role, so the property row and the picker can
 /// never disagree about which entry is currently selected.
-fn role_label(role: Option<crate::state::ProjectSourceRole>) -> &'static str {
-    role.map_or("ordinary source", crate::state::ProjectSourceRole::label)
+///
+/// The picker resolves a selection by matching the label it drew, so the label
+/// has to come from the same locale the row was painted in.
+fn role_label(messages: MessageCatalog, role: Option<crate::state::ProjectSourceRole>) -> String {
+    messages.text(
+        role.map_or(MessageId::CodeSourceRoleOrdinary, |role| match role {
+            crate::state::ProjectSourceRole::VerilogABuildProfile => {
+                MessageId::CodeSourceRoleBuildProfile
+            }
+            crate::state::ProjectSourceRole::AutomationEntry => {
+                MessageId::CodeSourceRoleAutomationEntry
+            }
+            crate::state::ProjectSourceRole::AutomationRunPlan => MessageId::CodeSourceRoleRunPlan,
+            crate::state::ProjectSourceRole::AutomationEnvironmentLock => {
+                MessageId::CodeSourceRoleEnvironmentLock
+            }
+            crate::state::ProjectSourceRole::AutomationPermissionManifest => {
+                MessageId::CodeSourceRolePermissionManifest
+            }
+        }),
+    )
 }
 
 impl RSpiceApp {
@@ -288,20 +309,24 @@ impl RSpiceApp {
         if !self.state.ui.code_workspace.source_document_dialog {
             return;
         }
-        let Some(facts) = document_facts(self) else {
+        let messages = self.state.ui.messages();
+        let Some(facts) = document_facts(self, messages) else {
             // The bundle or the page went away underneath an open dialog.
             self.state.ui.code_workspace.source_document_dialog = false;
             return;
         };
 
         let mut dialog = Dialog::new(
-            format!("{} \u{00b7} FILE LIFECYCLE", facts.leaf.to_uppercase()),
-            TITLE,
-            "Close",
+            messages.format(
+                MessageId::CodeSourceLifecycleEyebrow,
+                &[("document", &facts.leaf.to_uppercase())],
+            ),
+            messages.text(MessageId::CodeSourceLifecycleTitle),
+            messages.text(MessageId::CommonClose),
         )
-        .description(format!(
-            "Review ownership, persistence, includes, and revision history for {}, and run the file operations this project source graph allows.",
-            facts.leaf
+        .description(messages.format(
+            MessageId::CodeSourceLifecycleDescription,
+            &[("document", &facts.leaf)],
         ))
         .size(DialogSize::SimulationWorkflow)
         .initial_height(600.0)
@@ -310,20 +335,20 @@ impl RSpiceApp {
         if let Some(reason) = facts.block_reason {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Progress,
-                "File operations are held",
+                messages.text(MessageId::CodeSourceOperationsHeld),
                 reason,
             );
         } else if !facts.editable {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Progress,
-                "Read-only document",
-                "This document is not editable in the active project, so operations that rewrite it are unavailable.",
+                messages.text(MessageId::CodeSourceReadOnlyDocument),
+                messages.text(MessageId::CodeSourceReadOnlyDocumentDetail),
             );
         }
 
         let mut action = LifecycleAction::None;
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
-            action = lifecycle_body(ui, &mut self.state, &facts);
+            action = lifecycle_body(ui, &mut self.state, &facts, messages);
             None
         });
         self.apply_lifecycle_action(action, &facts);
@@ -426,58 +451,78 @@ impl RSpiceApp {
             return;
         };
         let automation = draft.language == ProjectSourceLanguage::RSpiceAutomation;
+        let messages = self.state.ui.messages();
         let mut dialog = Dialog::new(
-            format!(
-                "{} \u{00b7} PROJECT SOURCES",
-                draft.language.label().to_uppercase()
+            messages.format(
+                MessageId::CodeSourceWorkspaceEyebrow,
+                &[("language", &draft.language.label().to_uppercase())],
             ),
-            WORKSPACE_TITLE,
-            "Create workspace",
+            messages.text(MessageId::CodeSourceWorkspaceTitle),
+            messages.text(MessageId::CodeSourceWorkspacePrimary),
         )
-        .description(format!(
-            "Create the project-owned {} source closure. Every path is portable and logical; none of these names carries semantic authority on its own.",
-            draft.language.label()
+        .description(messages.format(
+            MessageId::CodeSourceWorkspaceDescription,
+            &[("language", draft.language.label())],
         ))
         .size(DialogSize::Transaction)
-        .ghost("Cancel");
+        .ghost(messages.text(MessageId::CommonCancel));
         if let Some(error) = draft.error.as_deref() {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
-                "The source workspace cannot be created",
+                messages.text(MessageId::CodeSourceWorkspaceRefused),
                 error,
             );
         }
 
         let mut edited = draft.clone();
         let choice = dialog.show(ctx, |ui| {
-            code_inspector_section(ui, "Closure", None, |ui| {
-                code_inspector_property_list(ui, |ui| {
-                    property_row_input(ui, "Root document", &mut edited.root_path, false);
-                    if automation {
-                        property_row_input(ui, "Run plan", &mut edited.run_plan_path, false);
+            code_inspector_section(
+                ui,
+                &messages.text(MessageId::CodeSourceWorkspaceClosure),
+                None,
+                |ui| {
+                    code_inspector_property_list(ui, |ui| {
                         property_row_input(
                             ui,
-                            "Environment lock",
-                            &mut edited.environment_lock_path,
+                            &messages.text(MessageId::CodeSourceWorkspaceRootPath),
+                            &mut edited.root_path,
                             false,
                         );
-                        property_row_input(
+                        if automation {
+                            property_row_input(
+                                ui,
+                                &messages.text(MessageId::CodeSourceWorkspaceRunPlanPath),
+                                &mut edited.run_plan_path,
+                                false,
+                            );
+                            property_row_input(
+                                ui,
+                                &messages.text(MessageId::CodeSourceWorkspaceEnvironmentLockPath),
+                                &mut edited.environment_lock_path,
+                                false,
+                            );
+                            property_row_input(
+                                ui,
+                                &messages.text(MessageId::CodeSourceWorkspacePermissionPath),
+                                &mut edited.permission_manifest_path,
+                                false,
+                            );
+                        } else {
+                            property_row_input(
+                                ui,
+                                &messages.text(MessageId::CodeSourceWorkspaceBuildProfilePath),
+                                &mut edited.build_profile_path,
+                                false,
+                            );
+                        }
+                        property_row(
                             ui,
-                            "Permission manifest",
-                            &mut edited.permission_manifest_path,
-                            false,
+                            &messages.text(MessageId::CodeSourceWorkspaceBoundDeck),
+                            &edited.netlist_source_path,
                         );
-                    } else {
-                        property_row_input(
-                            ui,
-                            "Build profile",
-                            &mut edited.build_profile_path,
-                            false,
-                        );
-                    }
-                    property_row(ui, "Bound deck", &edited.netlist_source_path);
-                });
-            });
+                    });
+                },
+            );
         });
         if let Some(state) = self
             .state
@@ -517,22 +562,28 @@ impl RSpiceApp {
     }
 }
 
-fn lifecycle_body(ui: &mut Ui, state: &mut AppState, facts: &DocumentFacts) -> LifecycleAction {
+fn lifecycle_body(
+    ui: &mut Ui,
+    state: &mut AppState,
+    facts: &DocumentFacts,
+    messages: MessageCatalog,
+) -> LifecycleAction {
     let t = Tokens::get(ui.ctx());
     let mut action = LifecycleAction::None;
     ScrollArea::vertical()
         .id_salt("source-document-lifecycle")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            if let Some(chosen) = current_document(ui, facts, t.color.ok, t.color.accent) {
+            if let Some(chosen) = current_document(ui, facts, t.color.ok, t.color.accent, messages)
+            {
                 action = chosen;
             }
-            operations(ui, facts, &mut action);
-            if let Some(chosen) = operation_review(ui, state) {
+            operations(ui, facts, &mut action, messages);
+            if let Some(chosen) = operation_review(ui, state, messages) {
                 action = chosen;
             }
-            includes(ui, facts);
-            if let Some(chosen) = revision_history(ui, state, facts) {
+            includes(ui, facts, messages);
+            if let Some(chosen) = revision_history(ui, state, facts, messages) {
                 action = chosen;
             }
         });
@@ -544,40 +595,66 @@ fn current_document(
     facts: &DocumentFacts,
     ok: egui::Color32,
     accent: egui::Color32,
+    messages: MessageCatalog,
 ) -> Option<LifecycleAction> {
     let ownership = if facts.editable {
-        ("project-owned \u{00b7} editable", ok)
+        (messages.text(MessageId::CodeSourceOwnedEditable), ok)
     } else {
-        ("project-owned \u{00b7} read-only", accent)
+        (messages.text(MessageId::CodeSourceOwnedReadOnly), accent)
     };
     let mut action = None;
-    code_inspector_section(ui, "Current document", Some(ownership), |ui| {
-        code_inspector_property_list(ui, |ui| {
-            property_row(ui, "Path", &facts.logical_path);
-            property_row(ui, "Identity", &facts.identity);
-            if let Some(chosen) = role_control(ui, facts) {
-                action = Some(chosen);
-            }
-            property_row(ui, "Content", &facts.shape);
-            property_row(ui, "Line endings", facts.line_endings);
-            property_row(ui, "Bundle", &facts.bundle);
-            property_row_status(
-                ui,
-                "Validation",
-                if facts.validation_current {
-                    "current for this closure"
-                } else {
-                    "stale \u{00b7} revalidate before use"
-                },
-                if facts.validation_current { ok } else { accent },
-                if facts.validation_current {
-                    StatusMark::Success
-                } else {
-                    StatusMark::Warning
-                },
-            );
-        });
-    });
+    code_inspector_section(
+        ui,
+        &messages.text(MessageId::CodeSourceCurrentDocument),
+        Some((&ownership.0, ownership.1)),
+        |ui| {
+            code_inspector_property_list(ui, |ui| {
+                property_row(
+                    ui,
+                    &messages.text(MessageId::CodeSourcePath),
+                    &facts.logical_path,
+                );
+                property_row(
+                    ui,
+                    &messages.text(MessageId::CodeSourceIdentity),
+                    &facts.identity,
+                );
+                if let Some(chosen) = role_control(ui, facts, messages) {
+                    action = Some(chosen);
+                }
+                property_row(
+                    ui,
+                    &messages.text(MessageId::CodeSourceContent),
+                    &facts.shape,
+                );
+                property_row(
+                    ui,
+                    &messages.text(MessageId::CodeSourceLineEndings),
+                    &messages.text(facts.line_endings),
+                );
+                property_row(
+                    ui,
+                    &messages.text(MessageId::CodeSourceBundle),
+                    &facts.bundle,
+                );
+                property_row_status(
+                    ui,
+                    &messages.text(MessageId::CodeSourceValidation),
+                    &messages.text(if facts.validation_current {
+                        MessageId::CodeSourceValidationCurrent
+                    } else {
+                        MessageId::CodeSourceValidationStale
+                    }),
+                    if facts.validation_current { ok } else { accent },
+                    if facts.validation_current {
+                        StatusMark::Success
+                    } else {
+                        StatusMark::Warning
+                    },
+                );
+            });
+        },
+    );
     action
 }
 
@@ -587,19 +664,24 @@ fn current_document(
 /// the user to reassign its role first. Without this control that instruction
 /// could not be followed, so the lock was a document nothing could ever move,
 /// rename, or delete.
-fn role_control(ui: &mut Ui, facts: &DocumentFacts) -> Option<LifecycleAction> {
+fn role_control(
+    ui: &mut Ui,
+    facts: &DocumentFacts,
+    messages: MessageCatalog,
+) -> Option<LifecycleAction> {
+    let row_label = messages.text(MessageId::CodeSourceRecordedRole);
     if facts.language != ProjectSourceLanguage::RSpiceAutomation || facts.is_entry {
-        property_row(ui, "Recorded role", &facts.role);
+        property_row(ui, &row_label, &facts.role);
         return None;
     }
     let options = ASSIGNABLE_AUTOMATION_ROLES
         .iter()
-        .map(|role| (role_label(*role).to_owned(), role_label(*role).to_owned()))
+        .map(|role| (role_label(messages, *role), role_label(messages, *role)))
         .collect::<Vec<_>>();
     let mut selected = facts.role.clone();
     let changed = crate::workbench::design_system::property_row_combo(
         ui,
-        "Recorded role",
+        &row_label,
         "source-document-role",
         &mut selected,
         &options,
@@ -609,54 +691,73 @@ fn role_control(ui: &mut Ui, facts: &DocumentFacts) -> Option<LifecycleAction> {
         .then(|| {
             ASSIGNABLE_AUTOMATION_ROLES
                 .iter()
-                .find(|role| role_label(**role) == selected)
+                .find(|role| role_label(messages, **role) == selected)
                 .map(|role| LifecycleAction::AssignRole(*role))
         })
         .flatten()
 }
 
-fn operations(ui: &mut Ui, facts: &DocumentFacts, action: &mut LifecycleAction) {
-    code_inspector_section(ui, "File operations", None, |ui| {
-        ui.add_space(6.0);
-        let candidates = [
-            ("New source\u{2026}", CodeSourceFileAction::New),
-            ("Rename\u{2026}", CodeSourceFileAction::Rename),
-            ("Move\u{2026}", CodeSourceFileAction::Move),
-            ("Duplicate\u{2026}", CodeSourceFileAction::Duplicate),
-            ("Delete\u{2026}", CodeSourceFileAction::Delete),
-        ];
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-            for (label, candidate) in candidates {
-                let refusal = refusal_reason(facts, candidate);
-                let response = Button::new(label)
-                    .enabled(refusal.is_none())
-                    .destructive(candidate == CodeSourceFileAction::Delete)
-                    .show(ui);
-                if response.clicked() {
-                    *action = LifecycleAction::Begin(candidate);
+/// The file operations, in the order they are offered.
+const FILE_OPERATIONS: [(MessageId, CodeSourceFileAction); 5] = [
+    (MessageId::CodeSourceNewFile, CodeSourceFileAction::New),
+    (MessageId::CodeSourceRename, CodeSourceFileAction::Rename),
+    (MessageId::CodeSourceMove, CodeSourceFileAction::Move),
+    (
+        MessageId::CodeSourceDuplicate,
+        CodeSourceFileAction::Duplicate,
+    ),
+    (MessageId::CodeSourceDelete, CodeSourceFileAction::Delete),
+];
+
+fn operations(
+    ui: &mut Ui,
+    facts: &DocumentFacts,
+    action: &mut LifecycleAction,
+    messages: MessageCatalog,
+) {
+    code_inspector_section(
+        ui,
+        &messages.text(MessageId::CodeSourceFileOperations),
+        None,
+        |ui| {
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                for (label, candidate) in FILE_OPERATIONS {
+                    let refusal = refusal_reason(facts, candidate);
+                    let response = Button::new(&messages.text(label))
+                        .enabled(refusal.is_none())
+                        .destructive(candidate == CodeSourceFileAction::Delete)
+                        .show(ui);
+                    if response.clicked() {
+                        *action = LifecycleAction::Begin(candidate);
+                    }
+                    if let Some(reason) = refusal {
+                        response.on_disabled_hover_text(reason.resolve(messages));
+                    }
                 }
-                if let Some(reason) = refusal {
-                    response.on_disabled_hover_text(reason);
+                if Button::new(&messages.text(MessageId::CodeSourceRevisionHistory))
+                    .show(ui)
+                    .clicked()
+                {
+                    *action = LifecycleAction::OpenHistory;
                 }
-            }
-            if Button::new("Revision history\u{2026}").show(ui).clicked() {
-                *action = LifecycleAction::OpenHistory;
-            }
-            if facts.language == ProjectSourceLanguage::RSpiceAutomation {
-                let response = Button::new("Import dependency\u{2026}")
-                    .enabled(facts.block_reason.is_none())
-                    .show(ui);
-                if response.clicked() {
-                    *action = LifecycleAction::Import;
+                if facts.language == ProjectSourceLanguage::RSpiceAutomation {
+                    let response =
+                        Button::new(&messages.text(MessageId::CodeSourceImportDependency))
+                            .enabled(facts.block_reason.is_none())
+                            .show(ui);
+                    if response.clicked() {
+                        *action = LifecycleAction::Import;
+                    }
+                    if let Some(reason) = facts.block_reason {
+                        response.on_disabled_hover_text(reason);
+                    }
                 }
-                if let Some(reason) = facts.block_reason {
-                    response.on_disabled_hover_text(reason);
-                }
-            }
-        });
-        ui.add_space(6.0);
-    });
+            });
+            ui.add_space(6.0);
+        },
+    );
 }
 
 /// Why an operation is unavailable, or `None` when it is.
@@ -665,9 +766,9 @@ fn operations(ui: &mut Ui, facts: &DocumentFacts, action: &mut LifecycleAction) 
 /// Content editability deliberately does not appear: a document can be
 /// read-only to type into and still be renamed, moved, or deleted, and gating
 /// on it would disable buttons the service would have honoured.
-fn refusal_reason(facts: &DocumentFacts, candidate: CodeSourceFileAction) -> Option<&'static str> {
+fn refusal_reason(facts: &DocumentFacts, candidate: CodeSourceFileAction) -> Option<Refusal> {
     if let Some(reason) = facts.block_reason {
-        return Some(reason);
+        return Some(Refusal::Service(reason));
     }
     let rewrites_graph = matches!(
         candidate,
@@ -677,53 +778,101 @@ fn refusal_reason(facts: &DocumentFacts, candidate: CodeSourceFileAction) -> Opt
             | CodeSourceFileAction::Delete
     );
     if rewrites_graph && facts.is_environment_lock {
-        return Some(
-            "The managed Automation environment lock is read-only. Reassign its role above, or duplicate it, before changing the source graph.",
-        );
+        return Some(Refusal::Stated(
+            MessageId::CodeSourceEnvironmentLockMutationBlocked,
+        ));
     }
     // The root is the closure's entry document. Removing it would leave a
     // bundle with nothing to enter through, so the service refuses.
     (candidate == CodeSourceFileAction::Delete && facts.is_root)
-        .then_some("The bundle root cannot be deleted; rename or replace it instead.")
+        .then_some(Refusal::Stated(MessageId::CodeSourceRootDeleteBlocked))
+}
+
+/// Why an operation is refused, and who owns the wording.
+///
+/// A rule this surface restates is catalog copy. A rule the source-graph
+/// service already answered with is that service's sentence, passed through
+/// unaltered so the two can never disagree about the reason.
+#[derive(Clone, Copy)]
+enum Refusal {
+    Stated(MessageId),
+    Service(&'static str),
+}
+
+impl Refusal {
+    fn resolve(self, messages: MessageCatalog) -> String {
+        match self {
+            Self::Stated(id) => messages.text(id),
+            Self::Service(reason) => reason.to_owned(),
+        }
+    }
 }
 
 /// The open file transaction, drawn where the operation buttons are so the
 /// proposed path and its failure reason stay together.
-fn operation_review(ui: &mut Ui, state: &mut AppState) -> Option<LifecycleAction> {
+fn operation_review(
+    ui: &mut Ui,
+    state: &mut AppState,
+    messages: MessageCatalog,
+) -> Option<LifecycleAction> {
     let t = Tokens::get(ui.ctx());
     let draft = state.ui.code_workspace.source_file_dialog.as_mut()?;
     let (title, commit) = match draft.action {
-        CodeSourceFileAction::New => ("New source document", "Create"),
-        CodeSourceFileAction::Rename => ("Rename document", "Rename"),
-        CodeSourceFileAction::Move => ("Move document", "Move"),
-        CodeSourceFileAction::Duplicate => ("Duplicate document", "Duplicate"),
-        CodeSourceFileAction::Delete => ("Delete document", "Delete"),
+        CodeSourceFileAction::New => (
+            MessageId::CodeSourceCreateTitle,
+            MessageId::CodeSourceCreatePrimary,
+        ),
+        CodeSourceFileAction::Rename => (
+            MessageId::CodeSourceRenameTitle,
+            MessageId::CodeSourceRenamePrimary,
+        ),
+        CodeSourceFileAction::Move => (
+            MessageId::CodeSourceMoveTitle,
+            MessageId::CodeSourceMovePrimary,
+        ),
+        CodeSourceFileAction::Duplicate => (
+            MessageId::CodeSourceDuplicateTitle,
+            MessageId::CodeSourceDuplicatePrimary,
+        ),
+        CodeSourceFileAction::Delete => (
+            MessageId::CodeSourceDeleteTitle,
+            MessageId::CodeSourceDeletePrimary,
+        ),
     };
     let deleting = draft.action == CodeSourceFileAction::Delete;
     let mut action = None;
     code_inspector_section(
         ui,
-        title,
-        Some(("open transaction", t.color.accent)),
+        &messages.text(title),
+        Some((
+            &messages.text(MessageId::CodeSourceOpenTransaction),
+            t.color.accent,
+        )),
         |ui| {
             code_inspector_property_list(ui, |ui| {
                 if deleting {
-                    property_row(ui, "Removing", &draft.source_path);
+                    property_row(
+                        ui,
+                        &messages.text(MessageId::CodeSourceRemoving),
+                        &draft.source_path,
+                    );
                 } else {
                     property_row_input(
                         ui,
-                        "Logical path",
+                        &messages.text(MessageId::CodeSourceLogicalPath),
                         &mut draft.proposed_path,
                         draft.error.is_some(),
                     );
                 }
                 property_row(
                     ui,
-                    "Against",
-                    &format!(
-                        "revision {} \u{00b7} {}",
-                        draft.bundle_revision,
-                        short_digest(draft.closure_digest)
+                    &messages.text(MessageId::CodeSourceAgainst),
+                    &messages.format(
+                        MessageId::CodeSourceAgainstRevision,
+                        &[
+                            ("revision", &draft.bundle_revision.to_string()),
+                            ("digest", &short_digest(draft.closure_digest)),
+                        ],
                     ),
                 );
             });
@@ -738,7 +887,7 @@ fn operation_review(ui: &mut Ui, state: &mut AppState) -> Option<LifecycleAction
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                if Button::new(commit)
+                if Button::new(&messages.text(commit))
                     .accent()
                     .destructive(deleting)
                     .enabled(deleting || !draft.proposed_path.trim().is_empty())
@@ -747,17 +896,19 @@ fn operation_review(ui: &mut Ui, state: &mut AppState) -> Option<LifecycleAction
                 {
                     action = Some(LifecycleAction::Commit);
                 }
-                if Button::new("Cancel").ghost().show(ui).clicked() {
+                if Button::new(&messages.text(MessageId::CommonCancel))
+                    .ghost()
+                    .show(ui)
+                    .clicked()
+                {
                     action = Some(LifecycleAction::Cancel);
                 }
                 if deleting {
                     ui.label(
-                    RichText::new(
-                        "Removing a document rewrites the source graph as a new bundle revision.",
-                    )
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-                );
+                        RichText::new(messages.text(MessageId::CodeSourceDeleteWarning))
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_dim),
+                    );
                 }
             });
             ui.add_space(6.0);
@@ -766,32 +917,32 @@ fn operation_review(ui: &mut Ui, state: &mut AppState) -> Option<LifecycleAction
     action
 }
 
-fn includes(ui: &mut Ui, facts: &DocumentFacts) {
+fn includes(ui: &mut Ui, facts: &DocumentFacts, messages: MessageCatalog) {
     let t = Tokens::get(ui.ctx());
     let total = facts.imports.len() + facts.imported_by.len();
     code_inspector_section(
         ui,
-        "Recorded includes",
+        &messages.text(MessageId::CodeSourceRecordedIncludes),
         Some((&total.to_string(), t.color.text_dim)),
         |ui| {
             if total == 0 {
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new(
-                        "This document has no recorded include edge in either direction.",
-                    )
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
+                    RichText::new(messages.text(MessageId::CodeSourceNoIncludes))
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
                 );
                 ui.add_space(6.0);
                 return;
             }
             code_inspector_property_list(ui, |ui| {
+                let imports = messages.text(MessageId::CodeSourceImports);
+                let imported_by = messages.text(MessageId::CodeSourceImportedBy);
                 for imported in &facts.imports {
-                    property_row(ui, "Imports", imported);
+                    property_row(ui, &imports, imported);
                 }
                 for importer in &facts.imported_by {
-                    property_row(ui, "Imported by", importer);
+                    property_row(ui, &imported_by, importer);
                 }
             });
         },
@@ -802,6 +953,7 @@ fn revision_history(
     ui: &mut Ui,
     state: &mut AppState,
     facts: &DocumentFacts,
+    messages: MessageCatalog,
 ) -> Option<LifecycleAction> {
     let history = state.ui.code_workspace.source_history.as_ref()?;
     let t = Tokens::get(ui.ctx());
@@ -810,13 +962,13 @@ fn revision_history(
     let mut action = None;
     code_inspector_section(
         ui,
-        "Retained bundle revisions",
+        &messages.text(MessageId::CodeSourceRetainedRevisions),
         Some((&facts.history.len().to_string(), t.color.text_dim)),
         |ui| {
             if facts.history.is_empty() {
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new("This bundle has no retained revision to restore yet.")
+                    RichText::new(messages.text(MessageId::CodeSourceNoRetainedRevision))
                         .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                         .color(t.color.text_dim),
                 );
@@ -824,21 +976,58 @@ fn revision_history(
                 return;
             }
             ui.add_space(4.0);
-            section_header(ui, "Retained closures", Some("newest last"));
+            section_header(
+                ui,
+                &messages.text(MessageId::CodeSourceRetainedClosures),
+                Some(&messages.text(MessageId::CodeSourceNewestLast)),
+            );
             Grid::new("source-document-revisions")
                 .num_columns(4)
                 .spacing(egui::vec2(14.0, 3.0))
                 .striped(true)
                 .show(ui, |ui| {
                     for row in &facts.history {
-                        if ui
-                            .selectable_label(
-                                selected == Some(row.revision),
-                                RichText::new(format!("revision {}", row.revision))
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Medium)),
+                        let documents = messages.format(
+                            if row.files == 1 {
+                                MessageId::CodeSourceDocumentSingular
+                            } else {
+                                MessageId::CodeSourceDocuments
+                            },
+                            &[("count", &row.files.to_string())],
+                        );
+                        // Restoring a closure is chosen from this row, and the
+                        // row's digest, size, and currency live in cells that
+                        // never take focus. The selectable cell says all of it.
+                        let response = ui.selectable_label(
+                            selected == Some(row.revision),
+                            RichText::new(messages.format(
+                                MessageId::CodeSourceRevision,
+                                &[("revision", &row.revision.to_string())],
+                            ))
+                            .font(theme::mono(tokens::FS_0, FontWeight::Medium)),
+                        );
+                        let announced = messages.format(
+                            if row.current {
+                                MessageId::CodeSourceRevisionAccessibleCurrent
+                            } else {
+                                MessageId::CodeSourceRevisionAccessible
+                            },
+                            &[
+                                ("revision", &row.revision.to_string()),
+                                ("digest", &row.digest),
+                                ("documents", &documents),
+                            ],
+                        );
+                        let chosen = selected == Some(row.revision);
+                        response.widget_info(|| {
+                            egui::WidgetInfo::selected(
+                                egui::WidgetType::SelectableLabel,
+                                true,
+                                chosen,
+                                &announced,
                             )
-                            .clicked()
-                        {
+                        });
+                        if response.clicked() {
                             action = Some(LifecycleAction::SelectRevision(row.revision));
                         }
                         ui.label(
@@ -847,14 +1036,18 @@ fn revision_history(
                                 .color(t.color.text_dim),
                         );
                         ui.label(
-                            RichText::new(format!("{} documents", row.files))
+                            RichText::new(&documents)
                                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                                 .color(t.color.text_dim),
                         );
                         ui.label(
-                            RichText::new(if row.current { "current closure" } else { "" })
-                                .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                                .color(t.color.ok),
+                            RichText::new(if row.current {
+                                messages.text(MessageId::CodeSourceCurrentClosure)
+                            } else {
+                                String::new()
+                            })
+                            .font(theme::sans(tokens::FS_0, FontWeight::Medium))
+                            .color(t.color.ok),
                         );
                         ui.end_row();
                     }
@@ -870,17 +1063,22 @@ fn revision_history(
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                let response = Button::new("Restore as new revision")
-                    .accent()
-                    .enabled(selected.is_some() && facts.block_reason.is_none())
-                    .show(ui);
+                let response =
+                    Button::new(&messages.text(MessageId::CodeSourceRestoreAsNewRevision))
+                        .accent()
+                        .enabled(selected.is_some() && facts.block_reason.is_none())
+                        .show(ui);
                 if response.clicked() {
                     action = Some(LifecycleAction::Restore);
                 }
                 if let Some(reason) = facts.block_reason {
                     response.on_disabled_hover_text(reason);
                 }
-                if Button::new("Close history").ghost().show(ui).clicked() {
+                if Button::new(&messages.text(MessageId::CodeSourceCloseHistory))
+                    .ghost()
+                    .show(ui)
+                    .clicked()
+                {
                     action = Some(LifecycleAction::CloseHistory);
                 }
             });
@@ -911,12 +1109,43 @@ mod tests {
 
     /// Line endings are reported from the retained bytes. A whole-file rewrite
     /// normalizes a mixed document, so the dialog has to be able to say so.
+    fn english() -> MessageCatalog {
+        MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates)
+    }
+
     #[test]
     fn line_endings_are_measured_rather_than_assumed() {
-        assert_eq!(line_ending_summary("a\nb\n"), "LF");
-        assert_eq!(line_ending_summary("a\r\nb\r\n"), "CRLF");
-        assert_eq!(line_ending_summary("a\r\nb\n"), "mixed LF and CRLF");
-        assert_eq!(line_ending_summary("single"), "none \u{00b7} single line");
+        let english = english();
+        let summary = |content| english.text(line_ending_summary(content));
+        assert_eq!(summary("a\nb\n"), "LF");
+        assert_eq!(summary("a\r\nb\r\n"), "CRLF");
+        assert_eq!(summary("a\r\nb\n"), "mixed LF and CRLF");
+        assert_eq!(summary("single"), "none \u{00b7} single line");
+    }
+
+    /// The role picker resolves a selection by matching the label it drew, so
+    /// every assignable role has to round-trip through its own text in every
+    /// locale — including the one whose expansion rewrites every vowel.
+    #[test]
+    fn every_assignable_role_round_trips_through_its_label_in_every_locale() {
+        for locale in crate::workbench::UiTextLocale::ALL {
+            let messages = MessageCatalog::new(locale);
+            let mut drawn = std::collections::BTreeSet::new();
+            for role in ASSIGNABLE_AUTOMATION_ROLES {
+                let label = role_label(messages, role);
+                assert!(
+                    drawn.insert(label.clone()),
+                    "two roles share the label {label:?} in {locale:?}"
+                );
+                assert_eq!(
+                    ASSIGNABLE_AUTOMATION_ROLES
+                        .iter()
+                        .find(|candidate| role_label(messages, **candidate) == label)
+                        .copied(),
+                    Some(role)
+                );
+            }
+        }
     }
 
     /// The defect this dialog exists for. Every file operation was reachable
@@ -940,7 +1169,7 @@ mod tests {
 
         open_source_document_dialog(&mut app.state)
             .expect("the Automation page owns a source bundle");
-        let facts = document_facts(&app).expect("the page states a document");
+        let facts = document_facts(&app, english()).expect("the page states a document");
         assert_eq!(facts.logical_path, original);
         assert!(facts.is_root, "the bundle root is the default document");
 
@@ -994,7 +1223,7 @@ mod tests {
         assert!(!locked.is_empty(), "the fixture bundle pins an environment");
         app.state.ui.code_workspace.automation.selected_file = Some(locked.clone());
 
-        let before = document_facts(&app).expect("the lock is a document");
+        let before = document_facts(&app, english()).expect("the lock is a document");
         assert!(before.is_environment_lock);
         assert!(
             refusal_reason(&before, CodeSourceFileAction::Rename).is_some(),
@@ -1003,7 +1232,7 @@ mod tests {
 
         app.apply_lifecycle_action(LifecycleAction::AssignRole(None), &before);
 
-        let after = document_facts(&app).expect("the document survives the role change");
+        let after = document_facts(&app, english()).expect("the document survives the role change");
         assert!(!after.is_environment_lock, "the role was reassigned");
         assert!(
             refusal_reason(&after, CodeSourceFileAction::Rename).is_none(),

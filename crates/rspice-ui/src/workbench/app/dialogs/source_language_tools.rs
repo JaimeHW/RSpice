@@ -24,9 +24,50 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::design_system::{
     code_inspector_property_list, code_inspector_section, property_row, property_row_input,
 };
-use crate::workbench::documents::code_workspace::{self, LanguageToolView, SourceCodeAction};
+use crate::workbench::documents::code_workspace::{
+    self, LanguageToolView, SourceCodeAction, SourceSymbolKind,
+};
+use crate::workbench::{MessageCatalog, MessageId};
 
-const TITLE: &str = "Source navigation and language tools";
+/// What a view is called on screen, and the stable salt its result grid is
+/// keyed by.
+///
+/// The grid used to take its `egui::Id` from the displayed title. Translating
+/// the title moved the widget, so scroll position and row state belonged to
+/// the locale rather than to the view.
+const fn view_text(view: LanguageToolView) -> (MessageId, &'static str) {
+    match view {
+        LanguageToolView::DocumentSymbols => (MessageId::CodeToolsDocumentSymbols, "doc-symbols"),
+        LanguageToolView::Completion => (MessageId::CodeToolsCompletion, "completion"),
+        LanguageToolView::Hover => (MessageId::CodeToolsHover, "hover"),
+        LanguageToolView::SignatureHelp => (MessageId::CodeToolsSignatureHelp, "signature"),
+        LanguageToolView::Definitions => (MessageId::CodeToolsDefinitions, "definitions"),
+        LanguageToolView::Declarations => (MessageId::CodeToolsDeclarations, "declarations"),
+        LanguageToolView::References => (MessageId::CodeToolsReferences, "references"),
+        LanguageToolView::WorkspaceSymbols => (MessageId::CodeToolsWorkspaceSymbols, "workspace"),
+        LanguageToolView::CodeActions => (MessageId::CodeToolsCodeActions, "code-actions"),
+    }
+}
+
+/// The catalog word for an indexed symbol's kind.
+///
+/// The kind column is display copy, so the surface chooses its words here
+/// rather than painting the index's own vocabulary.
+const fn symbol_kind_message(kind: SourceSymbolKind) -> MessageId {
+    match kind {
+        SourceSymbolKind::Module => MessageId::CodeSymbolKindModule,
+        SourceSymbolKind::Function => MessageId::CodeSymbolKindFunction,
+        SourceSymbolKind::Class => MessageId::CodeSymbolKindClass,
+        SourceSymbolKind::Parameter => MessageId::CodeSymbolKindParameter,
+        SourceSymbolKind::Port => MessageId::CodeSymbolKindPort,
+        SourceSymbolKind::Net => MessageId::CodeSymbolKindNet,
+        SourceSymbolKind::Variable => MessageId::CodeSymbolKindVariable,
+        SourceSymbolKind::Import => MessageId::CodeSymbolKindImport,
+        SourceSymbolKind::Configuration => MessageId::CodeSymbolKindConfiguration,
+        SourceSymbolKind::Discipline => MessageId::CodeSymbolKindDiscipline,
+        SourceSymbolKind::Nature => MessageId::CodeSymbolKindNature,
+    }
+}
 
 /// Open the tools over the document the visible page is showing.
 pub(crate) fn open_active_language_tools(app: &mut RSpiceApp) -> Result<(), String> {
@@ -104,18 +145,19 @@ impl RSpiceApp {
                     .is_current(self.state.workspace.project.id(), bundle)
             });
 
+        let messages = self.state.ui.messages();
         let mut dialog = Dialog::new(
-            format!(
-                "{} \u{00b7} {}",
-                tools.index.language.label().to_uppercase(),
-                tools.active_path.to_uppercase()
+            messages.format(
+                MessageId::CodeToolsEyebrow,
+                &[
+                    ("language", &tools.index.language.label().to_uppercase()),
+                    ("path", &tools.active_path.to_uppercase()),
+                ],
             ),
-            TITLE,
-            "Close",
+            messages.text(MessageId::CodeToolsTitle),
+            messages.text(MessageId::CommonClose),
         )
-        .description(
-            "Navigate symbols, references, and diagnostics over the exact indexed source closure. Every answer names the revision it was computed from.",
-        )
+        .description(messages.text(MessageId::CodeToolsDescription))
         .size(DialogSize::SimulationWorkflow)
         .initial_height(600.0)
         .primary_on_enter(false)
@@ -123,22 +165,26 @@ impl RSpiceApp {
         if let Some(error) = tools.error.as_deref() {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
-                "The language transaction was refused",
+                messages.text(MessageId::CodeToolsTransactionRefused),
                 error,
             );
         } else if stale {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Progress,
-                "Index is behind the project",
-                "The source bundle changed after this index was built. Navigation still answers from the indexed revision; reopen the tools to write against the current one.",
+                messages.text(MessageId::CodeToolsIndexBehind),
+                messages.text(MessageId::CodeToolsStaleIndex),
             );
         } else if let Some(status) = tools.status.as_deref() {
-            dialog = dialog.transaction_state(DialogTransactionTone::Complete, "Applied", status);
+            dialog = dialog.transaction_state(
+                DialogTransactionTone::Complete,
+                messages.text(MessageId::CodeToolsApplied),
+                status,
+            );
         }
 
         let mut action = ToolAction::None;
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
-            action = tools_body(ui, &tools, editable && !stale);
+            action = tools_body(ui, &tools, editable && !stale, messages);
             None
         });
         self.apply_tool_action(action, ctx);
@@ -218,6 +264,7 @@ fn tools_body(
     ui: &mut Ui,
     tools: &code_workspace::CodeLanguageToolsState,
     writable: bool,
+    messages: MessageCatalog,
 ) -> ToolAction {
     let t = Tokens::get(ui.ctx());
     let mut action = ToolAction::None;
@@ -227,21 +274,35 @@ fn tools_body(
         .show(ui, |ui| {
             code_inspector_section(
                 ui,
-                "Indexed closure",
+                &messages.text(MessageId::CodeToolsIndexedClosure),
                 Some((
-                    &format!("revision {}", tools.index.bundle_revision),
+                    &messages.format(
+                        MessageId::CodeToolsIndexRevision,
+                        &[("revision", &tools.index.bundle_revision.to_string())],
+                    ),
                     t.color.text_dim,
                 )),
                 |ui| {
                     code_inspector_property_list(ui, |ui| {
-                        property_row(ui, "Document", &tools.active_path);
                         property_row(
                             ui,
-                            "Indexed symbols",
+                            &messages.text(MessageId::CodeToolsDocument),
+                            &tools.active_path,
+                        );
+                        property_row(
+                            ui,
+                            &messages.text(MessageId::CodeToolsIndexedSymbols),
                             &tools.index.symbols().len().to_string(),
                         );
                         let mut query = tools.query.clone();
-                        if property_row_input(ui, "Symbol", &mut query, false).changed() {
+                        if property_row_input(
+                            ui,
+                            &messages.text(MessageId::CodeToolsSymbol),
+                            &mut query,
+                            false,
+                        )
+                        .changed()
+                        {
                             action = ToolAction::Query(query);
                         }
                     });
@@ -250,7 +311,10 @@ fn tools_body(
                         ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
                         for view in LanguageToolView::ALL {
                             if ui
-                                .selectable_label(tools.view == view, view.label())
+                                .selectable_label(
+                                    tools.view == view,
+                                    messages.text(view_text(view).0),
+                                )
                                 .clicked()
                             {
                                 action = ToolAction::Select(view);
@@ -261,11 +325,11 @@ fn tools_body(
                 },
             );
 
-            if let Some(chosen) = view_results(ui, tools, &t, writable) {
+            if let Some(chosen) = view_results(ui, tools, &t, writable, messages) {
                 action = chosen;
             }
             if tools.view == LanguageToolView::References
-                && let Some(chosen) = rename_transaction(ui, tools, &t, writable)
+                && let Some(chosen) = rename_transaction(ui, tools, &t, writable, messages)
             {
                 action = chosen;
             }
@@ -278,64 +342,71 @@ fn view_results(
     tools: &code_workspace::CodeLanguageToolsState,
     t: &Tokens,
     writable: bool,
+    messages: MessageCatalog,
 ) -> Option<ToolAction> {
     let index = &tools.index;
     let query = tools.query.as_str();
-    match tools.view {
+    let view = tools.view;
+    match view {
         LanguageToolView::DocumentSymbols => symbol_table(
             ui,
             t,
-            "Document symbols",
+            view,
+            messages,
             index
                 .document_symbols(&tools.active_path)
                 .into_iter()
-                .map(SymbolRow::from_symbol)
+                .map(|symbol| SymbolRow::from_symbol(symbol, messages))
                 .collect(),
         ),
         LanguageToolView::WorkspaceSymbols => symbol_table(
             ui,
             t,
-            "Workspace symbols",
+            view,
+            messages,
             index
                 .symbols()
                 .iter()
                 .filter(|symbol| query.is_empty() || symbol.name.contains(query))
-                .map(SymbolRow::from_symbol)
+                .map(|symbol| SymbolRow::from_symbol(symbol, messages))
                 .collect(),
         ),
         LanguageToolView::Definitions => symbol_table(
             ui,
             t,
-            "Definitions",
+            view,
+            messages,
             index
                 .definitions(query)
                 .into_iter()
-                .map(SymbolRow::from_symbol)
+                .map(|symbol| SymbolRow::from_symbol(symbol, messages))
                 .collect(),
         ),
         LanguageToolView::Declarations => symbol_table(
             ui,
             t,
-            "Declarations",
+            view,
+            messages,
             index
                 .declarations(query)
                 .into_iter()
-                .map(SymbolRow::from_symbol)
+                .map(|symbol| SymbolRow::from_symbol(symbol, messages))
                 .collect(),
         ),
         LanguageToolView::References => symbol_table(
             ui,
             t,
-            "References",
+            view,
+            messages,
             index
                 .references(query)
                 .into_iter()
                 .map(|occurrence| SymbolRow {
-                    kind: if occurrence.definition {
-                        "definition"
+                    kind: messages.text(if occurrence.definition {
+                        MessageId::CodeToolsDefinitionSuffix
                     } else {
-                        "reference"
-                    },
+                        MessageId::CodeToolsReferenceSuffix
+                    }),
                     name: occurrence.name,
                     logical_path: occurrence.logical_path,
                     line: occurrence.line,
@@ -346,25 +417,25 @@ fn view_results(
         LanguageToolView::Hover => prose(
             ui,
             t,
-            "Hover",
+            messages.text(view_text(view).0),
             index.hover(query),
-            "No indexed symbol matches this name.",
+            messages.text(MessageId::CodeToolsHoverNoSymbol),
         ),
         LanguageToolView::SignatureHelp => prose(
             ui,
             t,
-            "Signature help",
+            messages.text(view_text(view).0),
             index.signature_help(&tools.active_path, tools.caret_char_index),
-            "The caret is not inside a call this index can resolve.",
+            messages.text(MessageId::CodeToolsSignatureNoCall),
         ),
-        LanguageToolView::Completion => completions(ui, tools, t, writable),
-        LanguageToolView::CodeActions => code_actions(ui, tools, t, writable),
+        LanguageToolView::Completion => completions(ui, tools, t, writable, messages),
+        LanguageToolView::CodeActions => code_actions(ui, tools, t, writable, messages),
     }
 }
 
 /// One navigable row, whatever the view called it.
 struct SymbolRow {
-    kind: &'static str,
+    kind: String,
     name: String,
     logical_path: String,
     line: usize,
@@ -372,9 +443,9 @@ struct SymbolRow {
 }
 
 impl SymbolRow {
-    fn from_symbol(symbol: &code_workspace::SourceSymbol) -> Self {
+    fn from_symbol(symbol: &code_workspace::SourceSymbol, messages: MessageCatalog) -> Self {
         Self {
-            kind: symbol.kind.label(),
+            kind: messages.text(symbol_kind_message(symbol.kind)),
             name: symbol.name.clone(),
             logical_path: symbol.logical_path.clone(),
             line: symbol.line,
@@ -383,34 +454,59 @@ impl SymbolRow {
     }
 }
 
-fn symbol_table(ui: &mut Ui, t: &Tokens, title: &str, rows: Vec<SymbolRow>) -> Option<ToolAction> {
+fn symbol_table(
+    ui: &mut Ui,
+    t: &Tokens,
+    view: LanguageToolView,
+    messages: MessageCatalog,
+    rows: Vec<SymbolRow>,
+) -> Option<ToolAction> {
     let mut action = None;
+    let (title, salt) = view_text(view);
     code_inspector_section(
         ui,
-        title,
+        &messages.text(title),
         Some((&rows.len().to_string(), t.color.text_dim)),
         |ui| {
             if rows.is_empty() {
-                muted_line(ui, t, "The indexed closure answers nothing for this name.");
+                muted_line(ui, t, &messages.text(MessageId::CodeToolsNoAnswer));
                 return;
             }
-            Grid::new(format!("source-language-tools-{title}"))
+            Grid::new(format!("source-language-tools-{salt}"))
                 .num_columns(4)
                 .spacing(egui::vec2(14.0, 3.0))
                 .striped(true)
                 .show(ui, |ui| {
                     for row in &rows {
-                        if ui
-                            .selectable_label(
-                                false,
-                                RichText::new(&row.name)
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Medium)),
+                        // The name is the only focusable cell, and a result is
+                        // its name, its kind, and where it lives. Announce all
+                        // four rather than the one cell that takes focus.
+                        let response = ui.selectable_label(
+                            false,
+                            RichText::new(&row.name)
+                                .font(theme::mono(tokens::FS_0, FontWeight::Medium)),
+                        );
+                        let announced = messages.format(
+                            MessageId::CodeToolsResultAccessible,
+                            &[
+                                ("name", &row.name),
+                                ("kind", &row.kind),
+                                ("path", &row.logical_path),
+                                ("line", &row.line.to_string()),
+                                ("detail", &row.detail),
+                            ],
+                        );
+                        response.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::SelectableLabel,
+                                true,
+                                &announced,
                             )
-                            .clicked()
-                        {
+                        });
+                        if response.clicked() {
                             action = Some(ToolAction::Reveal(row.logical_path.clone(), row.line));
                         }
-                        dim(ui, t, row.kind);
+                        dim(ui, t, &row.kind);
                         dim(ui, t, &format!("{}:{}", row.logical_path, row.line));
                         dim(ui, t, &row.detail);
                         ui.end_row();
@@ -427,6 +523,7 @@ fn completions(
     tools: &code_workspace::CodeLanguageToolsState,
     t: &Tokens,
     writable: bool,
+    messages: MessageCatalog,
 ) -> Option<ToolAction> {
     let offered = tools
         .index
@@ -434,15 +531,11 @@ fn completions(
     let mut action = None;
     code_inspector_section(
         ui,
-        "Completion",
+        &messages.text(MessageId::CodeToolsCompletion),
         Some((&offered.len().to_string(), t.color.text_dim)),
         |ui| {
             if offered.is_empty() {
-                muted_line(
-                    ui,
-                    t,
-                    "Nothing completes the identifier at the captured caret.",
-                );
+                muted_line(ui, t, &messages.text(MessageId::CodeToolsNoCompletion));
                 return;
             }
             Grid::new("source-language-tools-completions")
@@ -477,13 +570,14 @@ fn code_actions(
     tools: &code_workspace::CodeLanguageToolsState,
     t: &Tokens,
     writable: bool,
+    messages: MessageCatalog,
 ) -> Option<ToolAction> {
     let offered = tools.index.code_actions(&tools.active_path);
     let mut action = None;
     let count = offered.as_ref().map_or(0, Vec::len);
     code_inspector_section(
         ui,
-        "Code actions",
+        &messages.text(MessageId::CodeToolsCodeActions),
         Some((&count.to_string(), t.color.text_dim)),
         |ui| match &offered {
             // The formatter refuses documents it cannot prove it would not
@@ -498,18 +592,14 @@ fn code_actions(
                 ui.add_space(6.0);
             }
             Ok(actions) if actions.is_empty() => {
-                muted_line(
-                    ui,
-                    t,
-                    "This document already satisfies every available action.",
-                );
+                muted_line(ui, t, &messages.text(MessageId::CodeToolsNoCodeActions));
             }
             Ok(actions) => {
                 ui.add_space(6.0);
                 for candidate in actions {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
-                        if Button::new("Apply")
+                        if Button::new(&messages.text(MessageId::CodeToolsApply))
                             .accent()
                             .enabled(writable)
                             .show(ui)
@@ -539,54 +629,71 @@ fn rename_transaction(
     tools: &code_workspace::CodeLanguageToolsState,
     t: &Tokens,
     writable: bool,
+    messages: MessageCatalog,
 ) -> Option<ToolAction> {
     let mut action = None;
     let occurrences = tools.index.references(&tools.query).len();
-    code_inspector_section(ui, "Rename symbol", None, |ui| {
-        code_inspector_property_list(ui, |ui| {
-            property_row(ui, "Renaming", &tools.query);
-            let mut replacement = tools.replacement.clone();
-            if property_row_input(ui, "New name", &mut replacement, false).changed() {
-                action = Some(ToolAction::Replacement(replacement));
-            }
-        });
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
-            let response = Button::new(&format!(
-                "Rename {occurrences} occurrence{}",
-                if occurrences == 1 { "" } else { "s" }
-            ))
-            .accent()
-            .enabled(writable && occurrences > 0 && !tools.replacement.trim().is_empty())
-            .show(ui);
-            if response.clicked() {
-                action = Some(ToolAction::Rename);
-            }
-            if !writable {
-                response.on_disabled_hover_text(
-                    "Rename rewrites project source, which this document or this index revision does not allow.",
+    code_inspector_section(
+        ui,
+        &messages.text(MessageId::CodeToolsRenameSymbol),
+        None,
+        |ui| {
+            code_inspector_property_list(ui, |ui| {
+                property_row(
+                    ui,
+                    &messages.text(MessageId::CodeToolsRenaming),
+                    &tools.query,
                 );
-            }
-            dim(
-                ui,
-                t,
-                "Rename is atomic: it refuses outright if any occurrence sits in a governed read-only source.",
-            );
-        });
-        ui.add_space(6.0);
-    });
+                let mut replacement = tools.replacement.clone();
+                if property_row_input(
+                    ui,
+                    &messages.text(MessageId::CodeToolsRenameTo),
+                    &mut replacement,
+                    false,
+                )
+                .changed()
+                {
+                    action = Some(ToolAction::Replacement(replacement));
+                }
+            });
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                let response = Button::new(&messages.format(
+                    if occurrences == 1 {
+                        MessageId::CodeToolsRenameOccurrenceSingular
+                    } else {
+                        MessageId::CodeToolsRenameOccurrences
+                    },
+                    &[("count", &occurrences.to_string())],
+                ))
+                .accent()
+                .enabled(writable && occurrences > 0 && !tools.replacement.trim().is_empty())
+                .show(ui);
+                if response.clicked() {
+                    action = Some(ToolAction::Rename);
+                }
+                if !writable {
+                    response.on_disabled_hover_text(
+                        messages.text(MessageId::CodeToolsRenameNotAllowed),
+                    );
+                }
+                dim(ui, t, &messages.text(MessageId::CodeToolsRenameAtomic));
+            });
+            ui.add_space(6.0);
+        },
+    );
     action
 }
 
 fn prose(
     ui: &mut Ui,
     t: &Tokens,
-    title: &str,
+    title: String,
     body: Option<String>,
-    empty: &str,
+    empty: String,
 ) -> Option<ToolAction> {
-    code_inspector_section(ui, title, None, |ui| {
+    code_inspector_section(ui, &title, None, |ui| {
         ui.add_space(6.0);
         match body {
             Some(text) => {
@@ -598,7 +705,7 @@ fn prose(
             }
             None => {
                 ui.label(
-                    RichText::new(empty)
+                    RichText::new(&empty)
                         .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                         .color(t.color.text_dim),
                 );
@@ -645,15 +752,39 @@ mod tests {
 
     /// Every view must be offered exactly once and name itself, or a chip
     /// would select a view the body cannot render.
+    ///
+    /// The grid salt is checked alongside the name because it used to be
+    /// derived from it: two views that translate to the same word would then
+    /// have shared one widget identity.
     #[test]
-    fn every_view_is_offered_once_and_names_itself() {
-        let labels = LanguageToolView::ALL
+    fn every_view_is_offered_once_and_names_itself_without_sharing_a_widget_identity() {
+        let salts = LanguageToolView::ALL
             .iter()
-            .map(|view| view.label())
+            .map(|view| view_text(*view).1)
             .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(labels.len(), LanguageToolView::ALL.len());
-        assert!(labels.contains("References"));
-        assert!(labels.contains("Code actions"));
+        assert_eq!(salts.len(), LanguageToolView::ALL.len());
+
+        for locale in crate::workbench::UiTextLocale::ALL {
+            let messages = MessageCatalog::new(locale);
+            let names = LanguageToolView::ALL
+                .iter()
+                .map(|view| messages.text(view_text(*view).0))
+                .collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(
+                names.len(),
+                LanguageToolView::ALL.len(),
+                "two views share a name in {locale:?}"
+            );
+        }
+        let english = MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates);
+        assert_eq!(
+            english.text(view_text(LanguageToolView::References).0),
+            "References"
+        );
+        assert_eq!(
+            english.text(view_text(LanguageToolView::CodeActions).0),
+            "Code actions"
+        );
     }
 
     /// The defect: the whole index — symbols, definitions, references, and
